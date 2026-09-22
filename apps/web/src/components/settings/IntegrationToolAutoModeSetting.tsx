@@ -11,20 +11,35 @@ import {
 
 import { useTRPC } from '@/trpc/client';
 
-import { Button, Label, Textarea } from '@/components/system';
+import {
+  Button,
+  ChevronDown,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+  Label,
+  Textarea,
+} from '@/components/system';
+
+/** Customer-facing copy: what Auto mode does for the person, no mechanics. */
+const COPY = {
+  description:
+    'Let Roomote handle routine work and ask before anything risky. Your other tool choices stay the same.',
+  off: 'Keep each tool’s current choice.',
+  on: 'Handle routine work automatically and ask before anything risky.',
+  disclosure: 'Add team guidance',
+  guidanceLabel: 'Team guidance',
+  guidanceHelp: 'Describe what your team considers routine or risky. Optional.',
+  guidancePlaceholder:
+    'Reading and searching are routine. Anything sent to customers is risky.',
+  save: 'Save changes',
+  unavailable: 'Auto mode isn’t available yet.',
+};
 
 const MODES: { mode: IntegrationToolAutoMode; label: string; hint: string }[] =
   [
-    {
-      mode: 'off',
-      label: 'Off',
-      hint: 'Tools follow their selected mode. Ask first asks a person.',
-    },
-    {
-      mode: 'on',
-      label: 'On',
-      hint: 'For tools set to Auto, routine calls run and risky calls ask a person.',
-    },
+    { mode: 'off', label: 'Off', hint: COPY.off },
+    { mode: 'on', label: 'On', hint: COPY.on },
   ];
 
 /**
@@ -39,6 +54,7 @@ export function IntegrationToolAutoModeSetting() {
     trpc.integrationToolPolicies.getAuto.queryOptions(),
   );
   const [policy, setPolicy] = useState('');
+  const [guidanceOpen, setGuidanceOpen] = useState(false);
   useEffect(() => {
     if (settings.data) setPolicy(settings.data.policy);
   }, [settings.data]);
@@ -57,25 +73,15 @@ export function IntegrationToolAutoModeSetting() {
   if (!settings.data) return null;
 
   const mode = settings.data.mode;
-  const model = settings.data.model;
-  const hosted = model?.kind === 'judgment';
+  // On needs a hosted judgment model; the helper-model fallback would be an
+  // LLM call per tool call, so it is never used. The person just sees that
+  // On is not available yet.
+  const available = settings.data.model?.kind === 'judgment';
   const policyDirty = policy.trim() !== settings.data.policy;
-  const modelNote = hosted
-    ? mode === 'on'
-      ? 'Uses the hosted judgment model.'
-      : 'The hosted judgment model still assesses and logs every call for review.'
-    : model === null
-      ? 'Auto mode requires a hosted judgment model. None is available.'
-      : `Auto mode requires a hosted judgment model. The helper model (${model.model}) makes a full LLM call for every tool call.`;
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <p className="text-sm text-muted-foreground">
-          Let a decision model handle tools set to Auto. Manual choices stay
-          fixed. {modelNote}
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">{COPY.description}</p>
       <div
         role="radiogroup"
         aria-label="Auto mode"
@@ -89,7 +95,7 @@ export function IntegrationToolAutoModeSetting() {
               type="button"
               role="radio"
               aria-checked={checked}
-              disabled={save.isPending || (option.mode === 'on' && !hosted)}
+              disabled={save.isPending || (option.mode === 'on' && !available)}
               onClick={() => {
                 if (!checked) save.mutate({ mode: option.mode, policy });
               }}
@@ -103,38 +109,55 @@ export function IntegrationToolAutoModeSetting() {
           );
         })}
       </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="integration-tool-auto-policy">Auto mode guidance</Label>
-        <Textarea
-          id="integration-tool-auto-policy"
-          value={policy}
-          maxLength={INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH}
-          placeholder="Describe what is routine and what is risky. For example: Reading and searching are routine. Anything sent to customers is risky."
-          rows={4}
-          onChange={(event) => setPolicy(event.target.value)}
-        />
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            disabled={!policyDirty || save.isPending}
-            onClick={() => save.mutate({ mode, policy })}
-          >
-            Save
-          </Button>
-          {policyDirty ? (
+      {available ? null : (
+        <p className="text-sm text-muted-foreground">{COPY.unavailable}</p>
+      )}
+      <Collapsible open={guidanceOpen} onOpenChange={setGuidanceOpen}>
+        <CollapsibleTrigger className="group flex cursor-pointer items-center gap-1.5 text-left text-sm text-muted-foreground hover:text-foreground">
+          <ChevronDown
+            className="size-4 shrink-0 transition-transform"
+            style={{ transform: guidanceOpen ? undefined : 'rotate(-90deg)' }}
+          />
+          {COPY.disclosure}
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-3 flex flex-col gap-2">
+          <Label htmlFor="integration-tool-auto-policy">
+            {COPY.guidanceLabel}
+          </Label>
+          {COPY.guidanceHelp ? (
+            <p className="text-sm text-muted-foreground">{COPY.guidanceHelp}</p>
+          ) : null}
+          <Textarea
+            id="integration-tool-auto-policy"
+            value={policy}
+            maxLength={INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH}
+            placeholder={COPY.guidancePlaceholder}
+            rows={4}
+            onChange={(event) => setPolicy(event.target.value)}
+          />
+          <div className="flex items-center gap-2">
             <Button
               type="button"
               size="sm"
-              variant="ghost"
-              disabled={save.isPending}
-              onClick={() => setPolicy(settings.data.policy)}
+              disabled={!policyDirty || save.isPending}
+              onClick={() => save.mutate({ mode, policy })}
             >
-              Discard
+              {COPY.save}
             </Button>
-          ) : null}
-        </div>
-      </div>
+            {policyDirty ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={save.isPending}
+                onClick={() => setPolicy(settings.data.policy)}
+              >
+                Discard
+              </Button>
+            ) : null}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   );
 }
