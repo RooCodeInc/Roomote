@@ -394,6 +394,7 @@ try {
     let jevActionCount = 0;
     let fallbackCount = 0;
     let loopId: string | undefined;
+    const runId = `complex-screenshot-benchmark-${mode}-${index}`;
 
     for (const plan of actionPlan) {
       const observation = await readObservation(plan.target, url);
@@ -415,7 +416,7 @@ try {
         }
       } else {
         const decision = await prepareScreenshotStep!({
-          runId: `complex-screenshot-benchmark-${mode}-${index}`,
+          runId,
           enabled: true,
           input: {
             operation: 'next',
@@ -453,6 +454,32 @@ try {
       if (plan.waitFor) await browser(['wait', '--text', plan.waitFor]);
     }
 
+    if (mode === 'prototype' && loopId) {
+      const finalObservation = await readObservation(undefined, url);
+      const ready = await prepareScreenshotStep!({
+        runId,
+        enabled: true,
+        input: {
+          operation: 'next',
+          optIn: true,
+          loopId,
+          evidenceGoal:
+            'The final Profile saved state is visible with Display name Roomote and Security checks complete; mark the screenshot capture-ready now.',
+          page: finalObservation,
+          allowedActions: [{ id: 'capture', kind: 'capture-ready' }],
+        } as ScreenshotPreparationInput,
+      });
+      if (ready.status !== 'ready' || ready.action?.kind !== 'capture-ready') {
+        fallbackCount += 1;
+        metrics = ready.metrics as unknown as Record<string, unknown>;
+        failedMetrics = metrics;
+        preparationStatus = `fallback:capture_ready:${ready.reason ?? ready.status}`;
+        throw new Error(preparationStatus);
+      }
+      preparationStatus = 'jev-capture-ready';
+      metrics = ready.metrics as unknown as Record<string, unknown>;
+    }
+
     const preparationMs = Number(
       (performance.now() - preparationStartedAt).toFixed(1),
     );
@@ -466,7 +493,11 @@ try {
       finalText.includes('Display name: Roomote') &&
       finalText.includes('Security checks complete');
     let recordStatus: string | null = null;
-    if (mode === 'prototype' && preparationStatus === 'jev-guided' && loopId) {
+    if (
+      mode === 'prototype' &&
+      preparationStatus === 'jev-capture-ready' &&
+      loopId
+    ) {
       if (!accepted) {
         throw new Error('visual_acceptance_failed');
       }
