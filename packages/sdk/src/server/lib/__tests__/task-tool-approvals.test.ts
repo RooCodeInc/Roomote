@@ -322,24 +322,27 @@ describe('requestTaskToolApproval', () => {
     expect(mocks.insertAutoRejected).not.toHaveBeenCalled();
   });
 
-  it('treats a chat-surface task Session as present without browser presence', async () => {
-    mocks.sessionForTask.mockResolvedValue({
-      ...ownedSession,
-      sourceSurface: 'slack',
-    });
-    const evaluation = { recommendation: 'ask', evaluatedAt: '' };
-    mocks.resolveAuto.mockResolvedValue({
-      action: 'ask',
-      mode: 'on',
-      evaluation,
-    });
+  it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
+    'treats a %s task Session as present without browser presence',
+    async (sourceSurface) => {
+      mocks.sessionForTask.mockResolvedValue({
+        ...ownedSession,
+        sourceSurface,
+      });
+      const evaluation = { recommendation: 'ask', evaluatedAt: '' };
+      mocks.resolveAuto.mockResolvedValue({
+        action: 'ask',
+        mode: 'on',
+        evaluation,
+      });
 
-    await expect(requestTaskToolApproval(ask)).resolves.toEqual({
-      outcome: 'pending',
-      approvalId: 'approval-1',
-    });
-    expect(isSessionUserPresent).not.toHaveBeenCalled();
-  });
+      await expect(requestTaskToolApproval(ask)).resolves.toEqual({
+        outcome: 'pending',
+        approvalId: 'approval-1',
+      });
+      expect(isSessionUserPresent).not.toHaveBeenCalled();
+    },
+  );
 
   it('runs a tool the owner chose to always allow, without the model', async () => {
     mocks.userPolicies.mockResolvedValue([

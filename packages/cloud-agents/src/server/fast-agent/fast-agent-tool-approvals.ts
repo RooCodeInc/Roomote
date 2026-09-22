@@ -64,6 +64,22 @@ const INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED =
   'experiment_disabled';
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
 
+export type FastAgentApprovalChatSurface = Extract<
+  FastAgentSurface,
+  'slack' | 'discord' | 'teams' | 'telegram'
+>;
+
+export function isFastAgentApprovalChatSurface(
+  surface: FastAgentSurface,
+): surface is FastAgentApprovalChatSurface {
+  return (
+    surface === 'slack' ||
+    surface === 'discord' ||
+    surface === 'teams' ||
+    surface === 'telegram'
+  );
+}
+
 /**
  * OpenCode flattens every MCP tool to `<server name>_<tool name>`. The server
  * name is the integration's code-mode mount name, which is the sanitized
@@ -394,13 +410,7 @@ export function createFastAgentToolApprovalBridge(input: {
   const notifiedApprovalIds = new Set<string>();
 
   const ownerIsPresent = async (): Promise<boolean> => {
-    if (
-      input.surface === 'slack' ||
-      input.surface === 'discord' ||
-      input.surface === 'telegram'
-    ) {
-      return true;
-    }
+    if (isFastAgentApprovalChatSurface(input.surface)) return true;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([

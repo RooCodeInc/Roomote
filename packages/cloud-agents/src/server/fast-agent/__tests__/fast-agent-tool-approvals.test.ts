@@ -71,6 +71,7 @@ import {
   extractApprovalCallArgs,
   hashIntegrationToolApprovalRules,
   integrationToolApprovalRulesToConfig,
+  isFastAgentApprovalChatSurface,
   resolveFastAgentToolApprovalRules,
   resolveFastAgentToolApprovalSession,
   shouldDisposeInstanceForToolApprovalRules,
@@ -797,6 +798,22 @@ describe('resolveFastAgentToolApprovalSession', () => {
   });
 });
 
+describe('approval chat surfaces', () => {
+  it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
+    'treats %s as a present approval surface',
+    (surface) => {
+      expect(isFastAgentApprovalChatSurface(surface)).toBe(true);
+    },
+  );
+
+  it.each(['web', 'agentmail', 'automation'] as const)(
+    'does not treat %s as a chat approval surface',
+    (surface) => {
+      expect(isFastAgentApprovalChatSurface(surface)).toBe(false);
+    },
+  );
+});
+
 describe('tool approval bridge', () => {
   const ask = {
     requestId: 'req-1',
@@ -1054,7 +1071,7 @@ describe('tool approval bridge', () => {
     expect(insertAutoRejectedIntegrationToolApproval).not.toHaveBeenCalled();
   });
 
-  it.each(['slack', 'discord', 'telegram'] as const)(
+  it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
     'treats a %s Session as present without browser presence',
     async (surface) => {
       redisMocks.isPresent.mockResolvedValue(false);

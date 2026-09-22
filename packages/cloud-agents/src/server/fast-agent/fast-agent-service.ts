@@ -226,6 +226,7 @@ import {
 } from './fast-agent-tool-policy';
 import {
   createFastAgentToolApprovalBridge,
+  isFastAgentApprovalChatSurface,
   resolveFastAgentToolApprovalSession,
   integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
@@ -6270,6 +6271,10 @@ export async function answerFastAgentQuestion({
                 inferenceAttemptNumber += 1;
                 resolvedInferenceModel = undefined;
                 captureInferenceContext('prompt_submission');
+                const approvalNotificationSurface =
+                  isFastAgentApprovalChatSurface(conversation.surface)
+                    ? conversation.surface
+                    : undefined;
                 // Native per-tool approval bridge for gated code-mode
                 // integration calls. Web conversations surface the pending
                 // card in the Session transcript; chat-originated
@@ -6288,16 +6293,11 @@ export async function answerFastAgentQuestion({
                       autoToolKeys: toolApprovalRules.autoToolKeys,
                       userRequest: question,
                       signal: promptSignal,
-                      ...(conversation.surface === 'slack' ||
-                      conversation.surface === 'discord' ||
-                      conversation.surface === 'telegram'
+                      ...(approvalNotificationSurface
                         ? {
                             notify: async (approval) => {
                               const sessionUrl = buildFastSessionUrl(
-                                conversation.surface as
-                                  | 'slack'
-                                  | 'discord'
-                                  | 'telegram',
+                                approvalNotificationSurface,
                                 session.id,
                               );
                               await adapter.postReply({

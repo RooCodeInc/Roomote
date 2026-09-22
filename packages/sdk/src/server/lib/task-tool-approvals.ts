@@ -41,6 +41,7 @@ async function isTaskSessionOwnerPresent(input: {
   if (
     input.sourceSurface === 'slack' ||
     input.sourceSurface === 'discord' ||
+    input.sourceSurface === 'teams' ||
     input.sourceSurface === 'telegram'
   ) {
     return true;
