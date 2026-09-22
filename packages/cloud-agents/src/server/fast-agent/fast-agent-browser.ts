@@ -156,14 +156,19 @@ type RecordedTurnEvent =
  * reply that replaced a retry notice is recorded as a notice, but the IDs it
  * carries were delivered by the capture follow-up, so those are dropped too.
  * The recorded result may be truncated, which is why `runBrowseCommand`
- * callers put `delivery`, `captureKind`, and `artifactId` first in the
- * result.
+ * callers put `delivery`, `captureKind`, `artifactId`, and `viewUrl` first
+ * in the result.
  */
 export function rebuildPendingCaptureDeliveries(
   events: ReadonlyArray<RecordedTurnEvent>,
-): { imageArtifactIds: string[]; videoArtifactIds: string[] } {
+): {
+  imageArtifactIds: string[];
+  videoArtifactIds: string[];
+  viewUrls: Map<string, string>;
+} {
   const imageArtifactIds: string[] = [];
   const videoArtifactIds: string[] = [];
+  const viewUrls = new Map<string, string>();
   for (const event of events) {
     if (event.kind === 'reply') {
       if (!event.inferenceRetryNotice) {
@@ -199,10 +204,17 @@ export function rebuildPendingCaptureDeliveries(
     (captureKind === 'screenshot' ? imageArtifactIds : videoArtifactIds).push(
       artifactId,
     );
+    const viewUrl = /"viewUrl"\s*:\s*"([^"]+)"/u.exec(event.result)?.[1];
+    if (viewUrl) viewUrls.set(artifactId, viewUrl);
+  }
+  const pendingIds = new Set([...imageArtifactIds, ...videoArtifactIds]);
+  for (const id of viewUrls.keys()) {
+    if (!pendingIds.has(id)) viewUrls.delete(id);
   }
   return {
     imageArtifactIds: [...new Set(imageArtifactIds)],
     videoArtifactIds: [...new Set(videoArtifactIds)],
+    viewUrls,
   };
 }
 

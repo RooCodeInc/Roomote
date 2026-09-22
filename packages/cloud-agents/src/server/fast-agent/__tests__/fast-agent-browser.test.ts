@@ -387,7 +387,39 @@ describe('rebuildPendingCaptureDeliveries', () => {
         }),
         { kind: 'action', tool: 'send_chat_reply', status: 'completed' },
       ]),
-    ).toEqual({ imageArtifactIds: ['img-1'], videoArtifactIds: ['vid-1'] });
+    ).toEqual({
+      imageArtifactIds: ['img-1'],
+      videoArtifactIds: ['vid-1'],
+      viewUrls: new Map(),
+    });
+  });
+
+  it('recovers viewer links for captures that are still pending', () => {
+    expect(
+      rebuildPendingCaptureDeliveries([
+        browse({
+          success: true,
+          delivery: 'attached_to_next_reply',
+          captureKind: 'screenshot',
+          artifactId: 'img-sent',
+          viewUrl: 'https://app/sessions/s?artifact=a.png&v=1',
+        }),
+        { kind: 'reply' },
+        browse({
+          success: true,
+          delivery: 'attached_to_next_reply',
+          captureKind: 'screenshot',
+          artifactId: 'img-open',
+          viewUrl: 'https://app/sessions/s?artifact=b.png&v=1',
+        }),
+      ]),
+    ).toEqual({
+      imageArtifactIds: ['img-open'],
+      videoArtifactIds: [],
+      viewUrls: new Map([
+        ['img-open', 'https://app/sessions/s?artifact=b.png&v=1'],
+      ]),
+    });
   });
 
   it('treats a retry-notice replacement that carried IDs as delivered', () => {
@@ -411,7 +443,11 @@ describe('rebuildPendingCaptureDeliveries', () => {
           imageArtifactIds: ['img-sent'],
         },
       ]),
-    ).toEqual({ imageArtifactIds: [], videoArtifactIds: ['vid-pending'] });
+    ).toEqual({
+      imageArtifactIds: [],
+      videoArtifactIds: ['vid-pending'],
+      viewUrls: new Map(),
+    });
   });
 
   it('drops captures a visible reply already carried and ignores failed or truncated results', () => {
@@ -446,6 +482,10 @@ describe('rebuildPendingCaptureDeliveries', () => {
           artifactId: 'img-new',
         }),
       ]),
-    ).toEqual({ imageArtifactIds: ['img-new'], videoArtifactIds: [] });
+    ).toEqual({
+      imageArtifactIds: ['img-new'],
+      videoArtifactIds: [],
+      viewUrls: new Map(),
+    });
   });
 });

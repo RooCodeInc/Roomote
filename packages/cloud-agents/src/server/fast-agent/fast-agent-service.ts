@@ -3921,6 +3921,8 @@ export async function answerFastAgentQuestion({
     // the capture itself and the next visible reply honours it.
     const pendingDeliveryImageArtifactIds: string[] = [];
     const pendingDeliveryVideoArtifactIds: string[] = [];
+    /** Viewer links for pending captures, the delivery that cannot be lost. */
+    const pendingCaptureViewUrls = new Map<string, string>();
     if (previousAttempt) {
       // A resumed turn recreates these arrays empty while the OpenCode
       // history still shows the completed `browse` call, so the model goes
@@ -3928,6 +3930,9 @@ export async function answerFastAgentQuestion({
       const pending = rebuildPendingCaptureDeliveries(previousAttempt.events);
       pendingDeliveryImageArtifactIds.push(...pending.imageArtifactIds);
       pendingDeliveryVideoArtifactIds.push(...pending.videoArtifactIds);
+      for (const [id, url] of pending.viewUrls) {
+        pendingCaptureViewUrls.set(id, url);
+      }
     }
     const attachRequestedCaptures = (reply: FastAgentReply): FastAgentReply => {
       const explicitImages = reply.imageArtifactIds ?? [];
@@ -3979,27 +3984,51 @@ export async function answerFastAgentQuestion({
           ? { charts: defaultCharts }
           : {}),
       };
-      // The surface replacers edit text (and Slack charts) only. A reply
-      // that replaces a retry notice therefore replaces it with its text
-      // alone, and its captures go out as a follow-up post that is persisted
-      // as its own reply once it has actually been delivered. Nothing marks
-      // a capture delivered before the user could see it: a failed
-      // follow-up returns the IDs to the pending list, and a crash leaves
-      // the recorded attempt without a reply carrying them.
-      const {
-        imageArtifactIds: replyImageArtifactIds = [],
-        videoArtifactIds: replyVideoArtifactIds = [],
-        ...replyTextOnly
-      } = replyWithImages;
+      // The surface replacers edit text (and Slack charts) only, so a reply
+      // that replaces a retry notice cannot carry its captures. The durable
+      // delivery is therefore the capture's viewer link, written into the
+      // replacement text itself: that reply is recorded as carrying every
+      // linked capture, so a resumed turn never re-sends them, and the user
+      // can open them even if nothing else lands. The attachment follow-up
+      // is best effort on top. Only a capture without a known link depends
+      // on the follow-up; it is recorded on the follow-up once that lands
+      // and returns to the pending list if it does not.
+      const replyImageArtifactIds = replyWithImages.imageArtifactIds ?? [];
+      const replyVideoArtifactIds = replyWithImages.videoArtifactIds ?? [];
       const carriesCaptures =
         replyImageArtifactIds.length > 0 || replyVideoArtifactIds.length > 0;
+      const linked = (id: string) => pendingCaptureViewUrls.has(id);
+      const captureLinks = [
+        ...replyImageArtifactIds.map((id) => ['Screenshot', id] as const),
+        ...replyVideoArtifactIds.map((id) => ['Recording', id] as const),
+      ].flatMap(([label, id]) => {
+        const url = pendingCaptureViewUrls.get(id);
+        return url ? [`- [${label}](${url})`] : [];
+      });
+      const replacementReply: FastAgentReply = carriesCaptures
+        ? {
+            ...replyWithImages,
+            message:
+              captureLinks.length > 0
+                ? `${replyWithImages.message}\n\n${captureLinks.join('\n')}`
+                : replyWithImages.message,
+            imageArtifactIds: replyImageArtifactIds.filter(linked),
+            videoArtifactIds: replyVideoArtifactIds.filter(linked),
+          }
+        : replyWithImages;
       const replacedRetry = await replaceInferenceRetryReply(
-        carriesCaptures ? replyTextOnly : replyWithImages,
+        replacementReply,
         true,
         () => diagnostics.recordVisibleReply(),
       );
       if (replacedRetry) {
         if (carriesCaptures) {
+          const unlinkedImages = replyImageArtifactIds.filter(
+            (id) => !linked(id),
+          );
+          const unlinkedVideos = replyVideoArtifactIds.filter(
+            (id) => !linked(id),
+          );
           const followUp: FastAgentReply = {
             purpose: replyWithImages.purpose,
             message:
@@ -4021,19 +4050,33 @@ export async function answerFastAgentQuestion({
             turnVisibleMessages.push(
               buildAssistantTextMessage(followUp.message),
             );
-            await persistAssistantReply({
-              reply: followUp,
-              event: allocateCanonicalEvent(
-                `assistant:${nextAssistantOrdinal++}`,
-              ),
-              platformMessageId: posted?.messageId,
-            });
+            if (unlinkedImages.length > 0 || unlinkedVideos.length > 0) {
+              // Linked captures are already recorded on the replacement;
+              // repeating them here would render them twice in the web
+              // transcript.
+              await persistAssistantReply({
+                reply: {
+                  purpose: followUp.purpose,
+                  message: followUp.message,
+                  ...(unlinkedImages.length > 0
+                    ? { imageArtifactIds: unlinkedImages }
+                    : {}),
+                  ...(unlinkedVideos.length > 0
+                    ? { videoArtifactIds: unlinkedVideos }
+                    : {}),
+                },
+                event: allocateCanonicalEvent(
+                  `assistant:${nextAssistantOrdinal++}`,
+                ),
+                platformMessageId: posted?.messageId,
+              });
+            }
           } catch (error) {
             console.warn(
-              `[Fast Agent] Failed to post captures after replacing a retry notice; they will ride the next reply: ${formatErrorForLog(error)}`,
+              `[Fast Agent] Failed to attach captures after replacing a retry notice; the reply carries their links: ${formatErrorForLog(error)}`,
             );
-            pendingDeliveryImageArtifactIds.unshift(...replyImageArtifactIds);
-            pendingDeliveryVideoArtifactIds.unshift(...replyVideoArtifactIds);
+            pendingDeliveryImageArtifactIds.unshift(...unlinkedImages);
+            pendingDeliveryVideoArtifactIds.unshift(...unlinkedVideos);
           }
         }
       } else {
@@ -6078,6 +6121,7 @@ export async function answerFastAgentQuestion({
                 ? pendingDeliveryImageArtifactIds
                 : pendingDeliveryVideoArtifactIds
               ).push(artifact.id);
+              pendingCaptureViewUrls.set(artifact.id, artifact.viewUrl);
             }
             let observations: string | undefined;
             const question = args.question?.trim();
@@ -6131,6 +6175,7 @@ export async function answerFastAgentQuestion({
               ...(delivery ? { delivery } : {}),
               captureKind: result.capture.kind,
               artifactId: artifact.id,
+              viewUrl: artifact.viewUrl,
               command,
               // The next step leads so a model skimming the result cannot
               // miss it; on chat surfaces the capture is invisible until a
@@ -6155,7 +6200,6 @@ export async function answerFastAgentQuestion({
               contentType: artifact.contentType,
               path: artifact.path,
               size: artifact.size,
-              viewUrl: artifact.viewUrl,
               rawUrl: artifact.rawUrl,
               ...(observations !== undefined ? { observations } : {}),
             };
