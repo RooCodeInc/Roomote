@@ -20,7 +20,7 @@ capabilities, call them, and pay per use from the deployment-connected Zero
 wallet. Roomote only installs this skill and the `zero` CLI
 when a deployment operator has enabled Zero. Prefer that CLI for the capability
 loop. The Zero MCP connector (`https://mcp.zero.xyz`) is for authentication and
-funding when the workspace connection is present in Settings.
+funding when the workspace connection is present on the Integrations page.
 
 **When to use it:** as the fallback for anything genuinely beyond native
 abilities — before telling the user "I can't do that," run `zero search`.
@@ -53,7 +53,7 @@ calls. Capture `runId` from `zero fetch --json`.
 ## Authentication in Roomote tasks
 
 Zero in Roomote is org-scoped: one operator connects Zero once for the
-deployment from Settings > Integrations.
+deployment from the Integrations page.
 
 1. Prefer the workspace Zero MCP connection when it is available. Use the
    connector to authorize a short-lived sandbox session when the skill

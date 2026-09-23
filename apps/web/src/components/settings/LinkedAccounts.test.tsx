@@ -852,12 +852,12 @@ describe('LinkedAccounts settings', () => {
 
     expect(
       screen.getByText(
-        'No personal linked accounts are available for this deployment yet. Ask an admin to enable a user-linked app in deployment integrations, then come back here to link your account.',
+        'No personal linked accounts are available for this deployment yet. Ask an admin to enable a user-linked app on the Integrations page, then come back here to link your account.',
       ),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(
-        'No personal linked accounts are available yet. Enable a user-linked app in deployment integrations, then come back here to link your account.',
+        'No personal linked accounts are available yet. Enable a user-linked app on the Integrations page, then come back here to link your account.',
       ),
     ).not.toBeInTheDocument();
   });

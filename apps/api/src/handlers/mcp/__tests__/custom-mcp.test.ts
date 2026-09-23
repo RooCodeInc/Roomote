@@ -422,6 +422,7 @@ describe('createCustomMcpProxy', () => {
     const body = (await response.json()) as { error: { message: string } };
 
     expect(body.error.message).toContain('reconnected');
+    expect(body.error.message).toContain('on the Integrations page');
   });
 
   it('403s deny-listed tool calls without contacting the upstream', async () => {

@@ -7,7 +7,7 @@ Integration keys let a Roomote agent use an API key you hold, for one HTTPS
 service, without the key ever entering chat, a prompt, a task environment, or
 a transcript. You enter the key once when an agent asks for it in a session,
 under **Personal Settings → Personal integrations**, or, for administrators,
-under **Settings → Integrations**. Personal integrations are available only to
+on the **Integrations** page. Personal integrations are available only to
 their owner; deployment-wide integrations are available to active members. The
 agent works with an opaque reference or a substitute token, and Roomote's API
 adds the real key on the way out. Integration keys are for HTTPS services, not
@@ -15,9 +15,10 @@ a replacement for [connected integrations](/integrations).
 
 When you ask Roomote to connect a service without saying how, it first checks
 the read-only built-in catalog, including providers that are off or not yet
-authorized. A matching built-in uses its native OAuth, secure Settings, or
-keyless path. If the provider is not built in, Roomote checks for the service's
-official remote MCP server and what connecting requires. If the provider must
+authorized. A matching built-in uses its native OAuth, its secure form on the
+**Integrations** page, or its keyless path. If the provider is not built in,
+Roomote checks for the service's official remote MCP server and what
+connecting requires. If the provider must
 approve or allowlist clients, or access is limited to a beta or plan, Roomote
 uses an integration key and mentions the MCP as an option. Otherwise it uses an
 integration key only when no supported MCP applies. An explicit request for the
@@ -52,9 +53,9 @@ approval.
 
 You can also add a personal integration directly under **Personal Settings →
 Personal integrations**, naming the origin, header, methods, and key yourself.
-Administrators add deployment-wide integrations under **Settings →
-Integrations**. Owners and administrators can change a shared integration to
-personal access; Roomote then moves it to the owner's Personal Settings.
+Administrators add deployment-wide integrations on the **Integrations** page.
+Owners and administrators can change a shared integration to personal access;
+Roomote then moves it to the owner's Personal Settings.
 
 An integration covers one origin. Nothing the agent sends can change the
 origin or widen the methods. Integrations are kept until you revoke them; you

@@ -1,6 +1,6 @@
 ---
 name: add-integration
-description: Add a new built-in MCP integration to Roomote. Use when adding a new third-party service (e.g. Asana, Datadog, Vercel) to the built-in integrations catalog shown in Settings/Integrations.
+description: Add a new built-in MCP integration to Roomote. Use when adding a new third-party service (e.g. Asana, Datadog, Vercel) to the built-in integrations catalog shown on the Integrations page.
 ---
 
 # Add Integration
@@ -86,7 +86,7 @@ Stop and ask the user to choose one of these paths:
 
 - Build a native MCP server inside Roomote with `serverMode: 'native'` and `connectionMode: 'admin_configured'`
 - Wait for the provider to ship an official remote MCP server
-- Recommend that the user configure a deployment-wide custom MCP server (Settings → Integrations → Custom MCP Servers; supports header auth and OAuth via the proxy) or an environment-scoped `mcpServers` entry instead
+- Recommend that the user configure a deployment-wide custom MCP server (Integrations page → Add integration → Custom MCP; supports header auth and OAuth via the proxy) or an environment-scoped `mcpServers` entry instead
 
 Do not quietly convert a missing remote MCP into a built-in integration without that product decision.
 
@@ -157,10 +157,10 @@ Read each target file before editing it. Follow the existing service entries rat
 4. `apps/worker/src/mcp/roomote-mcp-server/integration-setup.ts`
    - Add a `# ServiceName` section to `INTEGRATION_SETUP_CONTENT`
    - For deployment scope, say:
-     - "A deployment operator enables X from Settings > Integrations."
+     - "A deployment operator enables X from the Integrations page."
      - "That operator connects X once for the deployment via OAuth."
    - For user scope, say:
-     - "A deployment operator enables X from Settings > Integrations."
+     - "A deployment operator enables X from the Integrations page."
      - "Each user connects their own account via OAuth."
 
 5. `apps/api/src/handlers/mcp/integration-mcp-policy.ts`

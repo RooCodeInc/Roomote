@@ -379,7 +379,7 @@ function resolveReceiptLanguage(
     ) {
       return {
         verb: 'Checked',
-        object: `${remoteMcp}, needs setup in Settings`,
+        object: `${remoteMcp}, needs manual setup`,
       };
     }
     return { verb: 'Checked', object: remoteMcp };

@@ -2347,7 +2347,7 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'Preserve returned authorization and Settings links exactly',
+      'Preserve returned `authorizeUrl` and `settingsUrl` links exactly',
     );
     expect(prompt).toContain(
       'The conversation resumes automatically after OAuth',
@@ -2447,6 +2447,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'call `connect_integration` with the exact returned id',
     );
+    expect(prompt).toContain(
+      'keyless enablement, OAuth, or the secure form on the Integrations page',
+    );
+    expect(prompt).not.toMatch(/Settings\s*(→|>)\s*Integrations/);
     expect(prompt).toContain('never bypassed with another route');
     expect(prompt).not.toContain('pick one route in this order');
     expect(prompt).not.toContain(
