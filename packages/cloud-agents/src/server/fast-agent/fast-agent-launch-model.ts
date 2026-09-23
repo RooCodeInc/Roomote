@@ -168,7 +168,10 @@ function describeModelNote(params: {
  * not silently move work onto a more expensive model.
  */
 export async function resolveFastAgentLaunchModel(params: {
-  /** The agent's model argument: a string claim, null for the default. */
+  /**
+   * The agent's model argument. Null is treated like an omitted argument:
+   * some orchestrator models fill every optional argument with null.
+   */
   claimedModel?: string | null;
   claimedReasoningEffort?: ReasoningEffort | null;
   /** The delegated work: the launch prompt or the review target. */
@@ -193,12 +196,10 @@ export async function resolveFastAgentLaunchModel(params: {
     };
   }
   const modelsById = new Map(params.models.map((model) => [model.id, model]));
-  // An explicit default (null) or effort-only choice keeps the default model,
-  // as before; only a concrete model claim or no choice at all is routed.
-  const routable =
-    claimedModel !== undefined ||
-    (params.claimedModel === undefined &&
-      params.claimedReasoningEffort === undefined);
+  const claimedReasoningEffort = params.claimedReasoningEffort ?? undefined;
+  // An effort-only choice keeps the default model, as before. Null fillers
+  // count as omitted, so an ordinary launch still gets routing rules.
+  const routable = claimedModel !== undefined || !claimedReasoningEffort;
   const rules = routable
     ? params.codingModelRoutingRules
         .filter((rule) => modelsById.has(rule.modelId))

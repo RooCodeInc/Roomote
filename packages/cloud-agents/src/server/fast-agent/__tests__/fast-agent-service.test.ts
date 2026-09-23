@@ -11852,6 +11852,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         await expect(
           invokeTool(nativeToolNames.launchTask, {
             prompt: 'Restyle the checkout page.',
+            // GPT-5.x fills optional arguments with null; still routed.
+            model: null,
+            reasoningEffort: null,
             kickoffMessage: 'I’m delegating the checkout restyle.',
           }),
         ).resolves.toEqual({ success: true, taskId: 'task-1' });

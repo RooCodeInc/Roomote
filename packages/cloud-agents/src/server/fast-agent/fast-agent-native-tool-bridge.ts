@@ -486,7 +486,7 @@ export default {
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
     environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact launch target ID from the system prompt; pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, pass "${ALL_REPOSITORIES}" for all active repositories, or omit/pass null to use normal workspace routing`)}),
-    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID the user asked for by name; omit or pass null to use the deployment default"),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID a user explicitly asked for, by name or unambiguous description; omit or pass null to let Roomote choose from routing rules and the deployment default"),
     reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; use only with a selected model and omit or pass null to use the model's default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
     mode: z.enum(["standard", "environment_setup", "environment_verification"]).optional().describe("Use environment_setup for an admin-approved Blank slate environment-definition task. environment_verification is rejected on every turn; recipe verification is created automatically by ensure_environment create"),
@@ -504,7 +504,7 @@ export default {
   args: {
     repository: z.string().min(1).optional().describe("Repository full name like owner/name; omit in a pull request conversation to review the current pull request"),
     pullRequestNumber: z.number().int().positive().optional().describe("Pull request number; omit in a pull request conversation to review the current pull request"),
-    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID the user asked for by name; omit or pass null to use the deployment code-review default"),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID a user explicitly asked for, by name or unambiguous description; omit or pass null to use the deployment code-review default"),
     reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; omit or pass null to use the model's code-review default"),
     kickoffMessage: z.string().min(1).describe("Brief user-facing note that the review is underway; do not mention delegation or queue state"),
   },

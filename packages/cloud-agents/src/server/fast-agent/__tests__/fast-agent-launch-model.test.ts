@@ -272,12 +272,28 @@ describe('resolveFastAgentLaunchModel', () => {
       });
     });
 
-    it('keeps an explicit default or effort-only choice off the rules', async () => {
-      await expect(
-        resolve({ claimedModel: null, codingModelRoutingRules: rules }),
-      ).resolves.toMatchObject({ model: null, source: 'default' });
+    it('routes a launch whose optional arguments are null fillers', async () => {
+      mockEvaluateDecisionModel.mockResolvedValue({
+        routingRule: choice('model_rule_2', 0.91),
+      });
+
       await expect(
         resolve({
+          claimedModel: null,
+          claimedReasoningEffort: null,
+          codingModelRoutingRules: rules,
+        }),
+      ).resolves.toEqual({
+        model: sonnet.id,
+        reasoningEffort: 'high',
+        source: 'routing_rule',
+      });
+    });
+
+    it('keeps an effort-only choice off the rules', async () => {
+      await expect(
+        resolve({
+          claimedModel: null,
           claimedReasoningEffort: 'medium',
           codingModelRoutingRules: rules,
         }),
