@@ -8,6 +8,7 @@ import {
   DiscordCommunicationProvider,
   isDiscordUnknownMessageError,
 } from '../discord-provider';
+import { renderDiscordMarkdownTables } from '../discord-markdown';
 
 function createHarness(options: { nonceFactory?: () => string } = {}) {
   const server = new MockDiscordServer();
@@ -219,6 +220,68 @@ describe('DiscordCommunicationProvider', () => {
     )) {
       expect(request.body).not.toHaveProperty('flags');
     }
+  });
+
+  it('renders tables consistently in posts, edits, forum starters, and interactions', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+    const table = '| Provider | Region |\n| --- | --- |\n| Cloud | Global |';
+    const rendered = renderDiscordMarkdownTables(table);
+
+    const posted = await provider.postMessage({ channelId, text: table });
+    await provider.editMessage({
+      channelId,
+      messageId: posted.messageId,
+      text: table,
+    });
+    await provider.editInteractionResponse({
+      applicationId: '600000000000000001',
+      interactionToken: 'table-token',
+      text: table,
+    });
+
+    const forumChannelId = '400000000000000015';
+    server.addChannel({
+      id: forumChannelId,
+      guild_id: server.guildId,
+      name: 'comparisons',
+      type: 15,
+    });
+    await provider.createTaskThread({
+      channelId: forumChannelId,
+      name: 'Provider comparison',
+      initialText: table,
+    });
+
+    expect(
+      server.state.requests.find(
+        (request) =>
+          request.method === 'POST' &&
+          request.path === `/channels/${channelId}/messages`,
+      )?.body,
+    ).toMatchObject({ content: rendered });
+    expect(
+      server.state.requests.find(
+        (request) =>
+          request.method === 'PATCH' &&
+          request.path ===
+            `/channels/${channelId}/messages/${posted.messageId}`,
+      )?.body,
+    ).toMatchObject({ content: rendered });
+    expect(
+      server.state.requests.find(
+        (request) =>
+          request.method === 'PATCH' &&
+          request.path.includes('/webhooks/600000000000000001/'),
+      )?.body,
+    ).toMatchObject({ content: rendered });
+    expect(
+      server.state.requests.find(
+        (request) =>
+          request.method === 'POST' &&
+          request.path === `/channels/${forumChannelId}/threads`,
+      )?.body,
+    ).toMatchObject({ message: { content: rendered } });
   });
 
   it('retries rate limits and deduplicates retried sends with a nonce', async () => {
