@@ -19,6 +19,7 @@ describe('metadata descriptions', () => {
     'integration_keys_enabled',
     'code_mode_integrations_experiment_enabled',
     'integration_tool_approvals_experiment_enabled',
+    'results_page_enabled',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
@@ -34,20 +35,17 @@ describe('metadata descriptions', () => {
     expect(
       getBooleanMetadataDescriptorByKey('anonymous_analytics_enabled').kind,
     ).toBe('deployment-control');
-    expect(getBooleanMetadataDescriptorByKey('results_page_enabled').kind).toBe(
-      'deployment-control',
-    );
   });
 
   it('enables deployment experiments only from explicit true metadata', () => {
     expect(
       getDeploymentExperimentValues({
         results_page_enabled: true,
+        private_sessions_experiment_enabled: true,
         integration_keys_enabled: 'true',
       }),
     ).toEqual({
-      results: true,
-      privateSessions: false,
+      privateSessions: true,
       browserNotifications: false,
       integrationToolAutoApprovals: false,
       sessionTaskCommunicationTriage: false,

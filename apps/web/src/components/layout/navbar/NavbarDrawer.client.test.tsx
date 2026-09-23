@@ -41,10 +41,6 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
 }));
 
-vi.mock('@/hooks/useResultsPage', () => ({
-  useResultsPage: () => ({ enabled: false, isLoading: false }),
-}));
-
 vi.mock('@/components/layout/side-nav/RecentSessions', () => ({
   RecentSessions: ({ enabled }: { enabled: boolean }) => {
     state.recentSessionsEnabled = enabled;
@@ -126,7 +122,7 @@ describe('NavbarDrawer', () => {
     expect(onNewSession).toHaveBeenCalledOnce();
   });
 
-  it('keeps settings as the only admin/navigation destination in the drawer', () => {
+  it('shows Results with other dashboard destinations for admins', () => {
     render(<NavbarDrawer />);
 
     expect(
@@ -138,6 +134,7 @@ describe('NavbarDrawer', () => {
       'Home',
       'Sessions',
       'Automations',
+      'Results',
       'Integrations',
       'Analytics',
       'Settings',
@@ -181,6 +178,17 @@ describe('NavbarDrawer', () => {
     expect(
       screen.queryByRole('link', { name: /analytics/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows Results to non-admins', () => {
+    state.user.isAdmin = false;
+
+    render(<NavbarDrawer />);
+
+    expect(screen.getByRole('link', { name: 'Results' })).toHaveAttribute(
+      'href',
+      '/results',
+    );
   });
 
   it('shows automations to members', () => {

@@ -10,17 +10,17 @@ import {
 
 describe('deployment experiments', () => {
   it('stores one flag without replacing unrelated deployment metadata', async () => {
-    await setDeploymentExperimentEnabled('results', false);
+    await setDeploymentExperimentEnabled('privateSessions', false);
     await db
       .update(deploymentSettings)
       .set({
-        metadata: sql`${deploymentSettings.metadata} || '{"preserved":true}'::jsonb`,
+        metadata: sql`${deploymentSettings.metadata} || '{"preserved":true,"results_page_enabled":true}'::jsonb`,
       })
       .where(eq(deploymentSettings.id, 'default'));
-    await setDeploymentExperimentEnabled('results', true);
+    await setDeploymentExperimentEnabled('privateSessions', true);
 
     await expect(getDeploymentExperiments()).resolves.toMatchObject({
-      results: true,
+      privateSessions: true,
     });
     await expect(
       db.query.deploymentSettings.findFirst({
@@ -31,6 +31,7 @@ describe('deployment experiments', () => {
       metadata: {
         preserved: true,
         results_page_enabled: true,
+        private_sessions_experiment_enabled: true,
       },
     });
   });
