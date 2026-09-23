@@ -97,6 +97,7 @@ import {
   resolveFastAgentToolApprovalSession,
   shouldDisposeInstanceForToolApprovalRules,
 } from '../fast-agent-tool-approvals';
+import { resolveFastAgentToolApprovalUserRequest } from '../fast-agent-tool-approval-context';
 import {
   resolveIntegrationToolAutoDecision,
   resolveIntegrationToolAutoState,
@@ -864,6 +865,71 @@ describe('tool approval bridge', () => {
     });
   }
 
+  it('evaluates a routine read against a human steer accepted after bridge creation', async () => {
+    const question = 'Summarize the current release notes.';
+    const steeredHumanRequests: string[] = [];
+    const readOnlyIntegration = [
+      {
+        id: 'mock-slack',
+        name: 'Mock Slack',
+        description: '',
+        tools: [
+          {
+            name: 'read_channel',
+            description: 'Read recent messages from a channel.',
+            inputSchema: {},
+          },
+        ],
+      },
+    ] as unknown as FastAgentIntegration[];
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', evaluatedAt: '' },
+    });
+    const autoBridge = createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'slack',
+      integrations: readOnlyIntegration,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'read_channel'])]),
+      resolveUserRequest: () =>
+        resolveFastAgentToolApprovalUserRequest({
+          turnSource: 'human',
+          substantiveHumanInput: true,
+          question,
+          compatibilityMessages: [],
+          steeredHumanRequests,
+        }),
+    });
+
+    // This mirrors a native steer being accepted after the bridge already exists.
+    steeredHumanRequests.push('Read #release-notes before answering.');
+    const helperMocks = helpers();
+    helperMocks.fetchCallArgs.mockResolvedValue({
+      input: { channel: '#release-notes', text: '' },
+    });
+    autoBridge.handleAsk(
+      {
+        ...ask,
+        requestId: 'steered-read',
+        permission: codeModeToolKey('mock-slack', 'read_channel'),
+      },
+      helperMocks,
+    );
+
+    await vi.waitFor(() =>
+      expect(helperMocks.reply).toHaveBeenCalledWith('steered-read', 'once'),
+    );
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        integrationId: 'mock-slack',
+        toolName: 'read_channel',
+        userRequest: `${question}\n\nRead #release-notes before answering.`,
+      }),
+    );
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(true);
@@ -899,7 +965,7 @@ describe('tool approval bridge', () => {
         surface: 'web',
         integrations,
         autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
-        userRequest: 'Tell the team we shipped.',
+        resolveUserRequest: () => 'Tell the team we shipped.',
       });
 
     // Routine: the reservation-and-claim path, the model's view on the
@@ -1027,7 +1093,7 @@ describe('tool approval bridge', () => {
       surface: 'slack',
       integrations,
       autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
-      userRequest: 'Look up deployment notes.',
+      resolveUserRequest: () => 'Look up deployment notes.',
       notify,
     }).handleAsk(ask, helperMocks);
 
@@ -1093,7 +1159,7 @@ describe('tool approval bridge', () => {
       surface: 'slack',
       integrations: taskIntegration,
       autoToolKeys,
-      userRequest: 'Continue earlier work.',
+      resolveUserRequest: () => 'Continue earlier work.',
     }).handleAsk(taskAsk, ownTaskHelpers);
     await vi.waitFor(() =>
       expect(ownTaskHelpers.reply).toHaveBeenCalledWith('req-1', 'once'),
@@ -1128,7 +1194,7 @@ describe('tool approval bridge', () => {
       surface: 'slack',
       integrations: taskIntegration,
       autoToolKeys,
-      userRequest: 'Continue earlier work.',
+      resolveUserRequest: () => 'Continue earlier work.',
     }).handleAsk(
       { ...taskAsk, requestId: 'req-unrelated' },
       unrelatedTaskHelpers,

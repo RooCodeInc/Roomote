@@ -6438,13 +6438,14 @@ export async function answerFastAgentQuestion({
                       surface: conversation.surface as FastAgentSurface,
                       integrations: availableIntegrations,
                       autoToolKeys: toolApprovalRules.autoToolKeys,
-                      userRequest: resolveFastAgentToolApprovalUserRequest({
-                        turnSource,
-                        substantiveHumanInput,
-                        question,
-                        compatibilityMessages: session.compatibilityMessages,
-                        steeredHumanRequests,
-                      }),
+                      resolveUserRequest: () =>
+                        resolveFastAgentToolApprovalUserRequest({
+                          turnSource,
+                          substantiveHumanInput,
+                          question,
+                          compatibilityMessages: session.compatibilityMessages,
+                          steeredHumanRequests,
+                        }),
                       signal: promptSignal,
                       ...(approvalNotificationSurface
                         ? {

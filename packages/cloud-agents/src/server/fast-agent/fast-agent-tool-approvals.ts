@@ -406,8 +406,8 @@ export function createFastAgentToolApprovalBridge(input: {
    * by the decision model; every other ask is a person's own choice.
    */
   autoToolKeys?: Set<string>;
-  /** What the user last asked; Auto mode checks each call against it. */
-  userRequest?: string;
+  /** Resolve the latest human request for each Auto assessment; steers can arrive mid-turn. */
+  resolveUserRequest?: () => string | undefined;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   signal?: AbortSignal;
@@ -567,7 +567,7 @@ export function createFastAgentToolApprovalBridge(input: {
             toolName: tool.toolName,
             toolDescription: tool.description,
             args,
-            userRequest: input.userRequest,
+            userRequest: input.resolveUserRequest?.(),
             isSessionLaunchedTask: (taskId) =>
               isFastAgentLaunchedTask(input.sessionId, taskId),
             userId: input.userId,
