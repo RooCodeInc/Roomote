@@ -150,20 +150,6 @@ describe('resolveProxyToolApprovalBlocks', () => {
     });
   });
 
-  it('blocks nothing and reads nothing while the experiment is off', async () => {
-    mockExperiment.mockResolvedValue(false);
-    const resolveActingUserId = vi.fn(async () => 'user-1');
-    const blocks = await resolveProxyToolApprovalBlocks({
-      integrationId: 'linear',
-      tokenType: 'run',
-      resolveActingUserId,
-    });
-    expect(blocks.blocks.size).toBe(0);
-    expect(resolveActingUserId).not.toHaveBeenCalled();
-    expect(mockDeployment).not.toHaveBeenCalled();
-    expect(mockAutoState).not.toHaveBeenCalled();
-  });
-
   it("applies the task's session overrides to a task run only", async () => {
     mockSessionForTask.mockResolvedValue({ id: 'session-1' });
     mockOverrides.mockResolvedValue([

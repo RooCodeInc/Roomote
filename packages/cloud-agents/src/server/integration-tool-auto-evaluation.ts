@@ -179,7 +179,11 @@ export async function evaluateIntegrationToolAutoDecision(input: {
 }
 
 /**
- * What Auto mode is doing right now. `on` is the experiment plus the setting:
+ * What Auto mode is doing right now. Auto is experimental on its own
+ * (`integrationToolAutoApprovals`); per-tool approvals are not. With the
+ * experiment off nothing is assessed, not even in the background, and tools
+ * nobody has made a choice about run as they always have. `on` is the
+ * experiment plus the setting:
  * every default tool call is gated and must be assessed before it runs. `on`
  * does not imply a hosted judgment model is configured — the On control is
  * disabled without one, but the setting can outlive the model, and callers
@@ -196,7 +200,7 @@ export type IntegrationToolAutoState = {
 
 export async function resolveIntegrationToolAutoState(): Promise<IntegrationToolAutoState> {
   const [enabled, settings, model] = await Promise.all([
-    isDeploymentExperimentEnabled('integrationToolApprovals'),
+    isDeploymentExperimentEnabled('integrationToolAutoApprovals'),
     getIntegrationToolAutoSettings(),
     resolveDecisionModel().catch(() => null),
   ]);

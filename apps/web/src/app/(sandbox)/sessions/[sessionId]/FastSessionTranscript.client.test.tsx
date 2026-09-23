@@ -41,15 +41,6 @@ vi.mock('@/hooks/useSessionIntegrationApprovals', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
-  useIntegrationToolApprovalsExperiment: () => ({
-    enabled: false,
-    isLoading: false,
-    isUpdating: false,
-    setEnabled: vi.fn(),
-  }),
-}));
-
 vi.mock('@/hooks/useSessionIntegrationToolApprovals', () => ({
   useSessionIntegrationToolApprovals: () => ({
     data: { pending: [] },

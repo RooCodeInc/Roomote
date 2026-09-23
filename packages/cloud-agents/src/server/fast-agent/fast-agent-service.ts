@@ -3909,10 +3909,9 @@ export async function answerFastAgentQuestion({
       Env.RELEASE_VERSION,
       packageJson.version,
     );
-    // Experiment-gated (`integrationToolApprovals`) per-tool approval rules
-    // for code-mode integration calls: native ask rules pause gated tools
-    // behind a requester decision and deny rules hide rejected tools.
-    // Undefined while the experiment is off, which keeps ungated behavior.
+    // Per-tool approval rules for code-mode integration calls: native ask
+    // rules pause gated tools behind a requester decision and deny rules hide
+    // rejected tools.
     // Approvals and session overrides are keyed on the unified Session, not
     // the Fast conversation; resolve it once for the rules and the bridge.
     const {

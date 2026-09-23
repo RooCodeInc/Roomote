@@ -257,8 +257,8 @@ vi.mock('./IntegrationToolApprovalControls', () => ({
   ),
 }));
 
-vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
-  useIntegrationToolApprovalsExperiment: () => ({
+vi.mock('@/hooks/useIntegrationToolAutoApprovalsExperiment', () => ({
+  useIntegrationToolAutoApprovalsExperiment: () => ({
     enabled: false,
     isLoading: false,
     isUpdating: false,
@@ -340,10 +340,6 @@ vi.mock('@/hooks/mcp-connections', () => ({
     isPending: false,
     mutate: mutations.disconnectMcp,
     variables: undefined,
-  }),
-  useSetDisabledMcpTools: () => ({
-    isPending: false,
-    mutate: vi.fn(),
   }),
   useSaveAsanaConnection: () => ({
     isPending: false,

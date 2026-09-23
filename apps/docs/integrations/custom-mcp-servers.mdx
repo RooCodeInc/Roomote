@@ -42,8 +42,10 @@ real credentials per request. This means:
   upstream.
 - OAuth tokens refresh centrally, so long-running tasks keep working across
   token expiry.
-- Per-tool disables (the **Manage tools** dialog) are enforced at the proxy:
-  disabled tools are hidden from agents and blocked even if called directly.
+- Per-tool choices (the **Manage tools** dialog) are enforced at the proxy:
+  disabled tools are hidden from agents and blocked even if called directly,
+  and a task cannot run an **Always ask** tool until its session owner allows
+  that exact call.
 
 ## OAuth
 

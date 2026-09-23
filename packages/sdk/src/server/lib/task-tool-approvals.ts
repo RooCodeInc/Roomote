@@ -10,7 +10,6 @@ import {
   insertAutoApprovedIntegrationToolApproval,
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
-  isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
@@ -151,7 +150,7 @@ async function isTaskSessionOwnerPresent(input: {
 }
 
 /**
- * Experiment-gated (`integrationToolApprovals`) approvals for a task's agent.
+ * Per-tool approvals for a task's agent.
  * A task belongs to one Session, so its asks are recorded on that Session,
  * decided by the Session owner on the same card, and honor the same session
  * overrides. The worker relays the agent's native ask here; the integration
@@ -212,12 +211,8 @@ async function resolveTaskGoverningPolicies(input: {
 export async function resolveTaskIntegrationToolApprovals(input: {
   runId: number;
   actingUserId: string | undefined;
-  /** Resolved only while the experiment is on. */
   resolveServers: ResolveTaskServers;
 }): Promise<TaskIntegrationToolApprovals | undefined> {
-  if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-    return undefined;
-  }
   const session = await resolveTaskApprovalSession(input.runId);
   const [{ servers, policies, sessionOverrides }, autoState] =
     await Promise.all([
@@ -263,9 +258,6 @@ export async function requestTaskToolApproval(input: {
   actingUserId?: string;
   resolveServers?: ResolveTaskServers;
 }): Promise<TaskToolApprovalRequestResult> {
-  if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-    return { outcome: 'not_required' };
-  }
   const session = await resolveTaskApprovalSession(input.runId);
   if (!session?.ownerUserId) return { outcome: 'unavailable' };
   const context = { sessionId: session.sessionId, userId: session.ownerUserId };

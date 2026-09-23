@@ -1632,8 +1632,7 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
     /**
-     * Experiment-gated (`integrationToolApprovals`) per-tool approval rules
-     * in OpenCode config-permission shape, applied to the parent build agent
+     * Per-tool approval rules in OpenCode config-permission shape, applied to the parent build agent
      * and the helper subagents in the generated per-conversation config.
      * Rules live in config rather than the session ruleset so a policy
      * change never strands stale state in a persisted session: this file is

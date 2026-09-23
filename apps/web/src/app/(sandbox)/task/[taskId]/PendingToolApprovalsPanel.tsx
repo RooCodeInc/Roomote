@@ -3,12 +3,11 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { PendingIntegrationToolApprovals } from '@/components/sessions/PendingIntegrationToolApprovals';
-import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 import { useSessionIntegrationToolApprovals } from '@/hooks/useSessionIntegrationToolApprovals';
 import { useTRPC } from '@/trpc/client';
 
 /**
- * Experiment-gated (`integrationToolApprovals`) approval cards for this
+ * Approval cards for this
  * task's gated integration tool calls. A task's approvals are recorded on its
  * Session and answered by the Session owner, so this is the Session's own
  * card, narrowed to the asks this task raised. Anyone else sees nothing: the
@@ -16,18 +15,11 @@ import { useTRPC } from '@/trpc/client';
  */
 export function PendingToolApprovalsPanel({ taskId }: { taskId: string }) {
   const trpc = useTRPC();
-  const experiment = useIntegrationToolApprovalsExperiment();
   const { data: parentSession } = useQuery(
-    trpc.sessions.forTask.queryOptions(
-      { taskId },
-      { enabled: experiment.enabled },
-    ),
+    trpc.sessions.forTask.queryOptions({ taskId }),
   );
   const sessionId = parentSession?.sessionId;
-  const approvals = useSessionIntegrationToolApprovals(
-    sessionId,
-    experiment.enabled,
-  );
+  const approvals = useSessionIntegrationToolApprovals(sessionId);
   if (!sessionId) return null;
 
   return (

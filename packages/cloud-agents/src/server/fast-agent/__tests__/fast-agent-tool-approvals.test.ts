@@ -21,7 +21,6 @@ vi.mock('../../integration-tool-auto-evaluation', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  cancelOpenIntegrationToolApprovals: vi.fn(async () => 0),
   db: {},
   getSessionForFastConversation: vi.fn(),
   expireIntegrationToolApproval: vi.fn(async () => undefined),
@@ -553,14 +552,10 @@ describe('resolveFastAgentToolApprovalRules', () => {
     expect(listIntegrationToolUserPolicies).not.toHaveBeenCalled();
   });
 
-  it('is inactive without the experiment', async () => {
-    vi.mocked(isDeploymentExperimentEnabled).mockResolvedValueOnce(false);
-    expect(
-      await resolveFastAgentToolApprovalRules({ integrations }),
-    ).toBeUndefined();
-    expect(isDeploymentExperimentEnabled).toHaveBeenCalledWith(
-      'integrationToolApprovals',
-    );
+  it('compiles policies for every deployment, with no experiment to turn on', async () => {
+    const resolved = await resolveFastAgentToolApprovalRules({ integrations });
+    expect(resolved).toBeDefined();
+    expect(isDeploymentExperimentEnabled).not.toHaveBeenCalled();
   });
 
   it('applies the most restrictive mode to a colliding flattened key so it never runs ungated', async () => {
@@ -1252,25 +1247,6 @@ describe('tool approval bridge', () => {
       ),
     );
     expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
-  });
-
-  it('rejects an approved decision without executing when the experiment is disabled before the relay', async () => {
-    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
-      status: 'approved',
-    } as never);
-    vi.mocked(isDeploymentExperimentEnabled)
-      .mockResolvedValueOnce(true) // top-of-loop check
-      .mockResolvedValue(false); // approved-branch re-check and beyond
-    const helperMocks = helpers();
-    bridge().handleAsk(ask, helperMocks);
-    await vi.waitFor(() =>
-      expect(helperMocks.reply).toHaveBeenCalledWith(
-        'req-1',
-        'reject',
-        'Tool approvals were disabled; the call was not run.',
-      ),
-    );
-    expect(markIntegrationToolApprovalConsumed).not.toHaveBeenCalled();
   });
 
   it('records the ask with the paused call arguments and relays an approved decision once', async () => {
