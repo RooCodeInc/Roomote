@@ -380,6 +380,16 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
       ) {
         take -= 1;
       }
+      if (
+        open &&
+        take < remaining.length &&
+        remaining[take] === '\n' &&
+        current.length + take + 1 + open.marker.length <= limit
+      ) {
+        // A line break at the boundary saves the synthetic newline before
+        // the closing marker. Take it with this chunk, including any CR.
+        take += 1;
+      }
       if (take <= 0) return chunkDiscordPlainMessage(text, limit);
       current += remaining.slice(0, take);
       remaining = remaining.slice(take);

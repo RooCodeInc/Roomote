@@ -1318,6 +1318,28 @@ describe('chunkDiscordMessage', () => {
     expect(chunks.join('')).toMatch(/```\r\nOutside$/u);
   });
 
+  it('keeps a CRLF pair together when it meets the fenced chunk boundary', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`ts\r\n${'x'.repeat(28)}\r\nsecond line\r\n\`\`\``,
+      40,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+    expect(chunks[0]).toBe(`\`\`\`ts\r\n${'x'.repeat(28)}\r\n\`\`\``);
+    expect(chunks[1]).toMatch(/^```ts\nsecond line/u);
+    expect(
+      chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) === 2),
+    ).toBe(true);
+  });
+
+  it('does not duplicate an LF when it meets the fenced chunk boundary', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`ts\n${'x'.repeat(30)}\nsecond line\n\`\`\``,
+      40,
+    );
+    expect(chunks[0]).toBe(`\`\`\`ts\n${'x'.repeat(30)}\n\`\`\``);
+    expect(chunks[1]).toMatch(/^```ts\nsecond line/u);
+  });
+
   it('bounds chunks even when a fence language is too long to repeat', () => {
     const chunks = chunkDiscordMessage(
       `\`\`\`${'a'.repeat(80)}\nbody\n\`\`\``,
