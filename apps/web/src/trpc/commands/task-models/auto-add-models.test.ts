@@ -64,7 +64,7 @@ describe('buildAutoAddedTaskModelSettings', () => {
     expect(result!.taskModelSettings.defaultModelId).toBe('xai/grok-4.7');
   });
 
-  it('seeds the current GPT-6 successors for a fresh OpenAI connection', () => {
+  it('seeds GPT-6 Luna as the default for a fresh OpenAI connection', () => {
     const result = buildAutoAddedTaskModelSettings({
       provider: OPENAI,
       persistedTaskModelSettings: null,
@@ -79,7 +79,7 @@ describe('buildAutoAddedTaskModelSettings', () => {
     expect(modelIds).not.toEqual(
       expect.arrayContaining(['openai/gpt-5.6-sol', 'openai/gpt-5.6-luna']),
     );
-    expect(result!.taskModelSettings.defaultModelId).toBe('openai/gpt-6-sol');
+    expect(result!.taskModelSettings.defaultModelId).toBe('openai/gpt-6-luna');
   });
 
   it('keeps the usable default-catalog models and effective default when another provider is also connected', () => {
@@ -209,13 +209,13 @@ describe('buildAutoAddedTaskModelSettings', () => {
     const persisted = {
       models: [
         {
-          id: 'openrouter/z-ai/glm-5.2',
-          displayName: 'GLM 5.2',
-          family: 'GLM',
+          id: 'openrouter/openai/gpt-5.6-terra',
+          displayName: 'GPT 5.6 Terra',
+          family: 'GPT',
         },
       ],
-      allowedModelIds: ['openrouter/z-ai/glm-5.2'],
-      defaultModelId: 'openrouter/z-ai/glm-5.2',
+      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
+      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
     };
 
     const result = buildAutoAddedTaskModelSettings({
@@ -227,12 +227,12 @@ describe('buildAutoAddedTaskModelSettings', () => {
     expect(result).not.toBeNull();
     expect(result!.taskModelSettings.models?.map((model) => model.id)).toEqual(
       expect.arrayContaining([
-        'openrouter/z-ai/glm-5.2',
+        'openrouter/openai/gpt-5.6-terra',
         ...ANTHROPIC.suggestedTaskModels.map((suggestion) => suggestion.id),
       ]),
     );
     expect(result!.taskModelSettings.defaultModelId).toBe(
-      'openrouter/z-ai/glm-5.2',
+      'openrouter/openai/gpt-5.6-terra',
     );
     expect(result!.taskModelSettings.allowedModelIds).toEqual(
       expect.arrayContaining(result!.addedModels.map((model) => model.id)),
