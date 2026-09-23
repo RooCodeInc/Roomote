@@ -14,6 +14,7 @@ import {
   evaluateUnmentionedThreadReplyRouting,
   resolveUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
+  type UnmentionedThreadMention,
 } from './unmentioned-thread-reply.js';
 
 function human(
@@ -23,6 +24,7 @@ function human(
     mentionsBot?: boolean;
     mentionsSomebodyElse?: boolean;
     text?: string;
+    mentions?: UnmentionedThreadMention[];
   } = {},
 ): UnmentionedThreadHistoryMessage {
   return {
@@ -32,7 +34,12 @@ function human(
     mentionsBot: options.mentionsBot ?? false,
     mentionsSomebodyElse: options.mentionsSomebodyElse ?? false,
     ...(options.text !== undefined ? { text: options.text } : {}),
+    ...(options.mentions ? { mentions: options.mentions } : {}),
   };
+}
+
+function slackMention(userId: string, isBot = false): UnmentionedThreadMention {
+  return { token: `<@${userId}>`, userId, isBot };
 }
 
 function bot(id: string, text?: string): UnmentionedThreadHistoryMessage {
@@ -346,8 +353,61 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
           },
         ],
       },
-      reply: { author: 'reply author', text: 'can you also add a test?' },
+      reply: {
+        author: 'reply author',
+        text: 'can you also add a test?',
+        mentionsRoomote: false,
+        mentionsSomebodyElse: false,
+      },
     });
+  });
+
+  it('shows mentions as role labels, never provider ids', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('participant', 0.9),
+    );
+
+    await resolveUnmentionedThreadReplyRouting({
+      eventMessageId: '500',
+      eventText: '<@U2> they still do not have the new model, right?',
+      eventMentions: [slackMention('U2')],
+      eventMentionsSomebodyElse: true,
+      senderUserId: 'U1',
+      isThreadTaskOwner: true,
+      isThreadRootAuthor: false,
+      threadMessages: [
+        human('100', 'U1', {
+          mentionsBot: true,
+          text: '<@UBOT> please fix the bug',
+          mentions: [slackMention('UBOT', true)],
+        }),
+        bot('200', 'I opened a PR with the fix.'),
+        human('300', 'U2', {
+          mentionsSomebodyElse: true,
+          text: 'nice. <@U1> and <@U3>, can you review? cc <@U9|dana>',
+          mentions: [slackMention('U1'), slackMention('U3')],
+        }),
+      ],
+      compareMessageIds: compareNumericMessageIds,
+    });
+
+    const { state } = mockEvaluateTypeSafeJudgments.mock.calls[0]![0];
+    expect(
+      state.thread.messages.map((message: { text: string }) => message.text),
+    ).toEqual([
+      '@Roomote please fix the bug',
+      'I opened a PR with the fix.',
+      // U3 never wrote in the thread, so it takes the next label after the
+      // authors; an unresolved mention is still stripped of its id.
+      'nice. @reply author and @participant 2, can you review? cc @someone else',
+    ]);
+    expect(state.reply).toEqual({
+      author: 'reply author',
+      text: '@participant 1 they still do not have the new model, right?',
+      mentionsRoomote: false,
+      mentionsSomebodyElse: true,
+    });
+    expect(JSON.stringify(state)).not.toMatch(/U1|U2|U3|U9|UBOT/u);
   });
 
   it('keeps the refusal when Roomote is the likeliest addressee but below the threshold', async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getSlackMentionDirectiveText,
+  getSlackMentionsForJudgment,
   mentionsAnySlackUser,
   mentionsSlackBot,
   mentionsSlackUserOtherThanBot,
@@ -92,5 +93,19 @@ describe('mention-routing', () => {
     expect(getSlackMentionDirectiveText(message)).toBe('');
     expect(mentionsSlackUserOtherThanBot(message, 'U_BOT')).toBe(false);
     expect(mentionsSlackBot(message, 'U_BOT')).toBe(false);
+  });
+
+  it('lists every mention in the full text for the judgment state', () => {
+    expect(
+      getSlackMentionsForJudgment(
+        '<@U_BOT> ask <@U2|dana>\n> quoted <@U3>',
+        'U_BOT',
+      ),
+    ).toEqual([
+      { token: '<@U_BOT>', userId: 'U_BOT', isBot: true },
+      { token: '<@U2|dana>', userId: 'U2', isBot: false },
+      { token: '<@U3>', userId: 'U3', isBot: false },
+    ]);
+    expect(getSlackMentionsForJudgment(undefined, 'U_BOT')).toEqual([]);
   });
 });

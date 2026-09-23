@@ -73,6 +73,7 @@ import {
   isRoutableAutomatedSlackAppMention,
 } from '../helpers/event-normalization.js';
 import {
+  getSlackMentionsForJudgment,
   mentionsSlackBot,
   mentionsSlackUserOtherThanBot,
   mentionsSlackUserOtherThanBotOrUser,
@@ -324,6 +325,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
           message.user,
         ),
         text: message.text,
+        mentions: getSlackMentionsForJudgment(message.text, botUserId),
       };
     },
   );
@@ -333,6 +335,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   const decision = await resolveUnmentionedThreadReplyRouting({
     eventMessageId: event.ts,
     eventText: event.text,
+    eventMentions: getSlackMentionsForJudgment(event.text, botUserId),
     senderUserId: event.user,
     isThreadTaskOwner,
     isThreadRootAuthor,

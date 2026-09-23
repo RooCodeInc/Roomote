@@ -771,10 +771,16 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
           reply: {
             author: 'reply author',
             text: 'can you also add a unit test?',
+            mentionsRoomote: false,
+            mentionsSomebodyElse: false,
           },
         }),
       }),
     );
+    // The bot mention reaches the model as a role label, not a Slack user id.
+    const { state } = evaluateTypeSafeJudgmentsMock.mock.calls[0]![0];
+    expect(state.thread.messages[0].text).toBe('@Roomote please fix the bug');
+    expect(JSON.stringify(state)).not.toContain('UBOT');
     expect(markSlackThreadExplicitMentionRequiredMock).not.toHaveBeenCalled();
   });
 
