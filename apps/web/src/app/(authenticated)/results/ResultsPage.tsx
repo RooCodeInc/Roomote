@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 import { useMediaQuery } from 'usehooks-ts';
 
 import {
-  ArrowLeft,
   Button,
   CircleAlert,
   Dialog,
@@ -20,9 +19,6 @@ import {
   Empty,
   EmptyHeader,
   EmptyTitle,
-  ResizableDivider,
-  ResizablePanel,
-  ResizablePanelGroup,
   RetryableLoadError,
   Skeleton,
   TriangleAlert,
@@ -32,10 +28,13 @@ import { MessageResponse } from '@/components/ai-elements';
 import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
+import { cn } from '@/lib/utils';
 import { useResultsPage } from '@/hooks/useResultsPage';
 import { useTelemetry } from '@/hooks/useTelemetry';
 import { useTRPC } from '@/trpc/client';
 import type { ResultInboxItem } from '@/trpc/commands/results';
+
+import { ResponsiveWorkspacePanels } from '../../(sandbox)/SandboxWorkspacePanels';
 
 const EMPTY_RESULTS: ResultInboxItem[] = [];
 const DETAIL_SKELETON_DELAY_MS = 500;
@@ -45,26 +44,49 @@ function resultKey(result: Pick<ResultInboxItem, 'id' | 'kind'>) {
   return `${result.kind}:${result.id}`;
 }
 
-function AutomationAvatar({ result }: { result: ResultInboxItem }) {
+function AutomationAvatar({
+  result,
+  size = 'default',
+}: {
+  result: ResultInboxItem;
+  size?: 'default' | 'large';
+}) {
+  const isLarge = size === 'large';
   return (
-    <span className="flex size-7 shrink-0 items-center justify-center overflow-clip rounded-full border border-border bg-white ring-1 ring-card dark:bg-muted">
+    <span
+      className={cn(
+        'flex shrink-0 items-center justify-center overflow-clip rounded-full border border-border bg-white ring-1 ring-card dark:bg-muted',
+        isLarge ? 'size-8' : 'size-7',
+      )}
+    >
       <TaskAutomationIcon
         automationKey={result.automationKey}
-        className="size-5"
+        className={isLarge ? 'size-6' : 'size-5'}
       />
     </span>
   );
 }
 
-function PriorityMarker({ result }: { result: ResultInboxItem }) {
+function PriorityMarker({
+  result,
+  selected,
+}: {
+  result: ResultInboxItem;
+  selected: boolean;
+}) {
   if (result.priority === 'normal') return null;
   const Icon = result.priority === 'critical' ? TriangleAlert : CircleAlert;
   return (
     <Icon
       aria-label={`${result.priority === 'critical' ? 'Critical' : 'High'} priority`}
-      className={
-        result.priority === 'critical' ? 'text-destructive' : 'text-warning'
-      }
+      className={cn(
+        'size-3 shrink-0',
+        selected
+          ? 'text-black'
+          : result.priority === 'critical'
+            ? 'text-destructive'
+            : 'text-warning',
+      )}
       strokeWidth={2}
     />
   );
@@ -72,8 +94,8 @@ function PriorityMarker({ result }: { result: ResultInboxItem }) {
 
 function ResultsSkeleton() {
   return (
-    <div className="grid min-h-[34rem] grid-cols-1 gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-      <div className="space-y-1 bg-card p-3">
+    <div className="grid min-h-[34rem] grid-cols-1 overflow-hidden bg-background md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="space-y-1 bg-background p-3">
         {Array.from({ length: 6 }).map((_, index) => (
           <Skeleton key={index} className="h-24 w-full" />
         ))}
@@ -108,18 +130,28 @@ export function ResultsPage() {
   const isDesktop = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
   });
-  const [selectedKey, setSelectedKey] = useState(
-    () => searchParams.get('result') ?? '',
-  );
+  const requestedResultKey = searchParams.get('result') ?? '';
+  const [selectedKey, setSelectedKey] = useState(requestedResultKey);
+  const previousResultParamRef = useRef(requestedResultKey);
   const [showSuggestionComposer, setShowSuggestionComposer] = useState(false);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [displayedResult, setDisplayedResult] =
     useState<ResultInboxItem | null>(null);
   const [showDetailSkeleton, setShowDetailSkeleton] = useState(false);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const resultListRef = useRef<HTMLDivElement>(null);
   const detailHeadingRef = useRef<HTMLHeadingElement>(null);
   const mainActionRef = useRef<HTMLAnchorElement | HTMLButtonElement>(null);
   const trackedInboxViewRef = useRef(false);
+  const [canScrollResultsUp, setCanScrollResultsUp] = useState(false);
+  const [canScrollResultsDown, setCanScrollResultsDown] = useState(false);
+  const replaceResultParam = (key: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (key) params.set('result', key);
+    else params.delete('result');
+    const href = params.size > 0 ? `/results?${params.toString()}` : '/results';
+    startTransition(() => router.replace(href));
+  };
   const listQueryKey = trpc.results.list.queryKey();
   const listQuery = useQuery(
     trpc.results.list.queryOptions(undefined, { enabled }),
@@ -154,6 +186,9 @@ export function ResultsPage() {
         queryClient.setQueryData(listQueryKey, context?.previous);
         toast.error(error.message);
       },
+      onSuccess: (result) => {
+        if (result.success) toast.success('Result cleared');
+      },
       onSettled: () => void invalidate(),
     }),
   );
@@ -162,6 +197,8 @@ export function ResultsPage() {
       onSuccess: (result) => {
         capture('results_cleared_all', { count: result.clearedCount });
         setSelectedKey('');
+        setDisplayedResult(null);
+        replaceResultParam('');
         void invalidate();
       },
       onError: (error) => toast.error(error.message),
@@ -178,9 +215,24 @@ export function ResultsPage() {
     if (!isFlagLoading && !enabled) router.replace('/');
   }, [enabled, isFlagLoading, router]);
 
+  useEffect(() => {
+    if (previousResultParamRef.current === requestedResultKey) return;
+    previousResultParamRef.current = requestedResultKey;
+    setSelectedKey(requestedResultKey);
+    setShowSuggestionComposer(false);
+  }, [requestedResultKey]);
+
   const results = listQuery.data ?? EMPTY_RESULTS;
   const selectedSummary =
     results.find((result) => resultKey(result) === selectedKey) ?? null;
+  const updateResultScrollBoundaries = () => {
+    const list = resultListRef.current;
+    if (!list) return;
+    setCanScrollResultsUp(list.scrollTop > 1);
+    setCanScrollResultsDown(
+      list.scrollTop + list.clientHeight < list.scrollHeight - 1,
+    );
+  };
   const detailQuery = useQuery(
     trpc.results.get.queryOptions(
       {
@@ -196,10 +248,14 @@ export function ResultsPage() {
   const actionableResult = isDetailTransition ? null : displayedResult;
 
   useEffect(() => {
-    if (isDesktop && !selectedKey && results[0]) {
-      setSelectedKey(resultKey(results[0]));
-    }
-  }, [isDesktop, results, selectedKey]);
+    const list = resultListRef.current;
+    if (!list) return;
+    updateResultScrollBoundaries();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateResultScrollBoundaries);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [results.length]);
 
   useEffect(() => {
     if (!trackedInboxViewRef.current && listQuery.isSuccess) {
@@ -238,6 +294,16 @@ export function ResultsPage() {
     }
   }, [detailQuery.data, detailQuery.isError, selectedKey, selectedSummary]);
 
+  const closeResultDetail = () => {
+    const prior = selectedKey;
+    setSelectedKey('');
+    setShowSuggestionComposer(false);
+    setDisplayedResult(null);
+    setShowDetailSkeleton(false);
+    replaceResultParam('');
+    requestAnimationFrame(() => rowRefs.current.get(prior)?.focus());
+  };
+
   const selectResult = (result: ResultInboxItem) => {
     const key = resultKey(result);
     setSelectedKey(key);
@@ -247,37 +313,39 @@ export function ResultsPage() {
       priority: result.priority,
       preparation: result.preparationStatus,
     });
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('result', key);
-    startTransition(() => router.replace(`/results?${params.toString()}`));
+    replaceResultParam(key);
     if (!isDesktop) {
       requestAnimationFrame(() => detailHeadingRef.current?.focus());
     }
   };
 
   const clearResult = (result: ResultInboxItem) => {
-    if (isDetailTransition || resultKey(result) !== selectedKey) return;
+    if (resultKey(result) !== selectedKey) return;
     const index = results.findIndex(
       (candidate) => resultKey(candidate) === resultKey(result),
     );
     const next = results[index + 1] ?? results[index - 1] ?? null;
-    setSelectedKey(next ? resultKey(next) : '');
+    const nextKey = next ? resultKey(next) : '';
+    setSelectedKey(nextKey);
+    setShowSuggestionComposer(false);
+    if (!next) setDisplayedResult(null);
+    replaceResultParam(nextKey);
     capture('result_cleared', { kind: result.kind, priority: result.priority });
     clearMutation.mutate({ id: result.id, kind: result.kind });
   };
 
   useEffect(() => {
     const handleKeyboardNavigation = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+        return;
+      }
       const target = event.target;
       const element = target instanceof Element ? target : null;
-      const editable =
-        element instanceof HTMLInputElement ||
-        element instanceof HTMLTextAreaElement ||
-        element instanceof HTMLSelectElement ||
-        element?.getAttribute('contenteditable') === 'true';
+      const editable = Boolean(
+        element?.closest('input, textarea, select, [contenteditable="true"]'),
+      );
       if (editable) return;
 
-      const option = element?.closest('[role="option"]');
       const ordinaryControl = element?.closest(
         'a, button:not([role="option"]), [role="button"]',
       );
@@ -287,23 +355,33 @@ export function ResultsPage() {
         (result) => resultKey(result) === selectedKey,
       );
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        if (selectedIndex === -1) return;
-        const nextIndex = selectedIndex + (event.key === 'ArrowDown' ? 1 : -1);
+        const nextIndex =
+          selectedIndex === -1
+            ? event.key === 'ArrowDown'
+              ? 0
+              : results.length - 1
+            : selectedIndex + (event.key === 'ArrowDown' ? 1 : -1);
         const next = results[nextIndex];
         if (!next) return;
         event.preventDefault();
         selectResult(next);
-        requestAnimationFrame(() =>
-          rowRefs.current.get(resultKey(next))?.focus(),
-        );
+        if (isDesktop) {
+          requestAnimationFrame(() =>
+            rowRefs.current.get(resultKey(next))?.focus(),
+          );
+        }
         return;
       }
 
-      if (event.repeat || !actionableResult) return;
+      if (event.repeat || !selectedSummary) return;
       if (event.key === 'Delete') {
         event.preventDefault();
-        clearResult(actionableResult);
-      } else if (event.key === 'Enter' && !option) {
+        clearResult(selectedSummary);
+      } else if (
+        (event.key === 'Enter' || event.key === 'Return') &&
+        actionableResult &&
+        mainActionRef.current
+      ) {
         event.preventDefault();
         mainActionRef.current?.click();
       }
@@ -319,311 +397,340 @@ export function ResultsPage() {
 
   if (isFlagLoading || !enabled || listQuery.isPending) {
     return (
-      <div className="min-h-full w-full space-y-6 overflow-auto bg-background px-4 py-8 md:px-8">
-        <Skeleton className="h-8 w-52" />
-        <ResultsSkeleton />
+      <div className="min-h-full w-full overflow-auto bg-background px-4 py-8 md:px-8">
+        <div className="mx-auto w-full max-w-6xl space-y-6">
+          <Skeleton className="h-8 w-52" />
+          <ResultsSkeleton />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex min-h-full w-full flex-col overflow-hidden bg-background px-4 py-6 md:px-8">
-      <header className="mb-5 flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Results</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Outcomes and decisions from your automations.
-          </p>
-        </div>
-        {results.length > 0 ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={clearAllMutation.isPending}
-            onClick={() => setIsClearConfirmOpen(true)}
-          >
-            Clear all
-          </Button>
-        ) : null}
-      </header>
-
-      {listQuery.isError && listQuery.data === undefined ? (
-        <RetryableLoadError
-          className="border"
-          message="Failed to load results."
-          isRetrying={listQuery.isFetching}
-          onRetry={() => void listQuery.refetch()}
-        />
-      ) : results.length === 0 ? (
-        <Empty className="border">
-          <EmptyHeader>
-            <EmptyTitle>No pending results</EmptyTitle>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <ResizablePanelGroup
-          direction="horizontal"
-          className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-card"
-        >
-          <ResizablePanel
-            id="results-list"
-            order={1}
-            defaultSize={40}
-            minSize={30}
-            maxSize={55}
-            className={selectedSummary ? 'hidden md:block' : 'block'}
-          >
-            <div
-              role="listbox"
-              aria-label="Pending automation results"
-              className="h-full divide-y divide-background overflow-y-auto"
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col">
+        <header className="mb-5 flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground">Results</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Outcomes and decisions from your automations.
+            </p>
+          </div>
+          {results.length > 0 ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={clearAllMutation.isPending}
+              onClick={() => setIsClearConfirmOpen(true)}
             >
-              {results.map((result) => {
-                const key = resultKey(result);
-                const isSelected =
-                  selectedSummary && resultKey(selectedSummary) === key;
-                return (
-                  <button
-                    key={key}
-                    ref={(node) => {
-                      if (node) rowRefs.current.set(key, node);
-                      else rowRefs.current.delete(key);
-                    }}
-                    type="button"
-                    role="option"
-                    aria-selected={Boolean(isSelected)}
-                    className={`flex w-full gap-3 px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
-                      isSelected
-                        ? 'bg-accent text-accent-foreground'
-                        : 'hover:bg-muted/70'
-                    }`}
-                    onClick={() => selectResult(result)}
+              Clear all
+            </Button>
+          ) : null}
+        </header>
+
+        {listQuery.isError && listQuery.data === undefined ? (
+          <RetryableLoadError
+            className="border"
+            message="Failed to load results."
+            isRetrying={listQuery.isFetching}
+            onRetry={() => void listQuery.refetch()}
+          />
+        ) : results.length === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>No pending results</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <div className="flex min-h-0 flex-1 overflow-hidden bg-background">
+            <ResponsiveWorkspacePanels
+              isPanelOpen={selectedSummary !== null}
+              mainSize={40}
+              panelSize={60}
+              mainMinSize={30}
+              panelMinSize={40}
+              panelId="result-detail"
+              main={
+                <div className="relative h-full min-h-0 overflow-hidden bg-background">
+                  <div
+                    ref={resultListRef}
+                    role="listbox"
+                    aria-label="Pending automation results"
+                    className="scroll-thin h-full overflow-y-auto divide-y divide-card bg-background"
+                    onScroll={updateResultScrollBoundaries}
                   >
-                    <AutomationAvatar result={result} />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-start gap-2">
-                        <span className="line-clamp-2 flex-1 text-sm font-semibold leading-snug">
-                          {result.headline}
-                        </span>
-                        <PriorityMarker result={result} />
-                      </span>
-                      <span className="mt-1 line-clamp-2 block text-sm leading-snug text-muted-foreground">
-                        {result.decisionContext}
-                      </span>
-                      <span className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <span className="truncate">
-                          {result.automationName}
-                        </span>
-                        <span aria-hidden="true">·</span>
-                        <span className="shrink-0">
-                          {formatDistanceToNowCompact(result.createdAt, {
-                            addSuffix: true,
-                          })}
-                        </span>
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </ResizablePanel>
-          <ResizableDivider className="hidden bg-border md:flex" />
-          <ResizablePanel
-            id="result-detail"
-            order={2}
-            defaultSize={60}
-            minSize={40}
-            className={selectedSummary ? 'block' : 'hidden md:block'}
-          >
-            {selectedSummary ? (
-              showDetailSkeleton ? (
-                <DetailSkeleton />
-              ) : displayedResult ? (
-                <article
-                  aria-busy={isDetailTransition}
-                  className="flex h-full min-h-0 flex-col"
-                >
-                  <div className="min-h-0 flex-1 overflow-y-auto">
-                    <div className="mx-auto max-w-3xl px-5 pb-5 pt-6 md:px-8 md:pb-5 md:pt-8">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="mb-4 -ml-2 md:hidden"
-                        onClick={() => {
-                          const prior = selectedKey;
-                          setSelectedKey('');
-                          const params = new URLSearchParams(
-                            searchParams.toString(),
-                          );
-                          params.delete('result');
-                          router.replace(
-                            params.size > 0
-                              ? `/results?${params.toString()}`
-                              : '/results',
-                          );
-                          requestAnimationFrame(() =>
-                            rowRefs.current.get(prior)?.focus(),
-                          );
-                        }}
-                      >
-                        <ArrowLeft />
-                        Back to results
-                      </Button>
-                      <div className="flex items-start gap-3">
-                        <AutomationAvatar result={displayedResult} />
-                        <div className="min-w-0 flex-1">
-                          <h2
-                            ref={detailHeadingRef}
-                            tabIndex={-1}
-                            className="text-balance text-xl font-semibold leading-tight outline-none"
-                          >
-                            {displayedResult.headline}
-                          </h2>
-                          <p className="mt-2 text-base leading-relaxed text-muted-foreground">
-                            {displayedResult.decisionContext}
-                          </p>
-                          <p className="mt-3 text-sm text-muted-foreground">
-                            {displayedResult.automationName} ·{' '}
-                            {formatDistanceToNowCompact(
-                              displayedResult.createdAt,
-                              { addSuffix: true },
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <div aria-hidden="true" className="border-t" />
-                    <div className="mx-auto max-w-3xl px-5 pb-6 pt-3 md:px-8 md:pb-8">
-                      {showSuggestionComposer &&
-                      actionableResult?.kind === 'suggestion' ? (
-                        <div className="rounded-xl border bg-card p-4">
-                          <NewTaskForm
-                            key={actionableResult.id}
-                            animate={false}
-                            initialPrompt={
-                              actionableResult.actions.find(
-                                (action) => action.kind === 'start_suggestion',
-                              )?.initialPrompt ?? ''
-                            }
-                            placeholder="Add details"
-                            textareaMaxHeight={260}
-                            modelSelectorSize="base"
-                            onTaskStarted={() => {
-                              capture('suggestion_start_succeeded', {
-                                kind: actionableResult.kind,
-                              });
-                              acceptSuggestionMutation.mutate({
-                                id: actionableResult.id,
-                              });
-                            }}
-                          />
-                        </div>
-                      ) : null}
-
-                      <div className="mt-3 max-w-none pl-10">
-                        <MessageResponse className="break-words text-sm **:data-[streamdown='heading-1']:text-xl! **:data-[streamdown='heading-2']:text-base! **:data-[streamdown='heading-3']:text-base!">
-                          {displayedResult.content}
-                        </MessageResponse>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 flex-wrap gap-2 border-t bg-card px-5 py-4 md:px-8">
-                    {primaryAction?.kind === 'navigate' ? (
-                      <Button asChild>
-                        <Link
-                          ref={mainActionRef as Ref<HTMLAnchorElement>}
-                          href={primaryAction.href}
-                          target={primaryAction.external ? '_blank' : undefined}
-                          rel={
-                            primaryAction.external
-                              ? 'noopener noreferrer'
-                              : undefined
-                          }
-                          onClick={() =>
-                            capture('result_navigation_opened', {
-                              kind: actionableResult!.kind,
-                              action: primaryAction.action,
-                            })
-                          }
-                        >
-                          {primaryAction.label}
-                        </Link>
-                      </Button>
-                    ) : primaryAction ? (
-                      <Button
-                        ref={mainActionRef as Ref<HTMLButtonElement>}
-                        onClick={() => {
-                          capture('suggestion_start_requested', {
-                            kind: actionableResult!.kind,
-                          });
-                          setShowSuggestionComposer(true);
-                        }}
-                      >
-                        {primaryAction.label}
-                      </Button>
-                    ) : null}
-                    {secondaryActions.map((action) =>
-                      action.kind === 'navigate' ? (
-                        <Button
-                          key={`${action.action}:${action.href}`}
-                          variant="outline"
-                          asChild
-                        >
-                          <Link
-                            href={action.href}
-                            target={action.external ? '_blank' : undefined}
-                            rel={
-                              action.external
-                                ? 'noopener noreferrer'
-                                : undefined
-                            }
-                            onClick={() =>
-                              capture('result_navigation_opened', {
-                                kind: actionableResult!.kind,
-                                action: action.action,
-                              })
-                            }
-                          >
-                            {action.label}
-                          </Link>
-                        </Button>
-                      ) : (
-                        <Button
-                          key={action.action}
-                          variant="outline"
-                          onClick={() => {
-                            capture('suggestion_start_requested', {
-                              kind: actionableResult!.kind,
-                            });
-                            setShowSuggestionComposer(true);
+                    {results.map((result) => {
+                      const key = resultKey(result);
+                      const isSelected = selectedKey === key;
+                      return (
+                        <button
+                          key={key}
+                          ref={(node) => {
+                            if (node) rowRefs.current.set(key, node);
+                            else rowRefs.current.delete(key);
                           }}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          className={cn(
+                            'group flex w-full cursor-pointer items-start gap-3 py-4 pr-3 pl-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                            isSelected
+                              ? 'bg-accent-foreground text-black'
+                              : 'hover:bg-accent-foreground/10',
+                          )}
+                          onClick={() => selectResult(result)}
                         >
-                          {action.label}
-                        </Button>
-                      ),
-                    )}
-                    <Button
-                      variant="outline"
-                      disabled={clearMutation.isPending || !actionableResult}
-                      onClick={() =>
-                        actionableResult && clearResult(actionableResult)
-                      }
-                    >
-                      <X />
-                      Clear
-                    </Button>
+                          <AutomationAvatar result={result} />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-start gap-2">
+                              <span className="line-clamp-2 flex-1 text-base font-medium leading-snug">
+                                {result.headline}
+                              </span>
+                              <PriorityMarker
+                                result={result}
+                                selected={isSelected}
+                              />
+                            </span>
+                            <span
+                              className={cn(
+                                'mt-1 line-clamp-3 block text-sm leading-snug',
+                                isSelected
+                                  ? 'text-black/80'
+                                  : 'text-muted-foreground',
+                              )}
+                            >
+                              {result.decisionContext}
+                            </span>
+                            <span
+                              className={cn(
+                                'mt-2 flex items-center gap-1.5 text-xs',
+                                isSelected
+                                  ? 'text-black/75'
+                                  : 'text-muted-foreground',
+                              )}
+                            >
+                              <span className="truncate">
+                                {result.automationName}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span className="shrink-0">
+                                {formatDistanceToNowCompact(result.createdAt, {
+                                  addSuffix: true,
+                                })}
+                              </span>
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
-                </article>
-              ) : null
-            ) : (
-              <div className="hidden h-full items-center justify-center text-sm text-muted-foreground md:flex">
-                Select a result to read it.
-              </div>
-            )}
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      )}
+                  <div
+                    aria-hidden="true"
+                    data-visible={canScrollResultsUp}
+                    className={cn(
+                      'pointer-events-none absolute inset-x-0 top-0 h-12 bg-linear-to-b from-background to-transparent transition-transform motion-reduce:transition-none',
+                      canScrollResultsUp ? 'opacity-80' : 'opacity-0',
+                    )}
+                  />
+                  <div
+                    aria-hidden="true"
+                    data-visible={canScrollResultsDown}
+                    className={cn(
+                      'pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-linear-to-t from-background to-transparent transition-transform motion-reduce:transition-none',
+                      canScrollResultsDown ? 'opacity-80' : 'opacity-0',
+                    )}
+                  />
+                </div>
+              }
+              panel={
+                selectedSummary ? (
+                  showDetailSkeleton || !displayedResult ? (
+                    <div className="h-full overflow-y-auto bg-card">
+                      <DetailSkeleton />
+                    </div>
+                  ) : (
+                    <article
+                      aria-busy={isDetailTransition}
+                      className="flex h-full min-h-0 flex-col bg-card text-left"
+                    >
+                      <div className="min-h-0 flex-1 overflow-y-auto">
+                        <div className="mr-auto w-full max-w-3xl px-5 pb-5 pt-6 text-left md:px-8 md:pb-5 md:pt-8">
+                          <div className="flex items-start gap-3">
+                            <AutomationAvatar
+                              result={displayedResult}
+                              size="large"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <h2
+                                ref={detailHeadingRef}
+                                tabIndex={-1}
+                                className="text-balance text-xl font-semibold leading-tight outline-none"
+                              >
+                                {displayedResult.headline}
+                              </h2>
+                              <p className="mt-2 text-sm text-muted-foreground">
+                                {displayedResult.automationName} ·{' '}
+                                {formatDistanceToNowCompact(
+                                  displayedResult.createdAt,
+                                  { addSuffix: true },
+                                )}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="-mr-1.5 -mt-1.5 shrink-0"
+                              aria-label="Close result details"
+                              onClick={closeResultDetail}
+                            >
+                              <X />
+                            </Button>
+                          </div>
+                        </div>
+                        <div aria-hidden="true" className="border-t" />
+                        <div className="mr-auto w-full max-w-3xl px-5 pb-6 pt-4 text-left md:px-8 md:pb-8 md:pl-10">
+                          {displayedResult.decisionContext ? (
+                            <p className="text-base leading-relaxed text-muted-foreground">
+                              {displayedResult.decisionContext}
+                            </p>
+                          ) : null}
+                          {showSuggestionComposer &&
+                          actionableResult?.kind === 'suggestion' ? (
+                            <div className="mt-4 rounded-xl border bg-card p-4">
+                              <NewTaskForm
+                                key={actionableResult.id}
+                                animate={false}
+                                initialPrompt={
+                                  actionableResult.actions.find(
+                                    (action) =>
+                                      action.kind === 'start_suggestion',
+                                  )?.initialPrompt ?? ''
+                                }
+                                placeholder="Add details"
+                                textareaMaxHeight={260}
+                                modelSelectorSize="base"
+                                onTaskStarted={() => {
+                                  capture('suggestion_start_succeeded', {
+                                    kind: actionableResult.kind,
+                                  });
+                                  acceptSuggestionMutation.mutate({
+                                    id: actionableResult.id,
+                                  });
+                                }}
+                              />
+                            </div>
+                          ) : null}
+                          {displayedResult.content ? (
+                            <div className="mt-4 max-w-none">
+                              <MessageResponse className="break-words text-sm **:data-[streamdown='heading-1']:text-xl! **:data-[streamdown='heading-2']:text-base! **:data-[streamdown='heading-3']:text-base!">
+                                {displayedResult.content}
+                              </MessageResponse>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-card px-5 py-4 md:px-8">
+                        {primaryAction?.kind === 'navigate' ? (
+                          <Button asChild>
+                            <Link
+                              ref={mainActionRef as Ref<HTMLAnchorElement>}
+                              href={primaryAction.href}
+                              target={
+                                primaryAction.external ? '_blank' : undefined
+                              }
+                              rel={
+                                primaryAction.external
+                                  ? 'noopener noreferrer'
+                                  : undefined
+                              }
+                              onClick={() =>
+                                capture('result_navigation_opened', {
+                                  kind: actionableResult!.kind,
+                                  action: primaryAction.action,
+                                })
+                              }
+                            >
+                              {primaryAction.label}
+                            </Link>
+                          </Button>
+                        ) : primaryAction ? (
+                          <Button
+                            ref={mainActionRef as Ref<HTMLButtonElement>}
+                            onClick={() => {
+                              capture('suggestion_start_requested', {
+                                kind: actionableResult!.kind,
+                              });
+                              setShowSuggestionComposer(true);
+                            }}
+                          >
+                            {primaryAction.label}
+                          </Button>
+                        ) : null}
+                        {secondaryActions.map((action) =>
+                          action.kind === 'navigate' ? (
+                            <Button
+                              key={`${action.action}:${action.href}`}
+                              variant="outline"
+                              asChild
+                            >
+                              <Link
+                                href={action.href}
+                                target={action.external ? '_blank' : undefined}
+                                rel={
+                                  action.external
+                                    ? 'noopener noreferrer'
+                                    : undefined
+                                }
+                                onClick={() =>
+                                  capture('result_navigation_opened', {
+                                    kind: actionableResult!.kind,
+                                    action: action.action,
+                                  })
+                                }
+                              >
+                                {action.label}
+                              </Link>
+                            </Button>
+                          ) : (
+                            <Button
+                              key={action.action}
+                              variant="outline"
+                              onClick={() => {
+                                capture('suggestion_start_requested', {
+                                  kind: actionableResult!.kind,
+                                });
+                                setShowSuggestionComposer(true);
+                              }}
+                            >
+                              {action.label}
+                            </Button>
+                          ),
+                        )}
+                        <Button
+                          variant="outline"
+                          disabled={clearMutation.isPending || !selectedSummary}
+                          onClick={() =>
+                            selectedSummary && clearResult(selectedSummary)
+                          }
+                        >
+                          <X />
+                          Clear
+                        </Button>
+                        <p className="hidden self-center text-xs text-muted-foreground md:ml-auto md:block md:text-right">
+                          {
+                            'Use ↑/↓ keys to navigate, Return to act, Delete to clear'
+                          }
+                        </p>
+                      </div>
+                    </article>
+                  )
+                ) : null
+              }
+            />
+          </div>
+        )}
+      </div>
 
       <Dialog open={isClearConfirmOpen} onOpenChange={setIsClearConfirmOpen}>
         <DialogContent size="sm">

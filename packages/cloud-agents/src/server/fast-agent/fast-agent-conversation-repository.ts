@@ -15,6 +15,7 @@ import {
   advanceSessionReadCursor,
   getSessionForFastConversation,
   gt,
+  inArray,
   isNotNull,
   isNull,
   lt,
@@ -678,6 +679,63 @@ export async function scheduleFastAgentDurableTurnRetry(
     .where(pendingDurableTurnWhere(id))
     .returning({ id: fastAgentParentEvents.id });
   return rows.length > 0;
+}
+
+/**
+ * How long a native steer holds the queued follow-ups it is delivering
+ * before the queue may take them back. A live steer delivers or releases its
+ * claim within one dispatch, so this only bounds how long a crashed owner
+ * delays the queue's whole-turn fallback.
+ */
+const FAST_AGENT_HUMAN_STEER_CLAIM_MS = 2 * 60 * 1000;
+
+/**
+ * Claim queued human follow-ups for one native steer, returning the ids the
+ * steer may deliver. A row withdrawn or settled since the lookup is left out,
+ * and until the claim is released a withdrawal no longer succeeds, so a
+ * withdrawn follow-up is never delivered and a delivered one is never
+ * reported as withdrawn.
+ */
+export async function claimFastAgentHumanFollowUpSteers(
+  ids: string[],
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({
+      claimedUntil: new Date(Date.now() + FAST_AGENT_HUMAN_STEER_CLAIM_MS),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        inArray(fastAgentParentEvents.id, ids),
+        isNull(fastAgentParentEvents.admission),
+        isNull(fastAgentParentEvents.deliveredAt),
+        isNull(fastAgentParentEvents.discardedAt),
+      ),
+    )
+    .returning({ id: fastAgentParentEvents.id });
+  return new Set(rows.map((row) => row.id));
+}
+
+/**
+ * Return steer claims whose follow-ups were not delivered, so the queue's
+ * whole-turn fallback picks them up without waiting out the lease.
+ */
+export async function releaseFastAgentHumanFollowUpSteerClaims(
+  ids: string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+  await db
+    .update(fastAgentParentEvents)
+    .set({ claimedUntil: null, updatedAt: new Date() })
+    .where(
+      and(
+        inArray(fastAgentParentEvents.id, ids),
+        isNull(fastAgentParentEvents.admission),
+        isNull(fastAgentParentEvents.deliveredAt),
+      ),
+    );
 }
 
 export type FastAgentActiveInferenceRetryNotice = {

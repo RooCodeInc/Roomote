@@ -10,13 +10,18 @@ import {
   asRecord,
   asString,
   buildAcpRequestUserInputRequestId,
+  formatInferenceCreditsExhaustedMessage,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
   INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS,
   INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS,
+  isInferenceCreditsExhaustedError,
   normalizeAcpReasoningText,
   parseAcpFlattenedMcpToolName,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
+  resolveInferenceProviderDisplayName,
   TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY,
   TaskEventName,
 } from '@roomote/types';
@@ -1661,6 +1666,10 @@ export class OpenCodeServerHarness
   private readonly emittedTodoPlanKeys = new Set<string>();
   private readonly submittedUserMessageIds = new Set<string>();
   private readonly messageRoleById = new Map<string, OpenCodeMessageRole>();
+  // Provider behind each session's latest model request, used to name it in
+  // user-facing errors. The configured model is usually not known here: it
+  // comes from the generated OpenCode config unless a launch override set it.
+  private readonly assistantProviderIdBySession = new Map<string, string>();
   private readonly pendingUserInputRequests = new Map<
     string,
     HarnessPendingUserInputRequest
@@ -4279,7 +4288,11 @@ export class OpenCodeServerHarness
     }
 
     if (sessionId) {
-      const errorText = formatOpenCodeSessionErrorText(error);
+      const errorText = isInferenceCreditsExhaustedError(error)
+        ? formatInferenceCreditsExhaustedMessage(
+            this.resolveProviderDisplayName(sessionId),
+          )
+        : formatOpenCodeSessionErrorText(error);
 
       this.logger.error(
         `OpenCode session error sessionId=${sessionId}: ${JSON.stringify(error ?? {})}`,
@@ -4326,6 +4339,24 @@ export class OpenCodeServerHarness
 
     await this.cleanupVisualAttachmentDirectories();
     this.inFlight = false;
+  }
+
+  /**
+   * Display name of the provider behind a session's failing request. The
+   * gateway markers say whether `openai/` and `xai/` models run on a
+   * connected ChatGPT or Grok subscription rather than an API key.
+   */
+  private resolveProviderDisplayName(sessionId: string): string | undefined {
+    return resolveInferenceProviderDisplayName(
+      this.assistantProviderIdBySession.get(sessionId) ??
+        this.model?.providerID,
+      {
+        chatgptConnected:
+          this.commandEnv?.[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1',
+        xaiSubscriptionConnected:
+          this.commandEnv?.[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME] === '1',
+      },
+    );
   }
 
   private async failPendingContextOverflow(): Promise<boolean> {
@@ -5225,6 +5256,15 @@ export class OpenCodeServerHarness
 
     if (typeof info.parentID === 'string' && info.parentID) {
       this.assistantParentById.set(info.id, info.parentID);
+    }
+
+    if (
+      typeof info.sessionID === 'string' &&
+      info.sessionID &&
+      typeof info.providerID === 'string' &&
+      info.providerID
+    ) {
+      this.assistantProviderIdBySession.set(info.sessionID, info.providerID);
     }
 
     this.stallWatchdogs.noteProgress();

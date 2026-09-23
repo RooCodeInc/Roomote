@@ -268,7 +268,7 @@ describe('SessionCard', () => {
           ownerAutomation: null,
           ownerName: 'Test User',
           ownerEmail: 'test@example.com',
-          ownerImageUrl: null,
+          ownerImageUrl: '/api/avatars/user-1/avatar-123.png',
           ownerUserId: 'user-1',
           privacy: 'shared',
           sourceSurface: 'web',
@@ -288,6 +288,8 @@ describe('SessionCard', () => {
 
     expect(screen.getByText('Test User from Web')).toBeInTheDocument();
     expect(screen.queryByLabelText('Test User')).not.toBeInTheDocument();
+    expect(document.querySelector('img')).toHaveAttribute('loading', 'eager');
+    expect(document.querySelector('img')).toHaveAttribute('decoding', 'sync');
   });
 
   it('uses canonical identity for the viewer without changing other users', () => {

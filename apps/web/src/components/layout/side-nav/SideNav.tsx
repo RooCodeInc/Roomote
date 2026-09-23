@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -36,8 +36,9 @@ import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
 import { useResultsPage } from '@/hooks/useResultsPage';
 
 import {
-  getVisiblePrimaryNavItems,
+  getVisibleSideNavSections,
   SETUP_INCOMPLETE_NAV_TOOLTIP,
+  type PrimaryNavItem,
 } from '../navigation-items';
 import { SideNavItem } from './SideNavItem';
 import { RecentSessions } from './RecentSessions';
@@ -48,6 +49,10 @@ const SIDEBAR_LOGO_SRC = '/logos/r.svg';
 export function getTaskIdFromPathname(pathname: string): string | null {
   const match = pathname.match(/^\/task\/([^/]+)/);
   return match?.[1] ?? null;
+}
+
+function SideNavGroup({ children }: { children: ReactNode }) {
+  return <div className="flex flex-col gap-1">{children}</div>;
 }
 
 export const SideNav = ({
@@ -108,8 +113,8 @@ export const SideNav = ({
     () => new Set(pinnedTaskIds),
     [pinnedTaskIds],
   );
-  const visibleNavItems = useMemo(
-    () => getVisiblePrimaryNavItems({ isAdmin, resultsEnabled }),
+  const visibleNavSections = useMemo(
+    () => getVisibleSideNavSections({ isAdmin, resultsEnabled }),
     [isAdmin, resultsEnabled],
   );
 
@@ -143,6 +148,37 @@ export const SideNav = ({
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  const renderNavItem = ({
+    icon,
+    href,
+    label,
+    description,
+    matchExact,
+    matchPaths,
+    requiresSetup,
+  }: PrimaryNavItem) => (
+    <SideNavItem
+      key={href}
+      icon={icon}
+      href={href}
+      label={label}
+      aria-label={label}
+      tooltip={
+        setupIncomplete && requiresSetup ? SETUP_INCOMPLETE_NAV_TOOLTIP : label
+      }
+      description={setupIncomplete && requiresSetup ? undefined : description}
+      disabled={setupIncomplete && requiresSetup}
+      focusableWhenDisabled={setupIncomplete && requiresSetup}
+      expanded={isSideNavExpanded}
+      active={
+        matchExact
+          ? matchPaths.includes(pathname)
+          : matchPaths.some((path) => pathname.startsWith(path))
+      }
+      badgeCount={href === '/results' ? unreadResultCount : 0}
+    />
+  );
 
   return (
     <nav
@@ -214,92 +250,69 @@ export const SideNav = ({
       )}
 
       {/* Nav items — pinned to top */}
-      <div className="mt-4 flex w-full shrink-0 flex-col gap-1">
-        <SideNavItem
-          icon={Plus}
-          label="New Session"
-          tooltip={
-            <>
-              New Session (<span className="font-mono">N</span>)
-            </>
-          }
-          description="Start a session from anywhere"
-          expanded={isSideNavExpanded}
-          active={false}
-          aria-label="New Session"
-          onClick={() => setIsNewTaskDialogOpen(true)}
-        />
-
-        {visibleNavItems.map(
-          ({
-            icon,
-            href,
-            label,
-            description,
-            matchExact,
-            matchPaths,
-            requiresSetup,
-          }) => (
-            <SideNavItem
-              key={href}
-              icon={icon}
-              href={href}
-              label={label}
-              aria-label={label}
-              tooltip={
-                setupIncomplete && requiresSetup
-                  ? SETUP_INCOMPLETE_NAV_TOOLTIP
-                  : label
-              }
-              description={
-                setupIncomplete && requiresSetup ? undefined : description
-              }
-              disabled={setupIncomplete && requiresSetup}
-              focusableWhenDisabled={setupIncomplete && requiresSetup}
-              expanded={isSideNavExpanded}
-              active={
-                matchExact
-                  ? matchPaths.includes(pathname)
-                  : matchPaths.some((path) => pathname.startsWith(path))
-              }
-              badgeCount={href === '/results' ? unreadResultCount : 0}
-            />
-          ),
-        )}
-
-        <SideNavItem
-          icon={Settings}
-          href="/settings"
-          aria-label="Settings"
-          tooltip="Settings"
-          description="Manage your settings"
-          expanded={isSideNavExpanded}
-          active={pathname.startsWith('/settings')}
-        />
-
-        <SideNavItem
-          icon={Search}
-          label="Search"
-          tooltip="Search (⌘K)"
-          description="Search and navigate"
-          expanded={isSideNavExpanded}
-          active={false}
-          aria-label="Search"
-          onClick={() => openCommandPalette(true)}
-        />
-
-        {!isSideNavExpanded && (
+      <div className="mt-4 flex w-full shrink-0 flex-col gap-4">
+        <SideNavGroup>
+          {visibleNavSections.home.map(renderNavItem)}
           <SideNavItem
-            icon={ListChevronsUpDown}
-            label="Expand sidebar"
-            tooltip="Expand sidebar"
-            description="Access recent sessions from here"
-            expanded={false}
+            icon={Plus}
+            label="New Session"
+            tooltip={
+              <>
+                New Session (<span className="font-mono">N</span>)
+              </>
+            }
+            description="Start a session from anywhere"
+            expanded={isSideNavExpanded}
             active={false}
-            aria-label="Expand sidebar"
-            onClick={() => setSideNavExpanded(true)}
+            aria-label="New Session"
+            onClick={() => setIsNewTaskDialogOpen(true)}
           />
+          {visibleNavSections.sessions.map(renderNavItem)}
+        </SideNavGroup>
+
+        <SideNavGroup>
+          {visibleNavSections.manage.map(renderNavItem)}
+          <SideNavItem
+            icon={Settings}
+            href="/settings"
+            aria-label="Settings"
+            tooltip="Settings"
+            description="Manage your settings"
+            expanded={isSideNavExpanded}
+            active={pathname.startsWith('/settings')}
+          />
+        </SideNavGroup>
+
+        {visibleNavSections.insights.length > 0 && (
+          <SideNavGroup>
+            {visibleNavSections.insights.map(renderNavItem)}
+          </SideNavGroup>
         )}
+
+        <SideNavGroup>
+          <SideNavItem
+            icon={Search}
+            label="Search"
+            tooltip="Search (⌘K)"
+            description="Search and navigate"
+            expanded={isSideNavExpanded}
+            active={false}
+            aria-label="Search"
+            onClick={() => openCommandPalette(true)}
+          />
+          {!isSideNavExpanded && (
+            <SideNavItem
+              icon={ListChevronsUpDown}
+              label="Expand sidebar"
+              tooltip="Expand sidebar"
+              description="Access recent sessions from here"
+              expanded={false}
+              active={false}
+              aria-label="Expand sidebar"
+              onClick={() => setSideNavExpanded(true)}
+            />
+          )}
+        </SideNavGroup>
       </div>
 
       <div className="min-h-0 flex-1 overflow-clip">

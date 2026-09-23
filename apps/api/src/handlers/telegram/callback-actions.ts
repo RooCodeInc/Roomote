@@ -575,6 +575,15 @@ export async function handleTelegramCallbackQuery(
   query: TelegramCallbackQuery,
 ): Promise<void> {
   const data = query.data?.trim() ?? '';
+  const { parseIntegrationToolApprovalCallback } =
+    await import('@roomote/types');
+  const toolApproval = parseIntegrationToolApprovalCallback(data);
+  if (toolApproval) {
+    const { handleTelegramToolApprovalAction } =
+      await import('./tool-approval-action.js');
+    await handleTelegramToolApprovalAction({ query, decision: toolApproval });
+    return;
+  }
   const cancelRunId = parseCancelTaskCallbackData(data);
 
   if (cancelRunId !== null) {

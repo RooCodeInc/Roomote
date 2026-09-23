@@ -29,6 +29,7 @@ const {
   getOrCreateFastAgentSessionMock,
   fastAbortMock,
   resolveSuggestionFastConversationMock,
+  handleToolApprovalMock,
 } = vi.hoisted(() => ({
   answerCallbackMock: vi.fn(),
   apiLoggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -48,6 +49,7 @@ const {
   getOrCreateFastAgentSessionMock: vi.fn(),
   fastAbortMock: vi.fn(),
   resolveSuggestionFastConversationMock: vi.fn(),
+  handleToolApprovalMock: vi.fn(),
 }));
 
 vi.mock('../../tasks/suggestion-launch.js', async (importOriginal) => ({
@@ -118,6 +120,10 @@ vi.mock('../setup-suggestions.js', () => ({
     data.startsWith('idea:') ? data.slice('idea:'.length) : null,
 }));
 
+vi.mock('../tool-approval-action.js', () => ({
+  handleTelegramToolApprovalAction: handleToolApprovalMock,
+}));
+
 vi.mock('../task-launch.js', () => ({
   launchTelegramTask: launchTelegramTaskMock,
   resolveTelegramWorkspace: resolveTelegramWorkspaceMock,
@@ -132,6 +138,22 @@ import {
   handleTelegramCallbackQuery,
   handleTelegramSuggestionReaction,
 } from '../callback-actions.js';
+
+it('routes a Telegram approval button without launching a task', async () => {
+  const query = {
+    id: 'callback-1',
+    data: 'ita:3f0c8f0e-1111-4222-8333-444455556666:d',
+  } as TelegramCallbackQuery;
+  await handleTelegramCallbackQuery(query);
+  expect(handleToolApprovalMock).toHaveBeenCalledWith({
+    query,
+    decision: {
+      approvalId: '3f0c8f0e-1111-4222-8333-444455556666',
+      decision: 'rejected',
+    },
+  });
+  expect(launchTelegramTaskMock).not.toHaveBeenCalled();
+});
 
 const WORK_ITEM_ID = 'work-item-1';
 const CLAIMED_AT = new Date('2026-07-01T12:00:00.000Z');

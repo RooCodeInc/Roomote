@@ -22,7 +22,7 @@ describe('IntegrationToolAutoModeSection', () => {
 
   it('shows the section to an admin while the experiment is on', () => {
     render(<IntegrationToolAutoModeSection />);
-    expect(screen.getByText('Auto mode')).toBeInTheDocument();
+    expect(screen.getByText('Auto-approval decisions')).toBeInTheDocument();
     expect(screen.getByTestId('auto-mode-setting')).toBeInTheDocument();
   });
 

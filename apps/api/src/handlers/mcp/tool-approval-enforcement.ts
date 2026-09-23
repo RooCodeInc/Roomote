@@ -1,6 +1,8 @@
 import {
   claimTaskIntegrationToolCall,
   db,
+  findLatestFastConversationUserRequest,
+  findLatestTaskUserRequest,
   fingerprintIntegrationToolCall,
   getSessionForTask,
   isDeploymentExperimentEnabled,
@@ -9,6 +11,7 @@ import {
   listIntegrationToolUserPolicies,
 } from '@roomote/db/server';
 import {
+  INTEGRATION_TOOL_FAST_CONVERSATION_HEADER,
   integrationToolModeIsAutoAssessed,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
@@ -146,7 +149,20 @@ export function resolveProxyToolApprovalBlock(
   return approvals.blocks.get(toolName) ?? approvals.defaultBlock;
 }
 
-/** Shadow-assess a call to a default tool; never awaited. */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The Fast conversation a Session's integration call names, if any. */
+export function readFastConversationIdHeader(headers: Headers): string | null {
+  const value = headers.get(INTEGRATION_TOOL_FAST_CONVERSATION_HEADER)?.trim();
+  return value && UUID_PATTERN.test(value) ? value : null;
+}
+
+/**
+ * Shadow-assess a call to a default tool; never awaited. A call is assessed
+ * against what its user last asked: the task's latest prompt for a task, or
+ * the caller's own latest prompt in the Fast conversation it names.
+ */
 export function shadowProxyToolCall(
   approvals: ProxyToolApprovals,
   input: {
@@ -155,12 +171,27 @@ export function shadowProxyToolCall(
     args: unknown;
     userId: string | null;
     taskId: string | null;
+    fastConversationId?: string | null;
   },
 ): void {
   if (!approvals.shadowDefaultTools || approvals.blocks.has(input.toolName)) {
     return;
   }
-  recordIntegrationToolShadowEvaluationInBackground(input);
+  const { fastConversationId, ...call } = input;
+  const { taskId, userId } = call;
+  const resolveUserRequest = taskId
+    ? () => findLatestTaskUserRequest(taskId)
+    : fastConversationId && userId
+      ? () =>
+          findLatestFastConversationUserRequest({
+            conversationId: fastConversationId,
+            userId,
+          })
+      : undefined;
+  recordIntegrationToolShadowEvaluationInBackground({
+    ...call,
+    ...(resolveUserRequest ? { resolveUserRequest } : {}),
+  });
 }
 
 /**

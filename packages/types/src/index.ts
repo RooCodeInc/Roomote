@@ -63,6 +63,7 @@ export * from './inference-gateway';
 export * from './judgment-model';
 export * from './sandbox-preview-inference';
 export * from './inference-provider-retry';
+export * from './inference-credits-exhaustion';
 export * from './model-provider-config';
 export * from './openai-compatible-providers';
 export * from './recommended-task-models';

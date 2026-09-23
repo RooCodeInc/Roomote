@@ -45,57 +45,105 @@ describe('IntegrationToolAutoModeSetting', () => {
     state.setAuto.mockClear();
   });
 
-  it('shows the current mode and keeps the guidance behind a disclosure', () => {
+  it('shows the approval switch and a link to integration tool controls', () => {
     render(<IntegrationToolAutoModeSetting />);
-    expect(screen.getByRole('radio', { name: /^Off/ })).toBeChecked();
+    expect(
+      screen.getByRole('switch', { name: 'Enable auto-approval' }),
+    ).not.toBeChecked();
     expect(
       screen.getByText(
-        "Let Roomote handle routine work and ask before anything risky. When you're away, risky calls are blocked. Your other tool choices stay the same.",
+        'Let Roomote decide when something is worth interrupting for approval.',
       ),
     ).toBeInTheDocument();
     expect(
+      screen.getByRole('link', { name: 'Integrations page' }),
+    ).toHaveAttribute('href', '/integrations');
+    expect(
       screen.queryByLabelText('Additional instructions'),
     ).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Additional instructions' }),
-    );
+  });
+
+  it('shows guidance when enabled and saves changes using the current mode', async () => {
+    state.settings = { mode: 'on', policy: '', model: { kind: 'judgment' } };
+    render(<IntegrationToolAutoModeSetting />);
+    expect(
+      screen.getByRole('switch', { name: 'Enable auto-approval' }),
+    ).toBeChecked();
     expect(
       screen.getByLabelText('Additional instructions'),
     ).toBeInTheDocument();
-  });
-
-  it('switches the mode and saves the guidance separately', async () => {
-    render(<IntegrationToolAutoModeSetting />);
-    fireEvent.click(screen.getByRole('radio', { name: /^On/ }));
-    expect(state.setAuto).toHaveBeenLastCalledWith({ mode: 'on', policy: '' });
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Additional instructions' }),
-    );
+    expect(
+      screen.getByPlaceholderText(
+        'Include any specific guidance for how to decide auto-approval here',
+      ),
+    ).toBeInTheDocument();
     const guidance = screen.getByLabelText('Additional instructions');
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
     fireEvent.change(guidance, { target: { value: 'Reads only.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() =>
       expect(state.setAuto).toHaveBeenLastCalledWith({
-        mode: 'off',
+        mode: 'on',
         policy: 'Reads only.',
       }),
     );
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Enable auto-approval' }),
+    );
+    expect(state.setAuto).toHaveBeenLastCalledWith({
+      mode: 'off',
+      policy: 'Reads only.',
+    });
   });
 
-  it('cannot be turned on until the deployment is set up for it, and says so plainly', () => {
+  it('enables auto-approval through the same policy mutation', () => {
+    render(<IntegrationToolAutoModeSetting />);
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Enable auto-approval' }),
+    );
+    expect(state.setAuto).toHaveBeenCalledWith({ mode: 'on', policy: '' });
+  });
+
+  it('keeps the switch disabled with no availability message when off and no hosted model exists', () => {
     state.settings = {
       mode: 'off',
       policy: '',
       model: { kind: 'helper', model: 'openai/gpt-5.6-mini' },
     };
     render(<IntegrationToolAutoModeSetting />);
-    expect(screen.getByRole('radio', { name: /^On/ })).toBeDisabled();
+    expect(
+      screen.getByRole('switch', { name: 'Enable auto-approval' }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByText('Auto mode isn’t available yet.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Additional instructions'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps guidance visible and allows disabling if the hosted model becomes unavailable', () => {
+    state.settings = {
+      mode: 'on',
+      policy: 'Existing guidance',
+      model: { kind: 'judgment' },
+    };
+    const { rerender } = render(<IntegrationToolAutoModeSetting />);
+    state.settings = { ...state.settings, model: null };
+    rerender(<IntegrationToolAutoModeSetting />);
+    const toggle = screen.getByRole('switch', { name: 'Enable auto-approval' });
+    expect(toggle).toBeEnabled();
+    expect(toggle).toBeChecked();
     expect(
       screen.getByText('Auto mode isn’t available yet.'),
     ).toBeInTheDocument();
-    // No mechanics leak into the card.
-    expect(screen.queryByText(/judgment|decision model|LLM/)).toBeNull();
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+      'Existing guidance',
+    );
+    fireEvent.click(toggle);
+    expect(state.setAuto).toHaveBeenCalledWith({
+      mode: 'off',
+      policy: 'Existing guidance',
+    });
   });
 });

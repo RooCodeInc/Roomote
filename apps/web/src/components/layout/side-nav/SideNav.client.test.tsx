@@ -97,10 +97,10 @@ vi.mock('@/components/system', () => ({
   ListChevronsUpDown: () => <svg aria-hidden="true" />,
   MessageCircleQuestionMark: () => <svg aria-hidden="true" />,
   MessageSquarePlus: () => <svg aria-hidden="true" />,
+  MessagesSquare: () => <svg aria-hidden="true" />,
   PanelLeftClose: () => <svg aria-hidden="true" />,
   PanelLeftOpen: () => <svg aria-hidden="true" />,
   Plus: () => <svg aria-hidden="true" />,
-  Rows4: () => <svg aria-hidden="true" />,
   NotepadText: () => <svg aria-hidden="true" />,
   Search: () => <svg aria-hidden="true" />,
   Settings: () => <svg aria-hidden="true" />,
@@ -275,6 +275,14 @@ vi.mock('./SideNavSessionItem', () => ({
 
 import { getSessionIdFromPathname } from './RecentSessions';
 import { SideNav, getTaskIdFromPathname } from './SideNav';
+
+function getNavGroupLabels() {
+  const navGroups = screen.getByTestId('nav-/').parentElement?.parentElement;
+
+  return Array.from(navGroups?.children ?? [], (group) =>
+    Array.from(group.children, (item) => item.getAttribute('aria-label')),
+  );
+}
 
 describe('SideNav recent sessions', () => {
   beforeEach(() => {
@@ -530,25 +538,15 @@ describe('SideNav recent sessions', () => {
     );
   });
 
-  it('keeps the new session action above Home', () => {
+  it('groups Home before the new session action and Analytics between Settings and Search for admins', () => {
     render(<SideNav />);
 
-    const newSessionItem = screen.getByTestId('nav-action-New Session');
-    const homeItem = screen.getByTestId('nav-/');
-    expect(newSessionItem.compareDocumentPosition(homeItem)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-  });
-
-  it('keeps analytics visible and Sessions before automations for admins', () => {
-    render(<SideNav />);
-
-    expect(screen.getByTestId('nav-/analytics')).toBeInTheDocument();
-    const automations = screen.getByTestId('nav-/automations');
-    const sessions = screen.getByTestId('nav-/sessions');
-    expect(automations.compareDocumentPosition(sessions)).toBe(
-      Node.DOCUMENT_POSITION_PRECEDING,
-    );
+    expect(getNavGroupLabels()).toEqual([
+      ['Home', 'New Session', 'Sessions'],
+      ['Automations', 'Integrations', 'Settings'],
+      ['Analytics'],
+      ['Search', 'Expand sidebar'],
+    ]);
   });
 
   it('preserves pinned-task actions and live status', () => {
@@ -592,14 +590,16 @@ describe('SideNav recent sessions', () => {
     );
   });
 
-  it('shows settings and automations to members but keeps analytics admin-only', () => {
+  it('shows settings and automations to members without an empty analytics group', () => {
     state.user.isAdmin = false;
 
     render(<SideNav />);
 
-    expect(screen.getByTestId('nav-/settings')).toBeInTheDocument();
-    expect(screen.getByTestId('nav-/automations')).toBeInTheDocument();
-    expect(screen.queryByTestId('nav-/analytics')).not.toBeInTheDocument();
+    expect(getNavGroupLabels()).toEqual([
+      ['Home', 'New Session', 'Sessions'],
+      ['Automations', 'Integrations', 'Settings'],
+      ['Search', 'Expand sidebar'],
+    ]);
   });
 
   it('disables inaccessible destinations during setup while keeping Settings enabled', () => {

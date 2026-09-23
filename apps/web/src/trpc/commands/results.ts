@@ -293,7 +293,7 @@ export async function listResultsCommand(
         automationName: suggestion.automationName ?? 'Automation',
         headline: suggestion.headline,
         decisionContext: suggestion.decisionContext ?? '',
-        content: suggestion.decisionContext ?? '',
+        content: '',
         priority: suggestion.priority ?? 'normal',
         preparationStatus: 'not_required',
         createdAt: suggestion.createdAt,

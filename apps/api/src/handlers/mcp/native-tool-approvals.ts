@@ -3,6 +3,7 @@ import {
   describeProxyToolApprovalBlock,
   resolveProxyToolApprovalBlock,
   resolveProxyToolApprovalBlocks,
+  readFastConversationIdHeader,
   shadowProxyToolCall,
   type ProxyToolApprovals,
 } from './tool-approval-enforcement';
@@ -51,6 +52,8 @@ export async function readNativeMcpRequestBody(
 export async function resolveNativeToolApprovalGuard(input: {
   auth: McpAuthContext;
   integrationId: string;
+  /** The request's headers, for the Fast conversation a call names. */
+  requestHeaders?: Headers;
 }): Promise<NativeToolApprovalGuard> {
   const approvals = await resolveProxyToolApprovalBlocks({
     integrationId: input.integrationId,
@@ -68,7 +71,11 @@ export async function resolveNativeToolApprovalGuard(input: {
 
 class NativeGuard implements NativeToolApprovalGuard {
   constructor(
-    private readonly input: { auth: McpAuthContext; integrationId: string },
+    private readonly input: {
+      auth: McpAuthContext;
+      integrationId: string;
+      requestHeaders?: Headers;
+    },
     private readonly approvals: ProxyToolApprovals,
   ) {}
 
@@ -93,6 +100,9 @@ class NativeGuard implements NativeToolApprovalGuard {
       args,
       userId: this.input.auth.userId ?? null,
       taskId,
+      fastConversationId: this.input.requestHeaders
+        ? readFastConversationIdHeader(this.input.requestHeaders)
+        : null,
     });
 
     const block = resolveProxyToolApprovalBlock(this.approvals, toolName);

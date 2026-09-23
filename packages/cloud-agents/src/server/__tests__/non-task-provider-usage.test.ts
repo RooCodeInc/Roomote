@@ -153,6 +153,10 @@ describe('resolveOpenCodeSmallModel', () => {
       },
     });
     sessionAbortMock.mockResolvedValue({ data: true, error: undefined });
+    // Every prompt watches the event stream; by default it carries nothing.
+    eventSubscribeMock.mockImplementation(async () => ({
+      stream: (async function* () {})(),
+    }));
     sessionCreateMock.mockResolvedValue({
       data: { id: 'session-1' },
       error: undefined,
@@ -2125,6 +2129,291 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('ends an out-of-credits retry loop for a call with no callbacks', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openai/gpt-5.6-sol',
+    });
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.status' as const,
+          properties: {
+            sessionID: 'session-1',
+            status: {
+              type: 'retry' as const,
+              attempt: 1,
+              message: 'The usage limit has been reached',
+              next: Date.now() + 2_000,
+            },
+          },
+        };
+      })(),
+    });
+    sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+
+    const {
+      classifyNonTaskInferenceError,
+      generateTrackedNonTaskObject,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+    // Helper calls such as routing and titles pass no retry or UI callbacks,
+    // and must still fail fast instead of sitting through OpenCode's backoff.
+    const error = await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      modelRole: 'primary',
+      schema: z.object({ answer: z.string() }),
+      prompt: 'Answer.',
+      timeoutMs: 1_000,
+    }).catch((caught: unknown) => caught);
+
+    expect(classifyNonTaskInferenceError(error)).toMatchObject({
+      reason: 'insufficient_credits',
+      retryable: false,
+    });
+    expect(sessionAbortMock).toHaveBeenCalledWith(
+      {
+        sessionID: 'session-1',
+        directory: expect.stringContaining('roomote-non-task-'),
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it.each([
+    ['ChatGPT subscription', 'The usage limit has been reached'],
+    [
+      'OpenAI API',
+      'You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors.',
+    ],
+    [
+      'Anthropic',
+      "You have reached your API usage limits: your organization has crossed its monthly API usage threshold, set based on your organization's API tier. You will regain access on 2026-10-01 at 00:00 UTC.",
+    ],
+  ])(
+    'ends the prompt instead of retrying when the %s account is out of credits',
+    async (_provider, retryMessage) => {
+      process.env = {
+        ...originalEnv,
+        OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+      };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openai/gpt-5.6-sol',
+      });
+      // OpenCode retries these as rate limits; its status carries only the
+      // provider message, with no status code or body.
+      eventSubscribeMock.mockResolvedValue({
+        stream: (async function* () {
+          yield {
+            type: 'session.status' as const,
+            properties: {
+              sessionID: 'session-1',
+              status: {
+                type: 'retry' as const,
+                attempt: 1,
+                message: retryMessage,
+                next: Date.now() + 2_000,
+              },
+            },
+          };
+        })(),
+      });
+      sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+      const onProviderRetry = vi.fn();
+
+      const {
+        classifyNonTaskInferenceError,
+        generateTrackedNonTaskObject,
+        NON_TASK_INFERENCE_SURFACES,
+      } = await import('../non-task-provider-usage.js');
+      const error = await generateTrackedNonTaskObject({
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'primary',
+        schema: z.object({ answer: z.string() }),
+        prompt: 'Answer.',
+        onProviderRetry,
+        maxProviderRetryAttempts: 3,
+      }).catch((caught: unknown) => caught);
+
+      expect(onProviderRetry).not.toHaveBeenCalled();
+      expect(classifyNonTaskInferenceError(error)).toEqual({
+        message:
+          'The inference provider account does not have enough credits or quota.',
+        reason: 'insufficient_credits',
+        retryable: false,
+      });
+      // OpenCode's own backoff loop is cancelled, not left running.
+      expect(sessionAbortMock).toHaveBeenCalledWith(
+        {
+          sessionID: 'session-1',
+          directory: expect.stringContaining('roomote-non-task-'),
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+    },
+  );
+
+  it.each([
+    [
+      'a ChatGPT subscription usage limit sent as a retryable 429',
+      {
+        name: 'APIError',
+        data: {
+          message: 'The usage limit has been reached',
+          statusCode: 429,
+          isRetryable: true,
+          responseBody: JSON.stringify({
+            error: {
+              type: 'usage_limit_reached',
+              message: 'The usage limit has been reached',
+              plan_type: 'plus',
+              resets_in_seconds: 7_200,
+            },
+          }),
+        },
+      },
+    ],
+    [
+      'an OpenAI insufficient_quota 429',
+      {
+        name: 'APIError',
+        data: {
+          message:
+            'You exceeded your current quota, please check your plan and billing details.',
+          statusCode: 429,
+          isRetryable: true,
+          responseBody: JSON.stringify({
+            error: {
+              message:
+                'You exceeded your current quota, please check your plan and billing details.',
+              type: 'insufficient_quota',
+              param: null,
+              code: 'insufficient_quota',
+            },
+          }),
+        },
+      },
+    ],
+    [
+      'an Anthropic credit balance 400 marked non-retryable',
+      {
+        name: 'APIError',
+        data: {
+          message:
+            'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.',
+          statusCode: 400,
+          isRetryable: false,
+        },
+      },
+    ],
+    [
+      'an OpenRouter credits 402 marked non-retryable',
+      {
+        name: 'APIError',
+        data: {
+          message: 'This request requires more credits, or fewer max_tokens.',
+          statusCode: 402,
+          isRetryable: false,
+          responseBody: JSON.stringify({
+            error: {
+              code: 402,
+              message:
+                'This request requires more credits, or fewer max_tokens.',
+              metadata: { limit_source: 'openrouter_credits' },
+            },
+          }),
+        },
+      },
+    ],
+    [
+      "OpenCode's retry cap for a usage-limit retry",
+      {
+        name: 'APIError',
+        data: {
+          message: 'The usage limit has been reached',
+          isRetryable: false,
+        },
+      },
+    ],
+  ])('classifies %s as exhausted credits', async (_label, providerError) => {
+    const { classifyNonTaskInferenceError } =
+      await import('../non-task-provider-usage.js');
+
+    // Exhausted credits must not earn the generic provider rejection's
+    // fresh-session retry, nor the rate limit's backoff.
+    expect(classifyNonTaskInferenceError(providerError)).toEqual({
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      reason: 'insufficient_credits',
+      retryable: false,
+    });
+  });
+
+  it.each([
+    [
+      'a plain 429 rate limit',
+      {
+        name: 'APIError',
+        data: {
+          message: 'Rate limit reached for gpt-5.5. Please try again in 11s.',
+          statusCode: 429,
+          isRetryable: true,
+          responseBody: JSON.stringify({
+            error: { type: 'tokens', code: 'rate_limit_exceeded' },
+          }),
+        },
+      },
+      { reason: 'rate_limited', retryable: true },
+    ],
+    [
+      "a Gemini per-minute quota 429 that reuses OpenAI's wording",
+      {
+        name: 'APIError',
+        data: {
+          message:
+            'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits.',
+          statusCode: 429,
+          isRetryable: true,
+        },
+      },
+      { reason: 'rate_limited', retryable: true },
+    ],
+    [
+      "OpenRouter's temporary in-flight budget 402",
+      {
+        name: 'APIError',
+        data: {
+          message:
+            'This request would exceed your available credits given your current in-flight requests.',
+          statusCode: 402,
+          responseBody: JSON.stringify({
+            error: {
+              code: 402,
+              metadata: {
+                reason: 'in_flight_budget_exhausted',
+                limit_source: 'openrouter_in_flight_budget',
+              },
+            },
+          }),
+        },
+      },
+      { reason: 'provider_error', retryable: false },
+    ],
+  ])(
+    'keeps %s out of the exhausted-credits class',
+    async (_label, providerError, expected) => {
+      const { classifyNonTaskInferenceError } =
+        await import('../non-task-provider-usage.js');
+
+      expect(classifyNonTaskInferenceError(providerError)).toMatchObject(
+        expected,
+      );
+    },
+  );
+
   it.each(['prompt_result', 'session_event'] as const)(
     'preserves and classifies a gateway block when %s settles first',
     async (settlement) => {
@@ -3491,6 +3780,53 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it('reports exhausted credits from validation without waiting out OpenCode retries', async () => {
+    process.env = { ...originalEnv };
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // OpenCode retries the provider's usage-limit 429 itself; its status is
+    // the only signal before the prompt would settle or the deadline fire.
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.status' as const,
+          properties: {
+            sessionID: 'session-1',
+            status: {
+              type: 'retry' as const,
+              attempt: 1,
+              message: 'The usage limit has been reached',
+              next: Date.now() + 2_000,
+            },
+          },
+        };
+      })(),
+    });
+    sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+
+    try {
+      const { validateNonTaskInference } =
+        await import('../non-task-provider-usage.js');
+      const result = await validateNonTaskInference({
+        model: 'openai/gpt-5.6-sol',
+        runtimeEnv: { OPENAI_API_KEY: 'candidate-key' },
+        // Without the retry-status check this would end as a timeout.
+        timeoutMs: 2_000,
+      });
+
+      expect(result).toMatchObject({
+        success: false,
+        reason: 'insufficient_credits',
+        retryable: false,
+      });
+      expect(sessionAbortMock).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionID: 'session-1' }),
+        { signal: expect.any(AbortSignal) },
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it.each([

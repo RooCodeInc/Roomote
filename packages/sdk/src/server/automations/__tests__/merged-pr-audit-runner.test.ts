@@ -6,6 +6,7 @@ const {
   mockHasAnyActiveRepository,
   mockGetAutomationRuntime,
   mockRecordAutomationRunOutcome,
+  mockRecordBackgroundAutomationResult,
   mockUpdateAutomationScanCursor,
   mockListConnectedCommunicationProviders,
   mockResolveAutomationRuntimeDestination,
@@ -21,6 +22,7 @@ const {
   mockHasAnyActiveRepository: vi.fn(),
   mockGetAutomationRuntime: vi.fn(),
   mockRecordAutomationRunOutcome: vi.fn(),
+  mockRecordBackgroundAutomationResult: vi.fn(),
   mockUpdateAutomationScanCursor: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
@@ -50,6 +52,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   getAutomationRuntime: mockGetAutomationRuntime,
   recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
+  recordBackgroundAutomationResult: mockRecordBackgroundAutomationResult,
   updateAutomationScanCursor: mockUpdateAutomationScanCursor,
   slackInstallations: slackInstallationsTable,
   pullRequestFacts: {
@@ -331,6 +334,24 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     expect(manifests).toEqual([[1, 3], [2]]);
 
     expect(result.launchedTaskId).toBe('task-0');
+  });
+
+  it('persists a cleared no-PR audit outcome for code quality only', async () => {
+    mockSlackInstallationRows.mockResolvedValueOnce([]);
+    const codeQualityJob = createMergedPullRequestAuditJob({
+      automationKey: 'code_quality_auditor',
+      buildPrompt,
+    });
+
+    await codeQualityJob();
+
+    expect(mockRecordBackgroundAutomationResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationKey: 'code_quality_auditor',
+        content: 'No merged PRs to audit.',
+      }),
+    );
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('launches a single task without the provider field for an all-GitHub manifest', async () => {

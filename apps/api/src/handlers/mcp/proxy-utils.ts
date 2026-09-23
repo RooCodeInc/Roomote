@@ -28,6 +28,7 @@ import {
   describeProxyToolApprovalBlock,
   resolveProxyToolApprovalBlock,
   resolveProxyToolApprovalBlocks,
+  readFastConversationIdHeader,
   shadowProxyToolCall,
   type ProxyToolApprovals,
 } from './tool-approval-enforcement';
@@ -1179,6 +1180,7 @@ export function createMcpProxy(config: McpProxyConfig) {
           args: callArguments,
           userId: auth.userId ?? null,
           taskId: await resolveRunTokenTaskId(auth),
+          fastConversationId: readFastConversationIdHeader(c.req.raw.headers),
         });
       }
       if (

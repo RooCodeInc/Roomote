@@ -67,6 +67,9 @@ export type FastAgentSuggestedTask = {
 export type FastAgentReply = {
   purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
   message: string;
+  /** Trusted system notification for one pending tool call, rendered with
+   * native decision buttons by callback-capable communication surfaces. */
+  toolApproval?: import('@roomote/types').IntegrationToolApprovalMetadata;
   imageArtifactIds?: string[];
   videoArtifactIds?: string[];
   charts?: DataVisualizationInput[];

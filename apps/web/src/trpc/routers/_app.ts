@@ -44,6 +44,7 @@ import {
 } from '@roomote/types';
 
 import {
+  deleteFastSessionQueuedMessageCommand,
   getFastSessionMessagesCommand,
   getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
@@ -56,6 +57,7 @@ import {
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
+  deleteFastSessionQueuedMessageInputSchema,
   replyToFastSessionInputSchema,
   fastSessionPrReviewActionInputSchema,
   fastSessionCapabilityOfferResponseInputSchema,
@@ -3223,6 +3225,11 @@ export const appRouter = createRouter({
       .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
+      ),
+    deleteQueuedMessage: protectedProcedure
+      .input(deleteFastSessionQueuedMessageInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        deleteFastSessionQueuedMessageCommand(auth, input),
       ),
     startGoal: protectedProcedure
       .input(
