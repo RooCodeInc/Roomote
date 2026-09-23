@@ -277,13 +277,14 @@ services:
   # COMPOSE_PROFILES=brain; deployments that never enable the
   # profile see no infrastructure change. Internal-only: no published
   # ports, reachable solely by the API service, which fronts it at
-  # /api/mcp/gbrain with the read-only agent credential. Wire
-  # R_GBRAIN_URL plus static tokens into api/bullmq (operator-pinned), or the
-  # normal path: set GBRAIN_ADMIN_BOOTSTRAP_TOKEN below (>= 32 chars of
-  # [A-Za-z0-9_-]) and paste http://gbrain:8931 plus that same token into
-  # Settings > Integrations > Brain; Roomote then registers its own
-  # scoped clients via the admin API. If left unset, the entrypoint generates
-  # one at /data/admin-bootstrap-token on the volume.
+  # /api/mcp/gbrain with the read-only agent credential. Wire static tokens
+  # into api/bullmq (operator-pinned), or the normal path: api/bullmq already
+  # point R_GBRAIN_URL at http://gbrain:8931 and read the admin bootstrap token
+  # from the shared volume, so Roomote registers its own scoped clients via
+  # the admin API once Memory is enabled in Settings > Memory. Set
+  # GBRAIN_ADMIN_BOOTSTRAP_TOKEN below (>= 32 chars of [A-Za-z0-9_-]) to pin
+  # the token; if left unset, the entrypoint generates one at
+  # /data/admin-bootstrap-token on the volume.
   gbrain:
     profiles: [brain]
     container_name: roomote-gbrain
