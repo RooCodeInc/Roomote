@@ -1,13 +1,49 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 
-const { redirectToSignInMock, useUserMock } = vi.hoisted(() => ({
-  redirectToSignInMock: vi.fn(),
+const { replaceMock, useQueryMock, useUserMock } = vi.hoisted(() => ({
+  replaceMock: vi.fn(),
+  useQueryMock: vi.fn(),
   useUserMock: vi.fn(),
 }));
 
-vi.mock('@/hooks/useUser', () => ({ useUser: useUserMock }));
+let mockPathname = '/';
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => mockPathname,
+  useRouter: () => ({
+    replace: replaceMock,
+  }),
+}));
+
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: useQueryMock,
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: useUserMock,
+  useUser: useUserMock,
+}));
+
 vi.mock('@/hooks/useSignInRedirect', () => ({
-  useRedirectToSignIn: redirectToSignInMock,
+  useRedirectToSignIn: vi.fn(),
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    onboarding: {
+      status: {
+        queryOptions: vi.fn(() => ({ queryKey: ['onboarding.status'] })),
+      },
+    },
+    setup: {
+      status: {
+        queryOptions: vi.fn(() => ({ queryKey: ['setup.status'] })),
+      },
+      sessionStatus: {
+        queryOptions: vi.fn(() => ({ queryKey: ['setup.sessionStatus'] })),
+      },
+    },
+  }),
 }));
 
 vi.mock('@/components/layout', () => ({
@@ -31,65 +67,244 @@ vi.mock('@/components/layout/CommandPalette', () => ({
 vi.mock('@/components/layout/McpOAuthResultFeedback', () => ({
   McpOAuthResultFeedback: () => null,
 }));
-vi.mock('./ManagedAccessBanner', () => ({ ManagedAccessBanner: () => null }));
 
 import AuthenticatedLayoutClient from './AuthenticatedLayoutClient';
 
 describe('AuthenticatedLayoutClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPathname = '/';
     useUserMock.mockReturnValue({
       authStatus: 'signed-in',
       isSignedIn: true,
       user: { isAdmin: true },
     });
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: null, completed: false }
+          : {
+              hasGitHub: true,
+              hasEnvironments: true,
+              setupCompletedAt: '2026-01-01T00:00:00.000Z',
+            },
+      isLoading: false,
+      isError: false,
+    }));
   });
 
-  it('renders dashboard pages for admins before first-run setup is complete', () => {
+  it('renders authenticated pages when setup is complete', () => {
     const { container } = render(
       <AuthenticatedLayoutClient>
-        <div>Dashboard content</div>
+        <div>Home content</div>
       </AuthenticatedLayoutClient>,
     );
 
-    expect(screen.getByText('Dashboard content')).toBeVisible();
+    expect(screen.getByText('Home content')).toBeVisible();
     expect(
       container.querySelector('.h-effective-viewport'),
     ).toBeInTheDocument();
-    expect(redirectToSignInMock).toHaveBeenCalledWith(false);
+    expect(container.querySelector('.h-viewport')).not.toBeInTheDocument();
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 
-  it('renders dashboard pages for members before personal onboarding is complete', () => {
-    useUserMock.mockReturnValue({
-      authStatus: 'signed-in',
-      isSignedIn: true,
-      user: { isAdmin: false },
-    });
+  it('redirects incomplete admins to setup before rendering the page', async () => {
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: null, completed: false }
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: false,
+      isError: false,
+    }));
 
     render(
       <AuthenticatedLayoutClient>
-        <div>Dashboard content</div>
+        <div>Home content</div>
       </AuthenticatedLayoutClient>,
     );
 
-    expect(screen.getByText('Dashboard content')).toBeVisible();
-    expect(redirectToSignInMock).toHaveBeenCalledWith(false);
+    expect(screen.queryByText('Home content')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/setup?step=welcome');
+    });
   });
 
-  it('continues to redirect signed-out visitors', () => {
-    useUserMock.mockReturnValue({
-      authStatus: 'signed-out',
-      isSignedIn: false,
-      user: null,
-    });
+  it('redirects incomplete admins to their persisted setup Session', async () => {
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: false }
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: false,
+      isError: false,
+    }));
 
     render(
       <AuthenticatedLayoutClient>
-        <div>Dashboard content</div>
+        <div>Home content</div>
       </AuthenticatedLayoutClient>,
     );
 
-    expect(screen.queryByText('Dashboard content')).not.toBeInTheDocument();
-    expect(redirectToSignInMock).toHaveBeenCalledWith(true);
+    expect(screen.queryByText('Home content')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/sessions/setup-session-id');
+    });
+  });
+
+  it('unlocks authenticated pages when the setup Session completes before the setup-status cache refreshes', () => {
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: true }
+          : {
+              hasGitHub: true,
+              hasEnvironments: true,
+              setupCompletedAt: null,
+            },
+      isLoading: false,
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Home content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.getByText('Home content')).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps non-setup pages gated while an incomplete admin setup-session lookup is pending', () => {
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? undefined
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: options.queryKey[0] === 'setup.sessionStatus',
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Home content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.queryByText('Home content')).not.toBeInTheDocument();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a known setup Session accessible while its status refreshes', () => {
+    mockPathname = '/sessions/setup-session-id';
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: false }
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: options.queryKey[0] === 'setup.sessionStatus',
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Home content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.getByText('Home content')).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps Integrations accessible while admin setup is incomplete', () => {
+    mockPathname = '/integrations';
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: false }
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: options.queryKey[0] === 'setup.sessionStatus',
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Integrations content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.getByText('Integrations content')).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps platform issue submission accessible while admin setup is incomplete', () => {
+    mockPathname = '/platform-issues/report-id/submit';
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: false }
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: false,
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Platform issue content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.getByText('Platform issue content')).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('renders authenticated pages when setup is complete but environments are still missing', () => {
+    mockPathname = '/settings/previews';
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: null, completed: false }
+          : {
+              hasGitHub: true,
+              hasEnvironments: false,
+              setupCompletedAt: '2026-01-01T00:00:00.000Z',
+            },
+      isLoading: false,
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Settings content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.getByText('Settings content')).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 });

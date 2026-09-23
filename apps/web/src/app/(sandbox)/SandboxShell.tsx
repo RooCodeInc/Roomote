@@ -1,12 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { zIndex } from '@/lib';
 
 import { useRedirectToSignIn } from '@/hooks/useSignInRedirect';
 import { useUser } from '@/hooks/useUser';
+import { useTRPC } from '@/trpc/client';
 
 import { NavbarHeader, SideNav, Logo } from '@/components/layout';
 import { Spinner } from '@/components/system';
@@ -23,7 +27,9 @@ export function SandboxShell({
   children,
   requireAuth = true,
 }: SandboxShellProps) {
-  const { authStatus, isSignedIn } = useUser();
+  const router = useRouter();
+  const { authStatus, isSignedIn, user } = useUser();
+  const pathname = usePathname();
   const shouldRedirectToSignIn = requireAuth && authStatus === 'signed-out';
 
   useRedirectToSignIn(shouldRedirectToSignIn);
@@ -39,10 +45,67 @@ export function SandboxShell({
     [],
   );
 
+  const trpc = useTRPC();
+  const onboardingQueryEnabled = requireAuth && isSignedIn === true;
+  const { data: onboardingStatus, isError: isOnboardingError } = useQuery(
+    trpc.onboarding.status.queryOptions(undefined, {
+      enabled: onboardingQueryEnabled,
+      staleTime: 30_000,
+    }),
+  );
+  const { data: setupStatus } = useQuery(
+    trpc.setup.status.queryOptions(undefined, {
+      enabled: onboardingQueryEnabled && user?.isAdmin === true,
+      staleTime: 30_000,
+    }),
+  );
+  const { data: setupSessionStatus, isLoading: isSetupSessionLoading } =
+    useQuery(
+      trpc.setup.sessionStatus.queryOptions(undefined, {
+        enabled:
+          onboardingQueryEnabled &&
+          user?.isAdmin === true &&
+          setupStatus?.setupCompletedAt == null,
+        staleTime: 10_000,
+      }),
+    );
+
+  const needsOnboarding =
+    user?.isAdmin !== true &&
+    onboardingStatus &&
+    !onboardingStatus.onboardingCompletedAt;
+  const setupSessionPath = setupSessionStatus?.sessionId
+    ? `/sessions/${setupSessionStatus.sessionId}`
+    : null;
+  const needsAdminSetup =
+    user?.isAdmin === true &&
+    setupStatus?.setupCompletedAt == null &&
+    setupSessionStatus?.completed !== true;
+  const isAllowedSetupSession =
+    setupSessionPath !== null && pathname === setupSessionPath;
   const sandboxLayoutValue = useMemo(
     () => ({ isSidebarVisible, setSidebarVisible, toggleSidebar }),
     [isSidebarVisible, setSidebarVisible, toggleSidebar],
   );
+
+  useEffect(() => {
+    // Wait for the setup-session lookup before routing. Otherwise a direct
+    // visit to the in-progress setup session can briefly see no session ID
+    // and be redirected to /setup before the lookup resolves.
+    if (needsAdminSetup && !isSetupSessionLoading && !isAllowedSetupSession) {
+      router.replace(setupSessionPath ?? '/setup');
+    } else if (needsOnboarding || isOnboardingError) {
+      router.replace('/onboarding');
+    }
+  }, [
+    isAllowedSetupSession,
+    isOnboardingError,
+    isSetupSessionLoading,
+    needsAdminSetup,
+    needsOnboarding,
+    router,
+    setupSessionPath,
+  ]);
 
   if (shouldRedirectToSignIn) {
     return (
