@@ -1,3 +1,4 @@
+import { stripRecognizedInitialSkillInvocationsForTitle } from '@roomote/cloud-agents';
 import { getRedis } from '@roomote/redis';
 
 import { truncateWithEllipsis } from './truncate';
@@ -26,8 +27,14 @@ function getSlackLiveTaskStreamKey(taskId: string): string {
 }
 
 export function buildSlackLiveTaskTitle(prompt: string): string {
+  let displayPrompt = stripRecognizedInitialSkillInvocationsForTitle(prompt);
+
+  if (!displayPrompt.trim()) {
+    displayPrompt = prompt;
+  }
+
   return truncateWithEllipsis(
-    prompt.replace(/\s+/g, ' '),
+    displayPrompt.replace(/\s+/g, ' '),
     SLACK_LIVE_TASK_TITLE_MAX_LENGTH,
   );
 }

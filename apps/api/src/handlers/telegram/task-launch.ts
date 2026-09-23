@@ -24,7 +24,7 @@ import {
   consumeTelegramImplicitTopic,
   rememberTelegramImplicitTopic,
 } from './webhook-gate.js';
-import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import { buildCommunicationTaskPromptThreadName } from '../tasks/communication-task-thread.js';
 import type {
   QueuedTelegramCommunicationMessage,
   TelegramWorkspaceSelection,
@@ -264,7 +264,7 @@ function buildTelegramTaskAcknowledgementText(input: {
 const TELEGRAM_TASK_TOPIC_NAME_MAX_LENGTH = 96;
 
 export function buildTelegramTaskTopicName(description: string): string {
-  return buildCommunicationTaskThreadName(
+  return buildCommunicationTaskPromptThreadName(
     description,
     TELEGRAM_TASK_TOPIC_NAME_MAX_LENGTH,
   );

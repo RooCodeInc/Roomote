@@ -51,7 +51,7 @@ import {
 import { apiLogger } from '../../logging.js';
 import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
-import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import { buildCommunicationTaskPromptThreadName } from '../tasks/communication-task-thread.js';
 import {
   findActiveCommunicationTaskRun,
   findCompletedCommunicationTaskRunWithSnapshot,
@@ -1033,7 +1033,7 @@ async function processDiscordGatewayEvent(
       const parentId = channel.parentChannelId ?? channel.channelId;
       const thread = await resolved.provider.createTaskThread({
         channelId: parentId,
-        name: buildCommunicationTaskThreadName(command.request),
+        name: buildCommunicationTaskPromptThreadName(command.request),
         initialText: `Request from ${getDiscordInteractionUser(interaction)?.global_name?.trim() || sender.username}:\n\n${command.request}`,
       });
       fastChannel = {

@@ -17,6 +17,7 @@ import {
   type LaunchFastAgentTask,
   type TaskCommunicationTriageHint,
 } from '@roomote/cloud-agents/server';
+import { stripRecognizedInitialSkillInvocationsForTitle } from '@roomote/cloud-agents';
 import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
 import {
   asc,
@@ -1289,7 +1290,9 @@ export function createFastAgentDiscordTaskLauncher(params: {
         ? null
         : await params.provider.createTaskThread({
             channelId: params.conversation.replyTarget.channelId,
-            name: buildCommunicationTaskThreadName(prompt),
+            name: buildCommunicationTaskThreadName(
+              stripRecognizedInitialSkillInvocationsForTitle(prompt),
+            ),
             initialText: `Delegated by Fast:\n\n${prompt}`,
           });
       return {

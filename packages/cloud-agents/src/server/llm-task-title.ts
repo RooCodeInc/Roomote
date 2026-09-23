@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { formatSingleLineLog } from '@roomote/types';
 
+import { stripRecognizedInitialSkillInvocationsForTitle } from '../skill-invocation-title';
 import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
@@ -241,12 +242,16 @@ function normalizeMessageText(value: string): string {
 function buildTaskTitlePrompt(messages: TaskTitleMessage[]): string {
   let transcript = 'Conversation transcript (speaker-labeled):\n';
   let hasMessages = false;
+  let hasProcessedInitialUserMessage = false;
 
   for (const message of messages) {
-    const messageText = normalizeMessageText(message.text).slice(
-      0,
-      MAX_MESSAGE_CHARS,
-    );
+    let text = message.text;
+    if (message.role === 'user' && !hasProcessedInitialUserMessage) {
+      text = stripRecognizedInitialSkillInvocationsForTitle(text);
+      hasProcessedInitialUserMessage = true;
+    }
+
+    const messageText = normalizeMessageText(text).slice(0, MAX_MESSAGE_CHARS);
 
     if (!messageText) {
       continue;

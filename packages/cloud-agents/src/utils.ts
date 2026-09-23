@@ -4,6 +4,8 @@ import {
   PRODUCT_NAME,
 } from '@roomote/types';
 
+import { stripRecognizedInitialSkillInvocationsForTitle } from './skill-invocation-title';
+
 /**
  * Generates a human-readable title from a task run.
  */
@@ -342,11 +344,17 @@ export function generateTaskRunTitle(
         return UNTITLED_TASK;
       }
 
-      const desc = standardPayload.description.slice(0, limit);
+      const descriptionForTitle =
+        stripRecognizedInitialSkillInvocationsForTitle(
+          standardPayload.description,
+        );
+      if (!descriptionForTitle.trim()) {
+        return UNTITLED_TASK;
+      }
 
-      return desc.length < standardPayload.description.length
-        ? `${desc}...`
-        : desc;
+      const desc = descriptionForTitle.slice(0, limit);
+
+      return desc.length < descriptionForTitle.length ? `${desc}...` : desc;
     }
 
     case TaskPayloadKind.GithubPrConflictResolve: {
@@ -358,7 +366,14 @@ export function generateTaskRunTitle(
     }
 
     default:
-      return fallbackTitle || UNTITLED_TASK;
+      if (fallbackTitle) {
+        const cleanedFallbackTitle =
+          stripRecognizedInitialSkillInvocationsForTitle(fallbackTitle);
+        if (cleanedFallbackTitle.trim()) {
+          return cleanedFallbackTitle;
+        }
+      }
+      return UNTITLED_TASK;
   }
 }
 

@@ -6,6 +6,7 @@
  */
 
 export * from './utils';
+export * from './skill-invocation-title';
 export { STANDARD_TASK_MULTI_AGENT_GUIDANCE } from './standard-task-multi-agent-guidance';
 export { ROOMOTE_COMPACT_PROMPT } from './compact-prompt';
 export * from './file-attachments';
