@@ -39,6 +39,7 @@ import {
   type BackgroundAutomationProvider,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
+  type CustomAutomationRunWhen,
   type ReasoningEffort,
   type AutomationResultPriority,
 } from '@roomote/types';
@@ -124,6 +125,7 @@ export type CustomAutomationWriteInput = {
   targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram' | 'email';
   targetMode?: 'channel' | 'direct_message';
   targetChannelId?: string;
+  runWhen?: CustomAutomationRunWhen | null;
 };
 
 function toListItem(
@@ -418,6 +420,7 @@ export async function createCustomAutomationCommand(
     reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
     target: buildTarget(input, auth.userId),
+    ...(input.runWhen !== undefined ? { runWhen: input.runWhen } : {}),
     createdByUserId: auth.userId,
   });
 
@@ -471,6 +474,7 @@ export async function updateCustomAutomationCommand(
     reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
     target,
+    ...(input.runWhen !== undefined ? { runWhen: input.runWhen } : {}),
   });
 
   return toListItem(updated, null, scheduleContext);

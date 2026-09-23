@@ -18,6 +18,10 @@ const mocks = vi.hoisted(() => ({
   findInstallation: vi.fn(),
   findCustomAutomation: vi.fn(),
   recordCustomAutomationResult: vi.fn().mockResolvedValue(null),
+  getAutomationResultByDedupeKey: vi.fn(),
+  evaluateDecisionModel: vi.fn(),
+  resolveCustomAutomationResultVisibility: vi.fn(),
+  enqueueAutomationResultPreparation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   findWakeup: vi.fn(),
@@ -191,6 +195,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   captureFastAgentCommunicationDecision: mocks.captureCommunicationDecision,
 }));
 
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  evaluateDecisionModel: mocks.evaluateDecisionModel,
+}));
+
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
@@ -212,6 +220,7 @@ vi.mock('@roomote/db/server', () => ({
   inArray: vi.fn((...args: unknown[]) => args),
   isNull: vi.fn((value: unknown) => ['isNull', value]),
   getCustomAutomationById: mocks.findCustomAutomation,
+  getAutomationResultByDedupeKey: mocks.getAutomationResultByDedupeKey,
   recordCustomAutomationResult: mocks.recordCustomAutomationResult,
   getSessionWakeupById: mocks.findWakeup,
   getSessionForFastConversation: mocks.findWakeupSession,
@@ -317,6 +326,15 @@ vi.mock('./fast-automation-suggestions', () => ({
   postFastAutomationSuggestionsToTelegram: mocks.postTelegramSuggestions,
 }));
 
+vi.mock('./automation-result-visibility', () => ({
+  resolveCustomAutomationResultVisibility:
+    mocks.resolveCustomAutomationResultVisibility,
+}));
+
+vi.mock('./automation-result-preparation', () => ({
+  enqueueAutomationResultPreparation: mocks.enqueueAutomationResultPreparation,
+}));
+
 vi.mock('./source-control-fast-delivery', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./source-control-fast-delivery')>()),
   buildSourceControlFastDelivery: mocks.buildSourceControlFastDelivery,
@@ -391,6 +409,9 @@ describe('deliverFastAgentParentEvent', () => {
       id: 'automation-1',
       name: 'Weekly scan',
     });
+    mocks.getAutomationResultByDedupeKey.mockResolvedValue(null);
+    mocks.resolveCustomAutomationResultVisibility.mockResolvedValue('shared');
+    mocks.enqueueAutomationResultPreparation.mockResolvedValue(undefined);
     mocks.bindConversation.mockImplementation(
       async ({ conversation }: { conversation: unknown }) => ({
         id: parent.sessionId,
@@ -1816,6 +1837,22 @@ describe('deliverFastAgentParentEvent', () => {
         replyTarget: { channelId: 'C123' },
       },
     };
+    mocks.findCustomAutomation.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Weekly scan',
+      runWhen: {
+        all: [
+          {
+            id: 'new_regression',
+            ask: 'Does `report` describe a new regression?',
+            type: 'yes_no',
+            criteria: { true: 'New regression.', false: 'No new regression.' },
+            min: 0.75,
+          },
+        ],
+        onUncertain: 'skip',
+      },
+    });
 
     await deliverFastAgentParentEvent({
       parent: pendingParent,
@@ -1833,6 +1870,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
 
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.evaluateDecisionModel).not.toHaveBeenCalled();
     expect(mocks.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C123',
@@ -1909,6 +1947,191 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.discordPostMessage).not.toHaveBeenCalled();
     expect(mocks.discordEditMessage).not.toHaveBeenCalled();
     expect(mocks.recordCustomAutomationResult).not.toHaveBeenCalled();
+  });
+
+  it.each(['automation_triggered', 'task_settled'] as const)(
+    'records and suppresses a runWhen-missed %s report before provider delivery',
+    async (eventType) => {
+      const pendingParent = {
+        ...parent,
+        conversation: {
+          surface: 'slack' as const,
+          workspaceId: 'T123',
+          conversationId: 'automation-1:occurrence-1',
+          replyTarget: { channelId: 'C123' },
+        },
+      };
+      const runWhen = {
+        all: [
+          {
+            id: 'new_regression',
+            ask: 'Does `report` describe a new regression?',
+            type: 'yes_no' as const,
+            criteria: { true: 'New regression.', false: 'No new regression.' },
+            min: 0.75,
+          },
+        ],
+        onUncertain: 'skip' as const,
+      };
+      const answers = {
+        new_regression: { type: 'noul' as const, noul: 0.1 },
+      };
+      mocks.findCustomAutomation.mockResolvedValue({
+        id: 'automation-1',
+        name: 'Weekly scan',
+        runWhen,
+      });
+      mocks.evaluateDecisionModel.mockResolvedValue(answers);
+      mocks.recordCustomAutomationResult.mockResolvedValue({
+        id: 'condition-result-1',
+        runWhenOutcome: 'skipped',
+      });
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'No new regression was found.',
+        }),
+      );
+
+      await deliverFastAgentParentEvent({
+        parent: pendingParent,
+        event:
+          eventType === 'automation_triggered'
+            ? {
+                type: 'automation_triggered',
+                eventId: 'automation-1:occurrence-1',
+                automationId: 'automation-1',
+                automationName: 'Weekly scan',
+                prompt: 'Find current regressions.',
+                trigger: 'schedule',
+              }
+            : {
+                type: 'task_settled',
+                taskId: 'child-task-1',
+                runId: 42,
+                customAutomationId: 'automation-1',
+                status: 'completed',
+                taskUrl: 'https://roomote.example/task/child-task-1',
+                pullRequests: [],
+              },
+      });
+
+      expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+        expect.objectContaining({ highVolume: true }),
+      );
+      expect(mocks.recordCustomAutomationResult).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runWhenSnapshot: runWhen,
+          runWhenAnswers: answers,
+          runWhenOutcome: 'skipped',
+          content: 'No new regression was found.',
+        }),
+      );
+      expect(mocks.postMessage).not.toHaveBeenCalled();
+      expect(mocks.updateMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('posts and stores a report when runWhen conditions pass', async () => {
+    const pendingParent = {
+      ...parent,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+    const runWhen = {
+      all: [
+        {
+          id: 'new_regression',
+          ask: 'Does `report` describe a new regression?',
+          type: 'yes_no' as const,
+          criteria: { true: 'New regression.', false: 'No new regression.' },
+          min: 0.75,
+        },
+      ],
+      onUncertain: 'skip' as const,
+    };
+    const answers = {
+      new_regression: { type: 'noul' as const, noul: 0.95 },
+    };
+    mocks.findCustomAutomation.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Weekly scan',
+      runWhen,
+    });
+    mocks.evaluateDecisionModel.mockResolvedValue(answers);
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'A new regression is affecting users.',
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find current regressions.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledOnce();
+    expect(mocks.recordCustomAutomationResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runWhenSnapshot: runWhen,
+        runWhenAnswers: answers,
+        runWhenOutcome: 'passed',
+      }),
+    );
+  });
+
+  it('reuses a recorded runWhen outcome even after the rule is cleared', async () => {
+    const pendingParent = {
+      ...parent,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+    mocks.findCustomAutomation.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Weekly scan',
+      runWhen: null,
+    });
+    mocks.getAutomationResultByDedupeKey.mockResolvedValue({
+      runWhenOutcome: 'skipped',
+    });
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'No new regression was found.',
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find current regressions.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.evaluateDecisionModel).not.toHaveBeenCalled();
+    expect(mocks.recordCustomAutomationResult).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 
   it('posts suggestions beneath the Slack report when an automation task settles', async () => {

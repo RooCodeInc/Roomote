@@ -16,6 +16,8 @@ import {
   NO_REPOSITORIES,
   type ReasoningEffort,
   type AutomationResultPriority,
+  customAutomationRunWhenSchema,
+  type CustomAutomationRunWhen,
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
@@ -45,6 +47,8 @@ export type CustomAutomationWriteInput = {
   environmentId: string;
   /** Full destination target, or {} when the automation has no report destination. */
   target: OptionalAutomationTarget;
+  /** Optional declarative gate for posting successful automation reports. */
+  runWhen?: CustomAutomationRunWhen | null;
   createdByUserId?: string | null;
 };
 
@@ -76,6 +80,7 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
   cronExpression: string | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
+  runWhen?: CustomAutomationRunWhen | null;
 } {
   const name = normalizeName(input.name);
   const prompt = input.prompt.trim();
@@ -140,6 +145,11 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     throw new Error('Reasoning effort requires a model override.');
   }
 
+  const runWhen =
+    input.runWhen == null
+      ? input.runWhen
+      : customAutomationRunWhenSchema.parse(input.runWhen);
+
   if (!input.environmentId) {
     throw new Error('Environment is required.');
   }
@@ -155,7 +165,7 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     );
   }
 
-  return { name, prompt, cronExpression, model, reasoningEffort };
+  return { name, prompt, cronExpression, model, reasoningEffort, runWhen };
 }
 
 export type CustomAutomationWithCreator = CustomAutomation & {
@@ -197,7 +207,7 @@ export async function createCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression, model, reasoningEffort } =
+  const { name, prompt, cronExpression, model, reasoningEffort, runWhen } =
     assertValidWriteInput(input);
 
   const { executionMode, allRepositories, noRepositories } = getExecutionTarget(
@@ -225,6 +235,7 @@ export async function createCustomAutomation(
     .values({
       name,
       prompt,
+      runWhen: runWhen ?? null,
       enabled: input.enabled,
       resultPriority: input.resultPriority ?? 'normal',
       scheduleMode: input.scheduleMode,
@@ -255,7 +266,7 @@ export async function updateCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression, model, reasoningEffort } =
+  const { name, prompt, cronExpression, model, reasoningEffort, runWhen } =
     assertValidWriteInput(input);
 
   const existing = await getCustomAutomationById(id, client);
@@ -288,6 +299,7 @@ export async function updateCustomAutomation(
     .set({
       name,
       prompt,
+      runWhen: runWhen === undefined ? existing.runWhen : runWhen,
       enabled: input.enabled,
       resultPriority: input.resultPriority ?? existing.resultPriority,
       scheduleMode: input.scheduleMode,

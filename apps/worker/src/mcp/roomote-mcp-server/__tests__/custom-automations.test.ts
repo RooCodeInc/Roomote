@@ -77,7 +77,7 @@ describe('handleManageCustomAutomations', () => {
     });
   });
 
-  it('inspects one prompt without returning unrelated automation fields', async () => {
+  it('inspects automation rules and run outcomes without unrelated fields', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -110,6 +110,7 @@ describe('handleManageCustomAutomations', () => {
         name: 'Daily report',
         prompt: 'Inspect this stored prompt.',
       },
+      conditionRuns: [],
     });
   });
 

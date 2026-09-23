@@ -94,6 +94,9 @@ import type {
   SessionWakeupStatus,
   AutomationResultPriority,
   AutomationResultVisibility,
+  CustomAutomationRunWhen,
+  CustomAutomationRunWhenJudgmentAnswer,
+  CustomAutomationRunWhenOutcome,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -5158,6 +5161,7 @@ export const customAutomations = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     prompt: text('prompt').notNull(),
+    runWhen: jsonb('run_when').$type<CustomAutomationRunWhen | null>(),
     resultPriority: text('result_priority')
       .notNull()
       .default('normal')
@@ -5240,6 +5244,16 @@ export const automationResults = pgTable(
       text('result_visibility').$type<AutomationResultVisibility>(),
     automationName: text('automation_name').notNull(),
     content: text('content').notNull(),
+    runWhenSnapshot: jsonb(
+      'run_when_snapshot',
+    ).$type<CustomAutomationRunWhen | null>(),
+    runWhenAnswers: jsonb('run_when_answers').$type<Record<
+      string,
+      CustomAutomationRunWhenJudgmentAnswer
+    > | null>(),
+    runWhenOutcome: text(
+      'run_when_outcome',
+    ).$type<CustomAutomationRunWhenOutcome | null>(),
     resultKind: text('result_kind')
       .notNull()
       .default('outcome')

@@ -8,6 +8,8 @@ import {
   inArray,
   isNotNull,
   isNull,
+  ne,
+  or,
   isDeploymentExperimentEnabled,
   privateSessionAccess,
   privateTaskAccess,
@@ -72,6 +74,10 @@ const visibleReport = () =>
   and(
     eq(automationResults.resultVisibility, 'shared'),
     isNull(automationResults.supersededAt),
+    or(
+      isNull(automationResults.runWhenOutcome),
+      ne(automationResults.runWhenOutcome, 'skipped'),
+    ),
   )!;
 const visibleSuggestion = () =>
   and(

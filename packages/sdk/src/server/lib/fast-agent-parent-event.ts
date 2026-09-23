@@ -27,6 +27,7 @@ import {
   db,
   customAutomations,
   eq,
+  getAutomationResultByDedupeKey,
   getCustomAutomationById,
   isDeploymentExperimentEnabled,
   recordCustomAutomationResult,
@@ -105,6 +106,7 @@ import {
 } from './manager-slack';
 import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
 import { enqueueAutomationResultPreparation } from './automation-result-preparation';
+import { evaluateCustomAutomationRunWhen } from '../automations/custom-automation-run-when';
 import {
   appendFastAutomationSuggestionInstruction,
   postFastAutomationSuggestionsToDiscord,
@@ -2870,6 +2872,97 @@ export async function deliverFastAgentParentEventWithLock(
             if (reply.kickoff) {
               return;
             }
+
+            const dedupeKey = `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`;
+            let runWhenSnapshot:
+              | NonNullable<
+                  Awaited<ReturnType<typeof getCustomAutomationById>>
+                >['runWhen']
+              | null = null;
+            let runWhenEvaluation: Awaited<
+              ReturnType<typeof evaluateCustomAutomationRunWhen>
+            > | null = null;
+            const isSuccessfulRun =
+              reportEvent.type === 'automation_triggered' ||
+              reportEvent.status === 'completed';
+
+            if (reply.purpose === 'closeout' && isSuccessfulRun) {
+              try {
+                const existing =
+                  await getAutomationResultByDedupeKey(dedupeKey);
+                if (existing?.runWhenOutcome) {
+                  // A recorded outcome is the stable answer for this run,
+                  // even if the automation's rule has since changed.
+                  replyPosted = true;
+                  return;
+                }
+                const automation = await getCustomAutomationById(automationId);
+                runWhenSnapshot = automation?.runWhen ?? null;
+                if (runWhenSnapshot) {
+                  runWhenEvaluation = await evaluateCustomAutomationRunWhen({
+                    runWhen: runWhenSnapshot,
+                    report: reply.message,
+                    userId: parentTurn.userId,
+                    ...(reportEvent.type === 'task_settled'
+                      ? { taskId: reportEvent.taskId }
+                      : {}),
+                  });
+
+                  if (runWhenEvaluation.skipDelivery) {
+                    const sourceSession = await getSessionForFastConversation(
+                      db,
+                      params.parent.sessionId,
+                    );
+                    const skippedResult = await recordCustomAutomationResult({
+                      automationId,
+                      userId: parentTurn.userId,
+                      ...(reportEvent.type === 'task_settled'
+                        ? {
+                            sourceTaskId: reportEvent.taskId,
+                            sourceRunId: reportEvent.runId,
+                          }
+                        : {}),
+                      ...(sourceSession
+                        ? { sourceSessionId: sourceSession.id }
+                        : {}),
+                      content: reply.message,
+                      resultKind: 'outcome',
+                      dedupeKey,
+                      visibility: await resolveCustomAutomationResultVisibility(
+                        automationId,
+                      ).catch(() => 'private' as const),
+                      runWhenSnapshot,
+                      ...(runWhenEvaluation.answers
+                        ? { runWhenAnswers: runWhenEvaluation.answers }
+                        : {}),
+                      runWhenOutcome: runWhenEvaluation.outcome,
+                    });
+                    const savedRun =
+                      skippedResult ??
+                      (await getAutomationResultByDedupeKey(dedupeKey));
+                    if (savedRun?.runWhenOutcome) {
+                      // The record is durable before the event is marked
+                      // consumed, including on the replay path.
+                      replyPosted = true;
+                      return;
+                    }
+                    throw new Error('Skipped condition result was not saved.');
+                  }
+                }
+              } catch (error) {
+                console.warn(
+                  `[FastAutomation] Could not persist or evaluate runWhen for ${automationId}; preserving report delivery: ${error instanceof Error ? error.message : String(error)}`,
+                );
+                if (runWhenSnapshot) {
+                  runWhenEvaluation = {
+                    outcome: 'error',
+                    skipDelivery: false,
+                    answers: runWhenEvaluation?.answers ?? null,
+                  };
+                }
+              }
+            }
+
             const posted = await baseAdapter.postReply(reply);
             if (
               reply.purpose === 'closeout' ||
@@ -2894,10 +2987,20 @@ export async function deliverFastAgentParentEventWithLock(
                   reply.purpose === 'clarification'
                     ? 'input_request'
                     : 'outcome',
-                dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
+                dedupeKey,
                 visibility: await resolveCustomAutomationResultVisibility(
                   automationId,
                 ).catch(() => 'private' as const),
+                ...(runWhenSnapshot
+                  ? {
+                      runWhenSnapshot,
+                      ...(runWhenEvaluation?.answers
+                        ? { runWhenAnswers: runWhenEvaluation.answers }
+                        : {}),
+                      runWhenOutcome:
+                        runWhenEvaluation?.outcome ?? 'unavailable',
+                    }
+                  : {}),
               }).catch(() => undefined);
               if (result) {
                 await enqueueAutomationResultPreparation(result.id);

@@ -814,6 +814,11 @@ describe('buildFastAgentSystemPrompt', () => {
       'This tool is unavailable to advisor and judge subagents',
     );
     expect(prompt).toContain('use "run_now" rather than "launch_task"');
+    expect(prompt).toContain('runWhen');
+    expect(prompt).toContain('Noul near 0.5 is uncertain, not medium');
+    expect(prompt).toContain(
+      'inspect recorded run answers and tune against past runs',
+    );
     expect(prompt).toContain('same actor-authorized remote');
     expect(prompt).toContain('local stdio servers remain sandbox-only');
     expect(prompt).toContain(

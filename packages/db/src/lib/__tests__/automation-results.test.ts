@@ -3,17 +3,27 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   automationResults,
   db,
+  createCustomAutomation,
+  deleteCustomAutomation,
   ensureAutomationRows,
   eq,
+  getAutomationResultByDedupeKey,
+  listCustomAutomationConditionRuns,
+  recordCustomAutomationResult,
   recordAutomationResultForTask,
   reconcileAutomationResultAcceptance,
   taskFactory,
   taskPullRequests,
   tasks,
+  users,
+  userFactory,
 } from '../../server';
+import { FAST_EXECUTION } from '@roomote/types';
 
 describe('automation result acceptance', () => {
   const taskIds: string[] = [];
+  const customAutomationIds: string[] = [];
+  const userIds: string[] = [];
 
   beforeAll(() => ensureAutomationRows(db));
 
@@ -23,6 +33,15 @@ describe('automation result acceptance', () => {
         .delete(automationResults)
         .where(eq(automationResults.sourceTaskId, taskId));
       await db.delete(tasks).where(eq(tasks.id, taskId));
+    }
+    for (const automationId of customAutomationIds.splice(0)) {
+      await db
+        .delete(automationResults)
+        .where(eq(automationResults.customAutomationId, automationId));
+      await deleteCustomAutomation(automationId);
+    }
+    for (const userId of userIds.splice(0)) {
+      await db.delete(users).where(eq(users.id, userId));
     }
   });
 
@@ -191,5 +210,73 @@ describe('automation result acceptance', () => {
       acceptedAt: mergedAt,
       acceptanceReason: 'pull_request_merged',
     });
+  });
+
+  it('stores skipped runWhen answers privately for authorized inspection', async () => {
+    const owner = await userFactory.create();
+    userIds.push(owner.id);
+    const runWhen = {
+      all: [
+        {
+          id: 'new_regression',
+          ask: 'Does `report` describe a new regression?',
+          type: 'yes_no' as const,
+          criteria: { true: 'New regression.', false: 'No new regression.' },
+          min: 0.75,
+        },
+      ],
+      onUncertain: 'skip' as const,
+    };
+    const automation = await createCustomAutomation({
+      name: `Condition result ${Date.now()}`,
+      prompt: 'Find current regressions.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+      createdByUserId: owner.id,
+      runWhen,
+    });
+    customAutomationIds.push(automation.id);
+    const dedupeKey = `condition-result:${automation.id}`;
+
+    const saved = await recordCustomAutomationResult({
+      automationId: automation.id,
+      userId: owner.id,
+      content: 'No new regression was found.',
+      dedupeKey,
+      visibility: 'private',
+      runWhenSnapshot: runWhen,
+      runWhenAnswers: {
+        new_regression: { type: 'noul', noul: 0.1 },
+      },
+      runWhenOutcome: 'skipped',
+    });
+
+    expect(saved).toMatchObject({
+      runWhenSnapshot: runWhen,
+      runWhenAnswers: {
+        new_regression: { type: 'noul', noul: 0.1 },
+      },
+      runWhenOutcome: 'skipped',
+      preparationStatus: 'ready',
+      headline: 'Report skipped by run condition',
+    });
+    await expect(
+      getAutomationResultByDedupeKey(dedupeKey),
+    ).resolves.toMatchObject({
+      runWhenOutcome: 'skipped',
+    });
+    await expect(
+      listCustomAutomationConditionRuns(automation.id),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: saved!.id,
+        runWhenOutcome: 'skipped',
+        runWhenAnswers: {
+          new_regression: { type: 'noul', noul: 0.1 },
+        },
+      }),
+    ]);
   });
 });

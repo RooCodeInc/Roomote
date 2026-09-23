@@ -19,6 +19,7 @@ import {
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+  customAutomationRunWhenSchema,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -986,6 +987,7 @@ const automationsRouter = createRouter({
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
+        runWhen: customAutomationRunWhenSchema.nullable().optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
@@ -1033,6 +1035,7 @@ const automationsRouter = createRouter({
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
+        runWhen: customAutomationRunWhenSchema.nullable().optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>

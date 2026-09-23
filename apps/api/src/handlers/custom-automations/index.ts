@@ -10,6 +10,7 @@ import {
   eq,
   getDeploymentTaskModelOptions,
   getCustomAutomationById,
+  listCustomAutomationConditionRuns,
   isNull,
   listCustomAutomations,
   updateCustomAutomation,
@@ -31,6 +32,7 @@ import {
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+  customAutomationRunWhenSchema,
   getAutomationTargetEmailIdentityId,
   getAutomationTargetKind,
   type BackgroundAutomationProvider,
@@ -78,6 +80,7 @@ const writeSchema = z.object({
     .optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
+  runWhen: customAutomationRunWhenSchema.nullable().optional(),
 });
 
 const updateSchema = z.object({
@@ -100,6 +103,7 @@ const updateSchema = z.object({
     .optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
+  runWhen: customAutomationRunWhenSchema.nullable().optional(),
 });
 
 const UNIQUE_VIOLATION_CODE = '23505';
@@ -436,12 +440,22 @@ customAutomationsRouter.get('/:id', async (c) => {
   if (!automation || !canManage(c, automation)) {
     return c.json({ error: 'Custom automation was not found.' }, 404);
   }
+  const conditionRuns = await listCustomAutomationConditionRuns(automation.id);
   return c.json({
     automation: {
       id: automation.id,
       name: automation.name,
       prompt: automation.prompt,
+      runWhen: automation.runWhen,
     },
+    conditionRuns: conditionRuns.map((run) => ({
+      id: run.id,
+      createdAt: run.createdAt,
+      outcome: run.runWhenOutcome,
+      runWhen: run.runWhenSnapshot,
+      answers: run.runWhenAnswers,
+      reportExcerpt: run.content.slice(0, 2_000),
+    })),
   });
 });
 
@@ -501,6 +515,9 @@ customAutomationsRouter.post('/', async (c) => {
       reasoningEffort: parsed.data.reasoningEffort ?? null,
       environmentId: parsed.data.environmentId,
       target: buildTarget(parsed.data, actorId(c)),
+      ...(parsed.data.runWhen !== undefined
+        ? { runWhen: parsed.data.runWhen }
+        : {}),
       createdByUserId: actorId(c),
     });
     void captureActivationCustomAutomationChanged(
@@ -642,6 +659,9 @@ customAutomationsRouter.patch('/:id', async (c) => {
               existing.createdByUserId ?? actorId(c),
             )
           : existingTarget,
+      ...(parsed.data.runWhen !== undefined
+        ? { runWhen: parsed.data.runWhen }
+        : {}),
     });
     return c.json({
       automation: toApiAutomation(automation),

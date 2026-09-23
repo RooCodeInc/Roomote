@@ -27,6 +27,7 @@ const {
   mockCreateCustomAutomation,
   mockUpdateCustomAutomation,
   mockGetCustomAutomationById,
+  mockListCustomAutomationConditionRuns,
   mockListCustomAutomations,
   mockGetDeploymentTaskModelOptions,
   mockDeleteCustomAutomation,
@@ -43,6 +44,7 @@ const {
   mockCreateCustomAutomation: vi.fn(),
   mockUpdateCustomAutomation: vi.fn(),
   mockGetCustomAutomationById: vi.fn(),
+  mockListCustomAutomationConditionRuns: vi.fn(),
   mockListCustomAutomations: vi.fn(),
   mockGetDeploymentTaskModelOptions: vi.fn(),
   mockDeleteCustomAutomation: vi.fn(),
@@ -65,6 +67,7 @@ vi.mock('@roomote/db/server', () => ({
   updateCustomAutomation: mockUpdateCustomAutomation,
   deleteCustomAutomation: mockDeleteCustomAutomation,
   getCustomAutomationById: mockGetCustomAutomationById,
+  listCustomAutomationConditionRuns: mockListCustomAutomationConditionRuns,
   listCustomAutomations: mockListCustomAutomations,
   getDeploymentTaskModelOptions: mockGetDeploymentTaskModelOptions,
 }));
@@ -202,6 +205,7 @@ describe('custom-automations MCP routes', () => {
       models: ENABLED_MODELS,
       defaultModelId: 'openai/gpt-5.6-luna',
     });
+    mockListCustomAutomationConditionRuns.mockResolvedValue([]);
   });
 
   describe('API-hosted Roomote MCP tool', () => {
@@ -375,6 +379,7 @@ describe('custom-automations MCP routes', () => {
           name: 'Nightly report',
           prompt: 'Inspect this stored prompt.',
         },
+        conditionRuns: [],
       });
     });
 
@@ -629,15 +634,40 @@ describe('custom-automations MCP routes', () => {
     expect(mockRunCustomAutomationNow).not.toHaveBeenCalled();
   });
 
-  it('returns a bounded stored prompt record by automation ID', async () => {
+  it('returns the saved condition and recent condition runs by automation ID', async () => {
     const { app } = createApp();
+    const runWhen = {
+      all: [
+        {
+          id: 'new_regression',
+          ask: 'Does `report` describe a new regression?',
+          type: 'yes_no',
+          criteria: { true: 'New regression.', false: 'No new regression.' },
+          min: 0.75,
+        },
+      ],
+      onUncertain: 'skip',
+    };
     mockGetCustomAutomationById.mockResolvedValue({
       id: 'automation-1',
       name: 'Nightly report',
       prompt: 'Inspect this stored prompt.',
+      runWhen,
       enabled: true,
       lastError: 'previous failure',
     });
+    mockListCustomAutomationConditionRuns.mockResolvedValue([
+      {
+        id: 'result-1',
+        createdAt: new Date('2026-09-23T12:00:00.000Z'),
+        runWhenOutcome: 'skipped',
+        runWhenSnapshot: runWhen,
+        runWhenAnswers: {
+          new_regression: { type: 'noul', noul: 0.2 },
+        },
+        content: 'No qualifying regression found.',
+      },
+    ]);
 
     const res = await app.request('/custom-automations/automation-1');
 
@@ -647,7 +677,20 @@ describe('custom-automations MCP routes', () => {
         id: 'automation-1',
         name: 'Nightly report',
         prompt: 'Inspect this stored prompt.',
+        runWhen,
       },
+      conditionRuns: [
+        {
+          id: 'result-1',
+          createdAt: '2026-09-23T12:00:00.000Z',
+          outcome: 'skipped',
+          runWhen,
+          answers: {
+            new_regression: { type: 'noul', noul: 0.2 },
+          },
+          reportExcerpt: 'No qualifying regression found.',
+        },
+      ],
     });
   });
 
@@ -664,6 +707,30 @@ describe('custom-automations MCP routes', () => {
   });
 
   describe('POST / (create)', () => {
+    it('accepts and persists declarative runWhen conditions', async () => {
+      const { app } = createApp();
+      const runWhen = {
+        all: [
+          {
+            id: 'new_regression',
+            ask: 'Does `report` describe a new regression?',
+            type: 'yes_no',
+            criteria: { true: 'New regression.', false: 'No new regression.' },
+            min: 0.75,
+          },
+        ],
+        onUncertain: 'skip',
+      };
+      mockCreateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await postCreate(app, createBody({ runWhen }));
+
+      expect(res.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({ runWhen }),
+      );
+    });
+
     it('accepts a prompt at the shared 16,000-character limit', async () => {
       const { app } = createApp();
       const prompt = 'x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH);
@@ -1158,6 +1225,36 @@ describe('custom-automations MCP routes', () => {
       environmentId: ENVIRONMENT_ID,
       target: {},
     };
+
+    it('updates declarative runWhen without requiring prompt changes', async () => {
+      const { app } = createApp();
+      const runWhen = {
+        all: [
+          {
+            id: 'new_regression',
+            ask: 'Does `report` describe a new regression?',
+            type: 'yes_no',
+            criteria: { true: 'New regression.', false: 'No new regression.' },
+            min: 0.75,
+          },
+        ],
+        onUncertain: 'skip',
+      };
+      mockGetCustomAutomationById.mockResolvedValue(existing);
+      mockUpdateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ runWhen }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({ runWhen }),
+      );
+    });
 
     it('accepts a prompt at the shared 16,000-character limit', async () => {
       const { app } = createApp();
