@@ -5,7 +5,7 @@ import { ResultsExperimentalSetting } from '@/components/settings/ResultsExperim
 import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
 import { BrowserNotificationsExperimentalSetting } from '@/components/settings/BrowserNotificationsExperimentalSetting';
 import { IntegrationToolApprovalsExperimentalSetting } from '@/components/settings/IntegrationToolApprovalsExperimentalSetting';
-import { FastSessionCommunicationJevExperimentalSetting } from '@/components/settings/FastSessionCommunicationJevExperimentalSetting';
+import { SessionTaskCommunicationTriageExperimentalSetting } from '@/components/settings/SessionTaskCommunicationTriageExperimentalSetting';
 import { RetryableLoadError } from '@/components/system';
 import { useDeploymentExperiments } from '@/hooks/useDeploymentExperiments';
 
@@ -26,9 +26,9 @@ export function ExperimentalSettingsPage() {
         <>
           <PrivateSessionsExperimentalSetting />
           <IntegrationToolApprovalsExperimentalSetting />
+          <SessionTaskCommunicationTriageExperimentalSetting />
           <BrowserNotificationsExperimentalSetting />
           <ResultsExperimentalSetting />
-          <FastSessionCommunicationJevExperimentalSetting />
         </>
       )}
     </SettingsShell>

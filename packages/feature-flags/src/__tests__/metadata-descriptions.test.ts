@@ -36,11 +36,6 @@ describe('metadata descriptions', () => {
     expect(getBooleanMetadataDescriptorByKey('results_page_enabled').kind).toBe(
       'deployment-control',
     );
-    expect(
-      getBooleanMetadataDescriptorByKey(
-        'fast_session_communication_jev_experiment_enabled',
-      ).kind,
-    ).toBe('deployment-control');
   });
 
   it('enables deployment experiments only from explicit true metadata', () => {
@@ -54,15 +49,7 @@ describe('metadata descriptions', () => {
       privateSessions: false,
       browserNotifications: false,
       integrationToolApprovals: false,
-      fastSessionCommunicationJev: false,
+      sessionTaskCommunicationTriage: false,
     });
-  });
-
-  it('reads the Jev Session communication experiment only from explicit true metadata', () => {
-    expect(
-      getDeploymentExperimentValues({
-        fast_session_communication_jev_experiment_enabled: true,
-      }).fastSessionCommunicationJev,
-    ).toBe(true);
   });
 });

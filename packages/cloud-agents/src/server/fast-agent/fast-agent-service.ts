@@ -137,6 +137,7 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
+import type { TaskCommunicationTriageHint } from './fast-agent-task-communication-triage';
 import {
   inspectRAnalysisScript,
   parseRAttachmentText,
@@ -1955,6 +1956,8 @@ export async function answerFastAgentQuestion({
   platformEventKind = 'delegated_task',
   platformEventTimestampMs,
   automationReport = false,
+  taskCommunicationTriage,
+  taskCommunicationTriageEnabled = false,
   serviceCredentialPlatformActorUserId,
   serviceCredentialPlatformDenialReason,
   defaultImageArtifactIds = [],
@@ -2004,6 +2007,11 @@ export async function answerFastAgentQuestion({
   /** The settling delegated task ran for a custom automation; its closeout is
    * the run's report and may carry launchable suggestions. */
   automationReport?: boolean;
+  /** Judgment-model triage of a delegated task update, when the experiment
+   * routed this turn to the parent model. */
+  taskCommunicationTriage?: TaskCommunicationTriageHint;
+  /** The Session's task updates go through judgment-model triage. */
+  taskCommunicationTriageEnabled?: boolean;
   /** Trusted owner actor for a delegated-task continuation, resolved server-side. */
   serviceCredentialPlatformActorUserId?: string;
   serviceCredentialPlatformDenialReason?:
@@ -3942,6 +3950,8 @@ export async function answerFastAgentQuestion({
       platformEventVisibility,
       platformEventKind,
       automationReport,
+      ...(taskCommunicationTriage ? { taskCommunicationTriage } : {}),
+      taskCommunicationTriageEnabled,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       peerDirectedTurn: resolvedPeerDirectedTurn,
