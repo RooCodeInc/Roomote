@@ -1,5 +1,6 @@
 import {
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  DEFAULT_TASK_MODEL_ID,
   normalizeTaskModelId,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
@@ -2188,9 +2189,7 @@ describe('task model provider commands', () => {
     // connected via runtime env) and keep the effective default model.
     expect(modelIds).toContain('openrouter/openai/gpt-5.6-terra');
     expect(modelIds).toContain('anthropic/claude-sonnet-5');
-    expect(seededSettings?.defaultModelId).toBe(
-      'openrouter/openai/gpt-5.6-terra',
-    );
+    expect(seededSettings?.defaultModelId).toBe(DEFAULT_TASK_MODEL_ID);
     expect(result.addedRecommendedModelCount).toBe(5);
   });
 
