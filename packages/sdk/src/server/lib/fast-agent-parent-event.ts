@@ -85,6 +85,7 @@ import {
   gateDelegatedTaskCommunication,
   isTaskCommunicationTriageEnabled,
   listUnsharedTaskUpdates,
+  wasTaskCloseoutRelayed,
   type TaskActivityDigestItem,
 } from './task-communication-triage';
 import { buildDeterministicMessageId } from './deterministic-message-id';
@@ -2877,6 +2878,13 @@ export async function deliverFastAgentParentEventWithLock(
       params.event.type === 'task_settled'
         ? await withUnsharedTaskUpdates(params.event)
         : params.event;
+    // A web settle must normally speak so the user sees an outcome; when
+    // triage already relayed the task's closeout, it speaks only for news.
+    const settleCloseoutAlreadyRelayed =
+      params.event.type === 'task_settled' &&
+      (params.event.status === RunStatus.Completed ||
+        params.event.status === RunStatus.Idle) &&
+      (await wasTaskCloseoutRelayed(params.event.runId));
 
     const humanFollowUp =
       params.event.type === 'human_follow_up' ? params.event : null;
@@ -3067,7 +3075,8 @@ export async function deliverFastAgentParentEventWithLock(
         params.event.type === 'automation_triggered' ||
         params.event.type === 'task_turn_provider_error' ||
         (params.event.type === 'task_settled' &&
-          params.parent.conversation.surface === 'web') ||
+          params.parent.conversation.surface === 'web' &&
+          !settleCloseoutAlreadyRelayed) ||
         (params.event.type === 'scheduled_wakeup' &&
           params.event.reportPolicy === 'always')
           ? 'required'

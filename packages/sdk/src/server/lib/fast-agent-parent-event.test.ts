@@ -82,12 +82,14 @@ const mocks = vi.hoisted(() => ({
   ),
   listUnsharedTaskUpdates: vi.fn(async (): Promise<string[]> => []),
   isTaskCommunicationTriageEnabled: vi.fn(async () => false),
+  wasTaskCloseoutRelayed: vi.fn(async () => false),
 }));
 
 vi.mock('./task-communication-triage', () => ({
   gateDelegatedTaskCommunication: mocks.gateTaskCommunication,
   listUnsharedTaskUpdates: mocks.listUnsharedTaskUpdates,
   isTaskCommunicationTriageEnabled: mocks.isTaskCommunicationTriageEnabled,
+  wasTaskCloseoutRelayed: mocks.wasTaskCloseoutRelayed,
 }));
 
 vi.mock('./fast-agent-session-videos', () => ({
@@ -1028,6 +1030,42 @@ describe('deliverFastAgentParentEvent', () => {
       artifactType: 'general',
     });
   });
+
+  it.each([
+    [false, 'idle', 'required'],
+    [true, 'idle', 'optional'],
+    [true, 'completed', 'optional'],
+    [true, 'failed', 'required'],
+  ] as const)(
+    'makes a web settle optional only after triage relayed its closeout (relayed=%s, %s)',
+    async (closeoutRelayed, status, visibility) => {
+      mocks.wasTaskCloseoutRelayed.mockResolvedValueOnce(closeoutRelayed);
+      mocks.answerQuestion.mockResolvedValue('Settled');
+
+      await deliverFastAgentParentEvent({
+        parent: {
+          sessionId: parent.sessionId,
+          conversation: {
+            surface: 'web',
+            workspaceId: 'user-1',
+            conversationId: 'session-1',
+          },
+        },
+        event: {
+          type: 'task_settled',
+          taskId: 'task-1',
+          runId: 42,
+          status,
+          taskUrl: 'https://roomote.example/task/task-1',
+          pullRequests: [],
+        },
+      });
+
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({ platformEventVisibility: visibility }),
+      );
+    },
+  );
 
   it('passes a canonical review offer into the web transcript payload', async () => {
     const webParent = {

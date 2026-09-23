@@ -232,6 +232,23 @@ export async function listUnsharedTaskUpdates(
     .catch(() => []);
 }
 
+function closeoutRelayedKey(runId: number) {
+  return `session-task-closeout-relayed:${runId}`;
+}
+
+/**
+ * Whether triage already sent the task's own closeout to the user, so the
+ * settle turn only needs to speak when it adds something new.
+ */
+export async function wasTaskCloseoutRelayed(runId: number): Promise<boolean> {
+  if (!(await isTaskCommunicationTriageEnabled())) return false;
+  return (
+    (await getRedis()
+      .exists(closeoutRelayedKey(runId))
+      .catch(() => 0)) > 0
+  );
+}
+
 /** Claim the per-task relay slot; false when the task relayed recently. */
 async function claimRelaySlot(runId: number, force: boolean): Promise<boolean> {
   const key = `session-task-relay:${runId}`;
@@ -350,6 +367,16 @@ export async function gateDelegatedTaskCommunication(params: {
         return { kind: 'skip' };
       }
       capture(decision);
+      if (event.type === 'child_message' && event.purpose === 'closeout') {
+        await getRedis()
+          .set(
+            closeoutRelayedKey(event.runId),
+            '1',
+            'EX',
+            UNSHARED_UPDATES_TTL_SECONDS,
+          )
+          .catch(() => {});
+      }
       return { kind: 'deliver', hint: { decision, reason } };
     }
     case 'uncertain':
@@ -361,7 +388,9 @@ export async function gateDelegatedTaskCommunication(params: {
       return { kind: 'skip' };
     case 'quiet':
       capture(decision);
-      if (reason !== 'already_told') {
+      // Routine narration and repeats add nothing to a closeout; only a
+      // held-back milestone is worth folding in later.
+      if (reason === 'milestone_can_wait') {
         await rememberUnsharedUpdate(event.runId, update);
       }
       return { kind: 'skip' };
