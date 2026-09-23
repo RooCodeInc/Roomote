@@ -140,20 +140,25 @@ function AutoThumbSparkle() {
       className="pointer-events-none absolute inset-0 overflow-hidden rounded-full"
     >
       <motion.span
-        className="absolute top-1.5 left-1.5 size-1 rounded-full bg-accent-foreground opacity-40 shadow-[0_0_5px_currentColor]"
+        className="absolute inset-0 rounded-full bg-accent-foreground/15"
+        animate={reducedMotion ? undefined : { opacity: [0.1, 0.75, 0.1] }}
+        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.span
+        className="absolute top-1 left-1 size-1.5 rounded-full bg-accent-foreground opacity-40 shadow-[0_0_5px_currentColor]"
         animate={
           reducedMotion
             ? undefined
-            : { opacity: [0.1, 0.8, 0.1], scale: [0.5, 1, 0.5] }
+            : { opacity: [0.15, 1, 0.15], scale: [0.4, 1.2, 0.4] }
         }
         transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.span
-        className="absolute right-1.5 bottom-1.5 size-0.5 rounded-full bg-accent-foreground opacity-40 shadow-[0_0_4px_currentColor]"
+        className="absolute right-1 bottom-1 size-1 rounded-full bg-accent-foreground opacity-40 shadow-[0_0_4px_currentColor]"
         animate={
           reducedMotion
             ? undefined
-            : { opacity: [0.1, 0.65, 0.1], scale: [0.5, 1, 0.5] }
+            : { opacity: [0.15, 0.9, 0.15], scale: [0.4, 1.2, 0.4] }
         }
         transition={{
           duration: 2.4,
