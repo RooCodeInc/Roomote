@@ -1,4 +1,7 @@
-import { getVisiblePrimaryNavItems } from './navigation-items';
+import {
+  getVisiblePrimaryNavItems,
+  getVisibleSideNavSections,
+} from './navigation-items';
 
 describe('getVisiblePrimaryNavItems', () => {
   it('places sessions before automations for admins', () => {
@@ -60,6 +63,38 @@ describe('getVisiblePrimaryNavItems', () => {
     expect(items.find((item) => item.href === '/results')).toMatchObject({
       label: 'Results',
       requiresSetup: true,
+    });
+  });
+});
+
+describe('getVisibleSideNavSections', () => {
+  const toHrefs = (sections: ReturnType<typeof getVisibleSideNavSections>) =>
+    Object.fromEntries(
+      Object.entries(sections).map(([section, items]) => [
+        section,
+        items.map((item) => item.href),
+      ]),
+    );
+
+  it('keeps Analytics in its own section for admins', () => {
+    expect(
+      toHrefs(
+        getVisibleSideNavSections({ isAdmin: true, resultsEnabled: true }),
+      ),
+    ).toEqual({
+      home: ['/'],
+      sessions: ['/sessions'],
+      manage: ['/automations', '/results', '/integrations'],
+      insights: ['/analytics'],
+    });
+  });
+
+  it('leaves the insights section empty for members', () => {
+    expect(toHrefs(getVisibleSideNavSections({ isAdmin: false }))).toEqual({
+      home: ['/'],
+      sessions: ['/sessions'],
+      manage: ['/automations', '/integrations'],
+      insights: [],
     });
   });
 });

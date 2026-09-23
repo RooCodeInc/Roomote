@@ -61,7 +61,7 @@ vi.mock('@/components/system', () => ({
   X: Icon,
   House: Icon,
   Plug: Icon,
-  Rows4: Icon,
+  MessagesSquare: Icon,
   NotepadText: Icon,
   Plus: Icon,
   GalleryVerticalEnd: Icon,
