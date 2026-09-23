@@ -5,7 +5,7 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
   'privateSessions',
   'browserNotifications',
   'integrationToolAutoApprovals',
-  'fastSessionCommunicationJev',
+  'sessionTaskCommunicationTriage',
 ] as const;
 
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
@@ -16,8 +16,8 @@ export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
   browserNotifications: 'browser_notifications_experiment_enabled',
   integrationToolAutoApprovals:
     'integration_tool_auto_approvals_experiment_enabled',
-  fastSessionCommunicationJev:
-    'fast_session_communication_jev_experiment_enabled',
+  sessionTaskCommunicationTriage:
+    'session_task_communication_triage_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
 
 export type DeploymentExperimentValues = Record<
@@ -68,10 +68,10 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     description:
       'Show the Auto-approval decisions card in Settings → Agent Guidance for admins to turn on.',
   },
-  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.fastSessionCommunicationJev]: {
+  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.sessionTaskCommunicationTriage]: {
     kind: 'deployment-control',
     group: null,
     description:
-      'Use Jev for high-confidence, low-risk Fast task-report communication decisions. Disabled by default; absent means disabled.',
+      'Stream delegated task activity to its Session and let the judgment model decide whether to tell the user, redirect the task, or stay quiet. Disabled by default; absent means disabled.',
   },
 };

@@ -87,3 +87,6 @@ artifacts/ci-e2e/
 
 # Editor swap files
 *.swp
+
+# Task communication triage eval exports (real task content)
+packages/cloud-agents/evals/**/*.local.json
