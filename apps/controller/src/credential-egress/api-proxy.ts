@@ -58,6 +58,30 @@ export function buildCredentialEgressApiProxyWorkerEnv(params: {
   };
 }
 
+type RefusedRegistration = Exclude<
+  Awaited<ReturnType<CredentialEgressLifecycle['register']>>,
+  { status: 'registered' }
+>;
+
+/**
+ * The start error shown to the user. Planning already found live grants, so
+ * each outcome names what changed while the environment was starting.
+ */
+function describeRefusedAdmission(outcome: RefusedRegistration): string {
+  if (outcome.status === 'failed') {
+    return `Credential egress registration failed: ${outcome.error}. Integration keys could not be issued to this run; retry to start again.`;
+  }
+  switch (outcome.reason) {
+    case 'no_grants':
+      return 'Credential egress admission refused: the integration keys this run was starting with were revoked or expired during startup.';
+    case 'run_not_eligible':
+      return 'Credential egress admission refused: the run stopped, or its Session was archived or no longer belongs to the user who launched it, during startup.';
+    case 'disabled':
+    case 'unsupported_provider':
+      return 'Credential egress admission refused: this deployment cannot deliver integration keys to this compute provider.';
+  }
+}
+
 export interface ApiProxyAdmissionDependencies {
   isBootstrapReady: (runId: number, nonce: string) => Promise<boolean>;
   isRunActive: (runId: number) => Promise<boolean>;
@@ -136,7 +160,7 @@ export async function admitCredentialEgressApiProxy(
     resume: input.resume ?? false,
   });
   if (outcome.status !== 'registered')
-    throw new Error('Credential egress admission is no longer eligible');
+    throw new Error(describeRefusedAdmission(outcome));
 
   try {
     await deps.publish(
