@@ -486,7 +486,7 @@ export default {
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
     environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact launch target ID from the system prompt; pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, pass "${ALL_REPOSITORIES}" for all active repositories, or omit/pass null to use normal workspace routing`)}),
-    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID a user explicitly asked for, by name or unambiguous description; omit or pass null to let Roomote choose from routing rules and the deployment default"),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID a user explicitly asked for, by name, description, or a capability ask such as 'your strongest model'; omit or pass null to let Roomote choose from routing rules and the deployment default"),
     reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; use only with a selected model and omit or pass null to use the model's default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
     mode: z.enum(["standard", "environment_setup", "environment_verification"]).optional().describe("Use environment_setup for an admin-approved Blank slate environment-definition task. environment_verification is rejected on every turn; recipe verification is created automatically by ensure_environment create"),
