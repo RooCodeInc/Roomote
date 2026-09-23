@@ -53,7 +53,7 @@ describe('llm-task-title', () => {
       { role: 'user' as const, text: '$review-code is mentioned later' },
     ];
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: { title: '$implement-changes: Fix task title' },
+      object: { title: 'Fix task title' },
     });
 
     await expect(generateLlmTaskTitle({ messages })).resolves.toBe(
@@ -69,6 +69,12 @@ describe('llm-task-title', () => {
       '  $implement-changes\n\nFix the task title',
     );
     expect(messages[2]?.text).toBe('$review-code is mentioned later');
+  });
+
+  it('preserves a generated title that starts with a recognized skill name', () => {
+    expect(finalizeGeneratedTaskTitle('$review-code behavior')).toBe(
+      '$review-code behavior',
+    );
   });
 
   it('does not append any source suffix to generated titles', () => {

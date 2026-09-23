@@ -222,11 +222,7 @@ export function sanitizeGeneratedTaskTitle(value: unknown): string {
 
 export function finalizeGeneratedTaskTitle(rawTitle: unknown): string {
   const sanitized = sanitizeGeneratedTaskTitle(rawTitle);
-  const title =
-    stripRecognizedInitialSkillInvocationsForTitle(sanitized).trim();
-  return title
-    ? enforceWordCap(title, MAX_LLM_TASK_TITLE_WORDS)
-    : FALLBACK_TASK_TITLE;
+  return enforceWordCap(sanitized, MAX_LLM_TASK_TITLE_WORDS);
 }
 
 export function isFallbackTaskTitle(value: unknown): boolean {
