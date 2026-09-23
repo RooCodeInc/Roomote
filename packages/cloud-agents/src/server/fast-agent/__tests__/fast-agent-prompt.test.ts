@@ -1875,7 +1875,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Emoji reactions are unavailable on this surface');
     expect(prompt).toContain('<discord_table_formatting>');
     expect(prompt).toContain('padded ASCII table');
-    expect(prompt).toContain('horizontal scrolling is acceptable');
+    expect(prompt).toContain('under 2,000 characters');
     expect(prompt).not.toContain('<slack_modern_markdown>');
     expect(prompt).not.toContain(
       'attributes on the current `<slack_message>` identify its sender',

@@ -631,7 +631,7 @@ describe('slackAppMention', () => {
 });
 
 describe('buildChatProviderMessageInstructions', () => {
-  it('instructs Discord turns to emit padded ASCII tables directly', () => {
+  it('instructs Discord turns to emit concise ASCII tables directly', () => {
     const discordInstructions = buildChatProviderMessageInstructions('discord');
     const teamsInstructions = buildChatProviderMessageInstructions('teams');
     const slackInstructions = buildSlackMessageInstructions();
@@ -639,32 +639,16 @@ describe('buildChatProviderMessageInstructions', () => {
     expect(discordInstructions).toContain('<discord_table_formatting>');
     expect(discordInstructions).toContain('padded ASCII table');
     expect(discordInstructions).toContain('triple-backtick code fence');
-    expect(discordInstructions).toContain('horizontal scrolling is acceptable');
     expect(discordInstructions).toContain(
-      'Do not output GFM/Markdown pipe-table syntax for Discord',
+      'Discord displays Markdown pipe tables literally',
+    );
+    expect(discordInstructions).toContain('under 2,000 characters');
+    expect(discordInstructions).toContain(
+      'separate complete blocks that repeat the header and separator',
     );
     expect(discordInstructions).toContain(
-      'send it through separate `send_chat_reply` calls as multiple complete table blocks',
+      'wrap overlong values as labeled continuations',
     );
-    expect(discordInstructions).toContain(
-      'use `progress` for non-final chunks and `closeout` only for the final chunk',
-    );
-    expect(discordInstructions).toContain(
-      'within 2,000 characters (prefer at most 1,900)',
-    );
-    expect(discordInstructions).toContain(
-      'repeat the header and separator in every block',
-    );
-    expect(discordInstructions).toContain(
-      'Balance all triple-backtick fences in each message',
-    );
-    expect(discordInstructions).toContain(
-      'hard-wrap at a character boundary into labeled continuation lines',
-    );
-    expect(discordInstructions).toContain('repeat the row and column labels');
-    expect(discordInstructions).toContain('Preserve every value character');
-    expect(discordInstructions).toContain('<example>\n  ```\n');
-    expect(discordInstructions).toContain('\n  ```\n  </example>');
     expect(teamsInstructions).not.toContain('<discord_table_formatting>');
     expect(slackInstructions).toContain('Markdown tables');
     expect(slackInstructions).not.toContain('<discord_table_formatting>');
