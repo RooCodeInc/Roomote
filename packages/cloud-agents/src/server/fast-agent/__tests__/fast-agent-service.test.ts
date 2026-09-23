@@ -11860,9 +11860,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       ],
     });
-    mocks.evaluateDecisionModel.mockResolvedValue({
-      rule_1: { type: 'noul', noul: 0.92 },
-    });
+    // The first-turn hint sees the vague request and picks no rule; the
+    // launch-time check sees the delegated work and matches the rule.
+    mocks.evaluateJudgments.mockImplementation(
+      async ({ state }: { state: { request: string } }) => ({
+        model:
+          state.request === 'Restyle the checkout page.'
+            ? { choice: 'model_rule_1', confidence: 0.92 }
+            : { choice: 'default_model', confidence: 0.9 },
+      }),
+    );
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
       taskId: 'task-1',
@@ -11884,21 +11891,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({
       ...baseParams,
-      question: 'Restyle the checkout page.',
+      question: 'Can you clean up checkout?',
       adapter,
     });
 
-    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
-    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+    expect(mocks.evaluateJudgments).toHaveBeenCalledWith(
       expect.objectContaining({
-        state: { work: 'Restyle the checkout page.' },
-        questions: {
-          rule_1: expect.objectContaining({
-            instructions: expect.stringContaining('"Frontend UI work"'),
-          }),
-        },
+        state: { request: 'Restyle the checkout page.' },
       }),
     );
+    expect(mocks.evaluateDecisionModel).not.toHaveBeenCalled();
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
     );
@@ -11918,8 +11920,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       ],
     });
-    mocks.evaluateDecisionModel.mockResolvedValue({
-      rule_1: { type: 'noul', noul: 0.1 },
+    mocks.evaluateJudgments.mockResolvedValue({
+      model: { choice: 'default_model', confidence: 0.9 },
     });
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
@@ -11949,7 +11951,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       adapter,
     });
 
-    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
+    expect(mocks.evaluateJudgments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: { request: 'Fix the billing migration.' },
+      }),
+    );
+    // Sonnet is never named, so the user-request check rejects it outright.
+    expect(mocks.evaluateDecisionModel).not.toHaveBeenCalled();
     expect(launchTask).not.toHaveBeenCalled();
   });
 

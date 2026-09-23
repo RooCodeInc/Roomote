@@ -277,7 +277,6 @@ import {
 import {
   describeRejectedLaunchModel,
   verifyFastAgentLaunchModelRequest,
-  verifyFastAgentRoutingRuleMatch,
 } from './fast-agent-launch-model-guard';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
@@ -3887,10 +3886,10 @@ export async function answerFastAgentQuestion({
       : undefined;
     // A delegated-task model override the agent chose on its own must trace
     // back to a user asking for that model, or to an administrator's
-    // coding-model routing rule whose condition fits the work. The agent
-    // reads those rules from its prompt and may apply them on any turn, so a
-    // rule target is checked against the work rather than trusted outright.
-    // The first-turn routing hint and the deployment default need no check.
+    // coding-model routing rule. The agent reads those rules from its prompt
+    // and may apply them on any turn, so a rule target is re-checked through
+    // the same routing-hint judgment the first turn uses, against the work
+    // being delegated, rather than trusted because some rule names it.
     const rejectUnrequestedLaunchModel = async (
       modelId: string | null | undefined,
       work: string | undefined,
@@ -3917,14 +3916,17 @@ export async function answerFastAgentQuestion({
         ]),
       ];
       if (
-        await verifyFastAgentRoutingRuleMatch({
-          model,
-          rules: taskModelOptions.codingModelRoutingRules,
-          work: work ?? userMessages.at(-1) ?? '',
-          userId,
-        })
+        taskModelOptions.codingModelRoutingRules.some(
+          (rule) => rule.modelId === modelId,
+        )
       ) {
-        return undefined;
+        const launchRoutingHint = await resolveFastAgentRoutingHint({
+          request: work ?? userMessages.at(-1) ?? '',
+          environments: [],
+          models: taskModelOptions.models,
+          codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
+        });
+        if (launchRoutingHint?.model === modelId) return undefined;
       }
       const verdict = await verifyFastAgentLaunchModelRequest({
         model,
