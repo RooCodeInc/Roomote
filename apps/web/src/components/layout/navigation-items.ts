@@ -52,14 +52,6 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     requiresSetup: true,
   },
   {
-    icon: Plug,
-    href: '/integrations',
-    label: 'Integrations',
-    description: 'Connect Roomote with tools your team uses',
-    matchExact: false,
-    matchPaths: ['/integrations'],
-  },
-  {
     icon: NotepadText,
     href: '/results',
     label: 'Results',
@@ -68,6 +60,14 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchPaths: ['/results'],
     requiresSetup: true,
     resultsExperiment: true,
+  },
+  {
+    icon: Plug,
+    href: '/integrations',
+    label: 'Integrations',
+    description: 'Connect Roomote with tools your team uses',
+    matchExact: false,
+    matchPaths: ['/integrations'],
   },
   {
     icon: ChartColumnIncreasing,
