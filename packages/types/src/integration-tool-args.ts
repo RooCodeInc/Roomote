@@ -32,6 +32,7 @@ function hasSecretShapedString(value: string): boolean {
 }
 
 const READ_CONTENT_MAX_LENGTH = 4_000;
+const PERCENT_ENCODED_RUN = /[^\s"'<>]*%[0-9A-Fa-f]{2}[^\s"'<>]*/g;
 const PRIVATE_KEY_BLOCK =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
 
@@ -45,6 +46,10 @@ export function boundIntegrationToolReadContent(text: string): string {
   for (const pattern of SECRET_VALUE_PATTERNS) {
     masked = masked.replace(new RegExp(pattern.source, 'g'), MASKED_VALUE);
   }
+  // Percent-encoded credentials only match once decoded; mask the whole run.
+  masked = masked.replace(PERCENT_ENCODED_RUN, (run) =>
+    hasSecretShapedString(run) ? MASKED_VALUE : run,
+  );
   return masked.length > READ_CONTENT_MAX_LENGTH
     ? `[earlier content omitted]…${masked.slice(-READ_CONTENT_MAX_LENGTH)}`
     : masked;

@@ -90,6 +90,19 @@ describe('boundIntegrationToolReadContent', () => {
     );
   });
 
+  it('masks percent-encoded credentials', () => {
+    const encoded = [...githubClassicToken]
+      .map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`)
+      .join('');
+    const bounded = boundIntegrationToolReadContent(
+      `redirect https://example.net/cb?t=${encoded} done`,
+    );
+    expect(bounded).toBe('redirect [value omitted] done');
+    expect(bounded).not.toContain(encoded);
+    // An ordinary encoded URL is left as is.
+    expect(boundIntegrationToolReadContent('see a%20b')).toBe('see a%20b');
+  });
+
   it('masks a whole private key block', () => {
     const bounded = boundIntegrationToolReadContent(
       'before\n-----BEGIN RSA PRIVATE KEY-----\nMIIEabc\n-----END RSA PRIVATE KEY-----\nafter',

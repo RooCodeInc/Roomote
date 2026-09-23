@@ -34,22 +34,28 @@ export function resolveFastAgentToolApprovalUserRequest(input: {
   steeredHumanRequests: string[];
 }): string | undefined {
   if (input.turnSource === 'platform_event') {
+    // The event text is not a request; the latest human message is, plus
+    // any human follow-up steered into this turn.
+    let latestHumanRequest: string | undefined;
     for (
       let index = input.compatibilityMessages.length - 1;
-      index >= 0;
+      index >= 0 && !latestHumanRequest;
       index -= 1
     ) {
-      const text = substantiveHumanMessageText(
+      latestHumanRequest = substantiveHumanMessageText(
         input.compatibilityMessages[index]!,
       );
-      if (text) return text;
     }
-    return undefined;
+    return joinRequests([latestHumanRequest, ...input.steeredHumanRequests]);
   }
 
   if (!input.substantiveHumanInput) return undefined;
-  const requests = [input.question, ...input.steeredHumanRequests]
-    .map((request) => request.trim())
-    .filter(Boolean);
-  return requests.length > 0 ? requests.join('\n\n') : undefined;
+  return joinRequests([input.question, ...input.steeredHumanRequests]);
+}
+
+function joinRequests(requests: Array<string | undefined>): string | undefined {
+  const present = requests
+    .map((request) => request?.trim())
+    .filter((request): request is string => Boolean(request));
+  return present.length > 0 ? present.join('\n\n') : undefined;
 }

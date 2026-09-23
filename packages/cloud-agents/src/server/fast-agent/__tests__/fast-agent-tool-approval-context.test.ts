@@ -39,6 +39,27 @@ describe('resolveFastAgentToolApprovalUserRequest', () => {
     ).toBeUndefined();
   });
 
+  it('adds human steers accepted during a platform-event turn', () => {
+    expect(
+      resolveFastAgentToolApprovalUserRequest({
+        turnSource: 'platform_event',
+        substantiveHumanInput: false,
+        question: '<platform_event>scheduled wakeup</platform_event>',
+        compatibilityMessages: [userMessage('Watch the staging test', 'human')],
+        steeredHumanRequests: ['Also read the latest task messages.'],
+      }),
+    ).toBe('Watch the staging test\n\nAlso read the latest task messages.');
+    expect(
+      resolveFastAgentToolApprovalUserRequest({
+        turnSource: 'platform_event',
+        substantiveHumanInput: false,
+        question: '<platform_event>scheduled wakeup</platform_event>',
+        compatibilityMessages: [],
+        steeredHumanRequests: ['Check task 0abc123def456.'],
+      }),
+    ).toBe('Check task 0abc123def456.');
+  });
+
   it('includes current-turn steers alongside the latest human message', () => {
     expect(
       resolveFastAgentToolApprovalUserRequest({
