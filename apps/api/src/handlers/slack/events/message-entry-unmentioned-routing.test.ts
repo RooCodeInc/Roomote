@@ -15,6 +15,7 @@ const {
   recordInboundSlackConversationMessageMock,
   processFastAgentMessageMock,
   findSessionAttentionNotificationReplyMock,
+  stopChatSessionTasksMock,
 } = vi.hoisted(() => ({
   fetchThreadMessagesMock: vi.fn(),
   hasPendingRoutingConfirmationMock: vi.fn(),
@@ -30,6 +31,7 @@ const {
   recordInboundSlackConversationMessageMock: vi.fn(),
   processFastAgentMessageMock: vi.fn(),
   findSessionAttentionNotificationReplyMock: vi.fn(),
+  stopChatSessionTasksMock: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
@@ -81,6 +83,10 @@ vi.mock('../helpers/user-mapping.js', () => ({
 
 vi.mock('./fast-agent.js', () => ({
   processFastAgentMessage: processFastAgentMessageMock,
+}));
+
+vi.mock('../../tasks/session-stop-command.js', () => ({
+  stopChatSessionTasks: stopChatSessionTasksMock,
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => ({
@@ -175,7 +181,52 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     lookupSlackUserMappingMock.mockResolvedValue({
       activeMapping: { userId: 'user-1', slackUserId: 'U111' },
     });
+    stopChatSessionTasksMock.mockResolvedValue({
+      kind: 'stopped',
+      stoppedCount: 2,
+      text: 'Stopped 2 active tasks. The work remains resumable; send another message here to continue.',
+    });
   });
+
+  it('handles an explicit Slack stop request before normal Fast message routing', async () => {
+    const { handleMessageOrAppMentionEvent } =
+      await import('./message-entry.js');
+    const event = {
+      type: 'app_mention',
+      channel: 'C123',
+      channel_type: 'channel',
+      ts: '101.000',
+      thread_ts: '100.000',
+      user: 'U111',
+      text: '<@UBOT> stop',
+    } as never;
+    const postMessage = vi.fn().mockResolvedValue(undefined);
+    const context = {
+      slackInstallation,
+      slack: { postMessage },
+      teamId: 'T123',
+    } as never;
+
+    await handleMessageOrAppMentionEvent({ event, context });
+
+    expect(stopChatSessionTasksMock).toHaveBeenCalledWith({
+      provider: 'slack',
+      workspaceId: 'T123',
+      channelId: 'C123',
+      conversationId: '100.000',
+      threadId: '100.000',
+      userId: 'user-1',
+    });
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '100.000',
+        text: 'Stopped 2 active tasks. The work remains resumable; send another message here to continue.',
+      }),
+    );
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+    expect(recordInboundSlackConversationMessageMock).not.toHaveBeenCalled();
+  }, 15_000);
 
   it('preserves linked inbound history capture for a suppressed reply', async () => {
     const { recordSuppressedUnmentionedSlackThreadReply } =

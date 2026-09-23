@@ -535,6 +535,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     await this.callBotApi('setMyCommands', {
       commands: [
         { command: 'new', description: 'Start a fresh task' },
+        { command: 'stop', description: 'Stop this session’s active tasks' },
         {
           command: 'goal',
           description: 'Keep working toward an objective',
@@ -547,6 +548,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         { command: 'start', description: 'Show welcome and command help' },
         { command: 'help', description: 'Show command help' },
         { command: 'new', description: 'Start a fresh task' },
+        { command: 'stop', description: 'Stop this session’s active tasks' },
         {
           command: 'goal',
           description: 'Keep working toward an objective',

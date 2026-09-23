@@ -1259,6 +1259,12 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
             },
           ],
         },
+        {
+          name: 'stop',
+          description:
+            'Stop active tasks in this session and keep them resumable',
+          type: 1,
+        },
         { name: 'help', description: 'Show Roomote command help', type: 1 },
       ],
       { retryNetworkErrors: true, retryServerErrors: true },

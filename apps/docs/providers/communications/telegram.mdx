@@ -19,7 +19,7 @@ Use `<public-url>` below for your stable public Roomote URL.
 Message `@BotFather` in Telegram and create or select a bot. In the Roomote UI
 (**Settings > Communications > Telegram**), enter the bot token, then save.
 Roomote reads the bot identity from Telegram, generates a webhook secret,
-registers the Bot API webhook, and adds `/start`, `/help`, `/new`, and `/goal`
+registers the Bot API webhook, and adds `/start`, `/help`, `/new`, `/stop`, and `/goal`
 to the bot's command menu for you.
 
 In BotFather, open **Bot Settings > Threaded Mode** and enable it. Roomote will
@@ -108,8 +108,10 @@ up on tasks on their behalf.
    the same session continues
 4. use `/new <request>` and confirm a fresh conversation opens in its own
    topic when Threaded Mode is enabled
-5. use `/goal <objective>` and confirm the acknowledgement repeats the objective
-6. reply in the task topic to send a follow-up
+5. use `/stop` in a Roomote conversation with active tasks and confirm they stop
+   without losing resumability
+6. use `/goal <objective>` and confirm the acknowledgement repeats the objective
+7. reply in the task topic to send a follow-up
 
 Every message from a linked user enters a session: in private chats
 directly, and in groups from bot mentions. Roomote answers directly or delegates
@@ -120,6 +122,10 @@ Roomote user. `/new` starts a fresh conversation instead of continuing the
 current one, opening a new topic when Telegram supports it; in a plain private
 chat the request joins that chat's conversation. `/goal` makes the session
 own and pursue the supplied objective; Roomote may delegate child tasks as needed.
+Use `/stop` in a private chat or Roomote topic to soft-stop all active tasks
+linked to the current session, including delegated tasks. In a group without a
+topic, reply to a Roomote message with `/stop@botname`. The linked owner can
+continue the same session later by sending another message.
 
 Peer conversations do not apply to Telegram. Telegram's
 privacy settings can prevent ambient group messages from reaching bots, and

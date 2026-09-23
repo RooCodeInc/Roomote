@@ -156,6 +156,11 @@ mention or eligible thread-reply signals used for task entry. Sessions are
 isolated by linked Roomote user even when several people share one Teams thread.
 Unlinked senders receive the account-link prompt instead of starting work.
 
+In an existing session conversation, send `/stop` (or mention the bot with
+`/stop` in a channel) to soft-stop every active task linked to that session,
+including delegated tasks. The work remains resumable: send another message to
+continue later. Only the linked session owner can stop its tasks.
+
 Peer conversations do not apply to Teams. Bot Framework webhooks provide
 addressed activity, and delegated Microsoft Graph access can supply bounded
 history for eligible thread replies, but Roomote still keeps each person's

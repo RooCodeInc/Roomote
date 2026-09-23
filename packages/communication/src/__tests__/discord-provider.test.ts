@@ -305,6 +305,12 @@ describe('DiscordCommunicationProvider', () => {
           }),
         ],
       },
+      {
+        name: 'stop',
+        type: 1,
+        description:
+          'Stop active tasks in this session and keep them resumable',
+      },
       { name: 'help', type: 1 },
     ]);
   });

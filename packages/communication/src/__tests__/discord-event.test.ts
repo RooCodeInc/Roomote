@@ -343,6 +343,25 @@ describe('Discord Gateway event normalization', () => {
     expect(discordEventToQueuedCommunicationMessage(event)).toBeNull();
   });
 
+  it('routes the /stop slash command as an explicit task-entry command', () => {
+    const event = parse({
+      op: 0,
+      t: 'INTERACTION_CREATE',
+      d: {
+        id: 'interaction-stop',
+        application_id: 'application-1',
+        type: 2,
+        token: 'token',
+        channel_id: 'thread-1',
+        user: { id: 'user-1', username: 'matt' },
+        data: { name: 'STOP', type: 1 },
+      },
+    });
+
+    expect(getDiscordInteractionCommand(event)).toEqual({ name: 'stop' });
+    expect(isDiscordTaskEntryEvent(event)).toBe(true);
+  });
+
   it('does not treat removed fast interactions as task entry', () => {
     const event = parse({
       op: 0,

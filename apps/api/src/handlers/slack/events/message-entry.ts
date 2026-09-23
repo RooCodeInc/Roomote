@@ -33,10 +33,12 @@ import {
   type TaskInitiator,
   isDeploymentReadOnlyError,
 } from '@roomote/types';
+import { isStopSessionCommandText } from '@roomote/communication';
 import { findSessionAttentionNotificationReply } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../../logging.js';
 import { continueSessionAttentionReply } from '../../tasks/continue-session-attention-reply.js';
+import { stopChatSessionTasks } from '../../tasks/session-stop-command.js';
 import {
   ROUTING_LOCK_TTL_SECONDS,
   SLACK_ROUTING_LOCK_PREFIX,
@@ -1162,6 +1164,7 @@ async function handleSlackEntryEvent(params: {
   slackInstallation: SlackInstallation;
   slack: SlackNotifier;
   teamId: string;
+  stopSessionCommand?: boolean;
   skipThreadFollowupHandling?: boolean;
   threadTaskId?: string;
   peerConversationsEnabled?: boolean;
@@ -1177,6 +1180,7 @@ async function handleSlackEntryEvent(params: {
     slackInstallation,
     slack,
     teamId,
+    stopSessionCommand = false,
     skipThreadFollowupHandling = false,
     threadTaskId,
     peerConversationsEnabled,
@@ -1210,6 +1214,24 @@ async function handleSlackEntryEvent(params: {
     }
 
     await showConnectAccount(event, slackInstallation, slack);
+    return;
+  }
+
+  if (stopSessionCommand) {
+    const stopResult = await stopChatSessionTasks({
+      provider: 'slack',
+      workspaceId: teamId,
+      channelId: event.channel,
+      conversationId: event.thread_ts || event.ts,
+      threadId: event.thread_ts || event.ts,
+      userId: userMapping.userId,
+    });
+    await slack.postMessage({
+      channel: event.channel,
+      thread_ts: event.thread_ts || event.ts,
+      text: stopResult.text,
+      blocks: [{ type: 'markdown', text: stopResult.text }],
+    });
     return;
   }
 
@@ -1342,6 +1364,30 @@ export async function handleMessageOrAppMentionEvent(params: {
 }): Promise<void> {
   const { event, context } = params;
   enrichSlackMessageEvent(event);
+  const isStopCommand = isStopSessionCommandText(
+    event.authoredText ?? event.text,
+  );
+  const isHumanSlackMessage =
+    Boolean(event.user) &&
+    !event.bot_id &&
+    event.subtype !== 'bot_message' &&
+    event.user !== context.slackInstallation.botUserId;
+  const isStopCommandAddressedToRoomote =
+    isHumanSlackMessage &&
+    (event.type === 'app_mention' ||
+      event.channel_type === 'im' ||
+      event.channel_type === 'mpim' ||
+      mentionsSlackBot(event, context.slackInstallation.botUserId));
+  if (isStopCommand && isStopCommandAddressedToRoomote) {
+    await handleSlackEntryEvent({
+      event,
+      slackInstallation: context.slackInstallation,
+      slack: context.slack,
+      teamId: context.teamId,
+      stopSessionCommand: true,
+    });
+    return;
+  }
   const automatedAppMentionEvent = isRoutableAutomatedSlackAppMention(
     event,
     context.slackInstallation,

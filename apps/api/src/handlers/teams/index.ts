@@ -19,6 +19,7 @@ import {
   parseTeamsActivity,
   teamsActivityToQueuedCommunicationMessage,
 } from '@roomote/communication/teams-activity';
+import { isStopSessionCommandText } from '@roomote/communication';
 import {
   queueCommunicationMessage,
   queueCommunicationMessageOnce,
@@ -126,6 +127,7 @@ import {
   resolveSuggestionOriginSessionId,
 } from '../tasks/suggestion-launch.js';
 import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
+import { stopChatSessionTasks } from '../tasks/session-stop-command.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
@@ -2223,6 +2225,42 @@ teams.post('/', async (c) => {
   const fastChannelId = getTeamsBaseConversationId(
     metadata.communicationChannelId,
   );
+  if (isStopSessionCommandText(queuedMessage.text)) {
+    if (!mappedUserId || !tenantId) {
+      await postTeamsAccountLinkPrompt({ activity, metadata });
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'account_link_required',
+      });
+    }
+
+    const stopResult = await stopChatSessionTasks({
+      provider: 'teams',
+      workspaceId: tenantId,
+      channelId: fastChannelId,
+      conversationId:
+        metadata.communicationThreadId ?? metadata.communicationChannelId,
+      ...(metadata.communicationThreadId
+        ? { threadId: metadata.communicationThreadId }
+        : {}),
+      ...(replyToMessageId ? { replyToMessageId } : {}),
+      userId: mappedUserId,
+      displayName: activity.from?.name,
+    });
+    await postTeamsMessageBestEffort({
+      conversationId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+      serviceUrl: metadata.communicationServiceUrl,
+      text: stopResult.text,
+    });
+    return c.json({
+      ok: true,
+      stopRequested: true,
+      outcome: stopResult.kind,
+    });
+  }
+
   const attentionResolution =
     mappedUserId && tenantId
       ? await findSessionAttentionNotificationReply({
