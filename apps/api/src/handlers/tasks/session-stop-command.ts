@@ -9,7 +9,7 @@ type ChatStopProvider = Extract<
   'discord' | 'slack' | 'teams' | 'telegram'
 >;
 
-export type StopChatSessionTasksInput = {
+type StopChatSessionTasksInput = {
   provider: ChatStopProvider;
   workspaceId: string;
   channelId: string;
@@ -20,7 +20,7 @@ export type StopChatSessionTasksInput = {
   displayName?: string | null;
 };
 
-export type StopChatSessionTasksResult =
+type StopChatSessionTasksResult =
   | { kind: 'unavailable'; text: string }
   | { kind: 'stopped'; stoppedCount: number; text: string }
   | {
