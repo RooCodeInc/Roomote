@@ -31,17 +31,21 @@ vi.mock('@/components/tasks/ModelReasoningPicker', () => ({
   ModelReasoningPickerTrigger: ({
     label,
     reasoningEffort,
+    autoEffort,
     ariaLabel,
   }: {
     label: string;
     reasoningEffort?: string | null;
+    autoEffort?: boolean;
     ariaLabel: string;
   }) => (
     <button aria-label={ariaLabel}>
       {label}
-      {reasoningEffort
-        ? reasoningEffort[0]?.toUpperCase() + reasoningEffort.slice(1)
-        : ''}
+      {autoEffort && !reasoningEffort
+        ? 'Auto'
+        : reasoningEffort
+          ? reasoningEffort[0]?.toUpperCase() + reasoningEffort.slice(1)
+          : ''}
     </button>
   ),
   ModelReasoningPicker: ({
@@ -93,7 +97,7 @@ describe('SessionModelSwitcher', () => {
 
     expect(
       screen.getByRole('button', { name: 'Model for this session' }),
-    ).toHaveTextContent('Claude Sonnet 5High');
+    ).toHaveTextContent('Claude Sonnet 5Auto');
     expect(screen.getByTestId('reasoning-default')).toHaveTextContent('high');
     expect(screen.getByTestId('empty-model-label')).toHaveTextContent(
       'Default (Claude Sonnet 5)',
@@ -105,7 +109,7 @@ describe('SessionModelSwitcher', () => {
 
     expect(
       screen.getByRole('button', { name: 'Model for this session' }),
-    ).toHaveTextContent(/^Model$/);
+    ).toHaveTextContent(/^ModelAuto$/);
     expect(screen.queryByText('Medium')).not.toBeInTheDocument();
     expect(screen.getByTestId('reasoning-default')).toHaveTextContent(
       'Reasoning',

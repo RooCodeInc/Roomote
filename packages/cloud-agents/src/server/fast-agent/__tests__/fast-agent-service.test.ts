@@ -2318,6 +2318,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.generateText.mock.calls[0]?.[0].reasoningEffort).toBe('high');
   });
 
+  it('treats an explicit Auto (null) turn setting as a dynamic choice', async () => {
+    mocks.chooseAdaptiveEffort.mockResolvedValueOnce('medium');
+    await answerFastAgentQuestion({
+      ...baseParams,
+      reasoningEffort: null,
+      adapter: callbacks(),
+    });
+    expect(mocks.chooseAdaptiveEffort).toHaveBeenCalledOnce();
+    expect(mocks.generateText.mock.calls[0]?.[0].reasoningEffort).toBe(
+      'medium',
+    );
+  });
+
   it('does not judge effort for an explicit session selection', async () => {
     mocks.getSession.mockResolvedValueOnce({
       id: 'conversation-1',

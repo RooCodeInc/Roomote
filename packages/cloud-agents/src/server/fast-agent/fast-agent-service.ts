@@ -3560,7 +3560,8 @@ export async function answerFastAgentQuestion({
             request: question,
           })
         : undefined;
-    const explicitTurnEffort = reasoningEffort !== undefined;
+    // Null is the Auto selection; only a concrete level opts this turn out.
+    const explicitTurnEffort = reasoningEffort != null;
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;

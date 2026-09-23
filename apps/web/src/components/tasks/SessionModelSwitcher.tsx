@@ -47,17 +47,20 @@ export function SessionModelSwitcher({
     defaultModelId ?? data?.defaultFastModelId ?? null;
   const effectiveDefaultEffort =
     defaultReasoningEffort ?? data?.defaultFastReasoningEffort ?? null;
-  const effectiveReasoningEffort = reasoningEffort ?? effectiveDefaultEffort;
   const chipLabel = model
     ? displayModelName(model)
     : effectiveDefaultModelId
       ? displayModelName(effectiveDefaultModelId)
       : 'Model';
+  const autoAvailable =
+    data?.models.find(({ id }) => id === (model || effectiveDefaultModelId))
+      ?.metadata?.supportsReasoning !== false;
 
   const trigger = (
     <ModelReasoningPickerTrigger
       label={chipLabel}
-      reasoningEffort={effectiveReasoningEffort}
+      reasoningEffort={reasoningEffort}
+      autoEffort={autoAvailable}
       disabled={disabled}
       size={size}
       ariaLabel="Model for this session"
@@ -81,6 +84,7 @@ export function SessionModelSwitcher({
       onModelChange={onModelChange}
       reasoningEffort={reasoningEffort}
       defaultReasoningEffort={effectiveDefaultEffort}
+      allowAuto
       onReasoningEffortChange={onReasoningEffortChange}
       onModelSelectionChange={onModelSelectionChange}
       providerGrouping={{
