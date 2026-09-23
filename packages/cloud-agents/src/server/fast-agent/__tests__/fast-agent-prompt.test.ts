@@ -1865,11 +1865,13 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('My read: ship it today.');
   });
 
-  it('adapts native chat tool guidance for Discord', () => {
+  it('scopes rich Markdown guidance to non-Discord Fast surfaces', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       surface: 'discord',
     });
+    const modernMarkdownTableGuidance =
+      'Use modern Markdown when it improves scanability. Supported formatting includes headings, horizontal rules, blockquotes, fenced code blocks, tables, bold, italic, strikethrough, inline code, and Markdown links.';
 
     expect(prompt).toContain('fast mode on Discord');
     expect(prompt).toContain('Emoji reactions are unavailable on this surface');
@@ -1877,9 +1879,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('padded ASCII table');
     expect(prompt).toContain('under 2,000 characters');
     expect(prompt).not.toContain('<slack_modern_markdown>');
-    expect(prompt).not.toContain(
-      'Use modern Markdown when it improves scanability',
-    );
+    expect(prompt).not.toContain(modernMarkdownTableGuidance);
     expect(prompt).not.toContain('Markdown tables');
     expect(prompt).not.toContain(
       'attributes on the current `<slack_message>` identify its sender',
@@ -1893,10 +1893,16 @@ describe('buildFastAgentSystemPrompt', () => {
       surface: 'slack',
     });
     expect(slackPrompt).toContain('<slack_modern_markdown>');
-    expect(slackPrompt).toContain(
-      'Use modern Markdown when it improves scanability. Supported formatting includes headings, horizontal rules, blockquotes, fenced code blocks, tables, bold, italic, strikethrough, inline code, and Markdown links.',
-    );
+    expect(slackPrompt).toContain(modernMarkdownTableGuidance);
     expect(slackPrompt).not.toContain('<discord_table_formatting>');
+
+    const webPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'web',
+    });
+    expect(webPrompt).toContain(modernMarkdownTableGuidance);
+    expect(webPrompt).not.toContain('<slack_modern_markdown>');
+    expect(webPrompt).not.toContain('<discord_table_formatting>');
   });
 
   it('tells an addressed turn to answer without re-deciding directedness', () => {

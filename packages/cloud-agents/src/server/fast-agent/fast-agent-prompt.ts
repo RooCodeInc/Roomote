@@ -919,7 +919,9 @@ ${senderIdentityGuidance}${unresolvedRequestGuidance}${resumedTurnGuidance}- Do 
 - For a supported opinion, lead with a labeled provisional stance such as "My read:", then state its factual basis separately. Do not present interpretation as fact.
 - A closeout does not need to be self-contained when the conversation already supplies the needed context.
 - Reserve headings, recaps, and "what I did" lists for deliverables or handoffs where they improve comprehension.
-${surface === 'slack' ? '<slack_modern_markdown>\nSlack replies from `send_chat_reply` render in Slack `markdown` blocks.\n\nUse modern Markdown when it improves scanability. Supported formatting includes headings, horizontal rules, blockquotes, fenced code blocks, tables, bold, italic, strikethrough, inline code, and Markdown links.\n\nDo not assume Slack formatting is limited to old mrkdwn. Use richer Markdown when it makes the reply clearer.\n</slack_modern_markdown>' : ''}
+${surface === 'slack' ? '<slack_modern_markdown>\nSlack replies from `send_chat_reply` render in Slack `markdown` blocks.\n' : ''}
+${surface !== 'discord' ? 'Use modern Markdown when it improves scanability. Supported formatting includes headings, horizontal rules, blockquotes, fenced code blocks, tables, bold, italic, strikethrough, inline code, and Markdown links.' : ''}
+${surface === 'slack' ? '\nDo not assume Slack formatting is limited to old mrkdwn. Use richer Markdown when it makes the reply clearer.\n</slack_modern_markdown>' : ''}
 ${surface === 'discord' ? `${DISCORD_TABLE_FORMATTING_INSTRUCTIONS}\n` : ''}
 - Keep paragraphs short and structure longer replies lightly.
 - Keep bullets and numbered lists tight: one idea per item.
