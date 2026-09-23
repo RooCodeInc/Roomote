@@ -3074,6 +3074,52 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 
+  it('rejects a custom-provider model explicitly marked as not producing text', async () => {
+    // The custom-provider exception covers defaulted input metadata only. An
+    // explicit `output.text: false` declaration on an OpenAI-compatible
+    // provider is user config and must exclude the candidate as well.
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'roomote/acme/audio-speaker-1',
+      ROOMOTE_INFERENCE_API_KEY: 'test-key',
+      OPENCODE_CONFIG_CONTENT: '',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'roomote',
+            models: {
+              'acme/audio-speaker-1': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: false },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const {
+      generateTrackedNonTaskText,
+      NonTaskInputModalityUnsupportedError,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+        prompt: 'Transcribe the audio.',
+        requiredInputModality: 'audio',
+      }),
+    ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
   it('keeps a native session on its own model when it can view attached images', async () => {
     process.env = {
       ...originalEnv,
