@@ -28,7 +28,7 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           sessions and tasks. While enabled, each integration&apos;s Manage
           tools dialog in Settings → Integrations offers Auto (default, shown
           with no choice selected), Always allow, Always ask, and Disable per
-          tool. Set up Auto mode in Settings → Integrations to handle routine
+          tool. Set up Auto mode in Settings → Agent Guidance to handle routine
           work automatically and ask before anything risky. If the session owner
           is away, risky calls are blocked. Always ask pauses each call until
           the session owner allows it once, stops the asks for the rest of that

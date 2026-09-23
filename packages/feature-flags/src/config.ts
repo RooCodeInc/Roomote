@@ -65,7 +65,7 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     kind: 'deployment-control',
     group: null,
     description:
-      'Configure per-integration-tool approval policies for code-mode integration calls in sessions and let the session requester allow or reject each gated call before it runs. Disabled by default; absent means disabled.',
+      'Choose which integration tools run automatically, ask for approval, or are disabled. Tools left on Auto can use a judgement model to decide when to ask.',
   },
   [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.fastSessionCommunicationJev]: {
     kind: 'deployment-control',
