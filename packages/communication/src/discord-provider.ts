@@ -400,7 +400,20 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
         // the closing marker. Take it with this chunk, including any CR.
         take += 1;
       }
-      if (take <= 0) return chunkDiscordPlainMessage(text, limit);
+      if (take <= 0) {
+        // Backing off before CRLF can exhaust a partly filled chunk. Flush
+        // and retry under a fresh fence; only fall back if even that has no
+        // room to advance.
+        if (
+          open &&
+          current !== `${open.opening}\n` &&
+          current !== `${open.opening}\r\n`
+        ) {
+          flush();
+          continue;
+        }
+        return chunkDiscordPlainMessage(text, limit);
+      }
       current += remaining.slice(0, take);
       remaining = remaining.slice(take);
       if (remaining) flush();

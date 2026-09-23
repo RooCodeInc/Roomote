@@ -1343,6 +1343,24 @@ describe('chunkDiscordMessage', () => {
     ).toBe(true);
   });
 
+  it('retries the next fenced chunk when CRLF backoff consumes capacity', () => {
+    const text = `\`\`\`ts\r\n${'x'.repeat(26)}\r\nx\r\nsecond line\r\n\`\`\``;
+    const chunks = chunkDiscordMessage(text, 40);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+    expect(
+      chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) === 2),
+    ).toBe(true);
+    expect(chunks[1]).toMatch(/^```ts\nx\r\nsecond line/u);
+    for (let limit = 24; limit <= 60; limit += 1) {
+      const nearby = chunkDiscordMessage(text, limit);
+      expect(nearby.every((chunk) => chunk.length <= limit)).toBe(true);
+      expect(
+        nearby.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) === 2),
+      ).toBe(true);
+    }
+  });
+
   it('keeps a surrogate pair intact when backing off before CRLF', () => {
     const chunks = chunkDiscordMessage(
       `\`\`\`ts\r\n${'x'.repeat(27)}🧪\r\nsecond line\r\n\`\`\``,
