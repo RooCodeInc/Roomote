@@ -11,6 +11,13 @@ const { mockGenerateLlmTaskTitle } = vi.hoisted(() => ({
 const { mockCaptureEvent } = vi.hoisted(() => ({
   mockCaptureEvent: vi.fn().mockResolvedValue(undefined),
 }));
+const { mockChooseAdaptiveEffort } = vi.hoisted(() => ({
+  mockChooseAdaptiveEffort: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock('../adaptive-reasoning-effort', () => ({
+  chooseAdaptiveReasoningEffort: mockChooseAdaptiveEffort,
+}));
 
 vi.mock('../llm-task-title', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../llm-task-title')>()),
@@ -212,6 +219,39 @@ async function launchFresh(
   createdTaskIds.push(run.taskId);
   return run;
 }
+
+describe('adaptive task launch effort', () => {
+  it('persists an automatic effort in the run and respects an explicit selection', async () => {
+    const userId = await createUser();
+    mockChooseAdaptiveEffort.mockResolvedValueOnce('high');
+    const base = {
+      initiator: { kind: 'user' as const, userId },
+      workflow: 'standard' as const,
+      surface: 'web' as const,
+      trigger: 'manual' as const,
+    };
+
+    const automatic = await launchFresh(base);
+    expect(automatic.payload.reasoningEffort).toBe('high');
+    expect(mockChooseAdaptiveEffort).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: 'task', request: 'Do the thing' }),
+    );
+
+    mockChooseAdaptiveEffort.mockClear();
+    const explicit = await launchFresh({
+      ...base,
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          reasoningEffort: 'low',
+        },
+      }),
+    });
+    expect(explicit.payload.reasoningEffort).toBe('low');
+    expect(mockChooseAdaptiveEffort).not.toHaveBeenCalled();
+  });
+});
 
 afterAll(async () => {
   if (createdTaskIds.length > 0) {

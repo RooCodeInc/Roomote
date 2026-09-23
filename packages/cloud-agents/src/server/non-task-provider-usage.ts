@@ -1015,6 +1015,14 @@ export async function resolveNonTaskHelperModel(): Promise<{
   };
 }
 
+/** Resolve the actual orchestration model used by a Fast session turn. */
+export async function resolveNonTaskOrchestrationModelId(
+  model?: string,
+): Promise<string> {
+  return (await resolveNonTaskModelRuntime(model, 'orchestration'))
+    .catalogModelId;
+}
+
 /**
  * Options passed to `client.session.prompt` on top of the shared session/model
  * wiring the helper supplies (`sessionID`, `directory`, `model`). Callers

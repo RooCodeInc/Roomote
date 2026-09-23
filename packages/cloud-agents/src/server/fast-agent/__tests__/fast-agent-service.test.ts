@@ -88,6 +88,8 @@ const mocks = vi.hoisted(() => ({
   getActiveRecipeVerificationTaskId: vi.fn(),
   withEnvironmentVerificationRetryLock: vi.fn(),
   evaluateJudgments: vi.fn(),
+  chooseAdaptiveEffort: vi.fn(),
+  resolveOrchestrationModel: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -300,6 +302,7 @@ vi.mock('../../non-task-provider-usage', async (importOriginal) => {
     isNonTaskImageInputUnsupportedError:
       actual.isNonTaskImageInputUnsupportedError,
     resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
+    resolveNonTaskOrchestrationModelId: mocks.resolveOrchestrationModel,
     NonTaskOpenCodePromptTimeoutError: class extends Error {
       constructor(timeoutMs: number) {
         super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
@@ -321,6 +324,10 @@ vi.mock('../../non-task-provider-usage', async (importOriginal) => {
 vi.mock('../../typesafe-judgment', () => ({
   evaluateTypeSafeJudgments: mocks.evaluateJudgments,
   scoreTypeSafeRelevance: mocks.scoreTypeSafeRelevance,
+}));
+
+vi.mock('../../adaptive-reasoning-effort', () => ({
+  chooseAdaptiveReasoningEffort: mocks.chooseAdaptiveEffort,
 }));
 
 vi.mock('../fast-agent-opencode-session', () => ({
@@ -645,6 +652,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.setOpenCodeSession.mockResolvedValue(undefined);
     mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: true });
     mocks.evaluateJudgments.mockResolvedValue(null);
+    mocks.resolveOrchestrationModel.mockResolvedValue('openai/test');
+    mocks.chooseAdaptiveEffort.mockResolvedValue(null);
     mocks.reconcileRetryNotices.mockResolvedValue(0);
     mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
     mocks.renewRespondingLease.mockResolvedValue(true);
@@ -2291,6 +2300,34 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     },
   );
+
+  it('selects automatic effort once for an unconfigured human turn and passes it to inference', async () => {
+    mocks.chooseAdaptiveEffort.mockResolvedValueOnce('high');
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+    });
+    expect(mocks.resolveOrchestrationModel).toHaveBeenCalledOnce();
+    expect(mocks.chooseAdaptiveEffort).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: 'openai/test',
+        surface: 'session',
+        fallback: null,
+      }),
+    );
+    expect(mocks.generateText.mock.calls[0]?.[0].reasoningEffort).toBe('high');
+  });
+
+  it('does not judge effort for an explicit session selection', async () => {
+    mocks.getSession.mockResolvedValueOnce({
+      id: 'conversation-1',
+      compatibilityMessages: [],
+      reasoningEffort: 'xhigh',
+    });
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    expect(mocks.chooseAdaptiveEffort).not.toHaveBeenCalled();
+    expect(mocks.generateText.mock.calls[0]?.[0].reasoningEffort).toBe('xhigh');
+  });
 
   it('upgrades a legacy setup category question to the trusted integration card', async () => {
     const questions = [

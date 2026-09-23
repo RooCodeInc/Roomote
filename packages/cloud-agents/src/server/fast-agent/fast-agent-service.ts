@@ -165,6 +165,7 @@ import {
   NonTaskOpenCodePromptTimeoutError,
   NON_TASK_INFERENCE_SURFACES,
   resolveNonTaskInputModalityDelivery,
+  resolveNonTaskOrchestrationModelId,
   type NonTaskInputModalityDelivery,
   type NonTaskPromptFile,
   type NonTaskProviderRetryEvent,
@@ -174,6 +175,7 @@ import {
   type NonTaskOpenCodeNativeSteer,
   type NonTaskOpenCodeTaskPart,
 } from '../non-task-provider-usage';
+import { chooseAdaptiveReasoningEffort } from '../adaptive-reasoning-effort';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import {
   createFastAgentReplyStreamPublisher,
@@ -3558,9 +3560,36 @@ export async function answerFastAgentQuestion({
             request: question,
           })
         : undefined;
+    const explicitTurnEffort = reasoningEffort !== undefined;
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
+    if (
+      !explicitTurnEffort &&
+      !reasoningEffort &&
+      session.privacy !== 'private' &&
+      (substantiveHumanInput ||
+        (platformEvent && platformEventKind === 'automation'))
+    ) {
+      try {
+        const modelId = await resolveNonTaskOrchestrationModelId(
+          model ?? undefined,
+        );
+        reasoningEffort = await chooseAdaptiveReasoningEffort({
+          request: question,
+          modelId,
+          model: taskModelOptions.models.find(
+            (option) => option.id === modelId,
+          ),
+          fallback: null,
+          surface: 'session',
+        });
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Adaptive effort model lookup unavailable; using configured effort: ${formatErrorForLog(error)}`,
+        );
+      }
+    }
     currentSessionPrivacy = session.privacy ?? 'shared';
     currentPrivateOwnerUserId = session.privateOwnerUserId ?? null;
     privateSessionsExperimentEnabled =
