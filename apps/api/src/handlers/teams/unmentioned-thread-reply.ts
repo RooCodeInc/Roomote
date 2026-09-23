@@ -87,11 +87,12 @@ function toSharedHistoryMessages(
               mention.userId !== message.authorUserId)),
       ),
       text: message.text,
-      // Graph text keeps a mention as the display name it showed.
+      // teamsGraphHtmlToText renders a mention's `<at>Name</at>` tag as
+      // `@Name`, so that is the token to replace.
       mentions: message.mentions
         .filter((mention) => Boolean(mention.name))
         .map((mention) => ({
-          token: mention.name!,
+          token: `@${mention.name!}`,
           userId: mention.userId ?? mention.applicationId ?? null,
           isBot: isBotGraphMention(mention, normalizedBotAppId),
         })),
