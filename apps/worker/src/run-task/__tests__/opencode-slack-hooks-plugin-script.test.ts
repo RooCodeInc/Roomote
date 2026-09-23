@@ -150,13 +150,14 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     expect(output.output).toBe('tool output');
   });
 
-  it('rejects a progress reply before an automation task has a result', async () => {
+  it('rejects a progress reply before a result-only scan has its result', async () => {
     const stateFilePath = path.join(tempDir, 'slack-state.json');
     fs.writeFileSync(
       stateFilePath,
       JSON.stringify({
         startedAtMs: Date.now(),
         currentTurnRequiresInitialAck: false,
+        suppressNonTerminalRepliesWithoutTurn: true,
         requiresTerminalCloseoutWithoutTurn: true,
       }),
       'utf8',
@@ -185,6 +186,7 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
       JSON.stringify({
         startedAtMs: Date.now(),
         currentTurnRequiresInitialAck: false,
+        suppressNonTerminalRepliesWithoutTurn: true,
         requiresTerminalCloseoutWithoutTurn: true,
       }),
       'utf8',
@@ -202,6 +204,34 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
           callID: 'call_automation_closeout',
         },
         { args: { purpose: 'closeout' } },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not suppress progress for a follow-on task with only a closeout requirement', async () => {
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        startedAtMs: Date.now(),
+        currentTurnRequiresInitialAck: false,
+        requiresTerminalCloseoutWithoutTurn: true,
+      }),
+      'utf8',
+    );
+
+    process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE = stateFilePath;
+    process.env.ROOMOTE_NODE_EXECUTABLE = process.execPath;
+
+    const hooks = await loadHooks();
+    await expect(
+      hooks['tool.execute.before'](
+        {
+          tool: 'roomote_send_chat_reply',
+          sessionID: 'ses_parent',
+          callID: 'call_follow_on_progress',
+        },
+        { args: { purpose: 'progress' } },
       ),
     ).resolves.toBeUndefined();
   });
