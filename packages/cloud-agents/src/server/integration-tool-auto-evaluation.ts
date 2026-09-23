@@ -51,11 +51,11 @@ const QUESTIONS = {
   matchesRequest: {
     type: 'noul',
     instructions:
-      'The user asked for this tool call (`call`), or what they asked for in `userRequest` plainly needs it.',
+      'The user asked for this tool call (`call`), or it is a step toward what they asked for in `userRequest`, such as finding, listing, or looking up something the request needs.',
     criteria: {
-      true: 'The call is what the user asked for, or an obvious step of it.',
+      true: 'The call is what the user asked for, or a step toward it: locating, listing, or looking up what the request needs.',
       false:
-        'The call goes beyond, or aside from, what the user asked for, or there is no request to judge it against.',
+        'The call serves a different purpose than the user’s request, reaches into data the request does not need, or there is no request to judge it against.',
     },
   },
   steeredByUntrustedContent: {
@@ -85,7 +85,7 @@ const QUESTIONS = {
     criteria: {
       true: 'The deployment guidance specifically marks this kind of call or outcome as risky, sensitive, or requiring approval.',
       false:
-        'The deployment guidance is silent about this kind of call or describes it as routine.',
+        'The deployment guidance is silent about this kind of call, describes it as routine, or flags a different kind of action than this call (for example, it flags posting or sending while this call only reads).',
     },
   },
 } as const;
@@ -184,6 +184,23 @@ async function resolveInternalReadAllowlist(input: {
     : null;
 }
 
+/** A Roomote task read aimed at one task, in or out of the allowlist's scope. */
+function isTaskTargetedRead(
+  integrationId: string,
+  toolName: string,
+  args: unknown,
+): boolean {
+  if (integrationId !== ROOMOTE_MCP_ID || toolName !== 'manage_tasks')
+    return false;
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return false;
+  const record = args as Record<string, unknown>;
+  return (
+    typeof record.action === 'string' &&
+    INTERNAL_TASK_READ_ACTIONS.has(record.action) &&
+    typeof record.taskId === 'string'
+  );
+}
+
 export async function isAllowlistedInternalRead(input: {
   integrationId: string;
   toolName: string;
@@ -246,6 +263,15 @@ export async function evaluateIntegrationToolAutoDecision(input: {
         : {}),
       ...(deploymentGuidance ? { guidanceFlagsRisk } : {}),
     };
+    // A code-verified fact, so the model need not guess whether a task read
+    // is about the task the user means.
+    const targetTaskScope =
+      internalReadAllowlist === 'session_task'
+        ? 'The target task was launched by and is linked to the current session.'
+        : !internalReadAllowlist &&
+            isTaskTargetedRead(input.integrationId, input.toolName, input.args)
+          ? 'The target task was not launched by the current session and the user did not name it.'
+          : undefined;
     const answers = await evaluateDecisionModel({
       state: {
         call: {
@@ -254,12 +280,7 @@ export async function evaluateIntegrationToolAutoDecision(input: {
           ...(input.toolDescription
             ? { description: input.toolDescription }
             : {}),
-          ...(internalReadAllowlist === 'session_task'
-            ? {
-                targetTaskScope:
-                  'The target task was launched by and is linked to the current session.',
-              }
-            : {}),
+          ...(targetTaskScope ? { targetTaskScope } : {}),
           // The same redaction the approval card and audit row get.
           arguments: redactIntegrationToolArgs(input.args ?? null, {
             maxStringLength: 4_000,

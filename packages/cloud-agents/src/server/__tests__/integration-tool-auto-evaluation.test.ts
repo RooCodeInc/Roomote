@@ -182,6 +182,10 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(mocks.evaluate.mock.calls[1]![0].questions).toHaveProperty(
       'matchesRequest',
     );
+    // The model is told, as a checked fact, that this task is out of scope.
+    expect(
+      mocks.evaluate.mock.calls[1]![0].state.call.targetTaskScope,
+    ).toContain('not launched by the current session');
 
     const requestNamedTaskId = '1abc123def456';
     mocks.evaluate.mockResolvedValue(
@@ -357,6 +361,9 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       true: expect.stringContaining('specifically marks'),
       false: expect.stringContaining('is silent'),
     });
+    expect(questions.guidanceFlagsRisk.criteria.false).toContain(
+      'flags a different kind of action',
+    );
   });
 
   it('asks when no model or a failed evaluation leaves Auto unable to check', async () => {
