@@ -82,6 +82,22 @@ describe('buildAutoAddedTaskModelSettings', () => {
     expect(result!.taskModelSettings.defaultModelId).toBe('openai/gpt-6-luna');
   });
 
+  it('seeds the OpenCode Go GPT-6 Luna route as the fresh default', () => {
+    const provider = getSetupModelProvider('opencode-go');
+    const result = buildAutoAddedTaskModelSettings({
+      provider,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['opencode-go']),
+    });
+
+    expect(
+      result!.taskModelSettings.models?.map((model) => model.id),
+    ).toContain('opencode-go/gpt-6-luna');
+    expect(result!.taskModelSettings.defaultModelId).toBe(
+      'opencode-go/gpt-6-luna',
+    );
+  });
+
   it('keeps the usable default-catalog models and effective default when another provider is also connected', () => {
     const result = buildAutoAddedTaskModelSettings({
       provider: ANTHROPIC,

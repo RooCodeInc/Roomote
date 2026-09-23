@@ -366,32 +366,16 @@ export type SetupModelProviderDescriptor = {
   recommendedRoleReasoningEfforts?: RecommendedRoleReasoningEfforts;
 };
 
-function buildRecommendedRolesForModel(
+function buildRecommendedCodingPresetRoles(
   modelId: string,
-  reasoningEfforts: Partial<Record<TaskModelRole, ReasoningEffort>> = {},
+  reasoningEffort?: ReasoningEffort,
 ): RecommendedModelPreset['roles'] {
-  return Object.fromEntries(
-    TASK_MODEL_ROLES.map((role) => [
-      role,
-      {
-        modelId,
-        ...(reasoningEfforts[role]
-          ? { reasoningEffort: reasoningEfforts[role] }
-          : {}),
-      },
-    ]),
-  ) as RecommendedModelPreset['roles'];
-}
-
-function buildRecommendedNonCodingRoleModels(
-  modelId: string,
-): RecommendedRoleModels {
-  return Object.fromEntries(
-    TASK_MODEL_ROLES.filter((role) => role !== 'coding').map((role) => [
-      role,
+  return {
+    coding: {
       modelId,
-    ]),
-  ) as RecommendedRoleModels;
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    },
+  };
 }
 
 export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
@@ -410,26 +394,12 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
     id: 'default',
     label: 'Recommended',
     default: true,
-    roles: buildRecommendedRolesForModel('openai/gpt-6-luna', {
-      coding: 'medium',
-      helper: 'low',
-      vision: 'low',
-      codeReview: 'high',
-      explore: 'low',
-      planning: 'xhigh',
-    }),
+    roles: buildRecommendedCodingPresetRoles('openai/gpt-6-luna', 'medium'),
   },
   {
     id: 'luna-max',
     label: 'Luna Max',
-    roles: buildRecommendedRolesForModel('openai/gpt-6-luna', {
-      coding: 'max',
-      helper: 'low',
-      vision: 'low',
-      codeReview: 'high',
-      explore: 'low',
-      planning: 'xhigh',
-    }),
+    roles: buildRecommendedCodingPresetRoles('openai/gpt-6-luna', 'max'),
   },
 ] as const satisfies readonly RecommendedModelPreset[];
 
@@ -438,7 +408,7 @@ const OPENROUTER_EFFICIENT_MODEL_PRESET = {
   label: 'Efficient',
   // Reasoning efforts are intentionally unset so the shared per-role
   // defaults apply, exactly as they do for a hand-configured model.
-  roles: buildRecommendedRolesForModel('openrouter/openai/gpt-6-luna'),
+  roles: buildRecommendedCodingPresetRoles('openrouter/openai/gpt-6-luna'),
 } as const satisfies RecommendedModelPreset;
 
 /**
@@ -524,26 +494,18 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         id: 'balanced',
         label: 'Balanced',
         default: true,
-        roles: buildRecommendedRolesForModel(DEFAULT_TASK_MODEL_ID, {
-          coding: 'medium',
-          helper: 'low',
-          vision: 'low',
-          codeReview: 'medium',
-          explore: 'low',
-          planning: 'high',
-        }),
+        roles: buildRecommendedCodingPresetRoles(
+          DEFAULT_TASK_MODEL_ID,
+          'medium',
+        ),
       },
       {
         id: 'quick-turnaround',
         label: 'Quick turnaround',
-        roles: buildRecommendedRolesForModel('openrouter/openai/gpt-6-luna', {
-          coding: 'low',
-          helper: 'low',
-          vision: 'low',
-          codeReview: 'medium',
-          explore: 'low',
-          planning: 'medium',
-        }),
+        roles: buildRecommendedCodingPresetRoles(
+          'openrouter/openai/gpt-6-luna',
+          'low',
+        ),
       },
       OPENROUTER_EFFICIENT_MODEL_PRESET,
     ],
@@ -575,10 +537,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'minimax-m3': 'vercel/minimax/minimax-m3',
       'grok-4-7': 'vercel/spacexai/grok-4.7',
     }),
-    recommendedRoleModels: buildRecommendedNonCodingRoleModels(
-      'vercel/openai/gpt-6-luna',
-    ),
-    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
   },
   {
     id: 'requesty',
@@ -602,10 +560,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k3': 'requesty/kimi-k3',
       'grok-4-7': 'requesty/xai/grok-4.7',
     }),
-    recommendedRoleModels: buildRecommendedNonCodingRoleModels(
-      'requesty/gpt-6-luna@eu',
-    ),
-    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
   },
   {
     id: 'baseten',
@@ -700,8 +654,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-6-luna': 'azure/gpt-6-luna',
       'claude-opus-5-5': 'azure/claude-opus-5-5',
     }),
-    recommendedRoleModels:
-      buildRecommendedNonCodingRoleModels('azure/gpt-6-luna'),
   },
   {
     id: 'azure-cognitive-services',
@@ -729,9 +681,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-6-luna': 'azure-cognitive-services/gpt-6-luna',
       'claude-opus-5-5': 'azure-cognitive-services/claude-opus-5-5',
     }),
-    recommendedRoleModels: buildRecommendedNonCodingRoleModels(
-      'azure-cognitive-services/gpt-6-luna',
-    ),
   },
   {
     id: 'anthropic',
@@ -837,10 +786,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'minimax-m3': 'opencode/minimax-m3',
       'grok-4-7': 'opencode/grok-4.7',
     }),
-    recommendedRoleModels: buildRecommendedNonCodingRoleModels(
-      'opencode/gpt-6-luna',
-    ),
-    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
   },
   {
     id: 'opencode-go',
@@ -851,7 +796,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       href: 'https://opencode.ai/auth',
       linkLabel: 'Open OpenCode account',
     },
-    defaultRoomoteModel: 'opencode-go/glm-5.3',
+    defaultRoomoteModel: 'opencode-go/gpt-6-luna',
     authKind: 'api-key',
     // Go serves a broader catalog; only models in Roomote's central curated
     // recommendation list are suggested here.
@@ -865,14 +810,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k3': 'opencode-go/kimi-k3',
       'minimax-m3': 'opencode-go/minimax-m3',
       'qwen3-8-max': 'opencode-go/qwen3.8-max',
+      'gpt-6-luna': 'opencode-go/gpt-6-luna',
     }),
-    recommendedRoleModels: {
-      helper: 'opencode-go/gpt-5.6-luna',
-      vision: 'opencode-go/gpt-5.6-luna',
-      codeReview: 'opencode-go/minimax-m3',
-      explore: 'opencode-go/deepseek-v4.1-flash',
-      planning: 'opencode-go/qwen3.8-max',
-    },
   },
   {
     // Bedrock's current console issues API keys for the Mantle endpoint. The
@@ -908,10 +847,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'bedrock-mantle/openai.gpt-5.6-terra',
       'gpt-6-luna': 'bedrock-mantle/openai.gpt-6-luna',
     }),
-    recommendedRoleModels: buildRecommendedNonCodingRoleModels(
-      'bedrock-mantle/openai.gpt-6-luna',
-    ),
-    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
   },
   {
     // Provider id matches the models.dev/opencode `google` provider (Gemini
@@ -1032,9 +967,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         id: 'default',
         label: 'Recommended',
         default: true,
-        roles: buildRecommendedRolesForModel('github-copilot/gpt-6-luna', {
-          coding: 'medium',
-        }),
+        roles: buildRecommendedCodingPresetRoles(
+          'github-copilot/gpt-6-luna',
+          'medium',
+        ),
       },
     ],
   },
