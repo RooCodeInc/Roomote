@@ -136,6 +136,29 @@ describe('DiscordCommunicationProvider', () => {
     );
   });
 
+  it('posts CRLF fenced tables with the closing fence before following text', async () => {
+    let nonce = 123456789012345678n;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(nonce++),
+    });
+    const channelId = '400000000000000001';
+    const rows = Array.from(
+      { length: 130 },
+      (_, index) => `| row ${index} | ${'value '.repeat(4)} |`,
+    );
+    const text = `Summary\r\n\r\n\`\`\`text\r\n${rows.join('\r\n')}\r\n\`\`\`\r\nDone`;
+
+    await provider.postMessage({ channelId, text });
+
+    const messages = server.state.messages[channelId] ?? [];
+    expect(messages.length).toBeGreaterThan(1);
+    for (const message of messages) {
+      expect(message.content.length).toBeLessThanOrEqual(2_000);
+      expect(message.content.match(/^```/gm)?.length ?? 0).toBe(2);
+    }
+    expect(messages.at(-1)?.content).toMatch(/```\r?\nDone$/u);
+  });
+
   it('suppresses link unfurls on messages that carry no embeds of their own', async () => {
     // Discord unfurls any link into a preview card. Roomote posts task links
     // constantly, and Slack has always sent `unfurl_links: false`.
@@ -1281,6 +1304,18 @@ describe('chunkDiscordMessage', () => {
         .every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) % 2 === 0),
     ).toBe(true);
     expect(chunks.at(-1)).toContain('After');
+  });
+
+  it('recognizes CRLF fence closers at a short chunk boundary', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`ts\r\n${'x'.repeat(80)}\r\n\`\`\`\r\nOutside`,
+      40,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+    expect(
+      chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) % 2 === 0),
+    ).toBe(true);
+    expect(chunks.join('')).toMatch(/```\r\nOutside$/u);
   });
 
   it('bounds chunks even when a fence language is too long to repeat', () => {

@@ -328,7 +328,9 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
   };
 
   for (const line of lines) {
-    const value = line.endsWith('\n') ? line.slice(0, -1) : line;
+    const value = line.endsWith('\n')
+      ? line.slice(0, -1).replace(/\r$/u, '')
+      : line;
     const closing: boolean = open
       ? new RegExp(
           `^ {0,3}${open.marker[0]}{${open.marker.length},}[ \\t]*$`,
