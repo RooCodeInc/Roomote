@@ -109,6 +109,33 @@ describe('DiscordCommunicationProvider', () => {
     });
   });
 
+  it('posts long fenced tables as independent bounded code blocks', async () => {
+    let nonce = 123456789012345678n;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(nonce++),
+    });
+    const channelId = '400000000000000001';
+    const rows = Array.from(
+      { length: 130 },
+      (_, index) => `| row ${index} | ${'value '.repeat(4)} |`,
+    );
+    const text = `Summary\n\n\`\`\`text\n| Item | Detail |\n| --- | --- |\n${rows.join('\n')}\n\`\`\`\nDone`;
+
+    await provider.postMessage({ channelId, text });
+
+    const messages = server.state.messages[channelId] ?? [];
+    expect(messages.length).toBeGreaterThan(1);
+    for (const message of messages) {
+      expect(message.content.length).toBeLessThanOrEqual(2_000);
+      expect(message.content.match(/^```/gm)?.length ?? 0).toBe(2);
+    }
+    expect(messages[0]?.content).toContain('Summary\n\n```text\n');
+    expect(messages.at(-1)?.content).toContain('```\nDone');
+    expect(messages.map((message) => message.content).join('\n')).toContain(
+      rows[95],
+    );
+  });
+
   it('suppresses link unfurls on messages that carry no embeds of their own', async () => {
     // Discord unfurls any link into a preview card. Roomote posts task links
     // constantly, and Slack has always sent `unfurl_links: false`.
@@ -1208,5 +1235,68 @@ describe('chunkDiscordMessage', () => {
       'first line',
       'second line',
     ]);
+  });
+
+  it('preserves a boundary-sized fenced message without synthetic markers', () => {
+    const text = `\`\`\`js\n${'x'.repeat(1_990)}\n\`\`\``;
+    expect(text.length).toBe(2_000);
+    expect(chunkDiscordMessage(text)).toEqual([text]);
+  });
+
+  it('splits long fenced lines while retaining the language and exact content', () => {
+    const body = '🧪'.repeat(1_100);
+    const chunks = chunkDiscordMessage(`~~~typescript\n${body}\n~~~`, 80);
+    expect(chunks.length).toBeGreaterThan(2);
+    expect(chunks.every((chunk) => chunk.length <= 80)).toBe(true);
+    expect(chunks.every((chunk) => chunk.startsWith('~~~typescript\n'))).toBe(
+      true,
+    );
+    expect(chunks.every((chunk) => chunk.endsWith('\n~~~'))).toBe(true);
+    expect(
+      chunks
+        .map((chunk) => chunk.slice('~~~typescript\n'.length, -'\n~~~'.length))
+        .join(''),
+    ).toBe(body);
+  });
+
+  it('recognizes closing delimiters and does not treat code-looking lines as closers', () => {
+    const text = `\`\`\`ts\n${'x'.repeat(110)}\n\`\`\`not a close\n${'y'.repeat(90)}\n\`\`\`\nplain ending`;
+    const chunks = chunkDiscordMessage(text, 60);
+    expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+    expect(
+      chunks.filter((chunk) => chunk.includes('not a close')),
+    ).toHaveLength(1);
+    expect(chunks.at(-1)).toContain('plain ending');
+    expect(chunks.at(-1)?.endsWith('```')).toBe(false);
+  });
+
+  it('keeps a fence opening at a chunk boundary and later plain text outside it', () => {
+    const text = `${'p'.repeat(47)}\n\`\`\`js\n${'x'.repeat(90)}\n\`\`\`\nAfter`;
+    const chunks = chunkDiscordMessage(text, 50);
+    expect(chunks.every((chunk) => chunk.length <= 50)).toBe(true);
+    expect(chunks[0]).toBe(`${'p'.repeat(47)}\n`);
+    expect(
+      chunks
+        .slice(1)
+        .every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) % 2 === 0),
+    ).toBe(true);
+    expect(chunks.at(-1)).toContain('After');
+  });
+
+  it('bounds chunks even when a fence language is too long to repeat', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`${'a'.repeat(80)}\nbody\n\`\`\``,
+      40,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+  });
+
+  it('does not stall when the opening line and closing overhead exhaust the budget', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`${'a'.repeat(30)}\nbody\n\`\`\``,
+      39,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 39)).toBe(true);
+    expect(chunks.length).toBeGreaterThan(1);
   });
 });

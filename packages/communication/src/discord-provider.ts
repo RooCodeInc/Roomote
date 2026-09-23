@@ -282,6 +282,13 @@ export function chunkDiscordMessage(
   limit = DISCORD_MAX_MESSAGE_LENGTH,
 ): string[] {
   if (text.length <= limit) return text ? [text] : [];
+  if (/^ {0,3}(?:`{3,}|~{3,})/mu.test(text)) {
+    return chunkDiscordFencedMessage(text, limit);
+  }
+  return chunkDiscordPlainMessage(text, limit);
+}
+
+function chunkDiscordPlainMessage(text: string, limit: number): string[] {
   const chunks: string[] = [];
   let remaining = text;
 
@@ -299,6 +306,91 @@ export function chunkDiscordMessage(
     remaining = remaining.slice(splitAt).trimStart();
   }
   if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+/** Keep each sent message's fenced sections independently renderable. */
+function chunkDiscordFencedMessage(text: string, limit: number): string[] {
+  const chunks: string[] = [];
+  let current = '';
+  type Fence = { opening: string; marker: string };
+  let open: Fence | null = null;
+  const lines = text.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
+
+  const flush = () => {
+    if (!current) return;
+    chunks.push(
+      open
+        ? `${current}${current.endsWith('\n') ? '' : '\n'}${open.marker}`
+        : current,
+    );
+    current = open ? `${open.opening}\n` : '';
+  };
+
+  for (const line of lines) {
+    const value = line.endsWith('\n') ? line.slice(0, -1) : line;
+    const closing: boolean = open
+      ? new RegExp(
+          `^ {0,3}${open.marker[0]}{${open.marker.length},}[ \\t]*$`,
+          'u',
+        ).test(value)
+      : false;
+    const openingMatch: RegExpExecArray | null = open
+      ? null
+      : /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(value);
+    const opening: Fence | null =
+      openingMatch &&
+      !(openingMatch[1]?.startsWith('`') && openingMatch[2]?.includes('`'))
+        ? { opening: value, marker: openingMatch[1]! }
+        : null;
+    const nextOpen: Fence | null = closing ? null : (opening ?? open);
+    const suffixLength = nextOpen ? nextOpen.marker.length + 1 : 0;
+
+    // An unusually long delimiter/language cannot be wrapped safely. Keep
+    // the original plain splitting behavior rather than emitting oversized
+    // messages or manufacturing an invalid fence.
+    if (
+      (opening && line.length + suffixLength >= limit) ||
+      (closing && line.length + open!.opening.length + 1 > limit)
+    ) {
+      return chunkDiscordPlainMessage(text, limit);
+    }
+
+    if (opening || closing) {
+      if (current.length + line.length + suffixLength > limit) flush();
+      current += line;
+      open = nextOpen;
+      continue;
+    }
+
+    let remaining = line;
+    while (remaining) {
+      const capacity = limit - current.length - suffixLength;
+      if (capacity <= 0) {
+        flush();
+        continue;
+      }
+      let take = Math.min(capacity, remaining.length);
+      if (
+        take < remaining.length &&
+        /[\uD800-\uDBFF]/u.test(remaining[take - 1] ?? '') &&
+        /[\uDC00-\uDFFF]/u.test(remaining[take] ?? '')
+      ) {
+        take -= 1;
+      }
+      if (take <= 0) return chunkDiscordPlainMessage(text, limit);
+      current += remaining.slice(0, take);
+      remaining = remaining.slice(take);
+      if (remaining) flush();
+    }
+  }
+  if (current) {
+    chunks.push(
+      open
+        ? `${current}${current.endsWith('\n') ? '' : '\n'}${open.marker}`
+        : current,
+    );
+  }
   return chunks;
 }
 
