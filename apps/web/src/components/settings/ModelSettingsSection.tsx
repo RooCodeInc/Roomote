@@ -285,7 +285,7 @@ function TaskModelRoleEditor({
         : selectedModel?.metadata?.inputTypes
       : null;
   const unsupportedMediaInputs = mediaInputTypes?.length
-    ? (['image', 'sound'] as const).filter(
+    ? (['image', 'sound', 'video'] as const).filter(
         (type) => !mediaInputTypes.includes(type),
       )
     : [];

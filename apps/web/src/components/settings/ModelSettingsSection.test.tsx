@@ -446,7 +446,7 @@ describe('ModelSettingsSection', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent(
-      'not listed as supporting audio input',
+      'not listed as supporting audio or video input',
     );
 
     fireEvent.click(
@@ -455,7 +455,7 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
 
     expect(screen.getByText(/This model is not listed/)).toHaveTextContent(
-      'not listed as supporting image or audio input',
+      'not listed as supporting image or audio or video input',
     );
     await waitFor(() => {
       expect(updateMutateAsyncMock).toHaveBeenCalledWith(
@@ -475,11 +475,22 @@ describe('ModelSettingsSection', () => {
 
   it('recognizes sound as audio support in catalog metadata', () => {
     const data = buildSettingsData();
-    data.models[0]!.metadata.inputTypes = ['text', 'image', 'sound'];
+    data.models[0]!.metadata.inputTypes = ['text', 'image', 'sound', 'video'];
     settingsData.current = data;
     renderModelSettingsSection();
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('warns when a media model supports image and audio but not video', () => {
+    const data = buildSettingsData();
+    data.models[0]!.metadata.inputTypes = ['text', 'image', 'sound'];
+    settingsData.current = data;
+    renderModelSettingsSection();
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'not listed as supporting video input',
+    );
   });
 
   it('disables the runtime model selects when env-managed and omits the per-row Make default button', () => {
