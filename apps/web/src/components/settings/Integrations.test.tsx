@@ -232,28 +232,14 @@ vi.mock('@/hooks/linear', () => ({
 vi.mock('./IntegrationToolApprovalControls', () => ({
   IntegrationToolApprovalList: <T extends { name: string }>({
     tools,
-    isToolEnabled,
-    onToggleTool,
   }: {
     tools: T[];
-    isToolEnabled?: (toolName: string) => boolean;
-    onToggleTool?: (toolName: string, enabled: boolean) => void;
   }) => (
-    <div>
+    <ul aria-label="Integration tools">
       {tools.map((tool) => (
-        <label key={tool.name}>
-          <input
-            type="checkbox"
-            aria-label={tool.name}
-            checked={isToolEnabled?.(tool.name) ?? true}
-            onChange={(event) =>
-              onToggleTool?.(tool.name, event.target.checked)
-            }
-          />
-          {tool.name}
-        </label>
+        <li key={tool.name}>{tool.name}</li>
       ))}
-    </div>
+    </ul>
   ),
 }));
 
@@ -1561,7 +1547,7 @@ describe('Integrations settings', () => {
     ).not.toBeNull();
   });
 
-  it('opens the manage tools dialog without staged availability controls', () => {
+  it('opens the manage tools dialog with the tool list and no Save footer', () => {
     state.deploymentEnablements = [{ mcpId: 'sentry', enabled: true }];
     state.userConnections = [
       { id: 'conn-sentry', mcpId: 'sentry', authStatus: 'authenticated' },
@@ -1586,10 +1572,11 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
+    expect(screen.getByText('get_sentry_resource')).toBeInTheDocument();
+    // Per-tool choices save immediately; there is no staged Save step.
     expect(
-      screen.getByRole('checkbox', { name: 'get_sentry_resource' }),
-    ).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+      screen.queryByRole('button', { name: 'Save changes' }),
+    ).not.toBeInTheDocument();
   });
 
   it('links user-scoped MCP tool authentication errors to personal settings in a new tab', () => {
@@ -2600,7 +2587,7 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
-  it('preserves legacy availability controls when the list rerenders', () => {
+  it('keeps the tool list when the list rerenders', () => {
     state.deploymentEnablements = [{ mcpId: 'sentry', enabled: true }];
     state.userConnections = [
       { id: 'conn-sentry', mcpId: 'sentry', authStatus: 'authenticated' },
@@ -2631,13 +2618,8 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('checkbox', { name: 'get_sentry_resource' }),
-    ).toBeChecked();
-    expect(
-      screen.getByRole('checkbox', { name: 'search_events' }),
-    ).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(screen.getByText('get_sentry_resource')).toBeInTheDocument();
+    expect(screen.getByText('search_events')).toBeInTheDocument();
   });
 
   it('lets an admin store a voice key from the Voice card', async () => {
