@@ -314,26 +314,18 @@ function wrapCell(text: string, width: number): string[] {
   return lines;
 }
 
-function fitColumnWidths(
-  rows: string[][],
-  maxLineWidth: number,
-): number[] | null {
-  const columnCount = rows[0]!.length;
-  const availableCellWidth = maxLineWidth - 3 * columnCount - 1;
-  const minimumWidths = rows[0]!.map((cell) => Math.max(3, cell.length));
-  const minimumWidth = minimumWidths.reduce((sum, width) => sum + width, 0);
-  if (availableCellWidth < minimumWidth) return null;
-
-  const maximumWidths = Array.from({ length: columnCount }, (_, column) =>
-    Math.max(minimumWidths[column]!, ...rows.map((row) => row[column]!.length)),
-  );
-  const widths = [...maximumWidths];
-  const desiredExtra = widths.map(
+function distributeColumnWidths(
+  minimumWidths: number[],
+  maximumWidths: number[],
+  extraBudget: number,
+): number[] {
+  const columnCount = minimumWidths.length;
+  const widths = [...minimumWidths];
+  const desiredExtra = maximumWidths.map(
     (width, index) => width - minimumWidths[index]!,
   );
   const totalExtra = desiredExtra.reduce((sum, width) => sum + width, 0);
-  const extraBudget = availableCellWidth - minimumWidth;
-  if (totalExtra <= extraBudget) return widths;
+  if (totalExtra <= extraBudget) return [...maximumWidths];
   if (totalExtra === 0) return widths;
 
   let allocated = 0;
@@ -354,6 +346,34 @@ function fitColumnWidths(
     }
   }
   return widths;
+}
+
+function fitColumnWidths(
+  rows: string[][],
+  maxLineWidth: number,
+): number[] | null {
+  const columnCount = rows[0]!.length;
+  const availableCellWidth = maxLineWidth - 3 * columnCount - 1;
+  const minimumWidths = Array.from({ length: columnCount }, () => 3);
+  const minimumWidth = 3 * columnCount;
+  if (availableCellWidth < minimumWidth) return null;
+
+  const extraBudget = availableCellWidth - minimumWidth;
+  const headerWidths = rows[0]!.map((cell) => Math.max(3, cell.length));
+  const headerExtra = headerWidths.map((width) => width - 3);
+  const headerExtraTotal = headerExtra.reduce((sum, width) => sum + width, 0);
+  if (headerExtraTotal > extraBudget) {
+    return distributeColumnWidths(minimumWidths, headerWidths, extraBudget);
+  }
+
+  const maximumWidths = Array.from({ length: columnCount }, (_, column) =>
+    Math.max(headerWidths[column]!, ...rows.map((row) => row[column]!.length)),
+  );
+  return distributeColumnWidths(
+    headerWidths,
+    maximumWidths,
+    extraBudget - headerExtraTotal,
+  );
 }
 
 function renderAsciiTable(
@@ -392,10 +412,20 @@ function renderAsciiTable(
     return `${fence}\n${compactLines.join('\n')}\n${fence}`;
   }
 
-  const maxLineWidth = Math.floor(
-    (maxMessageLength - fence.length * 2 - 12) / 5,
-  );
-  const widths = fitColumnWidths(cells, maxLineWidth);
+  let maxLineWidth = Math.floor((maxMessageLength - fence.length * 2 - 12) / 5);
+  let widths = fitColumnWidths(cells, maxLineWidth);
+  for (let attempt = 0; widths && attempt < 10; attempt += 1) {
+    const headerHeight = Math.max(
+      ...cells[0]!.map((cell, index) => wrapCell(cell, widths![index]!).length),
+    );
+    const safeLineWidth = Math.floor(
+      (maxMessageLength - fence.length * 2 - 2 * (headerHeight + 5)) /
+        (headerHeight + 4),
+    );
+    if (safeLineWidth >= maxLineWidth) break;
+    maxLineWidth = safeLineWidth;
+    widths = fitColumnWidths(cells, maxLineWidth);
+  }
   if (!widths) return null;
 
   const horizontalBorder = (fill: '-' | '=') =>
