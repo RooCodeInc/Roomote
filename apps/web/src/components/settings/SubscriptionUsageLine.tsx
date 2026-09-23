@@ -2,6 +2,7 @@
 
 import type {
   SubscriptionProviderUsage,
+  SubscriptionUsageCredits,
   SubscriptionUsageWindow,
 } from '@roomote/types';
 
@@ -59,6 +60,21 @@ function formatUsageWindow(window: SubscriptionUsageWindow): string | null {
   return `${window.label}: ${value}${reset ? ` (${reset})` : ''}`;
 }
 
+function creditsAsUsageWindow(
+  credits: SubscriptionUsageCredits | undefined,
+): SubscriptionUsageWindow | undefined {
+  if (!credits) {
+    return undefined;
+  }
+  if (credits.unlimited) {
+    return { label: 'Credits', unlimited: true };
+  }
+  if (credits.balance !== undefined) {
+    return { label: 'Credits', remaining: credits.balance };
+  }
+  return undefined;
+}
+
 function getUsageWindowPercent(
   window: SubscriptionUsageWindow,
 ): number | undefined {
@@ -111,7 +127,13 @@ export function SubscriptionUsageLine({
   usage: SubscriptionProviderUsage | undefined;
   className?: string;
 }) {
-  const rows = (usage?.windows ?? [])
+  const windows = [...(usage?.windows ?? [])];
+  const creditsWindow = creditsAsUsageWindow(usage?.credits);
+  if (creditsWindow) {
+    windows.push(creditsWindow);
+  }
+
+  const rows = windows
     .map((window) => {
       const label = formatUsageWindow(window);
       if (!label) {
