@@ -342,6 +342,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     isOpenConversationThread: isFastAgentThread,
     allowPeerConversationMessages: peerConversationsEnabled,
     eventMentionsSomebodyElse,
+    conservativePeerConversationFallback: peerConversationsEnabled,
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });
