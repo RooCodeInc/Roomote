@@ -322,6 +322,8 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
           reply: {
             author: 'reply author',
             text: 'can you also add a unit test?',
+            mentionsRoomote: false,
+            mentionsSomebodyElse: false,
           },
         }),
       }),
