@@ -26,8 +26,8 @@ interface TaskToolApprovalAsk {
 }
 
 /**
- * The native approval rules for this run, or undefined when there are none
- * (the `integrationToolApprovals` experiment is off, or the lookup failed).
+ * The native approval rules for this run, or undefined when the lookup
+ * failed.
  * Best effort: the integration proxy refuses a gated call without an
  * approval whatever the agent's own configuration says.
  */

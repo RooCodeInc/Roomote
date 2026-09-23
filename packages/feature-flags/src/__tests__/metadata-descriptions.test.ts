@@ -18,6 +18,7 @@ describe('metadata descriptions', () => {
     'composerSuggestions',
     'integration_keys_enabled',
     'code_mode_integrations_experiment_enabled',
+    'integration_tool_approvals_experiment_enabled',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
@@ -48,7 +49,7 @@ describe('metadata descriptions', () => {
       results: true,
       privateSessions: false,
       browserNotifications: false,
-      integrationToolApprovals: false,
+      integrationToolAutoApprovals: false,
       sessionTaskCommunicationTriage: false,
     });
   });

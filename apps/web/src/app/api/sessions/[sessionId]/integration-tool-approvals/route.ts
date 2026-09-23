@@ -3,7 +3,6 @@ import { z } from 'zod';
 import {
   decideIntegrationToolApproval,
   IntegrationToolApprovalUnavailableError,
-  isDeploymentExperimentEnabled,
   listPendingIntegrationToolApprovals,
 } from '@roomote/db/server';
 import { integrationToolApprovalDecisionSchema } from '@roomote/types';
@@ -35,14 +34,6 @@ async function handle(request: Request, props: Props, method: 'GET' | 'POST') {
       .safeParse(await props.params);
     if (!params.success) return error(400);
     const context = { sessionId: params.data.sessionId, userId: auth.userId };
-
-    // The disabled experiment keeps the surface inert: no pending records
-    // exist, no decisions are accepted, and no execution path changes.
-    if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-      return method === 'GET'
-        ? NextResponse.json({ pending: [] }, { headers })
-        : error(404);
-    }
 
     if (method === 'GET') {
       const pending = await listPendingIntegrationToolApprovals(context);

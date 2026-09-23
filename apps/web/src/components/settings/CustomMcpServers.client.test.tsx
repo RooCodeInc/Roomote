@@ -41,6 +41,7 @@ const {
 } = vi.hoisted(() => ({
   approvals: {
     experimentEnabled: false,
+    modeOverride: null as string | null,
     listEnabled: [] as boolean[],
     scopes: [] as string[],
     setMode: vi.fn(),
@@ -72,8 +73,8 @@ vi.mock('sonner', () => ({
   toast: { success: toastSuccessMock, error: toastErrorMock },
 }));
 
-vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
-  useIntegrationToolApprovalsExperiment: () => ({
+vi.mock('@/hooks/useIntegrationToolAutoApprovalsExperiment', () => ({
+  useIntegrationToolAutoApprovalsExperiment: () => ({
     enabled: approvals.experimentEnabled,
   }),
 }));
@@ -86,7 +87,12 @@ vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
     approvals.listEnabled.push(options.enabled ?? true);
     approvals.scopes.push(options.scope ?? 'deployment');
     return {
-      modes: new Map([[JSON.stringify(['internal-tools', 'search']), 'ask']]),
+      modes: new Map([
+        [
+          JSON.stringify(['internal-tools', 'search']),
+          approvals.modeOverride ?? 'ask',
+        ],
+      ]),
       isUpdating: false,
       setMode: approvals.setMode,
       setModes: vi.fn(),
@@ -351,7 +357,7 @@ describe('useCustomMcpServers', () => {
     ).toBeInTheDocument();
   });
 
-  it('truncates a prompt-length tool description with legacy availability controls', async () => {
+  it('truncates a prompt-length tool description', async () => {
     const long = `Resolves a package name. ${'Details. '.repeat(40)}`.trim();
     state.servers = [buildServer()];
     state.tools = [
@@ -376,7 +382,7 @@ describe('useCustomMcpServers', () => {
     expect(
       screen.getByRole('button', { name: 'Show less' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'Resolve' })).toBeChecked();
+    expect(screen.queryByRole('checkbox')).toBeNull();
     state.tools = [];
   });
 
@@ -424,7 +430,7 @@ describe('useCustomMcpServers', () => {
       );
     });
 
-    it('never loads or shows approval policies for non-admins or with the experiment off', async () => {
+    it('never loads or shows approval policies for non-admins', async () => {
       state.isAdmin = false;
       await openToolsDialog();
       await screen.findByText('Search');
@@ -432,17 +438,24 @@ describe('useCustomMcpServers', () => {
         screen.queryByRole('group', { name: 'Approval mode for search' }),
       ).not.toBeInTheDocument();
       expect(approvals.listEnabled).not.toContain(true);
+    });
 
-      cleanup();
-      state.isAdmin = true;
+    it('shows the approval choices to an admin with Auto off, a default tool as Always allow', async () => {
       approvals.experimentEnabled = false;
-      approvals.listEnabled.length = 0;
-      await openToolsDialog();
-      await screen.findByText('Search');
-      expect(
-        screen.queryByRole('group', { name: 'Approval mode for search' }),
-      ).not.toBeInTheDocument();
-      expect(approvals.listEnabled).not.toContain(true);
+      approvals.modeOverride = 'allow';
+      try {
+        await openToolsDialog();
+        const control = within(
+          await screen.findByRole('group', {
+            name: 'Approval mode for search',
+          }),
+        );
+        expect(
+          control.getByRole('button', { name: 'Always allow' }),
+        ).toHaveAttribute('aria-pressed', 'true');
+      } finally {
+        approvals.modeOverride = null;
+      }
     });
   });
 

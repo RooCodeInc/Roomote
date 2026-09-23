@@ -5,7 +5,6 @@ import {
   findLatestTaskUserRequest,
   fingerprintIntegrationToolCall,
   getSessionForTask,
-  isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
@@ -38,8 +37,7 @@ export type ProxyToolApprovals = {
 };
 
 /**
- * Experiment-gated (`integrationToolApprovals`) enforcement of per-tool
- * approval policies at the integration proxy, the one boundary every caller
+ * Enforcement of per-tool approval policies at the integration proxy, the one boundary every caller
  * crosses. A Session enforces `ask` natively before the call ever gets here,
  * but a task's agent has a shell next to its MCP configuration, so nothing
  * inside the sandbox can be the boundary for a task.
@@ -55,7 +53,7 @@ export type ProxyToolApprovals = {
  * a session `ask` gates a tool the policies leave alone.
  *
  * The stricter of the deployment policy and the acting user's personal
- * policy applies, within the layers that govern the integration. Returns no blocks while the experiment is off.
+ * policy applies, within the layers that govern the integration.
  */
 export async function resolveProxyToolApprovalBlocks(input: {
   integrationId: string;
@@ -66,16 +64,12 @@ export async function resolveProxyToolApprovalBlocks(input: {
    */
   policyScope?: 'deployment' | 'personal';
   tokenType: 'run' | 'auth';
-  /** Looked up only while the experiment is on. */
   resolveActingUserId: () => Promise<string | null>;
   /** The run token's task, for its Session's overrides. */
   resolveTaskId?: () => Promise<string | null>;
 }): Promise<ProxyToolApprovals> {
   const blocks = new Map<string, ProxyToolApprovalBlock>();
   const result: ProxyToolApprovals = { blocks, shadowDefaultTools: false };
-  if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-    return result;
-  }
   const autoState = await resolveIntegrationToolAutoState();
   result.shadowDefaultTools = autoState.mode === 'shadow';
   if (autoState.mode === 'on' && input.tokenType === 'run') {

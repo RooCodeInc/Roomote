@@ -200,6 +200,10 @@ describe('resolveIntegrationToolAutoState', () => {
     await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
       mode: 'off',
     });
+    // Auto has an experiment of its own; per-tool approvals do not.
+    expect(mocks.experiment).toHaveBeenCalledWith(
+      'integrationToolAutoApprovals',
+    );
   });
 
   it('shadows while off with a hosted model, so its judgment can be reviewed', async () => {

@@ -4,7 +4,7 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
   'results',
   'privateSessions',
   'browserNotifications',
-  'integrationToolApprovals',
+  'integrationToolAutoApprovals',
   'sessionTaskCommunicationTriage',
 ] as const;
 
@@ -14,7 +14,8 @@ export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
   results: 'results_page_enabled',
   privateSessions: 'private_sessions_experiment_enabled',
   browserNotifications: 'browser_notifications_experiment_enabled',
-  integrationToolApprovals: 'integration_tool_approvals_experiment_enabled',
+  integrationToolAutoApprovals:
+    'integration_tool_auto_approvals_experiment_enabled',
   sessionTaskCommunicationTriage:
     'session_task_communication_triage_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
@@ -61,11 +62,11 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     description:
       'Offer desktop browser notifications while the relevant session or task page remains open',
   },
-  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.integrationToolApprovals]: {
+  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.integrationToolAutoApprovals]: {
     kind: 'deployment-control',
     group: null,
     description:
-      'Choose which integration tools run automatically, ask for approval, or are disabled. Tools left on Auto can use a judgement model to decide when to ask.',
+      'Show the Auto-approval decisions card in Settings → Agent Guidance for admins to turn on.',
   },
   [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.sessionTaskCommunicationTriage]: {
     kind: 'deployment-control',

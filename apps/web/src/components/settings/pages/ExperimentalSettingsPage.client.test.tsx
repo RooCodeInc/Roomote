@@ -47,9 +47,9 @@ vi.mock(
 );
 
 vi.mock(
-  '@/components/settings/IntegrationToolApprovalsExperimentalSetting',
+  '@/components/settings/IntegrationToolAutoApprovalsExperimentalSetting',
   () => ({
-    IntegrationToolApprovalsExperimentalSetting: () => (
+    IntegrationToolAutoApprovalsExperimentalSetting: () => (
       <div>Integration tool approvals setting</div>
     ),
   }),

@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 
 import type { PermissionRuleset } from '@opencode-ai/sdk/v2/client';
 import {
-  cancelOpenIntegrationToolApprovals,
   claimAutoApprovedIntegrationToolApproval,
   db,
   expireIntegrationToolApproval,
@@ -12,7 +11,6 @@ import {
   insertAutoApprovedIntegrationToolApproval,
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
-  isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
@@ -39,8 +37,7 @@ import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 
 /**
- * Experiment-gated (`integrationToolApprovals`) per-tool approvals for
- * code-mode integration calls in sessions.
+ * Per-tool approvals for code-mode integration calls in sessions.
  *
  * Design notes:
  * - Policies compile into native OpenCode session permission rules (`ask` /
@@ -60,8 +57,6 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
  *   call with changed arguments is a new ask by construction.
  */
 const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
-const INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED =
-  'experiment_disabled';
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
 
 type FastAgentApprovalChatSurface = Extract<
@@ -318,10 +313,6 @@ export async function resolveFastAgentToolApprovalRules(input: {
     }
   | undefined
 > {
-  const enabled = await isDeploymentExperimentEnabled(
-    'integrationToolApprovals',
-  );
-  if (!enabled) return undefined;
   const [policies, userPolicies, sessionOverrides, autoState] =
     await Promise.all([
       listIntegrationToolPolicies(),
@@ -524,22 +515,6 @@ export function createFastAgentToolApprovalBridge(input: {
         toolName: tool.toolName,
         args: args ?? null,
       });
-      // Never auto-approve or record anything while the experiment is off:
-      // a session-scoped allow must not execute the next ask after a mid-turn
-      // disable, exactly like the requester-decision path below.
-      if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-        await cancelOpenIntegrationToolApprovals(
-          INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED,
-        );
-        await helpers
-          .reply(
-            ask.requestId,
-            'reject',
-            'Tool approvals were disabled; the call was not run.',
-          )
-          .catch(() => undefined);
-        return;
-      }
       // "Don't ask again this session": read fresh on every ask so the
       // requester's choice applies to the very next call, even mid-turn. The
       // audit row is written before the relay; if it cannot be written the
@@ -673,24 +648,6 @@ export function createFastAgentToolApprovalBridge(input: {
       const deadline = Date.parse(approval.expiresAt);
       for (;;) {
         if (input.signal?.aborted) return;
-        // The experiment can be disabled while this ask is open. Fail the
-        // native ask closed and leave a terminal, reasoned cancellation so a
-        // later re-enable can never resurrect this grant.
-        if (
-          !(await isDeploymentExperimentEnabled('integrationToolApprovals'))
-        ) {
-          await cancelOpenIntegrationToolApprovals(
-            INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED,
-          );
-          await helpers
-            .reply(
-              ask.requestId,
-              'reject',
-              'Tool approvals were disabled; the call was not run.',
-            )
-            .catch(() => undefined);
-          return;
-        }
         const row = await getIntegrationToolApproval(approval.approvalId);
         if (!row || row.status === 'rejected' || row.status === 'cancelled') {
           await helpers
@@ -713,25 +670,6 @@ export function createFastAgentToolApprovalBridge(input: {
           return;
         }
         if (row.status === 'approved') {
-          // The experiment may have been disabled since this iteration's
-          // top-level check; never relay an execution under a disabled
-          // experiment. The cancellation sweep also marks the row cancelled,
-          // which makes the consume below fail closed as well.
-          if (
-            !(await isDeploymentExperimentEnabled('integrationToolApprovals'))
-          ) {
-            await cancelOpenIntegrationToolApprovals(
-              INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED,
-            );
-            await helpers
-              .reply(
-                ask.requestId,
-                'reject',
-                'Tool approvals were disabled; the call was not run.',
-              )
-              .catch(() => undefined);
-            return;
-          }
           // Consume before relaying: only the first relay of an approved,
           // unclaimed decision reaches OpenCode; a cancelled or
           // double-claimed row fails closed instead of executing twice.

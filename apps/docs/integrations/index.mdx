@@ -62,12 +62,26 @@ silently bypassed with another connection method.
 ## Manage available tools
 
 Some connected integrations expose a **Manage tools** action in
-**Settings > Integrations**. Admins can use it to restrict the types of
-operations Roomote can make with the service.
+**Settings > Integrations**. Admins use it to choose how Roomote can use each of
+the integration's tools:
 
-Use this as a coarse permissions system, for example allowing only read
-operations or restricting access to a certain type of entity. The list varies
-depending on the integration.
+- **Always allow**: the tool runs without asking. This is also what a tool you
+  have not made a choice about does.
+- **Always ask**: every call pauses until the session owner allows it once,
+  allows it for the rest of that session, or denies it. A task asks the owner
+  of its session the same way, and a task nobody can answer for, such as one an
+  automation started, cannot run the tool.
+- **Disable**: the tool is hidden from Roomote and refused if called directly.
+
+Tools are grouped into read-only and write/delete tools when the integration
+describes them, and each group can be set in one click. Choices apply to the
+whole deployment from the next session turn. In a session, the owner can also
+ask to be asked about any tool for the rest of that session from the tool's
+call in the transcript.
+
+Members manage the same choices for their own private MCP servers from
+[Personal Settings](/personal-settings); those apply to their own sessions
+only.
 
 Some integrations can only list tools after the first user links their account
 from [Personal Settings](/personal-settings).

@@ -94,7 +94,7 @@ function summarizeArgs(argsSummary: unknown): string | null {
 }
 
 /**
- * The experiment-gated (`integrationToolApprovals`) card asking the Session
+ * The card asking the Session
  * requester to allow one gated integration tool call or reject it. Allowing
  * resumes that exact paused call once through OpenCode's native permission
  * reply. "Allow for this session" also records a requester-owned

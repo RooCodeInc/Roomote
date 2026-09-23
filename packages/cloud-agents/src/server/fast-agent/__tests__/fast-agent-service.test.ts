@@ -417,6 +417,14 @@ vi.mock('@roomote/redis', () => ({
   getRedis: () => ({ publish: mocks.publishReplyStream }),
 }));
 
+// Per-tool approvals run for every deployment now. These service tests
+// cover other behavior, so the turn compiles no approval rules, exactly as
+// for a deployment where nobody has made a choice.
+vi.mock('../fast-agent-tool-approvals', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../fast-agent-tool-approvals')>()),
+  resolveFastAgentToolApprovalRules: vi.fn(async () => undefined),
+}));
+
 vi.mock('../fast-agent-turn-lock', () => ({
   registerFastAgentTurnActivity: vi.fn(() => vi.fn()),
   FastAgentTurnLockLostError: class extends Error {

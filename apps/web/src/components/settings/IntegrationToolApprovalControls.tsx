@@ -7,14 +7,13 @@ import {
   type IntegrationToolPolicyMode,
 } from '@roomote/types';
 
-import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
+import { useIntegrationToolAutoApprovalsExperiment } from '@/hooks/useIntegrationToolAutoApprovalsExperiment';
 import { useIntegrationToolPolicies } from '@/hooks/useIntegrationToolPolicies';
 
 import {
   Badge,
   BasicTooltip,
   Ban,
-  Checkbox,
   CheckCheck,
   ChevronDown,
   ChevronRight,
@@ -25,10 +24,12 @@ import {
 } from '@/components/system';
 
 /**
- * The stored choices a tool can be given. Auto, the default, is no choice at
- * all: a row shows it as nothing pressed, and pressing the selected choice
- * again returns to it. The group row also offers Auto, so a whole group can
- * be returned to it in one step.
+ * The stored choices a tool can be given. A tool nobody has made a choice
+ * about has no row. With Auto tool approvals on (experimental), that default
+ * is Auto: a row shows it as nothing pressed, pressing the selected choice
+ * again returns to it, and the group row also offers Auto so a whole group
+ * can be returned to it in one step. With Auto off, the default simply runs,
+ * so it shows as Always allow.
  */
 type ApprovalModeOption = {
   mode: IntegrationToolPolicyMode;
@@ -57,8 +58,7 @@ const BULK_MODES: ApprovalModeOption[] = [
 ];
 
 /**
- * Experiment-gated (`integrationToolApprovals`) per-tool approval mode: one
- * click per tool, with the current mode visible without opening anything.
+ * Per-tool approval mode: one click per tool, with the current mode visible without opening anything.
  * Shared by every integration tool management dialog so built-in and custom
  * MCP integrations offer the same choices.
  */
@@ -140,14 +140,16 @@ function groupIntegrationToolsByAccess<T extends GroupableTool>(
 
 /**
  * One tool group. A titled group collapses; an untitled one (unclassified
- * tools) is just the list. With approvals active the header carries the same
- * button row plus Auto, applying to every tool in the group; a mixed group
- * leaves every choice unpressed.
+ * tools) is just the list. For a viewer who can manage the policies the
+ * header carries the same button row, plus Auto while it is available,
+ * applying to every tool in the group; a mixed group leaves every choice
+ * unpressed.
  */
 function IntegrationToolApprovalGroup({
   title,
   count,
   modes,
+  options,
   disabled,
   onChangeAll,
   children,
@@ -157,6 +159,8 @@ function IntegrationToolApprovalGroup({
   count: number;
   /** The group's per-tool modes, or undefined while approvals are inactive. */
   modes?: IntegrationToolPolicyMode[];
+  /** The group row's choices: Auto is among them only while it is available. */
+  options?: ApprovalModeOption[];
   disabled?: boolean;
   onChangeAll?: (mode: IntegrationToolPolicyMode) => void;
   children: ReactNode;
@@ -174,7 +178,7 @@ function IntegrationToolApprovalGroup({
         toolName={`all ${title?.toLowerCase() ?? 'tools'}`}
         value={sharedMode}
         disabled={disabled}
-        options={BULK_MODES}
+        options={options ?? BULK_MODES}
         onChange={onChangeAll}
       />
     ) : null;
@@ -220,10 +224,10 @@ function IntegrationToolApprovalGroup({
 
 /**
  * The grouped tool list every integration tool dialog renders, with the
- * experiment-gated approval controls wired in one place. The dialog supplies
- * each tool's own row content (its label and description); this adds the
- * per-tool mode control and group-level control, or nothing but the grouping
- * when approvals are not active for the viewer.
+ * approval controls wired in one place. The dialog supplies each tool's own
+ * row content (its label and description); this adds the per-tool mode
+ * control and group-level control, or nothing but the grouping for a viewer
+ * who cannot manage the policies.
  */
 export function IntegrationToolApprovalList<T extends ManageableTool>({
   integrationId,
@@ -232,9 +236,6 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
   canManage,
   open,
   tools,
-  isToolEnabled,
-  onToggleTool,
-  toggleDisabled,
 }: {
   /** The id policies are keyed on: the mount name agents see. */
   integrationId: string | null;
@@ -246,18 +247,16 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
   canManage: boolean;
   open: boolean;
   tools: T[];
-  /** Legacy availability controls remain available while approvals are off. */
-  isToolEnabled?: (toolName: string) => boolean;
-  onToggleTool?: (toolName: string, enabled: boolean) => void;
-  toggleDisabled?: boolean;
 }) {
-  const experiment = useIntegrationToolApprovalsExperiment();
-  const active = experiment.enabled && canManage && integrationId != null;
-  const showLegacyAvailability =
-    !experiment.enabled &&
-    canManage &&
-    isToolEnabled != null &&
-    onToggleTool != null;
+  const autoExperiment = useIntegrationToolAutoApprovalsExperiment();
+  // Wait for the Auto experiment before showing any choice, so a default
+  // tool never flickers between Always allow and nothing pressed.
+  const active =
+    canManage && integrationId != null && !autoExperiment.isLoading;
+  const autoAvailable = autoExperiment.enabled;
+  // Without Auto, a tool nobody has made a choice about simply runs.
+  const shownMode = (mode: IntegrationToolPolicyMode) =>
+    !autoAvailable && mode === 'allow' ? 'always_allow' : mode;
   const policies = useIntegrationToolPolicies({
     enabled: open && active,
     scope,
@@ -276,7 +275,8 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
           count={group.tools.length}
           {...(active
             ? {
-                modes: group.tools.map((tool) => modeFor(tool)),
+                modes: group.tools.map((tool) => shownMode(modeFor(tool))),
+                options: autoAvailable ? BULK_MODES : STORED_MODES,
                 onChangeAll: (mode: IntegrationToolPolicyMode) =>
                   policies.setModes(
                     integrationId,
@@ -287,34 +287,12 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
             : {})}
         >
           {group.tools.map((tool) => {
-            const checkboxId = `integration-tool-${integrationId ?? 'unknown'}-${tool.name}`;
             return (
               <div key={tool.name} className="flex items-start gap-3 py-2.5">
-                {showLegacyAvailability ? (
-                  <Checkbox
-                    id={checkboxId}
-                    checked={isToolEnabled(tool.name)}
-                    disabled={toggleDisabled}
-                    onCheckedChange={(checked) =>
-                      onToggleTool(tool.name, checked === true)
-                    }
-                    className="mt-0.5"
-                  />
-                ) : null}
                 <div className="min-w-0 flex-1 text-sm">
-                  {showLegacyAvailability ? (
-                    <label
-                      htmlFor={checkboxId}
-                      title={tool.name}
-                      className="cursor-pointer"
-                    >
-                      {prettifyToolName(tool.name, integrationName)}
-                    </label>
-                  ) : (
-                    <span title={tool.name}>
-                      {prettifyToolName(tool.name, integrationName)}
-                    </span>
-                  )}
+                  <span title={tool.name}>
+                    {prettifyToolName(tool.name, integrationName)}
+                  </span>
                   {tool.description ? (
                     <ToolDescription text={tool.description} />
                   ) : null}
@@ -322,10 +300,11 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
                 {active ? (
                   <IntegrationToolApprovalModeControl
                     toolName={tool.name}
-                    value={modeFor(tool)}
-                    onChange={(mode) =>
-                      policies.setMode(integrationId, tool.name, mode)
-                    }
+                    value={shownMode(modeFor(tool))}
+                    onChange={(mode) => {
+                      if (mode === modeFor(tool)) return;
+                      policies.setMode(integrationId, tool.name, mode);
+                    }}
                   />
                 ) : null}
               </div>
