@@ -1,5 +1,5 @@
 const mocks = vi.hoisted(() => ({
-  resolveAuto: vi.fn(async () => ({ action: 'ask', mode: 'off' }) as unknown),
+  resolveAuto: vi.fn(async () => ({ action: 'run', mode: 'off' }) as unknown),
   autoState: vi.fn(async () => ({ mode: 'off' }) as unknown),
   experiment: vi.fn(async () => true),
   findRun: vi.fn(async () => ({ taskId: 'task-1' }) as unknown),
@@ -9,14 +9,22 @@ const mocks = vi.hoisted(() => ({
   overrides: vi.fn(async () => [] as unknown[]),
   insert: vi.fn(async () => ({ approvalId: 'approval-1' })),
   insertAuto: vi.fn(async () => ({ approvalId: 'approval-auto' })),
+  insertAutoRejected: vi.fn(async () => ({ approvalId: 'approval-denied' })),
   claimAuto: vi.fn(async () => true),
   getApproval: vi.fn(async () => undefined as unknown),
   expire: vi.fn(async () => undefined),
+  isPresent: vi.fn(async () => true),
 }));
 
 vi.mock(
   '@roomote/cloud-agents/server/integration-tool-auto-evaluation',
   () => ({
+    describeIntegrationToolAutoDeny: (evaluation: { unavailable?: string }) =>
+      evaluation.unavailable === 'no_model'
+        ? 'an automatic check is not available'
+        : evaluation.unavailable === 'error'
+          ? 'the automatic check failed'
+          : 'it was assessed as risky',
     resolveIntegrationToolAutoDecision: mocks.resolveAuto,
     resolveIntegrationToolAutoState: mocks.autoState,
   }),
@@ -33,10 +41,14 @@ vi.mock('@roomote/db/server', () => ({
   listIntegrationToolSessionOverrides: mocks.overrides,
   insertIntegrationToolApproval: mocks.insert,
   insertAutoApprovedIntegrationToolApproval: mocks.insertAuto,
+  insertAutoRejectedIntegrationToolApproval: mocks.insertAutoRejected,
   claimAutoApprovedIntegrationToolApproval: mocks.claimAuto,
   getIntegrationToolApproval: mocks.getApproval,
   expireIntegrationToolApproval: mocks.expire,
   fingerprintIntegrationToolCall: (input: unknown) => JSON.stringify(input),
+}));
+vi.mock('@roomote/redis', () => ({
+  isSessionUserPresent: mocks.isPresent,
 }));
 
 import {
@@ -44,11 +56,13 @@ import {
   requestTaskToolApproval,
   resolveTaskIntegrationToolApprovals,
 } from '../task-tool-approvals';
+import { isSessionUserPresent } from '@roomote/redis';
 
 const ownedSession = {
   id: 'session-1',
   ownerKind: 'user',
   ownerUserId: 'owner-1',
+  sourceSurface: 'web',
 };
 const ask = {
   runId: 7,
@@ -74,8 +88,9 @@ beforeEach(() => {
   mocks.userPolicies.mockResolvedValue([]);
   mocks.overrides.mockResolvedValue([]);
   mocks.claimAuto.mockResolvedValue(true);
-  mocks.resolveAuto.mockResolvedValue({ action: 'ask', mode: 'off' });
+  mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
   mocks.autoState.mockResolvedValue({ mode: 'off' });
+  mocks.isPresent.mockResolvedValue(true);
 });
 
 describe('resolveTaskIntegrationToolApprovals', () => {
@@ -195,12 +210,29 @@ describe('requestTaskToolApproval', () => {
     expect(mocks.claimAuto).not.toHaveBeenCalled();
     expect(mocks.insert).not.toHaveBeenCalled();
 
-    // Risky: the card, with the model's view on it.
+    // Risky: the present owner gets a card with the assessment.
+    const riskyEvaluation = { ...evaluation, recommendation: 'ask' };
     mocks.resolveAuto.mockResolvedValue({
       action: 'ask',
       mode: 'on',
-      evaluation: { ...evaluation, recommendation: 'ask' },
+      evaluation: riskyEvaluation,
     });
+    await expect(requestTaskToolApproval(ask)).resolves.toEqual({
+      outcome: 'pending',
+      approvalId: 'approval-1',
+    });
+    expect(mocks.insert).toHaveBeenCalledWith(
+      { sessionId: 'session-1', userId: 'owner-1' },
+      expect.objectContaining({
+        taskId: 'task-1',
+        nativeRequestId: 'per_1',
+        autoEvaluation: riskyEvaluation,
+      }),
+    );
+    expect(mocks.insertAutoRejected).not.toHaveBeenCalled();
+
+    // Auto failing outright still asks a present owner.
+    mocks.resolveAuto.mockRejectedValue(new Error('settings unavailable'));
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({
       outcome: 'pending',
       approvalId: 'approval-1',
@@ -208,25 +240,109 @@ describe('requestTaskToolApproval', () => {
     expect(mocks.insert).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.objectContaining({
-        autoEvaluation: { ...evaluation, recommendation: 'ask' },
+        autoEvaluation: expect.objectContaining({
+          recommendation: 'ask',
+          unavailable: 'error',
+        }),
       }),
     );
-
-    // Auto failing outright asks a person.
-    mocks.resolveAuto.mockRejectedValue(new Error('settings unavailable'));
-    await expect(requestTaskToolApproval(ask)).resolves.toEqual({
-      outcome: 'pending',
-      approvalId: 'approval-1',
-    });
+    expect(mocks.insertAutoRejected).not.toHaveBeenCalled();
   });
 
   it('runs a default tool asked under a stale rule once Auto is off', async () => {
-    mocks.resolveAuto.mockResolvedValue({ action: 'ask', mode: 'off' });
+    mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({
       outcome: 'not_required',
     });
     expect(mocks.insert).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      'risky',
+      { recommendation: 'ask', answers: { riskScore: 0.9 }, evaluatedAt: '' },
+      'it was assessed as risky',
+    ],
+    [
+      'evaluation error',
+      { recommendation: 'ask', unavailable: 'error', evaluatedAt: '' },
+      'the automatic check failed',
+    ],
+    [
+      'no model',
+      { recommendation: 'ask', unavailable: 'no_model', evaluatedAt: '' },
+      'an automatic check is not available',
+    ],
+  ])(
+    'denies an Auto %s call when the Session owner is absent',
+    async (_label, evaluation, reason) => {
+      mocks.isPresent.mockResolvedValue(false);
+      mocks.resolveAuto.mockResolvedValue({
+        action: 'ask',
+        mode: 'on',
+        evaluation,
+      });
+
+      await expect(requestTaskToolApproval(ask)).resolves.toEqual({
+        outcome: 'denied',
+        reason,
+      });
+      expect(isSessionUserPresent).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        userId: 'owner-1',
+      });
+      expect(mocks.insertAutoRejected).toHaveBeenCalledWith(
+        { sessionId: 'session-1', userId: 'owner-1' },
+        expect.objectContaining({
+          taskId: 'task-1',
+          autoEvaluation: evaluation,
+        }),
+      );
+      expect(mocks.insert).not.toHaveBeenCalled();
+    },
+  );
+
+  it('asks when the task presence lookup fails', async () => {
+    const evaluation = { recommendation: 'ask', evaluatedAt: '' };
+    mocks.resolveAuto.mockResolvedValue({
+      action: 'ask',
+      mode: 'on',
+      evaluation,
+    });
+    mocks.isPresent.mockRejectedValueOnce(new Error('redis unavailable'));
+
+    await expect(requestTaskToolApproval(ask)).resolves.toEqual({
+      outcome: 'pending',
+      approvalId: 'approval-1',
+    });
+    expect(mocks.insert).toHaveBeenCalledWith(
+      { sessionId: 'session-1', userId: 'owner-1' },
+      expect.objectContaining({ autoEvaluation: evaluation }),
+    );
+    expect(mocks.insertAutoRejected).not.toHaveBeenCalled();
+  });
+
+  it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
+    'treats a %s task Session as present without browser presence',
+    async (sourceSurface) => {
+      mocks.sessionForTask.mockResolvedValue({
+        ...ownedSession,
+        sourceSurface,
+      });
+      const evaluation = { recommendation: 'ask', evaluatedAt: '' };
+      mocks.resolveAuto.mockResolvedValue({
+        action: 'ask',
+        mode: 'on',
+        evaluation,
+      });
+
+      await expect(requestTaskToolApproval(ask)).resolves.toEqual({
+        outcome: 'pending',
+        approvalId: 'approval-1',
+      });
+      expect(isSessionUserPresent).not.toHaveBeenCalled();
+    },
+  );
 
   it('runs a tool the owner chose to always allow, without the model', async () => {
     mocks.userPolicies.mockResolvedValue([

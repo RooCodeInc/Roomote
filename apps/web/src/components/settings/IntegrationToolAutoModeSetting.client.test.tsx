@@ -49,6 +49,11 @@ describe('IntegrationToolAutoModeSetting', () => {
     render(<IntegrationToolAutoModeSetting />);
     expect(screen.getByRole('radio', { name: /^Off/ })).toBeChecked();
     expect(
+      screen.getByText(
+        "Let Roomote handle routine work and ask before anything risky. When you're away, risky calls are blocked. Your other tool choices stay the same.",
+      ),
+    ).toBeInTheDocument();
+    expect(
       screen.queryByLabelText('Additional instructions'),
     ).not.toBeInTheDocument();
     fireEvent.click(

@@ -24,9 +24,9 @@ import {
 /** Customer-facing copy: what Auto mode does for the person, no mechanics. */
 const COPY = {
   description:
-    'Let Roomote handle routine work and ask before anything risky. Your other tool choices stay the same.',
+    "Let Roomote handle routine work and ask before anything risky. When you're away, risky calls are blocked. Your other tool choices stay the same.",
   off: 'Keep each tool’s current choice.',
-  on: 'Handle routine work automatically and ask before anything risky.',
+  on: "Handle routine work automatically and ask before anything risky. Risky calls are blocked when you're away.",
   disclosure: 'Additional instructions',
   guidanceLabel: 'Additional instructions',
   guidanceHelp:
@@ -45,8 +45,8 @@ const MODES: { mode: IntegrationToolAutoMode; label: string; hint: string }[] =
 
 /**
  * Deployment-wide Auto mode for tool approvals. Rendered on the
- * Integrations page, only while the experiment is on. Reject is never affected, and the model can only ever run a call
- * or ask; it never rejects one.
+ * Integrations page, only while the experiment is on. Reject is never
+ * affected, and Auto only runs routine calls; it asks about anything risky.
  */
 export function IntegrationToolAutoModeSetting() {
   const trpc = useTRPC();

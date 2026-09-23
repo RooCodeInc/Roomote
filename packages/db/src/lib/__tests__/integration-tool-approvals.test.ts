@@ -17,6 +17,7 @@ import {
   fingerprintIntegrationToolCall,
   getIntegrationToolApproval,
   insertAutoApprovedIntegrationToolApproval,
+  insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
   IntegrationToolApprovalUnavailableError,
   listIntegrationToolPolicies,
@@ -584,6 +585,51 @@ describe('auto-approved reservations', () => {
     const row = await getIntegrationToolApproval(reservation.approvalId);
     expect(row?.status).toBe('cancelled');
     expect(row?.cancelReason).toBe('experiment_disabled');
+  });
+});
+
+describe('auto-rejected audit rows', () => {
+  it('inserts a born-terminal auto_rejected row with the model assessment and no decider', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const evaluation = {
+      recommendation: 'ask' as const,
+      answers: { riskScore: 0.9 },
+      evaluatedAt: new Date().toISOString(),
+    };
+    const denial = await insertAutoRejectedIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+        autoEvaluation: evaluation,
+      },
+    );
+    expect(denial.status).toBe('auto_rejected');
+    const row = await getIntegrationToolApproval(denial.approvalId);
+    expect(row?.status).toBe('auto_rejected');
+    expect(row?.decidedByUserId).toBeNull();
+    expect(row?.decidedAt).not.toBeNull();
+    expect(row?.autoEvaluation).toMatchObject({ recommendation: 'ask' });
+    // Terminal: nothing can claim, decide, or cancel it into a run.
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: denial.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      decideIntegrationToolApproval(
+        { sessionId, userId },
+        { approvalId: denial.approvalId, decision: 'approved' },
+      ),
+    ).rejects.toThrow();
+    expect((await getIntegrationToolApproval(denial.approvalId))?.status).toBe(
+      'auto_rejected',
+    );
   });
 });
 

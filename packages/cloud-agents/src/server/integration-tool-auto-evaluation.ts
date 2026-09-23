@@ -82,8 +82,9 @@ export type AutoRiskAnswers = {
  * Run without a person only when the call reads and changes nothing (with
  * confidence), is what the user asked for when that is known, is not steered
  * by untrusted content, and the deployment's guidance does not flag it.
- * Anything less asks. The model can only ever recommend running the call or
- * asking, never rejecting.
+ * Anything less asks a person. The model can only ever recommend running the
+ * call or asking a person; presence decides whether that ask becomes a card
+ * or a denial.
  */
 export function recommendFromAutoAnswers(
   answers: AutoRiskAnswers,
@@ -178,11 +179,14 @@ export async function evaluateIntegrationToolAutoDecision(input: {
 }
 
 /**
- * What Auto mode is doing right now. `on` needs the experiment, the setting,
- * and a hosted judgment model: the helper-model fallback is an LLM call per
- * tool call, which is never turned on implicitly. `shadow` is the same
- * assessment recorded without acting, while Auto is off and a hosted model
- * is there to do it cheaply.
+ * What Auto mode is doing right now. `on` is the experiment plus the setting:
+ * every default tool call is gated and must be assessed before it runs. `on`
+ * does not imply a hosted judgment model is configured — the On control is
+ * disabled without one, but the setting can outlive the model, and callers
+ * must treat `on` without a judgment model as an ask for a present owner and
+ * a denial for an absent owner. `shadow` is the same assessment recorded
+ * without acting, while Auto is off and a hosted model is there to do it
+ * cheaply.
  */
 export type IntegrationToolAutoState = {
   mode: 'off' | 'shadow' | 'on';
@@ -197,8 +201,13 @@ export async function resolveIntegrationToolAutoState(): Promise<IntegrationTool
     resolveDecisionModel().catch(() => null),
   ]);
   const hosted = model?.kind === 'judgment';
-  const mode =
-    !enabled || !hosted ? 'off' : settings.mode === 'on' ? 'on' : 'shadow';
+  const mode = !enabled
+    ? 'off'
+    : settings.mode === 'on'
+      ? 'on'
+      : hosted
+        ? 'shadow'
+        : 'off';
   return { mode, settings, model: model?.kind ?? null };
 }
 
@@ -244,7 +253,7 @@ export function recordIntegrationToolShadowEvaluationInBackground(input: {
 }
 
 export type IntegrationToolAutoDecision =
-  | { action: 'ask'; mode: 'off' }
+  | { action: 'run'; mode: 'off' }
   | {
       action: 'approve' | 'ask';
       mode: 'on';
@@ -252,15 +261,47 @@ export type IntegrationToolAutoDecision =
     };
 
 /**
+ * The short, model-facing reason an Auto denial happened, suitable for the
+ * tool error returned to the agent.
+ */
+export function describeIntegrationToolAutoDeny(
+  evaluation: IntegrationToolAutoEvaluation,
+): string {
+  if (evaluation.unavailable === 'no_model') {
+    return 'an automatic check is not available';
+  }
+  if (evaluation.unavailable === 'error') {
+    return 'the automatic check failed';
+  }
+  return 'it was assessed as risky';
+}
+
+/**
  * How Auto treats one call to a default tool. `approve` means the call is
- * routine enough to run without a card. Only `on` can produce it, and only
- * after the assessment has actually run, so an error still asks.
+ * routine enough to run; anything else — a risky assessment, an evaluation
+ * error, or Auto on without a judgment model to assess with — asks the owner.
+ * Presence decides whether that ask becomes a card or a denial. Only `off`
+ * (Auto disabled) lets the call run unassessed.
  */
 export async function resolveIntegrationToolAutoDecision(
   input: Parameters<typeof evaluateIntegrationToolAutoDecision>[0],
 ): Promise<IntegrationToolAutoDecision> {
   const state = await resolveIntegrationToolAutoState();
-  if (state.mode !== 'on') return { action: 'ask', mode: 'off' };
+  if (state.mode !== 'on') return { action: 'run', mode: 'off' };
+  if (state.model !== 'judgment') {
+    // Auto is on but nothing can assess the call. The helper model fallback is
+    // an LLM call per tool call and is never used here; ask/deny is decided by
+    // the Session owner's presence at the enforcement point.
+    return {
+      action: 'ask',
+      mode: 'on',
+      evaluation: {
+        recommendation: 'ask',
+        unavailable: 'no_model',
+        evaluatedAt: new Date().toISOString(),
+      },
+    };
+  }
   const evaluation = await evaluateIntegrationToolAutoDecision({
     ...input,
     deploymentGuidance: state.settings.policy,

@@ -7,6 +7,7 @@ import {
   getIntegrationToolApproval,
   getSessionForTask,
   insertAutoApprovedIntegrationToolApproval,
+  insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
@@ -14,7 +15,9 @@ import {
   listIntegrationToolUserPolicies,
   taskRuns,
 } from '@roomote/db/server';
+import { isSessionUserPresent } from '@roomote/redis';
 import {
+  describeIntegrationToolAutoDeny,
   resolveIntegrationToolAutoDecision,
   resolveIntegrationToolAutoState,
 } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
@@ -27,6 +30,48 @@ import {
   type IntegrationToolPolicyScope,
   type TaskIntegrationToolApprovals,
 } from '@roomote/types';
+
+const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
+
+async function isTaskSessionOwnerPresent(input: {
+  sessionId: string;
+  userId: string;
+  sourceSurface: string | null | undefined;
+}): Promise<boolean> {
+  if (
+    input.sourceSurface === 'slack' ||
+    input.sourceSurface === 'discord' ||
+    input.sourceSurface === 'teams' ||
+    input.sourceSurface === 'telegram'
+  ) {
+    return true;
+  }
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      isSessionUserPresent({
+        sessionId: input.sessionId,
+        userId: input.userId,
+      }),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => {
+          console.warn(
+            `[Task tool approvals] Presence lookup timed out for Session ${input.sessionId}; asking defensively.`,
+          );
+          resolve(true);
+        }, SESSION_PRESENCE_LOOKUP_TIMEOUT_MS);
+        timeout.unref?.();
+      }),
+    ]);
+  } catch (error) {
+    console.warn(
+      `[Task tool approvals] Presence lookup failed for Session ${input.sessionId}; asking defensively: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return true;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 /**
  * Experiment-gated (`integrationToolApprovals`) approvals for a task's agent.
@@ -48,6 +93,7 @@ async function resolveTaskApprovalSession(runId: number) {
     sessionId: session.id,
     ownerUserId:
       session.ownerKind === 'user' ? (session.ownerUserId ?? null) : null,
+    sourceSurface: session.sourceSurface,
   };
 }
 
@@ -119,6 +165,8 @@ type TaskToolApprovalRequestResult =
   | { outcome: 'unavailable' }
   /** The Session owner already chose not to be asked about this tool. */
   | { outcome: 'approved' }
+  /** Auto mode blocked the call; the reason goes back to the model. */
+  | { outcome: 'denied'; reason: string }
   | { outcome: 'pending'; approvalId: string };
 
 /** Record one native ask from a task's agent. */
@@ -171,7 +219,8 @@ export async function requestTaskToolApproval(input: {
   const allowedForSession =
     overrideForSession === 'allow' || effectiveMode === 'always_allow';
   // Auto mode assesses a call to a default tool only; a tool someone made a
-  // choice about is theirs to decide. Any failure on this path asks a person.
+  // choice about is theirs to decide. A risky or unavailable assessment asks
+  // the Session owner when present and is denied when they are away.
   const auto = integrationToolModeIsAutoAssessed({
     policyMode,
     sessionOverrideMode: overrideForSession,
@@ -183,10 +232,18 @@ export async function requestTaskToolApproval(input: {
         userRequest: input.userRequest,
         userId: session.ownerUserId,
         taskId: session.taskId,
-      }).catch(() => ({ action: 'ask' as const, mode: 'failed' as const }))
+      }).catch(() => ({
+        action: 'ask' as const,
+        mode: 'on' as const,
+        evaluation: {
+          recommendation: 'ask' as const,
+          unavailable: 'error' as const,
+          evaluatedAt: new Date().toISOString(),
+        },
+      }))
     : undefined;
   // A default tool asked while Auto is off (a stale native rule) runs as it
-  // always has; a failed assessment asks a person instead.
+  // always has.
   if (auto?.mode === 'off') return { outcome: 'not_required' };
   if (allowedForSession) {
     // Same reservation-and-claim audit path as a Session's own agent.
@@ -210,9 +267,27 @@ export async function requestTaskToolApproval(input: {
     });
     return { outcome: 'approved' };
   }
+  if (auto?.action === 'ask') {
+    const ownerPresent = await isTaskSessionOwnerPresent({
+      sessionId: session.sessionId,
+      userId: session.ownerUserId,
+      sourceSurface: session.sourceSurface,
+    });
+    if (!ownerPresent) {
+      // Born-terminal audit row; no card is shown while the owner is away.
+      await insertAutoRejectedIntegrationToolApproval(context, {
+        ...call,
+        autoEvaluation: auto.evaluation,
+      });
+      return {
+        outcome: 'denied',
+        reason: describeIntegrationToolAutoDeny(auto.evaluation),
+      };
+    }
+  }
   const approval = await insertIntegrationToolApproval(context, {
     ...call,
-    ...(auto?.mode === 'on' ? { autoEvaluation: auto.evaluation } : {}),
+    ...(auto?.action === 'ask' ? { autoEvaluation: auto.evaluation } : {}),
   });
   return { outcome: 'pending', approvalId: approval.approvalId };
 }

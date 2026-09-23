@@ -693,6 +693,51 @@ export async function insertAutoApprovedIntegrationToolApproval(
 }
 
 /**
+ * Audit row for a call Auto mode denied: born terminal `auto_rejected`, so
+ * no later decision or relay can ever run it, and the model's assessment is
+ * recorded beside the denial. `decidedByUserId` stays null: the decision
+ * model denied, not a person.
+ */
+export async function insertAutoRejectedIntegrationToolApproval(
+  context: { sessionId: string; userId: string },
+  input: {
+    integrationId: string;
+    toolName: string;
+    nativeRequestId: string;
+    argsFingerprint: string;
+    argsSummary: unknown;
+    /** Set when a task's agent asked; see `claimTaskIntegrationToolCall`. */
+    taskId?: string;
+    /** The decision model's assessment, or why it could not assess. */
+    autoEvaluation: IntegrationToolAutoEvaluation;
+  },
+): Promise<IntegrationToolApprovalMetadata> {
+  return db.transaction(async (tx) => {
+    const owner = await requireSessionOwner(tx, context);
+    const [row] = await tx
+      .insert(integrationToolApprovalRequests)
+      .values({
+        sessionId: context.sessionId,
+        requesterUserId: owner.id,
+        taskId: input.taskId ?? null,
+        autoEvaluation: input.autoEvaluation,
+        integrationId: input.integrationId,
+        toolName: input.toolName,
+        nativeRequestId: input.nativeRequestId,
+        argsFingerprint: input.argsFingerprint,
+        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        status: 'auto_rejected',
+        decidedByUserId: null,
+        decidedAt: sql`clock_timestamp()`,
+        expiresAt: sql`clock_timestamp()`,
+      })
+      .returning();
+    if (!row) throw new IntegrationToolApprovalUnavailableError('write_failed');
+    return approvalMetadata(row);
+  });
+}
+
+/**
  * Atomically claim an unrelayed auto-approval for relay: only an `approved`,
  * unclaimed row transitions to terminal `auto_approved`. The experiment
  * disable sweep cancels `approved` rows, so a sweep that lands first makes

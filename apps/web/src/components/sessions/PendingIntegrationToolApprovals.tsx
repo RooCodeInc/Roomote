@@ -13,8 +13,8 @@ import {
 } from '@/components/system';
 import {
   MCP_INTEGRATIONS,
-  type IntegrationToolApprovalMetadata,
   type IntegrationToolAutoEvaluation,
+  type IntegrationToolApprovalMetadata,
 } from '@roomote/types';
 
 const integrationNames = new Map(
@@ -65,19 +65,15 @@ function approvalPrompt(item: IntegrationToolApprovalMetadata): string {
   return `Let ${name} use this tool?`;
 }
 
-/**
- * One line on what Auto made of the call, so the person deciding knows
- * why they are being asked. Auto never rejects, so this only ever explains
- * why it did not run the call on its own.
- */
+/** Explain why Auto handed a call to the Session owner. */
 function describeAutoEvaluation(
   evaluation: IntegrationToolAutoEvaluation,
 ): string {
   if (evaluation.unavailable === 'no_model') {
-    return 'Auto couldn’t check this call because no decision model is available.';
+    return "Auto couldn't check this call because an automatic check wasn't available, so it asked you.";
   }
   if (evaluation.unavailable === 'error') {
-    return 'Auto couldn’t check this call.';
+    return "Auto couldn't check this call, so it asked you.";
   }
   return evaluation.recommendation === 'approve'
     ? 'Auto would have run this call.'

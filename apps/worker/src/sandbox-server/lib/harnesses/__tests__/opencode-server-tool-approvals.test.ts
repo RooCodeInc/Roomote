@@ -106,6 +106,24 @@ describe('createTaskToolApprovalRelay', () => {
     },
   );
 
+  it('rejects with the Auto mode tool error when the outcome is denied', async () => {
+    const { client, api, relay } = setup([], {
+      outcome: 'denied',
+      reason: 'it was assessed as risky',
+    });
+    relay.handleAsk(ask);
+    await replied(client);
+    expect(api.status).not.toHaveBeenCalled();
+    expect(client.replyPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reply: 'reject',
+        message: expect.stringContaining(
+          'Auto mode blocked this tool call because it was assessed as risky and the session owner was away',
+        ),
+      }),
+    );
+  });
+
   it('rejects when nobody can approve, the tool is unknown, or the relay fails', async () => {
     const unavailable = setup([], { outcome: 'unavailable' });
     unavailable.relay.handleAsk(ask);

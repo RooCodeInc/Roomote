@@ -57,6 +57,7 @@ import {
   type EnvironmentRecipe,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
+  type FastAgentSurface,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
   LIST_REPOSITORIES_MAX_LIMIT,
@@ -225,6 +226,7 @@ import {
 } from './fast-agent-tool-policy';
 import {
   createFastAgentToolApprovalBridge,
+  isFastAgentApprovalChatSurface,
   resolveFastAgentToolApprovalSession,
   integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
@@ -6295,6 +6297,10 @@ export async function answerFastAgentQuestion({
                 inferenceAttemptNumber += 1;
                 resolvedInferenceModel = undefined;
                 captureInferenceContext('prompt_submission');
+                const approvalNotificationSurface =
+                  isFastAgentApprovalChatSurface(conversation.surface)
+                    ? conversation.surface
+                    : undefined;
                 // Native per-tool approval bridge for gated code-mode
                 // integration calls. Web conversations surface the pending
                 // card in the Session transcript; chat-originated
@@ -6308,16 +6314,16 @@ export async function answerFastAgentQuestion({
                       sessionId: toolApprovalSessionId,
                       // The Session owner decides, even on a participant's turn.
                       userId: toolApprovalDeciderUserId,
+                      surface: conversation.surface as FastAgentSurface,
                       integrations: availableIntegrations,
                       autoToolKeys: toolApprovalRules.autoToolKeys,
                       userRequest: question,
                       signal: promptSignal,
-                      ...(conversation.surface === 'slack' ||
-                      conversation.surface === 'discord'
+                      ...(approvalNotificationSurface
                         ? {
                             notify: async (approval) => {
                               const sessionUrl = buildFastSessionUrl(
-                                conversation.surface as 'slack' | 'discord',
+                                approvalNotificationSurface,
                                 session.id,
                               );
                               await adapter.postReply({

@@ -156,7 +156,7 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(questions.guidanceFlagsRisk).toBeDefined();
   });
 
-  it('falls back to asking with no model or a failed evaluation', async () => {
+  it('asks when no model or a failed evaluation leaves Auto unable to check', async () => {
     mocks.evaluate.mockResolvedValue(null);
     await expect(
       evaluateIntegrationToolAutoDecision(call),
@@ -173,7 +173,7 @@ describe('evaluateIntegrationToolAutoDecision', () => {
 });
 
 describe('resolveIntegrationToolAutoState', () => {
-  it('is on only with the experiment, the setting, and a hosted judgment model', async () => {
+  it('is on with the experiment and the setting, even when no judgment model is left', async () => {
     mocks.settings.mockResolvedValue({ mode: 'on', policy: 'Reads are fine.' });
     await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
       mode: 'on',
@@ -181,15 +181,17 @@ describe('resolveIntegrationToolAutoState', () => {
       settings: { policy: 'Reads are fine.' },
     });
 
-    // The helper-model fallback is an LLM call per tool call: never implied.
+    // The setting can outlive the model: on stays on so callers ask or deny
+    // based on presence instead of silently running unassessed calls. The
+    // helper-model fallback is an LLM call per tool call: never implied.
     mocks.resolveModel.mockResolvedValue({ kind: 'helper', model: 'm' });
     await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
-      mode: 'off',
+      mode: 'on',
       model: 'helper',
     });
     mocks.resolveModel.mockResolvedValue(null);
     await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
-      mode: 'off',
+      mode: 'on',
       model: null,
     });
 
@@ -256,9 +258,9 @@ describe('recordIntegrationToolShadowEvaluationInBackground', () => {
 });
 
 describe('resolveIntegrationToolAutoDecision', () => {
-  it('asks unless on, and then runs only a routine call', async () => {
+  it('runs unassessed unless on, and then runs only a routine call', async () => {
     await expect(resolveIntegrationToolAutoDecision(call)).resolves.toEqual({
-      action: 'ask',
+      action: 'run',
       mode: 'off',
     });
     expect(mocks.evaluate).not.toHaveBeenCalled();
@@ -281,7 +283,7 @@ describe('resolveIntegrationToolAutoDecision', () => {
       'Reads are routine.',
     );
 
-    // Risky, or no model at all: the card shows.
+    // Risky, or a failed evaluation: the call asks its owner.
     mocks.evaluate.mockResolvedValue(
       modelAnswers({ ...routine, risk: { score: 2, confidence: 0.9 } }),
     );
@@ -296,5 +298,23 @@ describe('resolveIntegrationToolAutoDecision', () => {
       mode: 'on',
       evaluation: { unavailable: 'no_model' },
     });
+  });
+
+  it('asks when Auto is on but no judgment model is configured', async () => {
+    mocks.settings.mockResolvedValue({ mode: 'on', policy: '' });
+    mocks.resolveModel.mockResolvedValue(null);
+    await expect(
+      resolveIntegrationToolAutoDecision(call),
+    ).resolves.toMatchObject({
+      action: 'ask',
+      mode: 'on',
+      evaluation: { recommendation: 'ask', unavailable: 'no_model' },
+    });
+    // The helper model is never used for tool-call assessment.
+    mocks.resolveModel.mockResolvedValue({ kind: 'helper', model: 'm' });
+    await expect(
+      resolveIntegrationToolAutoDecision(call),
+    ).resolves.toMatchObject({ action: 'ask', mode: 'on' });
+    expect(mocks.evaluate).not.toHaveBeenCalled();
   });
 });
