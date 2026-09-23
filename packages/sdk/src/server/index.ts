@@ -288,6 +288,11 @@ export {
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
 export {
+  flushTaskActivityDigest,
+  TASK_ACTIVITY_DIGEST_QUEUE_NAME,
+  type TaskActivityDigestJob,
+} from './lib/task-activity-digest';
+export {
   SESSION_WAKEUP_FIRE_JOB_NAME,
   SESSION_WAKEUP_QUEUE_NAME,
   SESSION_WAKEUP_RECOVERY_LOOKAHEAD_MS,

@@ -4,7 +4,7 @@ import { PendingIntegrationToolApprovals } from '@/components/sessions/PendingIn
 import { useSessionIntegrationToolApprovals } from './useSessionIntegrationToolApprovals';
 
 function PendingView() {
-  const { data } = useSessionIntegrationToolApprovals('session-1', true);
+  const { data } = useSessionIntegrationToolApprovals('session-1');
   return (
     <PendingIntegrationToolApprovals
       sessionId="session-1"

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
-  approvalsEnabled: false,
+  autoEnabled: false,
   policies: [] as { integrationId: string; toolName: string; mode: string }[],
   setModeCalls: [] as {
     integrationId: string;
@@ -20,9 +20,9 @@ const state = vi.hoisted(() => ({
   policiesUpdating: false,
 }));
 
-vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
-  useIntegrationToolApprovalsExperiment: () => ({
-    enabled: state.approvalsEnabled,
+vi.mock('@/hooks/useIntegrationToolAutoApprovalsExperiment', () => ({
+  useIntegrationToolAutoApprovalsExperiment: () => ({
+    enabled: state.autoEnabled,
     isLoading: false,
     isUpdating: false,
     setEnabled: vi.fn(),
@@ -74,10 +74,6 @@ vi.mock('@/hooks/mcp-connections', () => ({
     isError: false,
     status: 'success' as const,
   }),
-  useSetDisabledMcpTools: () => ({
-    isPending: false,
-    mutate: vi.fn(),
-  }),
 }));
 
 import { McpToolManagementDialog } from './McpToolManagementDialog';
@@ -96,7 +92,7 @@ function renderDialog(props?: { open?: boolean; isAdmin?: boolean }) {
 
 describe('McpToolManagementDialog tool approvals', () => {
   beforeEach(() => {
-    state.approvalsEnabled = false;
+    state.autoEnabled = false;
     state.policies = [];
     state.setModeCalls = [];
     state.setModesCalls = [];
@@ -106,7 +102,7 @@ describe('McpToolManagementDialog tool approvals', () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
-  it('keeps legacy availability controls while the approvals experiment is off', () => {
+  it('shows the approval choices with no experiment, a default tool as Always allow while Auto is off', () => {
     state.searchDescription = 'Search the web with Exa.';
     try {
       renderDialog();
@@ -115,27 +111,31 @@ describe('McpToolManagementDialog tool approvals', () => {
         'web_search_exa',
       );
       expect(screen.getByText('Search the web with Exa.')).toBeInTheDocument();
+      const search = within(
+        screen.getByRole('group', {
+          name: 'Approval mode for web_search_exa',
+        }),
+      );
       expect(
-        screen.getByRole('checkbox', { name: 'Web Search Exa' }),
-      ).toBeChecked();
+        search.getByRole('button', { name: 'Always allow' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      // Auto is experimental: without it the group row offers no Auto.
       expect(
-        screen.getByRole('button', { name: 'Save changes' }),
-      ).toBeDisabled();
-      expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+        within(
+          screen.getByRole('group', { name: 'Approval mode for all tools' }),
+        ).queryByRole('button', { name: 'Auto' }),
+      ).toBeNull();
+      // The old enable checkboxes and their Save footer are gone: Disable
+      // replaces them.
+      expect(screen.queryByRole('checkbox')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
     } finally {
       state.searchDescription = null;
     }
   });
 
-  it('hides per-tool approval modes while the experiment is off', () => {
-    renderDialog();
-    expect(
-      screen.queryByLabelText('Approval mode for web_search_exa'),
-    ).not.toBeInTheDocument();
-  });
-
   it('does not fire the admin-only policy query while the dialog is closed or for non-admin viewers', () => {
-    state.approvalsEnabled = true;
+    state.autoEnabled = true;
     state.policiesQueryEnabled = undefined;
     renderDialog({ open: false, isAdmin: true });
     // A closed dialog never mounts the tool list, so the query hook never runs.
@@ -149,7 +149,7 @@ describe('McpToolManagementDialog tool approvals', () => {
   });
 
   it('shows the three stored choices with Auto as nothing pressed and saves changes in one click', () => {
-    state.approvalsEnabled = true;
+    state.autoEnabled = true;
     state.policies = [
       { integrationId: 'exa', toolName: 'web_fetch_exa', mode: 'reject' },
     ];
@@ -196,7 +196,7 @@ describe('McpToolManagementDialog tool approvals', () => {
   });
 
   it('keeps approval mode buttons enabled while a policy save is pending', () => {
-    state.approvalsEnabled = true;
+    state.autoEnabled = true;
     state.policiesUpdating = true;
     renderDialog();
 
@@ -216,7 +216,7 @@ describe('McpToolManagementDialog tool approvals', () => {
   });
 
   it('shows unclassified tools as a plain list with a mixed group row', () => {
-    state.approvalsEnabled = true;
+    state.autoEnabled = true;
     state.policies = [
       { integrationId: 'exa', toolName: 'web_fetch_exa', mode: 'reject' },
     ];
@@ -255,7 +255,7 @@ describe('McpToolManagementDialog tool approvals', () => {
   });
 
   it('groups annotated tools by access and sets a whole group at once', async () => {
-    state.approvalsEnabled = true;
+    state.autoEnabled = true;
     state.annotated = true;
     state.policies = [
       { integrationId: 'exa', toolName: 'web_fetch_exa', mode: 'ask' },
@@ -285,7 +285,7 @@ describe('McpToolManagementDialog tool approvals', () => {
   });
 
   it('uses the requested dialog size and exact mode tooltip', async () => {
-    state.approvalsEnabled = true;
+    state.autoEnabled = true;
     renderDialog();
 
     expect(screen.getByRole('dialog')).toHaveClass('md:max-w-2xl');

@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     selectForUpdate: vi.fn(),
     updateSet: vi.fn(),
     updateWhere: vi.fn(),
+    updateReturning: vi.fn(),
     findPending: vi.fn(),
     findRun: vi.fn(),
     selectRows: vi.fn(),
@@ -235,7 +236,14 @@ describe('Fast parent event durable queue', () => {
         }),
     );
     mocks.updateSet.mockReturnValue({ where: mocks.updateWhere });
-    mocks.updateWhere.mockResolvedValue(undefined);
+    // Settlement writes are awaited directly; an attempt start reads back
+    // the row it claimed.
+    mocks.updateWhere.mockImplementation(() =>
+      Object.assign(Promise.resolve(undefined), {
+        returning: mocks.updateReturning,
+      }),
+    );
+    mocks.updateReturning.mockResolvedValue([{ id: 'attempted' }]);
     mocks.queueAdd.mockResolvedValue(undefined);
     mocks.selectRows.mockResolvedValue([]);
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
@@ -848,6 +856,8 @@ describe('Fast parent event durable queue', () => {
       durableAdmission: { eventId: 'inline-3', inferenceRetries: 2 },
     });
     expect(params.resumedAfterInterruption).toBeUndefined();
+    // An inline row keeps its retry time: the resumed run reads it.
+    expect(mocks.updateSet.mock.calls[0]?.[0]).not.toHaveProperty('retryAt');
 
     // A second park schedules its own delayed wakeup keyed by the time.
     const retryAt = new Date(Date.now() + 30_000);
@@ -1099,6 +1109,44 @@ describe('Fast parent event durable queue', () => {
       mocks.releaseLock,
     );
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('skips a queued follow-up its sender withdrew after the drain read it', async () => {
+    const withdrawn = pendingRow('withdrawn-follow-up', {
+      type: 'human_follow_up' as const,
+      eventId: 'web-client-1',
+      currentMessageId: 'web-client-1',
+      userId: 'user-2',
+      question: 'Never mind.',
+      webFollowUp: true,
+    });
+    const next = pendingRow('next-event', { ...event, messageId: 'message-2' });
+    mocks.findPending
+      .mockResolvedValueOnce(withdrawn)
+      // The lookup still sees the row as pending...
+      .mockResolvedValueOnce(withdrawn)
+      .mockResolvedValueOnce(next)
+      .mockResolvedValueOnce(undefined);
+    // ...but the withdrawal commits first, so the attempt start claims nothing.
+    mocks.updateReturning.mockResolvedValueOnce([]);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: withdrawn.eventKey,
+    });
+
+    expect(mocks.deliver).toHaveBeenCalledOnce();
+    expect(mocks.deliver.mock.calls[0]?.[0]?.event).toEqual(next.event);
+    // The attempt starts only on a still-pending row, and clears a queued
+    // row's elapsed retry time so a withdrawal sees it in flight.
+    expect(mocks.updateWhere.mock.calls[0]?.[0]).toEqual([
+      ['id', withdrawn.id],
+      'delivered_at',
+      'discarded_at',
+    ]);
+    expect(mocks.updateSet.mock.calls[0]?.[0]).toMatchObject({
+      retryAt: null,
+    });
   });
 
   it('parks a transiently failing head with backoff and holds the events behind it', async () => {

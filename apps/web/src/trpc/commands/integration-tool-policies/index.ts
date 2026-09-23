@@ -31,9 +31,8 @@ import type { UserAuthSuccess } from '@/types';
 import { assertAdmin } from '../setup/shared';
 
 /**
- * Experiment-gated (`integrationToolApprovals`) per-tool approval policies.
- * Deployment-scoped and admin-managed: every session on the deployment runs
- * under these modes while the experiment is enabled.
+ * Per-tool approval policies. Deployment-scoped and admin-managed: every
+ * session on the deployment runs under these modes.
  */
 export async function listIntegrationToolPoliciesCommand(
   auth: UserAuthSuccess,
@@ -68,8 +67,8 @@ export async function setIntegrationToolPoliciesCommand(
   return listIntegrationToolPolicies();
 }
 
-const toolApprovalsEnabled = () =>
-  isDeploymentExperimentEnabled('integrationToolApprovals');
+const autoApprovalsEnabled = () =>
+  isDeploymentExperimentEnabled('integrationToolAutoApprovals');
 
 /**
  * Keep pre-policy availability rows compatible while the policy surface rolls
@@ -168,13 +167,11 @@ async function syncLegacyDisabledTools(input: {
 
 /**
  * The caller's personal policies for their own Sessions. They layer on the
- * deployment policies and only ever tighten them. Inert while the experiment
- * is off.
+ * deployment policies and only ever tighten them.
  */
 export async function listPersonalIntegrationToolPoliciesCommand(
   auth: UserAuthSuccess,
 ) {
-  if (!(await toolApprovalsEnabled())) return [];
   return listIntegrationToolUserPolicies(auth.userId);
 }
 
@@ -182,12 +179,6 @@ export async function setPersonalIntegrationToolPolicyCommand(
   auth: UserAuthSuccess,
   input: IntegrationToolPolicyUpsert,
 ) {
-  if (!(await toolApprovalsEnabled())) {
-    throw new TRPCError({
-      code: 'NOT_FOUND',
-      message: 'Tool approvals are not enabled.',
-    });
-  }
   await upsertIntegrationToolUserPolicy({ ...input, userId: auth.userId });
   await syncLegacyDisabledTool({
     ...input,
@@ -201,12 +192,6 @@ export async function setPersonalIntegrationToolPoliciesCommand(
   auth: UserAuthSuccess,
   input: IntegrationToolPoliciesUpsert,
 ) {
-  if (!(await toolApprovalsEnabled())) {
-    throw new TRPCError({
-      code: 'NOT_FOUND',
-      message: 'Tool approvals are not enabled.',
-    });
-  }
   await upsertIntegrationToolUserPolicies({ ...input, userId: auth.userId });
   await syncLegacyDisabledTools({
     ...input,
@@ -245,10 +230,10 @@ export async function setIntegrationToolAutoSettingsCommand(
   input: IntegrationToolAutoSettings,
 ) {
   assertAdmin(auth);
-  if (!(await toolApprovalsEnabled())) {
+  if (!(await autoApprovalsEnabled())) {
     throw new TRPCError({
       code: 'NOT_FOUND',
-      message: 'Integration tool approvals are not enabled.',
+      message: 'Auto tool approvals are not enabled.',
     });
   }
   await setIntegrationToolAutoSettings({

@@ -20,6 +20,8 @@ type AvatarProps = {
   size?: AvatarSize;
   className?: string;
   imgClassName?: string;
+  loading?: 'eager' | 'lazy';
+  decoding?: 'async' | 'sync' | 'auto';
   alt?: string;
 } & Omit<React.ComponentProps<'div'>, 'className'>;
 
@@ -63,6 +65,8 @@ export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
       size = 'md',
       className,
       imgClassName,
+      loading = 'lazy',
+      decoding = 'async',
       alt,
       ...props
     },
@@ -113,8 +117,8 @@ export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
             src={resolvedImageUrl}
             alt=""
             className={cn('size-full object-cover', imgClassName)}
-            loading="lazy"
-            decoding="async"
+            loading={loading}
+            decoding={decoding}
             onError={() => markImageFailed(resolvedImageUrl)}
           />
         ) : (

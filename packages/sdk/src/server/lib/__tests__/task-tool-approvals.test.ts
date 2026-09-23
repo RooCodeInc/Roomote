@@ -141,19 +141,6 @@ it('posts task-originated Slack asks in the task thread with native approval but
 });
 
 describe('resolveTaskIntegrationToolApprovals', () => {
-  it('returns nothing, and resolves no servers, while the experiment is off', async () => {
-    mocks.experiment.mockResolvedValue(false);
-    const resolveServers = vi.fn(async () => ({}));
-    await expect(
-      resolveTaskIntegrationToolApprovals({
-        runId: 7,
-        actingUserId: 'user-1',
-        resolveServers,
-      }),
-    ).resolves.toBeUndefined();
-    expect(resolveServers).not.toHaveBeenCalled();
-  });
-
   it("compiles the governing policies and the task's session overrides", async () => {
     mocks.deploymentPolicies.mockResolvedValue([
       policy('save_issue', 'ask'),
@@ -462,14 +449,6 @@ describe('requestTaskToolApproval', () => {
     });
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({
       outcome: 'unavailable',
-    });
-    expect(mocks.insert).not.toHaveBeenCalled();
-  });
-
-  it('asks for nothing while the experiment is off', async () => {
-    mocks.experiment.mockResolvedValue(false);
-    await expect(requestTaskToolApproval(ask)).resolves.toEqual({
-      outcome: 'not_required',
     });
     expect(mocks.insert).not.toHaveBeenCalled();
   });

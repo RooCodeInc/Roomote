@@ -13,6 +13,7 @@ import path from 'node:path';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_LIVE_EVENT_TYPES,
+  PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
   TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY,
   TaskEventName,
   asRecord,
@@ -3259,6 +3260,248 @@ describe('OpenCodeServerHarness', () => {
       harness.dispose();
     }
   });
+
+  it('ends an OpenCode usage-limit retry loop as out of credits for the connected subscription', async () => {
+    // The gateway marker means `openai/` models run on the ChatGPT
+    // subscription, whose usage limit OpenCode retries like a rate limit.
+    const { client, harness } = createHarness(undefined, {
+      commandEnv: { R_INFERENCE_GATEWAY_CHATGPT: '1' },
+    });
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            providerID: 'openai',
+            modelID: 'gpt-5.5',
+            time: { created: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.status',
+        properties: {
+          sessionID: 'ses_1',
+          status: {
+            type: 'retry',
+            attempt: 1,
+            message: 'The usage limit has been reached',
+            next: Date.now() + 2_000,
+          },
+        },
+      });
+
+      const creditsMessage =
+        'You seem to have run out of credits for ChatGPT (subscription). Choose another provider/model or reset your subscription to continue.';
+      expect(client.abort).toHaveBeenCalledWith({
+        sessionId: 'ses_1',
+        signal: expect.any(AbortSignal),
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(true);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) => envelope.payload[PROVIDER_RETRY_NOTICE_PAYLOAD_KEY],
+        ),
+      ).toBe(false);
+      expect(
+        persistedEnvelopes.find(
+          (envelope) => envelope.payload[TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY],
+        )?.payload,
+      ).toMatchObject({
+        text: creditsMessage,
+        [TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY]: { errorSummary: creditsMessage },
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it.each([
+    {
+      label: 'an OpenAI insufficient_quota 429',
+      providerID: 'openai',
+      providerName: 'OpenAI',
+      error: {
+        name: 'APIError',
+        data: {
+          message:
+            'You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors.',
+          statusCode: 429,
+          isRetryable: true,
+          responseBody: JSON.stringify({
+            error: {
+              message:
+                'You exceeded your current quota, please check your plan and billing details.',
+              type: 'insufficient_quota',
+              param: null,
+              code: 'insufficient_quota',
+            },
+          }),
+        },
+      },
+    },
+    {
+      label: 'an Anthropic credit balance 400',
+      providerID: 'anthropic',
+      providerName: 'Anthropic',
+      error: {
+        name: 'APIError',
+        data: {
+          message:
+            'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.',
+          statusCode: 400,
+          isRetryable: false,
+        },
+      },
+    },
+    {
+      label: 'an OpenRouter credits 402',
+      providerID: 'openrouter',
+      providerName: 'OpenRouter',
+      error: {
+        name: 'APIError',
+        data: {
+          message:
+            'This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 14075.',
+          statusCode: 402,
+          isRetryable: false,
+          responseBody: JSON.stringify({
+            error: {
+              code: 402,
+              message: 'This request requires more credits.',
+              metadata: { limit_source: 'openrouter_credits' },
+            },
+          }),
+        },
+      },
+    },
+  ])(
+    'fails the task without retrying $label',
+    async ({ providerID, providerName, error }) => {
+      vi.useFakeTimers();
+      const { client, harness } = createHarness();
+      const taskEvents: TaskEvent[] = [];
+      const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+      harness.subscribe((event) => taskEvents.push(event));
+      harness.subscribeRuntimePersistedEnvelope((envelope) =>
+        persistedEnvelopes.push(envelope),
+      );
+
+      try {
+        await connectHarness(harness, client);
+
+        expect(
+          harness.sendCommand({
+            commandName: TaskCommandName.StartNewTask,
+            data: {
+              text: 'Start work.',
+              visibleInTranscript: true,
+            },
+          }),
+        ).toBe(true);
+
+        await vi.waitFor(() => {
+          expect(client.promptAsync).toHaveBeenCalledTimes(1);
+        });
+
+        await client.emit({
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: 'msg_1',
+              sessionID: 'ses_1',
+              role: 'assistant',
+              providerID,
+              modelID: 'main-model',
+              time: { created: 1 },
+            },
+          },
+        });
+        await client.emit({
+          type: 'session.error',
+          properties: { sessionID: 'ses_1', error },
+        });
+        await client.emit({
+          type: 'session.idle',
+          properties: { sessionID: 'ses_1' },
+        });
+        // Neither rate-limit nor generic provider recovery may schedule a
+        // continue prompt for an empty account.
+        await vi.advanceTimersByTimeAsync(120_000);
+
+        const creditsMessage = `You seem to have run out of credits for ${providerName}. Choose another provider/model or reset your subscription to continue.`;
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+        expect(
+          persistedEnvelopes.some(
+            (envelope) => envelope.payload[PROVIDER_RETRY_NOTICE_PAYLOAD_KEY],
+          ),
+        ).toBe(false);
+        expect(
+          persistedEnvelopes.find(
+            (envelope) => envelope.payload[TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY],
+          )?.payload,
+        ).toMatchObject({
+          text: creditsMessage,
+          [TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY]: {
+            errorSummary: creditsMessage,
+          },
+        });
+        expect(taskEvents).toContainEqual({
+          eventName: TaskEventName.Message,
+          payload: [
+            expect.objectContaining({
+              taskId: 'ses_1',
+              message: expect.objectContaining({
+                say: 'terminal_provider_error',
+                text: creditsMessage,
+              }),
+            }),
+          ],
+        });
+      } finally {
+        harness.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('hands an exhausted OpenCode connection reset retry to bounded Roomote recovery', async () => {
     vi.useFakeTimers();

@@ -5,8 +5,8 @@ const state = vi.hoisted(() => ({ isAdmin: true, enabled: true }));
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({ isAdmin: state.isAdmin }),
 }));
-vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
-  useIntegrationToolApprovalsExperiment: () => ({ enabled: state.enabled }),
+vi.mock('@/hooks/useIntegrationToolAutoApprovalsExperiment', () => ({
+  useIntegrationToolAutoApprovalsExperiment: () => ({ enabled: state.enabled }),
 }));
 vi.mock('./IntegrationToolAutoModeSetting', () => ({
   IntegrationToolAutoModeSetting: () => <div data-testid="auto-mode-setting" />,

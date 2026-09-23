@@ -30,19 +30,6 @@ export async function isDeploymentExperimentEnabled(
   return (await getDeploymentExperiments(database))[id];
 }
 
-export async function isDeploymentExperimentEnabledWithShareLock(
-  id: DeploymentExperimentId,
-  database: DatabaseOrTransaction,
-): Promise<boolean> {
-  const [settings] = await database
-    .select({ metadata: deploymentSettings.metadata })
-    .from(deploymentSettings)
-    .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
-    .for('share');
-
-  return getDeploymentExperimentValues(settings?.metadata)[id];
-}
-
 export async function setDeploymentExperimentEnabled(
   id: DeploymentExperimentId,
   enabled: boolean,

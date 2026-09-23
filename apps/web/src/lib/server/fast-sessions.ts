@@ -19,6 +19,7 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   fastAgentParentEvents,
+  gt,
   llmUsageEvents,
   inArray,
   isNull,
@@ -93,6 +94,8 @@ export type FastSessionMessage = Pick<
 export type FastSessionQueuedMessage = {
   id: string;
   clientMessageId: string;
+  /** Sender; only they may withdraw the message before delivery. */
+  userId?: string;
   text: string;
   images?: string[];
   timestamp: number;
@@ -615,6 +618,7 @@ function parseFastSessionQueuedMessage(row: {
 }): FastSessionQueuedMessage | null {
   const clientMessageId = row.event.currentMessageId;
   const text = row.event.question;
+  const userId = row.event.userId;
   const images = Array.isArray(row.event.images)
     ? row.event.images.filter(
         (image): image is string => typeof image === 'string',
@@ -638,6 +642,7 @@ function parseFastSessionQueuedMessage(row: {
   return {
     id: row.id,
     clientMessageId,
+    ...(typeof userId === 'string' && userId.length > 0 ? { userId } : {}),
     text: text || (attachmentTexts?.length ? '(queued attachment)' : ''),
     ...(images && images.length > 0 ? { images } : {}),
     timestamp: row.createdAt.getTime(),
@@ -686,6 +691,79 @@ export async function hasFastSessionQueuedMessages(
     .limit(1);
 
   return Boolean(row);
+}
+
+type FastSessionQueuedMessageWithdrawal =
+  | 'withdrawn'
+  | 'not_queued'
+  | 'forbidden';
+
+/**
+ * Withdraw a web follow-up that is still waiting in the Session queue. Only
+ * its sender may withdraw it, and only before any delivery path has taken
+ * it. Both paths mark the row with a conditional write before the agent can
+ * see the message (the queue worker starts an attempt, native steering
+ * claims it), and each skips a row already withdrawn, so this write and
+ * theirs exclude each other: `withdrawn` means the message will not be
+ * delivered, and a message already being delivered reports `not_queued`.
+ */
+export async function withdrawFastSessionQueuedMessage(params: {
+  sessionId: string;
+  clientMessageId: string;
+  userId: string;
+}): Promise<FastSessionQueuedMessageWithdrawal> {
+  const queuedMessageWhere = and(
+    eq(fastAgentParentEvents.conversationId, params.sessionId),
+    fastSessionQueuedFollowUpWhere,
+    sql`${fastAgentParentEvents.event} ->> 'currentMessageId' = ${params.clientMessageId}`,
+  );
+  const [queued] = await db
+    .select({
+      id: fastAgentParentEvents.id,
+      senderUserId: sql<
+        string | null
+      >`${fastAgentParentEvents.event} ->> 'userId'`,
+    })
+    .from(fastAgentParentEvents)
+    .where(queuedMessageWhere)
+    .limit(1);
+  if (!queued) return 'not_queued';
+  if (queued.senderUserId !== params.userId) return 'forbidden';
+
+  const now = new Date();
+  const withdrawn = await db
+    .update(fastAgentParentEvents)
+    .set({
+      discardedAt: now,
+      lastError: 'Withdrawn by its sender before delivery.',
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(fastAgentParentEvents.id, queued.id),
+        queuedMessageWhere,
+        // The queue worker counts an attempt before delivering; an attempt
+        // that failed and is parked for a later retry is idle again.
+        or(
+          eq(fastAgentParentEvents.attempts, 0),
+          gt(fastAgentParentEvents.retryAt, now),
+        ),
+        // Native steering claims the rows it is about to deliver and clears
+        // the claim only when it hands them back undelivered. A lapsed claim
+        // still blocks: its owner may be mid-delivery or gone, and the queue
+        // delivers the row after the lease either way.
+        isNull(fastAgentParentEvents.claimedUntil),
+        // A prompt that already persisted is in the transcript and will
+        // still be delivered, even after an interrupted steer released it.
+        sql`not exists (
+          select 1 from ${fastAgentMessages}
+          where ${fastAgentMessages.conversationId} = ${params.sessionId}
+            and ${fastAgentMessages.eventId} = ${`${params.clientMessageId}:user`}
+        )`,
+      ),
+    )
+    .returning({ id: fastAgentParentEvents.id });
+  return withdrawn.length > 0 ? 'withdrawn' : 'not_queued';
 }
 
 function prepareFastSessionMessageRow<

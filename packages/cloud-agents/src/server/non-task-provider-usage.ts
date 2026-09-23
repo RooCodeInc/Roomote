@@ -12,6 +12,8 @@ import {
 } from '@roomote/db/server';
 import {
   getOpenAiCompatibleRuntimeConfigs,
+  isInferenceCreditsExhaustedError,
+  isOpenRouterInFlightBudgetError,
   isReasoningEffort,
   toBedrockMantleRuntimeModelId,
   type ReasoningEffort,
@@ -221,10 +223,6 @@ export interface GenerateTrackedNonTaskObjectParams<
 > extends GenerateTrackedNonTaskBaseParams {
   schema: TSchema;
   structuredOutputRetryCount?: number;
-  onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
-  onMessageCompleted?: (
-    message: NonTaskOpenCodeCompletedMessage,
-  ) => Promise<void> | void;
 }
 
 /**
@@ -1591,241 +1589,253 @@ async function runNonTaskSdkPrompt(
     // Reasoning parts stream deltas under the same `field: "text"`; only
     // parts announced as text parts are reply text.
     const assistantTextPartIds = new Set<string>();
-    const needsEventMonitor = Boolean(
-      params.onProviderRetry ||
-      options.onAssistantMessageStarted ||
-      options.onAssistantMessageCompleted ||
-      options.onSubagentSessionReady ||
-      options.onParentTaskPartUpdated ||
-      options.onAssistantTextUpdated ||
-      options.onPermissionAsked ||
-      options.trackSessionTreeUsage,
-    );
-
-    if (needsEventMonitor) {
-      try {
-        const subscribeStartedAtMs = Date.now();
-        const subscription = await client.event.subscribe(
-          { directory: sessionDirectory },
-          { signal: eventAbortController.signal },
-        );
-        setupTiming.eventSubscribeMs = Date.now() - subscribeStartedAtMs;
-        eventMonitor = (async () => {
-          try {
-            for await (const event of subscription.stream) {
-              if (
-                (event.type === 'session.created' ||
-                  event.type === 'session.updated') &&
-                event.properties.info.parentID === sessionId
-              ) {
-                trackedSessionIds.add(event.properties.sessionID);
-                if (event.type === 'session.created') {
-                  sessionsCreatedThisTurn.add(event.properties.sessionID);
-                }
+    // The event stream is always watched, even when the caller wants no
+    // callbacks: OpenCode retries an account out of credits like a rate
+    // limit, and only its retry status reveals that before the prompt
+    // settles. Without it a helper call or credential validation would sit
+    // through OpenCode's whole backoff, or time out, instead of failing fast.
+    try {
+      const subscribeStartedAtMs = Date.now();
+      const subscription = await client.event.subscribe(
+        { directory: sessionDirectory },
+        { signal: eventAbortController.signal },
+      );
+      setupTiming.eventSubscribeMs = Date.now() - subscribeStartedAtMs;
+      eventMonitor = (async () => {
+        try {
+          for await (const event of subscription.stream) {
+            if (
+              (event.type === 'session.created' ||
+                event.type === 'session.updated') &&
+              event.properties.info.parentID === sessionId
+            ) {
+              trackedSessionIds.add(event.properties.sessionID);
+              if (event.type === 'session.created') {
+                sessionsCreatedThisTurn.add(event.properties.sessionID);
+              }
+              try {
+                await options.onSubagentSessionReady?.(
+                  event.properties.sessionID,
+                );
+              } catch (error) {
+                rejectSessionError(error);
+                return;
+              }
+            } else if (event.type === 'message.part.updated') {
+              const taskPart = normalizeParentOpenCodeTaskPart(
+                event.properties.part,
+                sessionId,
+              );
+              if (taskPart) {
                 try {
-                  await options.onSubagentSessionReady?.(
-                    event.properties.sessionID,
-                  );
+                  await options.onParentTaskPartUpdated?.(taskPart);
                 } catch (error) {
                   rejectSessionError(error);
                   return;
                 }
-              } else if (event.type === 'message.part.updated') {
-                const taskPart = normalizeParentOpenCodeTaskPart(
-                  event.properties.part,
-                  sessionId,
-                );
-                if (taskPart) {
-                  try {
-                    await options.onParentTaskPartUpdated?.(taskPart);
-                  } catch (error) {
-                    rejectSessionError(error);
-                    return;
-                  }
-                }
-                const streamedDelta = asRecord(event.properties)?.delta;
-                const assistantText = normalizeParentOpenCodeTextPart(
-                  event.properties.part,
-                  sessionId,
-                  // Older servers attach the streamed delta to this event.
-                  typeof streamedDelta === 'string' ? streamedDelta : undefined,
-                );
-                // Parts carry no role; the user prompt's own text part must
-                // never read as reply text.
-                if (
-                  assistantText &&
-                  observedAssistantMessageIds.has(assistantText.messageId)
-                ) {
-                  assistantTextPartIds.add(assistantText.partId);
-                  options.onAssistantTextUpdated?.(assistantText);
-                }
-              } else if (
-                isOpenCodeTextPartDeltaEvent(event, sessionId) &&
-                assistantTextPartIds.has(event.properties.partID)
+              }
+              const streamedDelta = asRecord(event.properties)?.delta;
+              const assistantText = normalizeParentOpenCodeTextPart(
+                event.properties.part,
+                sessionId,
+                // Older servers attach the streamed delta to this event.
+                typeof streamedDelta === 'string' ? streamedDelta : undefined,
+              );
+              // Parts carry no role; the user prompt's own text part must
+              // never read as reply text.
+              if (
+                assistantText &&
+                observedAssistantMessageIds.has(assistantText.messageId)
               ) {
-                options.onAssistantTextUpdated?.({
-                  messageId: event.properties.messageID,
-                  partId: event.properties.partID,
-                  delta: event.properties.delta,
-                  completed: false,
-                });
-              } else if (
-                event.type === 'message.updated' &&
-                event.properties.info.role === 'assistant' &&
-                trackedSessionIds.has(event.properties.info.sessionID)
+                assistantTextPartIds.add(assistantText.partId);
+                options.onAssistantTextUpdated?.(assistantText);
+              }
+            } else if (
+              isOpenCodeTextPartDeltaEvent(event, sessionId) &&
+              assistantTextPartIds.has(event.properties.partID)
+            ) {
+              options.onAssistantTextUpdated?.({
+                messageId: event.properties.messageID,
+                partId: event.properties.partID,
+                delta: event.properties.delta,
+                completed: false,
+              });
+            } else if (
+              event.type === 'message.updated' &&
+              event.properties.info.role === 'assistant' &&
+              trackedSessionIds.has(event.properties.info.sessionID)
+            ) {
+              const info = event.properties.info;
+              const messageId = asString(info.id);
+              if (
+                info.sessionID === sessionId &&
+                messageId &&
+                !observedAssistantMessageIds.has(messageId)
               ) {
-                const info = event.properties.info;
-                const messageId = asString(info.id);
-                if (
-                  info.sessionID === sessionId &&
-                  messageId &&
-                  !observedAssistantMessageIds.has(messageId)
-                ) {
-                  observedAssistantMessageIds.add(messageId);
-                  try {
-                    await options.onAssistantMessageStarted?.({
-                      id: messageId,
-                      sessionId,
-                      parentId: asString(info.parentID) ?? null,
-                      createdAtMs: asFiniteNumber(info.time.created) ?? null,
-                    });
-                  } catch (error) {
-                    rejectSessionError(error);
-                    return;
-                  }
-                }
-                if (
-                  info.sessionID === sessionId &&
-                  messageId &&
-                  info.time.completed !== undefined &&
-                  !completedAssistantMessageIds.has(messageId)
-                ) {
-                  completedAssistantMessageIds.add(messageId);
-                  try {
-                    const tokens = readNonTaskOpenCodeMessageTokens(info);
-                    await options.onAssistantMessageCompleted?.({
-                      id: messageId,
-                      sessionId,
-                      createdAtMs: asFiniteNumber(info.time.created) ?? null,
-                      completedAtMs:
-                        asFiniteNumber(info.time.completed) ?? null,
-                      ...(tokens ? { tokens } : {}),
-                    });
-                  } catch (error) {
-                    rejectSessionError(error);
-                    return;
-                  }
-                }
-                if (
-                  options.trackSessionTreeUsage &&
-                  info.time.completed !== undefined
-                ) {
-                  void recordUsageOnce(info);
-                  markUsageEventObserved(info);
-                }
-              } else if (
-                event.type === 'session.status' &&
-                event.properties.sessionID === sessionId &&
-                event.properties.status.type === 'retry'
-              ) {
+                observedAssistantMessageIds.add(messageId);
                 try {
-                  await params.onProviderRetry?.({
-                    attempt: event.properties.status.attempt,
-                    message: event.properties.status.message,
-                    ...(Number.isFinite(event.properties.status.next)
-                      ? { nextRetryAtMs: event.properties.status.next }
-                      : {}),
+                  await options.onAssistantMessageStarted?.({
+                    id: messageId,
+                    sessionId,
+                    parentId: asString(info.parentID) ?? null,
+                    createdAtMs: asFiniteNumber(info.time.created) ?? null,
                   });
                 } catch (error) {
-                  // Retry reporting is auxiliary. A transient Slack or Discord
-                  // post failure must not stop observation of the provider's
-                  // eventual session error.
-                  console.warn(
-                    `[NonTaskProviderUsage] OpenCode provider retry reporter failed: ${formatOpenCodeSdkError(error)}`,
-                  );
-                }
-                if (
-                  params.maxProviderRetryAttempts !== undefined &&
-                  event.properties.status.attempt >=
-                    params.maxProviderRetryAttempts
-                ) {
-                  rejectSessionError(
-                    new NonTaskOpenCodePromptError(
-                      {
-                        name: 'APIError',
-                        data: {
-                          message: event.properties.status.message,
-                          isRetryable: false,
-                        },
-                      },
-                      promptErrorLabel,
-                    ),
-                  );
+                  rejectSessionError(error);
                   return;
                 }
-              } else if (event.type === 'permission.asked') {
-                // Permission asks are owned by the consumer (decision wait
-                // and native reply), never by this monitor: a consumer
-                // failure must not reject the prompt stream, and the pause
-                // itself is the intended behavior.
+              }
+              if (
+                info.sessionID === sessionId &&
+                messageId &&
+                info.time.completed !== undefined &&
+                !completedAssistantMessageIds.has(messageId)
+              ) {
+                completedAssistantMessageIds.add(messageId);
                 try {
-                  const properties = event.properties;
-                  options.onPermissionAsked?.(
-                    {
-                      requestId: properties.id,
-                      sessionId: properties.sessionID,
-                      permission: properties.permission,
-                      ...(properties.tool?.messageID
-                        ? { messageId: properties.tool.messageID }
-                        : {}),
-                      ...(properties.tool?.callID
-                        ? { callId: properties.tool.callID }
-                        : {}),
-                    },
-                    permissionAskHelpers,
-                  );
+                  const tokens = readNonTaskOpenCodeMessageTokens(info);
+                  await options.onAssistantMessageCompleted?.({
+                    id: messageId,
+                    sessionId,
+                    createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                    completedAtMs: asFiniteNumber(info.time.completed) ?? null,
+                    ...(tokens ? { tokens } : {}),
+                  });
                 } catch (error) {
-                  console.warn(
-                    `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
-                  );
+                  rejectSessionError(error);
+                  return;
                 }
-              } else if (
-                event.type === 'session.error' &&
-                event.properties.sessionID === sessionId
+              }
+              if (
+                options.trackSessionTreeUsage &&
+                info.time.completed !== undefined
+              ) {
+                void recordUsageOnce(info);
+                markUsageEventObserved(info);
+              }
+            } else if (
+              event.type === 'session.status' &&
+              event.properties.sessionID === sessionId &&
+              event.properties.status.type === 'retry'
+            ) {
+              // OpenCode retries an exhausted account like a rate limit,
+              // and its status carries only the provider message. No retry
+              // can succeed until the account is topped up, so end the
+              // prompt instead of reporting a temporary error.
+              if (
+                isInferenceCreditsExhaustedError(
+                  event.properties.status.message,
+                )
               ) {
                 rejectSessionError(
                   new NonTaskOpenCodePromptError(
-                    event.properties.error ??
-                      new Error(
-                        'OpenCode session failed without error detail.',
-                      ),
+                    {
+                      name: 'APIError',
+                      data: {
+                        message: event.properties.status.message,
+                        isRetryable: false,
+                      },
+                    },
                     promptErrorLabel,
                   ),
                 );
                 return;
               }
-            }
-          } catch (error) {
-            if (!eventAbortController.signal.aborted) {
-              console.warn(
-                `[NonTaskProviderUsage] OpenCode event monitor failed: ${formatOpenCodeSdkError(error)}`,
+              try {
+                await params.onProviderRetry?.({
+                  attempt: event.properties.status.attempt,
+                  message: event.properties.status.message,
+                  ...(Number.isFinite(event.properties.status.next)
+                    ? { nextRetryAtMs: event.properties.status.next }
+                    : {}),
+                });
+              } catch (error) {
+                // Retry reporting is auxiliary. A transient Slack or Discord
+                // post failure must not stop observation of the provider's
+                // eventual session error.
+                console.warn(
+                  `[NonTaskProviderUsage] OpenCode provider retry reporter failed: ${formatOpenCodeSdkError(error)}`,
+                );
+              }
+              if (
+                params.maxProviderRetryAttempts !== undefined &&
+                event.properties.status.attempt >=
+                  params.maxProviderRetryAttempts
+              ) {
+                rejectSessionError(
+                  new NonTaskOpenCodePromptError(
+                    {
+                      name: 'APIError',
+                      data: {
+                        message: event.properties.status.message,
+                        isRetryable: false,
+                      },
+                    },
+                    promptErrorLabel,
+                  ),
+                );
+                return;
+              }
+            } else if (event.type === 'permission.asked') {
+              // Permission asks are owned by the consumer (decision wait
+              // and native reply), never by this monitor: a consumer
+              // failure must not reject the prompt stream, and the pause
+              // itself is the intended behavior.
+              try {
+                const properties = event.properties;
+                options.onPermissionAsked?.(
+                  {
+                    requestId: properties.id,
+                    sessionId: properties.sessionID,
+                    permission: properties.permission,
+                    ...(properties.tool?.messageID
+                      ? { messageId: properties.tool.messageID }
+                      : {}),
+                    ...(properties.tool?.callID
+                      ? { callId: properties.tool.callID }
+                      : {}),
+                  },
+                  permissionAskHelpers,
+                );
+              } catch (error) {
+                console.warn(
+                  `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
+                );
+              }
+            } else if (
+              event.type === 'session.error' &&
+              event.properties.sessionID === sessionId
+            ) {
+              rejectSessionError(
+                new NonTaskOpenCodePromptError(
+                  event.properties.error ??
+                    new Error('OpenCode session failed without error detail.'),
+                  promptErrorLabel,
+                ),
               );
+              return;
             }
           }
-        })();
-      } catch (error) {
-        if (options.onSubagentSessionReady) {
-          throw new Error(
-            `OpenCode subagent session discovery is unavailable: ${formatOpenCodeSdkError(error)}`,
-          );
+        } catch (error) {
+          if (!eventAbortController.signal.aborted) {
+            console.warn(
+              `[NonTaskProviderUsage] OpenCode event monitor failed: ${formatOpenCodeSdkError(error)}`,
+            );
+          }
         }
-        // Retry reporting is additive. Keep the prompt path available if an
-        // older externally configured OpenCode server cannot stream events.
-        if (!eventAbortController.signal.aborted) {
-          console.warn(
-            `[NonTaskProviderUsage] Could not subscribe to OpenCode events: ${formatOpenCodeSdkError(error)}`,
-          );
-        }
+      })();
+    } catch (error) {
+      if (options.onSubagentSessionReady) {
+        throw new Error(
+          `OpenCode subagent session discovery is unavailable: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+      // Retry reporting is additive. Keep the prompt path available if an
+      // older externally configured OpenCode server cannot stream events.
+      if (!eventAbortController.signal.aborted) {
+        console.warn(
+          `[NonTaskProviderUsage] Could not subscribe to OpenCode events: ${formatOpenCodeSdkError(error)}`,
+        );
       }
     }
 
@@ -1847,9 +1857,7 @@ async function runNonTaskSdkPrompt(
       // unavailable so human follow-ups use the durable whole-turn queue.
       let promptResult: Awaited<typeof promptRequest>;
       try {
-        promptResult = needsEventMonitor
-          ? await Promise.race([promptRequest, sessionError])
-          : await promptRequest;
+        promptResult = await Promise.race([promptRequest, sessionError]);
       } finally {
         options.onNativeSteerClosed?.();
       }
@@ -2220,8 +2228,6 @@ async function generateTrackedNonTaskObjectWithSdk<
     },
     {
       promptErrorLabel: `OpenCode structured prompt failed (model ${resolvedRuntime.model})`,
-      onPromptStarted: params.onPromptStarted,
-      onMessageCompleted: params.onMessageCompleted,
     },
   );
 
@@ -2368,6 +2374,19 @@ export function classifyNonTaskInferenceError(
     };
   }
 
+  // An account out of credits or quota outranks the provider's own retry
+  // flag: ChatGPT and OpenAI send it as a retryable 429, and OpenCode's retry
+  // cap turns it into a generic rejection. Neither a retry nor a fresh
+  // session can succeed until the account is topped up.
+  if (isInferenceCreditsExhaustedError(inferenceError)) {
+    return {
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      reason: 'insufficient_credits',
+      retryable: false,
+    };
+  }
+
   if (isInferenceErrorExplicitlyNonRetryable(inferenceError)) {
     return {
       message: 'The inference provider rejected the request.',
@@ -2448,15 +2467,6 @@ export function classifyNonTaskInferenceError(
     };
   }
 
-  if (statusCode === 402) {
-    return {
-      message:
-        'The inference provider account does not have enough credits or quota.',
-      reason: 'insufficient_credits',
-      retryable: false,
-    };
-  }
-
   if (statusCode === 404) {
     return {
       message: 'The selected model is unavailable with these credentials.',
@@ -2487,12 +2497,13 @@ export function classifyNonTaskInferenceError(
   }
 
   if (
-    detail.includes('insufficient_quota') ||
-    detail.includes('insufficient quota') ||
-    detail.includes('insufficient credit') ||
-    detail.includes('payment required') ||
-    detail.includes('billing') ||
-    /\b402\b/u.test(detail)
+    (detail.includes('insufficient_quota') ||
+      detail.includes('insufficient quota') ||
+      detail.includes('insufficient credit') ||
+      detail.includes('payment required') ||
+      detail.includes('billing') ||
+      /\b402\b/u.test(detail)) &&
+    !isOpenRouterInFlightBudgetError(inferenceError)
   ) {
     return {
       message:
@@ -2563,7 +2574,8 @@ export function classifyNonTaskInferenceError(
 
   // Remaining structured 4xx responses (400, 413, 422, …) are client errors:
   // resending the same request cannot recover them. 408 stays retryable as a
-  // timeout; 401/402/403/404/429 were classified above.
+  // timeout; 401/403/404/429 were classified above, and every 402 except
+  // OpenRouter's in-flight budget hold by the credits check.
   if (
     statusCode !== undefined &&
     statusCode >= 400 &&

@@ -18,6 +18,7 @@ describe('metadata descriptions', () => {
     'composerSuggestions',
     'integration_keys_enabled',
     'code_mode_integrations_experiment_enabled',
+    'integration_tool_approvals_experiment_enabled',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
@@ -36,11 +37,6 @@ describe('metadata descriptions', () => {
     expect(getBooleanMetadataDescriptorByKey('results_page_enabled').kind).toBe(
       'deployment-control',
     );
-    expect(
-      getBooleanMetadataDescriptorByKey(
-        'fast_session_communication_jev_experiment_enabled',
-      ).kind,
-    ).toBe('deployment-control');
   });
 
   it('enables deployment experiments only from explicit true metadata', () => {
@@ -53,16 +49,8 @@ describe('metadata descriptions', () => {
       results: true,
       privateSessions: false,
       browserNotifications: false,
-      integrationToolApprovals: false,
-      fastSessionCommunicationJev: false,
+      integrationToolAutoApprovals: false,
+      sessionTaskCommunicationTriage: false,
     });
-  });
-
-  it('reads the Jev Session communication experiment only from explicit true metadata', () => {
-    expect(
-      getDeploymentExperimentValues({
-        fast_session_communication_jev_experiment_enabled: true,
-      }).fastSessionCommunicationJev,
-    ).toBe(true);
   });
 });

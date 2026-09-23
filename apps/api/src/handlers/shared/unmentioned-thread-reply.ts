@@ -41,6 +41,14 @@ type UnmentionedThreadReplyEvaluation = {
   routedByJudgmentModel?: boolean;
 };
 
+type UnmentionedThreadReplyEvaluationOptions = {
+  /**
+   * Restore the legacy peer-participation cutoff for an open conversation.
+   * Used only after Slack has established that no judgment model is selected.
+   */
+  includeOtherHumanAuthorsInOpenConversation?: boolean;
+};
+
 /**
  * Compare ordered provider message ids. Return negative when `left` is older
  * than `right`, zero when equal, positive when `left` is newer.
@@ -80,22 +88,25 @@ export function compareBigIntMessageIds(left: string, right: string): number {
  * after the bot's last message unless an opted-in peer conversation passes
  * that message to the judgment gate; a later bot reply reopens the window.
  */
-export function evaluateUnmentionedThreadReplyRouting(input: {
-  eventMessageId: string;
-  senderUserId: string;
-  isThreadTaskOwner: boolean;
-  isThreadRootAuthor: boolean;
-  isAutomationReportThread?: boolean;
-  /** True when any human participant may address Roomote in this conversation. */
-  isOpenConversationThread?: boolean;
-  /**
-   * True when an opted-in conversation intentionally admits peer chatter to
-   * the judgment gate instead of using the legacy interjection cutoff.
-   */
-  allowPeerConversationMessages?: boolean;
-  threadMessages: UnmentionedThreadHistoryMessage[];
-  compareMessageIds: CompareMessageIds;
-}): UnmentionedThreadReplyEvaluation {
+export function evaluateUnmentionedThreadReplyRouting(
+  input: {
+    eventMessageId: string;
+    senderUserId: string;
+    isThreadTaskOwner: boolean;
+    isThreadRootAuthor: boolean;
+    isAutomationReportThread?: boolean;
+    /** True when any human participant may address Roomote in this conversation. */
+    isOpenConversationThread?: boolean;
+    /**
+     * True when an opted-in conversation intentionally admits peer chatter to
+     * the judgment gate instead of using the legacy interjection cutoff.
+     */
+    allowPeerConversationMessages?: boolean;
+    threadMessages: UnmentionedThreadHistoryMessage[];
+    compareMessageIds: CompareMessageIds;
+  },
+  options: UnmentionedThreadReplyEvaluationOptions = {},
+): UnmentionedThreadReplyEvaluation {
   const {
     eventMessageId,
     senderUserId,
@@ -161,7 +172,9 @@ export function evaluateUnmentionedThreadReplyRouting(input: {
     }
 
     const isMessageFromSomebodyElse =
-      !isOpenConversationThread && message.authorUserId !== senderUserId;
+      (!isOpenConversationThread ||
+        options.includeOtherHumanAuthorsInOpenConversation === true) &&
+      message.authorUserId !== senderUserId;
     if (
       isMessageFromSomebodyElse ||
       (message.mentionsSomebodyElse && !allowPeerConversationMessages)
@@ -484,9 +497,21 @@ export async function resolveUnmentionedThreadReplyRouting(
     eventText: string;
     /** True when the reply itself mentions a human other than the sender. */
     eventMentionsSomebodyElse?: boolean;
+    /**
+     * In a user-owned Slack Fast conversation, restore the legacy peer cutoff
+     * only if no judgment model is selected. Selected-model decisions remain
+     * authoritative.
+     */
+    conservativePeerConversationFallback?: boolean;
   },
 ): Promise<UnmentionedThreadReplyEvaluation> {
-  const decision = evaluateUnmentionedThreadReplyRouting(input);
+  const {
+    eventText,
+    eventMentionsSomebodyElse,
+    conservativePeerConversationFallback = false,
+    ...routingInput
+  } = input;
+  const decision = evaluateUnmentionedThreadReplyRouting(routingInput);
 
   // A false/non-interjected result is either an ineligible sender or unreliable
   // empty history. Do not spend a judgment request on either case.
@@ -505,14 +530,28 @@ export async function resolveUnmentionedThreadReplyRouting(
   }
 
   const judgment = await judgeUnmentionedReplyAddressee({
-    eventMessageId: input.eventMessageId,
-    senderUserId: input.senderUserId,
-    eventText: input.eventText,
-    threadMessages: input.threadMessages,
-    compareMessageIds: input.compareMessageIds,
+    eventMessageId: routingInput.eventMessageId,
+    senderUserId: routingInput.senderUserId,
+    eventText,
+    threadMessages: routingInput.threadMessages,
+    compareMessageIds: routingInput.compareMessageIds,
   });
 
   if (judgment.kind === 'unconfigured') {
+    if (conservativePeerConversationFallback) {
+      // The legacy Slack fallback treated a current peer mention, or another
+      // human's participation/mention since Roomote's latest reply, as an
+      // interjection. A later Roomote reply therefore reopens the window.
+      if (eventMentionsSomebodyElse) {
+        return { shouldRoute: false, interjectionDetected: true };
+      }
+
+      return evaluateUnmentionedThreadReplyRouting(
+        { ...routingInput, allowPeerConversationMessages: false },
+        { includeOtherHumanAuthorsInOpenConversation: true },
+      );
+    }
+
     return decision;
   }
 
