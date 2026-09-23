@@ -358,7 +358,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
       const stateFilePath = writeState({
         startedAtMs: Date.now(),
         currentTurnRequiresInitialAck: false,
-        requiresTerminalCloseoutWithoutTurn: true,
+        suppressNonTerminalRepliesWithoutTurn: true,
       });
 
       const result = runHook({
@@ -384,7 +384,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     const stateFilePath = writeState({
       startedAtMs: Date.now(),
       currentTurnRequiresInitialAck: false,
-      requiresTerminalCloseoutWithoutTurn: true,
+      suppressNonTerminalRepliesWithoutTurn: true,
     });
 
     const result = runHook({
@@ -406,7 +406,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     const stateFilePath = writeState({
       startedAtMs: Date.now(),
       currentTurnRequiresInitialAck: false,
-      requiresTerminalCloseoutWithoutTurn: true,
+      suppressNonTerminalRepliesWithoutTurn: true,
     });
 
     const result = runHook({
@@ -422,6 +422,34 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
+  });
+
+  it.each([
+    'roomote_post_to_channel',
+    'roomote_reply_to_slack_thread',
+    'roomote_send_chat_reaction_emoji',
+  ])('rejects %s from late-bound automation tasks', (toolName) => {
+    const stateFilePath = writeState({
+      startedAtMs: Date.now(),
+      currentTurnRequiresInitialAck: false,
+      suppressNonTerminalRepliesWithoutTurn: true,
+    });
+
+    const result = runHook({
+      input: {
+        hook_event_name: 'PreToolUse',
+        tool_name: toolName,
+      },
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      decision: 'block',
+      permissionDecision: 'deny',
+    });
   });
 
   it('allows tool_search before the current Slack turn has been acknowledged', () => {

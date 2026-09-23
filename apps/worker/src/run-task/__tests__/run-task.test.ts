@@ -1308,6 +1308,7 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 345_678,
         currentTurnRequiresInitialAck: false,
+        suppressNonTerminalRepliesWithoutTurn: true,
       }),
       'utf8',
     );
@@ -1372,6 +1373,7 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 456_000,
         currentTurnRequiresInitialAck: false,
+        suppressNonTerminalRepliesWithoutTurn: true,
       }),
       'utf8',
     );
@@ -1430,6 +1432,7 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 456_789,
         currentTurnRequiresInitialAck: false,
+        suppressNonTerminalRepliesWithoutTurn: true,
       }),
       'utf8',
     );
@@ -1488,6 +1491,7 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 567_891,
         currentTurnRequiresInitialAck: false,
+        suppressNonTerminalRepliesWithoutTurn: true,
       }),
       'utf8',
     );
