@@ -69,8 +69,8 @@ function creditsAsUsageWindow(
   if (credits.unlimited) {
     return { label: 'Credits', unlimited: true };
   }
-  if (credits.balance !== undefined) {
-    return { label: 'Credits', remaining: credits.balance };
+  if (credits.balance !== undefined && Number.isFinite(credits.balance)) {
+    return { label: 'Credits', remaining: Math.floor(credits.balance) };
   }
   return undefined;
 }

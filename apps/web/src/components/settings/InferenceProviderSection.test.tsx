@@ -559,7 +559,7 @@ describe('InferenceProviderSection', () => {
             resetsAt: new Date(Date.now() + 5 * 3_600_000).toISOString(),
           },
         ],
-        credits: { balance: 12.5 },
+        credits: { balance: 12.9999 },
         fetchedAt: new Date().toISOString(),
       },
       {
@@ -574,7 +574,7 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.getByText('Weekly limit: 8% used (resets in 5h)'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Credits: 12.5 left')).toBeInTheDocument();
+    expect(screen.getByText('Credits: 12 left')).toBeInTheDocument();
     expect(
       screen.getByText('Premium requests: 211 of 300 left'),
     ).toBeInTheDocument();
