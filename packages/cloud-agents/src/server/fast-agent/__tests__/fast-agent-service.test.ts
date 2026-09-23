@@ -717,6 +717,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     // Fixture models: model_1 = GPT-5.6 (default), model_2 = Claude Sonnet 5.
     // Launches ask about a user model request every time; none by default.
     mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
       requestedModel: {
         type: 'choice',
         choice: 'none',
@@ -10971,6 +10972,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('launches before the first reply and then posts the task link', async () => {
     mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
       requestedModel: {
         type: 'choice',
         choice: 'model_2',
@@ -11666,6 +11668,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('allows a corrected launch after rejecting an unavailable model', async () => {
     mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
       requestedModel: {
         type: 'choice',
         choice: 'model_2',
@@ -11798,6 +11801,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('launches on the default model with a note when no user asked for the pick', async () => {
     mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
       requestedModel: decisionChoice('none', 0.97),
     });
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
@@ -11897,6 +11901,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({
         state: expect.objectContaining({ work: 'Restyle the checkout page.' }),
         questions: {
+          wantsNonDefaultModel: expect.anything(),
           requestedModel: expect.anything(),
           routingRule: expect.objectContaining({
             criteria: expect.objectContaining({
@@ -11930,6 +11935,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ],
     });
     mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
       requestedModel: decisionChoice('none', 0.95),
       routingRule: decisionChoice('default_model', 0.9),
     });
@@ -11999,8 +12005,64 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('resolves review models against the code-review default', async () => {
+    mocks.getTaskModelOptions.mockResolvedValue({
+      models: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6' },
+        { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
+      ],
+      defaultModelId: 'openai/gpt-5.6',
+      codeReviewModelId: 'anthropic/claude-sonnet-5',
+      codingModelRoutingRules: [],
+    });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.92 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_1',
+        confidence: 0.93,
+        probabilities: { model_1: 0.93 },
+      },
+    });
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.reviewPullRequest, {
+            repository: 'acme/api',
+            pullRequestNumber: 42,
+            model: 'openai/gpt-5.6',
+            kickoffMessage: 'Reviewing this now.',
+          }),
+        ).resolves.toMatchObject({ success: true });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Review acme/api#42 with GPT-5.6 instead of the usual model.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          defaultModel:
+            'Claude Sonnet 5 [id: anthropic/claude-sonnet-5], the deployment default',
+        }),
+      }),
+    );
+    expect(mocks.launchPrReview).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ model: 'openai/gpt-5.6' }),
+    );
+  });
+
   it('validates and forwards pull request review model overrides', async () => {
     mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
       requestedModel: {
         type: 'choice',
         choice: 'model_2',

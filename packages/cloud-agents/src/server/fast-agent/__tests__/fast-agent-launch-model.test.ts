@@ -71,6 +71,7 @@ describe('resolveFastAgentLaunchModel', () => {
   describe('without routing rules', () => {
     it('asks about a user request even without a claim', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
         requestedModel: choice('none', 0.97),
       });
 
@@ -80,11 +81,15 @@ describe('resolveFastAgentLaunchModel', () => {
         source: 'default',
       });
       const { questions } = mockEvaluateDecisionModel.mock.calls[0]![0];
-      expect(Object.keys(questions)).toEqual(['requestedModel']);
+      expect(Object.keys(questions)).toEqual([
+        'wantsNonDefaultModel',
+        'requestedModel',
+      ]);
     });
 
     it('applies a confident user request the agent did not pass', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
         requestedModel: choice('model_3', 0.9),
       });
 
@@ -97,6 +102,7 @@ describe('resolveFastAgentLaunchModel', () => {
 
     it('needs a confident pick without a claim to break a split request', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
         requestedModel: {
           type: 'choice',
           choice: 'model_3',
@@ -113,6 +119,7 @@ describe('resolveFastAgentLaunchModel', () => {
 
     it('keeps an effort-only choice on the default model', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
         requestedModel: choice('none', 0.97),
       });
 
@@ -123,6 +130,7 @@ describe('resolveFastAgentLaunchModel', () => {
 
     it('keeps a claimed deployment default and its effort', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
         requestedModel: choice('none', 0.97),
       });
 
@@ -137,6 +145,7 @@ describe('resolveFastAgentLaunchModel', () => {
 
     it('uses a model the user asked for, with the claimed effort', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
         requestedModel: choice('model_3', 0.9),
       });
 
@@ -153,11 +162,15 @@ describe('resolveFastAgentLaunchModel', () => {
       });
       const { state, questions } = mockEvaluateDecisionModel.mock.calls[0]![0];
       expect(state).toEqual({
+        defaultModel: 'GPT 5.6 [id: openai/gpt-5.6], the deployment default',
         work: 'Refactor the scheduler.',
         latestRequest: 'Actually, use the newest Opus.',
         earlierMessages: ['Fix checkout.'],
       });
-      expect(Object.keys(questions)).toEqual(['requestedModel']);
+      expect(Object.keys(questions)).toEqual([
+        'wantsNonDefaultModel',
+        'requestedModel',
+      ]);
       expect(questions.requestedModel.criteria.model_3).toContain(
         'Claude Opus 5 [id: anthropic/claude-opus-5]',
       );
@@ -165,6 +178,7 @@ describe('resolveFastAgentLaunchModel', () => {
 
     it('launches on the default with a note when no user asked for the claim', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
         requestedModel: choice('none', 0.95),
       });
 
@@ -188,6 +202,7 @@ describe('resolveFastAgentLaunchModel', () => {
 
     it('uses the model the user asked for over a different claim', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
         requestedModel: choice('model_2', 0.9),
       });
 
@@ -201,11 +216,12 @@ describe('resolveFastAgentLaunchModel', () => {
       });
     });
 
-    function split(probabilities: Record<string, number>) {
+    function split(probabilities: Record<string, number>, wants = 0.9) {
       const [top, confidence] = Object.entries(probabilities).sort(
         (left, right) => right[1] - left[1],
       )[0]!;
       return {
+        wantsNonDefaultModel: { type: 'noul', noul: wants },
         requestedModel: {
           type: 'choice',
           choice: top,
@@ -228,20 +244,58 @@ describe('resolveFastAgentLaunchModel', () => {
       });
     });
 
-    it('rejects a claim that is not the top-ranked model', async () => {
+    it('accepts a claim for a capability ask that names no model', async () => {
+      // "Throw your strongest model at this": a different model is wanted,
+      // but no specific model is identified.
       mockEvaluateDecisionModel.mockResolvedValue(
-        split({ model_2: 0.4, model_3: 0.26, none: 0.34 }),
+        split({ none: 0.95, model_2: 0.05 }),
+      );
+
+      await expect(resolve({ claimedModel: opus.id })).resolves.toEqual({
+        model: opus.id,
+        reasoningEffort: null,
+        source: 'user_request',
+      });
+    });
+
+    it('keeps the default for a capability ask without a claim', async () => {
+      mockEvaluateDecisionModel.mockResolvedValue(
+        split({ none: 0.95, model_2: 0.05 }),
+      );
+
+      await expect(resolve()).resolves.toMatchObject({
+        model: null,
+        source: 'default',
+      });
+    });
+
+    it('rejects a claim when no different model is wanted', async () => {
+      // The attribution-trailer case: the model is named, but not requested.
+      mockEvaluateDecisionModel.mockResolvedValue(
+        split({ model_3: 0.6, none: 0.4 }, 0.03),
       );
 
       await expect(resolve({ claimedModel: opus.id })).resolves.toMatchObject({
         model: null,
         source: 'default',
+      });
+    });
+
+    it('uses the claim when a different model is wanted but none is picked confidently', async () => {
+      // "The newest Fable": Fable 5 and 5.1 split the probability.
+      mockEvaluateDecisionModel.mockResolvedValue(
+        split({ model_2: 0.34, model_3: 0.31, none: 0.35 }),
+      );
+
+      await expect(resolve({ claimedModel: opus.id })).resolves.toMatchObject({
+        model: opus.id,
+        source: 'user_request',
       });
     });
 
     it('rejects a top-ranked claim when no model request is likely', async () => {
       mockEvaluateDecisionModel.mockResolvedValue(
-        split({ model_3: 0.3, model_2: 0.15, none: 0.55 }),
+        split({ model_3: 0.3, model_2: 0.15, none: 0.55 }, 0.2),
       );
 
       await expect(resolve({ claimedModel: opus.id })).resolves.toMatchObject({
@@ -250,14 +304,14 @@ describe('resolveFastAgentLaunchModel', () => {
       });
     });
 
-    it('needs a confident pick to override the claim with another model', async () => {
+    it('uses a confident pick over a different claim', async () => {
       mockEvaluateDecisionModel.mockResolvedValue(
-        split({ model_2: 0.55, model_3: 0, none: 0.45 }),
+        split({ model_2: 0.65, model_3: 0, none: 0.35 }),
       );
 
       await expect(resolve({ claimedModel: opus.id })).resolves.toMatchObject({
-        model: null,
-        source: 'default',
+        model: sonnet.id,
+        source: 'user_request',
       });
     });
 
@@ -305,7 +359,11 @@ describe('resolveFastAgentLaunchModel', () => {
         source: 'routing_rule',
       });
       const { questions } = mockEvaluateDecisionModel.mock.calls[0]![0];
-      expect(Object.keys(questions)).toEqual(['requestedModel', 'routingRule']);
+      expect(Object.keys(questions)).toEqual([
+        'wantsNonDefaultModel',
+        'requestedModel',
+        'routingRule',
+      ]);
       expect(questions.routingRule.instructions).toContain(
         'independent of list order',
       );
@@ -332,6 +390,7 @@ describe('resolveFastAgentLaunchModel', () => {
 
     it('asks both questions in one call and prefers the user request', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
         requestedModel: choice('model_3', 0.9),
         routingRule: choice('model_rule_2', 0.95),
       });
@@ -342,11 +401,12 @@ describe('resolveFastAgentLaunchModel', () => {
       expect(mockEvaluateDecisionModel).toHaveBeenCalledOnce();
       expect(
         Object.keys(mockEvaluateDecisionModel.mock.calls[0]![0].questions),
-      ).toEqual(['requestedModel', 'routingRule']);
+      ).toEqual(['wantsNonDefaultModel', 'requestedModel', 'routingRule']);
     });
 
     it('applies a matching rule when the claimed model was not requested', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
         requestedModel: choice('none', 0.9),
         routingRule: choice('model_rule_2', 0.9),
       });
@@ -392,7 +452,7 @@ describe('resolveFastAgentLaunchModel', () => {
       });
       expect(
         Object.keys(mockEvaluateDecisionModel.mock.calls[0]![0].questions),
-      ).toEqual(['requestedModel']);
+      ).toEqual(['wantsNonDefaultModel', 'requestedModel']);
     });
 
     it('ignores rules for models that are no longer enabled', async () => {
@@ -401,12 +461,13 @@ describe('resolveFastAgentLaunchModel', () => {
       ).resolves.toMatchObject({ model: null, source: 'default' });
       expect(
         Object.keys(mockEvaluateDecisionModel.mock.calls[0]![0].questions),
-      ).toEqual(['requestedModel']);
+      ).toEqual(['wantsNonDefaultModel', 'requestedModel']);
     });
   });
 
   it('keeps the head and tail of an oversized latest message', async () => {
     mockEvaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
       requestedModel: choice('none', 0.9),
     });
 
@@ -423,6 +484,7 @@ describe('resolveFastAgentLaunchModel', () => {
 
   it('bounds earlier messages, newest first', async () => {
     mockEvaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
       requestedModel: choice('none', 0.9),
     });
 
@@ -448,6 +510,7 @@ describe('resolveFastAgentLaunchModel', () => {
 
   it('keeps the claimed model among capped request options', async () => {
     mockEvaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
       requestedModel: choice('none', 0.9),
     });
     const many = Array.from({ length: 50 }, (_, index) => ({
