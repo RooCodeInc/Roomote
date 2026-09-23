@@ -3,6 +3,7 @@ import {
   INFERENCE_PROVIDER_RATE_LIMIT_BASE_DELAY_MS,
   INFERENCE_PROVIDER_RATE_LIMIT_MAX_DELAY_MS,
   asRecord,
+  isInferenceCreditsExhaustedError,
   resolveInferenceProviderRetryDelayMs,
 } from '@roomote/types';
 
@@ -35,11 +36,19 @@ export const OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT = [
  *
  * OpenCode's own retry policy already covers APIError with isRetryable, but
  * that UnknownError payload falls through as a terminal session.error.
+ *
+ * A 429 that says the account is out of credits or quota (ChatGPT
+ * `usage_limit_reached`, OpenAI `insufficient_quota`, Anthropic's spend cap)
+ * is not a rate limit: waiting does not refill it.
  */
 export function isOpenCodeProviderRateLimitError(error: unknown): boolean {
   const values = collectProviderErrorValues(error);
 
   if (values.some((value) => asRecord(value)?.isRetryable === false)) {
+    return false;
+  }
+
+  if (isInferenceCreditsExhaustedError(error)) {
     return false;
   }
 

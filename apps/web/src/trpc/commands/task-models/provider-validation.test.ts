@@ -97,7 +97,37 @@ describe('assertInferenceProviderConnection', () => {
           { name: 'ANTHROPIC_API_KEY', value: 'candidate-key' },
         ],
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
+  });
+
+  it('saves a key whose account is out of credits and returns a warning instead', async () => {
+    // Operators add the provider and top the account up in parallel, so an
+    // exhausted account must not block the save the way a bad key does.
+    mockValidateNonTaskInference.mockResolvedValue({
+      success: false,
+      checkedAt: '2026-08-13T12:00:00.000Z',
+      latencyMs: 25,
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      model: 'anthropic/claude-sonnet-5',
+      reason: 'insufficient_credits',
+      retryable: false,
+    });
+
+    await expect(
+      assertInferenceProviderConnection({
+        providerLabel: 'Anthropic',
+        providerEnvVarNames: ['ANTHROPIC_API_KEY'],
+        modelId: 'anthropic/claude-sonnet-5',
+        credentialValues: [
+          { name: 'ANTHROPIC_API_KEY', value: 'candidate-key' },
+        ],
+      }),
+    ).resolves.toEqual({
+      code: 'insufficient_credits',
+      message:
+        'The Anthropic account seems to be out of credits or quota. Add credits before using it.',
+    });
   });
 
   it('throws only the sanitized provider failure', async () => {
@@ -187,5 +217,27 @@ describe('validateSetupModelProviderCredentials', () => {
       model: 'anthropic/claude-sonnet-5',
       runtimeEnv: { ANTHROPIC_API_KEY: 'candidate-key' },
     });
+  });
+
+  it('passes an out-of-credits warning through without blocking', async () => {
+    mockValidateNonTaskInference.mockResolvedValue({
+      success: false,
+      checkedAt: '2026-08-13T12:00:00.000Z',
+      latencyMs: 25,
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      model: 'anthropic/claude-sonnet-5',
+      reason: 'insufficient_credits',
+      retryable: false,
+    });
+
+    await expect(
+      validateSetupModelProviderCredentials({
+        provider: getSetupModelProvider('anthropic'),
+        apiKey: 'candidate-key',
+        action: 'save it',
+        modelId: 'anthropic/claude-sonnet-5',
+      }),
+    ).resolves.toMatchObject({ code: 'insufficient_credits' });
   });
 });
