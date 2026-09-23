@@ -11757,6 +11757,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('rejects a launch model the user never asked for', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      requested: { type: 'noul', noul: 0.02 },
+    });
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
       taskId: 'task-default',
@@ -11792,7 +11795,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       adapter,
     });
 
-    expect(mocks.evaluateDecisionModel).not.toHaveBeenCalled();
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
     expect(launchTask).toHaveBeenCalledOnce();
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({ model: null }),
@@ -11837,9 +11840,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({
         state: expect.objectContaining({
           model: 'Claude Sonnet 5 [id: anthropic/claude-sonnet-5]',
-          mentions: [
-            expect.stringContaining('Co-Authored-By: Claude Sonnet 5'),
-          ],
+          latestRequest: expect.stringContaining(
+            'Co-Authored-By: Claude Sonnet 5',
+          ),
         }),
       }),
     );
@@ -11923,6 +11926,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.evaluateJudgments.mockResolvedValue({
       model: { choice: 'default_model', confidence: 0.9 },
     });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      requested: { type: 'noul', noul: 0.02 },
+    });
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
       taskId: 'task-1',
@@ -11956,8 +11962,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         state: { request: 'Fix the billing migration.' },
       }),
     );
-    // Sonnet is never named, so the user-request check rejects it outright.
-    expect(mocks.evaluateDecisionModel).not.toHaveBeenCalled();
+    // With no rule match, the user-request check decides, and no user asked.
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
     expect(launchTask).not.toHaveBeenCalled();
   });
 
