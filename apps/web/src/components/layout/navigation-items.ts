@@ -25,7 +25,6 @@ export interface PrimaryNavItem {
   matchPaths: string[];
   sideNavSection: SideNavSection;
   adminOnly?: boolean;
-  resultsExperiment?: boolean;
 }
 
 const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
@@ -60,11 +59,10 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     icon: NotepadText,
     href: '/results',
     label: 'Results',
-    description: 'Review automation results',
+    description: 'Review automation reports and suggested follow-ups',
     matchExact: false,
     matchPaths: ['/results'],
     sideNavSection: 'manage',
-    resultsExperiment: true,
   },
   {
     icon: Plug,
@@ -89,18 +87,12 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
 
 export function getVisiblePrimaryNavItems(opts: {
   isAdmin: boolean;
-  resultsEnabled?: boolean;
 }): PrimaryNavItem[] {
-  return PRIMARY_NAV_ITEMS.filter(
-    (item) =>
-      (!item.adminOnly || opts.isAdmin) &&
-      (!item.resultsExperiment || opts.resultsEnabled),
-  );
+  return PRIMARY_NAV_ITEMS.filter((item) => !item.adminOnly || opts.isAdmin);
 }
 
 export function getVisibleSideNavSections(opts: {
   isAdmin: boolean;
-  resultsEnabled?: boolean;
 }): Record<SideNavSection, PrimaryNavItem[]> {
   const sections: Record<SideNavSection, PrimaryNavItem[]> = {
     home: [],

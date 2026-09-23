@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useMediaQuery } from 'usehooks-ts';
 import { Menu, Plus, X, Settings } from '@/components/system';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { useResultsPage } from '@/hooks/useResultsPage';
 import { RecentSessions } from '@/components/layout/side-nav/RecentSessions';
 
 import {
@@ -25,11 +24,7 @@ export const NavbarDrawer = ({
 }) => {
   const pathname = usePathname();
   const { isAdmin } = useAuthorizedUser();
-  const { enabled: resultsEnabled } = useResultsPage();
-  const visibleNavItems = getVisiblePrimaryNavItems({
-    isAdmin,
-    resultsEnabled,
-  });
+  const visibleNavItems = getVisiblePrimaryNavItems({ isAdmin });
   const isMobile = useMediaQuery('(max-width: 767px)', {
     initializeWithValue: false,
   });

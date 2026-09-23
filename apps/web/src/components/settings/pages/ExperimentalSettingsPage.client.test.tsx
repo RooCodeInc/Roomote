@@ -55,10 +55,6 @@ vi.mock(
   }),
 );
 
-vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
-  ResultsExperimentalSetting: () => <div>Results setting</div>,
-}));
-
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
 describe('ExperimentalSettingsPage', () => {
@@ -86,6 +82,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.getByText('Task communication triage setting'),
     ).toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
   });
 
   it('shows one retryable error instead of default-valued settings after an initial load failure', () => {
@@ -113,7 +110,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Results setting')).toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();
@@ -142,7 +139,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Results setting')).toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();

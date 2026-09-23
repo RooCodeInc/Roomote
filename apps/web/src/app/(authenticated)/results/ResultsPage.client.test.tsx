@@ -88,10 +88,6 @@ vi.mock('sonner', () => ({
   toast: { error: mocks.toastError, success: mocks.toastSuccess },
 }));
 
-vi.mock('@/hooks/useResultsPage', () => ({
-  useResultsPage: () => ({ enabled: true, isLoading: false }),
-}));
-
 vi.mock('@/hooks/useTelemetry', () => ({
   useTelemetry: () => ({ capture: vi.fn() }),
 }));
@@ -368,10 +364,16 @@ describe('ResultsPage', () => {
     );
   });
 
-  it('uses pending language for an empty queue', async () => {
+  it('explains where new results will appear when the queue is empty', async () => {
     mocks.list.mockResolvedValue([]);
     renderPage();
-    expect(await screen.findByText('No pending results')).toBeInTheDocument();
+    expect(await screen.findByText("You're all caught up")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'New automation reports and suggested follow-ups will appear here when they are ready.',
+      ),
+    ).toBeInTheDocument();
+    expect(mocks.replace).not.toHaveBeenCalled();
   });
 
   it('retains prior detail for 500ms, hides stale actions, then swaps when ready', async () => {

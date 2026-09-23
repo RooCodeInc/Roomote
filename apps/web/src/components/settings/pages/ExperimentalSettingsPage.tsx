@@ -1,7 +1,6 @@
 'use client';
 
 import { SettingsShell } from '@/components/settings/SettingsShell';
-import { ResultsExperimentalSetting } from '@/components/settings/ResultsExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
 import { BrowserNotificationsExperimentalSetting } from '@/components/settings/BrowserNotificationsExperimentalSetting';
 import { SessionTaskCommunicationTriageExperimentalSetting } from '@/components/settings/SessionTaskCommunicationTriageExperimentalSetting';
@@ -26,7 +25,6 @@ export function ExperimentalSettingsPage() {
           <PrivateSessionsExperimentalSetting />
           <SessionTaskCommunicationTriageExperimentalSetting />
           <BrowserNotificationsExperimentalSetting />
-          <ResultsExperimentalSetting />
         </>
       )}
     </SettingsShell>

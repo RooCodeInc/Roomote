@@ -33,7 +33,6 @@ import { useLiveTaskStatus, useTaskPins } from '@/hooks/tasks';
 import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
-import { useResultsPage } from '@/hooks/useResultsPage';
 
 import {
   getVisibleSideNavSections,
@@ -69,11 +68,8 @@ export const SideNav = () => {
   );
   const isSideNavExpanded = hasHydrated && persistedIsSideNavExpanded;
   const trpc = useTRPC();
-  const { enabled: resultsEnabled } = useResultsPage();
   const { data: unreadResultCount = 0 } = useQuery(
-    trpc.results.pendingCount.queryOptions(undefined, {
-      enabled: resultsEnabled,
-    }),
+    trpc.results.pendingCount.queryOptions(undefined),
   );
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   const { pinnedTaskIds, setTaskPinned, isTaskPinMutationPending } =
@@ -109,8 +105,8 @@ export const SideNav = () => {
     [pinnedTaskIds],
   );
   const visibleNavSections = useMemo(
-    () => getVisibleSideNavSections({ isAdmin, resultsEnabled }),
-    [isAdmin, resultsEnabled],
+    () => getVisibleSideNavSections({ isAdmin }),
+    [isAdmin],
   );
 
   useEffect(() => {
