@@ -150,37 +150,22 @@ describe('renderDiscordMarkdownTables', () => {
     ).toBe(longValue.length);
   });
 
-  it('wraps wide headers within the per-message grid budget instead of keeping GFM raw', () => {
-    const headerA = 'H'.repeat(200);
-    const headerB = 'M'.repeat(200);
-    const valueA = 'C'.repeat(200);
-    const valueB = 'D'.repeat(200);
-    const input = `| ${headerA} | ${headerB} |\n| --- | --- |\n| ${valueA} | ${valueB} |`;
+  it('renders headers wider than the sizing loop budget instead of keeping GFM raw', () => {
+    const headerA = 'H'.repeat(940);
+    const headerB = 'M'.repeat(940);
+    const input = `| ${headerA} | ${headerB} |\n| --- | --- |\n| C | D |`;
+    expect(input.length).toBe(1_911);
 
     const rendered = renderDiscordMarkdownTables(input);
     const chunks = chunkDiscordMessage(input);
 
     expect(rendered).not.toBe(input);
-    expect(chunks.length).toBeGreaterThan(1);
+    expect(rendered.length).toBeLessThanOrEqual(2_000);
+    expect(chunks).toHaveLength(1);
     expect(chunks.every((chunk) => chunk.length <= 2_000)).toBe(true);
-    expect(chunks.every((chunk) => chunk.includes(headerA.slice(0, 80)))).toBe(
-      true,
-    );
-    expect(chunks.every((chunk) => chunk.includes(headerB.slice(0, 80)))).toBe(
-      true,
-    );
-    expect(
-      chunks.reduce(
-        (count, chunk) => count + (chunk.match(/C/gu)?.length ?? 0),
-        0,
-      ),
-    ).toBe(valueA.length);
-    expect(
-      chunks.reduce(
-        (count, chunk) => count + (chunk.match(/D/gu)?.length ?? 0),
-        0,
-      ),
-    ).toBe(valueB.length);
+    expect(rendered).toContain(headerA);
+    expect(rendered).toContain(headerB);
+    expect(rendered).toContain('C | D');
   });
 
   it('keeps forum-starter tables when the preamble does not fit beside a table chunk', () => {

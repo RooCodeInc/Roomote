@@ -376,6 +376,15 @@ function fitColumnWidths(
   );
 }
 
+function renderMinimalAsciiTable(cells: string[][], fence: string): string {
+  const lines = [
+    cells[0]!.join(' | '),
+    cells[0]!.map(() => '---').join(' | '),
+    ...cells.slice(1).map((row) => row.join(' | ')),
+  ];
+  return `${fence}\n${lines.join('\n')}\n${fence}`;
+}
+
 function renderAsciiTable(
   header: string[],
   bodyRows: string[][],
@@ -394,7 +403,7 @@ function renderAsciiTable(
   if (style === 'compact') {
     const maxLineWidth = maxMessageLength - fence.length * 2 - 2;
     const widths = fitColumnWidths(cells, maxLineWidth + 4);
-    if (!widths) return null;
+    if (!widths) return renderMinimalAsciiTable(cells, fence);
     const renderRow = (row: string[]) => {
       const wrapped = row.map((cell, index) => wrapCell(cell, widths[index]!));
       const height = Math.max(...wrapped.map((column) => column.length));
@@ -414,7 +423,9 @@ function renderAsciiTable(
 
   let maxLineWidth = Math.floor((maxMessageLength - fence.length * 2 - 12) / 5);
   let widths = fitColumnWidths(cells, maxLineWidth);
-  for (let attempt = 0; widths && attempt < 10; attempt += 1) {
+  // Each failed pass strictly lowers maxLineWidth, which is capped by the
+  // Discord message limit, so this converges without a header-size cutoff.
+  while (widths && maxLineWidth > 0) {
     const headerHeight = Math.max(
       ...cells[0]!.map((cell, index) => wrapCell(cell, widths![index]!).length),
     );
@@ -426,7 +437,7 @@ function renderAsciiTable(
     maxLineWidth = safeLineWidth;
     widths = fitColumnWidths(cells, maxLineWidth);
   }
-  if (!widths) return null;
+  if (!widths) return renderMinimalAsciiTable(cells, fence);
 
   const horizontalBorder = (fill: '-' | '=') =>
     `+${widths.map((width) => fill.repeat(width + 2)).join('+')}+`;
