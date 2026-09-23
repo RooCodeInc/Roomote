@@ -456,6 +456,49 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('frames triaged task updates by the judgment decision', () => {
+    const untriaged = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+    });
+    const relay = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: { decision: 'relay', reason: 'needs_user' },
+    });
+    const redirect = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: { decision: 'redirect', reason: 'off_track' },
+    });
+    const uncertain = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: {
+        decision: 'uncertain',
+        reason: 'mixed_signals',
+      },
+    });
+
+    expect(untriaged).toContain('roughly 10 minutes of silence');
+    expect(untriaged).not.toContain(
+      'A judgment model triaged this task update',
+    );
+    for (const prompt of [relay, redirect, uncertain]) {
+      expect(prompt).toContain('A judgment model triaged this task update');
+      expect(prompt).not.toContain('roughly 10 minutes of silence');
+    }
+    expect(relay).toContain(
+      'the task needs something only the user can provide',
+    );
+    expect(redirect).toContain('send one corrective "send_task_message"');
+    expect(uncertain).toContain('Silence is the right answer');
+  });
+
   it('offers suggestions on an automation task-settled report only', () => {
     const settlePrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

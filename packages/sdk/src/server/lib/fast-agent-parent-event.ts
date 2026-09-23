@@ -15,6 +15,7 @@ import {
   type FastAgentReplyHandle,
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
+  type TaskCommunicationTriageHint,
 } from '@roomote/cloud-agents/server';
 import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
 import {
@@ -80,6 +81,11 @@ import {
 
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 import { notifyFastWebSessionAttention } from './session-attention-notification';
+import {
+  gateDelegatedTaskCommunication,
+  listUnsharedTaskUpdates,
+  type TaskActivityDigestItem,
+} from './task-communication-triage';
 import { buildDeterministicMessageId } from './deterministic-message-id';
 import {
   buildLinearFastReplyMessageId,
@@ -238,6 +244,17 @@ export type FastAgentParentEvent =
       charts?: DataVisualizationInput[];
     }
   | {
+      /** Condensed delegated-task activity; only produced while the
+       * `sessionTaskCommunicationTriage` experiment is on. */
+      type: 'task_activity';
+      taskId: string;
+      runId: number;
+      actingUserId?: string;
+      /** Latest `task_messages.ts` covered; the next digest starts after it. */
+      throughTs: number;
+      items: TaskActivityDigestItem[];
+    }
+  | {
       type: 'artifact_published';
       taskId: string;
       runId: number;
@@ -256,6 +273,8 @@ export type FastAgentParentEvent =
       /** Trusted latest actor copied from task_runs at settle time. */
       actingUserId?: string;
       customAutomationId?: string;
+      /** Task updates triage kept from the user, attached at delivery. */
+      unsharedTaskUpdates?: string[];
       title?: string;
       status: string;
       error?: string;
@@ -431,6 +450,8 @@ export function buildEventClientMessageSeed(
       return `fast-parent-wakeup:${event.eventId}`;
     case 'child_message':
       return `fast-parent-child-message:${event.messageId}`;
+    case 'task_activity':
+      return `fast-parent-task-activity:${event.runId}:${event.throughTs}`;
     case 'artifact_published':
       return `fast-parent-artifact:${event.artifact.id}:v${event.artifact.version}`;
     case 'pull_request_opened':
@@ -2643,11 +2664,18 @@ function buildFastAutomationFailureReport(
     : `${subject} failed${detail}\n${event.taskUrl}`;
 }
 
+async function withUnsharedTaskUpdates(
+  event: Extract<FastAgentParentEvent, { type: 'task_settled' }>,
+): Promise<FastAgentParentEvent> {
+  const unsharedTaskUpdates = await listUnsharedTaskUpdates(event.runId);
+  return unsharedTaskUpdates.length ? { ...event, unsharedTaskUpdates } : event;
+}
+
 async function resolveDelegatedTaskActor(
   parent: FastAgentParent,
   event: Extract<
     FastAgentParentEvent,
-    { type: 'child_message' | 'task_settled' }
+    { type: 'child_message' | 'task_activity' | 'task_settled' }
   >,
 ): Promise<{
   userId?: string;
@@ -2827,10 +2855,33 @@ export async function deliverFastAgentParentEventWithLock(
       return 'skipped';
     }
 
+    let taskCommunicationTriage: TaskCommunicationTriageHint | undefined;
+    if (
+      params.event.type === 'child_message' ||
+      params.event.type === 'task_activity'
+    ) {
+      const gate = await gateDelegatedTaskCommunication({
+        parent: params.parent,
+        surface: params.parent.conversation.surface,
+        requesterUserId: params.event.actingUserId ?? null,
+        telemetryUserId: params.event.actingUserId ?? params.parent.sessionId,
+        event: params.event,
+      });
+      if (gate.kind === 'skip') {
+        return 'skipped';
+      }
+      taskCommunicationTriage = gate.hint;
+    }
+    const promptEvent: FastAgentParentEvent =
+      params.event.type === 'task_settled'
+        ? await withUnsharedTaskUpdates(params.event)
+        : params.event;
+
     const humanFollowUp =
       params.event.type === 'human_follow_up' ? params.event : null;
     const delegatedTaskActor =
       params.event.type === 'child_message' ||
+      params.event.type === 'task_activity' ||
       params.event.type === 'task_settled'
         ? await resolveDelegatedTaskActor(params.parent, params.event)
         : undefined;
@@ -2929,7 +2980,7 @@ export async function deliverFastAgentParentEventWithLock(
     await answerFastAgentQuestion({
       question:
         humanFollowUp?.question ??
-        `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
+        `<platform_event>${JSON.stringify(promptEvent)}</platform_event>`,
       ...(humanFollowUp?.images ? { images: humanFollowUp.images } : {}),
       ...(humanFollowUp?.allowSilentAmbientReply === true &&
       !humanFollowUp.input &&
@@ -3029,6 +3080,7 @@ export async function deliverFastAgentParentEventWithLock(
       automationReport:
         params.event.type === 'task_settled' &&
         Boolean(params.event.customAutomationId),
+      ...(taskCommunicationTriage ? { taskCommunicationTriage } : {}),
       ...(delegatedTaskActor?.userId
         ? {
             serviceCredentialPlatformActorUserId: delegatedTaskActor.userId,

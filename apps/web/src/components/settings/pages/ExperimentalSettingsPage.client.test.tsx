@@ -55,6 +55,15 @@ vi.mock(
   }),
 );
 
+vi.mock(
+  '@/components/settings/SessionTaskCommunicationTriageExperimentalSetting',
+  () => ({
+    SessionTaskCommunicationTriageExperimentalSetting: () => (
+      <div>Task communication triage setting</div>
+    ),
+  }),
+);
+
 vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
   ResultsExperimentalSetting: () => <div>Results setting</div>,
 }));
@@ -82,6 +91,9 @@ describe('ExperimentalSettingsPage', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText('Integration tool approvals setting'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Task communication triage setting'),
     ).toBeInTheDocument();
   });
 

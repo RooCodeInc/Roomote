@@ -54,6 +54,7 @@ import { extractShowWidgetFallbackDelivery } from './show-widget-fallback-delive
 import { maybeNotifySourceThreadOfTerminalProviderError } from './notify-source-thread-provider-error';
 import { syncTaskCommunicationThreadTitleBestEffort } from '../task-thread-title-sync';
 import { notifyPlatformIssueReport } from '../platform-issue-reporting';
+import { maybeScheduleTaskActivityDigest } from '../task-activity-digest';
 
 interface RecordTaskMessageEnvelopeInput {
   runId: number;
@@ -832,6 +833,14 @@ export async function recordTaskMessageEnvelope(
   });
 
   void maybeHandleRequestedDeploymentEnvVars(input);
+
+  void maybeScheduleTaskActivityDigest({ runId, envelope }).catch((error) => {
+    console.warn(
+      `[recordTaskMessageEnvelope] Failed to schedule task activity digest for run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 
   // A terminal provider error ends the model turn without ending the task, so
   // the run settles idle and never reaches the terminal-failure notifications in
