@@ -2903,6 +2903,131 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 
+  it('tries a configured model the provider catalog does not list yet', async () => {
+    // A newly released helper model has no models.dev entry, so the provider
+    // catalog carries no modality metadata for it at all. Missing metadata is
+    // not proof the model rejects audio: the transcription call should try it
+    // instead of telling the user no configured model supports audio input.
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.9-flash',
+      OPENROUTER_API_KEY: 'test-key',
+      OPENCODE_CONFIG_CONTENT: '',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/gpt-5.6-terra': {
+                capabilities: {
+                  input: { audio: false },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [{ type: 'text', text: 'Deploy the fix.' }],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+    const result = await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+      prompt: 'Transcribe the audio.',
+      requiredInputModality: 'audio',
+    });
+
+    expect(result).toBe('Deploy the fix.');
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'openrouter',
+          modelID: 'google/gemini-3.9-flash',
+        },
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('tries a custom OpenAI-compatible provider model with defaulted modality metadata', async () => {
+    // Models served through an OpenAI-compatible provider (the Roomote
+    // inference gateway, LiteLLM, Ollama, named custom providers) are
+    // registered in OpenCode with defaulted text-only capabilities, so the
+    // catalog reports audio:false even when the underlying model accepts
+    // audio. That defaulted metadata must not block transcription.
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'roomote/openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'roomote/google/gemini-3.6-flash',
+      ROOMOTE_INFERENCE_API_KEY: 'test-key',
+      OPENCODE_CONFIG_CONTENT: '',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'roomote',
+            models: {
+              'openai/gpt-5.6-terra': {
+                capabilities: {
+                  input: { audio: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.6-flash': {
+                capabilities: {
+                  input: { audio: false },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [{ type: 'text', text: 'Deploy the fix.' }],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+    const result = await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+      prompt: 'Transcribe the audio.',
+      requiredInputModality: 'audio',
+    });
+
+    expect(result).toBe('Deploy the fix.');
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'roomote',
+          modelID: 'google/gemini-3.6-flash',
+        },
+      }),
+      expect.anything(),
+    );
+  });
+
   it('keeps a native session on its own model when it can view attached images', async () => {
     process.env = {
       ...originalEnv,

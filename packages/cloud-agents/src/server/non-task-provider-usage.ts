@@ -1050,6 +1050,16 @@ async function findModelSupportingInputModality(input: {
   modality: NonTaskInputModality;
   candidates: Array<string | undefined>;
   defaultFirstCandidateOnUnknown?: boolean;
+  /**
+   * When no candidate has positive modality metadata, fall back to the first
+   * candidate whose metadata is merely unknown instead of declaring the
+   * modality unsupported. Catalog metadata is absent for newly released
+   * models and defaulted to text-only for custom OpenAI-compatible providers,
+   * so absence is not proof the model rejects the input; the inference call
+   * itself remains the authority. An explicit `false` from a cataloged
+   * provider still counts as known-unsupported.
+   */
+  allowUnknownModalityFallback?: boolean;
   timeoutMs?: number | null;
 }): Promise<string | undefined> {
   const candidates = input.candidates
@@ -1089,6 +1099,8 @@ async function findModelSupportingInputModality(input: {
       );
     }
 
+    let unknownModalityCandidate: string | undefined;
+
     for (const [index, candidate] of candidates.entries()) {
       const { providerID, modelID } = splitOpenCodeModelId(candidate);
       const provider = result.data.providers.find(
@@ -1109,12 +1121,21 @@ async function findModelSupportingInputModality(input: {
       ) {
         return candidate;
       }
+
+      if (
+        input.allowUnknownModalityFallback &&
+        unknownModalityCandidate === undefined &&
+        (inputCapability !== false ||
+          generatedOpenAiCompatibleProviderIds.has(providerID))
+      ) {
+        unknownModalityCandidate = candidate;
+      }
     }
+
+    return unknownModalityCandidate;
   } finally {
     server.release();
   }
-
-  return undefined;
 }
 
 async function resolveModelForInputModality(
@@ -1148,6 +1169,7 @@ async function resolveModelForInputModality(
       runtime.resolvedModelRuntimeEnv.R_MODEL,
       runtime.model,
     ],
+    allowUnknownModalityFallback: true,
     timeoutMs: params.timeoutMs,
   });
   if (!model) {
