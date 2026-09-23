@@ -99,23 +99,26 @@ describe('StepConfigureInference', () => {
       screen.getByRole('heading', { name: 'Configure inference' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Choose a provider for task inference/),
+      screen.getByText(/Your Roomote Cloud trial includes/),
     ).toHaveTextContent(
-      'Choose a provider for task inference, the model Roomote uses to work on your tasks.Your Roomote Cloud trial includes $5 of inference, or you can configure your own provider directly.',
+      'Your Roomote Cloud trial includes $5 of inference to try things out, or you can configure your own provider directly.',
     );
     expect(
-      screen.getByText(/Managed Roomote Cloud uses Kev/),
+      screen.getByText(/Some Roomote functionality uses fast judgement models/),
     ).toHaveTextContent(
-      'Task inference is separate from judgment. Managed Roomote Cloud uses Kev, a hosted judgment model for fast routing and triage, by default unless you configure another judgment model. Its endpoint does not retain decision text. Connect TypeSafe, OpenRouter, or Vercel AI Gateway in Settings > Models to choose a different route.',
+      'Some Roomote functionality uses fast judgement models, not just LLMs. You can use the Roomote provider model for free, or configure your own (TypeSafe Jev, OpenRouter, Vercel).',
     );
+    expect(
+      screen.getByText('The Roomote provider never retains your data.'),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole('button', {
-        name: 'Use Roomote trial for task inference',
+        name: 'Use the Roomote provider',
       }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', {
-        name: 'Use my own task-inference provider',
+        name: 'Configure my own provider',
       }),
     ).toBeInTheDocument();
     expect(screen.getByTestId('gift')).toBeInTheDocument();
@@ -134,7 +137,7 @@ describe('StepConfigureInference', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Use Roomote trial for task inference',
+        name: 'Use the Roomote provider',
       }),
     );
 
@@ -159,7 +162,7 @@ describe('StepConfigureInference', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Use my own task-inference provider',
+        name: 'Configure my own provider',
       }),
     );
 
