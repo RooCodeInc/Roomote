@@ -2250,6 +2250,39 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).toHaveBeenCalledOnce();
   });
 
+  it('marks criteria-bearing Telegram DM automations as requiring their root', async () => {
+    const pendingParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-dm-1',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'telegram-dm-1' },
+      },
+    };
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find current regressions.',
+        launchCriteria: 'Only investigate new regressions.',
+        targetKind: 'telegram_user',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationLaunchCriteriaRequired: true,
+        automationLaunchRootRequired: true,
+      }),
+    );
+  });
+
   it('creates a Discord automation thread only after Jev continues', async () => {
     const pendingParent = {
       ...parent,

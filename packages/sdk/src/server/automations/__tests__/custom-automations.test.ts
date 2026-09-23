@@ -950,6 +950,82 @@ describe('customAutomationsJob', () => {
     );
   });
 
+  it('posts a standalone Discord failure when criteria defer the destination root', async () => {
+    const claimAt = new Date('2026-09-23T19:00:00.000Z');
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        launchCriteria: 'Only run when there are flaky tests.',
+        target: {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'discord-channel-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'discord',
+    ]);
+    fastMocks.enqueueParentEvent.mockRejectedValueOnce(
+      new Error('parent event admission failed'),
+    );
+
+    const result = await customAutomationsJob();
+
+    expect(result.errors).toEqual([
+      'Flaky tests: parent event admission failed',
+    ]);
+    expect(fastMocks.createDiscordThread).not.toHaveBeenCalled();
+    expect(fastMocks.discordPostMessage).toHaveBeenCalledWith({
+      channelId: 'discord-channel-1',
+      text: 'Flaky tests failed: parent event admission failed',
+      textFormat: 'markdown',
+      idempotencyKey: `fast-automation-startup-failure:${automation.id}:${claimAt.toISOString()}`,
+    });
+  });
+
+  it('posts a standalone Teams failure when criteria defer the destination root', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        launchCriteria: 'Only run when there are flaky tests.',
+        target: {
+          provider: 'teams',
+          targetKind: 'teams_channel',
+          externalRef: 'teams-conversation-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue(['teams']);
+    vi.mocked(findTeamsConversationRoute).mockResolvedValue({
+      serviceUrl: 'https://smba.example.com/amer/',
+      workspaceId: 'tenant-1',
+    });
+    fastMocks.enqueueParentEvent.mockRejectedValueOnce(
+      new Error('parent event admission failed'),
+    );
+
+    const result = await customAutomationsJob();
+
+    expect(result.errors).toEqual([
+      'Flaky tests: parent event admission failed',
+    ]);
+    expect(fastMocks.teamsPostMessage).toHaveBeenCalledWith({
+      channelId: 'teams-conversation-1',
+      serviceUrl: 'https://smba.example.com/amer/',
+      text: 'Flaky tests failed: parent event admission failed',
+      textFormat: 'markdown',
+    });
+    expect(fastMocks.teamsUpdateMessage).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       provider: 'discord',

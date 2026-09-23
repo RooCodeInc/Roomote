@@ -1959,6 +1959,7 @@ export async function answerFastAgentQuestion({
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
   automationLaunchCriteriaRequired = false,
+  automationLaunchRootRequired = false,
   platformEventTimestampMs,
   automationReport = false,
   taskCommunicationTriage,
@@ -2009,6 +2010,8 @@ export async function answerFastAgentQuestion({
   platformEventKind?: FastAgentPlatformEventKind;
   /** True only for a custom automation occurrence with a saved launch rule. */
   automationLaunchCriteriaRequired?: boolean;
+  /** A continued automation run cannot safely report until this root exists. */
+  automationLaunchRootRequired?: boolean;
   /** Original durable admission time for a projected platform receipt. */
   platformEventTimestampMs?: number;
   /** The settling delegated task ran for a custom automation; its closeout is
@@ -4508,9 +4511,16 @@ export async function answerFastAgentQuestion({
         const updatedConversation = await adapter.prepareAutomationLaunch?.();
         if (updatedConversation) conversation = updatedConversation;
       } catch (error) {
+        if (automationLaunchRootRequired) {
+          console.warn(
+            `[Fast Agent] Required automation destination root creation failed; aborting the run: ${formatErrorForLog(error)}`,
+          );
+          throw error;
+        }
         // A provider root is best effort after a continue. The automation
         // still runs, and its adapter can use the rootless route if creation
-        // failed.
+        // failed. Some destinations, such as Telegram DMs, require the root
+        // to keep the report in the automation's thread.
         console.warn(
           `[Fast Agent] Deferred automation destination setup failed; continuing with the existing route: ${formatErrorForLog(error)}`,
         );
@@ -5287,6 +5297,16 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before showing a widget.',
+              };
+            }
             const args = showWidgetArgsSchema.parse(call.args);
             const result = await prepareShowWidget(args);
             if (!result.success) {

@@ -3385,6 +3385,9 @@ export async function deliverFastAgentParentEventWithLock(
       automationLaunchCriteriaRequired:
         params.event.type === 'automation_triggered' &&
         Boolean(params.event.launchCriteria?.trim() || params.event.runWhen),
+      automationLaunchRootRequired:
+        params.event.type === 'automation_triggered' &&
+        params.event.targetKind === 'telegram_user',
       ...(params.event.type === 'child_message' && params.event.admittedAtMs
         ? { platformEventTimestampMs: params.event.admittedAtMs }
         : {}),

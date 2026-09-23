@@ -11347,6 +11347,74 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('defers show_widget destination replies until automation criteria continue', async () => {
+    const order: string[] = [];
+    const evaluateAutomationLaunchCriteria = vi.fn(async () => {
+      order.push('evaluate');
+      return { decision: 'continue' as const };
+    });
+    const prepareAutomationLaunch = vi.fn(async () => {
+      order.push('root');
+    });
+    const postReply = vi.fn<FastAgentTurnAdapter['postReply']>(
+      async (reply) => {
+        order.push(`reply:${reply.purpose}`);
+      },
+    );
+    const adapter = callbacks({
+      evaluateAutomationLaunchCriteria,
+      prepareAutomationLaunch,
+      postReply,
+    });
+    const widgetArgs = {
+      html: '<p>Automation is ready.</p>',
+      title: 'Automation status',
+      textFallback: 'Automation is ready.',
+    };
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.showWidget, widgetArgs),
+        ).resolves.toMatchObject({
+          success: false,
+          error:
+            'Call evaluate_automation_launch_criteria before showing a widget.',
+        });
+        expect(postReply).not.toHaveBeenCalled();
+
+        await invokeTool(nativeToolNames.evaluateAutomationLaunchCriteria, {
+          findingsReport: 'The automation is ready to run.',
+        });
+        const result = await invokeTool(nativeToolNames.showWidget, widgetArgs);
+        expect(result).toMatchObject({ success: true, shown: true });
+        return 'The automation is proceeding.';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+      automationLaunchCriteriaRequired: true,
+    });
+
+    expect(order).toEqual([
+      'evaluate',
+      'root',
+      'reply:progress',
+      'reply:closeout',
+    ]);
+    expect(postReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'progress',
+        message: expect.stringContaining('[View widget]'),
+      }),
+    );
+  });
+
   it('settles a confident gate stop quietly without creating a root or launching a task', async () => {
     const launchTask = vi.fn<LaunchFastAgentTask>();
     const prepareAutomationLaunch = vi.fn();
@@ -11395,6 +11463,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
     expect(prepareAutomationLaunch).not.toHaveBeenCalled();
     expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+  });
+
+  it('propagates a Telegram DM topic failure instead of continuing rootless', async () => {
+    const evaluateAutomationLaunchCriteria = vi.fn(async () => ({
+      decision: 'continue' as const,
+    }));
+    const prepareAutomationLaunch = vi.fn(async () => {
+      throw new Error('Telegram DM topic creation failed');
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const adapter = callbacks({
+      evaluateAutomationLaunchCriteria,
+      prepareAutomationLaunch,
+      launchTask,
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'telegram',
+          workspaceId: 'telegram-dm-1',
+          conversationId: 'automation-1:occurrence-1',
+          replyTarget: { channelId: 'telegram-dm-1' },
+        },
+        adapter,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'required',
+        automationLaunchCriteriaRequired: true,
+        automationLaunchRootRequired: true,
+      }),
+    ).rejects.toThrow('Telegram DM topic creation failed');
+
+    expect(evaluateAutomationLaunchCriteria).toHaveBeenCalledOnce();
+    expect(prepareAutomationLaunch).toHaveBeenCalledOnce();
+    expect(launchTask).not.toHaveBeenCalled();
+    expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
   it('keeps an automation clarification eligible after delegated work starts', async () => {

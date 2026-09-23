@@ -78,6 +78,10 @@ const visibleReport = () =>
       isNull(automationResults.runWhenOutcome),
       ne(automationResults.runWhenOutcome, 'skipped'),
     ),
+    or(
+      isNull(automationResults.launchCriteriaOutcome),
+      ne(automationResults.launchCriteriaOutcome, 'skipped'),
+    ),
   )!;
 const visibleSuggestion = () =>
   and(

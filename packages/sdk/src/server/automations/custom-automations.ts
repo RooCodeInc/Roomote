@@ -597,8 +597,9 @@ async function runFastCustomAutomation(params: {
 
 /**
  * A run that fails before its Session can speak tells the destination so: it
- * edits the root it already posted (Discord, Teams) or posts the error
- * (Slack, Telegram). A broken automation must not fail silently.
+ * updates an existing Discord or Teams root when available, otherwise posts a
+ * standalone failure. Slack, Telegram, and Email use their direct report path.
+ * A broken automation must not fail silently.
  */
 async function reportFastAutomationStartupFailure(params: {
   automation: CustomAutomation;
@@ -628,17 +629,29 @@ async function reportFastAutomationStartupFailure(params: {
           unfurl_media: false,
         });
       }
-    } else if (conversation.surface === 'discord' && rootMessageId) {
+    } else if (conversation.surface === 'discord') {
       const provider =
         await createDiscordCommunicationProviderFromRuntimeCredentials();
-      await provider?.editMessage({
-        channelId:
-          conversation.replyTarget.threadId ??
-          conversation.replyTarget.channelId,
-        messageId: rootMessageId,
-        text: message,
-      });
-    } else if (conversation.surface === 'teams' && rootMessageId) {
+      if (rootMessageId) {
+        await provider?.editMessage({
+          channelId:
+            conversation.replyTarget.threadId ??
+            conversation.replyTarget.channelId,
+          messageId: rootMessageId,
+          text: message,
+        });
+      } else {
+        await provider?.postMessage({
+          channelId: conversation.replyTarget.channelId,
+          ...(conversation.replyTarget.threadId
+            ? { threadId: conversation.replyTarget.threadId }
+            : {}),
+          text: message,
+          textFormat: 'markdown',
+          idempotencyKey: `fast-automation-startup-failure:${conversation.conversationId}`,
+        });
+      }
+    } else if (conversation.surface === 'teams') {
       const provider =
         await createTeamsCommunicationProviderFromRuntimeCredentials();
       const route = await findTeamsConversationRoute(
@@ -650,13 +663,25 @@ async function reportFastAutomationStartupFailure(params: {
         : conversation.replyTarget.serviceUrl;
       const serviceUrl = route?.serviceUrl ?? persistedDirectMessageServiceUrl;
       if (provider && serviceUrl) {
-        await provider.updateMessage({
-          channelId: conversation.replyTarget.channelId,
-          messageId: rootMessageId,
-          serviceUrl,
-          text: message,
-          textFormat: 'markdown',
-        });
+        if (rootMessageId) {
+          await provider.updateMessage({
+            channelId: conversation.replyTarget.channelId,
+            messageId: rootMessageId,
+            serviceUrl,
+            text: message,
+            textFormat: 'markdown',
+          });
+        } else {
+          await provider.postMessage({
+            channelId: conversation.replyTarget.channelId,
+            ...(conversation.replyTarget.threadId
+              ? { threadId: conversation.replyTarget.threadId }
+              : {}),
+            serviceUrl,
+            text: message,
+            textFormat: 'markdown',
+          });
+        }
       }
     } else if (conversation.surface === 'telegram') {
       const provider =
