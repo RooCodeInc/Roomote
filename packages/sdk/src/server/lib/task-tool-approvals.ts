@@ -15,6 +15,7 @@ import {
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
   taskRuns,
+  trackedMessages,
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
 import {
@@ -28,10 +29,84 @@ import {
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
   toIntegrationToolUserRequest,
+  getCommunicationChannelFromTaskPayload,
+  getCommunicationProviderFromTaskPayload,
+  getCommunicationThreadIdFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
+  getFastAgentParentFromPayload,
+  integrationToolApprovalMessage,
+  integrationToolApprovalButtons,
+  integrationToolApprovalSlackBlocks,
+  type IntegrationToolApprovalMetadata,
   type IntegrationToolApprovalStatus,
   type IntegrationToolPolicyScope,
   type TaskIntegrationToolApprovals,
 } from '@roomote/types';
+import { getCommunicationProviderAdapter } from './communication-providers';
+
+async function publishTaskToolApproval(input: {
+  payload: unknown;
+  approval: IntegrationToolApprovalMetadata;
+}) {
+  const parent = getFastAgentParentFromPayload(input.payload);
+  const parentConversation =
+    parent?.conversation && 'replyTarget' in parent.conversation
+      ? parent.conversation
+      : undefined;
+  const surface =
+    getCommunicationProviderFromTaskPayload(input.payload) ??
+    parentConversation?.surface;
+  if (surface !== 'slack' && surface !== 'discord' && surface !== 'telegram')
+    return;
+  const channelId =
+    getCommunicationChannelFromTaskPayload(input.payload) ??
+    parentConversation?.replyTarget.channelId;
+  const threadId =
+    getCommunicationThreadIdFromTaskPayload(input.payload) ??
+    parentConversation?.replyTarget.threadId;
+  if (!channelId) return;
+  const slackTeamId =
+    surface === 'slack'
+      ? (getCommunicationTeamIdFromTaskPayload(input.payload) ??
+        parentConversation?.workspaceId)
+      : undefined;
+  if (surface === 'slack' && !slackTeamId) return;
+  const provider = await getCommunicationProviderAdapter(surface, {
+    slackTeamId,
+  });
+  if (!provider) return;
+  const approval = input.approval;
+  const text = integrationToolApprovalMessage(approval);
+  const [claim] = await db
+    .insert(trackedMessages)
+    .values({
+      surface,
+      kind: 'tool_approval',
+      dedupeKey: approval.approvalId,
+      channelId,
+      threadTs: threadId ?? null,
+    })
+    .onConflictDoNothing()
+    .returning({ id: trackedMessages.id });
+  if (!claim) return;
+  try {
+    const posted = await provider.postMessage({
+      channelId,
+      ...(threadId ? { threadId } : {}),
+      text,
+      ...(surface === 'slack'
+        ? { blocks: integrationToolApprovalSlackBlocks(approval) }
+        : { buttons: integrationToolApprovalButtons(approval.approvalId) }),
+    });
+    await db
+      .update(trackedMessages)
+      .set({ messageTs: posted.messageId })
+      .where(eq(trackedMessages.id, claim.id));
+  } catch (error) {
+    await db.delete(trackedMessages).where(eq(trackedMessages.id, claim.id));
+    throw error;
+  }
+}
 
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
 
@@ -84,7 +159,7 @@ async function isTaskSessionOwnerPresent(input: {
  */
 async function resolveTaskApprovalSession(runId: number) {
   const run = await db.query.taskRuns.findFirst({
-    columns: { taskId: true },
+    columns: { taskId: true, payload: true },
     where: eq(taskRuns.id, runId),
   });
   if (!run) return null;
@@ -96,6 +171,7 @@ async function resolveTaskApprovalSession(runId: number) {
     ownerUserId:
       session.ownerKind === 'user' ? (session.ownerUserId ?? null) : null,
     sourceSurface: session.sourceSurface,
+    payload: run.payload,
   };
 }
 
@@ -298,6 +374,13 @@ export async function requestTaskToolApproval(input: {
     ...call,
     ...(auto?.action === 'ask' ? { autoEvaluation: auto.evaluation } : {}),
   });
+  await publishTaskToolApproval({ payload: session.payload, approval }).catch(
+    (error) => {
+      console.warn(
+        `[Task tool approvals] Could not post approval notification: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+  );
   return { outcome: 'pending', approvalId: approval.approvalId };
 }
 

@@ -6329,6 +6329,7 @@ export async function answerFastAgentQuestion({
                               await adapter.postReply({
                                 purpose: 'progress',
                                 message: `Approval needed: ${approval.integrationId} wants to run ${approval.toolName}. Allow or reject it in the session: ${sessionUrl}`,
+                                toolApproval: approval,
                               });
                             },
                           }
