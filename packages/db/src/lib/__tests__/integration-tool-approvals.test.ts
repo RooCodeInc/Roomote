@@ -110,9 +110,9 @@ describe('redactIntegrationToolArgs', () => {
       long: 'x'.repeat(500),
     }) as Record<string, unknown>;
     expect(redacted.text).toBe('hello');
-    expect(redacted.apiKey).toBe('[redacted]');
+    expect(redacted.apiKey).toBe('[value omitted]');
     expect((redacted.nested as Record<string, unknown>).authorization).toBe(
-      '[redacted]',
+      '[value omitted]',
     );
     expect((redacted.nested as Record<string, unknown>).note).toBe('ok');
     expect(String(redacted.long)).toContain('[truncated]');
@@ -540,7 +540,7 @@ describe('Auto mode', () => {
     expect(row).toMatchObject({
       integrationId: call.integrationId,
       toolName: call.toolName,
-      argsSummary: { ...call.args, apiKey: '[redacted]' },
+      argsSummary: { ...call.args, apiKey: '[value omitted]' },
       evaluation,
     });
   });
@@ -786,7 +786,10 @@ describe('integration tool session overrides', () => {
       .from(integrationToolApprovalRequests)
       .where(eq(integrationToolApprovalRequests.sessionId, context.sessionId));
     expect(row?.status).toBe('auto_approved');
-    expect(row?.argsSummary).toEqual({ channel: 'C123', apiKey: '[redacted]' });
+    expect(row?.argsSummary).toEqual({
+      channel: 'C123',
+      apiKey: '[value omitted]',
+    });
     expect(await listPendingIntegrationToolApprovals(context)).toEqual([]);
     expect(
       await markIntegrationToolApprovalConsumed({

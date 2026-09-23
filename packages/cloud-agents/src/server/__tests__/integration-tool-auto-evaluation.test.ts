@@ -16,16 +16,11 @@ vi.mock('@roomote/db/server', async () => ({
   isDeploymentExperimentEnabled: mocks.experiment,
   recordIntegrationToolAutoEvaluation: mocks.record,
   recordIntegrationToolShadowEvaluation: mocks.recordShadow,
-  redactIntegrationToolArgs: (value: unknown) =>
-    JSON.parse(
-      JSON.stringify(value, (key, item) =>
-        key === 'apiKey' ? '[redacted]' : item,
-      ),
-    ),
 }));
 
 import {
   evaluateIntegrationToolAutoDecision,
+  isAllowlistedInternalRead,
   recommendFromAutoAnswers,
   recordIntegrationToolShadowEvaluationInBackground,
   resolveIntegrationToolAutoDecision,
@@ -74,6 +69,22 @@ describe('recommendFromAutoAnswers', () => {
     expect(
       recommendFromAutoAnswers({ ...routine, matchesRequest: undefined }),
     ).toBe('approve');
+    expect(
+      recommendFromAutoAnswers(
+        {
+          ...routine,
+          matchesRequest: undefined,
+          risk: { score: 0.1, confidence: 0.89 },
+        },
+        { allowlistedInternalRead: true },
+      ),
+    ).toBe('ask');
+    expect(
+      recommendFromAutoAnswers(
+        { ...routine, matchesRequest: undefined },
+        { allowlistedInternalRead: true },
+      ),
+    ).toBe('approve');
     for (const doubt of [
       // Anything past "reads and changes nothing", or unsure it is that.
       { risk: { score: 0.8, confidence: 0.9 } },
@@ -106,7 +117,7 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       call: {
         integration: 'linear',
         tool: 'list_issues',
-        arguments: { team: 'ENG', apiKey: '[redacted]' },
+        arguments: { team: 'ENG', apiKey: '[value omitted]' },
       },
       userRequest: 'What is open for ENG?',
       deploymentGuidance: null,
@@ -115,11 +126,179 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       type: 'score',
       criteria: RISK_LEVELS,
     });
+    expect(questions.steeredByUntrustedContent.criteria).toEqual({
+      true: expect.stringContaining('content the agent read'),
+      false: expect.stringContaining('no read content shaped them'),
+    });
     expect(Object.keys(questions).sort()).toEqual([
       'matchesRequest',
       'risk',
       'steeredByUntrustedContent',
     ]);
+  });
+
+  it('skips request matching only for in-scope internal task reads', async () => {
+    const taskId = '0abc123def456';
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({ ...routine, matchesRequest: undefined }),
+    );
+    const isSessionLaunchedTask = vi.fn(async () => true);
+    const ownTask = await evaluateIntegrationToolAutoDecision({
+      integrationId: 'roomote',
+      toolName: 'manage_tasks',
+      args: { action: 'get_messages', taskId },
+      userRequest: 'Continue the previous investigation.',
+      isSessionLaunchedTask,
+    });
+    expect(ownTask.recommendation).toBe('approve');
+    expect(mocks.evaluate.mock.calls[0]![0].questions).not.toHaveProperty(
+      'matchesRequest',
+    );
+    expect(
+      mocks.evaluate.mock.calls[0]![0].state.call.targetTaskScope,
+    ).toContain('launched by');
+    expect(isSessionLaunchedTask).toHaveBeenCalledWith(taskId);
+
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({ ...routine, matchesRequest: 0.4 }),
+    );
+    const unrelatedTask = await evaluateIntegrationToolAutoDecision({
+      integrationId: 'roomote',
+      toolName: 'manage_tasks',
+      args: { action: 'get_messages', taskId },
+      userRequest: 'Continue the previous investigation.',
+      isSessionLaunchedTask: async () => false,
+    });
+    expect(unrelatedTask.recommendation).toBe('ask');
+    expect(mocks.evaluate.mock.calls[1]![0].questions).toHaveProperty(
+      'matchesRequest',
+    );
+
+    const requestNamedTaskId = '1abc123def456';
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({ ...routine, matchesRequest: undefined }),
+    );
+    const namedLookup = vi.fn(async () => false);
+    const namedTask = await evaluateIntegrationToolAutoDecision({
+      integrationId: 'roomote',
+      toolName: 'manage_tasks',
+      args: { action: 'get_summary', taskId: requestNamedTaskId },
+      userRequest: `Please inspect task ${requestNamedTaskId}.`,
+      isSessionLaunchedTask: namedLookup,
+    });
+    expect(namedTask.recommendation).toBe('approve');
+    expect(namedLookup).not.toHaveBeenCalled();
+    expect(mocks.evaluate.mock.calls[2]![0].questions).not.toHaveProperty(
+      'matchesRequest',
+    );
+
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    const searchScopeCheck = vi.fn(async () => true);
+    await evaluateIntegrationToolAutoDecision({
+      integrationId: 'roomote',
+      toolName: 'manage_tasks',
+      args: { action: 'search', query: 'deployment notes' },
+      userRequest: 'Continue the previous investigation.',
+      isSessionLaunchedTask: searchScopeCheck,
+    });
+    expect(searchScopeCheck).not.toHaveBeenCalled();
+    expect(mocks.evaluate.mock.calls[3]![0].questions).toHaveProperty(
+      'matchesRequest',
+    );
+  });
+
+  it('recognizes only the specified internal read tools and task scopes', async () => {
+    const isSessionLaunchedTask = vi.fn(
+      async (taskId: string) => taskId === '0abc123def456',
+    );
+    const taskRead = {
+      integrationId: 'roomote',
+      toolName: 'manage_tasks',
+      args: { action: 'get_updates', taskId: '0abc123def456' },
+      userRequest: 'Unrelated request',
+      isSessionLaunchedTask,
+    };
+    await expect(isAllowlistedInternalRead(taskRead)).resolves.toBe(true);
+    await expect(
+      isAllowlistedInternalRead({
+        ...taskRead,
+        args: { action: 'get_updates', taskId: '1abc123def456' },
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      isAllowlistedInternalRead({
+        ...taskRead,
+        args: { action: 'search', taskId: '0abc123def456' },
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      isAllowlistedInternalRead({
+        ...taskRead,
+        args: { action: 'get_messages', sessionId: 'session-1' },
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      isAllowlistedInternalRead({
+        integrationId: 'gbrain',
+        toolName: 'query',
+        args: { query: 'context' },
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      isAllowlistedInternalRead({
+        integrationId: 'gbrain',
+        toolName: 'search',
+        args: { query: 'context' },
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('asks deterministically before Jev for a credential-shaped value outside the allowlist', async () => {
+    const sentinel = `sk-or-v1-${'x'.repeat(32)}`;
+    const result = await evaluateIntegrationToolAutoDecision({
+      integrationId: 'exa',
+      toolName: 'web_search',
+      args: { query: `${'x'.repeat(250)} ${sentinel}` },
+      userRequest: 'Look up our deployment notes.',
+    });
+    expect(result).toMatchObject({
+      recommendation: 'ask',
+      reason: expect.stringContaining('credential-shaped value'),
+    });
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+  });
+
+  it('masks credential values for Jev while allowing an allowlisted Brain query to be judged', async () => {
+    const sentinel = `ghp_${'x'.repeat(36)}`;
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({
+        ...routine,
+        risk: { score: 0.1, confidence: 0.95 },
+        matchesRequest: undefined,
+      }),
+    );
+    const result = await evaluateIntegrationToolAutoDecision({
+      integrationId: 'gbrain',
+      toolName: 'query',
+      args: { query: `deploy notes ${sentinel}` },
+      userRequest: 'Look up our deployment notes.',
+    });
+    expect(result.recommendation).toBe('approve');
+    const { state, questions } = mocks.evaluate.mock.calls[0]![0];
+    expect(state.call.arguments).toEqual({ query: '[value omitted]' });
+    expect(questions).not.toHaveProperty('matchesRequest');
+  });
+
+  it('gives Jev longer arguments than the 200-character approval preview', async () => {
+    const longQuery = 'ordinary-search-term '.repeat(30);
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    await evaluateIntegrationToolAutoDecision({
+      ...call,
+      args: { query: longQuery },
+    });
+    expect(mocks.evaluate.mock.calls[0]![0].state.call.arguments).toEqual({
+      query: longQuery,
+    });
   });
 
   it('asks only what there is something to judge against', async () => {
@@ -154,6 +333,10 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       'Anything sent to customers is high risk.',
     );
     expect(questions.guidanceFlagsRisk).toBeDefined();
+    expect(questions.guidanceFlagsRisk.criteria).toEqual({
+      true: expect.stringContaining('specifically marks'),
+      false: expect.stringContaining('is silent'),
+    });
   });
 
   it('asks when no model or a failed evaluation leaves Auto unable to check', async () => {

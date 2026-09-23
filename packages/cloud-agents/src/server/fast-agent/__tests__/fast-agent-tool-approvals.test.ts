@@ -20,8 +20,26 @@ vi.mock('../../integration-tool-auto-evaluation', () => ({
   })),
 }));
 
+const databaseMocks = vi.hoisted(() => ({
+  sessionTaskRows: [] as Array<{ taskId: string }>,
+  where: vi.fn(),
+}));
 vi.mock('@roomote/db/server', () => ({
-  db: {},
+  and: (...conditions: unknown[]) => ({ conditions }),
+  db: {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn((condition: unknown) => {
+          databaseMocks.where(condition);
+          return {
+            limit: vi.fn(async () => databaseMocks.sessionTaskRows),
+          };
+        }),
+      })),
+    })),
+  },
+  eq: (column: unknown, value: unknown) => ({ column, value }),
+  sessionTasks: { sessionId: 'sessionId', taskId: 'taskId', origin: 'origin' },
   getSessionForFastConversation: vi.fn(),
   expireIntegrationToolApproval: vi.fn(async () => undefined),
   fingerprintIntegrationToolCall: vi.fn(() => 'fingerprint'),
@@ -61,6 +79,10 @@ import {
   listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
+import {
+  redactIntegrationToolArgs,
+  type IntegrationToolApprovalMetadata,
+} from '@roomote/types';
 import { isSessionUserPresent } from '@roomote/redis';
 
 import {
@@ -965,6 +987,166 @@ describe('tool approval bridge', () => {
     bridge().handleAsk({ ...ask, requestId: 'req-4' }, manual);
     await vi.waitFor(() => expect(manual.reply).toHaveBeenCalled());
     expect(resolveIntegrationToolAutoDecision).not.toHaveBeenCalled();
+  });
+
+  it('uses the shared neutral-masked argument view for the approval card and audit summary', async () => {
+    const sentinel = `sk-or-v1-${'z'.repeat(32)}`;
+    const args = {
+      channel: 'C1',
+      text: 'hi',
+      query: `search for deploy notes ${sentinel}`,
+    };
+    const argsSummary = redactIntegrationToolArgs(args);
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'ask',
+      mode: 'on',
+      evaluation: { recommendation: 'ask', evaluatedAt: '' },
+    });
+    vi.mocked(insertIntegrationToolApproval).mockResolvedValue({
+      approvalId: 'approval-masked',
+      integrationId: 'mock-slack',
+      toolName: 'post_message',
+      argsSummary,
+      status: 'pending',
+      taskId: null,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
+    const notify = vi.fn(
+      async (_approval: IntegrationToolApprovalMetadata) => undefined,
+    );
+    const helperMocks = helpers();
+    helperMocks.fetchCallArgs.mockResolvedValue({ input: args });
+
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'slack',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+      userRequest: 'Look up deployment notes.',
+      notify,
+    }).handleAsk(ask, helperMocks);
+
+    await vi.waitFor(() => expect(notify).toHaveBeenCalled());
+    expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+      { sessionId: 'session-id', userId: 'user-id' },
+      expect.objectContaining({ argsSummary }),
+    );
+    expect(notify.mock.calls[0]![0].argsSummary).toEqual(argsSummary);
+    expect(JSON.stringify(argsSummary)).not.toContain(sentinel);
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ args }),
+    );
+  });
+
+  it('scopes internal task reads to fast-delegated tasks in the current session', async () => {
+    const taskId = '0abc123def456';
+    const args = {
+      action: 'get_messages',
+      taskId,
+      channel: 'C1',
+      text: 'hi',
+    };
+    const taskIntegration = [
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: '',
+        tools: [
+          {
+            name: 'manage_tasks',
+            description: 'Inspect Roomote tasks.',
+            inputSchema: {},
+          },
+        ],
+      },
+    ] as unknown as FastAgentIntegration[];
+    vi.mocked(resolveIntegrationToolAutoDecision).mockImplementation(
+      async (input) => {
+        const inSession = await input.isSessionLaunchedTask?.(taskId);
+        return {
+          action: inSession ? 'approve' : 'ask',
+          mode: 'on',
+          evaluation: {
+            recommendation: inSession ? 'approve' : 'ask',
+            evaluatedAt: '',
+          },
+        };
+      },
+    );
+    const autoToolKeys = new Set([JSON.stringify(['roomote', 'manage_tasks'])]);
+    const taskAsk = {
+      ...ask,
+      permission: codeModeToolKey('roomote', 'manage_tasks'),
+    };
+
+    databaseMocks.sessionTaskRows = [{ taskId }];
+    const ownTaskHelpers = helpers();
+    ownTaskHelpers.fetchCallArgs.mockResolvedValue({ input: args });
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'slack',
+      integrations: taskIntegration,
+      autoToolKeys,
+      userRequest: 'Continue earlier work.',
+    }).handleAsk(taskAsk, ownTaskHelpers);
+    await vi.waitFor(() =>
+      expect(ownTaskHelpers.reply).toHaveBeenCalledWith('req-1', 'once'),
+    );
+    expect(databaseMocks.where).toHaveBeenLastCalledWith({
+      conditions: [
+        { column: 'sessionId', value: 'session-id' },
+        { column: 'taskId', value: taskId },
+        { column: 'origin', value: 'fast_delegation' },
+      ],
+    });
+
+    databaseMocks.sessionTaskRows = [];
+    vi.mocked(insertIntegrationToolApproval).mockResolvedValue({
+      approvalId: 'approval-unrelated-task',
+      integrationId: 'roomote',
+      toolName: 'manage_tasks',
+      argsSummary: args,
+      status: 'pending',
+      taskId: null,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
+    const unrelatedTaskHelpers = helpers();
+    unrelatedTaskHelpers.fetchCallArgs.mockResolvedValue({ input: args });
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'slack',
+      integrations: taskIntegration,
+      autoToolKeys,
+      userRequest: 'Continue earlier work.',
+    }).handleAsk(
+      { ...taskAsk, requestId: 'req-unrelated' },
+      unrelatedTaskHelpers,
+    );
+    await vi.waitFor(() =>
+      expect(unrelatedTaskHelpers.reply).toHaveBeenCalledWith(
+        'req-unrelated',
+        'reject',
+        'The requester rejected this tool call.',
+      ),
+    );
+    expect(databaseMocks.where).toHaveBeenLastCalledWith({
+      conditions: [
+        { column: 'sessionId', value: 'session-id' },
+        { column: 'taskId', value: taskId },
+        { column: 'origin', value: 'fast_delegation' },
+      ],
+    });
   });
 
   it.each([
