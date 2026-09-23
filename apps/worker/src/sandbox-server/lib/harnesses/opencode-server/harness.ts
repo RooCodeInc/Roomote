@@ -1712,6 +1712,7 @@ export class OpenCodeServerHarness
     provider_error: 0,
   };
   private openCodeInternalRetryCount = 0;
+  private openCodeInternalRetryStatusCount = 0;
   private lastOpenCodeRetryStatusMessage: string | null = null;
   private providerErrorRecoveryQueuedPromptId: string | null = null;
   /**
@@ -4050,10 +4051,13 @@ export class OpenCodeServerHarness
         this.sessionId;
       const message = asString(status?.message);
       const retryAttempt = asFiniteNumber(status?.attempt);
+      this.openCodeInternalRetryStatusCount += 1;
       const isTerminalProviderError = isOpenCodeTerminalProviderError(status);
       const exhaustedRetryBudget =
-        retryAttempt !== undefined &&
-        retryAttempt >= MAX_OPENCODE_INTERNAL_RETRY_ATTEMPTS;
+        retryAttempt !== undefined
+          ? retryAttempt >= MAX_OPENCODE_INTERNAL_RETRY_ATTEMPTS
+          : this.openCodeInternalRetryStatusCount >=
+            MAX_OPENCODE_INTERNAL_RETRY_ATTEMPTS;
 
       if (sessionId && (isTerminalProviderError || exhaustedRetryBudget)) {
         await this.terminateOpenCodeProviderRetry(
@@ -4528,6 +4532,7 @@ export class OpenCodeServerHarness
     this.providerErrorRecoveryCounts.policy_refusal = 0;
     this.providerErrorRecoveryCounts.provider_error = 0;
     this.openCodeInternalRetryCount = 0;
+    this.openCodeInternalRetryStatusCount = 0;
     this.lastOpenCodeRetryStatusMessage = null;
     this.providerErrorRecoveryQueuedPromptId = null;
     this.providerErrorRecoveryRetryAtMs = null;
@@ -5282,6 +5287,7 @@ export class OpenCodeServerHarness
     this.providerErrorRecoveryCounts.policy_refusal = 0;
     this.providerErrorRecoveryCounts.provider_error = 0;
     this.openCodeInternalRetryCount = 0;
+    this.openCodeInternalRetryStatusCount = 0;
     this.lastOpenCodeRetryStatusMessage = null;
     this.pendingContextOverflowError = null;
     this.clearAllExecuteToolProgress({ keepBackgroundWatchdogs: true });
