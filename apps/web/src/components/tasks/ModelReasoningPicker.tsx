@@ -130,6 +130,47 @@ function getPickerReasoningEffortLabel(effort: ReasoningEffort): string {
   return effort === 'xhigh' ? 'X-High' : getReasoningEffortLabel(effort);
 }
 
+/** Selected-state glints live inside the slider thumb, never beside the label. */
+function AutoThumbSparkle() {
+  const reducedMotion = useReducedMotion();
+  return (
+    <span
+      data-testid="auto-thumb-sparkle"
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded-full"
+    >
+      <motion.span
+        className="absolute inset-0 rounded-full bg-accent-foreground/35"
+        animate={reducedMotion ? undefined : { opacity: [0.1, 0.9, 0.1] }}
+        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.span
+        className="absolute top-1 left-1 size-1.5 rounded-full bg-accent-foreground opacity-40 shadow-[0_0_5px_currentColor]"
+        animate={
+          reducedMotion
+            ? undefined
+            : { opacity: [0.15, 1, 0.15], scale: [0.4, 1.2, 0.4] }
+        }
+        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.span
+        className="absolute right-1 bottom-1 size-1 rounded-full bg-accent-foreground opacity-40 shadow-[0_0_4px_currentColor]"
+        animate={
+          reducedMotion
+            ? undefined
+            : { opacity: [0.15, 0.9, 0.15], scale: [0.4, 1.2, 0.4] }
+        }
+        transition={{
+          duration: 2.4,
+          delay: 0.8,
+          repeat: Infinity,
+          ease: 'easeInOut',
+        }}
+      />
+    </span>
+  );
+}
+
 function PickerContent({
   models,
   model,
@@ -143,6 +184,7 @@ function PickerContent({
   modelDisabled,
   reasoningDisabled,
   supportedReasoningEfforts,
+  allowAuto = false,
   providerGrouping,
   onModelSelectionChange,
   onClose,
@@ -168,6 +210,7 @@ function PickerContent({
   modelDisabled?: boolean;
   reasoningDisabled?: boolean;
   supportedReasoningEfforts?: readonly ReasoningEffort[];
+  allowAuto?: boolean;
   providerGrouping?: ProviderGroupingOptions;
   onClose?: () => void;
 }) {
@@ -187,20 +230,32 @@ function PickerContent({
   const selectedModel = models.find(({ id }) => id === effectiveModelId);
   const efforts = supportedReasoningEfforts ?? supportedEfforts(selectedModel);
   const reasoningUnavailable = efforts.length === 0;
+  const sliderEfforts: readonly (ReasoningEffort | null)[] = useMemo(
+    () => (allowAuto && !reasoningUnavailable ? [null, ...efforts] : efforts),
+    [allowAuto, efforts, reasoningUnavailable],
+  );
   const effectiveEffort =
-    (reasoningEffort
-      ? efforts.includes(reasoningEffort)
-        ? reasoningEffort
-        : closestSupportedEffort(reasoningEffort, efforts)
-      : efforts.find((effort) => effort === defaultReasoningEffort)) ??
-    efforts[Math.floor((efforts.length - 1) / 2)];
-  const effortIndex = effectiveEffort ? efforts.indexOf(effectiveEffort) : 0;
+    allowAuto && reasoningEffort === null && !reasoningUnavailable
+      ? null
+      : ((reasoningEffort
+          ? efforts.includes(reasoningEffort)
+            ? reasoningEffort
+            : closestSupportedEffort(reasoningEffort, efforts)
+          : efforts.find((effort) => effort === defaultReasoningEffort)) ??
+        efforts[Math.floor((efforts.length - 1) / 2)]);
+  const effortIndex = reasoningUnavailable
+    ? 0
+    : sliderEfforts.indexOf(effectiveEffort ?? null);
   const reducedMotion = useReducedMotion() ?? false;
   const effortTransitionDirection: 1 | -1 =
     effortIndex < previousEffortIndexRef.current ? -1 : 1;
-  const effortLabel = effectiveEffort
-    ? getPickerReasoningEffortLabel(effectiveEffort)
-    : REASONING_UNAVAILABLE_LABEL;
+  const effortLabel = reasoningUnavailable
+    ? REASONING_UNAVAILABLE_LABEL
+    : effectiveEffort === null
+      ? 'Auto'
+      : effectiveEffort
+        ? getPickerReasoningEffortLabel(effectiveEffort)
+        : REASONING_UNAVAILABLE_LABEL;
   const labelTransition: ReasoningLabelTransition = {
     direction: effortTransitionDirection,
     reducedMotion,
@@ -362,6 +417,10 @@ function PickerContent({
       applyModelSelection(nextModel, null);
       return;
     }
+    if (allowAuto && reasoningEffort === null) {
+      applyModelSelection(nextModel, null);
+      return;
+    }
     if (reasoningEffort !== null) {
       if (nextEfforts.includes(reasoningEffort)) {
         applyModelSelection(nextModel, reasoningEffort);
@@ -425,8 +484,9 @@ function PickerContent({
   };
 
   const setEffortIndex = (index: number) => {
-    const effort = efforts[index];
-    if (effort && effort !== effectiveEffort) onReasoningEffortChange(effort);
+    const effort = sliderEfforts[index];
+    if (effort !== undefined && effort !== effectiveEffort)
+      onReasoningEffortChange(effort);
   };
 
   useEffect(() => {
@@ -439,7 +499,7 @@ function PickerContent({
       if (
         disabled ||
         reasoningDisabled ||
-        efforts.length < 2 ||
+        sliderEfforts.length < 2 ||
         event.deltaY === 0
       ) {
         return;
@@ -447,10 +507,13 @@ function PickerContent({
 
       const nextIndex = Math.max(
         0,
-        Math.min(efforts.length - 1, effortIndex + (event.deltaY < 0 ? 1 : -1)),
+        Math.min(
+          sliderEfforts.length - 1,
+          effortIndex + (event.deltaY < 0 ? 1 : -1),
+        ),
       );
-      const effort = efforts[nextIndex];
-      if (effort && effort !== effectiveEffort) {
+      const effort = sliderEfforts[nextIndex];
+      if (effort !== undefined && effort !== effectiveEffort) {
         onReasoningEffortChange(effort);
       }
     };
@@ -463,7 +526,7 @@ function PickerContent({
     disabled,
     effectiveEffort,
     effortIndex,
-    efforts,
+    sliderEfforts,
     onReasoningEffortChange,
     reasoningDisabled,
   ]);
@@ -566,7 +629,11 @@ function PickerContent({
         >
           <AnimatePresence initial={false} custom={labelTransition}>
             <motion.span
-              key={effectiveEffort ?? 'no-reasoning'}
+              key={
+                reasoningUnavailable
+                  ? 'no-reasoning'
+                  : (effectiveEffort ?? 'auto')
+              }
               aria-hidden="true"
               className="absolute inset-x-0 top-3"
               custom={labelTransition}
@@ -587,13 +654,13 @@ function PickerContent({
               reasoningUnavailable ? 'cursor-not-allowed' : 'cursor-ns-resize',
             )}
           >
-            {efforts.map((effort, index) => {
-              const position = index / Math.max(1, efforts.length - 1);
+            {sliderEfforts.map((effort, index) => {
+              const position = index / Math.max(1, sliderEfforts.length - 1);
               const endpointOffset =
                 SLIDER_THUMB_RADIUS_PX * (1 - position * 2);
               return (
                 <span
-                  key={effort}
+                  key={effort ?? 'auto'}
                   aria-hidden="true"
                   className="pointer-events-none absolute left-1/2 z-10 h-0.5 w-2 -translate-x-1/2 translate-y-1/2 rounded-full bg-background/40"
                   style={{
@@ -605,15 +672,20 @@ function PickerContent({
             <Slider
               orientation="vertical"
               min={0}
-              max={Math.max(0, efforts.length - 1)}
+              max={Math.max(0, sliderEfforts.length - 1)}
               step={1}
               value={[effortIndex]}
-              disabled={disabled || reasoningDisabled || efforts.length < 2}
+              disabled={
+                disabled || reasoningDisabled || sliderEfforts.length < 2
+              }
               aria-label="Reasoning level"
-              aria-valuetext={
-                effectiveEffort
-                  ? getPickerReasoningEffortLabel(effectiveEffort)
-                  : REASONING_UNAVAILABLE_LABEL
+              aria-valuetext={effortLabel}
+              thumbContent={
+                allowAuto &&
+                effectiveEffort === null &&
+                !reasoningUnavailable ? (
+                  <AutoThumbSparkle />
+                ) : undefined
               }
               className={cn(
                 'h-full min-h-0 data-[orientation=vertical]:min-h-0 [&>span:not([data-slot])]:transition-[bottom] [&>span:not([data-slot])]:duration-300 [&>span:not([data-slot])]:ease-out motion-reduce:[&>span:not([data-slot])]:transition-none [&_[data-slot=slider-track]]:w-4 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2',
@@ -723,6 +795,7 @@ export const ModelReasoningPickerTrigger = forwardRef<
   Omit<ComponentProps<'button'>, 'children' | 'size'> & {
     label: string;
     reasoningEffort?: ReasoningEffort | null;
+    autoEffort?: boolean;
     disabled?: boolean;
     size?: 'compact' | 'base';
     appearance?: 'ghost' | 'select';
@@ -732,6 +805,7 @@ export const ModelReasoningPickerTrigger = forwardRef<
   {
     label,
     reasoningEffort,
+    autoEffort = false,
     disabled,
     size = 'compact',
     appearance = 'ghost',
@@ -790,7 +864,9 @@ export const ModelReasoningPickerTrigger = forwardRef<
       )}
     >
       <span className="max-w-48 truncate">{label}</span>
-      {reasoningEffort ? (
+      {autoEffort && !reasoningEffort ? (
+        <span className="text-accent-foreground">Auto</span>
+      ) : reasoningEffort ? (
         <span
           className={cn(
             'text-muted-foreground/70 transition-colors duration-500 motion-reduce:transition-none',

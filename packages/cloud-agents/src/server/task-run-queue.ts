@@ -95,6 +95,7 @@ import {
   type MatchedHumanActor,
 } from './commit-author';
 import { resolveEffectiveHarnessModelState } from './harness-model-overrides';
+import { chooseAdaptiveReasoningEffort } from './adaptive-reasoning-effort';
 import {
   generateLlmTaskTitle,
   isFallbackTaskTitle,
@@ -1522,6 +1523,26 @@ async function enqueueFreshLaunch(
       deploymentCodingReasoningEffort:
         resolvedHarness.deploymentCodingReasoningEffort ?? null,
     });
+
+  if (
+    targetHarness === 'opencode-server' &&
+    privacy !== 'private' &&
+    !task.payload.reasoningEffort &&
+    !requestedExistingTask
+  ) {
+    const selectedEffort = await chooseAdaptiveReasoningEffort({
+      request: getInitialTaskPrompt(task) ?? '',
+      modelId: effectiveTaskModel,
+      model: resolvedHarness.deploymentTaskModelSettings?.models?.find(
+        (option) => option.id === effectiveTaskModel,
+      ),
+      fallback: taskWithHarnessOverrides.payload.reasoningEffort ?? null,
+      surface: 'task',
+    });
+    if (selectedEffort) {
+      taskWithHarnessOverrides.payload.reasoningEffort = selectedEffort;
+    }
+  }
 
   const repositoryName = taskWithHarnessOverrides.payload.repo || null;
   const resolvedTaskPolicy = resolveTaskRuntimePolicy({

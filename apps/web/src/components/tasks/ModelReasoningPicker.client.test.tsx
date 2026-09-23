@@ -81,6 +81,7 @@ function Harness({
   emptyModelLabel,
   availableModels = models,
   onModelSelectionChange,
+  allowAuto = false,
 }: {
   initialModel?: string;
   initialEffort?: ReasoningEffort | null;
@@ -91,6 +92,7 @@ function Harness({
     model: string;
     reasoningEffort: ReasoningEffort | null;
   }) => void;
+  allowAuto?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [model, setModel] = useState(initialModel);
@@ -131,6 +133,7 @@ function Harness({
         onModelChange={setModel}
         reasoningEffort={effort}
         defaultReasoningEffort="medium"
+        allowAuto={allowAuto}
         onReasoningEffortChange={setEffort}
         onModelSelectionChange={
           onModelSelectionChange ? handleSelection : undefined
@@ -233,6 +236,44 @@ describe('ModelReasoningPicker', () => {
     expect(screen.getByTestId('selection')).toHaveTextContent(
       'provider/alpha:high',
     );
+  });
+
+  it('selects Auto as a slider level and keeps it across supported model changes', () => {
+    const combined = vi.fn();
+    render(
+      <Harness
+        initialEffort={null}
+        allowAuto
+        onModelSelectionChange={combined}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    expect(slider).toHaveAttribute('aria-valuetext', 'Auto');
+    expect(slider).toContainElement(screen.getByTestId('auto-thumb-sparkle'));
+    expect(screen.getByTestId('reasoning-level-label')).toHaveTextContent(
+      /^Auto$/,
+    );
+    expect(slider).toHaveAttribute('aria-valuemin', '0');
+    expect(slider).toHaveAttribute('aria-valuemax', '2');
+    fireEvent.wheel(slider, { deltaY: -40 });
+    expect(screen.getByTestId('selection')).toHaveTextContent(
+      'provider/alpha:low',
+    );
+    expect(screen.queryByTestId('auto-thumb-sparkle')).not.toBeInTheDocument();
+    fireEvent.wheel(slider, { deltaY: 40 });
+    expect(slider).toHaveAttribute('aria-valuetext', 'Auto');
+    expect(screen.getByTestId('selection')).toHaveTextContent(
+      'provider/alpha:default',
+    );
+
+    fireEvent.click(screen.getByRole('option', { name: 'Beta' }));
+    expect(combined).toHaveBeenLastCalledWith({
+      model: 'provider/beta',
+      reasoningEffort: null,
+    });
+    expect(slider).toHaveAttribute('aria-valuetext', 'Auto');
+    expect(slider).toHaveAttribute('aria-valuemax', '1');
   });
 
   it('briefly flashes the trigger when its selection changes', async () => {

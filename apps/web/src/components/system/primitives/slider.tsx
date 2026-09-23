@@ -14,8 +14,12 @@ function Slider({
   'aria-label': ariaLabel,
   'aria-labelledby': ariaLabelledBy,
   'aria-valuetext': ariaValueText,
+  thumbContent,
   ...props
-}: React.ComponentProps<typeof SliderPrimitive.Root>) {
+}: React.ComponentProps<typeof SliderPrimitive.Root> & {
+  /** Optional decoration rendered inside each thumb. */
+  thumbContent?: React.ReactNode;
+}) {
   const _values = React.useMemo(
     () =>
       Array.isArray(value)
@@ -61,8 +65,10 @@ function Slider({
           aria-label={ariaLabel}
           aria-labelledby={ariaLabelledBy}
           aria-valuetext={ariaValueText}
-          className="border-primary bg-background ring-ring/50 block size-4 shrink-0 rounded-full border shadow-sm transition-[color,box-shadow] hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
-        />
+          className="border-primary bg-background ring-ring/50 relative block size-4 shrink-0 rounded-full border shadow-sm transition-[color,box-shadow] hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
+        >
+          {thumbContent}
+        </SliderPrimitive.Thumb>
       ))}
     </SliderPrimitive.Root>
   );

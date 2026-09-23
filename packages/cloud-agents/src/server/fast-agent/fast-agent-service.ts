@@ -30,6 +30,7 @@ import {
   NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
   REASONING_EFFORT_VALUES,
+  getTaskModelCatalog,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
   buildEnvironmentVerificationPrompt,
@@ -165,6 +166,7 @@ import {
   NonTaskOpenCodePromptTimeoutError,
   NON_TASK_INFERENCE_SURFACES,
   resolveNonTaskInputModalityDelivery,
+  resolveNonTaskOrchestrationModelId,
   type NonTaskInputModalityDelivery,
   type NonTaskPromptFile,
   type NonTaskProviderRetryEvent,
@@ -174,6 +176,7 @@ import {
   type NonTaskOpenCodeNativeSteer,
   type NonTaskOpenCodeTaskPart,
 } from '../non-task-provider-usage';
+import { chooseAdaptiveReasoningEffort } from '../adaptive-reasoning-effort';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import {
   createFastAgentReplyStreamPublisher,
@@ -3462,6 +3465,7 @@ export async function answerFastAgentQuestion({
           columns: {
             globalAgentInstructions: true,
             workspaceRoutingSettings: true,
+            taskModelSettings: true,
           },
         })
         .catch((error) => {
@@ -3558,9 +3562,37 @@ export async function answerFastAgentQuestion({
             request: question,
           })
         : undefined;
+    // Null is the Auto selection; only a concrete level opts this turn out.
+    const explicitTurnEffort = reasoningEffort != null;
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
+    if (
+      !explicitTurnEffort &&
+      !reasoningEffort &&
+      session.privacy !== 'private' &&
+      (substantiveHumanInput ||
+        (platformEvent && platformEventKind === 'automation'))
+    ) {
+      try {
+        const modelId = await resolveNonTaskOrchestrationModelId(
+          model ?? undefined,
+        );
+        reasoningEffort = await chooseAdaptiveReasoningEffort({
+          request: question,
+          modelId,
+          model: getTaskModelCatalog(
+            agentBehaviorSettings?.taskModelSettings,
+          ).find((option) => option.id === modelId),
+          fallback: null,
+          surface: 'session',
+        });
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Adaptive effort model lookup unavailable; using configured effort: ${formatErrorForLog(error)}`,
+        );
+      }
+    }
     currentSessionPrivacy = session.privacy ?? 'shared';
     currentPrivateOwnerUserId = session.privateOwnerUserId ?? null;
     privateSessionsExperimentEnabled =
