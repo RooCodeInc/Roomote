@@ -7,6 +7,7 @@ const {
   mockActiveRepositoryRows,
   mockGetAutomationRuntime,
   mockRecordAutomationRunOutcome,
+  mockRecordBackgroundAutomationResult,
   mockUpsertBackgroundAutomationSlackThread,
   mockResolveAutomationRuntimeDestination,
   mockResolveAutomationRepositoryDestination,
@@ -47,6 +48,7 @@ const {
   mockActiveRepositoryRows: vi.fn(),
   mockGetAutomationRuntime: vi.fn(),
   mockRecordAutomationRunOutcome: vi.fn(),
+  mockRecordBackgroundAutomationResult: vi.fn(),
   mockUpsertBackgroundAutomationSlackThread: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
   mockResolveAutomationRepositoryDestination: vi.fn(),
@@ -84,6 +86,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   getAutomationRuntime: mockGetAutomationRuntime,
   recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
+  recordBackgroundAutomationResult: mockRecordBackgroundAutomationResult,
   upsertBackgroundAutomationSlackThread:
     mockUpsertBackgroundAutomationSlackThread,
   slackInstallations: slackInstallationsTable,
@@ -287,6 +290,24 @@ describe('announcerJob non-Slack posting', () => {
       expect.anything(),
       expect.objectContaining({ key: 'announcer', status: 'succeeded' }),
     );
+  });
+
+  it('persists a cleared outcome when the scan window has no merged PRs', async () => {
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '-100555',
+    });
+    mockMergedPullRequestRows.mockResolvedValue([]);
+
+    await announcerJob({ manualTrigger: true });
+
+    expect(mockRecordBackgroundAutomationResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationKey: 'announcer',
+        content: 'No merged PRs to summarize.',
+      }),
+    );
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('ignores installation A before any outcome and launches the manager report for owner B', async () => {
