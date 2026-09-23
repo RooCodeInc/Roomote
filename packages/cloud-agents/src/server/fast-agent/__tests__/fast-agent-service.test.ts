@@ -704,6 +704,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
       ],
       defaultModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [],
     });
     mocks.evaluateDecisionModel.mockResolvedValue({
       requested: { type: 'noul', noul: 0.95 },
@@ -11843,6 +11844,51 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }),
     );
     expect(launchTask).not.toHaveBeenCalled();
+  });
+
+  it('launches on a coding-model routing rule target without confirmation', async () => {
+    mocks.getTaskModelOptions.mockResolvedValue({
+      models: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6' },
+        { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
+      ],
+      defaultModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [
+        {
+          condition: 'Frontend UI work',
+          modelId: 'anthropic/claude-sonnet-5',
+        },
+      ],
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Restyle the checkout page.',
+            model: 'anthropic/claude-sonnet-5',
+            kickoffMessage: 'I’m delegating the checkout restyle.',
+          }),
+        ).resolves.toEqual({ success: true, taskId: 'task-1' });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Restyle the checkout page.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).not.toHaveBeenCalled();
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
+    );
   });
 
   it('launches on the deployment default model without confirmation', async () => {

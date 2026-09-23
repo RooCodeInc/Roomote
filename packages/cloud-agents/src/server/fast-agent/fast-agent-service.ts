@@ -3885,15 +3885,21 @@ export async function answerFastAgentQuestion({
       ? await routingHintRequest
       : undefined;
     // A delegated-task model override the agent chose on its own must trace
-    // back to a user asking for that model. The routing-rule pick and the
-    // deployment default need no confirmation.
+    // back to a user asking for that model. The deployment default and any
+    // model an administrator's coding-model routing rule targets need no
+    // confirmation: the agent applies those rules itself on every turn, not
+    // only through the first-turn routing hint.
+    const routingRuleModelIds = new Set(
+      taskModelOptions.codingModelRoutingRules.map((rule) => rule.modelId),
+    );
     const rejectUnrequestedLaunchModel = async (
       modelId: string | null | undefined,
     ): Promise<string | undefined> => {
       if (
         !modelId ||
         modelId === routingHint?.model ||
-        modelId === taskModelOptions.defaultModelId
+        modelId === taskModelOptions.defaultModelId ||
+        routingRuleModelIds.has(modelId)
       ) {
         return undefined;
       }
