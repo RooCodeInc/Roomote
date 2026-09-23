@@ -2865,6 +2865,137 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it.each(['audio', 'video'] as const)(
+    'uses the coding model for opted-in %s when Vision is same as coding',
+    async (modality) => {
+      process.env = { ...originalEnv };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/google/gemini-3.8-flash',
+        R_SMALL_MODEL: 'openrouter/openai/text-helper',
+        [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
+      });
+      configProvidersMock.mockResolvedValue({
+        data: {
+          providers: [
+            {
+              id: 'openrouter',
+              models: {
+                'google/gemini-3.8-flash': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+                'openai/text-helper': {
+                  capabilities: {
+                    input: { [modality]: false },
+                    output: { text: true },
+                  },
+                },
+              },
+            },
+          ],
+          default: {},
+        },
+        error: undefined,
+      });
+      sessionPromptMock.mockResolvedValue({
+        data: {
+          info: { error: null },
+          parts: [{ type: 'text', text: 'Attachment understood.' }],
+        },
+        error: undefined,
+      });
+
+      const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+        await import('../non-task-provider-usage.js');
+      await expect(
+        generateTrackedNonTaskText({
+          surface:
+            modality === 'audio'
+              ? NON_TASK_INFERENCE_SURFACES.chatAudioTranscription
+              : NON_TASK_INFERENCE_SURFACES.chatVideoDescription,
+          prompt: 'Read the attachment.',
+          requiredInputModality: modality,
+        }),
+      ).resolves.toBe('Attachment understood.');
+      expect(sessionPromptMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: {
+            providerID: 'openrouter',
+            modelID: 'google/gemini-3.8-flash',
+          },
+        }),
+        expect.anything(),
+      );
+    },
+  );
+
+  it.each(['audio', 'video'] as const)(
+    'delivers opted-in %s through the coding fallback when Vision is same as coding',
+    async (modality) => {
+      process.env = { ...originalEnv };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/google/gemini-3.8-flash',
+        R_ORCHESTRATION_MODEL: 'openrouter/openai/text-orchestrator',
+        [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
+      });
+      configProvidersMock.mockResolvedValue({
+        data: {
+          providers: [
+            {
+              id: 'openrouter',
+              models: {
+                'google/gemini-3.8-flash': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+                'openai/text-orchestrator': {
+                  capabilities: {
+                    input: { [modality]: false },
+                    output: { text: true },
+                  },
+                },
+              },
+            },
+          ],
+          default: {},
+        },
+        error: undefined,
+      });
+
+      const {
+        resolveNonTaskInputModalityDelivery,
+        NonTaskInputModalityUnsupportedError,
+      } = await import('../non-task-provider-usage.js');
+      await expect(
+        resolveNonTaskInputModalityDelivery({
+          modality,
+          modelRole: 'orchestration',
+        }),
+      ).resolves.toEqual({
+        delivery: 'helper',
+        model: 'openrouter/openai/text-orchestrator',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      await expect(
+        resolveNonTaskInputModalityDelivery({ modality, modelRole: 'primary' }),
+      ).resolves.toEqual({
+        delivery: 'direct',
+        model: 'openrouter/google/gemini-3.8-flash',
+      });
+      await expect(
+        resolveNonTaskInputModalityDelivery({
+          modality,
+          modelRole: 'primary',
+          skipSessionModel: true,
+        }),
+      ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
+    },
+  );
+
   it('rejects audio before capability lookup or inference when the opt-in is off', async () => {
     process.env = { ...originalEnv };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({

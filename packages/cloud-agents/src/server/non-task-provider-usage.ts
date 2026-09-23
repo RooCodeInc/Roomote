@@ -937,6 +937,7 @@ async function resolveNonTaskModelRuntime(
 ): Promise<{
   model: string;
   catalogModelId: string;
+  visionModel: string | undefined;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
 }> {
   const requestedModel = model?.trim();
@@ -1015,6 +1016,10 @@ async function resolveNonTaskModelRuntime(
     // `bedrock-mantle-openai`), mirroring the task worker's rewrite.
     model: toBedrockMantleRuntimeModelId(resolvedModel),
     catalogModelId: resolvedModel,
+    // Keep the deployment coding fallback before an orchestration or explicit
+    // session model temporarily takes over R_MODEL in selectedRuntimeEnv.
+    visionModel:
+      resolvedModelRuntimeEnv.R_VISION_MODEL ?? resolvedModelRuntimeEnv.R_MODEL,
     // An explicit model rides into the server lease env as the primary role
     // model so the config builder registers its provider — the deployment's
     // role models may not include it, and an unregistered Bedrock (or
@@ -1179,6 +1184,7 @@ async function resolveModelForInputModality(
   params: GenerateTrackedNonTaskTextParams,
   runtime: {
     model: string;
+    visionModel: string | undefined;
     resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
   },
 ): Promise<string> {
@@ -1198,7 +1204,7 @@ async function resolveModelForInputModality(
   }
 
   const modalityModels = requiresVisionModelOptIn
-    ? [runtime.resolvedModelRuntimeEnv.R_VISION_MODEL]
+    ? [runtime.visionModel]
     : [
         runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
         runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
@@ -1267,9 +1273,10 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   ) {
     throw new NonTaskAudioVideoSupportDisabledError(modality);
   }
+  const visionModel = runtime.visionModel;
   const helperCandidates = (
     requiresVisionModelOptIn
-      ? [env.R_VISION_MODEL]
+      ? [visionModel]
       : [env.R_VISION_MODEL, env.R_SMALL_MODEL, env.R_MODEL]
   )
     .map((candidate) =>
@@ -1277,7 +1284,9 @@ export async function resolveNonTaskInputModalityDelivery(params: {
     )
     .filter(
       (candidate): candidate is string =>
-        Boolean(candidate) && candidate !== sessionModel,
+        Boolean(candidate) &&
+        (candidate !== sessionModel ||
+          (requiresVisionModelOptIn && !params.skipSessionModel)),
     );
   const model = await findModelSupportingInputModality({
     env,
@@ -1300,7 +1309,8 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   const runtimeModelId = (candidate: string | undefined) =>
     candidate ? toBedrockMantleRuntimeModelId(candidate) : undefined;
   const helperReasoningEffort =
-    model === runtimeModelId(env.R_VISION_MODEL)
+    model ===
+    runtimeModelId(requiresVisionModelOptIn ? visionModel : env.R_VISION_MODEL)
       ? env.R_VISION_MODEL_REASONING_EFFORT
       : model === runtimeModelId(env.R_SMALL_MODEL)
         ? env.R_SMALL_MODEL_REASONING_EFFORT
