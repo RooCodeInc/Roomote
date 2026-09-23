@@ -19,6 +19,7 @@ recorded inference usage. Use it to answer questions such as:
 
 - which task and automation types account for the most spend
 - how much session orchestration and memory contribute to spend
+- how much judgment-model routing and review pre-screening contribute to usage
 - which product features or runtime sources account for inference spend
 - whether a particular environment or model is driving costs
 - how usage differs between people and automations
@@ -63,6 +64,12 @@ in token totals even though it contributes no cost. A request with neither
 pricing nor token usage cannot contribute to those metrics. Use provider and
 model filters to narrow an investigation when totals do not match an external
 provider invoice.
+
+Judgment-model calls appear as non-task inference under the `judgment_model`
+source. Primary decisions and optional shadow evaluations are separate requests,
+so both contribute when shadow mode is enabled. Roomote records provider-reported
+tokens and cost when available; missing metadata leaves those values at zero
+without changing the decision or its fallback behavior.
 
 Deleting a task does not remove its recorded inference usage from Cost
 Analytics. The historical usage still contributes to totals, task counts, and
