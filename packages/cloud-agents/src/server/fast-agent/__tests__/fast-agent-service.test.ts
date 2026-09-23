@@ -11860,6 +11860,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       ],
     });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      rule_1: { type: 'noul', noul: 0.92 },
+    });
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
       taskId: 'task-1',
@@ -11885,10 +11888,69 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       adapter,
     });
 
-    expect(mocks.evaluateDecisionModel).not.toHaveBeenCalled();
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: { work: 'Restyle the checkout page.' },
+        questions: {
+          rule_1: expect.objectContaining({
+            instructions: expect.stringContaining('"Frontend UI work"'),
+          }),
+        },
+      }),
+    );
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
     );
+  });
+
+  it('rejects a routing rule target when its condition does not fit the work', async () => {
+    mocks.getTaskModelOptions.mockResolvedValue({
+      models: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6' },
+        { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
+      ],
+      defaultModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [
+        {
+          condition: 'Frontend UI work',
+          modelId: 'anthropic/claude-sonnet-5',
+        },
+      ],
+    });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      rule_1: { type: 'noul', noul: 0.1 },
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the billing migration.',
+            model: 'anthropic/claude-sonnet-5',
+            kickoffMessage: 'I’m delegating the migration fix.',
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: expect.stringContaining('was not applied'),
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Fix the billing migration.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
+    expect(launchTask).not.toHaveBeenCalled();
   });
 
   it('launches on the deployment default model without confirmation', async () => {

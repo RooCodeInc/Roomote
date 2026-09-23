@@ -8,7 +8,10 @@ vi.mock('../../typesafe-judgment', () => ({
 
 import type { TaskModelOption } from '@roomote/types';
 
-import { verifyFastAgentLaunchModelRequest } from '../fast-agent-launch-model-guard';
+import {
+  verifyFastAgentLaunchModelRequest,
+  verifyFastAgentRoutingRuleMatch,
+} from '../fast-agent-launch-model-guard';
 
 const opus: TaskModelOption = {
   id: 'openrouter/anthropic/claude-opus-5',
@@ -124,5 +127,94 @@ describe('verifyFastAgentLaunchModelRequest', () => {
         userId: 'user-1',
       }),
     ).resolves.toEqual({ allowed: false, reason: 'not_mentioned' });
+  });
+});
+
+describe('verifyFastAgentRoutingRuleMatch', () => {
+  const rules = [
+    { condition: 'Large refactors', modelId: opus.id, reasoningEffort: null },
+    {
+      condition: 'Database migrations',
+      modelId: opus.id,
+      reasoningEffort: null,
+    },
+    {
+      condition: 'Docs edits',
+      modelId: 'openrouter/google/gemini-3.8-flash',
+      reasoningEffort: null,
+    },
+  ];
+
+  beforeEach(() => {
+    mockEvaluateDecisionModel.mockReset();
+  });
+
+  it('asks only about the rules that target the model', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue({
+      rule_1: { type: 'noul', noul: 0.1 },
+      rule_2: { type: 'noul', noul: 0.9 },
+    });
+
+    await expect(
+      verifyFastAgentRoutingRuleMatch({
+        model: opus,
+        rules,
+        work: 'Add a column to the orders table with a backfill.',
+        userId: 'user-1',
+      }),
+    ).resolves.toBe(true);
+    const { questions } = mockEvaluateDecisionModel.mock.calls[0]![0];
+    expect(Object.keys(questions)).toEqual(['rule_1', 'rule_2']);
+    expect(questions.rule_2.instructions).toContain('"Database migrations"');
+  });
+
+  it('rejects a weak match', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue({
+      rule_1: { type: 'noul', noul: 0.5 },
+      rule_2: { type: 'noul', noul: 0.3 },
+    });
+
+    await expect(
+      verifyFastAgentRoutingRuleMatch({
+        model: opus,
+        rules,
+        work: 'Fix a typo.',
+        userId: 'user-1',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('skips the decision model when no rule targets the model', async () => {
+    await expect(
+      verifyFastAgentRoutingRuleMatch({
+        model: opus,
+        rules: [rules[2]!],
+        work: 'Refactor everything.',
+        userId: 'user-1',
+      }),
+    ).resolves.toBe(false);
+    expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['is unavailable', () => mockEvaluateDecisionModel.mockResolvedValue(null)],
+    [
+      'fails',
+      () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockEvaluateDecisionModel.mockRejectedValue(new Error('timeout'));
+      },
+    ],
+  ])('does not apply rules when the decision model %s', async (_, arrange) => {
+    arrange();
+
+    await expect(
+      verifyFastAgentRoutingRuleMatch({
+        model: opus,
+        rules,
+        work: 'Refactor the checkout module.',
+        userId: 'user-1',
+      }),
+    ).resolves.toBe(false);
   });
 });

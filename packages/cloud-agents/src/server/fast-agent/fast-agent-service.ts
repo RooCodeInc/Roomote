@@ -277,6 +277,7 @@ import {
 import {
   describeRejectedLaunchModel,
   verifyFastAgentLaunchModelRequest,
+  verifyFastAgentRoutingRuleMatch,
 } from './fast-agent-launch-model-guard';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
@@ -3885,21 +3886,19 @@ export async function answerFastAgentQuestion({
       ? await routingHintRequest
       : undefined;
     // A delegated-task model override the agent chose on its own must trace
-    // back to a user asking for that model. The deployment default and any
-    // model an administrator's coding-model routing rule targets need no
-    // confirmation: the agent applies those rules itself on every turn, not
-    // only through the first-turn routing hint.
-    const routingRuleModelIds = new Set(
-      taskModelOptions.codingModelRoutingRules.map((rule) => rule.modelId),
-    );
+    // back to a user asking for that model, or to an administrator's
+    // coding-model routing rule whose condition fits the work. The agent
+    // reads those rules from its prompt and may apply them on any turn, so a
+    // rule target is checked against the work rather than trusted outright.
+    // The first-turn routing hint and the deployment default need no check.
     const rejectUnrequestedLaunchModel = async (
       modelId: string | null | undefined,
+      work: string | undefined,
     ): Promise<string | undefined> => {
       if (
         !modelId ||
         modelId === routingHint?.model ||
-        modelId === taskModelOptions.defaultModelId ||
-        routingRuleModelIds.has(modelId)
+        modelId === taskModelOptions.defaultModelId
       ) {
         return undefined;
       }
@@ -3917,6 +3916,16 @@ export async function answerFastAgentQuestion({
             .flatMap(extractModelMessageText),
         ]),
       ];
+      if (
+        await verifyFastAgentRoutingRuleMatch({
+          model,
+          rules: taskModelOptions.codingModelRoutingRules,
+          work: work ?? userMessages.at(-1) ?? '',
+          userId,
+        })
+      ) {
+        return undefined;
+      }
       const verdict = await verifyFastAgentLaunchModelRequest({
         model,
         userMessages,
@@ -5264,8 +5273,10 @@ export async function answerFastAgentQuestion({
                 error: `Model "${selectedModel}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
             }
-            const unrequestedModelError =
-              await rejectUnrequestedLaunchModel(selectedModel);
+            const unrequestedModelError = await rejectUnrequestedLaunchModel(
+              selectedModel,
+              args.prompt,
+            );
             if (unrequestedModelError) {
               return { success: false, error: unrequestedModelError };
             }
@@ -5446,7 +5457,7 @@ export async function answerFastAgentQuestion({
               };
             }
             const unrequestedReviewModelError =
-              await rejectUnrequestedLaunchModel(args.model);
+              await rejectUnrequestedLaunchModel(args.model, undefined);
             if (unrequestedReviewModelError) {
               return { success: false, error: unrequestedReviewModelError };
             }
