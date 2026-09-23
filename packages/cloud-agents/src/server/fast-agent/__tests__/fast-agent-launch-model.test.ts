@@ -162,10 +162,59 @@ describe('resolveFastAgentLaunchModel', () => {
       });
     });
 
-    it('ignores a low-confidence request', async () => {
-      mockEvaluateDecisionModel.mockResolvedValue({
-        requestedModel: choice('model_3', 0.55),
+    function split(probabilities: Record<string, number>) {
+      const [top, confidence] = Object.entries(probabilities).sort(
+        (left, right) => right[1] - left[1],
+      )[0]!;
+      return {
+        requestedModel: {
+          type: 'choice',
+          choice: top,
+          confidence,
+          probabilities,
+        },
+      };
+    }
+
+    it('accepts a claim that tops a split request, like "the newest Fable"', async () => {
+      // model_2 = Sonnet, model_3 = Opus: a request split across two models.
+      mockEvaluateDecisionModel.mockResolvedValue(
+        split({ model_3: 0.4, model_2: 0.26, none: 0.34 }),
+      );
+
+      await expect(resolve({ claimedModel: opus.id })).resolves.toEqual({
+        model: opus.id,
+        reasoningEffort: null,
+        source: 'user_request',
       });
+    });
+
+    it('rejects a claim that is not the top-ranked model', async () => {
+      mockEvaluateDecisionModel.mockResolvedValue(
+        split({ model_2: 0.4, model_3: 0.26, none: 0.34 }),
+      );
+
+      await expect(resolve({ claimedModel: opus.id })).resolves.toMatchObject({
+        model: null,
+        source: 'default',
+      });
+    });
+
+    it('rejects a top-ranked claim when no model request is likely', async () => {
+      mockEvaluateDecisionModel.mockResolvedValue(
+        split({ model_3: 0.3, model_2: 0.15, none: 0.55 }),
+      );
+
+      await expect(resolve({ claimedModel: opus.id })).resolves.toMatchObject({
+        model: null,
+        source: 'default',
+      });
+    });
+
+    it('needs a confident pick to override the claim with another model', async () => {
+      mockEvaluateDecisionModel.mockResolvedValue(
+        split({ model_2: 0.55, model_3: 0, none: 0.45 }),
+      );
 
       await expect(resolve({ claimedModel: opus.id })).resolves.toMatchObject({
         model: null,

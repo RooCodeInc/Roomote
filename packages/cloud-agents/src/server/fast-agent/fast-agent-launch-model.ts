@@ -11,10 +11,19 @@ import {
 } from '../typesafe-judgment';
 
 /**
- * A user-requested model is used only when the decision model picks it with
- * at least this confidence. Starting value, not tuned.
+ * Without a usable agent claim, a user-requested model is used only when the
+ * decision model picks it with at least this confidence. Starting value.
  */
 const REQUESTED_MODEL_MIN_CONFIDENCE = 0.6;
+/**
+ * The agent's claim is used when at least this much probability says a user
+ * asked for some model and the claim is the top-ranked model. A description
+ * such as "the newest Fable" splits a judgment model's probability across
+ * versions, so no single model clears the bar above, while synthetic
+ * no-request cases (attribution trailers, model questions) put at most 0.04
+ * here. Starting value, not tuned on real traffic.
+ */
+const MODEL_REQUESTED_MIN_PROBABILITY = 0.5;
 /** A coding-model routing rule applies only at this confidence. */
 const ROUTING_RULE_MIN_CONFIDENCE = 0.8;
 
@@ -159,6 +168,46 @@ function describeModelNote(params: {
 }
 
 /**
+ * Reads the explicit-request answer in two parts: whether a user asked for
+ * any model at all, then which one. The agent's claim settles "which one"
+ * when it is the decision model's top-ranked model, since the agent can
+ * resolve descriptions the decision model only narrows down; otherwise the
+ * decision model's own pick must be confident on its own.
+ */
+function selectRequestedModel(params: {
+  answer: TypeSafeAnswers<{ q: TypeSafeChoiceQuestion }>['q'] | undefined;
+  requestableModels: readonly TaskModelOption[];
+  claimedModel: string | undefined;
+}): TaskModelOption | undefined {
+  const { answer, requestableModels } = params;
+  if (!answer) return undefined;
+  const modelProbabilities = requestableModels.map(
+    (_, index) => answer.probabilities[`model_${index + 1}`] ?? 0,
+  );
+  const claimIndex = requestableModels.findIndex(
+    (model) => model.id === params.claimedModel,
+  );
+  const requestedProbability = modelProbabilities.reduce(
+    (sum, probability) => sum + probability,
+    0,
+  );
+  if (
+    claimIndex >= 0 &&
+    requestedProbability >= MODEL_REQUESTED_MIN_PROBABILITY &&
+    modelProbabilities[claimIndex]! > 0 &&
+    modelProbabilities[claimIndex] === Math.max(...modelProbabilities)
+  ) {
+    return requestableModels[claimIndex];
+  }
+  const choiceIndex = answer.choice.startsWith('model_')
+    ? Number(answer.choice.slice('model_'.length)) - 1
+    : -1;
+  return answer.confidence >= REQUESTED_MODEL_MIN_CONFIDENCE
+    ? requestableModels[choiceIndex]
+    : undefined;
+}
+
+/**
  * Decides the model for delegated Fast work in one place, in precedence
  * order: a model a user explicitly asked for, then an administrator's
  * coding-model routing rule whose condition fits the work, then the
@@ -258,15 +307,11 @@ export async function resolveFastAgentLaunchModel(params: {
     );
   }
 
-  const requestedAnswer = answers?.requestedModel;
-  const requestedIndex = requestedAnswer?.choice.startsWith('model_')
-    ? Number(requestedAnswer.choice.slice('model_'.length)) - 1
-    : -1;
-  const requestedModel =
-    requestedAnswer &&
-    requestedAnswer.confidence >= REQUESTED_MODEL_MIN_CONFIDENCE
-      ? requestableModels[requestedIndex]
-      : undefined;
+  const requestedModel = selectRequestedModel({
+    answer: answers?.requestedModel,
+    requestableModels,
+    claimedModel,
+  });
   const ruleAnswer = answers?.routingRule;
   const ruleIndex = ruleAnswer?.choice.startsWith('model_rule_')
     ? Number(ruleAnswer.choice.slice('model_rule_'.length)) - 1
