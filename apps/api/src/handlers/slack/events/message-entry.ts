@@ -1165,6 +1165,7 @@ async function handleSlackEntryEvent(params: {
   slack: SlackNotifier;
   teamId: string;
   stopSessionCommand?: boolean;
+  silentStopWhenUnavailable?: boolean;
   skipThreadFollowupHandling?: boolean;
   threadTaskId?: string;
   peerConversationsEnabled?: boolean;
@@ -1181,6 +1182,7 @@ async function handleSlackEntryEvent(params: {
     slack,
     teamId,
     stopSessionCommand = false,
+    silentStopWhenUnavailable = false,
     skipThreadFollowupHandling = false,
     threadTaskId,
     peerConversationsEnabled,
@@ -1224,8 +1226,12 @@ async function handleSlackEntryEvent(params: {
       channelId: event.channel,
       conversationId: event.thread_ts || event.ts,
       threadId: event.thread_ts || event.ts,
+      ...(event.thread_ts ? { replyToMessageId: event.thread_ts } : {}),
       userId: userMapping.userId,
     });
+    if (silentStopWhenUnavailable && stopResult.kind === 'unavailable') {
+      return;
+    }
     await slack.postMessage({
       channel: event.channel,
       thread_ts: event.thread_ts || event.ts,
@@ -1370,7 +1376,7 @@ export async function handleMessageOrAppMentionEvent(params: {
   const isHumanSlackMessage =
     Boolean(event.user) &&
     !event.bot_id &&
-    event.subtype !== 'bot_message' &&
+    !event.subtype &&
     event.user !== context.slackInstallation.botUserId;
   const isStopCommandAddressedToRoomote =
     isHumanSlackMessage &&
@@ -1378,13 +1384,24 @@ export async function handleMessageOrAppMentionEvent(params: {
       event.channel_type === 'im' ||
       event.channel_type === 'mpim' ||
       mentionsSlackBot(event, context.slackInstallation.botUserId));
-  if (isStopCommand && isStopCommandAddressedToRoomote) {
+  const isUnmentionedStopInSessionThread =
+    isHumanSlackMessage &&
+    event.type === 'message' &&
+    event.channel_type !== 'im' &&
+    event.channel_type !== 'mpim' &&
+    Boolean(event.thread_ts) &&
+    !mentionsSlackBot(event, context.slackInstallation.botUserId);
+  if (
+    isStopCommand &&
+    (isStopCommandAddressedToRoomote || isUnmentionedStopInSessionThread)
+  ) {
     await handleSlackEntryEvent({
       event,
       slackInstallation: context.slackInstallation,
       slack: context.slack,
       teamId: context.teamId,
       stopSessionCommand: true,
+      silentStopWhenUnavailable: isUnmentionedStopInSessionThread,
     });
     return;
   }

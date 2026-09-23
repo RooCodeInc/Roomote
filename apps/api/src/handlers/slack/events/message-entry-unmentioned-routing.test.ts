@@ -215,6 +215,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       channelId: 'C123',
       conversationId: '100.000',
       threadId: '100.000',
+      replyToMessageId: '100.000',
       userId: 'user-1',
     });
     expect(postMessage).toHaveBeenCalledWith(
@@ -226,6 +227,75 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     );
     expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
     expect(recordInboundSlackConversationMessageMock).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('handles a bare stop reply in an existing session thread', async () => {
+    const { handleMessageOrAppMentionEvent } =
+      await import('./message-entry.js');
+    const event = {
+      type: 'message',
+      channel: 'C123',
+      channel_type: 'channel',
+      ts: '102.000',
+      thread_ts: '100.000',
+      user: 'U111',
+      text: 'stop',
+    } as never;
+    const postMessage = vi.fn().mockResolvedValue(undefined);
+
+    await handleMessageOrAppMentionEvent({
+      event,
+      context: {
+        slackInstallation,
+        slack: { postMessage },
+        teamId: 'T123',
+      } as never,
+    });
+
+    expect(stopChatSessionTasksMock).toHaveBeenCalledWith({
+      provider: 'slack',
+      workspaceId: 'T123',
+      channelId: 'C123',
+      conversationId: '100.000',
+      threadId: '100.000',
+      replyToMessageId: '100.000',
+      userId: 'user-1',
+    });
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ thread_ts: '100.000' }),
+    );
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('silently ignores a bare stop outside a stoppable session thread', async () => {
+    stopChatSessionTasksMock.mockResolvedValueOnce({
+      kind: 'unavailable',
+      text: "I couldn't find a Roomote session you can stop in this conversation.",
+    });
+    const { handleMessageOrAppMentionEvent } =
+      await import('./message-entry.js');
+    const event = {
+      type: 'message',
+      channel: 'C123',
+      channel_type: 'channel',
+      ts: '102.000',
+      thread_ts: '100.000',
+      user: 'U111',
+      text: 'stop',
+    } as never;
+    const postMessage = vi.fn().mockResolvedValue(undefined);
+
+    await handleMessageOrAppMentionEvent({
+      event,
+      context: {
+        slackInstallation,
+        slack: { postMessage },
+        teamId: 'T123',
+      } as never,
+    });
+
+    expect(stopChatSessionTasksMock).toHaveBeenCalledOnce();
+    expect(postMessage).not.toHaveBeenCalled();
   }, 15_000);
 
   it('preserves linked inbound history capture for a suppressed reply', async () => {
