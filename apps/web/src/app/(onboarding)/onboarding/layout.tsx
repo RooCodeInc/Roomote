@@ -6,39 +6,18 @@ import { useQuery } from '@tanstack/react-query';
 
 import { useRedirectToSignIn } from '@/hooks/useSignInRedirect';
 import { useUser } from '@/hooks/useUser';
-import { DEFAULT_SETUP_REDIRECT_PATH, requiresSetup } from '@/lib/setup-status';
 import { useTRPC } from '@/trpc/client';
 import { FramedSurface, RoomoteWordmark, UserMenu } from '@/components/layout';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { authStatus, isSignedIn, user } = useUser();
+  const { authStatus, isSignedIn } = useUser();
   const [userMenuPortalContainer, setUserMenuPortalContainer] =
     useState<HTMLDivElement | null>(null);
   const trpc = useTRPC();
-  const isAdmin = user?.isAdmin === true;
   const shouldRedirectToSignIn = authStatus === 'signed-out';
 
   useRedirectToSignIn(shouldRedirectToSignIn);
-
-  const setupQueryEnabled = isSignedIn && isAdmin;
-  const {
-    data: setupStatus,
-    isLoading: isSetupLoading,
-    isError: isSetupError,
-  } = useQuery(
-    trpc.setup.status.queryOptions(undefined, {
-      enabled: setupQueryEnabled,
-      staleTime: 30_000,
-    }),
-  );
-
-  const shouldRedirectToSetup =
-    isAdmin &&
-    !isSetupLoading &&
-    !isSetupError &&
-    setupStatus != null &&
-    requiresSetup(setupStatus);
 
   const onboardingQueryEnabled = isSignedIn === true;
   const { data: onboardingStatus, isLoading: isOnboardingLoading } = useQuery(
@@ -49,22 +28,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    if (shouldRedirectToSetup) {
-      router.replace(DEFAULT_SETUP_REDIRECT_PATH);
-    }
-  }, [shouldRedirectToSetup, router]);
-
-  useEffect(() => {
-    if (setupQueryEnabled && (isSetupLoading || shouldRedirectToSetup)) return;
     if (!onboardingQueryEnabled || isOnboardingLoading) return;
 
     if (onboardingStatus?.onboardingCompletedAt != null) {
       router.replace('/');
     }
   }, [
-    setupQueryEnabled,
-    isSetupLoading,
-    shouldRedirectToSetup,
     onboardingQueryEnabled,
     isOnboardingLoading,
     onboardingStatus?.onboardingCompletedAt,
@@ -72,9 +41,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   ]);
 
   if (!isSignedIn) {
-    return null;
-  }
-  if (setupQueryEnabled && (isSetupLoading || shouldRedirectToSetup)) {
     return null;
   }
   if (

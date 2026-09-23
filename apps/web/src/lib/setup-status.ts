@@ -19,7 +19,3 @@ export function getSetupRedirectPath(
 
   return null;
 }
-
-export function requiresSetup(status: SetupGuardStatus | undefined): boolean {
-  return getSetupRedirectPath(status) !== null;
-}

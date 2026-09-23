@@ -16,14 +16,6 @@ describe('getVisiblePrimaryNavItems', () => {
     ]);
   });
 
-  it('marks Home, Automations, and Analytics as setup-gated', () => {
-    const items = getVisiblePrimaryNavItems({ isAdmin: true });
-
-    expect(
-      items.filter((item) => item.requiresSetup).map((item) => item.href),
-    ).toEqual(['/', '/automations', '/analytics']);
-  });
-
   it('hides analytics from non-admins', () => {
     const items = getVisiblePrimaryNavItems({
       isAdmin: false,
@@ -35,16 +27,6 @@ describe('getVisiblePrimaryNavItems', () => {
       '/automations',
       '/integrations',
     ]);
-  });
-
-  it('shows setup-gated automations to members', () => {
-    const items = getVisiblePrimaryNavItems({
-      isAdmin: false,
-    });
-
-    expect(items.find((item) => item.href === '/automations')).toMatchObject({
-      requiresSetup: true,
-    });
   });
 
   it('places opted-in Results immediately after Automations for every user', () => {
@@ -62,7 +44,6 @@ describe('getVisiblePrimaryNavItems', () => {
     ]);
     expect(items.find((item) => item.href === '/results')).toMatchObject({
       label: 'Results',
-      requiresSetup: true,
     });
   });
 });

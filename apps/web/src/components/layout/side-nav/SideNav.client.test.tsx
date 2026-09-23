@@ -602,48 +602,24 @@ describe('SideNav recent sessions', () => {
     ]);
   });
 
-  it('disables inaccessible destinations during setup while keeping Settings enabled', () => {
-    render(<SideNav setupIncomplete />);
+  it('keeps dashboard destinations enabled', () => {
+    render(<SideNav />);
 
-    expect(screen.getByTestId('nav-/')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    expect(screen.getByTestId('nav-/automations')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    expect(screen.getByTestId('nav-/analytics')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
     for (const href of ['/', '/automations', '/analytics']) {
       expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
-        'data-tooltip',
-        'Available when setup is completed.',
-      );
-      expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
-        'data-description',
-        '',
+        'data-disabled',
+        'false',
       );
     }
-    expect(screen.getByTestId('nav-/sessions')).toHaveAttribute(
-      'data-disabled',
-      'false',
-    );
-    expect(screen.getByTestId('nav-/settings')).toHaveAttribute(
-      'data-disabled',
-      'false',
-    );
   });
 
-  it('removes the expanded wordmark Home link during setup', () => {
+  it('keeps the expanded wordmark linked to Home', () => {
     state.isSideNavExpanded = true;
 
-    render(<SideNav setupIncomplete />);
+    render(<SideNav />);
 
     expect(
       screen.getByRole('img', { name: 'Roomote' }).closest('a'),
-    ).toBeNull();
+    ).toHaveAttribute('href', '/');
   });
 });

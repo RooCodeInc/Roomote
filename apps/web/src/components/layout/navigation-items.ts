@@ -25,12 +25,8 @@ export interface PrimaryNavItem {
   matchPaths: string[];
   sideNavSection: SideNavSection;
   adminOnly?: boolean;
-  requiresSetup?: boolean;
   resultsExperiment?: boolean;
 }
-
-export const SETUP_INCOMPLETE_NAV_TOOLTIP =
-  'Available when setup is completed.';
 
 const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
   {
@@ -41,7 +37,6 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchExact: true,
     matchPaths: ['/'],
     sideNavSection: 'home',
-    requiresSetup: true,
   },
   {
     icon: MessagesSquare,
@@ -60,7 +55,6 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchExact: false,
     matchPaths: ['/automations'],
     sideNavSection: 'manage',
-    requiresSetup: true,
   },
   {
     icon: NotepadText,
@@ -70,7 +64,6 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchExact: false,
     matchPaths: ['/results'],
     sideNavSection: 'manage',
-    requiresSetup: true,
     resultsExperiment: true,
   },
   {
@@ -91,7 +84,6 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchPaths: ['/analytics'],
     sideNavSection: 'insights',
     adminOnly: true,
-    requiresSetup: true,
   },
 ];
 
