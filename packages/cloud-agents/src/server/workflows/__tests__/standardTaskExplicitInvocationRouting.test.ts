@@ -27,6 +27,28 @@ describe('Standard Task explicit invocation routing', () => {
     );
   });
 
+  it.each([
+    [
+      '$review-code: Inspect the task title',
+      '$review-code: Inspect the task title',
+    ],
+    [
+      '/review-code, Inspect the task title',
+      '/review-code, Inspect the task title',
+    ],
+  ])(
+    'recognizes punctuation-delimited packaged invocations without changing the prompt: %s',
+    (description, preservedPrompt) => {
+      const { prompt } = standardTask({
+        description,
+        repo: 'Roomote/example-app',
+        requestFormat: 'structured',
+      });
+
+      expect(prompt).toBe(preservedPrompt);
+    },
+  );
+
   it('does not preserve Fast-only Doctor as an authoritative sandbox invocation', () => {
     const { prompt } = standardTask({
       description: '$doctor\nCheck the configured environment.',

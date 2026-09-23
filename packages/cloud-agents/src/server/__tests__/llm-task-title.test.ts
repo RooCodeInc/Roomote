@@ -43,6 +43,34 @@ describe('llm-task-title', () => {
     );
   });
 
+  it('cleans only the initial user invocation in a copy used for title generation', async () => {
+    const messages = [
+      {
+        role: 'user' as const,
+        text: '  $implement-changes\n\nFix the task title',
+      },
+      { role: 'assistant' as const, text: 'I will check the title flow.' },
+      { role: 'user' as const, text: '$review-code is mentioned later' },
+    ];
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { title: '$implement-changes: Fix task title' },
+    });
+
+    await expect(generateLlmTaskTitle({ messages })).resolves.toBe(
+      ': Fix task title',
+    );
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt:
+          'Conversation transcript (speaker-labeled):\n[User] Fix the task title\n[Assistant] I will check the title flow.\n[User] $review-code is mentioned later\n',
+      }),
+    );
+    expect(messages[0]?.text).toBe(
+      '  $implement-changes\n\nFix the task title',
+    );
+    expect(messages[2]?.text).toBe('$review-code is mentioned later');
+  });
+
   it('does not append any source suffix to generated titles', () => {
     const title = finalizeGeneratedTaskTitle(
       'one two three four five six seven eight nine ten eleven',

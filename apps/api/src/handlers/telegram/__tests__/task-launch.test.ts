@@ -130,7 +130,7 @@ describe('Telegram task topic launch', () => {
         provider: 'telegram',
         user: 'Grace',
         userId: 'user-1',
-        text: 'Fix the flaky login test',
+        text: '$implement-changes: Fix the flaky login test',
         ts: '42',
         channel: '111000111',
       },
@@ -148,7 +148,7 @@ describe('Telegram task topic launch', () => {
 
     expect(createTelegramForumTopicBestEffortMock).toHaveBeenCalledWith({
       chatId: '-100111000111',
-      name: 'Fix the flaky login test',
+      name: ': Fix the flaky login test',
     });
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -164,10 +164,13 @@ describe('Telegram task topic launch', () => {
     );
     const enqueuedPayload = enqueueTaskMock.mock.calls[0]?.[0].task.payload;
     expect(enqueuedPayload.communicationMessageId).toBe('900');
+    expect(enqueuedPayload.description).toBe(
+      '$implement-changes: Fix the flaky login test',
+    );
     expect(postTelegramMessageBestEffortMock).toHaveBeenNthCalledWith(1, {
       chatId: '-100111000111',
       threadId: '77',
-      text: 'Task request from Grace:\n\nFix the flaky login test',
+      text: 'Task request from Grace:\n\n$implement-changes: Fix the flaky login test',
     });
     expect(postTelegramMessageBestEffortMock).toHaveBeenNthCalledWith(
       2,
@@ -181,7 +184,7 @@ describe('Telegram task topic launch', () => {
       chatId: '-100111000111',
       threadId: undefined,
       replyToMessageId: '42',
-      text: 'Started “Fix the flaky login test” in a new topic.',
+      text: 'Started “: Fix the flaky login test” in a new topic.',
       buttons: [
         [
           {
