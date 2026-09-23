@@ -2,15 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useMediaQuery } from 'usehooks-ts';
-import {
-  Menu,
-  Plus,
-  X,
-  Settings,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/system';
+import { Menu, Plus, X, Settings } from '@/components/system';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useResultsPage } from '@/hooks/useResultsPage';
 import { RecentSessions } from '@/components/layout/side-nav/RecentSessions';
@@ -24,16 +16,11 @@ import {
   DrawerTitle,
 } from '@/components/system';
 
-import {
-  getVisiblePrimaryNavItems,
-  SETUP_INCOMPLETE_NAV_TOOLTIP,
-} from '../navigation-items';
+import { getVisiblePrimaryNavItems } from '../navigation-items';
 
 export const NavbarDrawer = ({
-  setupIncomplete = false,
   onNewSession,
 }: {
-  setupIncomplete?: boolean;
   onNewSession?: () => void;
 }) => {
   const pathname = usePathname();
@@ -92,38 +79,20 @@ export const NavbarDrawer = ({
 
               {visibleNavItems.map((item) => {
                 const Icon = item.icon;
-                const disabled = setupIncomplete && item.requiresSetup;
-                const control = (
-                  <Button
-                    variant="ghost"
-                    size="lg"
-                    className="justify-start"
-                    aria-disabled={disabled || undefined}
-                    asChild={!disabled}
-                  >
-                    {disabled ? (
-                      <>
-                        <Icon className="size-5" />
-                        {item.mobileLabel ?? item.label}
-                      </>
-                    ) : (
+                return (
+                  <Fragment key={item.href}>
+                    <Button
+                      variant="ghost"
+                      size="lg"
+                      className="justify-start"
+                      asChild
+                    >
                       <Link href={item.href}>
                         <Icon className="size-5" />
                         {item.mobileLabel ?? item.label}
                       </Link>
-                    )}
-                  </Button>
-                );
-
-                return disabled ? (
-                  <Tooltip key={item.href}>
-                    <TooltipTrigger asChild>{control}</TooltipTrigger>
-                    <TooltipContent side="right">
-                      {SETUP_INCOMPLETE_NAV_TOOLTIP}
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Fragment key={item.href}>{control}</Fragment>
+                    </Button>
+                  </Fragment>
                 );
               })}
 

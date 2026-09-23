@@ -93,13 +93,6 @@ vi.mock('@/components/system', () => ({
     <div>{children}</div>
   ),
   DrawerTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  Tooltip: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  TooltipTrigger: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  TooltipContent: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
 }));
 
 import { NavbarDrawer } from './NavbarDrawer';
@@ -168,27 +161,16 @@ describe('NavbarDrawer', () => {
     expect(state.recentSessionsEnabled).toBe(true);
   });
 
-  it('keeps setup-gated destinations visible but disabled with an explanation', () => {
-    render(<NavbarDrawer setupIncomplete />);
+  it('keeps dashboard destinations linked regardless of setup choices', () => {
+    render(<NavbarDrawer />);
 
-    expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute(
-      'href',
-      '/sessions',
-    );
-    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
-      'href',
-      '/settings',
-    );
-    for (const name of ['Home', 'Automations', 'Analytics']) {
-      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name })).toHaveAttribute(
-        'aria-disabled',
-        'true',
-      );
+    for (const [name, href] of [
+      ['Home', '/'],
+      ['Automations', '/automations'],
+      ['Analytics', '/analytics'],
+    ]) {
+      expect(screen.getByRole('link', { name })).toHaveAttribute('href', href);
     }
-    expect(
-      screen.getAllByText('Available when setup is completed.'),
-    ).toHaveLength(3);
   });
 
   it('hides analytics from non-admins', () => {

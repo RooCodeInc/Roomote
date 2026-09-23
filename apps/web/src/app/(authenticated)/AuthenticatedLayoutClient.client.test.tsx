@@ -258,6 +258,31 @@ describe('AuthenticatedLayoutClient', () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
+  it('keeps platform issue submission accessible while admin setup is incomplete', () => {
+    mockPathname = '/platform-issues/report-id/submit';
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: false }
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: false,
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Platform issue content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.getByText('Platform issue content')).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
   it('renders authenticated pages when setup is complete but environments are still missing', () => {
     mockPathname = '/settings/previews';
     useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
