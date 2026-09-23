@@ -4,35 +4,22 @@ import {
 } from './navigation-items';
 
 describe('getVisiblePrimaryNavItems', () => {
-  it('places sessions before automations for admins', () => {
+  it('keeps Results in the main navigation for admins', () => {
     const items = getVisiblePrimaryNavItems({ isAdmin: true });
 
     expect(items.map((item) => item.href)).toEqual([
       '/',
       '/sessions',
       '/automations',
+      '/results',
       '/integrations',
       '/analytics',
     ]);
   });
 
-  it('hides analytics from non-admins', () => {
+  it('shows Results and hides analytics from non-admins', () => {
     const items = getVisiblePrimaryNavItems({
       isAdmin: false,
-    });
-
-    expect(items.map((item) => item.href)).toEqual([
-      '/',
-      '/sessions',
-      '/automations',
-      '/integrations',
-    ]);
-  });
-
-  it('places opted-in Results immediately after Automations for every user', () => {
-    const items = getVisiblePrimaryNavItems({
-      isAdmin: false,
-      resultsEnabled: true,
     });
 
     expect(items.map((item) => item.href)).toEqual([
@@ -58,11 +45,7 @@ describe('getVisibleSideNavSections', () => {
     );
 
   it('keeps Analytics in its own section for admins', () => {
-    expect(
-      toHrefs(
-        getVisibleSideNavSections({ isAdmin: true, resultsEnabled: true }),
-      ),
-    ).toEqual({
+    expect(toHrefs(getVisibleSideNavSections({ isAdmin: true }))).toEqual({
       home: ['/'],
       sessions: ['/sessions'],
       manage: ['/automations', '/results', '/integrations'],
@@ -74,7 +57,7 @@ describe('getVisibleSideNavSections', () => {
     expect(toHrefs(getVisibleSideNavSections({ isAdmin: false }))).toEqual({
       home: ['/'],
       sessions: ['/sessions'],
-      manage: ['/automations', '/integrations'],
+      manage: ['/automations', '/results', '/integrations'],
       insights: [],
     });
   });

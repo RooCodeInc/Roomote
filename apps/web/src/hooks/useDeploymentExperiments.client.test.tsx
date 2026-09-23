@@ -71,11 +71,15 @@ describe('useDeploymentExperiments', () => {
   it('exposes the same shared value to every consumer hook', () => {
     queryState.data = {
       ...getDeploymentExperimentValues(undefined),
-      results: true,
+      privateSessions: true,
     };
 
-    const first = renderHook(() => useDeploymentExperiment('results', 'fail'));
-    const second = renderHook(() => useDeploymentExperiment('results', 'fail'));
+    const first = renderHook(() =>
+      useDeploymentExperiment('privateSessions', 'fail'),
+    );
+    const second = renderHook(() =>
+      useDeploymentExperiment('privateSessions', 'fail'),
+    );
 
     expect(first.result.current.enabled).toBe(true);
     expect(second.result.current.enabled).toBe(true);
@@ -84,9 +88,12 @@ describe('useDeploymentExperiments', () => {
   it('sends one deployment experiment mutation', () => {
     const { result } = renderHook(() => useDeploymentExperiments());
 
-    act(() => result.current.setExperiment('results', true));
+    act(() => result.current.setExperiment('privateSessions', true));
 
-    expect(mocks.mutate).toHaveBeenCalledWith({ id: 'results', enabled: true });
+    expect(mocks.mutate).toHaveBeenCalledWith({
+      id: 'privateSessions',
+      enabled: true,
+    });
   });
 
   it('optimistically updates and rolls back only the changed deployment flag', async () => {

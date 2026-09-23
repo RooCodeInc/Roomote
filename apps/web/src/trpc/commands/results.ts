@@ -8,7 +8,6 @@ import {
   inArray,
   isNotNull,
   isNull,
-  isDeploymentExperimentEnabled,
   privateSessionAccess,
   privateTaskAccess,
   sessionTasks,
@@ -62,12 +61,6 @@ export type ResultInboxItem = {
   actions: ResultAction[];
 };
 
-async function assertResultsEnabled() {
-  if (!(await isDeploymentExperimentEnabled('results'))) {
-    throw new Error('Results is not enabled.');
-  }
-}
-
 const visibleReport = () =>
   and(
     eq(automationResults.resultVisibility, 'shared'),
@@ -93,7 +86,6 @@ function safeExternalUrl(value: string | null) {
 export async function listResultsCommand(
   auth: UserAuthSuccess,
 ): Promise<ResultInboxItem[]> {
-  await assertResultsEnabled();
   const linkedSessionId = sql<
     string | null
   >`coalesce(${automationResults.sourceSessionId}, ${sessionTasks.sessionId})`;
@@ -332,7 +324,6 @@ export async function getResultCommand(
 }
 
 export async function getPendingResultCountCommand(_auth: UserAuthSuccess) {
-  if (!(await isDeploymentExperimentEnabled('results'))) return 0;
   const [reportRows, suggestionRows] = await Promise.all([
     db
       .select({ count: count() })
@@ -368,7 +359,6 @@ export async function clearResultCommand(
   _auth: UserAuthSuccess,
   input: { id: string; kind: 'report' | 'suggestion' },
 ) {
-  await assertResultsEnabled();
   const now = new Date();
   const changed =
     input.kind === 'report'
@@ -403,7 +393,6 @@ export async function acceptSuggestionResultCommand(
   _auth: UserAuthSuccess,
   input: { id: string },
 ) {
-  await assertResultsEnabled();
   const now = new Date();
   const changed = await db
     .update(workItems)
@@ -421,7 +410,6 @@ export async function acceptSuggestionResultCommand(
 }
 
 export async function clearResultsCommand(_auth: UserAuthSuccess) {
-  await assertResultsEnabled();
   const now = new Date();
   const [reports, suggestions] = await Promise.all([
     db
@@ -466,7 +454,6 @@ export async function actOnResultCommand(
   if (input.kind === 'suggestion') {
     return acceptSuggestionResultCommand(auth, { id: input.id });
   }
-  await assertResultsEnabled();
   const now = new Date();
   await db
     .update(automationResults)

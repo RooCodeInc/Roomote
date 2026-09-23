@@ -10,11 +10,11 @@ import {
   workItems,
 } from '@roomote/db/server';
 
-const experimentEnabled = vi.hoisted(() => ({ value: false }));
+const resultsExperimentEnabled = vi.hoisted(() => ({ value: false }));
 
 vi.mock('@roomote/db/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/db/server')>()),
-  isDeploymentExperimentEnabled: () => experimentEnabled.value,
+  isDeploymentExperimentEnabled: () => resultsExperimentEnabled.value,
 }));
 
 import type { UserAuthSuccess } from '@/types';
@@ -27,22 +27,53 @@ import {
 
 describe('Results commands', () => {
   beforeEach(() => {
-    experimentEnabled.value = false;
+    resultsExperimentEnabled.value = false;
   });
 
-  it('ignores a legacy per-user opt-in when the deployment experiment is off', async () => {
+  it('serves existing results when the retired deployment experiment is off', async () => {
     const user = await userFactory.create({
-      metadata: { results_page_enabled: true },
+      metadata: { results_page_enabled: false },
     });
+    const [report] = await db
+      .insert(automationResults)
+      .values({
+        userId: user.id,
+        resultVisibility: 'shared',
+        automationName: 'Daily report',
+        content: 'Report body',
+        priority: 'normal',
+        dedupeKey: `retired-results-experiment:${user.id}`,
+      })
+      .returning({ id: automationResults.id });
 
-    await expect(
-      listResultsCommand({ userId: user.id } as UserAuthSuccess),
-    ).rejects.toThrow('Results is not enabled.');
+    try {
+      const auth = { userId: user.id } as UserAuthSuccess;
+      await expect(listResultsCommand(auth)).resolves.toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: report!.id })]),
+      );
+      await expect(getUnreadResultCountCommand(auth)).resolves.toBeGreaterThan(
+        0,
+      );
+      await expect(
+        actOnResultCommand(auth, {
+          id: report!.id,
+          kind: 'report',
+          action: 'ignore',
+        }),
+      ).resolves.toMatchObject({ success: true });
+      await expect(listResultsCommand(auth)).resolves.not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: report!.id })]),
+      );
+    } finally {
+      await db
+        .delete(automationResults)
+        .where(eq(automationResults.id, report!.id));
+      await db.delete(users).where(eq(users.id, user.id));
+    }
   });
 
   it('sorts unread items by priority then recency and removes acted-on items', async () => {
     const user = await userFactory.create();
-    experimentEnabled.value = true;
     const auth = { userId: user.id } as UserAuthSuccess;
     const sourceTask = await taskFactory.create({
       repositoryName: 'RooCodeInc/Roomote',
@@ -137,7 +168,6 @@ describe('Results commands', () => {
   });
 
   it('shares only output snapshotted as shared and applies the same boundary to actions', async () => {
-    experimentEnabled.value = true;
     const [creator, member] = await Promise.all([
       userFactory.create({ role: 'admin' }),
       userFactory.create({ role: 'member' }),
