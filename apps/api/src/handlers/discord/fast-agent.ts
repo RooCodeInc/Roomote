@@ -46,7 +46,7 @@ import {
   type TaskInitiator,
 } from '@roomote/types';
 
-import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import { buildCommunicationTaskPromptThreadName } from '../tasks/communication-task-thread.js';
 import { resolveSuggestionFastConversation } from '../tasks/suggestion-launch.js';
 import {
   startAcceptedFastAgentTurn,
@@ -180,7 +180,7 @@ export async function processDiscordFastAgentMessage(
     const thread = await input.provider.createThreadFromMessage({
       channelId: channel.channelId,
       messageId: anchorMessageId,
-      name: buildCommunicationTaskThreadName(input.question),
+      name: buildCommunicationTaskPromptThreadName(input.question),
     });
     channel = {
       ...channel,

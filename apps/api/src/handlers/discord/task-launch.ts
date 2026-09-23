@@ -22,7 +22,10 @@ import {
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
 import { getRedis } from '@roomote/redis';
 
-import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import {
+  buildCommunicationTaskPromptThreadName,
+  buildCommunicationTaskThreadName,
+} from '../tasks/communication-task-thread.js';
 import {} from './replies.js';
 import {
   discordTaskAcknowledgementText,
@@ -288,7 +291,7 @@ async function reserveDiscordAnchoredThread(input: {
 }): Promise<DiscordTaskThread | null> {
   const parentId = taskThreadParentId(input);
   if (!parentId) return null;
-  const provisionalName = buildCommunicationTaskThreadName(
+  const provisionalName = buildCommunicationTaskPromptThreadName(
     input.queuedMessage.text,
   );
   const existing = await findPendingTaskThread(
@@ -385,7 +388,7 @@ export async function launchDiscordTask(input: {
     if (!createdThread) {
       createdThread = await input.provider.reserveTaskThread({
         channelId: parentId,
-        name: buildCommunicationTaskThreadName(input.queuedMessage.text),
+        name: buildCommunicationTaskPromptThreadName(input.queuedMessage.text),
         initialText,
         selectForumTag: async (availableTags) =>
           (

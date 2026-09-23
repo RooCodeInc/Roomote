@@ -21,6 +21,7 @@ import {
   resolveConflictResolverLabel,
 } from './utils';
 import { isRecognizedInitialSkillInvocation } from './skillInvocationRouting';
+import { matchInitialSkillInvocationPrefix } from '../../skill-invocation-title';
 import { renderLinkedWorkItemsSection } from './pr-linked-work-items';
 import { buildGitHubMessageInstructions } from '../github-message-instructions';
 
@@ -587,11 +588,9 @@ ${requestUserInputGuidance}
       newlineIndex === -1
         ? trimmedDescription
         : trimmedDescription.slice(0, newlineIndex).trimEnd();
-    const packagedSkillMatch = commandLine.match(/^[$/]([A-Za-z0-9._-]+)/);
-    const packagedSkillName =
-      packagedSkillMatch && packagedSkillMatch[1]
-        ? packagedSkillMatch[1]
-        : null;
+    const packagedSkillInvocation =
+      matchInitialSkillInvocationPrefix(commandLine);
+    const packagedSkillName = packagedSkillInvocation?.skillName ?? null;
     const hasPackagedSkillInvocation =
       packagedSkillName !== null &&
       isRecognizedInitialSkillInvocation({

@@ -589,6 +589,35 @@ describe('generateTaskRunTitle', () => {
       expect(title).toBe('Plan the refactoring strategy');
     });
 
+    it('removes recognized skill invocations from standard task titles only', () => {
+      const payload = {
+        repo: 'owner/repo',
+        description: '$implement-changes\n\nFix the Slack task title cleanup',
+      };
+
+      expect(
+        generateTaskRunTitle({
+          type: TaskPayloadKind.StandardTask,
+          payload,
+        }),
+      ).toBe('Fix the Slack task title cleanup');
+      expect(payload.description).toBe(
+        '$implement-changes\n\nFix the Slack task title cleanup',
+      );
+    });
+
+    it('uses the untitled fallback when a standard task contains only a recognized invocation', () => {
+      expect(
+        generateTaskRunTitle({
+          type: TaskPayloadKind.StandardTask,
+          payload: {
+            repo: 'owner/repo',
+            description: '$implement-changes',
+          },
+        }),
+      ).toBe('Untitled task');
+    });
+
     it('should generate title for Linear agent session', () => {
       const title = generateTaskRunTitle({
         type: TaskPayloadKind.LinearAgentSession,

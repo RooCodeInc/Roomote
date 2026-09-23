@@ -265,6 +265,34 @@ describe('Session detail page', () => {
     });
   });
 
+  it('cleans a recognized skill invocation from the web metadata fallback', async () => {
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-1',
+      isAdmin: false,
+    });
+    getFastSessionByIdMock.mockResolvedValue({
+      id: '6a1f8f1e-0000-4000-8000-000000000008',
+      title: null,
+      messages: [
+        {
+          role: 'user',
+          contentBlocks: [
+            { type: 'text', text: '$implement-changes: Fix the web fallback' },
+          ],
+        },
+      ],
+    });
+
+    await expect(
+      generateMetadata({
+        params: Promise.resolve({
+          sessionId: '6a1f8f1e-0000-4000-8000-000000000008',
+        }),
+      }),
+    ).resolves.toEqual({ title: 'Fix the web fallback | Roomote' });
+  });
+
   it('uses the shared task workspace and renders supported session data', async () => {
     authorizeMock.mockResolvedValue({
       success: true,
@@ -295,7 +323,7 @@ describe('Session detail page', () => {
           ts: 1,
           eventType: 'roomote_runtime.user_prompt',
           role: 'user',
-          contentBlocks: [{ type: 'text', text: 'Question' }],
+          contentBlocks: [{ type: 'text', text: '$review-code: Question' }],
           metadata: { visibleInTranscript: true },
           payload: {},
           source: 'slack',
@@ -340,7 +368,10 @@ describe('Session detail page', () => {
         canReply: true,
         fallbackTitle: 'Question',
         initialMessages: expect.arrayContaining([
-          expect.objectContaining({ eventId: 'turn-1:user' }),
+          expect.objectContaining({
+            eventId: 'turn-1:user',
+            contentBlocks: [{ type: 'text', text: '$review-code: Question' }],
+          }),
         ]),
       }),
       undefined,

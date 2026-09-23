@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { z } from 'zod';
 
 import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
+import { stripRecognizedInitialSkillInvocationsForTitle } from '@roomote/cloud-agents';
 import {
   getTextFromContentBlocks,
   PRODUCT_NAME,
@@ -83,8 +84,11 @@ export async function generateMetadata({
     (message) => message.role === 'user',
   );
   const fallbackTitle =
-    getTextFromContentBlocks(initialUserMessage?.contentBlocks ?? [])?.trim() ||
-    'New session';
+    stripRecognizedInitialSkillInvocationsForTitle(
+      getTextFromContentBlocks(
+        initialUserMessage?.contentBlocks ?? [],
+      )?.trim() ?? '',
+    ).trim() || 'New session';
   const title = truncatePageTitle(
     unifiedSession?.title ?? session?.title ?? fallbackTitle,
   );
@@ -278,8 +282,11 @@ export default async function SessionDetailPage({
     (message) => message.role === 'user',
   );
   const fallbackTitle =
-    getTextFromContentBlocks(initialUserMessage?.contentBlocks ?? [])?.trim() ||
-    'New session';
+    stripRecognizedInitialSkillInvocationsForTitle(
+      getTextFromContentBlocks(
+        initialUserMessage?.contentBlocks ?? [],
+      )?.trim() ?? '',
+    ).trim() || 'New session';
 
   return (
     <SessionWorkspace session={sessionInfo}>

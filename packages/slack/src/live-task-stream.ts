@@ -1,12 +1,10 @@
-import { isRecognizedInitialSkillInvocation } from '@roomote/cloud-agents/server';
+import { stripRecognizedInitialSkillInvocationsForTitle } from '@roomote/cloud-agents';
 import { getRedis } from '@roomote/redis';
 
 import { truncateWithEllipsis } from './truncate';
 
 const SLACK_LIVE_TASK_STREAM_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SLACK_LIVE_TASK_TITLE_MAX_LENGTH = 160;
-const LEADING_SKILL_INVOCATION_PATTERN =
-  /^\s*[$/]([A-Za-z0-9._-]+)[,;:!?]?\s*/u;
 
 export interface SlackLiveTaskStreamData {
   /** Workspace that owns the card; every update must use this team's bot token. */
@@ -29,26 +27,10 @@ function getSlackLiveTaskStreamKey(taskId: string): string {
 }
 
 export function buildSlackLiveTaskTitle(prompt: string): string {
-  const originalPrompt = prompt;
-  let displayPrompt = prompt;
-
-  while (true) {
-    const match = LEADING_SKILL_INVOCATION_PATTERN.exec(displayPrompt);
-    const skillName = match?.[1];
-
-    if (
-      !match ||
-      !skillName ||
-      !isRecognizedInitialSkillInvocation({ skillName })
-    ) {
-      break;
-    }
-
-    displayPrompt = displayPrompt.slice(match[0].length);
-  }
+  let displayPrompt = stripRecognizedInitialSkillInvocationsForTitle(prompt);
 
   if (!displayPrompt.trim()) {
-    displayPrompt = originalPrompt;
+    displayPrompt = prompt;
   }
 
   return truncateWithEllipsis(

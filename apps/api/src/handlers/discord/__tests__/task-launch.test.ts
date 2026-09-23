@@ -119,7 +119,7 @@ describe('launchDiscordTask', () => {
       launchOwnerUserId: 'user-1',
       queuedMessage: {
         provider: 'discord',
-        text: 'Fix the flaky tests',
+        text: '$implement-changes: Fix the flaky tests',
         user: 'Matt',
         userId: 'user-1',
         ts: 'message-1',
@@ -147,7 +147,8 @@ describe('launchDiscordTask', () => {
     expect(provider.reserveTaskThread).toHaveBeenCalledWith({
       channelId: 'channel-1',
       name: 'Fix the flaky tests',
-      initialText: 'Task request from Matt:\n\nFix the flaky tests',
+      initialText:
+        'Task request from Matt:\n\n$implement-changes: Fix the flaky tests',
       selectForumTag: expect.any(Function),
     });
     const selectForumTag = provider.reserveTaskThread.mock.calls[0]?.[0]
@@ -164,19 +165,21 @@ describe('launchDiscordTask', () => {
       ]),
     ).resolves.toBe('tag-bug');
     expect(mocks.selectDiscordForumTag).toHaveBeenCalledWith({
-      taskDescription: 'Fix the flaky tests',
+      taskDescription: '$implement-changes: Fix the flaky tests',
       availableTags: [expect.objectContaining({ id: 'tag-bug' })],
       tracking: { userId: 'user-1' },
     });
     expect(provider.completeTaskThread).toHaveBeenCalledWith({
       thread: reservedThread,
-      initialText: 'Task request from Matt:\n\nFix the flaky tests',
+      initialText:
+        'Task request from Matt:\n\n$implement-changes: Fix the flaky tests',
     });
     expect(mocks.enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: {
           type: 'standard',
           payload: expect.objectContaining({
+            description: '$implement-changes: Fix the flaky tests',
             communicationProvider: 'discord',
             communicationGuildId: 'guild-1',
             communicationChannelId: 'channel-1',
