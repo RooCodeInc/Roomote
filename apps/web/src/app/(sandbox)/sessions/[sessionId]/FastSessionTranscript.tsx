@@ -64,7 +64,11 @@ import {
   type SessionModelSelection,
   type SessionPromptSubmission,
 } from './SessionPromptInput';
-import { SessionQueuedMessageList } from './SessionQueuedMessageList';
+import {
+  SessionQueuedMessageList,
+  type SessionQueuedMessage,
+  type SessionQueuedMessageDeleteOutcome,
+} from './SessionQueuedMessageList';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { describeValidationError } from '@/lib/validation-error';
 import { isComposerValidationError } from '@/lib/validation-error';
@@ -561,6 +565,11 @@ export function FastSessionTranscript({
   const [localQueuedMessages, setLocalQueuedMessages] = useState<
     FastSessionQueuedMessage[]
   >([]);
+  // Withdrawn follow-ups never return, so a queue snapshot polled before the
+  // withdrawal cannot bring one back.
+  const [withdrawnClientMessageIds, setWithdrawnClientMessageIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const hasReceivedInitialSessionStateRef = useRef(false);
   const pendingTaskReportTimingsRef = useRef(
     new Map<string, { admittedAtMs: number; serverReceivedAtMs: number }>(),
@@ -916,7 +925,10 @@ export function FastSessionTranscript({
 
     return [...serverQueuedMessages, ...localQueuedMessages].filter(
       (message) => {
-        if (deliveredClientMessageIds.has(message.clientMessageId)) {
+        if (
+          deliveredClientMessageIds.has(message.clientMessageId) ||
+          withdrawnClientMessageIds.has(message.clientMessageId)
+        ) {
           return false;
         }
         if (seenClientMessageIds.has(message.clientMessageId)) {
@@ -926,7 +938,12 @@ export function FastSessionTranscript({
         return true;
       },
     );
-  }, [deliveredClientMessageIds, localQueuedMessages, serverQueuedMessages]);
+  }, [
+    deliveredClientMessageIds,
+    localQueuedMessages,
+    serverQueuedMessages,
+    withdrawnClientMessageIds,
+  ]);
 
   const messages = useMemo(() => {
     return [...serverMessages.values(), ...optimisticMessages].sort(
@@ -1467,6 +1484,7 @@ export function FastSessionTranscript({
               {
                 id: clientMessageId,
                 clientMessageId,
+                ...(currentUser ? { userId: currentUser.userId } : {}),
                 text: prepared.text,
                 ...(images.length > 0 ? { images } : {}),
                 timestamp: Date.now(),
@@ -1529,6 +1547,33 @@ export function FastSessionTranscript({
       }
     },
     [currentUser, isSending, replaceOptimisticMessages, sessionId, trpcClient],
+  );
+
+  const deleteQueuedMessage = useCallback(
+    async (
+      message: SessionQueuedMessage,
+    ): Promise<SessionQueuedMessageDeleteOutcome> => {
+      const { outcome } =
+        await trpcClient.fastSessions.deleteQueuedMessage.mutate({
+          sessionId,
+          clientMessageId: message.clientMessageId,
+        });
+      // Either way the server no longer holds it as waiting, so this tab's
+      // optimistic copy stops standing in for it; the server snapshot and
+      // the transcript show whatever is left.
+      setLocalQueuedMessages((current) =>
+        current.filter(
+          (queued) => queued.clientMessageId !== message.clientMessageId,
+        ),
+      );
+      if (outcome === 'withdrawn') {
+        setWithdrawnClientMessageIds((current) =>
+          new Set(current).add(message.clientMessageId),
+        );
+      }
+      return outcome;
+    },
+    [sessionId, trpcClient],
   );
 
   const handleReviewAction = useCallback(
@@ -2101,6 +2146,8 @@ export function FastSessionTranscript({
               taskStateRevision={taskStateRevision}
               agentWorking={agentWorking}
               queuedMessages={queuedMessages}
+              currentUserId={currentUser?.userId ?? null}
+              onDeleteQueuedMessage={deleteQueuedMessage}
               initialModel={sessionModel}
               initialReasoningEffort={sessionReasoningEffort}
               defaultModelId={defaultModelId}
@@ -2151,6 +2198,8 @@ export function FastSessionTranscript({
           <div className="mx-auto w-full max-w-4xl shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card @[56rem]:rounded-t-lg">
             <SessionQueuedMessageList
               queuedMessages={queuedMessages}
+              currentUserId={currentUser?.userId ?? null}
+              onDelete={canReply ? deleteQueuedMessage : undefined}
               className="border-b-0"
             />
           </div>

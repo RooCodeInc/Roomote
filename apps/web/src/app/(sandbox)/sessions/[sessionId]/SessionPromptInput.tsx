@@ -49,6 +49,7 @@ import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/Attachments
 import {
   SessionQueuedMessageList,
   type SessionQueuedMessage,
+  type SessionQueuedMessageDeleteOutcome,
 } from './SessionQueuedMessageList';
 import { SessionWakeups } from './SessionWakeups';
 
@@ -234,6 +235,8 @@ export function SessionPromptInput({
   taskStateRevision = '',
   agentWorking = false,
   queuedMessages = [],
+  currentUserId = null,
+  onDeleteQueuedMessage,
   initialModel = null,
   initialReasoningEffort = null,
   defaultModelId = null,
@@ -258,6 +261,11 @@ export function SessionPromptInput({
   /** Follow-ups waiting for delivery, shown inside the composer card until
    * the agent picks them up. */
   queuedMessages?: SessionQueuedMessage[];
+  /** The viewer, who may delete their own queued follow-ups. */
+  currentUserId?: string | null;
+  onDeleteQueuedMessage?: (
+    message: SessionQueuedMessage,
+  ) => Promise<SessionQueuedMessageDeleteOutcome>;
   initialModel?: string | null;
   initialReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
@@ -457,7 +465,11 @@ export function SessionPromptInput({
   return (
     <div className="mx-auto w-full max-w-4xl">
       <SessionWakeups key={sessionId} sessionId={sessionId} />
-      <SessionQueuedMessageList queuedMessages={queuedMessages} />
+      <SessionQueuedMessageList
+        queuedMessages={queuedMessages}
+        currentUserId={currentUserId}
+        onDelete={onDeleteQueuedMessage}
+      />
       <PromptInputRoot
         onSubmit={handleSubmit}
         accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}

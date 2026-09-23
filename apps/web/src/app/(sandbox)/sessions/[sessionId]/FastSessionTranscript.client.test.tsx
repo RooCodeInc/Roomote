@@ -64,6 +64,7 @@ vi.mock('./CapabilityOfferCard', () => ({
 
 const {
   replyMutate,
+  deleteQueuedMessageMutate,
   startGoalMutate,
   reviewActionMutate,
   updateModelSelectionMutate,
@@ -81,6 +82,7 @@ const {
   invalidateQueries,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
+  deleteQueuedMessageMutate: vi.fn(),
   startGoalMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
   updateModelSelectionMutate: vi.fn(),
@@ -195,6 +197,7 @@ vi.mock('@/trpc/client', () => ({
         queryKey: (input: unknown) => ['fastSessions.tasks', input],
       },
       reply: { mutate: replyMutate },
+      deleteQueuedMessage: { mutate: deleteQueuedMessageMutate },
       startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
@@ -427,6 +430,7 @@ beforeEach(() => {
   window.location.hash = '';
   FakeEventSource.instances = [];
   replyMutate.mockReset();
+  deleteQueuedMessageMutate.mockReset();
   startGoalMutate.mockReset();
   startGoalMutate.mockResolvedValue({ success: true, goal: {} });
   reviewActionMutate.mockReset();
@@ -3179,6 +3183,139 @@ describe('FastSessionTranscript', () => {
     expect(
       within(screen.getByRole('log')).getAllByText('Queued follow-up'),
     ).toHaveLength(1);
+  });
+
+  it('retires a locally queued follow-up once its steered prompt persists with the client id', async () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: { primaryEmailAddress: null, imageUrl: '' },
+    };
+    replyMutate.mockResolvedValue({
+      success: true,
+      admission: 'queued',
+      clientMessageId: 'ignored',
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Steer this in' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    const { clientMessageId } = replyMutate.mock.calls[0]![0] as {
+      clientMessageId: string;
+    };
+    const queue = screen.getByRole('list', { name: 'Queued messages' });
+    expect(within(queue).getByText('Steer this in')).toBeInTheDocument();
+
+    // Native steering delivers it mid-turn: the queue row settles and the
+    // persisted prompt carries the client id the composer sent.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', { queuedMessages: [] });
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'steered-user-1',
+              role: 'user',
+              text: 'Steer this in',
+              ts: 3,
+            }),
+            eventId: `${clientMessageId}:user`,
+            turnId: clientMessageId,
+            metadata: {
+              visibleInTranscript: true,
+              turnSource: 'human',
+              userId: 'current-user',
+              clientMessageId,
+            },
+          },
+        ],
+      });
+    });
+
+    expect(
+      screen.queryByRole('list', { name: 'Queued messages' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('log')).getAllByText('Steer this in'),
+    ).toHaveLength(1);
+  });
+
+  it('deletes the sender’s queued follow-up from the composer card and keeps it gone', async () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: { primaryEmailAddress: null, imageUrl: '' },
+    };
+    replyMutate.mockResolvedValue({
+      success: true,
+      admission: 'queued',
+      clientMessageId: 'ignored',
+    });
+    const deletion = Promise.withResolvers<{ outcome: 'withdrawn' }>();
+    deleteQueuedMessageMutate.mockReturnValue(deletion.promise);
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Never mind this' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    const { clientMessageId } = replyMutate.mock.calls[0]![0] as {
+      clientMessageId: string;
+    };
+    const serverRow = {
+      id: 'parent-event-1',
+      clientMessageId,
+      userId: 'current-user',
+      text: 'Never mind this',
+      timestamp: 2,
+    };
+    // The server's row replaces the optimistic entry under the same client id.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', {
+        queuedMessages: [serverRow],
+      });
+    });
+
+    const queue = screen.getByRole('list', { name: 'Queued messages' });
+    fireEvent.click(
+      within(queue).getByRole('button', { name: 'Delete queued message' }),
+    );
+    expect(deleteQueuedMessageMutate).toHaveBeenCalledExactlyOnceWith({
+      sessionId: 'session-1',
+      clientMessageId,
+    });
+    expect(
+      within(queue).getByRole('button', { name: 'Deleting queued message' }),
+    ).toBeDisabled();
+
+    await act(async () => deletion.resolve({ outcome: 'withdrawn' }));
+    expect(
+      screen.queryByRole('list', { name: 'Queued messages' }),
+    ).not.toBeInTheDocument();
+
+    // A snapshot polled before the withdrawal cannot bring it back.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', {
+        queuedMessages: [serverRow],
+      });
+    });
+    expect(screen.queryByText('Never mind this')).not.toBeInTheDocument();
   });
 
   it('hydrates a pending queue item after reload and reconciles it by client id', () => {
