@@ -1,5 +1,6 @@
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
+  RunStatus,
   type AutomationResultPriority,
   type AutomationResultKind,
   type AutomationResultVisibility,
@@ -12,7 +13,9 @@ import {
   customAutomations,
   sessionTasks,
   taskPullRequests,
+  taskRuns,
   tasks,
+  workItems,
 } from '../schema';
 import { isEmptyAutomationOutcome } from './empty-automation-result';
 
@@ -231,6 +234,56 @@ export async function recordAutomationResultForTask(
   }
 
   return recordAutomationResultForTaskWithClient(params, client);
+}
+
+/** Persist an already-cleared outcome for a selected automation that finished
+ * without a report or work item. Locking the task serializes this decision
+ * with report publication and makes repeated settlement idempotent. */
+export async function recordSilentAutomationResultForRun(runId: number) {
+  return db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ taskId: taskRuns.taskId, status: taskRuns.status })
+      .from(taskRuns)
+      .where(eq(taskRuns.id, runId));
+    if (!run || run.status !== RunStatus.Completed) return null;
+
+    const [task] = await tx
+      .select({
+        id: tasks.id,
+        state: tasks.state,
+        initiatorAutomation: tasks.initiatorAutomation,
+      })
+      .from(tasks)
+      .where(eq(tasks.id, run.taskId))
+      .for('update');
+    if (
+      task?.state !== 'completed' ||
+      !task.initiatorAutomation ||
+      !isEmptyAutomationOutcome(task.initiatorAutomation, 'No output.')
+    )
+      return null;
+
+    const report = await tx.query.automationResults.findFirst({
+      where: eq(automationResults.sourceTaskId, task.id),
+      columns: { id: true },
+    });
+    const workItem = await tx.query.workItems.findFirst({
+      where: eq(workItems.sourceTaskId, task.id),
+      columns: { id: true },
+    });
+    if (report || workItem) return null;
+
+    return recordAutomationResultForTaskWithClient(
+      {
+        taskId: task.id,
+        sourceRunId: runId,
+        content: 'No output.',
+        dedupeKey: `task:${task.id}:run:${runId}:no-output`,
+        visibility: 'shared',
+      },
+      tx,
+    );
+  });
 }
 
 async function recordCustomAutomationResultWithClient(

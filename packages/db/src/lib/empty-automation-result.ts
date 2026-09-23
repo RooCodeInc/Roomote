@@ -36,7 +36,7 @@ export function isEmptyAutomationOutcome(
 
   return statements.every(
     (statement) =>
-      /^(?:(?:scan|run|audit|triage)(?: complete| completed)?(?::| —| -)\s*)?(?:no|zero|0)\s+(?:(?:open|new|actionable|qualifying|relevant|merged|config(?:uration)?)\s+)*(?:alerts?|issues?|errors?|findings?|results?|output|items?|pull requests?|prs?|follow[- ]?ups?|work items?|remediation(?: work)?)(?:\s+(?:found|identified|detected|needed|required|to report|to summarize|to act on|submitted|started|created|posted|in (?:this|the) (?:scan|run|window)))?$/iu.test(
+      /^(?:(?:scan|run|audit|triage)(?: complete| completed)?(?::| —| -)\s*)?(?:no|zero|0)\s+(?:(?:open|new|actionable|qualifying|relevant|merged|config(?:uration)?)\s+)*(?:alerts?|issues?|errors?|findings?|results?|output|items?|pull requests?|prs?|follow[- ]?ups?|work items?|remediation(?: work)?)(?:\s+(?:found|identified|detected|needed|required|to report|to summarize|to audit|to act on|submitted|started|created|posted|in (?:this|the) (?:scan|run|window)))?$/iu.test(
         statement,
       ) ||
       /^(?:nothing (?:to report|actionable|to summarize)|no action (?:needed|required)|no (?:follow[- ]?up|remediation|work items?) (?:needed|required|submitted|started|created))$/iu.test(
