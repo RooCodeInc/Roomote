@@ -443,6 +443,12 @@ describe('tool presentation resolver', () => {
       'Found',
       'remote MCP deepwiki (disabled)',
     ],
+    [
+      'completed',
+      { status: 'needs_static_headers', name: 'deepwiki' },
+      'Checked',
+      'remote MCP deepwiki, needs manual setup',
+    ],
     ['failed', {}, 'Failed to Add', 'remote MCP DeepWiki'],
   ] as const)(
     'presents add_remote_mcp while %s',

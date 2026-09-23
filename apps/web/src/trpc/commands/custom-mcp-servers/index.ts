@@ -559,7 +559,7 @@ export async function listCustomMcpServerToolsCommand(
 
   if (!server.url || server.isStdio) {
     throw new Error(
-      'Local (stdio) servers run inside the task sandbox; their tools cannot be listed from Settings.',
+      'Local (stdio) servers run inside the task sandbox; their tools cannot be listed from the Integrations page.',
     );
   }
 

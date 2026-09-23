@@ -8,7 +8,7 @@ import { Section } from './Section';
 /**
  * Experiment-gated (`integrationToolApprovals`) admin switch. The per-tool
  * approval modes themselves are configured per integration from the Manage
- * tools dialog in Settings → Integrations while this experiment is on.
+ * tools dialog on the Integrations page while this experiment is on.
  */
 export function IntegrationToolApprovalsExperimentalSetting() {
   const { enabled, isLoading, isUpdating, setEnabled } =
@@ -26,12 +26,12 @@ export function IntegrationToolApprovalsExperimentalSetting() {
         <p className="text-sm text-muted-foreground">
           Gate individual integration tools behind a requester decision in
           sessions and tasks. While enabled, each integration&apos;s Manage
-          tools dialog in Settings → Integrations offers Auto (default, shown
-          with no choice selected), Always allow, Always ask, and Disable per
-          tool. Set up Auto mode in Settings → Agent Guidance to handle routine
-          work automatically and ask before anything risky. If the session owner
-          is away, risky calls are blocked. Always ask pauses each call until
-          the session owner allows it once, stops the asks for the rest of that
+          tools dialog on the Integrations page offers Auto (default, shown with
+          no choice selected), Always allow, Always ask, and Disable per tool.
+          Set up Auto mode in Settings → Agent Guidance to handle routine work
+          automatically and ask before anything risky. If the session owner is
+          away, risky calls are blocked. Always ask pauses each call until the
+          session owner allows it once, stops the asks for the rest of that
           session, or declines it; Disable hides the tool and blocks it
           outright. A task asks the owner of its session the same way, and a
           task nobody can answer for, such as one an automation started, cannot

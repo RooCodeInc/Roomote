@@ -4562,7 +4562,7 @@ export function AutomationsSettings({
                       })
                     ) {
                       toast.error(
-                        'Configure Sentry in Settings > Integrations before enabling Triage Sentry Issues.',
+                        'Configure Sentry on the Integrations page before enabling Triage Sentry Issues.',
                       );
                       return;
                     }
@@ -4643,8 +4643,7 @@ export function AutomationsSettings({
                     })}
 
                     <p className="text-xs text-muted-foreground md:max-w-160">
-                      Requires Sentry to be configured in Settings &gt;
-                      Integrations.
+                      Requires Sentry to be configured on the Integrations page.
                     </p>
 
                     <div className="space-y-2">

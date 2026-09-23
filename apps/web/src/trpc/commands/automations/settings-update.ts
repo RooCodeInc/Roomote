@@ -1501,7 +1501,7 @@ export async function updateBackgroundAgentSettingsCommand(
   ) {
     fieldErrors.general =
       fieldErrors.general ||
-      'Configure Sentry in Settings > Integrations before enabling Triage Sentry Issues.';
+      'Configure Sentry on the Integrations page before enabling Triage Sentry Issues.';
   }
 
   if (
