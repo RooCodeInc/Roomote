@@ -15,6 +15,13 @@ const mocks = vi.hoisted(() => ({
   expire: vi.fn(async () => undefined),
   isPresent: vi.fn(async () => true),
   latestUserRequest: vi.fn(async () => undefined as string | undefined),
+  postMessage: vi.fn(async () => ({ messageId: 'provider-message-1' })),
+  claimTracked: vi.fn(async () => [{ id: 'tracked-1' }]),
+  provider: vi.fn(),
+}));
+
+vi.mock('../communication-providers', () => ({
+  getCommunicationProviderAdapter: mocks.provider,
 }));
 
 vi.mock(
@@ -32,9 +39,19 @@ vi.mock(
 );
 
 vi.mock('@roomote/db/server', () => ({
-  db: { query: { taskRuns: { findFirst: mocks.findRun } } },
+  db: {
+    query: { taskRuns: { findFirst: mocks.findRun } },
+    insert: () => ({
+      values: () => ({
+        onConflictDoNothing: () => ({ returning: mocks.claimTracked }),
+      }),
+    }),
+    update: () => ({ set: () => ({ where: vi.fn(async () => undefined) }) }),
+    delete: () => ({ where: vi.fn(async () => undefined) }),
+  },
   eq: vi.fn(),
   taskRuns: { id: 'id' },
+  trackedMessages: { id: 'id' },
   isDeploymentExperimentEnabled: mocks.experiment,
   getSessionForTask: mocks.sessionForTask,
   listIntegrationToolPolicies: mocks.deploymentPolicies,
@@ -94,6 +111,33 @@ beforeEach(() => {
   mocks.autoState.mockResolvedValue({ mode: 'off' });
   mocks.isPresent.mockResolvedValue(true);
   mocks.latestUserRequest.mockResolvedValue(undefined);
+  mocks.claimTracked.mockResolvedValue([{ id: 'tracked-1' }]);
+  mocks.provider.mockResolvedValue({ postMessage: mocks.postMessage });
+});
+
+it('posts task-originated Slack asks in the task thread with native approval buttons', async () => {
+  mocks.findRun.mockResolvedValue({
+    taskId: 'task-1',
+    payload: {
+      communicationProvider: 'slack',
+      communicationChannelId: 'C123',
+      communicationThreadId: '123.45',
+      communicationTeamId: 'T123',
+    },
+  });
+  mocks.deploymentPolicies.mockResolvedValue([policy('save_issue', 'ask')]);
+  const result = await requestTaskToolApproval(ask);
+  expect(result).toEqual({ outcome: 'pending', approvalId: 'approval-1' });
+  expect(mocks.provider).toHaveBeenCalledWith('slack', { slackTeamId: 'T123' });
+  expect(mocks.postMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      channelId: 'C123',
+      threadId: '123.45',
+      blocks: expect.arrayContaining([
+        expect.objectContaining({ type: 'actions' }),
+      ]),
+    }),
+  );
 });
 
 describe('resolveTaskIntegrationToolApprovals', () => {

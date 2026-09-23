@@ -211,11 +211,27 @@ async function processFastAgentReaction(params: {
         }),
         postReply: async ({
           message,
+          toolApproval,
           kickoff,
           imageArtifactIds = [],
           videoArtifactIds = [],
           charts = [],
         }) => {
+          if (toolApproval) {
+            const {
+              integrationToolApprovalMessage,
+              integrationToolApprovalSlackBlocks,
+            } = await import('@roomote/types');
+            const messageTs = await context.slack.postMessage({
+              channel: event.item.channel,
+              thread_ts: threadTs,
+              text: integrationToolApprovalMessage(toolApproval),
+              blocks: integrationToolApprovalSlackBlocks(toolApproval),
+            });
+            if (!messageTs)
+              throw new Error('Slack did not accept the approval request.');
+            return { messageId: messageTs };
+          }
           const replyImages = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
             sessionId: session.id,

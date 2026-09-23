@@ -168,6 +168,92 @@ export type IntegrationToolApprovalDecision = z.infer<
   typeof integrationToolApprovalDecisionSchema
 >;
 
+/** Compact enough for Telegram callback_data (64 bytes). No authority is
+ * conveyed by the callback: the database still checks the mapped requester. */
+export function buildIntegrationToolApprovalCallback(
+  approvalId: string,
+  decision: IntegrationToolApprovalDecision['decision'],
+): string {
+  const code = { approved: 'o', approved_for_session: 's', rejected: 'd' }[
+    decision
+  ];
+  return `ita:${approvalId}:${code}`;
+}
+
+export function parseIntegrationToolApprovalCallback(
+  value?: string,
+): IntegrationToolApprovalDecision | null {
+  const match =
+    /^ita:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):([osd])$/iu.exec(
+      value ?? '',
+    );
+  if (!match) return null;
+  return {
+    approvalId: match[1]!,
+    decision: (
+      { o: 'approved', s: 'approved_for_session', d: 'rejected' } as const
+    )[match[2]!.toLowerCase() as 'o' | 's' | 'd'],
+  };
+}
+
+export function integrationToolApprovalButtons(approvalId: string) {
+  return [
+    [
+      {
+        text: 'Allow once',
+        callbackData: buildIntegrationToolApprovalCallback(
+          approvalId,
+          'approved',
+        ),
+      },
+      {
+        text: 'Allow for session',
+        callbackData: buildIntegrationToolApprovalCallback(
+          approvalId,
+          'approved_for_session',
+        ),
+      },
+      {
+        text: 'Deny',
+        callbackData: buildIntegrationToolApprovalCallback(
+          approvalId,
+          'rejected',
+        ),
+      },
+    ],
+  ];
+}
+
+/** Only the persisted, redacted argument summary may be displayed in chat. */
+export function integrationToolApprovalMessage(
+  approval: IntegrationToolApprovalMetadata,
+): string {
+  const summary = JSON.stringify(approval.argsSummary);
+  return `Approval needed: ${approval.integrationId} / ${approval.toolName}${summary && summary !== '{}' && summary !== 'null' ? `\nArguments (redacted): ${summary.slice(0, 1200)}${summary.length > 1200 ? '…' : ''}` : ''}`;
+}
+
+export const INTEGRATION_TOOL_APPROVAL_SLACK_ACTION_ID =
+  'integration_tool_approval';
+
+export function integrationToolApprovalSlackBlocks(
+  approval: IntegrationToolApprovalMetadata,
+) {
+  return [
+    { type: 'markdown', text: integrationToolApprovalMessage(approval) },
+    {
+      type: 'actions',
+      elements: integrationToolApprovalButtons(approval.approvalId)[0]!.map(
+        (button) => ({
+          type: 'button',
+          text: { type: 'plain_text', text: button.text },
+          action_id: INTEGRATION_TOOL_APPROVAL_SLACK_ACTION_ID,
+          value: button.callbackData,
+        }),
+      ),
+    },
+  ];
+}
+
 export const integrationToolPolicyUpsertSchema = z.object({
   integrationId: z.string().min(1).max(200),
   toolName: z.string().min(1).max(200),

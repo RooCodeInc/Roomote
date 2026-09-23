@@ -23,7 +23,11 @@ import {
   type SlackNotifier,
 } from '@roomote/slack';
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
-import { buildDataVisualizationBlocks } from '@roomote/types';
+import {
+  buildDataVisualizationBlocks,
+  integrationToolApprovalMessage,
+  integrationToolApprovalSlackBlocks,
+} from '@roomote/types';
 import {
   admitFastAgentHumanFollowUp,
   createFastAgentConversationArtifact,
@@ -511,11 +515,23 @@ export async function processFastAgentMessage(params: {
           : {}),
         postReply: async ({
           message,
+          toolApproval,
           kickoff,
           imageArtifactIds = [],
           videoArtifactIds = [],
           charts = [],
         }) => {
+          if (toolApproval) {
+            const messageTs = await slack.postMessage({
+              channel: event.channel,
+              thread_ts: threadId,
+              text: integrationToolApprovalMessage(toolApproval),
+              blocks: integrationToolApprovalSlackBlocks(toolApproval),
+            });
+            if (!messageTs)
+              throw new Error('Slack did not accept the approval request.');
+            return { messageId: messageTs };
+          }
           const replyImages = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
             sessionId: session.id,

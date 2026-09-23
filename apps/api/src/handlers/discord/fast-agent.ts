@@ -42,6 +42,8 @@ import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
+  integrationToolApprovalButtons,
+  integrationToolApprovalMessage,
   type FastAgentConversation,
   type TaskInitiator,
 } from '@roomote/types';
@@ -541,7 +543,15 @@ export async function processDiscordFastAgentMessage(
             kickoffDelivered: true,
           };
         },
-        postReply: async ({ message: text }) => {
+        postReply: async ({ message: text, toolApproval }) => {
+          if (toolApproval) {
+            const posted = await input.provider.postMessage({
+              ...conversation.replyTarget,
+              text: integrationToolApprovalMessage(toolApproval),
+              buttons: integrationToolApprovalButtons(toolApproval.approvalId),
+            });
+            return { messageId: posted.messageId };
+          }
           const posted = await postFastReplyWithFooter(text);
           didSendVisibleResponse = true;
           return { messageId: posted.messageId };

@@ -1,4 +1,7 @@
-import { formatErrorForLog } from '@roomote/types';
+import {
+  formatErrorForLog,
+  INTEGRATION_TOOL_APPROVAL_SLACK_ACTION_ID,
+} from '@roomote/types';
 import {
   buildSuggestedTasksOnboardingFollowupIgnoreBlocks,
   buildSuggestedTasksOnboardingFollowupPromptTextBlocks,
@@ -28,6 +31,7 @@ import {
   handleSlackPrReviewActionYes,
 } from './pr-review-action.js';
 import { handleThreadReplyDetailsToggle } from './thread-reply-details-toggle.js';
+import { handleSlackToolApprovalAction } from './tool-approval-action.js';
 import { apiLogger } from '../../../logging.js';
 
 /**
@@ -235,6 +239,9 @@ export async function handleSlackInteractivePayload(
   }
 
   switch (true) {
+    case actionId === INTEGRATION_TOOL_APPROVAL_SLACK_ACTION_ID:
+      await handleSlackToolApprovalAction(interactivePayload);
+      break;
     case actionId === 'connect_account':
       await handleConnectAccount(interactivePayload);
       break;
