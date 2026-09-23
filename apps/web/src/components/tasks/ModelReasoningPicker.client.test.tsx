@@ -250,12 +250,17 @@ describe('ModelReasoningPicker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
     const slider = screen.getByRole('slider', { name: 'Reasoning level' });
     expect(slider).toHaveAttribute('aria-valuetext', 'Auto');
+    expect(slider).toContainElement(screen.getByTestId('auto-thumb-sparkle'));
+    expect(screen.getByTestId('reasoning-level-label')).toHaveTextContent(
+      /^Auto$/,
+    );
     expect(slider).toHaveAttribute('aria-valuemin', '0');
     expect(slider).toHaveAttribute('aria-valuemax', '2');
     fireEvent.wheel(slider, { deltaY: -40 });
     expect(screen.getByTestId('selection')).toHaveTextContent(
       'provider/alpha:low',
     );
+    expect(screen.queryByTestId('auto-thumb-sparkle')).not.toBeInTheDocument();
     fireEvent.wheel(slider, { deltaY: 40 });
     expect(slider).toHaveAttribute('aria-valuetext', 'Auto');
     expect(screen.getByTestId('selection')).toHaveTextContent(

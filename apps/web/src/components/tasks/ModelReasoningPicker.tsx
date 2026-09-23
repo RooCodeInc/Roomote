@@ -130,15 +130,17 @@ function getPickerReasoningEffortLabel(effort: ReasoningEffort): string {
   return effort === 'xhigh' ? 'X-High' : getReasoningEffortLabel(effort);
 }
 
-/** Tiny selected-state glints; no icon or motion for reduced-motion users. */
-function AutoEffortSparkle() {
+/** Selected-state glints live inside the slider thumb, never beside the label. */
+function AutoThumbSparkle() {
   const reducedMotion = useReducedMotion();
   return (
-    <span className="relative inline-block px-0.5 text-accent-foreground">
-      Auto
+    <span
+      data-testid="auto-thumb-sparkle"
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded-full"
+    >
       <motion.span
-        aria-hidden="true"
-        className="pointer-events-none absolute -right-1 top-0 size-1 rounded-full bg-accent-foreground opacity-50 shadow-[0_0_5px_currentColor]"
+        className="absolute top-1.5 left-1.5 size-1 rounded-full bg-accent-foreground opacity-40 shadow-[0_0_5px_currentColor]"
         animate={
           reducedMotion
             ? undefined
@@ -147,8 +149,7 @@ function AutoEffortSparkle() {
         transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.span
-        aria-hidden="true"
-        className="pointer-events-none absolute -left-1 bottom-0 size-0.5 rounded-full bg-accent-foreground opacity-50 shadow-[0_0_4px_currentColor]"
+        className="absolute right-1.5 bottom-1.5 size-0.5 rounded-full bg-accent-foreground opacity-40 shadow-[0_0_4px_currentColor]"
         animate={
           reducedMotion
             ? undefined
@@ -636,7 +637,7 @@ function PickerContent({
               animate="center"
               exit="exit"
             >
-              {effortLabel === 'Auto' ? <AutoEffortSparkle /> : effortLabel}
+              {effortLabel}
             </motion.span>
           </AnimatePresence>
           <span className="sr-only" role="status" aria-label={effortLabel} />
@@ -674,6 +675,13 @@ function PickerContent({
               }
               aria-label="Reasoning level"
               aria-valuetext={effortLabel}
+              thumbContent={
+                allowAuto &&
+                effectiveEffort === null &&
+                !reasoningUnavailable ? (
+                  <AutoThumbSparkle />
+                ) : undefined
+              }
               className={cn(
                 'h-full min-h-0 data-[orientation=vertical]:min-h-0 [&>span:not([data-slot])]:transition-[bottom] [&>span:not([data-slot])]:duration-300 [&>span:not([data-slot])]:ease-out motion-reduce:[&>span:not([data-slot])]:transition-none [&_[data-slot=slider-track]]:w-4 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2',
                 reasoningUnavailable
@@ -852,7 +860,7 @@ export const ModelReasoningPickerTrigger = forwardRef<
     >
       <span className="max-w-48 truncate">{label}</span>
       {autoEffort && !reasoningEffort ? (
-        <AutoEffortSparkle />
+        <span className="text-accent-foreground">Auto</span>
       ) : reasoningEffort ? (
         <span
           className={cn(
