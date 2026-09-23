@@ -658,6 +658,11 @@ describe('buildChatProviderMessageInstructions', () => {
     expect(discordInstructions).toContain(
       'Balance all triple-backtick fences in each message',
     );
+    expect(discordInstructions).toContain(
+      'hard-wrap at a character boundary into labeled continuation lines',
+    );
+    expect(discordInstructions).toContain('repeat the row and column labels');
+    expect(discordInstructions).toContain('Preserve every value character');
     expect(discordInstructions).toContain('<example>\n  ```\n');
     expect(discordInstructions).toContain('\n  ```\n  </example>');
     expect(teamsInstructions).not.toContain('<discord_table_formatting>');
