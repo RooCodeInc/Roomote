@@ -13,6 +13,8 @@ const {
   mockGetCommunicationMessages,
   mockQueueSlackMessage,
   mockQueueCommunicationMessage,
+  mockPeekTaskFollowUps,
+  mockRemoveTaskFollowUp,
   mockQueueLinearMessage,
   mockRecordTaskMessageEnvelope,
   mockRecordTaskInferenceUsage,
@@ -33,6 +35,8 @@ const {
   mockGetCommunicationMessages: vi.fn(),
   mockQueueSlackMessage: vi.fn(),
   mockQueueCommunicationMessage: vi.fn(),
+  mockPeekTaskFollowUps: vi.fn(),
+  mockRemoveTaskFollowUp: vi.fn(),
   mockQueueLinearMessage: vi.fn(),
   mockRecordTaskMessageEnvelope: vi.fn(),
   mockRecordTaskInferenceUsage: vi.fn(),
@@ -55,7 +59,9 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/communication/messages', () => ({
   getCommunicationMessages: mockGetCommunicationMessages,
+  peekTaskFollowUps: mockPeekTaskFollowUps,
   queueCommunicationMessage: mockQueueCommunicationMessage,
+  removeTaskFollowUp: mockRemoveTaskFollowUp,
 }));
 
 vi.mock(
@@ -407,6 +413,42 @@ describe('taskRunsRouter queue message guards', () => {
       tokenType: 'run',
       version: 1,
     });
+  });
+
+  it('lets the matching run token drain queued task follow-ups', async () => {
+    const queued = [
+      {
+        raw: 'raw-1',
+        message: {
+          clientMessageId: 'task-follow-up:1',
+          deliveryMode: 'steer',
+          prompt: 'continue',
+        },
+      },
+    ];
+    mockPeekTaskFollowUps.mockResolvedValueOnce(queued);
+
+    await expect(
+      createRunCaller().peekTaskFollowUps({ runId: 42 }),
+    ).resolves.toEqual(queued);
+    await expect(
+      createRunCaller().removeTaskFollowUp({ runId: 42, raw: 'raw-1' }),
+    ).resolves.toBeUndefined();
+
+    expect(mockPeekTaskFollowUps).toHaveBeenCalledWith(42);
+    expect(mockRemoveTaskFollowUp).toHaveBeenCalledWith(42, 'raw-1');
+  });
+
+  it('rejects task follow-up drain for auth-token callers', async () => {
+    await expect(
+      createAuthCaller().peekTaskFollowUps({ runId: 42 }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      createAuthCaller().removeTaskFollowUp({ runId: 42, raw: 'raw-1' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    expect(mockPeekTaskFollowUps).not.toHaveBeenCalled();
+    expect(mockRemoveTaskFollowUp).not.toHaveBeenCalled();
   });
 
   it('allows queueLinearMessage for the matching run token', async () => {
