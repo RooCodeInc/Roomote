@@ -140,8 +140,8 @@ function AutoThumbSparkle() {
       className="pointer-events-none absolute inset-0 overflow-hidden rounded-full"
     >
       <motion.span
-        className="absolute inset-0 rounded-full bg-accent-foreground/15"
-        animate={reducedMotion ? undefined : { opacity: [0.1, 0.75, 0.1] }}
+        className="absolute inset-0 rounded-full bg-accent-foreground/35"
+        animate={reducedMotion ? undefined : { opacity: [0.1, 0.9, 0.1] }}
         transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.span
