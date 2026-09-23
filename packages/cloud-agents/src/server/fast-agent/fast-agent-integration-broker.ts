@@ -26,6 +26,7 @@ import {
 } from '@roomote/db/server';
 import { resolveGitLabInstanceHost } from '@roomote/gitlab';
 import {
+  INTEGRATION_TOOL_FAST_CONVERSATION_HEADER,
   createMemoryMcpInstructions,
   BRAIN_MCP_ID,
   CHAT_DESTINATIONS_TOOL,
@@ -727,20 +728,23 @@ export async function callFastAgentIntegration(
   // The token minted at list time is short-lived, so deployment-proxy calls
   // re-mint it here: a call late in a long turn must not send an expired
   // bearer. Direct upstream endpoints keep their own resolved headers.
+  // Deployment-proxy calls also name their conversation, so the proxy can
+  // shadow-assess them against this user's latest prompt there.
   let endpoint = integration.endpoint;
   if (!endpoint || endpoint.deploymentProxy) {
     const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+    const proxyHeaders = {
+      Authorization: `Bearer ${authToken}`,
+      [INTEGRATION_TOOL_FAST_CONVERSATION_HEADER]: context.sessionId,
+    };
     endpoint = endpoint
       ? {
           ...endpoint,
-          headers: {
-            ...endpoint.headers,
-            Authorization: `Bearer ${authToken}`,
-          },
+          headers: { ...endpoint.headers, ...proxyHeaders },
         }
       : {
           url: integrationProxyUrl(apiBaseUrl, integration.id),
-          headers: { Authorization: `Bearer ${authToken}` },
+          headers: proxyHeaders,
         };
   }
   if (

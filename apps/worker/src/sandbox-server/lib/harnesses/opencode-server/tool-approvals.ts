@@ -2,7 +2,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import { sdk } from '@roomote/sdk/client';
-import type { TaskIntegrationToolApprovals } from '@roomote/types';
+import {
+  toIntegrationToolUserRequest,
+  type TaskIntegrationToolApprovals,
+} from '@roomote/types';
 
 import { parseDirectMcpConfig } from './mcp-config';
 
@@ -207,7 +210,9 @@ export function createTaskToolApprovalRelay(options: {
       );
       return;
     }
-    const userRequest = options.getUserRequest?.();
+    const userRequest = toIntegrationToolUserRequest(
+      options.getUserRequest?.(),
+    );
     const result = await api.request({
       ...tool,
       nativeRequestId: ask.requestId,

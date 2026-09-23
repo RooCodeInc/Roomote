@@ -78,6 +78,7 @@ grafanaMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
     const guard = await resolveNativeToolApprovalGuard({
       auth,
       integrationId: 'grafana',
+      requestHeaders: c.req.raw.headers,
     });
     const body = await readNativeMcpRequestBody(c.req.raw);
     const refusal = await guard.checkCall(body);

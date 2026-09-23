@@ -17,6 +17,7 @@ vi.mock('../tool-approval-enforcement', () => ({
     approvals: { blocks: Map<string, string>; defaultBlock?: string },
     toolName: string,
   ) => approvals.blocks.get(toolName) ?? approvals.defaultBlock,
+  readFastConversationIdHeader: () => null,
   shadowProxyToolCall: () => undefined,
 }));
 

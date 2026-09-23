@@ -222,14 +222,23 @@ export function recordIntegrationToolShadowEvaluationInBackground(input: {
   args: unknown;
   userId: string | null;
   taskId: string | null;
+  /**
+   * What the user last asked for, looked up only while shadowing; the
+   * assessment runs without it when there is none or the lookup fails.
+   */
+  resolveUserRequest?: () => Promise<string | undefined>;
 }): void {
   void resolveIntegrationToolAutoState()
     .then(async (state) => {
       if (state.mode !== 'shadow') return;
+      const userRequest = await input
+        .resolveUserRequest?.()
+        .catch(() => undefined);
       const evaluation = await evaluateIntegrationToolAutoDecision({
         integrationId: input.integrationId,
         toolName: input.toolName,
         args: input.args,
+        userRequest,
         deploymentGuidance: state.settings.policy,
         userId: input.userId,
         taskId: input.taskId,
