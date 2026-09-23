@@ -153,6 +153,10 @@ describe('resolveOpenCodeSmallModel', () => {
       },
     });
     sessionAbortMock.mockResolvedValue({ data: true, error: undefined });
+    // Every prompt watches the event stream; by default it carries nothing.
+    eventSubscribeMock.mockImplementation(async () => ({
+      stream: (async function* () {})(),
+    }));
     sessionCreateMock.mockResolvedValue({
       data: { id: 'session-1' },
       error: undefined,
@@ -2125,6 +2129,60 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('ends an out-of-credits retry loop for a call with no callbacks', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openai/gpt-5.6-sol',
+    });
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.status' as const,
+          properties: {
+            sessionID: 'session-1',
+            status: {
+              type: 'retry' as const,
+              attempt: 1,
+              message: 'The usage limit has been reached',
+              next: Date.now() + 2_000,
+            },
+          },
+        };
+      })(),
+    });
+    sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+
+    const {
+      classifyNonTaskInferenceError,
+      generateTrackedNonTaskObject,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+    // Helper calls such as routing and titles pass no retry or UI callbacks,
+    // and must still fail fast instead of sitting through OpenCode's backoff.
+    const error = await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      modelRole: 'primary',
+      schema: z.object({ answer: z.string() }),
+      prompt: 'Answer.',
+      timeoutMs: 1_000,
+    }).catch((caught: unknown) => caught);
+
+    expect(classifyNonTaskInferenceError(error)).toMatchObject({
+      reason: 'insufficient_credits',
+      retryable: false,
+    });
+    expect(sessionAbortMock).toHaveBeenCalledWith(
+      {
+        sessionID: 'session-1',
+        directory: expect.stringContaining('roomote-non-task-'),
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
   it.each([
     ['ChatGPT subscription', 'The usage limit has been reached'],
     [
@@ -3722,6 +3780,53 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it('reports exhausted credits from validation without waiting out OpenCode retries', async () => {
+    process.env = { ...originalEnv };
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // OpenCode retries the provider's usage-limit 429 itself; its status is
+    // the only signal before the prompt would settle or the deadline fire.
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.status' as const,
+          properties: {
+            sessionID: 'session-1',
+            status: {
+              type: 'retry' as const,
+              attempt: 1,
+              message: 'The usage limit has been reached',
+              next: Date.now() + 2_000,
+            },
+          },
+        };
+      })(),
+    });
+    sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+
+    try {
+      const { validateNonTaskInference } =
+        await import('../non-task-provider-usage.js');
+      const result = await validateNonTaskInference({
+        model: 'openai/gpt-5.6-sol',
+        runtimeEnv: { OPENAI_API_KEY: 'candidate-key' },
+        // Without the retry-status check this would end as a timeout.
+        timeoutMs: 2_000,
+      });
+
+      expect(result).toMatchObject({
+        success: false,
+        reason: 'insufficient_credits',
+        retryable: false,
+      });
+      expect(sessionAbortMock).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionID: 'session-1' }),
+        { signal: expect.any(AbortSignal) },
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it.each([
