@@ -127,6 +127,8 @@ export function SessionCard({
             email={session.ownerEmail ?? undefined}
             size="md"
             alt=""
+            loading="eager"
+            decoding="sync"
           />
         )}
         {session.unread && session.ownerUserId === viewerUserId ? (
