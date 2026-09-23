@@ -3498,6 +3498,7 @@ export async function answerFastAgentQuestion({
         return {
           models: [],
           defaultModelId: undefined,
+          codeReviewModelId: undefined,
           codingModelRoutingRules: [],
         };
       }),
@@ -5422,6 +5423,11 @@ export async function answerFastAgentQuestion({
               userMessages: collectUserMessageTexts(),
               models: taskModelOptions.models,
               codingModelRoutingRules: [],
+              // An unoverridden review runs on the code-review model, which
+              // can differ from the task default.
+              defaultModelId:
+                taskModelOptions.codeReviewModelId ??
+                taskModelOptions.defaultModelId,
               userId,
             });
             const signature = `review_pull_request:${repository}#${pullRequestNumber}`;
