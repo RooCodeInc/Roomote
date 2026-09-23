@@ -12,6 +12,8 @@ import {
 } from '@roomote/db/server';
 import {
   getOpenAiCompatibleRuntimeConfigs,
+  isInferenceCreditsExhaustedError,
+  isOpenRouterInFlightBudgetError,
   isReasoningEffort,
   toBedrockMantleRuntimeModelId,
   type ReasoningEffort,
@@ -1728,6 +1730,29 @@ async function runNonTaskSdkPrompt(
                 event.properties.sessionID === sessionId &&
                 event.properties.status.type === 'retry'
               ) {
+                // OpenCode retries an exhausted account like a rate limit,
+                // and its status carries only the provider message. No retry
+                // can succeed until the account is topped up, so end the
+                // prompt instead of reporting a temporary error.
+                if (
+                  isInferenceCreditsExhaustedError(
+                    event.properties.status.message,
+                  )
+                ) {
+                  rejectSessionError(
+                    new NonTaskOpenCodePromptError(
+                      {
+                        name: 'APIError',
+                        data: {
+                          message: event.properties.status.message,
+                          isRetryable: false,
+                        },
+                      },
+                      promptErrorLabel,
+                    ),
+                  );
+                  return;
+                }
                 try {
                   await params.onProviderRetry?.({
                     attempt: event.properties.status.attempt,
@@ -2368,6 +2393,19 @@ export function classifyNonTaskInferenceError(
     };
   }
 
+  // An account out of credits or quota outranks the provider's own retry
+  // flag: ChatGPT and OpenAI send it as a retryable 429, and OpenCode's retry
+  // cap turns it into a generic rejection. Neither a retry nor a fresh
+  // session can succeed until the account is topped up.
+  if (isInferenceCreditsExhaustedError(inferenceError)) {
+    return {
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      reason: 'insufficient_credits',
+      retryable: false,
+    };
+  }
+
   if (isInferenceErrorExplicitlyNonRetryable(inferenceError)) {
     return {
       message: 'The inference provider rejected the request.',
@@ -2448,15 +2486,6 @@ export function classifyNonTaskInferenceError(
     };
   }
 
-  if (statusCode === 402) {
-    return {
-      message:
-        'The inference provider account does not have enough credits or quota.',
-      reason: 'insufficient_credits',
-      retryable: false,
-    };
-  }
-
   if (statusCode === 404) {
     return {
       message: 'The selected model is unavailable with these credentials.',
@@ -2487,12 +2516,13 @@ export function classifyNonTaskInferenceError(
   }
 
   if (
-    detail.includes('insufficient_quota') ||
-    detail.includes('insufficient quota') ||
-    detail.includes('insufficient credit') ||
-    detail.includes('payment required') ||
-    detail.includes('billing') ||
-    /\b402\b/u.test(detail)
+    (detail.includes('insufficient_quota') ||
+      detail.includes('insufficient quota') ||
+      detail.includes('insufficient credit') ||
+      detail.includes('payment required') ||
+      detail.includes('billing') ||
+      /\b402\b/u.test(detail)) &&
+    !isOpenRouterInFlightBudgetError(inferenceError)
   ) {
     return {
       message:
@@ -2563,7 +2593,8 @@ export function classifyNonTaskInferenceError(
 
   // Remaining structured 4xx responses (400, 413, 422, …) are client errors:
   // resending the same request cannot recover them. 408 stays retryable as a
-  // timeout; 401/402/403/404/429 were classified above.
+  // timeout; 401/403/404/429 were classified above, and every 402 except
+  // OpenRouter's in-flight budget hold by the credits check.
   if (
     statusCode !== undefined &&
     statusCode >= 400 &&

@@ -54,9 +54,10 @@ a provider never re-adds models you removed.
 
 When you connect or update an API-key provider, Roomote first checks the
 submitted credentials with a small live model request. If the provider rejects
-the key, or the account has no remaining credits, nothing is saved: fix the
-credential and save again. Other failures (a rate limit, a model your account
-cannot access, or a transient provider outage) never block the save.
+the key, nothing is saved: fix the credential and save again. An account with no
+remaining credits or quota is still saved, with a warning, so you can add
+credits while you finish setting up. Other failures (a rate limit, a model your
+account cannot access, or a transient provider outage) never block the save.
 Self-hosted OpenAI-compatible endpoint connections are checked by listing the
 endpoint's models instead. Saving again without changing any credential skips
 the live check.
@@ -531,3 +532,9 @@ deployment. It helps admins compare models without relying on stale defaults.
   for the vision role.
 - **A model works from one provider but not another.** Check provider-specific
   credentials, rate limits, model availability, and model ID prefix.
+- **Work stops with "You seem to have run out of credits".** The provider
+  reported that the account has no remaining credits or quota, or that a
+  ChatGPT subscription reached its usage limit. Roomote does not retry these
+  automatically, because retrying cannot succeed until the account changes.
+  Add credits or wait for the subscription limit to reset, or switch to a model
+  from another provider. Temporary rate limits are still retried automatically.

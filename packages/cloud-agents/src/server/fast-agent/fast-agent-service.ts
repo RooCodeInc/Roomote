@@ -38,10 +38,12 @@ import {
   fastAgentHumanFollowUpEventSchema,
   fastAgentCapabilityOfferInputSchema,
   formatErrorForLog,
+  formatInferenceCreditsExhaustedMessage,
   formatSingleLineLog,
   manageWakeupsInputSchema,
   serviceCredentialPrepareSchema,
   serviceCredentialPrepareToolSchema,
+  resolveInferenceProviderDisplayName,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
   truncateAcpOutputText,
@@ -78,8 +80,10 @@ import {
   getActiveRecipeVerificationTaskId,
   inArray,
   isBrainEnabled,
+  isChatGptSubscriptionConnected,
   isPrivateSessionsExperimentEnabled,
   isNull,
+  isXaiSubscriptionConnected,
   markSessionGoalForConversation,
   releaseSessionGoalContinuation,
   sql,
@@ -1132,9 +1136,13 @@ function formatFastAgentInferenceRetryNotice(
 function formatFastAgentInferenceFailure(
   failure: FastAgentInferenceFailure,
   retried: boolean,
-  context: { detail?: string; model?: string } = {},
+  context: { detail?: string; model?: string; providerName?: string } = {},
 ): string {
-  const summary = formatFastAgentInferenceFailureSummary(failure, retried);
+  const summary = formatFastAgentInferenceFailureSummary(
+    failure,
+    retried,
+    context.providerName,
+  );
   // The specific reasons already say what happened. The generic rejection
   // is the one that leaves the reader guessing, so it carries the provider's
   // own status and message, and the model that produced them.
@@ -1146,6 +1154,7 @@ function formatFastAgentInferenceFailure(
 function formatFastAgentInferenceFailureSummary(
   failure: FastAgentInferenceFailure,
   retried: boolean,
+  providerName: string | undefined,
 ): string {
   switch (failure.reason) {
     case 'content_filter':
@@ -1167,7 +1176,7 @@ function formatFastAgentInferenceFailureSummary(
         ? 'The request is still being blocked by the inference provider gateway after retrying. Please try again in a moment.'
         : 'The request was blocked by the inference provider gateway. Please try again in a moment.';
     case 'insufficient_credits':
-      return 'The inference provider account has insufficient credits or quota.';
+      return formatInferenceCreditsExhaustedMessage(providerName);
     case 'invalid_credentials':
       return 'Could not authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
     case 'model_unavailable':
@@ -1175,6 +1184,37 @@ function formatFastAgentInferenceFailureSummary(
     default:
       return 'Could not complete the request because the inference provider returned an error. Please try again in a moment.';
   }
+}
+
+/**
+ * Display name of the provider that served the failed request. A connected
+ * ChatGPT or Grok subscription wins over the API key at runtime for `openai/`
+ * and `xai/` models, so the connection decides which one ran out.
+ */
+async function resolveFastAgentInferenceProviderName(
+  model: string | undefined,
+): Promise<string | undefined> {
+  if (!model) return undefined;
+  // Naming the provider is best effort; the closeout must go out regardless.
+  const isConnected = async (check: () => Promise<boolean>) => {
+    try {
+      return await check();
+    } catch {
+      return false;
+    }
+  };
+  const [chatgptConnected, xaiSubscriptionConnected] = await Promise.all([
+    model.startsWith('openai/')
+      ? isConnected(() => isChatGptSubscriptionConnected())
+      : false,
+    model.startsWith('xai/')
+      ? isConnected(() => isXaiSubscriptionConnected())
+      : false,
+  ]);
+  return resolveInferenceProviderDisplayName(model, {
+    chatgptConnected,
+    xaiSubscriptionConnected,
+  });
 }
 
 function waitForFastAgentInferenceRetry(
@@ -7079,7 +7119,17 @@ export async function answerFastAgentQuestion({
         ? formatFastAgentInferenceFailure(
             error.failure,
             inferenceRetryAttempted,
-            { detail: error.detail, model: lastResolvedInferenceModel },
+            {
+              detail: error.detail,
+              model: lastResolvedInferenceModel,
+              ...(error.failure.reason === 'insufficient_credits'
+                ? {
+                    providerName: await resolveFastAgentInferenceProviderName(
+                      lastResolvedInferenceModel,
+                    ),
+                  }
+                : {}),
+            },
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
     // The error closeout is recorded like any other closeout: its intent

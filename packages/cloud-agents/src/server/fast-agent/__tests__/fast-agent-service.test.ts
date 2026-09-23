@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   appendMemory: vi.fn(),
   appendLearnedPreference: vi.fn(),
   isBrainEnabled: vi.fn(),
+  isChatGptSubscriptionConnected: vi.fn(),
+  isXaiSubscriptionConnected: vi.fn(),
   deploymentExperimentEnabled: vi.fn(),
   privateSessionsEnabled: vi.fn(),
   generateText: vi.fn(),
@@ -248,6 +250,8 @@ vi.mock('@roomote/db/server', () => ({
   appendLearnedUserPreference: mocks.appendLearnedPreference,
   getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
+  isChatGptSubscriptionConnected: mocks.isChatGptSubscriptionConnected,
+  isXaiSubscriptionConnected: mocks.isXaiSubscriptionConnected,
   isDeploymentExperimentEnabled: mocks.deploymentExperimentEnabled,
   isPrivateSessionsExperimentEnabled: mocks.privateSessionsEnabled,
   db: {
@@ -565,6 +569,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.privateSessionsEnabled.mockResolvedValue(true);
+    mocks.isChatGptSubscriptionConnected.mockResolvedValue(false);
+    mocks.isXaiSubscriptionConnected.mockResolvedValue(false);
     mocks.deploymentExperimentEnabled.mockResolvedValue(false);
     mocks.getPendingHumanFollowUp.mockResolvedValue([]);
     mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
@@ -8150,6 +8156,79 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
 
     it.each([
+      {
+        model: 'openai/gpt-5.5',
+        chatgptConnected: true,
+        providerName: 'ChatGPT (subscription)',
+      },
+      {
+        model: 'openai/gpt-5.5',
+        chatgptConnected: false,
+        providerName: 'OpenAI',
+      },
+      {
+        model: 'openrouter/anthropic/claude-sonnet-5',
+        chatgptConnected: true,
+        providerName: 'OpenRouter',
+      },
+    ])(
+      'closes out exhausted $providerName credits for $model without retrying',
+      async ({ model, chatgptConnected, providerName }) => {
+        vi.useFakeTimers();
+        try {
+          mocks.isChatGptSubscriptionConnected.mockResolvedValue(
+            chatgptConnected,
+          );
+          mocks.classifyInferenceError.mockReturnValue({
+            message:
+              'The inference provider account does not have enough credits or quota.',
+            reason: 'insufficient_credits',
+            retryable: false,
+          });
+          mocks.generateText.mockImplementation(
+            async (_params, _session, options) => {
+              options.onModelResolved?.(model);
+              throw Object.assign(
+                new Error('APIError: The usage limit has been reached'),
+                {
+                  data: {
+                    statusCode: 429,
+                    message: 'The usage limit has been reached',
+                  },
+                },
+              );
+            },
+          );
+          const postReply = vi.fn().mockResolvedValue(undefined);
+          const closeout = `You seem to have run out of credits for ${providerName}. Choose another provider/model or reset your subscription to continue.`;
+
+          const result = answerFastAgentQuestion({
+            ...baseParams,
+            adapter: callbacks({ postReply }),
+          });
+          result.catch(() => undefined);
+          await vi.runAllTimersAsync();
+          vi.useRealTimers();
+          await expect(result).resolves.toBe(closeout);
+
+          // Neither backoff nor a fresh session can help until the account
+          // is topped up, so the first failure closes the turn.
+          expect(mocks.generateText).toHaveBeenCalledOnce();
+          expect(postReply).toHaveBeenCalledOnce();
+          expect(postReply).toHaveBeenCalledWith(
+            expect.objectContaining({ purpose: 'closeout', message: closeout }),
+          );
+          const retryNoticeWrites = mocks.upsertMessage.mock.calls
+            .map(([input]) => input.message)
+            .filter((message) => message.eventId?.includes('retry-notice'));
+          expect(retryNoticeWrites).toEqual([]);
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it.each([
       [
         { statusCode: '401', status: 429, code: 403, message: 'Rejected' },
         'Rejected',
@@ -13665,6 +13744,39 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       ).resolves.toBe(closeout);
       expect(adapter.postReply).not.toHaveBeenCalled();
+    });
+
+    it('settles an out-of-credits platform event once, naming the provider', async () => {
+      mocks.classifyInferenceError.mockReturnValue({
+        message:
+          'The inference provider account does not have enough credits or quota.',
+        reason: 'insufficient_credits',
+        retryable: false,
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          options.onModelResolved?.('openrouter/anthropic/claude-sonnet-5');
+          throw new Error(
+            'APIError: This request requires more credits, or fewer max_tokens.',
+          );
+        },
+      );
+      const adapter = callbacks();
+      const creditsCloseout =
+        'You seem to have run out of credits for OpenRouter. Choose another provider/model or reset your subscription to continue.';
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          adapter,
+        }),
+      ).resolves.toBe(creditsCloseout);
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: creditsCloseout,
+      });
     });
 
     it('still rethrows a failure another attempt could recover', async () => {
