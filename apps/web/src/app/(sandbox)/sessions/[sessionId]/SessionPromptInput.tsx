@@ -46,6 +46,10 @@ import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
+import {
+  SessionQueuedMessageList,
+  type SessionQueuedMessage,
+} from './SessionQueuedMessageList';
 import { SessionWakeups } from './SessionWakeups';
 
 export type SessionPromptSubmission = PromptInputMessage & {
@@ -229,6 +233,7 @@ export function SessionPromptInput({
   assistantMessageCount = 0,
   taskStateRevision = '',
   agentWorking = false,
+  queuedMessages = [],
   initialModel = null,
   initialReasoningEffort = null,
   defaultModelId = null,
@@ -250,6 +255,9 @@ export function SessionPromptInput({
   /** True while the agent is still responding; suggestions only exist while
    * the agent is waiting for the human. */
   agentWorking?: boolean;
+  /** Follow-ups waiting for delivery, shown inside the composer card until
+   * the agent picks them up. */
+  queuedMessages?: SessionQueuedMessage[];
   initialModel?: string | null;
   initialReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
@@ -449,6 +457,7 @@ export function SessionPromptInput({
   return (
     <div className="mx-auto w-full max-w-4xl">
       <SessionWakeups key={sessionId} sessionId={sessionId} />
+      <SessionQueuedMessageList queuedMessages={queuedMessages} />
       <PromptInputRoot
         onSubmit={handleSubmit}
         accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}

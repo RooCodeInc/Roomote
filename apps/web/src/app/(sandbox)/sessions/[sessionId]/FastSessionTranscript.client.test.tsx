@@ -3148,8 +3148,11 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     await waitFor(() => expect(replyMutate).toHaveBeenCalled());
-    expect(screen.getByText('Queued follow-up')).toBeInTheDocument();
+    const queue = screen.getByRole('list', { name: 'Queued messages' });
+    expect(within(queue).getByText('Queued follow-up')).toBeInTheDocument();
     expect(screen.getByRole('log')).not.toHaveTextContent('Queued follow-up');
+    // The queue belongs to the composer card, above the message input.
+    expect(queue.parentElement).toContainElement(input);
 
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {

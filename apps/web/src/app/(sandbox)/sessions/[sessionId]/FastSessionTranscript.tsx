@@ -64,6 +64,7 @@ import {
   type SessionModelSelection,
   type SessionPromptSubmission,
 } from './SessionPromptInput';
+import { SessionQueuedMessageList } from './SessionQueuedMessageList';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { describeValidationError } from '@/lib/validation-error';
 import { isComposerValidationError } from '@/lib/validation-error';
@@ -116,7 +117,6 @@ import {
   toAcpUiMessage,
 } from '../../task/[taskId]/hooks/services/acp-protocol-service';
 import type { AcpUiMessage } from '../../task/[taskId]/types';
-import { QueuedMessagesContent } from '../../task/[taskId]/QueuedMessages';
 
 /** Rows arriving over the SSE stream have `createdAt` serialized to a string;
  * the transcript only sorts on ts/turnSeq/id, so both shapes are accepted. */
@@ -2090,7 +2090,6 @@ export function FastSessionTranscript({
           <SessionScrollRestoration sessionId={sessionId} />
           <ConversationScrollButton />
         </Conversation>
-        <QueuedMessagesContent queuedMessages={queuedMessages} />
         {canReply && !pendingInputRequest?.preset ? (
           <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
             <SessionPromptInput
@@ -2101,6 +2100,7 @@ export function FastSessionTranscript({
               assistantMessageCount={suggestionHistory.assistantCount}
               taskStateRevision={taskStateRevision}
               agentWorking={agentWorking}
+              queuedMessages={queuedMessages}
               initialModel={sessionModel}
               initialReasoningEffort={sessionReasoningEffort}
               defaultModelId={defaultModelId}
@@ -2145,6 +2145,13 @@ export function FastSessionTranscript({
             <ComposerErrorDialog
               error={validationError}
               onClose={() => setValidationError(null)}
+            />
+          </div>
+        ) : queuedMessages.length > 0 ? (
+          <div className="mx-auto w-full max-w-4xl shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card @[56rem]:rounded-t-lg">
+            <SessionQueuedMessageList
+              queuedMessages={queuedMessages}
+              className="border-b-0"
             />
           </div>
         ) : null}
