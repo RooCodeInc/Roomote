@@ -179,11 +179,17 @@ export function decideTaskCommunication(
   if (high('off_track')) {
     return { decision: 'redirect', reason: 'off_track' };
   }
+  // The task's own result or question is what the user is waiting for; it
+  // is never deferred or dropped on the strength of a low score.
+  if (
+    context.update.kind === 'task_activity' &&
+    context.update.items.some((item) => item.kind === 'question')
+  ) {
+    return { decision: 'relay', reason: 'task_question' };
+  }
   if (high('already_told')) {
     return { decision: 'quiet', reason: 'already_told' };
   }
-  // The task's own result or question is what the user is waiting for; it
-  // is never deferred or dropped on the strength of a low score.
   if (context.update.kind === 'task_report') {
     if (context.update.purpose === 'closeout') {
       return { decision: 'relay', reason: 'task_result' };

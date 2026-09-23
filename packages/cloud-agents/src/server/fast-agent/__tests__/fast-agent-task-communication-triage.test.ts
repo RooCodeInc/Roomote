@@ -114,6 +114,21 @@ describe('decideTaskCommunication', () => {
     });
   });
 
+  it('always relays a pending question even when other signals say it was told', () => {
+    expect(
+      decideTaskCommunication(
+        { ...quietSignals, already_told: 0.95 },
+        {
+          ...absent,
+          update: {
+            kind: 'task_activity',
+            items: [{ kind: 'question', text: 'Which public-safe treatment?' }],
+          },
+        },
+      ),
+    ).toEqual({ decision: 'relay', reason: 'task_question' });
+  });
+
   it('uses each signal threshold calibrated from replayed updates', () => {
     expect(
       decideTaskCommunication(

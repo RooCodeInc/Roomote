@@ -508,6 +508,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(untriaged).not.toContain(
       'A judgment model triaged this task update',
     );
+    expect(untriaged).toContain(
+      'a delegated task question is not automatically a question only the human can answer',
+    );
     for (const prompt of [relay, redirect, uncertain]) {
       expect(prompt).toContain('A judgment model triaged this task update');
       expect(prompt).not.toContain('roughly 10 minutes of silence');
@@ -517,6 +520,31 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(redirect).toContain('send one corrective "send_task_message"');
     expect(uncertain).toContain('Silence is the right answer');
+  });
+
+  it('lets a Session answer a delegated task question from existing context', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: {
+        decision: 'relay',
+        reason: 'task_question',
+      },
+    });
+
+    expect(prompt).toContain(
+      'Follow the task-question handling below before deciding whether the human needs to be asked',
+    );
+    expect(prompt).toContain(
+      'use "send_task_message" to answer that same task',
+    );
+    expect(prompt).toContain('use the exact option label');
+    expect(prompt).toContain(
+      'do not include private Session or deployment URLs or details in that output',
+    );
+    expect(prompt).toContain("ask through this Session's supported input path");
+    expect(prompt).toContain('do not claim the task has resumed or finished');
   });
 
   it('offers suggestions on an automation task-settled report only', () => {

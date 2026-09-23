@@ -288,6 +288,46 @@ type TaskCommunicationGate =
   | { kind: 'deliver'; hint?: TaskCommunicationTriageHint }
   | { kind: 'skip' };
 
+type DelegatedTaskCommunicationEvent =
+  | {
+      type: 'child_message';
+      taskId: string;
+      runId: number;
+      purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
+      message: string;
+    }
+  | {
+      type: 'task_activity';
+      taskId: string;
+      runId: number;
+      items: TaskActivityDigestItem[];
+    };
+
+function hasPendingTaskQuestion(
+  event: DelegatedTaskCommunicationEvent,
+): boolean {
+  return (
+    event.type === 'task_activity' &&
+    event.items.some((item) => item.kind === 'question')
+  );
+}
+
+/** Questions that block a child task always reach its parent Session. */
+export function getTaskCommunicationFallback(
+  event: DelegatedTaskCommunicationEvent,
+): TaskCommunicationGate {
+  if (event.type === 'child_message') {
+    return { kind: 'deliver' };
+  }
+
+  return hasPendingTaskQuestion(event)
+    ? {
+        kind: 'deliver',
+        hint: { decision: 'relay', reason: 'task_question' },
+      }
+    : { kind: 'skip' };
+}
+
 /**
  * Decide whether a delegated task's update should become a parent turn.
  * Explicit reports keep today's behavior whenever the judgment model cannot
@@ -298,24 +338,10 @@ export async function gateDelegatedTaskCommunication(params: {
   surface: FastAgentSurface;
   requesterUserId: string | null;
   telemetryUserId: string;
-  event:
-    | {
-        type: 'child_message';
-        taskId: string;
-        runId: number;
-        purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
-        message: string;
-      }
-    | {
-        type: 'task_activity';
-        taskId: string;
-        runId: number;
-        items: TaskActivityDigestItem[];
-      };
+  event: DelegatedTaskCommunicationEvent;
 }): Promise<TaskCommunicationGate> {
   const { event } = params;
-  const fallback: TaskCommunicationGate =
-    event.type === 'child_message' ? { kind: 'deliver' } : { kind: 'skip' };
+  const fallback = getTaskCommunicationFallback(event);
   if (!(await isTaskCommunicationTriageEnabled())) return fallback;
 
   const telemetry = {
@@ -326,6 +352,7 @@ export async function gateDelegatedTaskCommunication(params: {
   };
   if (
     event.type === 'task_activity' &&
+    !hasPendingTaskQuestion(event) &&
     (await getRedis()
       .exists(recentCloseoutKey(event.runId))
       .catch(() => 0)) > 0

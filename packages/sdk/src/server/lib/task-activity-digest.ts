@@ -48,7 +48,27 @@ const DIGEST_EVENT_TYPES = [
   ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
   ACP_ENVELOPE_EVENT_TYPES.ToolCall,
 ] as const;
+const QUESTION_DIGEST_EVENT_TYPES = [
+  ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+] as const;
 const DIGEST_EVENT_TYPE_SET = new Set<string>(DIGEST_EVENT_TYPES);
+type TaskActivityDigestEventType = (typeof DIGEST_EVENT_TYPES)[number];
+
+export function shouldScheduleTaskActivityDigestFor(
+  eventType: string,
+  triageEnabled: boolean,
+): boolean {
+  return (
+    DIGEST_EVENT_TYPE_SET.has(eventType) &&
+    (triageEnabled || eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput)
+  );
+}
+
+export function getTaskActivityDigestEventTypes(
+  triageEnabled: boolean,
+): readonly TaskActivityDigestEventType[] {
+  return triageEnabled ? DIGEST_EVENT_TYPES : QUESTION_DIGEST_EVENT_TYPES;
+}
 
 /** Tools whose content already reaches the Session another way. */
 const DIGEST_IGNORED_TOOLS = new Set([
@@ -131,12 +151,22 @@ export async function maybeScheduleTaskActivityDigest(input: {
   runId: number;
   envelope: { eventType: string; ts: number };
 }): Promise<void> {
-  if (!DIGEST_EVENT_TYPE_SET.has(input.envelope.eventType)) return;
-  if (!(await isTaskCommunicationTriageEnabled())) return;
+  const isQuestion =
+    input.envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput;
+  const triageEnabled = isQuestion
+    ? false
+    : await isTaskCommunicationTriageEnabled();
+  if (
+    !shouldScheduleTaskActivityDigestFor(
+      input.envelope.eventType,
+      triageEnabled,
+    )
+  ) {
+    return;
+  }
   if (!(await runReportsToParentSession(input.runId))) return;
 
-  const urgent =
-    input.envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput;
+  const urgent = isQuestion;
   const now = Date.now();
   await getDigestQueue().add(
     'flush',
@@ -286,7 +316,7 @@ async function findLastDigest(
 export async function flushTaskActivityDigest(
   job: TaskActivityDigestJob,
 ): Promise<void> {
-  if (!(await isTaskCommunicationTriageEnabled())) return;
+  const triageEnabled = await isTaskCommunicationTriageEnabled();
 
   const run = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, job.runId),
@@ -320,7 +350,10 @@ export async function flushTaskActivityDigest(
     .where(
       and(
         eq(taskMessages.runId, run.id),
-        inArray(taskMessages.eventType, [...DIGEST_EVENT_TYPES]),
+        inArray(
+          taskMessages.eventType,
+          getTaskActivityDigestEventTypes(triageEnabled),
+        ),
         ...(lastDigest ? [gt(taskMessages.ts, lastDigest.throughTs)] : []),
       ),
     )

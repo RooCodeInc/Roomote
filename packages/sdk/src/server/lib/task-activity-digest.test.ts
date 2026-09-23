@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
-import { buildTaskActivityDigest } from './task-activity-digest';
+import {
+  buildTaskActivityDigest,
+  getTaskActivityDigestEventTypes,
+  shouldScheduleTaskActivityDigestFor,
+} from './task-activity-digest';
 
 const assistant = (text: string) => ({
   eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
@@ -115,5 +119,28 @@ describe('buildTaskActivityDigest', () => {
       'four',
       'five',
     ]);
+  });
+});
+
+describe('task question digest delivery', () => {
+  it('schedules pending questions without enabling general activity digests', () => {
+    expect(
+      shouldScheduleTaskActivityDigestFor(
+        ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      shouldScheduleTaskActivityDigestFor(
+        ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        false,
+      ),
+    ).toBe(false);
+    expect(getTaskActivityDigestEventTypes(false)).toEqual([
+      ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+    ]);
+    expect(getTaskActivityDigestEventTypes(true)).toContain(
+      ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+    );
   });
 });
