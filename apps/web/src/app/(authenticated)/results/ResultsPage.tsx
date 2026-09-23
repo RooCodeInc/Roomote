@@ -67,17 +67,26 @@ function AutomationAvatar({
   );
 }
 
-function PriorityMarker({ result }: { result: ResultInboxItem }) {
+function PriorityMarker({
+  result,
+  selected,
+}: {
+  result: ResultInboxItem;
+  selected: boolean;
+}) {
   if (result.priority === 'normal') return null;
   const Icon = result.priority === 'critical' ? TriangleAlert : CircleAlert;
   return (
     <Icon
       aria-label={`${result.priority === 'critical' ? 'Critical' : 'High'} priority`}
-      className={
-        result.priority === 'critical'
-          ? 'size-3 shrink-0 text-destructive'
-          : 'size-3 shrink-0 text-warning'
-      }
+      className={cn(
+        'size-3 shrink-0',
+        selected
+          ? 'text-black'
+          : result.priority === 'critical'
+            ? 'text-destructive'
+            : 'text-warning',
+      )}
       strokeWidth={2}
     />
   );
@@ -464,9 +473,9 @@ export function ResultsPage() {
                           role="option"
                           aria-selected={isSelected}
                           className={cn(
-                            'group flex w-full cursor-pointer items-start gap-3 px-3 py-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                            'group flex w-full cursor-pointer items-start gap-3 py-4 pr-3 pl-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                             isSelected
-                              ? 'bg-accent text-accent-foreground'
+                              ? 'bg-accent-foreground text-black'
                               : 'hover:bg-accent-foreground/10',
                           )}
                           onClick={() => selectResult(result)}
@@ -477,12 +486,29 @@ export function ResultsPage() {
                               <span className="line-clamp-2 flex-1 text-base font-medium leading-snug">
                                 {result.headline}
                               </span>
-                              <PriorityMarker result={result} />
+                              <PriorityMarker
+                                result={result}
+                                selected={isSelected}
+                              />
                             </span>
-                            <span className="mt-1 line-clamp-3 block text-sm leading-snug text-muted-foreground">
+                            <span
+                              className={cn(
+                                'mt-1 line-clamp-3 block text-sm leading-snug',
+                                isSelected
+                                  ? 'text-black/80'
+                                  : 'text-muted-foreground',
+                              )}
+                            >
                               {result.decisionContext}
                             </span>
-                            <span className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <span
+                              className={cn(
+                                'mt-2 flex items-center gap-1.5 text-xs',
+                                isSelected
+                                  ? 'text-black/75'
+                                  : 'text-muted-foreground',
+                              )}
+                            >
                               <span className="truncate">
                                 {result.automationName}
                               </span>
@@ -553,7 +579,7 @@ export function ResultsPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="shrink-0"
+                              className="-mr-1.5 -mt-1.5 shrink-0"
                               aria-label="Close result details"
                               onClick={closeResultDetail}
                             >
@@ -562,7 +588,7 @@ export function ResultsPage() {
                           </div>
                         </div>
                         <div aria-hidden="true" className="border-t" />
-                        <div className="mr-auto w-full max-w-3xl px-5 pb-6 pl-10 pt-4 text-left md:px-8 md:pb-8 md:pl-10">
+                        <div className="mr-auto w-full max-w-3xl px-5 pb-6 pt-4 text-left md:px-8 md:pb-8 md:pl-10">
                           {displayedResult.decisionContext ? (
                             <p className="text-base leading-relaxed text-muted-foreground">
                               {displayedResult.decisionContext}
@@ -691,7 +717,7 @@ export function ResultsPage() {
                           <X />
                           Clear
                         </Button>
-                        <p className="w-full self-center text-xs text-muted-foreground sm:ml-auto sm:w-auto sm:text-right">
+                        <p className="hidden self-center text-xs text-muted-foreground md:ml-auto md:block md:text-right">
                           {
                             'Use ↑/↓ keys to navigate, Return to act, Delete to clear'
                           }
