@@ -311,6 +311,8 @@ const TASK_COMMUNICATION_RELAY_REASONS: Partial<
   changes_picture: 'it changes what the user expects or would want',
   actionable_milestone:
     'it gives the user something they can look at or act on now',
+  judgment_call:
+    'the task is making a choice the user did not ask for and may want a say in. Say plainly what it is doing and that they can ask for a different approach',
   task_result: "it is the task's own result for what the user asked",
   task_question: 'it is a question the task needs the user to answer',
 };

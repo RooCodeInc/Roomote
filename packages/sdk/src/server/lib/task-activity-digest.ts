@@ -20,8 +20,8 @@ import {
   extractAcpMessageText,
   getFastAgentParentFromPayload,
   isPrReviewRun,
+  RunStatus,
   type FastAgentParent,
-  type RunStatus,
   type TaskMessageContentBlock,
 } from '@roomote/types';
 
@@ -211,7 +211,10 @@ export function buildTaskActivityDigest(
     switch (row.eventType) {
       case ACP_ENVELOPE_EVENT_TYPES.AssistantMessage: {
         const text = extractAcpMessageText(row.contentBlocks, payload);
-        if (text?.trim()) messages.push(truncate(text, MAX_ITEM_CHARS));
+        // Provider retry notices are machinery, not the task's narration.
+        if (text?.trim() && !text.trimStart().startsWith('Provider error:')) {
+          messages.push(truncate(text, MAX_ITEM_CHARS));
+        }
         break;
       }
       case ACP_ENVELOPE_EVENT_TYPES.Plan:
@@ -299,8 +302,11 @@ export async function flushTaskActivityDigest(
   });
   const parent = getFastAgentParentFromPayload(run?.payload);
   if (!run || !parent || isPrReviewRun(run)) return;
-  // The settle event carries whatever the run did last.
-  if (EXITED_RUN_STATUSES.has(run.status)) return;
+  // The settle event carries whatever the run did last; an idle run has
+  // settled too and only resumes through a new turn.
+  if (EXITED_RUN_STATUSES.has(run.status) || run.status === RunStatus.Idle) {
+    return;
+  }
 
   const lastDigest = await findLastDigest(parent, run.id);
   const rows = await db

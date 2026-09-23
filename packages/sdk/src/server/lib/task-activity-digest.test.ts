@@ -90,6 +90,20 @@ describe('buildTaskActivityDigest', () => {
     });
   });
 
+  it('drops provider retry notices from the narration', () => {
+    expect(
+      buildTaskActivityDigest([
+        assistant(
+          'Provider error: Bad Gateway: Failed to reach the provider\n\nRetrying now.',
+        ),
+        toolCall('bash', 'git status'),
+      ]),
+    ).toEqual({
+      toolsOnly: true,
+      items: [{ kind: 'tools', text: 'git status' }],
+    });
+  });
+
   it('keeps only the most recent narration', () => {
     const digest = buildTaskActivityDigest(
       ['one', 'two', 'three', 'four', 'five'].map(assistant),

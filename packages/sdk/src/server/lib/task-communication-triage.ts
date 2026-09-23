@@ -232,6 +232,13 @@ export async function listUnsharedTaskUpdates(
     .catch(() => []);
 }
 
+/** Activity right after a relayed result restates it; skip it unjudged. */
+const RECENT_CLOSEOUT_QUIET_SECONDS = 5 * 60;
+
+function recentCloseoutKey(runId: number) {
+  return `session-task-closeout-recent:${runId}`;
+}
+
 function closeoutRelayedKey(runId: number) {
   return `session-task-closeout-relayed:${runId}`;
 }
@@ -297,16 +304,30 @@ export async function gateDelegatedTaskCommunication(params: {
     event.type === 'child_message' ? { kind: 'deliver' } : { kind: 'skip' };
   if (!(await isTaskCommunicationTriageEnabled())) return fallback;
 
-  const update: TaskCommunicationUpdate =
-    event.type === 'child_message'
-      ? { kind: 'task_report', purpose: event.purpose, text: event.message }
-      : { kind: 'task_activity', items: event.items };
   const telemetry = {
     userId: params.telemetryUserId,
     sessionId: params.parent.sessionId,
     eventType: event.type,
     surface: params.surface,
   };
+  if (
+    event.type === 'task_activity' &&
+    (await getRedis()
+      .exists(recentCloseoutKey(event.runId))
+      .catch(() => 0)) > 0
+  ) {
+    captureTaskCommunicationTriage({
+      ...telemetry,
+      outcome: 'quiet',
+      reason: 'already_told',
+    });
+    return { kind: 'skip' };
+  }
+
+  const update: TaskCommunicationUpdate =
+    event.type === 'child_message'
+      ? { kind: 'task_report', purpose: event.purpose, text: event.message }
+      : { kind: 'task_activity', items: event.items };
 
   let result: Awaited<ReturnType<typeof triageTaskCommunication>>;
   try {
@@ -376,12 +397,20 @@ export async function gateDelegatedTaskCommunication(params: {
       capture(decision);
       if (event.type === 'child_message' && event.purpose === 'closeout') {
         await getRedis()
+          .multi()
           .set(
             closeoutRelayedKey(event.runId),
             '1',
             'EX',
             UNSHARED_UPDATES_TTL_SECONDS,
           )
+          .set(
+            recentCloseoutKey(event.runId),
+            '1',
+            'EX',
+            RECENT_CLOSEOUT_QUIET_SECONDS,
+          )
+          .exec()
           .catch(() => {});
       }
       return { kind: 'deliver', hint: { decision, reason } };

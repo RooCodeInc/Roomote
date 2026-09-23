@@ -9,6 +9,7 @@ import {
 const quietSignals: TaskCommunicationSignals = {
   needs_user: 0.05,
   changes_picture: 0.1,
+  judgment_call: 0.1,
   actionable_milestone: 0.1,
   off_track: 0.05,
   already_told: 0.2,
@@ -113,12 +114,30 @@ describe('decideTaskCommunication', () => {
     });
   });
 
-  it('is uncertain when an action signal sits in the middle', () => {
+  it('uses each signal threshold calibrated from replayed updates', () => {
     expect(
       decideTaskCommunication(
-        { ...quietSignals, changes_picture: 0.5 },
+        { ...quietSignals, changes_picture: 0.4 },
         absent,
       ),
+    ).toEqual({ decision: 'relay', reason: 'changes_picture' });
+    expect(
+      decideTaskCommunication({ ...quietSignals, judgment_call: 0.55 }, absent),
+    ).toEqual({ decision: 'relay', reason: 'judgment_call' });
+    expect(
+      decideTaskCommunication({ ...quietSignals, judgment_call: 0.3 }, absent),
+    ).toEqual({ decision: 'quiet', reason: 'routine' });
+  });
+
+  it('is uncertain when an action signal sits just under its threshold', () => {
+    expect(
+      decideTaskCommunication(
+        { ...quietSignals, changes_picture: 0.3 },
+        absent,
+      ),
+    ).toEqual({ decision: 'uncertain', reason: 'mixed_signals' });
+    expect(
+      decideTaskCommunication({ ...quietSignals, needs_user: 0.6 }, absent),
     ).toEqual({ decision: 'uncertain', reason: 'mixed_signals' });
   });
 });

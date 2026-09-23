@@ -60,11 +60,21 @@ const questions = {
   changes_picture: {
     type: 'noul',
     instructions:
-      'Does the update reveal something that changes what the requester expects or would want: a different root cause, bigger or smaller scope, a wrong premise in the original ask, a new risk, or a plan that no longer works?',
+      'Has the task found that the request rests on a wrong or incomplete premise? For example: the reported problem comes from behavior that exists on purpose (a feature working as designed) or has a different cause or trigger than described, the thing the requester wants changed does not exist, or the requested approach will not work as asked.',
     criteria: {
-      true: 'Hearing this now would change what the requester thinks is happening or what they would ask for.',
+      true: 'The task learned something that contradicts or corrects what the requester believed when they asked.',
       false:
-        'The update is consistent with what the requester already expects: routine progress, internal steps, or details they would not act on.',
+        'What the task found matches what the requester described; it is only filling in details.',
+    },
+  },
+  judgment_call: {
+    type: 'noul',
+    instructions:
+      'Is the task making, or about to make, a consequential choice the requester did not specify and could reasonably disagree with? For example: fixing a reported problem by changing or disabling behavior that exists on purpose, building something substantial they did not ask for, removing something, or satisfying a stated constraint through a non-obvious workaround.',
+    criteria: {
+      true: 'The requester would likely want a say before this choice lands.',
+      false:
+        'The choices are routine implementation details, or the requester explicitly asked for them.',
     },
   },
   actionable_milestone: {
@@ -113,6 +123,7 @@ export type TaskCommunicationDecisionReason =
   | 'off_track'
   | 'needs_user'
   | 'changes_picture'
+  | 'judgment_call'
   | 'actionable_milestone'
   | 'already_told'
   | 'task_result'
@@ -128,10 +139,23 @@ export type TaskCommunicationTriageResult = {
   latencyMs: number;
 };
 
-/** A signal at or above this is treated as clearly true. */
-export const TASK_COMMUNICATION_SIGNAL_HIGH = 0.7;
-/** Every action signal at or below this means the update is routine. */
-export const TASK_COMMUNICATION_SIGNAL_LOW = 0.3;
+/**
+ * Per-signal level at which a signal counts as clearly true. The judgment
+ * model compresses these probabilities differently per question, so each was
+ * set by replaying real task updates: routine updates never scored
+ * `changes_picture` above ~0.2 or `judgment_call` above ~0.3, while the
+ * moments worth hearing about scored 0.4 and up.
+ */
+export const TASK_COMMUNICATION_SIGNAL_THRESHOLDS: TaskCommunicationSignals = {
+  needs_user: 0.7,
+  changes_picture: 0.35,
+  judgment_call: 0.5,
+  actionable_milestone: 0.7,
+  off_track: 0.7,
+  already_told: 0.7,
+};
+/** Below this share of its threshold, a signal is clearly false. */
+const ROUTINE_SHARE_OF_THRESHOLD = 0.75;
 
 /**
  * Deterministic policy over the judgment signals. Steering wins because a
@@ -150,7 +174,7 @@ export function decideTaskCommunication(
   reason: TaskCommunicationDecisionReason;
 } {
   const high = (signal: TaskCommunicationSignal) =>
-    signals[signal] >= TASK_COMMUNICATION_SIGNAL_HIGH;
+    signals[signal] >= TASK_COMMUNICATION_SIGNAL_THRESHOLDS[signal];
 
   if (high('off_track')) {
     return { decision: 'redirect', reason: 'off_track' };
@@ -174,6 +198,9 @@ export function decideTaskCommunication(
   if (high('changes_picture')) {
     return { decision: 'relay', reason: 'changes_picture' };
   }
+  if (high('judgment_call')) {
+    return { decision: 'relay', reason: 'judgment_call' };
+  }
   if (high('actionable_milestone')) {
     const worthInterrupting =
       context.requesterIsPresent ||
@@ -187,11 +214,15 @@ export function decideTaskCommunication(
     'off_track',
     'needs_user',
     'changes_picture',
+    'judgment_call',
     'actionable_milestone',
   ];
   if (
     actionSignals.every(
-      (signal) => signals[signal] <= TASK_COMMUNICATION_SIGNAL_LOW,
+      (signal) =>
+        signals[signal] <
+        TASK_COMMUNICATION_SIGNAL_THRESHOLDS[signal] *
+          ROUTINE_SHARE_OF_THRESHOLD,
     )
   ) {
     return { decision: 'quiet', reason: 'routine' };
@@ -221,6 +252,7 @@ export async function triageTaskCommunication(
   const signals: TaskCommunicationSignals = {
     needs_user: answers.needs_user.noul,
     changes_picture: answers.changes_picture.noul,
+    judgment_call: answers.judgment_call.noul,
     actionable_milestone: answers.actionable_milestone.noul,
     off_track: answers.off_track.noul,
     already_told: answers.already_told.noul,
