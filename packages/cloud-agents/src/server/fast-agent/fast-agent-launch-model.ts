@@ -21,10 +21,12 @@ const REQUESTED_MODEL_MIN_CONFIDENCE = 0.6;
  * A user must want a model other than the default with at least this
  * probability before any non-default model is used from a request. In
  * synthetic runs, incidental mentions (attribution trailers, model questions,
- * hard work) scored at most 0.11 and real asks, including capability asks
- * such as "the best model we have", at least 0.43. Not tuned on real traffic.
+ * hard work) scored at most 0.11 and clear asks at least 0.76; vaguer
+ * capability asks ("the best model we have") scored around 0.43 to 0.5 and
+ * may fall back to the default. Kept high because a false yes lets an
+ * unrequested, possibly expensive model run. Not tuned on real traffic.
  */
-const WANTS_NON_DEFAULT_MIN_PROBABILITY = 0.3;
+const WANTS_NON_DEFAULT_MIN_PROBABILITY = 0.5;
 /** A coding-model routing rule applies only at this confidence. */
 const ROUTING_RULE_MIN_CONFIDENCE = 0.8;
 
