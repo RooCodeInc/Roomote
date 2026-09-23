@@ -274,6 +274,10 @@ import {
   resolveFastAgentLaunchModelSelection,
   resolveFastAgentRoutingHint,
 } from './fast-agent-routing-hint';
+import {
+  describeRejectedLaunchModel,
+  verifyFastAgentLaunchModelRequest,
+} from './fast-agent-launch-model-guard';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -3880,6 +3884,42 @@ export async function answerFastAgentQuestion({
     const routingHint = userMessageResult?.initialHumanTurn
       ? await routingHintRequest
       : undefined;
+    // A delegated-task model override the agent chose on its own must trace
+    // back to a user asking for that model. The routing-rule pick and the
+    // deployment default need no confirmation.
+    const rejectUnrequestedLaunchModel = async (
+      modelId: string | null | undefined,
+    ): Promise<string | undefined> => {
+      if (
+        !modelId ||
+        modelId === routingHint?.model ||
+        modelId === taskModelOptions.defaultModelId
+      ) {
+        return undefined;
+      }
+      const model = taskModelOptions.models.find(
+        (candidate) => candidate.id === modelId,
+      );
+      if (!model) return undefined;
+      const userMessages = [
+        ...new Set([
+          ...threadContext
+            .filter((message) => !message.bot_id)
+            .map((message) => message.text),
+          ...[...session.compatibilityMessages, ...turnVisibleMessages]
+            .filter((message) => message.role === 'user')
+            .flatMap(extractModelMessageText),
+        ]),
+      ];
+      const verdict = await verifyFastAgentLaunchModelRequest({
+        model,
+        userMessages,
+        userId,
+      });
+      return verdict.allowed
+        ? undefined
+        : describeRejectedLaunchModel(model, verdict.reason);
+    };
     const {
       bootstrapMessages,
       turnMessages,
@@ -5218,6 +5258,11 @@ export async function answerFastAgentQuestion({
                 error: `Model "${selectedModel}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
             }
+            const unrequestedModelError =
+              await rejectUnrequestedLaunchModel(selectedModel);
+            if (unrequestedModelError) {
+              return { success: false, error: unrequestedModelError };
+            }
             const reasoningModelId =
               selectedModel ?? taskModelOptions.defaultModelId;
             if (
@@ -5393,6 +5438,11 @@ export async function answerFastAgentQuestion({
                 success: false,
                 error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
+            }
+            const unrequestedReviewModelError =
+              await rejectUnrequestedLaunchModel(args.model);
+            if (unrequestedReviewModelError) {
+              return { success: false, error: unrequestedReviewModelError };
             }
             const signature = `review_pull_request:${repository}#${pullRequestNumber}`;
             if (completedTaskActions.has(signature)) {
