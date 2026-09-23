@@ -26,10 +26,12 @@ describe('automation result acceptance', () => {
     }
   });
 
-  async function createAutomationTask() {
+  async function createAutomationTask(
+    initiatorAutomation: typeof tasks.$inferSelect.initiatorAutomation = 'issue_fixer',
+  ) {
     const task = await taskFactory.create({
       initiatorKind: 'automation',
-      initiatorAutomation: 'issue_fixer',
+      initiatorAutomation,
       initiatorUserId: null,
     });
     taskIds.push(task.id);
@@ -191,5 +193,32 @@ describe('automation result acceptance', () => {
       acceptedAt: mergedAt,
       acceptanceReason: 'pull_request_merged',
     });
+  });
+
+  it('clears a qualifying no-op at publication without clearing a substantive outcome', async () => {
+    const task = await createAutomationTask('dependabot_triage');
+    const empty = await recordAutomationResultForTask({
+      taskId: task.id,
+      content: 'No open alerts. No remediation work needed.',
+      dedupeKey: `empty:${task.id}`,
+      visibility: 'shared',
+    });
+    const substantive = await recordAutomationResultForTask({
+      taskId: task.id,
+      content: 'No open alerts in one repository. Access blocked for another.',
+      dedupeKey: `substantive:${task.id}`,
+      visibility: 'shared',
+    });
+    const inputRequest = await recordAutomationResultForTask({
+      taskId: task.id,
+      content: 'No open alerts.',
+      dedupeKey: `input:${task.id}`,
+      visibility: 'shared',
+      resultKind: 'input_request',
+    });
+
+    expect(empty?.ignoredAt).toBeInstanceOf(Date);
+    expect(substantive?.ignoredAt).toBeNull();
+    expect(inputRequest?.ignoredAt).toBeNull();
   });
 });

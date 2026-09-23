@@ -14,6 +14,7 @@ import {
   taskPullRequests,
   tasks,
 } from '../schema';
+import { isEmptyAutomationOutcome } from './empty-automation-result';
 
 function fallbackResultCopy(content: string, automationName: string) {
   const plain = content
@@ -164,6 +165,11 @@ async function recordAutomationResultForTaskWithClient(
     descriptor?.label ??
     'Automation';
   const fallback = fallbackResultCopy(params.content, automationName);
+  const autoClearedAt =
+    (params.resultKind === undefined || params.resultKind === 'outcome') &&
+    isEmptyAutomationOutcome(task.initiatorAutomation, params.content)
+      ? new Date()
+      : null;
 
   const [result] = await client
     .insert(automationResults)
@@ -178,6 +184,7 @@ async function recordAutomationResultForTaskWithClient(
       automationName,
       content: params.content,
       resultKind: params.resultKind ?? 'outcome',
+      ignoredAt: autoClearedAt,
       ...fallback,
       priority:
         customAutomation?.resultPriority ??
@@ -322,12 +329,19 @@ export async function recordBackgroundAutomationResult(
   );
   const automationName = descriptor?.label ?? 'Automation';
   const fallback = fallbackResultCopy(params.content, automationName);
+  const autoClearedAt = isEmptyAutomationOutcome(
+    params.automationKey,
+    params.content,
+  )
+    ? new Date()
+    : null;
   const [result] = await client
     .insert(automationResults)
     .values({
       automationKey: params.automationKey,
       automationName,
       content: params.content,
+      ignoredAt: autoClearedAt,
       ...fallback,
       priority:
         descriptor && 'resultPriority' in descriptor

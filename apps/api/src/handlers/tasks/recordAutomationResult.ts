@@ -55,7 +55,7 @@ export async function recordAutomationResult(
     sourceRunId: auth.authContext.runId,
     resultKind: body.data.resultKind,
   });
-  if (result) {
+  if (result && !result.ignoredAt) {
     await enqueueAutomationResultPreparation(result.id);
   }
 
