@@ -5,6 +5,28 @@ type DiscordFence = {
   length: number;
 };
 
+function escapeDiscordCodeText(text: string): string {
+  return text.replace(/&(?:amp|lt|gt|quot|#39|apos);|[<>]/giu, (character) => {
+    switch (character.toLowerCase()) {
+      case '&amp;':
+        return '&';
+      case '&quot;':
+        return '"';
+      case '&#39;':
+      case '&apos;':
+        return "'";
+      case '<':
+      case '&lt;':
+        return '&lt;';
+      case '>':
+      case '&gt;':
+        return '&gt;';
+      default:
+        return character;
+    }
+  });
+}
+
 function getFenceOpening(line: string): DiscordFence | null {
   const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/u);
   if (!match) return null;
@@ -208,19 +230,13 @@ function plainMarkdownSegment(text: string): string {
     .replace(/<((?:https?:\/\/|mailto:)[^>]+)>/giu, (_match, url: string) =>
       protectUrl(url),
     )
-    .replace(/<\/?[A-Za-z][^>]*>/gu, '')
     .replace(/(?<!\\)(\*\*|__|~~)(?=\S)([\s\S]*?\S)(?<!\\)\1/gu, '$2')
     .replace(/(?<![\\*])\*(?=\S)([\s\S]*?\S)(?<![\\*])\*(?!\*)/gu, '$1')
     .replace(
       /(?<![\p{L}\p{N}_\\])_(?=\S)([\s\S]*?\S)(?<!\\)_(?![\p{L}\p{N}_])/gu,
       '$1',
     )
-    .replace(/\\([^A-Za-z0-9\s])/gu, '$1')
-    .replace(/&amp;/giu, '&')
-    .replace(/&lt;/giu, '<')
-    .replace(/&gt;/giu, '>')
-    .replace(/&quot;/giu, '"')
-    .replace(/&#39;|&apos;/giu, "'");
+    .replace(/\\([^A-Za-z0-9\s])/gu, '$1');
   return plain.replace(
     /\uE000(\d+)\uE001/gu,
     (_match, index: string) => urls[Number(index)] ?? '',
@@ -268,7 +284,7 @@ function plainInlineMarkdown(text: string): string {
     index = closing + runLength;
   }
   flushPlainSegment();
-  return output;
+  return escapeDiscordCodeText(output);
 }
 
 function longestRun(text: string, character: '`' | '~'): number {
@@ -304,15 +320,19 @@ function fitColumnWidths(
 ): number[] | null {
   const columnCount = rows[0]!.length;
   const availableCellWidth = maxLineWidth - 3 * columnCount - 1;
-  if (availableCellWidth < 3 * columnCount) return null;
+  const minimumWidths = rows[0]!.map((cell) => Math.max(3, cell.length));
+  const minimumWidth = minimumWidths.reduce((sum, width) => sum + width, 0);
+  if (availableCellWidth < minimumWidth) return null;
 
   const maximumWidths = Array.from({ length: columnCount }, (_, column) =>
-    Math.max(3, ...rows.map((row) => row[column]!.length)),
+    Math.max(minimumWidths[column]!, ...rows.map((row) => row[column]!.length)),
   );
   const widths = [...maximumWidths];
-  const desiredExtra = widths.map((width) => width - 3);
+  const desiredExtra = widths.map(
+    (width, index) => width - minimumWidths[index]!,
+  );
   const totalExtra = desiredExtra.reduce((sum, width) => sum + width, 0);
-  const extraBudget = availableCellWidth - 3 * columnCount;
+  const extraBudget = availableCellWidth - minimumWidth;
   if (totalExtra <= extraBudget) return widths;
   if (totalExtra === 0) return widths;
 
@@ -321,7 +341,7 @@ function fitColumnWidths(
   for (let index = 0; index < columnCount; index += 1) {
     const exact = (desiredExtra[index]! * extraBudget) / totalExtra;
     const whole = Math.floor(exact);
-    widths[index] = 3 + whole;
+    widths[index] = minimumWidths[index]! + whole;
     allocated += whole;
     fractions.push({ index, fraction: exact - whole });
   }
@@ -340,6 +360,7 @@ function renderAsciiTable(
   header: string[],
   bodyRows: string[][],
   maxMessageLength: number,
+  style: 'grid' | 'compact',
 ): string | null {
   const columns = header.length;
   const cells = [header, ...bodyRows].map((row) =>
@@ -350,7 +371,30 @@ function renderAsciiTable(
     ),
   );
   const fence = selectCodeFence(cells);
-  const maxLineWidth = maxMessageLength - fence.length * 2 - 2;
+  if (style === 'compact') {
+    const maxLineWidth = maxMessageLength - fence.length * 2 - 2;
+    const widths = fitColumnWidths(cells, maxLineWidth + 4);
+    if (!widths) return null;
+    const renderRow = (row: string[]) => {
+      const wrapped = row.map((cell, index) => wrapCell(cell, widths[index]!));
+      const height = Math.max(...wrapped.map((column) => column.length));
+      return Array.from({ length: height }, (_, line) =>
+        wrapped
+          .map((column, index) => (column[line] ?? '').padEnd(widths[index]!))
+          .join(' | '),
+      );
+    };
+    const compactLines = [
+      ...renderRow(cells[0]!),
+      widths.map((width) => '-'.repeat(width)).join('-+-'),
+    ];
+    for (const row of cells.slice(1)) compactLines.push(...renderRow(row));
+    return `${fence}\n${compactLines.join('\n')}\n${fence}`;
+  }
+
+  const maxLineWidth = Math.floor(
+    (maxMessageLength - fence.length * 2 - 12) / 5,
+  );
   const widths = fitColumnWidths(cells, maxLineWidth);
   if (!widths) return null;
 
@@ -402,6 +446,7 @@ function contentOf(token: string): string {
 export function renderDiscordMarkdownTables(
   text: string,
   maxMessageLength = DEFAULT_DISCORD_MESSAGE_LENGTH,
+  style: 'grid' | 'compact' = 'grid',
 ): string {
   const lines = lineTokens(text);
   let output = '';
@@ -456,7 +501,12 @@ export function renderDiscordMarkdownTables(
       }
 
       if (!malformed && bodyRows.length) {
-        const table = renderAsciiTable(header, bodyRows, maxMessageLength);
+        const table = renderAsciiTable(
+          header,
+          bodyRows,
+          maxMessageLength,
+          style,
+        );
         if (table) {
           const eol =
             lineEnding(lines[index]!) ||

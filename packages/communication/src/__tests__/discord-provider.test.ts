@@ -284,6 +284,107 @@ describe('DiscordCommunicationProvider', () => {
     ).toMatchObject({ message: { content: rendered } });
   });
 
+  it('keeps expanded GFM tables within the limit for edit-only endpoints', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+    const rows = Array.from(
+      { length: 100 },
+      (_, index) => `| Row ${index} | value |`,
+    );
+    const table = ['| Provider | Value |', '| --- | --- |', ...rows].join('\n');
+    expect(table.length).toBeLessThan(2_000);
+    expect(renderDiscordMarkdownTables(table).length).toBeGreaterThan(2_000);
+    const compact = renderDiscordMarkdownTables(table, 2_000, 'compact');
+    expect(compact.length).toBeLessThanOrEqual(2_000);
+
+    const posted = await provider.postMessage({
+      channelId,
+      text: 'placeholder',
+    });
+    await provider.editMessage({
+      channelId,
+      messageId: posted.messageId,
+      text: table,
+    });
+    await provider.editInteractionResponse({
+      applicationId: '600000000000000001',
+      interactionToken: 'long-table-token',
+      text: table,
+    });
+
+    const edits = server.state.requests.filter(
+      (request) => request.method === 'PATCH',
+    );
+    expect(edits).toHaveLength(2);
+    expect(edits[0]?.body).toMatchObject({ content: compact });
+    expect(edits[1]?.body).toMatchObject({ content: compact });
+  });
+
+  it('posts oversized table rows as header-repeated Discord messages', async () => {
+    let nonce = 0;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(1_000 + nonce++),
+    });
+    const channelId = '400000000000000001';
+    const longValue = 'x'.repeat(6_000);
+    const text = `| Provider | Details |\n| --- | --- |\n| Long | ${longValue} |`;
+
+    await provider.postMessage({ channelId, text });
+
+    const messages = server.state.messages[channelId] ?? [];
+    expect(messages.length).toBeGreaterThan(1);
+    expect(messages.every((message) => message.content.length <= 2_000)).toBe(
+      true,
+    );
+    expect(
+      messages.every((message) => message.content.includes('| Provider')),
+    ).toBe(true);
+    expect(
+      messages.reduce(
+        (count, message) => count + (message.content.match(/x/gu)?.length ?? 0),
+        0,
+      ),
+    ).toBe(longValue.length);
+  });
+
+  it('keeps the table in forum starters when expanded content exceeds one message', async () => {
+    const { server, provider } = createHarness();
+    const forumChannelId = '400000000000000015';
+    server.addChannel({
+      id: forumChannelId,
+      guild_id: server.guildId,
+      name: 'comparisons',
+      type: 15,
+    });
+    const rows = Array.from({ length: 60 }, (_, index) => `| P${index} | x |`);
+    const initialText = [
+      'Comparison notes. '.repeat(28),
+      '',
+      '| Provider | Value |',
+      '| --- | --- |',
+      ...rows,
+    ].join('\n');
+    expect(initialText.length).toBeLessThan(2_000);
+    expect(renderDiscordMarkdownTables(initialText).length).toBeGreaterThan(
+      2_000,
+    );
+
+    const thread = await provider.createTaskThread({
+      channelId: forumChannelId,
+      name: 'Provider comparison',
+      initialText,
+    });
+    const starter = server.state.messages[thread.channelId]?.[0]?.content;
+
+    expect(starter?.length).toBeLessThanOrEqual(2_000);
+    expect(starter).toContain('Comparison notes.');
+    expect(starter).toContain('| Provider');
+    expect(starter).toContain('P0');
+    expect(starter?.split('\n').filter((line) => line === '```')).toHaveLength(
+      2,
+    );
+  });
+
   it('retries rate limits and deduplicates retried sends with a nonce', async () => {
     const { server, provider, sleep } = createHarness();
     server.enqueueRateLimit(0.01);

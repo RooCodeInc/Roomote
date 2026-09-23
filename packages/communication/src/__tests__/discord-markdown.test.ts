@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { chunkDiscordMessage } from '../discord-provider';
+import {
+  chunkDiscordMessage,
+  truncateDiscordMessage,
+} from '../discord-provider';
 import { renderDiscordMarkdownTables } from '../discord-markdown';
 
 describe('renderDiscordMarkdownTables', () => {
@@ -73,6 +76,17 @@ describe('renderDiscordMarkdownTables', () => {
     expect(renderDiscordMarkdownTables(input)).toContain('use `raw` ticks');
   });
 
+  it('renders HTML-like cell text safely and decodes entities only once', () => {
+    const input =
+      '| Name | Notes |\n| --- | --- |\n| Alpha | <script>alert(1)</script> &amp; &amp;lt;script&amp;gt; |';
+
+    const rendered = renderDiscordMarkdownTables(input);
+
+    expect(rendered).not.toContain('<script');
+    expect(rendered).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(rendered).toContain('& &lt;script&gt;');
+  });
+
   it('leaves malformed tables unchanged rather than dropping extra cells', () => {
     const malformed = [
       '| Name | Value |',
@@ -117,6 +131,47 @@ describe('renderDiscordMarkdownTables', () => {
     }
     expect(chunks.join('\n')).toContain('Provider 179');
     expect(chunks.join('\n')).toContain('value');
+  });
+
+  it('keeps oversized wrapped table rows in header-repeated chunks', () => {
+    const longValue = 'x'.repeat(6_000);
+    const input = `| Provider | Details |\n| --- | --- |\n| Long | ${longValue} |`;
+
+    const chunks = chunkDiscordMessage(input);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.length <= 2_000)).toBe(true);
+    expect(chunks.every((chunk) => chunk.includes('| Provider'))).toBe(true);
+    expect(
+      chunks.reduce(
+        (count, chunk) => count + (chunk.match(/x/gu)?.length ?? 0),
+        0,
+      ),
+    ).toBe(longValue.length);
+  });
+
+  it('keeps forum-starter tables when the preamble does not fit beside a table chunk', () => {
+    const rows = Array.from({ length: 60 }, (_, index) => `| P${index} | x |`);
+    const preamble = 'Comparison notes. '.repeat(28);
+    const input = [
+      preamble,
+      '',
+      '| Provider | Value |',
+      '| --- | --- |',
+      ...rows,
+    ].join('\n');
+    expect(input.length).toBeLessThan(2_000);
+    expect(renderDiscordMarkdownTables(input).length).toBeGreaterThan(2_000);
+
+    const starter = truncateDiscordMessage(input);
+
+    expect(starter.length).toBeLessThanOrEqual(2_000);
+    expect(starter).toContain('Comparison notes.');
+    expect(starter).toContain('| Provider');
+    expect(starter).toContain('P0');
+    expect(starter.split('\n').filter((line) => line === '```')).toHaveLength(
+      2,
+    );
   });
 
   it('keeps oversized existing code fences balanced without losing their tail', () => {

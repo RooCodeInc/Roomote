@@ -427,6 +427,16 @@ function isAsciiTableBorder(line: string, character: '-' | '='): boolean {
     : /^\+(?:=+\+)+$/u.test(line);
 }
 
+function containsAsciiTable(text: string): boolean {
+  const lines = text.split(/\r?\n/u);
+  return lines.some(
+    (line, index) =>
+      index > 0 &&
+      isAsciiTableBorder(line, '-') &&
+      Boolean(lines[index + 1]?.startsWith('|')),
+  );
+}
+
 function chunkAsciiTable(
   segment: Extract<DiscordMessageSegment, { kind: 'fenced' }>,
   content: string,
@@ -457,14 +467,35 @@ function chunkAsciiTable(
   let groups: string[][] = [];
   for (const group of rowGroups) {
     const candidate = renderChunk([...groups, group]);
-    if (candidate.length > limit) {
-      if (!groups.length) return null;
-      chunks.push(renderChunk(groups));
-      groups = [group];
-      if (renderChunk(groups).length > limit) return null;
+    if (candidate.length <= limit) {
+      groups.push(group);
       continue;
     }
-    groups.push(group);
+    if (groups.length) {
+      chunks.push(renderChunk(groups));
+      groups = [];
+    }
+    if (renderChunk([group]).length <= limit) {
+      groups.push(group);
+      continue;
+    }
+
+    const border = group.at(-1);
+    const rowLines = group.slice(0, -1);
+    if (!border || !rowLines.length) return null;
+    let fragment: string[] = [];
+    for (const line of rowLines) {
+      const fragmentWithLine = [...fragment, line, border];
+      if (renderChunk([fragmentWithLine]).length > limit) {
+        if (!fragment.length) return null;
+        chunks.push(renderChunk([[...fragment, border]]));
+        fragment = [line];
+        if (renderChunk([[...fragment, border]]).length > limit) return null;
+      } else {
+        fragment.push(line);
+      }
+    }
+    if (fragment.length) chunks.push(renderChunk([[...fragment, border]]));
   }
   if (groups.length) chunks.push(renderChunk(groups));
   return chunks;
@@ -550,6 +581,55 @@ function appendDiscordTruncationMark(text: string, limit: number): string {
   return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
+function firstDiscordTableChunk(chunks: string[]): string | null {
+  for (const chunk of chunks) {
+    if (!containsAsciiTable(chunk)) continue;
+    const table = splitDiscordMessageSegments(chunk).find(
+      (segment) =>
+        segment.kind === 'fenced' && containsAsciiTable(segment.text),
+    );
+    return table?.text ?? chunk;
+  }
+  return null;
+}
+
+function truncateDiscordTableWithPreamble(
+  chunks: string[],
+  limit: number,
+): string | null {
+  const tableChunk = firstDiscordTableChunk(chunks);
+  if (!tableChunk) return null;
+
+  const tableIndex = chunks.findIndex((chunk) => containsAsciiTable(chunk));
+  const priorChunks = chunks.slice(0, tableIndex);
+  const hasEarlierCode = priorChunks.some((chunk) =>
+    splitDiscordMessageSegments(chunk).some(
+      (segment) => segment.kind === 'fenced',
+    ),
+  );
+  let preamble = hasEarlierCode ? '' : priorChunks.join('\n').trim();
+  const preambleLimit = Math.min(400, Math.floor(limit / 4));
+  if (preamble.length > preambleLimit) {
+    preamble = `${preamble.slice(0, Math.max(0, preambleLimit - 1)).trimEnd()}…`;
+  }
+
+  const lead = preamble ? `${preamble}\n\n` : '';
+  const tableLimit = limit - lead.length;
+  if (tableLimit <= 0) return appendDiscordTruncationMark(tableChunk, limit);
+  return `${lead}${appendDiscordTruncationMark(tableChunk, tableLimit)}`;
+}
+
+function renderDiscordSingleMessage(text: string): string {
+  const rendered = renderDiscordMarkdownTables(text);
+  if (rendered.length <= DISCORD_MAX_MESSAGE_LENGTH) return rendered;
+  const compact = renderDiscordMarkdownTables(
+    text,
+    DISCORD_MAX_MESSAGE_LENGTH,
+    'compact',
+  );
+  return compact.length <= DISCORD_MAX_MESSAGE_LENGTH ? compact : text;
+}
+
 export function chunkDiscordMessage(
   text: string,
   limit = DISCORD_MAX_MESSAGE_LENGTH,
@@ -566,7 +646,12 @@ export function truncateDiscordMessage(
 ): string {
   const rendered = renderDiscordMarkdownTables(text, limit);
   if (rendered.length <= limit) return rendered;
-  const firstChunk = chunkRenderedDiscordMessage(rendered, limit)[0] ?? '';
+  const chunks = chunkRenderedDiscordMessage(rendered, limit);
+  const firstChunk = chunks[0] ?? '';
+  if (!containsAsciiTable(firstChunk)) {
+    const table = truncateDiscordTableWithPreamble(chunks, limit);
+    if (table) return table;
+  }
   return appendDiscordTruncationMark(firstChunk, limit);
 }
 
@@ -879,12 +964,12 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     /** Footer-only edits must not clear interactive controls on the carrier. */
     preserveButtons?: boolean;
   }): Promise<void> {
-    const text = renderDiscordMarkdownTables(input.text);
-    if (text.length > DISCORD_MAX_MESSAGE_LENGTH) {
+    if (input.text.length > DISCORD_MAX_MESSAGE_LENGTH) {
       throw new Error(
         'Discord edited message text cannot exceed 2000 characters.',
       );
     }
+    const text = renderDiscordSingleMessage(input.text);
     await this.request(
       'PATCH',
       `/channels/${input.channelId}/messages/${input.messageId}`,
@@ -997,10 +1082,10 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     images?: Array<{ url: string; altText: string }>;
     autoArchiveDuration?: 60 | 1440 | 4320 | 10080;
   }): Promise<DiscordTaskThread> {
-    const text = renderDiscordMarkdownTables(input.text);
-    if (text.length > DISCORD_MAX_MESSAGE_LENGTH) {
+    if (input.text.length > DISCORD_MAX_MESSAGE_LENGTH) {
       throw new Error('Discord forum post text cannot exceed 2000 characters.');
     }
+    const text = renderDiscordSingleMessage(input.text);
     const nonce = this.nonceFactory();
     const channel = await this.request<
       DiscordApiChannel & { message?: DiscordApiMessage }
@@ -1384,12 +1469,12 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     text: string;
     buttons?: CommunicationMessageButton[][];
   }): Promise<CommunicationPostMessageResult> {
-    const text = renderDiscordMarkdownTables(input.text);
-    if (text.length > DISCORD_MAX_MESSAGE_LENGTH) {
+    if (input.text.length > DISCORD_MAX_MESSAGE_LENGTH) {
       throw new Error(
         'Discord interaction response text cannot exceed 2000 characters.',
       );
     }
+    const text = renderDiscordSingleMessage(input.text);
     const message = await this.request<DiscordApiMessage>(
       'PATCH',
       `/webhooks/${input.applicationId}/${input.interactionToken}/messages/@original`,
