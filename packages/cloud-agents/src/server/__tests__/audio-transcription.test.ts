@@ -14,7 +14,11 @@ import {
   resolveAudioTranscriptionMimeType,
   transcribeAudioAttachment,
 } from '../audio-transcription';
-import { NonTaskInputModalityUnsupportedError } from '../non-task-provider-usage';
+import {
+  NonTaskAudioVideoSupportDisabledError,
+  NonTaskInputModalityUnsupportedError,
+  VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE,
+} from '../non-task-provider-usage';
 
 describe('audio transcription', () => {
   beforeEach(() => {
@@ -68,6 +72,40 @@ describe('audio transcription', () => {
     ).resolves.toEqual({ status: 'unsupported_model' });
   });
 
+  it('points runtime audio capability errors back to the Vision model setting', async () => {
+    generateTrackedNonTaskTextMock.mockRejectedValue(
+      new Error('This model does not support audio input.'),
+    );
+
+    const result = await transcribeAudioAttachment({
+      audioBytes: Buffer.from('audio'),
+      mimeType: 'audio/ogg',
+      filename: 'voice-message.ogg',
+    });
+
+    expect(result).toEqual({ status: 'unsupported_model' });
+    expect(
+      formatAudioTranscriptionResult('voice-message.ogg', result),
+    ).toContain('Settings > Models > Vision model');
+  });
+
+  it('rejects audio without calling a model when audio and video are disabled', async () => {
+    generateTrackedNonTaskTextMock.mockRejectedValue(
+      new NonTaskAudioVideoSupportDisabledError('audio'),
+    );
+
+    const result = await transcribeAudioAttachment({
+      audioBytes: Buffer.from('audio'),
+      mimeType: 'audio/ogg',
+      filename: 'voice-message.ogg',
+    });
+
+    expect(result).toEqual({ status: 'audio_video_disabled' });
+    expect(
+      formatAudioTranscriptionResult('voice-message.ogg', result),
+    ).toContain(VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE);
+  });
+
   it('rejects unsupported and oversized audio without inference', async () => {
     expect(isAudioTranscriptionSupportedMimeType('audio/mp4')).toBe(true);
     expect(isAudioTranscriptionSupportedMimeType('audio/x-ms-wma')).toBe(false);
@@ -103,6 +141,8 @@ describe('audio transcription', () => {
       formatAudioTranscriptionResult('voice.ogg', {
         status: 'unsupported_model',
       }),
-    ).toContain('Choose an audio-capable Media model in Settings > Models');
+    ).toContain(
+      'Choose an audio-capable model under Settings > Models > Vision model',
+    );
   });
 });

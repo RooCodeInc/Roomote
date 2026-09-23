@@ -107,7 +107,7 @@ describe('TaskModelSwitcher', () => {
     ).toHaveTextContent('High');
   });
 
-  it('labels the unchanged vision role as Media in the task switcher', () => {
+  it('labels the unchanged vision role in the task switcher', () => {
     launchModelsData.current = {
       defaultModelId: 'openai/gpt-6-astra',
       defaultReasoningEffort: 'low',
@@ -120,7 +120,7 @@ describe('TaskModelSwitcher', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'All roles' }));
 
-    expect(screen.getByText('Media')).toBeInTheDocument();
-    expect(screen.getByLabelText('Media model')).toBeInTheDocument();
+    expect(screen.getByText('Vision')).toBeInTheDocument();
+    expect(screen.getByLabelText('Vision model')).toBeInTheDocument();
   });
 });

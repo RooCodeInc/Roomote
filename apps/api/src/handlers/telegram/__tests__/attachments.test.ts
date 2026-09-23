@@ -110,7 +110,37 @@ describe('attachTelegramMediaToQueuedMessage audio', () => {
     });
 
     expect(result.text).toContain(
-      'Choose an audio-capable Media model in Settings > Models',
+      'Choose an audio-capable model under Settings > Models > Vision model',
     );
+  });
+
+  it('adds the opt-in guidance to the incoming chat message when audio is off', async () => {
+    downloadFileMock.mockResolvedValue({
+      bytes: Uint8Array.from([1]),
+      filePath: 'voice.oga',
+      contentType: 'audio/ogg',
+    });
+    transcribeAudioAttachmentMock.mockResolvedValue({
+      status: 'audio_video_disabled',
+    });
+
+    const result = await attachTelegramMediaToQueuedMessage({
+      message: {
+        message_id: 2,
+        chat: { id: 3, type: 'private' },
+        voice: {
+          file_id: 'voice-file',
+          file_unique_id: 'voice-unique',
+          duration: 3,
+          mime_type: 'audio/ogg',
+        },
+      },
+      queuedMessage,
+      botToken: 'secret-token',
+    });
+
+    expect(result.text).toContain('Audio and video support is off.');
+    expect(result.text).toContain('Also use for audio and video');
+    expect(result.text).toContain('Settings > Models');
   });
 });

@@ -292,4 +292,24 @@ describe('describeVideo', () => {
       error: 'Failed to describe video',
     });
   });
+
+  it('returns the disabled-support guidance to the task video tool', async () => {
+    const message =
+      'Audio and video support is off. To enable it, turn on "Also use for audio and video" under "Vision model" in Settings > Models and pick a model that supports audio and video input (for example Gemini).';
+    describeVideoAttachmentMock.mockResolvedValueOnce(message);
+
+    const response = await createApp(authContext).request(
+      new Request('http://localhost/tasks/task-1/describe_video', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          videoBytes: Buffer.from('video').toString('base64'),
+          mimeType: 'video/mp4',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ description: message });
+  });
 });

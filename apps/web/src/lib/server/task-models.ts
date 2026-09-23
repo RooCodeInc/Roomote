@@ -30,6 +30,17 @@ export async function getDeploymentRuntimeModelConfig(): Promise<DeploymentModel
   return normalizeDeploymentModelConfig(deployment?.runtimeModelConfig);
 }
 
+export async function getDeploymentVisionModelAudioVideoEnabled(): Promise<boolean> {
+  const deployment = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+    columns: {
+      visionModelAudioVideoEnabled: true,
+    },
+  });
+
+  return deployment?.visionModelAudioVideoEnabled === true;
+}
+
 export async function getTaskModelDisplayNameMap(
   modelIds: Iterable<string | null | undefined>,
 ): Promise<Map<string, string>> {

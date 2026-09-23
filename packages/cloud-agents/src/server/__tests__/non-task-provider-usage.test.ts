@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 
 import { z } from 'zod';
+import { ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME } from '@roomote/types';
 
 const {
   createOpencodeClientMock,
@@ -2582,6 +2583,8 @@ describe('resolveOpenCodeSmallModel', () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
       R_SMALL_MODEL: 'openrouter/google/gemini-3.6-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
+      [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
       OPENROUTER_API_KEY: 'test-key',
       OPENCODE_CONFIG_CONTENT: JSON.stringify({
         model: 'openrouter/openai/gpt-5.6-terra',
@@ -2696,10 +2699,11 @@ describe('resolveOpenCodeSmallModel', () => {
 
   it.each([
     {
-      role: 'primary',
+      role: 'Vision model',
       runtimeEnv: {
-        R_MODEL: 'openrouter/google/gemini-primary',
+        R_MODEL: 'openrouter/openai/text-primary',
         R_SMALL_MODEL: 'openrouter/openai/text-small',
+        R_VISION_MODEL: 'openrouter/google/gemini-primary',
       },
       selectedModel: 'google/gemini-primary',
     },
@@ -2718,6 +2722,7 @@ describe('resolveOpenCodeSmallModel', () => {
       process.env = { ...originalEnv };
       mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
         ...runtimeEnv,
+        [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
         OPENROUTER_API_KEY: 'test-key',
         OPENCODE_CONFIG_CONTENT: '',
       });
@@ -2785,7 +2790,7 @@ describe('resolveOpenCodeSmallModel', () => {
     },
   );
 
-  it('prefers the configured vision model for video prompts', async () => {
+  it('uses only the configured vision model for video prompts', async () => {
     process.env = {
       ...originalEnv,
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
@@ -2794,6 +2799,7 @@ describe('resolveOpenCodeSmallModel', () => {
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
       R_SMALL_MODEL: 'openrouter/google/gemini-3.6-flash',
       R_VISION_MODEL: 'openrouter/google/gemini-3.6-pro',
+      [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
     });
     configProvidersMock.mockResolvedValue({
       data: {
@@ -2859,6 +2865,32 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('rejects audio before capability lookup or inference when the opt-in is off', async () => {
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-6-luna',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.8-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.8-pro',
+      OPENROUTER_API_KEY: 'test-key',
+    });
+
+    const {
+      generateTrackedNonTaskText,
+      NonTaskAudioVideoSupportDisabledError,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+        prompt: 'Transcribe the audio.',
+        requiredInputModality: 'audio',
+      }),
+    ).rejects.toBeInstanceOf(NonTaskAudioVideoSupportDisabledError);
+    expect(configProvidersMock).not.toHaveBeenCalled();
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
   it('rejects native file prompts when configured models lack the modality', async () => {
     process.env = {
       ...originalEnv,
@@ -2866,6 +2898,9 @@ describe('resolveOpenCodeSmallModel', () => {
     };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'openrouter/google/gemini-audio-helper',
+      R_VISION_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
     });
     configProvidersMock.mockResolvedValue({
       data: {
@@ -2876,6 +2911,12 @@ describe('resolveOpenCodeSmallModel', () => {
               'openai/gpt-5.6-terra': {
                 capabilities: {
                   input: { audio: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-audio-helper': {
+                capabilities: {
+                  input: { audio: true },
                   output: { text: true },
                 },
               },
@@ -2903,8 +2944,58 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 
-  it('tries a configured model the provider catalog does not list yet', async () => {
-    // A newly released helper model has no models.dev entry, so the provider
+  it('does not use the helper model as a video fallback when Vision lacks video input', async () => {
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-6-luna',
+      R_SMALL_MODEL: 'openrouter/google/gemini-video-helper',
+      R_VISION_MODEL: 'openrouter/openai/gpt-6-luna',
+      [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/gpt-6-luna': {
+                capabilities: {
+                  input: { video: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-video-helper': {
+                capabilities: {
+                  input: { video: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const {
+      generateTrackedNonTaskText,
+      NonTaskInputModalityUnsupportedError,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.chatVideoDescription,
+        prompt: 'Describe the video.',
+        requiredInputModality: 'video',
+      }),
+    ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('tries the Vision model when the provider catalog does not list it yet', async () => {
+    // A newly released Vision model has no models.dev entry, so the provider
     // catalog carries no modality metadata for it at all. Missing metadata is
     // not proof the model rejects audio: the transcription call should try it
     // instead of telling the user no configured model supports audio input.
@@ -2912,6 +3003,8 @@ describe('resolveOpenCodeSmallModel', () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
       R_SMALL_MODEL: 'openrouter/google/gemini-3.9-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.9-flash',
+      [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
       OPENROUTER_API_KEY: 'test-key',
       OPENCODE_CONFIG_CONTENT: '',
     });
@@ -2962,7 +3055,7 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
-  it('tries a custom OpenAI-compatible provider model with defaulted modality metadata', async () => {
+  it('tries a custom OpenAI-compatible Vision model with defaulted modality metadata', async () => {
     // Models served through an OpenAI-compatible provider (the Roomote
     // inference gateway, LiteLLM, Ollama, named custom providers) are
     // registered in OpenCode with defaulted text-only capabilities, so the
@@ -2972,6 +3065,8 @@ describe('resolveOpenCodeSmallModel', () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'roomote/openai/gpt-5.6-terra',
       R_SMALL_MODEL: 'roomote/google/gemini-3.6-flash',
+      R_VISION_MODEL: 'roomote/google/gemini-3.6-flash',
+      [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
       ROOMOTE_INFERENCE_API_KEY: 'test-key',
       OPENCODE_CONFIG_CONTENT: '',
     });
@@ -3035,6 +3130,8 @@ describe('resolveOpenCodeSmallModel', () => {
     process.env = { ...originalEnv };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/acme/audio-only-1',
+      R_VISION_MODEL: 'openrouter/acme/audio-only-1',
+      [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
       OPENROUTER_API_KEY: 'test-key',
       OPENCODE_CONFIG_CONTENT: '',
     });
@@ -3081,6 +3178,8 @@ describe('resolveOpenCodeSmallModel', () => {
     process.env = { ...originalEnv };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'roomote/acme/audio-speaker-1',
+      R_VISION_MODEL: 'roomote/acme/audio-speaker-1',
+      [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1',
       ROOMOTE_INFERENCE_API_KEY: 'test-key',
       OPENCODE_CONFIG_CONTENT: '',
     });

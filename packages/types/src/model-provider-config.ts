@@ -52,6 +52,9 @@ export const ROOMOTE_INFERENCE_PROVIDER_ID = 'roomote' as const;
 export const ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME =
   'R_TRIAL_OPENROUTER_API_KEY' as const;
 export const ROOMOTE_TRIAL_MODEL_PRESET_ID = 'trial' as const;
+/** Internal control-plane runtime marker for the Vision model's media opt-in. */
+export const ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME =
+  'ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED' as const;
 
 /**
  * Provider env vars that are hosting delivery mechanisms, not credentials:
@@ -201,7 +204,7 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
     settingsModelInputKey: 'visionModelId',
     settingsReasoningInputKey: 'visionModelReasoningEffort',
     settingsModelInputOptional: false,
-    invalidModelMessage: 'Choose a valid media model.',
+    invalidModelMessage: 'Choose a valid vision model.',
     includeInSandbox: true,
   },
   codeReview: {

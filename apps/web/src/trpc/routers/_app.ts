@@ -2716,6 +2716,7 @@ export const appRouter = createRouter({
           planningModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
+          visionModelAudioVideoEnabled: z.boolean().optional(),
           codingModelRoutingRules: z.array(codingModelRoutingRuleSchema),
         }),
       )

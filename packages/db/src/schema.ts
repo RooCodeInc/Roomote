@@ -244,6 +244,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   runtimeModelConfig: jsonb(
     'runtime_model_config',
   ).$type<DeploymentModelConfig>(),
+  visionModelAudioVideoEnabled: boolean('vision_model_audio_video_enabled')
+    .notNull()
+    .default(false),
   runtimeComputeConfig: jsonb(
     'runtime_compute_config',
   ).$type<DeploymentComputeConfig>(),

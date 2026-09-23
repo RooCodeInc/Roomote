@@ -270,7 +270,7 @@ where you want more speed, quality, or cost control.
 | Default coding model | Normal Roomote tasks: code changes, debugging, tests, repo investigation, and follow-ups | Strong tool use, coding quality, long-context reliability, and good instruction following |
 | Orchestration model  | Session answers and coordination of delegated task launches                              | Low latency, conversational quality, and reliable tool routing                             |
 | Helper model         | Lightweight routing, titles, summaries, and quick internal decisions                     | Low latency, low cost, and enough accuracy for short judgments                            |
-| Media model          | Image inspection, audio transcription, and video descriptions                            | Image, audio, and video input support with clear text output                               |
+| Vision model         | Image inspection; optional audio transcription and video descriptions                   | Image input support; audio and video input only when enabled                              |
 | Code review model    | Initial PR or MR review tasks and review-sync work                                       | Careful reasoning, bug finding, security awareness, and willingness to cite evidence      |
 | Explore model        | Repository search and focused codebase exploration                                      | Fast tool use, low latency, and reliable source-grounded investigation                    |
 | Advisor model        | Planning turns and advisor consultations inside longer coding tasks                      | Deliberate reasoning, decomposition, and ability to keep constraints in mind              |
@@ -280,10 +280,15 @@ You do not need a separate model for every role. Set a specialized role to
 strong default model, then split out a faster orchestration or helper model, or
 a stronger review model, after they can see real usage.
 
-The **Media model** handles image, audio, and video attachments when a separate
-model is needed. Choose a model that accepts the attachment types you use; image
-support alone does not imply audio or video support. Audio transcription may
-also fall back to the helper or coding model when it supports audio input.
+The **Vision model** handles image attachments when the active model cannot
+inspect them. Audio transcription and video descriptions are off by default.
+To enable them, turn on **Also use for audio and video** under **Vision model**
+in **Settings > Models**, then choose a model that supports both inputs. When
+enabled, audio and video use only the Vision model; Roomote does not fall back
+to the helper or coding model for those attachments.
+
+After upgrading, audio and video remain off until an admin enables this setting.
+This avoids sending attachments to a model that cannot process them.
 
 ### Coding model routing rules
 
@@ -507,7 +512,7 @@ Mixing providers is normal. It can help when:
 - another provider has better availability or rate limits
 - you want direct-provider access for one model and gateway routing for another
 - you are comparing model families before changing the default
-- a specialized model, such as a media model, only exists behind one provider
+- a specialized model, such as a vision model, only exists behind one provider
 
 The main tradeoff is operational complexity. Each provider adds credentials,
 account limits, billing, and possible regional or data-handling requirements.
@@ -531,7 +536,10 @@ deployment. It helps admins compare models without relying on stale defaults.
   the model is enabled in **Settings > Models**.
 - **Tasks are expensive or slow.** Move helper work to a cheaper model, lower
   reasoning where quality allows, or choose a faster default model.
-- **An image, audio, or video attachment cannot be read.** Check the selected
-  **Media model** in **Settings > Models** for support for that input type.
+- **An image attachment cannot be read.** Check the selected **Vision model**
+  in **Settings > Models** for image input support.
+- **An audio or video attachment is not processed.** Turn on **Also use for
+  audio and video** under **Vision model** in **Settings > Models**, then choose
+  a model that supports the required input.
 - **A model works from one provider but not another.** Check provider-specific
   credentials, rate limits, model availability, and model ID prefix.

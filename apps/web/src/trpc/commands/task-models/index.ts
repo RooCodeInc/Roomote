@@ -61,6 +61,7 @@ import type {
 import {
   getDeploymentRuntimeModelConfig,
   getDeploymentTaskModelSettings,
+  getDeploymentVisionModelAudioVideoEnabled,
 } from '@/lib/server/task-models';
 import {
   getPersistedEnvironmentVariableValues,
@@ -139,6 +140,7 @@ type TaskModelSettingsResult = {
     family: string;
   }>;
   codingModelRoutingRules: CodingModelRoutingRule[];
+  visionModelAudioVideoEnabled: boolean;
 };
 
 type TaskModelSuggestionResult = {
@@ -226,6 +228,7 @@ export async function getTaskModelSettingsCommand(
   const [
     settings,
     persistedRuntimeModelConfig,
+    visionModelAudioVideoEnabled,
     persistedEnvVarNames,
     chatgptConnected,
     githubCopilotConnected,
@@ -234,6 +237,7 @@ export async function getTaskModelSettingsCommand(
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
+    getDeploymentVisionModelAudioVideoEnabled(),
     getPersistedEnvironmentVariableNames(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
@@ -322,6 +326,7 @@ export async function getTaskModelSettingsCommand(
       family,
     })),
     codingModelRoutingRules: settings.codingModelRoutingRules ?? [],
+    visionModelAudioVideoEnabled,
   };
 }
 
@@ -1251,6 +1256,7 @@ export async function updateTaskModelSettingsCommand(
     codeReviewModelReasoningEffort: ReasoningEffort | null;
     exploreModelReasoningEffort?: ReasoningEffort | null;
     planningModelReasoningEffort: ReasoningEffort | null;
+    visionModelAudioVideoEnabled?: boolean;
     codingModelRoutingRules?: CodingModelRoutingRule[];
   },
 ): Promise<
@@ -1453,7 +1459,11 @@ export async function updateTaskModelSettingsCommand(
     // must be carried forward from the locked row so a concurrent sync
     // commit is not clobbered by a stale snapshot.
     const [persisted] = await tx
-      .select({ taskModelSettings: deploymentSettings.taskModelSettings })
+      .select({
+        taskModelSettings: deploymentSettings.taskModelSettings,
+        visionModelAudioVideoEnabled:
+          deploymentSettings.visionModelAudioVideoEnabled,
+      })
       .from(deploymentSettings)
       .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
       .limit(1)
@@ -1470,6 +1480,10 @@ export async function updateTaskModelSettingsCommand(
         persisted?.taskModelSettings ?? null,
       ).catalogSyncedModelIds,
     });
+    const nextVisionModelAudioVideoEnabled =
+      input.visionModelAudioVideoEnabled ??
+      persisted?.visionModelAudioVideoEnabled ??
+      false;
 
     await tx
       .insert(deploymentSettings)
@@ -1477,6 +1491,7 @@ export async function updateTaskModelSettingsCommand(
         id: DEFAULT_DEPLOYMENT_ID,
         taskModelSettings,
         runtimeModelConfig: nextRuntimeModelConfig,
+        visionModelAudioVideoEnabled: nextVisionModelAudioVideoEnabled,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -1484,6 +1499,7 @@ export async function updateTaskModelSettingsCommand(
         set: {
           taskModelSettings,
           runtimeModelConfig: nextRuntimeModelConfig,
+          visionModelAudioVideoEnabled: nextVisionModelAudioVideoEnabled,
           updatedAt: new Date(),
         },
       });

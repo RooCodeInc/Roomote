@@ -66,7 +66,11 @@ vi.mock('./xai-subscription', () => ({
 }));
 
 vi.mock('../schema', () => ({
-  deploymentSettings: { id: 'deploymentSettings.id' },
+  deploymentSettings: {
+    id: 'deploymentSettings.id',
+    visionModelAudioVideoEnabled:
+      'deploymentSettings.visionModelAudioVideoEnabled',
+  },
   eq: vi.fn(),
 }));
 
@@ -83,6 +87,7 @@ import {
 } from './model-runtime-config';
 import {
   DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
+  ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
 } from '@roomote/types';
@@ -164,6 +169,31 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY',
       OPENROUTER_API_KEY: 'sk-openrouter',
     });
+  });
+
+  it('passes the Vision audio/video opt-in to control-plane inference only', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'openrouter/openai/gpt-6-luna',
+      },
+      visionModelAudioVideoEnabled: true,
+    });
+
+    const controlPlaneEnv = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { OPENROUTER_API_KEY: 'sk-openrouter' },
+    });
+    const sandboxEnv = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { OPENROUTER_API_KEY: 'sk-openrouter' },
+    });
+
+    expect(
+      controlPlaneEnv[ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME],
+    ).toBe('1');
+    expect(sandboxEnv).not.toHaveProperty(
+      ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME,
+    );
   });
 
   it('keeps explicit orchestration and coding models ahead of the catalog default', async () => {

@@ -11,8 +11,10 @@ import {
   resolveEffectiveModelRuntimeEnv,
 } from '@roomote/db/server';
 import {
+  formatErrorForLog,
   getOpenAiCompatibleRuntimeConfigs,
   isReasoningEffort,
+  ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME,
   toBedrockMantleRuntimeModelId,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -211,9 +213,38 @@ export type NonTaskPromptFile = {
 
 export class NonTaskInputModalityUnsupportedError extends Error {
   constructor(public readonly modality: NonTaskInputModality) {
-    super(`No configured model supports ${modality} input and text output.`);
+    super(
+      modality === 'audio' || modality === 'video'
+        ? `The Vision model does not support ${modality} input and text output.`
+        : `No configured model supports ${modality} input and text output.`,
+    );
     this.name = 'NonTaskInputModalityUnsupportedError';
   }
+}
+
+export const VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE =
+  'Audio and video support is off. To enable it, turn on "Also use for audio and video" under "Vision model" in Settings > Models and pick a model that supports audio and video input (for example Gemini).';
+
+export class NonTaskAudioVideoSupportDisabledError extends Error {
+  constructor(public readonly modality: 'audio' | 'video') {
+    super(VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE);
+    this.name = 'NonTaskAudioVideoSupportDisabledError';
+  }
+}
+
+export function isNonTaskAudioVideoCapabilityError(
+  error: unknown,
+  modality: 'audio' | 'video',
+): boolean {
+  const detail = formatErrorForLog(error).toLowerCase();
+  const modalityPattern = modality === 'audio' ? '(?:audio|sound)' : 'video';
+  const rejectionPattern =
+    '(?:not supported|unsupported|does not support|doesn.t support|cannot accept|cannot process|cannot handle|unable to process)';
+
+  return new RegExp(
+    `(?:${modalityPattern}).{0,100}${rejectionPattern}|${rejectionPattern}.{0,100}(?:${modalityPattern})`,
+    'u',
+  ).test(detail);
 }
 
 export interface GenerateTrackedNonTaskObjectParams<
@@ -1156,25 +1187,33 @@ async function resolveModelForInputModality(
     return runtime.model;
   }
 
-  const modalityModels =
-    modality === 'image' || modality === 'video'
-      ? [
-          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
-          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
-        ]
-      : [
-          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
-          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
-        ];
+  const requiresVisionModelOptIn = modality === 'audio' || modality === 'video';
+  if (
+    requiresVisionModelOptIn &&
+    runtime.resolvedModelRuntimeEnv[
+      ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME
+    ] !== '1'
+  ) {
+    throw new NonTaskAudioVideoSupportDisabledError(modality);
+  }
+
+  const modalityModels = requiresVisionModelOptIn
+    ? [runtime.resolvedModelRuntimeEnv.R_VISION_MODEL]
+    : [
+        runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+        runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+      ];
   const model = await findModelSupportingInputModality({
     env: runtime.resolvedModelRuntimeEnv,
     modality,
-    candidates: [
-      params.model,
-      ...modalityModels,
-      runtime.resolvedModelRuntimeEnv.R_MODEL,
-      runtime.model,
-    ],
+    candidates: requiresVisionModelOptIn
+      ? modalityModels
+      : [
+          params.model,
+          ...modalityModels,
+          runtime.resolvedModelRuntimeEnv.R_MODEL,
+          runtime.model,
+        ],
     allowUnknownModalityFallback: true,
     timeoutMs: params.timeoutMs,
   });
@@ -1189,11 +1228,12 @@ async function resolveModelForInputModality(
  *
  * `direct`: the session model accepts the modality itself, so the files ride
  * along as prompt parts. `helper`: the session model cannot read the input;
- * the session keeps running on its own model and a separate helper model
- * (the deployment vision model, then the helper model, then the coding model)
- * inspects the files on request. The session model is never swapped for the
- * modality. This is the same split tasks use, where a hidden visual subagent
- * reads images for a coding model that cannot.
+ * the session keeps running on its own model while a helper inspects the
+ * files. Image helpers use the deployment Vision model, then the helper model,
+ * then the coding model. Audio and video use only the Vision model when opted
+ * in. The session model is never swapped for the modality. This is the same
+ * split tasks use, where a hidden visual subagent reads images for a coding
+ * model that cannot.
  */
 export type NonTaskInputModalityDelivery =
   | { delivery: 'direct'; model: string }
@@ -1219,7 +1259,19 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   );
   const env = runtime.resolvedModelRuntimeEnv;
   const sessionModel = runtime.model;
-  const helperCandidates = [env.R_VISION_MODEL, env.R_SMALL_MODEL, env.R_MODEL]
+  const modality = params.modality;
+  const requiresVisionModelOptIn = modality === 'audio' || modality === 'video';
+  if (
+    requiresVisionModelOptIn &&
+    env[ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME] !== '1'
+  ) {
+    throw new NonTaskAudioVideoSupportDisabledError(modality);
+  }
+  const helperCandidates = (
+    requiresVisionModelOptIn
+      ? [env.R_VISION_MODEL]
+      : [env.R_VISION_MODEL, env.R_SMALL_MODEL, env.R_MODEL]
+  )
     .map((candidate) =>
       candidate ? toBedrockMantleRuntimeModelId(candidate) : candidate,
     )
@@ -1229,11 +1281,14 @@ export async function resolveNonTaskInputModalityDelivery(params: {
     );
   const model = await findModelSupportingInputModality({
     env,
-    modality: params.modality,
-    candidates: params.skipSessionModel
-      ? helperCandidates
-      : [sessionModel, ...helperCandidates],
-    defaultFirstCandidateOnUnknown: !params.skipSessionModel,
+    modality,
+    candidates:
+      requiresVisionModelOptIn || params.skipSessionModel
+        ? helperCandidates
+        : [sessionModel, ...helperCandidates],
+    defaultFirstCandidateOnUnknown: requiresVisionModelOptIn
+      ? true
+      : !params.skipSessionModel,
     timeoutMs: params.timeoutMs,
   });
   if (!model) {

@@ -177,11 +177,14 @@ function buildSettingsData(
       reasoningEffort: ReasoningEffort | null;
       condition: string;
     }>;
+    visionModelAudioVideoEnabled?: boolean;
   } = {},
 ) {
   return {
     suggestions: [],
     defaultModelId: 'openrouter/openai/gpt-5.4',
+    visionModelAudioVideoEnabled:
+      overrides.visionModelAudioVideoEnabled ?? false,
     models: [
       {
         id: 'openrouter/openai/gpt-5.4',
@@ -435,27 +438,29 @@ describe('ModelSettingsSection', () => {
     );
   };
 
-  it('explains the media role and warns when the selected model lacks audio input', async () => {
+  it('explains the Vision model and warns when it cannot inspect images', async () => {
     settingsData.current = buildSettingsData();
     renderModelSettingsSection();
 
-    expect(screen.getByText('Media model')).toBeInTheDocument();
+    expect(screen.getByText('Vision model')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Handles image, audio, and video attachments. Choose a model that supports these inputs.',
+        'Used to inspect images attached to messages and tasks.',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'not listed as supporting audio or video input',
-    );
+    const audioVideoSwitch = screen.getByRole('switch', {
+      name: 'Also use for audio and video',
+    });
+    expect(audioVideoSwitch).not.toBeChecked();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Media model and reasoning' }),
+      screen.getByRole('button', { name: 'Vision model and reasoning' }),
     );
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
 
     expect(screen.getByText(/This model is not listed/)).toHaveTextContent(
-      'not listed as supporting image or audio or video input',
+      'not listed as supporting image input',
     );
     await waitFor(() => {
       expect(updateMutateAsyncMock).toHaveBeenCalledWith(
@@ -482,15 +487,35 @@ describe('ModelSettingsSection', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('warns when a media model supports image and audio but not video', () => {
+  it('warns for missing audio and video support only when the opt-in is on', async () => {
     const data = buildSettingsData();
-    data.models[0]!.metadata.inputTypes = ['text', 'image', 'sound'];
+    data.models[0]!.metadata.inputTypes = ['text', 'image'];
     settingsData.current = data;
     renderModelSettingsSection();
 
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'not listed as supporting video input',
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Also use for audio and video' }),
     );
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'not listed as supporting audio or video input',
+    );
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({ visionModelAudioVideoEnabled: true }),
+      );
+    });
+
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Also use for audio and video' }),
+    );
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ visionModelAudioVideoEnabled: false }),
+      );
+    });
   });
 
   it('disables the runtime model selects when env-managed and omits the per-row Make default button', () => {

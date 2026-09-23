@@ -22,6 +22,7 @@ import {
   parseModelProviderEnvKeys,
   ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   ROOMOTE_INFERENCE_PROVIDER_ID,
+  ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME,
   resolveSetupModelProviderIdFromModel,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
@@ -116,6 +117,7 @@ async function loadPersistedRuntimeModelConfig(
     columns: {
       runtimeModelConfig: true,
       taskModelSettings: true,
+      visionModelAudioVideoEnabled: true,
     },
   });
 
@@ -126,6 +128,8 @@ async function loadPersistedRuntimeModelConfig(
     catalogModels: getTaskModelCatalog(deployment?.taskModelSettings),
     enabledCatalogModels: getEnabledTaskModels(deployment?.taskModelSettings),
     defaultModelId: getDefaultTaskModelId(deployment?.taskModelSettings),
+    visionModelAudioVideoEnabled:
+      deployment?.visionModelAudioVideoEnabled === true,
     codingModelRoutingRules: normalizeTaskModelSettings(
       deployment?.taskModelSettings,
     ).codingModelRoutingRules,
@@ -421,7 +425,13 @@ async function resolveModelRuntimeEnv(
   const executor = options.executor ?? db;
   const [
     persistedEnvVars,
-    { runtimeModelConfig, catalogModels, enabledCatalogModels, defaultModelId },
+    {
+      runtimeModelConfig,
+      catalogModels,
+      enabledCatalogModels,
+      defaultModelId,
+      visionModelAudioVideoEnabled,
+    },
   ] = await Promise.all([
     resolveEffectiveDeploymentEnvVars({
       deploymentEnvVars: options.deploymentEnvVars,
@@ -716,6 +726,9 @@ async function resolveModelRuntimeEnv(
 
   return {
     ...resolvedRoleEnv,
+    ...(!inferenceGateway && visionModelAudioVideoEnabled
+      ? { [ROOMOTE_VISION_MODEL_AUDIO_VIDEO_ENABLED_ENV_VAR_NAME]: '1' }
+      : {}),
     ...(providerKeyNames.length > 0 && {
       R_MODEL_ENV_KEYS: providerKeyNames.join(','),
     }),

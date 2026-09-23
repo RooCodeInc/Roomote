@@ -69,9 +69,16 @@ as an image input.
 
 Images never change which model handles your request. When the active model
 accepts image input, it sees the image itself. When it does not, Roomote keeps
-that model in charge and has the configured media model (or, failing that,
+that model in charge and has the configured Vision model (or, failing that,
 the helper or coding model) describe the image on request, the same way a
 coding task delegates visual inspection to a hidden subagent.
+
+Audio transcription and video descriptions are opt-in. In **Settings > Models**,
+turn on **Also use for audio and video** under **Vision model** and choose a
+model that supports both inputs. When the setting is off, Roomote does not send
+audio or video attachments to an inference model. When it is on, those
+attachments use only the Vision model. Existing deployments need to enable this
+setting after upgrading to restore audio and video processing.
 
 That means you can ask things like:
 

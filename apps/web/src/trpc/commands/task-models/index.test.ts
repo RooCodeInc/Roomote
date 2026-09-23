@@ -62,6 +62,7 @@ vi.mock('@roomote/db/server', () => ({
     setupNewState: 'setupNewState',
     taskModelSettings: 'taskModelSettings',
     runtimeModelConfig: 'runtimeModelConfig',
+    visionModelAudioVideoEnabled: 'visionModelAudioVideoEnabled',
   },
   environmentVariables: {
     name: 'env.name',
@@ -232,6 +233,7 @@ describe('lookupTaskModelCommand', () => {
       const row: Record<string, unknown> = {
         taskModelSettings: null,
         runtimeModelConfig: null,
+        visionModelAudioVideoEnabled: false,
       };
       if (columns && !columns.taskModelSettings) {
         delete row.taskModelSettings;
@@ -239,12 +241,16 @@ describe('lookupTaskModelCommand', () => {
       if (columns && !columns.runtimeModelConfig) {
         delete row.runtimeModelConfig;
       }
+      if (columns && !columns.visionModelAudioVideoEnabled) {
+        delete row.visionModelAudioVideoEnabled;
+      }
       return row;
     });
     mockUpdateDeploymentSettings.mockImplementation(async ({ set }) => {
       mockFindDeploymentSettings.mockResolvedValue({
         taskModelSettings: set.taskModelSettings ?? null,
         runtimeModelConfig: set.runtimeModelConfig ?? null,
+        visionModelAudioVideoEnabled: set.visionModelAudioVideoEnabled ?? false,
       });
     });
     mockInsertDeploymentSettings.mockReturnValue({
@@ -1165,12 +1171,18 @@ describe('lookupTaskModelCommand', () => {
       visionModelReasoningEffort: null,
       codeReviewModelReasoningEffort: null,
       planningModelReasoningEffort: null,
+      visionModelAudioVideoEnabled: true,
     });
 
     expect(result).toMatchObject({ success: true });
+    if (!result.success) {
+      throw new Error('Expected model settings to save successfully.');
+    }
+    expect(result.settings.visionModelAudioVideoEnabled).toBe(true);
     expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         set: expect.objectContaining({
+          visionModelAudioVideoEnabled: true,
           runtimeModelConfig: {
             roomoteModel: 'openrouter/openai/gpt-5.6',
             roomoteOrchestrationModel: null,

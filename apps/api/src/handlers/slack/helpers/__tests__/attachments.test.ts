@@ -24,6 +24,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       filename: string,
       result:
         | { status: 'transcribed'; transcript: string }
+        | { status: 'audio_video_disabled' }
         | { status: 'unsupported_model' }
         | { status: 'oversized' }
         | { status: 'failed' },
@@ -31,10 +32,12 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       result.status === 'transcribed'
         ? `Audio attachment transcript ("${filename}"):\n${result.transcript}`
         : result.status === 'unsupported_model'
-          ? `[Audio attachment "${filename}" could not be transcribed: no available model supports audio input. Choose an audio-capable Media model in Settings > Models.]`
-          : result.status === 'oversized'
-            ? `[Audio attachment "${filename}" could not be transcribed because it exceeds the 20 MiB limit.]`
-            : `[Audio attachment "${filename}" could not be transcribed.]`,
+          ? `[Audio attachment "${filename}" could not be transcribed because the Vision model does not support audio input. Choose an audio-capable model under Settings > Models > Vision model.]`
+          : result.status === 'audio_video_disabled'
+            ? `[Audio attachment "${filename}" could not be transcribed. Audio and video support is off. To enable it, turn on "Also use for audio and video" under "Vision model" in Settings > Models and pick a model that supports audio and video input (for example Gemini).]`
+            : result.status === 'oversized'
+              ? `[Audio attachment "${filename}" could not be transcribed because it exceeds the 20 MiB limit.]`
+              : `[Audio attachment "${filename}" could not be transcribed.]`,
   ),
   isAudioTranscriptionSupportedMimeType: vi.fn(
     (mimeType: string) => mimeType === 'audio/mp4',
@@ -96,7 +99,7 @@ describe('processSlackAttachments audio', () => {
     ]);
   });
 
-  it('keeps an audio-only task actionable when no model supports audio', async () => {
+  it('keeps an audio-only task actionable when the Vision model lacks audio support', async () => {
     const slack = {
       downloadSlackFile: vi.fn().mockResolvedValue(Buffer.from('audio')),
       processSlackFiles: vi.fn().mockResolvedValue([]),
@@ -121,8 +124,37 @@ describe('processSlackAttachments audio', () => {
     });
 
     expect(result.attachmentTexts).toEqual([
-      '[Audio attachment "Audio Clip.m4a" could not be transcribed: no available model supports audio input. Choose an audio-capable Media model in Settings > Models.]',
+      '[Audio attachment "Audio Clip.m4a" could not be transcribed because the Vision model does not support audio input. Choose an audio-capable model under Settings > Models > Vision model.]',
     ]);
+  });
+
+  it('passes the opt-in guidance into the Slack chat message when audio is off', async () => {
+    transcribeAudioAttachmentMock.mockResolvedValue({
+      status: 'audio_video_disabled',
+    });
+    const result = await processSlackAttachments({
+      slack: {
+        downloadSlackFile: vi.fn().mockResolvedValue(Buffer.from('audio')),
+        processSlackFiles: vi.fn().mockResolvedValue([]),
+      } as never,
+      files: [
+        {
+          id: 'F-audio',
+          name: 'Audio Clip.m4a',
+          mimetype: 'audio/mp4',
+          filetype: 'm4a',
+          url_private: 'https://files.slack.test/audio',
+          url_private_download: 'https://files.slack.test/audio/download',
+          size: 76_457,
+        },
+      ],
+    });
+
+    expect(result.attachmentTexts[0]).toContain(
+      'Audio and video support is off.',
+    );
+    expect(result.attachmentTexts[0]).toContain('Also use for audio and video');
+    expect(result.attachmentTexts[0]).toContain('Settings > Models');
   });
 
   it('warns without downloading oversized audio', async () => {

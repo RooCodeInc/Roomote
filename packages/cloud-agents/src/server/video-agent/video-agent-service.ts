@@ -2,8 +2,11 @@ import { formatErrorForLog } from '@roomote/types';
 
 import {
   generateTrackedNonTaskText,
+  isNonTaskAudioVideoCapabilityError,
+  NonTaskAudioVideoSupportDisabledError,
   NonTaskInputModalityUnsupportedError,
   NON_TASK_INFERENCE_SURFACES,
+  VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE,
 } from '../non-task-provider-usage';
 import {
   isVideoAgentSupportedMimeType,
@@ -60,11 +63,17 @@ export async function describeVideoAttachment(input: {
     );
     return description;
   } catch (error) {
-    if (error instanceof NonTaskInputModalityUnsupportedError) {
+    if (error instanceof NonTaskAudioVideoSupportDisabledError) {
+      return VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE;
+    }
+    if (
+      error instanceof NonTaskInputModalityUnsupportedError ||
+      isNonTaskAudioVideoCapabilityError(error, 'video')
+    ) {
       console.warn(
-        `[Video Agent] Skipping video description: no available model supports video input. Choose a video-capable Media model in Settings > Models (${Date.now() - startedAt}ms)`,
+        `[Video Agent] Skipping video description: the Vision model does not support video input. Choose a video-capable model under Settings > Models > Vision model (${Date.now() - startedAt}ms)`,
       );
-      return null;
+      return 'The Vision model does not support video input. Choose a video-capable model under Settings > Models > Vision model.';
     }
 
     console.error(

@@ -111,6 +111,7 @@ type ModelSettingsSectionDraft = {
   models: EditableTaskModel[];
   enabledModelIds: string[];
   roles: TaskModelRoleDrafts;
+  visionModelAudioVideoEnabled: boolean;
   codingModelRoutingRules: CodingModelRoutingRulesDraft;
 };
 
@@ -184,12 +185,11 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   },
   {
     role: 'vision',
-    label: 'Media model',
-    description:
-      'Handles image, audio, and video attachments. Choose a model that supports these inputs.',
+    label: 'Vision model',
+    description: 'Used to inspect images attached to messages and tasks.',
     icon: Image,
-    placeholder: 'Select a media model',
-    reasoningAriaLabel: 'Media model reasoning level',
+    placeholder: 'Select a vision model',
+    reasoningAriaLabel: 'Vision model reasoning level',
   },
   {
     role: 'codeReview',
@@ -231,6 +231,8 @@ function TaskModelRoleEditor({
   reasoningEffort,
   onModelChange,
   onReasoningChange,
+  visionModelAudioVideoEnabled = false,
+  onVisionModelAudioVideoEnabledChange,
   children,
 }: {
   config: TaskModelRoleConfig;
@@ -244,6 +246,8 @@ function TaskModelRoleEditor({
   reasoningEffort: ReasoningEffort | null;
   onModelChange: (value: string) => void;
   onReasoningChange: (value: ReasoningEffort | null) => void;
+  visionModelAudioVideoEnabled?: boolean;
+  onVisionModelAudioVideoEnabledChange?: (enabled: boolean) => void;
   children?: ReactNode;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -285,9 +289,10 @@ function TaskModelRoleEditor({
         : selectedModel?.metadata?.inputTypes
       : null;
   const unsupportedMediaInputs = mediaInputTypes?.length
-    ? (['image', 'sound', 'video'] as const).filter(
-        (type) => !mediaInputTypes.includes(type),
-      )
+    ? (visionModelAudioVideoEnabled
+        ? (['image', 'sound', 'video'] as const)
+        : (['image'] as const)
+      ).filter((type) => !mediaInputTypes.includes(type))
     : [];
   const selectedReasoningEffort =
     reasoningEffort ?? DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role];
@@ -349,9 +354,27 @@ function TaskModelRoleEditor({
             {unsupportedMediaInputs
               .map((type) => (type === 'sound' ? 'audio' : type))
               .join(' or ')}{' '}
-            input. Media attachments of these types may not work.
+            input. Attachments of these types may not work.
           </p>
         )}
+        {config.role === 'vision' && onVisionModelAudioVideoEnabledChange ? (
+          <div className="flex items-start gap-3 pt-1">
+            <Switch
+              aria-label="Also use for audio and video"
+              checked={visionModelAudioVideoEnabled}
+              onCheckedChange={onVisionModelAudioVideoEnabledChange}
+            />
+            <div className="space-y-1">
+              <p className="text-sm font-medium">
+                Also use for audio and video
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Off by default. When enabled, audio and video attachments use
+                this model; choose one that supports both inputs.
+              </p>
+            </div>
+          </div>
+        ) : null}
         {children}
       </div>
     </div>
@@ -592,6 +615,7 @@ function cloneDraft(
     })),
     enabledModelIds: [...draft.enabledModelIds],
     roles: cloneTaskModelRoleDrafts(draft.roles),
+    visionModelAudioVideoEnabled: draft.visionModelAudioVideoEnabled,
     codingModelRoutingRules: cloneCodingModelRoutingRules(
       draft.codingModelRoutingRules,
     ),
@@ -608,7 +632,8 @@ function draftsEqual(
 
   if (
     left.enabledModelIds.length !== right.enabledModelIds.length ||
-    left.models.length !== right.models.length
+    left.models.length !== right.models.length ||
+    left.visionModelAudioVideoEnabled !== right.visionModelAudioVideoEnabled
   ) {
     return false;
   }
@@ -779,6 +804,7 @@ export function ModelSettingsSection({
     models: [],
     enabledModelIds: [],
     roles: createEmptyTaskModelRoleDrafts(),
+    visionModelAudioVideoEnabled: false,
     codingModelRoutingRules: [],
   });
   const [models, setModels] = useState<EditableTaskModel[]>([]);
@@ -788,6 +814,8 @@ export function ModelSettingsSection({
   );
   const [codingModelRoutingRules, setCodingModelRoutingRules] =
     useState<CodingModelRoutingRulesDraft>([]);
+  const [visionModelAudioVideoEnabled, setVisionModelAudioVideoEnabled] =
+    useState(false);
   const [newModelId, setNewModelId] = useState('');
   const [newModelProvider, setNewModelProvider] =
     useState<SetupModelProviderId>('openrouter');
@@ -954,9 +982,16 @@ export function ModelSettingsSection({
       models,
       enabledModelIds,
       roles: roleDrafts,
+      visionModelAudioVideoEnabled,
       codingModelRoutingRules,
     };
-  }, [codingModelRoutingRules, enabledModelIds, models, roleDrafts]);
+  }, [
+    codingModelRoutingRules,
+    enabledModelIds,
+    models,
+    roleDrafts,
+    visionModelAudioVideoEnabled,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -1022,6 +1057,8 @@ export function ModelSettingsSection({
         },
       },
       codingModelRoutingRules: settingsData.codingModelRoutingRules ?? [],
+      visionModelAudioVideoEnabled:
+        settingsData.visionModelAudioVideoEnabled ?? false,
     } satisfies ModelSettingsSectionDraft;
 
     const isLocallyClean = draftsEqual(
@@ -1038,6 +1075,7 @@ export function ModelSettingsSection({
     setModels(nextDraft.models);
     setEnabledModelIds(nextDraft.enabledModelIds);
     setRoleDrafts(nextDraft.roles);
+    setVisionModelAudioVideoEnabled(nextDraft.visionModelAudioVideoEnabled);
     setCodingModelRoutingRules(nextDraft.codingModelRoutingRules);
   }, [settingsData]);
 
@@ -1335,6 +1373,7 @@ export function ModelSettingsSection({
     setModels(clonedDraft.models);
     setEnabledModelIds(clonedDraft.enabledModelIds);
     setRoleDrafts(clonedDraft.roles);
+    setVisionModelAudioVideoEnabled(clonedDraft.visionModelAudioVideoEnabled);
     setCodingModelRoutingRules(clonedDraft.codingModelRoutingRules);
   };
 
@@ -1346,6 +1385,8 @@ export function ModelSettingsSection({
       models: updates.models ?? models,
       enabledModelIds: updates.enabledModelIds ?? enabledModelIds,
       roles: updates.roles ?? roleDrafts,
+      visionModelAudioVideoEnabled:
+        updates.visionModelAudioVideoEnabled ?? visionModelAudioVideoEnabled,
       codingModelRoutingRules:
         updates.codingModelRoutingRules ?? codingModelRoutingRules,
     });
@@ -1464,6 +1505,7 @@ export function ModelSettingsSection({
         codeReviewModelReasoningEffort: draft.roles.codeReview.reasoningEffort,
         exploreModelReasoningEffort: draft.roles.explore.reasoningEffort,
         planningModelReasoningEffort: draft.roles.planning.reasoningEffort,
+        visionModelAudioVideoEnabled: draft.visionModelAudioVideoEnabled,
         codingModelRoutingRules: prepareCodingModelRoutingRulesForSave(
           draft.codingModelRoutingRules,
         ),
@@ -1855,6 +1897,7 @@ export function ModelSettingsSection({
                 selectValue={roleSelectValues[config.role]}
                 optionGroups={roleOptionGroups[config.role]}
                 codingModelMetadata={effectiveCodingModelMetadata}
+                visionModelAudioVideoEnabled={visionModelAudioVideoEnabled}
                 supportsReasoning={roleSupportsReasoning[config.role]}
                 reasoningEffort={roleDrafts[config.role].reasoningEffort}
                 onModelChange={(value) =>
@@ -1868,6 +1911,15 @@ export function ModelSettingsSection({
                 }
                 onReasoningChange={(value) =>
                   updateRoleReasoningEffort(config.role, value)
+                }
+                onVisionModelAudioVideoEnabledChange={
+                  config.role === 'vision'
+                    ? (enabled) =>
+                        applyDraftUpdates(
+                          { visionModelAudioVideoEnabled: enabled },
+                          0,
+                        )
+                    : undefined
                 }
               >
                 {config.role === 'coding' ? (
