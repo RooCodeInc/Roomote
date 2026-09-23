@@ -2,13 +2,20 @@ import { type LucideIcon } from '@/components/system';
 import {
   ChartColumnIncreasing,
   House,
+  MessagesSquare,
   Plug,
   NotepadText,
-  Rows4,
   Zap,
 } from '@/components/system';
 
-interface PrimaryNavItem {
+/**
+ * Groups items in the desktop side nav: `home` and `sessions` share the first
+ * group around the New Session action, `manage` ends with Settings, and
+ * `insights` renders as its own group when it has visible items.
+ */
+type SideNavSection = 'home' | 'sessions' | 'manage' | 'insights';
+
+export interface PrimaryNavItem {
   icon: LucideIcon;
   href: string;
   label: string;
@@ -16,6 +23,7 @@ interface PrimaryNavItem {
   description: string;
   matchExact: boolean;
   matchPaths: string[];
+  sideNavSection: SideNavSection;
   adminOnly?: boolean;
   requiresSetup?: boolean;
   resultsExperiment?: boolean;
@@ -32,15 +40,17 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     description: 'Start here',
     matchExact: true,
     matchPaths: ['/'],
+    sideNavSection: 'home',
     requiresSetup: true,
   },
   {
-    icon: Rows4,
+    icon: MessagesSquare,
     href: '/sessions',
     label: 'Sessions',
     description: 'View current and past conversations',
     matchExact: false,
     matchPaths: ['/sessions', '/tasks', '/cloud-agents'],
+    sideNavSection: 'sessions',
   },
   {
     icon: Zap,
@@ -49,6 +59,7 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     description: 'Configure background work that runs for your team',
     matchExact: false,
     matchPaths: ['/automations'],
+    sideNavSection: 'manage',
     requiresSetup: true,
   },
   {
@@ -58,6 +69,7 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     description: 'Review automation results',
     matchExact: false,
     matchPaths: ['/results'],
+    sideNavSection: 'manage',
     requiresSetup: true,
     resultsExperiment: true,
   },
@@ -68,6 +80,7 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     description: 'Connect Roomote with tools your team uses',
     matchExact: false,
     matchPaths: ['/integrations'],
+    sideNavSection: 'manage',
   },
   {
     icon: ChartColumnIncreasing,
@@ -76,6 +89,7 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     description: 'View analytics',
     matchExact: false,
     matchPaths: ['/analytics'],
+    sideNavSection: 'insights',
     adminOnly: true,
     requiresSetup: true,
   },
@@ -90,4 +104,22 @@ export function getVisiblePrimaryNavItems(opts: {
       (!item.adminOnly || opts.isAdmin) &&
       (!item.resultsExperiment || opts.resultsEnabled),
   );
+}
+
+export function getVisibleSideNavSections(opts: {
+  isAdmin: boolean;
+  resultsEnabled?: boolean;
+}): Record<SideNavSection, PrimaryNavItem[]> {
+  const sections: Record<SideNavSection, PrimaryNavItem[]> = {
+    home: [],
+    sessions: [],
+    manage: [],
+    insights: [],
+  };
+
+  for (const item of getVisiblePrimaryNavItems(opts)) {
+    sections[item.sideNavSection].push(item);
+  }
+
+  return sections;
 }
