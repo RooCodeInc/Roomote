@@ -202,6 +202,13 @@ that prior workspace instead of starting over. Snapshot retention depends on
 the sandbox provider: Modal-backed snapshots do not have Roomote's seven-day
 application expiry, while other providers may use a bounded window.
 
+If you send a follow-up while the sandbox runtime is still starting, Roomote
+accepts it into the task's queue and delivers it when the runtime can receive
+instructions. Follow-ups stay in order, including later messages sent after the
+runtime becomes reachable, and a retried send with the same client message ID
+is not delivered twice. If the run finishes before Roomote can admit the
+message, the request is rejected instead of reviving the settled run.
+
 When a task delegated from a session asks for input, reply naturally in
 the originating session. If one input request is pending, Roomote
 applies a matching reply to that request instead of treating it as a separate

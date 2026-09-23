@@ -62,12 +62,41 @@ silently bypassed with another connection method.
 ## Manage available tools
 
 Some connected integrations expose a **Manage tools** action in
-**Settings > Integrations**. Admins can use it to restrict the types of
-operations Roomote can make with the service.
+**Settings > Integrations**. The dialog groups tools into read-only and
+write/delete sections when the integration supplies that metadata.
 
-Use this as a coarse permissions system, for example allowing only read
-operations or restricting access to a certain type of entity. The list varies
-depending on the integration.
+Admins can enable **Integration tool approvals** under **Settings >
+Experimental**. While it is enabled, each tool has one of four modes:
+
+- **Auto** uses the deployment's Auto mode. With Auto mode on, the configured
+  judgment model runs routine calls and asks the session owner before risky
+  ones. With Auto mode off, the tool runs as it did before approvals were
+  enabled.
+- **Always allow** runs without an Auto assessment or approval prompt.
+- **Always ask** pauses every call for the session owner.
+- **Disable** hides the tool from agents and rejects direct calls at the
+  Roomote proxy.
+
+Configure deployment-wide Auto mode under **Settings > Integrations**. Turning
+it on requires a configured [judgment model](/models#judgment-model). Admins can
+also add plain-language guidance describing what their deployment considers
+routine or risky. Auto can only run a call or ask; it never rejects one, and it
+does not widen the integration, actor, or provider permissions that decide
+whether the tool is available in the first place.
+
+An approval request shows the integration, tool, and sanitized arguments. The
+session owner can allow the call once, allow that tool for the rest of the
+session, or deny it. Unanswered requests expire and fail closed. A delegated
+task asks its parent session's owner; an unattended task, such as an
+automation-started task, cannot run an **Always ask** tool when nobody can
+answer.
+
+Deployment policies are admin-managed and apply from the next session turn.
+Members can manage personal policies for their own personal integrations and
+MCP servers. When both deployment and personal policies govern a built-in
+integration, the stricter choice wins, so a personal policy cannot loosen an
+admin restriction. When the experiment is off, the existing enabled/disabled
+tool controls remain in effect.
 
 Some integrations can only list tools after the first user links their account
 from [Personal Settings](/personal-settings).

@@ -142,6 +142,21 @@ in **Available Models**, and assign it to a role or select it for a session or
 task. Adding these routes does not change existing model defaults; access still
 depends on the connected provider account or plan.
 
+**Claude Opus 5.5** replaces Claude Opus 5 in the recommended catalog. It is
+available through managed Roomote inference, Anthropic, Azure OpenAI, Azure AI
+Foundry, Amazon Bedrock, OpenRouter, Vercel AI Gateway, Requesty, OpenCode Zen,
+and GitHub Copilot. New recommended mappings use it for planning where those
+providers previously used Claude Opus 5.
+
+**GPT-6 Sol** and **GPT-6 Luna** replace GPT 5.6 Sol and Luna in the
+recommended catalog for managed Roomote inference, OpenAI, Azure OpenAI, Azure
+AI Foundry, Amazon Bedrock, OpenRouter, Vercel AI Gateway, Requesty, OpenCode
+Zen, GitHub Copilot, and ChatGPT Subscription. New OpenAI and ChatGPT
+connections use Sol as the coding default, while new GitHub Copilot connections
+use Luna. Applying the current provider presets uses the GPT-6 mappings, but
+existing saved role mappings do not change automatically. Provider and account
+availability still apply.
+
 **DeepSeek V4.1 Flash** is recommended through
 [DeepSeek](/providers/inference/deepseek),
 [OpenRouter](/providers/inference/openrouter),
@@ -194,9 +209,9 @@ You can also split model roles with env vars:
 R_ORCHESTRATION_MODEL=openrouter/google/gemini-3.8-flash
 R_ORCHESTRATION_MODEL_REASONING_EFFORT=low
 R_SMALL_MODEL=openrouter/openai/gpt-4.1-mini
-R_VISION_MODEL=openrouter/openai/gpt-5.6-sol
-R_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.6-sol
-R_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
+R_VISION_MODEL=openrouter/openai/gpt-6-sol
+R_CODE_REVIEW_MODEL=openrouter/openai/gpt-6-sol
+R_EXPLORE_MODEL=openrouter/openai/gpt-6-luna
 ```
 
 Roomote automatically makes common provider configuration available to the
@@ -358,6 +373,16 @@ When a judgment model is on, Roomote asks it first for:
 - ranking a task's own changed hunks by defect risk during its self-review,
   before it pushes or opens a pull request (the same pre-screen pull request
   reviews use), as advisory hints the agent re-reads
+- ranking specific changed hunks before a pull-request review, with up to three
+  advisory hints for the reviewer; the review still examines the complete diff,
+  and a hunk that is not highlighted is not treated as cleared
+
+Admins can separately enable **Jev Session communication** under **Settings >
+Experimental**. It uses the judgment model for high-confidence task reports,
+blocked-input detection, redundant-update suppression, and evidenced completion
+reporting. Low-confidence, unavailable, or policy-sensitive cases fall back to
+the regular model path. Steering, permissions, cancellation, lifecycle, and
+destructive actions remain outside the experiment.
 
 Roomote acts on the judgment model only when it is confident. When it is
 unsure, unavailable, or returns an error, Roomote keeps the behavior it has
@@ -375,6 +400,11 @@ through a configured judgment model (Jev or the Roomote judgment model). A
 helper model never opts into these batches, so deployments without a judgment
 model keep the existing conservative behavior and do not incur new
 high-volume language-model calls.
+
+Primary and shadow judgment-model requests are recorded as non-task inference
+under the `judgment_model` source in [Cost Analytics](/cost-analytics). A
+provider that omits token or price metadata can still make a successful
+decision, but the corresponding analytics row may have zero tokens or cost.
 
 ## Reasoning settings
 
