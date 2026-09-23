@@ -31,6 +31,25 @@ function hasSecretShapedString(value: string): boolean {
   return SECRET_VALUE_PATTERNS.some((pattern) => pattern.test(candidate));
 }
 
+const READ_CONTENT_MAX_LENGTH = 4_000;
+const PRIVATE_KEY_BLOCK =
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
+
+/**
+ * Tool results the agent read, prepared for the judgment model: recognized
+ * credentials are masked in place (the surrounding text is the evidence) and
+ * only the most recent text is kept, since the paused call follows it.
+ */
+export function boundIntegrationToolReadContent(text: string): string {
+  let masked = text.replace(PRIVATE_KEY_BLOCK, MASKED_VALUE);
+  for (const pattern of SECRET_VALUE_PATTERNS) {
+    masked = masked.replace(new RegExp(pattern.source, 'g'), MASKED_VALUE);
+  }
+  return masked.length > READ_CONTENT_MAX_LENGTH
+    ? `[earlier content omitted]…${masked.slice(-READ_CONTENT_MAX_LENGTH)}`
+    : masked;
+}
+
 /** Scan argument values recursively; field names are deliberately ignored. */
 export function hasIntegrationToolSecret(value: unknown): boolean {
   const visited = new WeakSet<object>();

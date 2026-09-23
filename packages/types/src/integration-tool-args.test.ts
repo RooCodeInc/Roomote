@@ -1,4 +1,5 @@
 import {
+  boundIntegrationToolReadContent,
   hasIntegrationToolSecret,
   redactIntegrationToolArgs,
 } from './integration-tool-args';
@@ -77,5 +78,31 @@ describe('integration tool argument secret handling', () => {
     expect(JSON.stringify(redactIntegrationToolArgs(value))).not.toContain(
       openRouterKey,
     );
+  });
+});
+
+describe('boundIntegrationToolReadContent', () => {
+  it('masks credentials in place and keeps the surrounding text', () => {
+    const text = `Deploy notes\nOPENROUTER_API_KEY=${openRouterKey}\ntoken ${githubClassicToken} end`;
+    const bounded = boundIntegrationToolReadContent(text);
+    expect(bounded).toBe(
+      'Deploy notes\nOPENROUTER_API_KEY=[value omitted]\ntoken [value omitted] end',
+    );
+  });
+
+  it('masks a whole private key block', () => {
+    const bounded = boundIntegrationToolReadContent(
+      'before\n-----BEGIN RSA PRIVATE KEY-----\nMIIEabc\n-----END RSA PRIVATE KEY-----\nafter',
+    );
+    expect(bounded).toBe('before\n[value omitted]\nafter');
+  });
+
+  it('keeps only the most recent text when content is long', () => {
+    const bounded = boundIntegrationToolReadContent(
+      `${'old '.repeat(2_000)}latest instruction`,
+    );
+    expect(bounded.startsWith('[earlier content omitted]')).toBe(true);
+    expect(bounded.endsWith('latest instruction')).toBe(true);
+    expect(bounded.length).toBeLessThan(4_100);
   });
 });

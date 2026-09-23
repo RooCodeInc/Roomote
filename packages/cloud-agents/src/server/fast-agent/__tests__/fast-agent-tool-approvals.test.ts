@@ -843,9 +843,11 @@ describe('tool approval bridge', () => {
 
   function helpers() {
     return {
-      fetchCallArgs: vi.fn(async () => ({
-        input: { channel: 'C1', text: 'hi' },
-      })),
+      fetchCallArgs: vi.fn(
+        async (): Promise<{ input: unknown; readContent?: string }> => ({
+          input: { channel: 'C1', text: 'hi' },
+        }),
+      ),
       reply: vi.fn(
         async (
           _requestId: string,
@@ -1085,7 +1087,10 @@ describe('tool approval bridge', () => {
       async (_approval: IntegrationToolApprovalMetadata) => undefined,
     );
     const helperMocks = helpers();
-    helperMocks.fetchCallArgs.mockResolvedValue({ input: args });
+    helperMocks.fetchCallArgs.mockResolvedValue({
+      input: args,
+      readContent: 'Status page: all systems operational.',
+    });
 
     createFastAgentToolApprovalBridge({
       sessionId: 'session-id',
@@ -1104,8 +1109,12 @@ describe('tool approval bridge', () => {
     );
     expect(notify.mock.calls[0]![0].argsSummary).toEqual(argsSummary);
     expect(JSON.stringify(argsSummary)).not.toContain(sentinel);
+    // What the agent read earlier in the turn reaches the assessment.
     expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledWith(
-      expect.objectContaining({ args }),
+      expect.objectContaining({
+        args,
+        readContent: 'Status page: all systems operational.',
+      }),
     );
   });
 

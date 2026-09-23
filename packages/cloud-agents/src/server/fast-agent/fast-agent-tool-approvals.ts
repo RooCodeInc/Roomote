@@ -272,6 +272,7 @@ type FastAgentToolApprovalHelpers = {
     | {
         input?: unknown;
         toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        readContent?: string;
       }
     | undefined
   >;
@@ -568,6 +569,7 @@ export function createFastAgentToolApprovalBridge(input: {
             toolDescription: tool.description,
             args,
             userRequest: input.resolveUserRequest?.(),
+            readContent: recovered?.readContent,
             isSessionLaunchedTask: (taskId) =>
               isFastAgentLaunchedTask(input.sessionId, taskId),
             userId: input.userId,
