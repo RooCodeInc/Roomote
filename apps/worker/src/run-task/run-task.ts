@@ -358,10 +358,33 @@ function hasScheduledAutomationSource(taskRun: { payload: unknown }): boolean {
   );
 }
 
+function getReplySatisfactionPolicyState(taskRun: { payload: unknown }): {
+  suppressNonTerminalRepliesWithoutTurn?: true;
+  requiresTerminalCloseoutWithoutTurn?: true;
+} {
+  if (!taskRun.payload || typeof taskRun.payload !== 'object') {
+    return {};
+  }
+
+  const payload = taskRun.payload as {
+    suppressNonTerminalRepliesWithoutTurn?: unknown;
+    requiresTerminalCloseoutWithoutTurn?: unknown;
+  };
+
+  return {
+    ...(payload.suppressNonTerminalRepliesWithoutTurn === true
+      ? { suppressNonTerminalRepliesWithoutTurn: true }
+      : {}),
+    ...(payload.requiresTerminalCloseoutWithoutTurn === true
+      ? { requiresTerminalCloseoutWithoutTurn: true }
+      : {}),
+  };
+}
+
 /**
- * Channel-only automation launches stay silent until they have a result or
- * blocker. Scheduled scan tasks have no inbound message to acknowledge, and
- * execution tasks late-bind their report thread on the first chat message.
+ * Classifies channel-only automation launches for initial-acknowledgement and
+ * task-environment behavior. Reply suppression is controlled separately by
+ * the explicit task-payload policy copied into reply-satisfaction state.
  */
 function isSilentChannelAutomationLaunch(taskRun: {
   payload: unknown;
@@ -1045,6 +1068,7 @@ export const runTask = async ({
           startedAtMs,
           currentTurnRequiresInitialAck:
             shouldRequireInitialAckOnInitialTurn(taskRun),
+          ...getReplySatisfactionPolicyState(taskRun),
           ...(initialTurnMessageTs
             ? {
                 currentTurnMessageTs: initialTurnMessageTs,

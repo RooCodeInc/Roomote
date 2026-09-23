@@ -556,6 +556,8 @@ describe('taskSpecSchema', () => {
         description: 'Suggest a few tasks',
         trigger: 'scheduled',
         notifySlack: true,
+        suppressNonTerminalRepliesWithoutTurn: true,
+        requiresTerminalCloseoutWithoutTurn: true,
         suggestionSource: 'sentry_triage',
         historicalThreadFeedbackDebugSnippet:
           '*Debug: historical Slack-thread signals included in this run*\n- Prior automation threads included: 1',
@@ -571,6 +573,8 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.description).toBe('Suggest a few tasks');
     expect(parsed.payload.trigger).toBe('scheduled');
     expect(parsed.payload.notifySlack).toBe(true);
+    expect(parsed.payload.suppressNonTerminalRepliesWithoutTurn).toBe(true);
+    expect(parsed.payload.requiresTerminalCloseoutWithoutTurn).toBe(true);
     expect(parsed.payload.suggestionSource).toBe('sentry_triage');
     expect(parsed.payload.historicalThreadFeedbackDebugSnippet).toContain(
       'historical Slack-thread signals included in this run',

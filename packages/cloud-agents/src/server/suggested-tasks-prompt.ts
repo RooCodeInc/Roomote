@@ -138,6 +138,7 @@ Investigation method:
 - aim for roughly 6-8 exploration threads across different subsystems or areas and roughly 1-2 recent-activity follow-ups. The exact numbers can flex based on repo size and activity level, but exploration should always be the majority.
 - investigate directly in the active OpenCode session. Do not spawn child agent processes or depend on another CLI.
 - collect candidate findings as you go, but do not submit until you have reviewed all selected investigation threads.
+- Do not send any user-visible acknowledgement, progress update, status message, partial finding, or scan narration while work is in flight. Keep findings internal until the complete candidate set has been investigated, verified, and ranked, then make exactly one send_chat_reply call with purpose set to closeout and include the final structured suggestions. If a durable blocker or genuinely required input prevents completion, send a single terminal closeout explaining it instead of progress messages.
 - for each candidate finding, record the repository, file paths, relevant functions or variables, the failure mechanism, a concrete repro or user-impact scenario, and a confidence level.
 - RANKING PHASE (mandatory, after investigation):
   - rank all candidate findings together in a single pass.
