@@ -21,9 +21,9 @@ export type ChatReplyPurpose =
 interface ChatReplySatisfactionState {
   startedAtMs?: number;
   /**
-   * Set at launch for late-bound automation execution tasks: the Stop hook
-   * blocks silent completion, and the silence hook stamps post-closeout work
-   * even though no inbound chat turn exists.
+   * Set at launch for channel-only automation tasks that have no inbound chat
+   * turn but require a terminal report. The Stop hook blocks silent
+   * completion, and the silence hook stamps post-closeout work.
    */
   requiresTerminalCloseoutWithoutTurn?: boolean;
   parentThreadId?: string;

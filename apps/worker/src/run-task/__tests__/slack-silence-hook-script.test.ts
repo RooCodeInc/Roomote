@@ -353,7 +353,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
   });
 
   it.each(['ack', 'progress'])(
-    'rejects %s replies from late-bound automation tasks',
+    'rejects %s replies from silent automation tasks',
     (purpose) => {
       const stateFilePath = writeState({
         startedAtMs: Date.now(),
@@ -380,7 +380,38 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     },
   );
 
-  it('allows a terminal reply from a late-bound automation task', () => {
+  it.each([
+    'roomote_send_chat_message',
+    'roomote_send_chat_reaction_emoji',
+    'roomote_reply_to_slack_thread',
+  ])(
+    'blocks non-terminal chat posting tool %s for silent automation tasks',
+    (toolName) => {
+      const stateFilePath = writeState({
+        startedAtMs: Date.now(),
+        currentTurnRequiresInitialAck: false,
+        requiresTerminalCloseoutWithoutTurn: true,
+      });
+
+      const result = runHook({
+        input: {
+          hook_event_name: 'PreToolUse',
+          tool_name: toolName,
+        },
+        env: {
+          ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        decision: 'block',
+        permissionDecision: 'deny',
+      });
+    },
+  );
+
+  it('allows a terminal reply with suggestions from a silent automation task', () => {
     const stateFilePath = writeState({
       startedAtMs: Date.now(),
       currentTurnRequiresInitialAck: false,
@@ -391,7 +422,16 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
       input: {
         hook_event_name: 'PreToolUse',
         tool_name: 'roomote_send_chat_reply',
-        tool_args: { purpose: 'closeout' },
+        tool_args: {
+          purpose: 'closeout',
+          suggestions: [
+            {
+              title: 'Fix stale cache handling',
+              brief: 'Expired data can remain visible after refresh.',
+              targetRepositoryFullName: 'acme/app',
+            },
+          ],
+        },
       },
       env: {
         ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
@@ -402,7 +442,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     expect(result.stdout).toBe('');
   });
 
-  it('allows a clarification from a late-bound automation task', () => {
+  it('allows a clarification from a silent automation task', () => {
     const stateFilePath = writeState({
       startedAtMs: Date.now(),
       currentTurnRequiresInitialAck: false,

@@ -358,6 +358,24 @@ function hasScheduledAutomationSource(taskRun: { payload: unknown }): boolean {
   );
 }
 
+function isSuggestedIdeasScan(taskRun: {
+  payloadKind: string;
+  payload: unknown;
+}): boolean {
+  if (
+    taskRun.payloadKind !== TaskPayloadKind.Scan ||
+    !taskRun.payload ||
+    typeof taskRun.payload !== 'object'
+  ) {
+    return false;
+  }
+
+  return (
+    (taskRun.payload as { suggestionSource?: unknown }).suggestionSource ===
+    'suggest_ideas'
+  );
+}
+
 /**
  * Channel-only automation launches stay silent until they have a result or
  * blocker. Scheduled scan tasks have no inbound message to acknowledge, and
@@ -1045,6 +1063,9 @@ export const runTask = async ({
           startedAtMs,
           currentTurnRequiresInitialAck:
             shouldRequireInitialAckOnInitialTurn(taskRun),
+          ...(isSuggestedIdeasScan(taskRun)
+            ? { requiresTerminalCloseoutWithoutTurn: true }
+            : {}),
           ...(initialTurnMessageTs
             ? {
                 currentTurnMessageTs: initialTurnMessageTs,
