@@ -1,5 +1,5 @@
 {
-  "id": "14bf5035-e743-4a1d-982f-ddb83f3ad280",
+  "id": "1d75f7c6-277e-41ec-9041-9edc8d0d63dd",
   "prevId": "712f08d5-a1aa-4903-a565-887b1455854c",
   "version": "7",
   "dialect": "postgresql",
@@ -1297,21 +1297,21 @@
           "primaryKey": false,
           "notNull": true
         },
-        "run_when_snapshot": {
-          "name": "run_when_snapshot",
+        "launch_criteria_snapshot": {
+          "name": "launch_criteria_snapshot",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
-        "run_when_answers": {
-          "name": "run_when_answers",
+        "launch_criteria_answers": {
+          "name": "launch_criteria_answers",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
-        "run_when_outcome": {
-          "name": "run_when_outcome",
-          "type": "text",
+        "launch_criteria_outcome": {
+          "name": "launch_criteria_outcome",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -2960,6 +2960,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "launch_criteria": {
+          "name": "launch_criteria",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "run_when": {
           "name": "run_when",

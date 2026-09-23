@@ -662,16 +662,18 @@ describe('custom-automations MCP routes', () => {
       {
         id: 'result-1',
         createdAt: new Date('2026-09-23T12:00:00.000Z'),
-        runWhenOutcome: 'skipped',
-        runWhenSnapshot: runWhen,
-        runWhenAnswers: {
-          new_regression: { type: 'noul', noul: 0.2 },
+        launchCriteriaSnapshot: {
+          launchCriteria: 'Only investigate new regressions.',
+          runWhen,
         },
-        launchCriteriaSnapshot: 'Only investigate new regressions.',
         launchCriteriaAnswers: {
           criteriaMet: { type: 'noul', noul: 0.1 },
+          runWhen: { new_regression: { type: 'noul', noul: 0.9 } },
         },
-        launchCriteriaOutcome: 'skipped',
+        launchCriteriaOutcome: {
+          launchCriteria: 'skipped',
+          runWhen: 'passed',
+        },
         content: 'No qualifying regression found.',
       },
     ]);
@@ -691,10 +693,10 @@ describe('custom-automations MCP routes', () => {
         {
           id: 'result-1',
           createdAt: '2026-09-23T12:00:00.000Z',
-          outcome: 'skipped',
+          outcome: 'passed',
           runWhen,
           answers: {
-            new_regression: { type: 'noul', noul: 0.2 },
+            new_regression: { type: 'noul', noul: 0.9 },
           },
           launchCriteria: 'Only investigate new regressions.',
           launchCriteriaOutcome: 'skipped',

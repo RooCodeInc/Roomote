@@ -8,8 +8,6 @@ import {
   inArray,
   isNotNull,
   isNull,
-  ne,
-  or,
   isDeploymentExperimentEnabled,
   privateSessionAccess,
   privateTaskAccess,
@@ -74,14 +72,8 @@ const visibleReport = () =>
   and(
     eq(automationResults.resultVisibility, 'shared'),
     isNull(automationResults.supersededAt),
-    or(
-      isNull(automationResults.runWhenOutcome),
-      ne(automationResults.runWhenOutcome, 'skipped'),
-    ),
-    or(
-      isNull(automationResults.launchCriteriaOutcome),
-      ne(automationResults.launchCriteriaOutcome, 'skipped'),
-    ),
+    sql`coalesce(${automationResults.launchCriteriaOutcome}->>'launchCriteria', '') <> 'skipped'`,
+    sql`coalesce(${automationResults.launchCriteriaOutcome}->>'runWhen', '') <> 'skipped'`,
   )!;
 const visibleSuggestion = () =>
   and(

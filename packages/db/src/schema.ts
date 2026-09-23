@@ -94,11 +94,10 @@ import type {
   SessionWakeupStatus,
   AutomationResultPriority,
   AutomationResultVisibility,
-  CustomAutomationLaunchCriteriaAnswer,
-  CustomAutomationLaunchCriteriaOutcome,
+  CustomAutomationLaunchCriteriaAnswers,
+  CustomAutomationLaunchCriteriaOutcomes,
+  CustomAutomationLaunchCriteriaSnapshot,
   CustomAutomationRunWhen,
-  CustomAutomationRunWhenJudgmentAnswer,
-  CustomAutomationRunWhenOutcome,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -5247,23 +5246,15 @@ export const automationResults = pgTable(
       text('result_visibility').$type<AutomationResultVisibility>(),
     automationName: text('automation_name').notNull(),
     content: text('content').notNull(),
-    launchCriteriaSnapshot: text('launch_criteria_snapshot'),
-    launchCriteriaAnswers: jsonb('launch_criteria_answers').$type<{
-      criteriaMet?: CustomAutomationLaunchCriteriaAnswer;
-    } | null>(),
-    launchCriteriaOutcome: text(
+    launchCriteriaSnapshot: jsonb(
+      'launch_criteria_snapshot',
+    ).$type<CustomAutomationLaunchCriteriaSnapshot | null>(),
+    launchCriteriaAnswers: jsonb(
+      'launch_criteria_answers',
+    ).$type<CustomAutomationLaunchCriteriaAnswers | null>(),
+    launchCriteriaOutcome: jsonb(
       'launch_criteria_outcome',
-    ).$type<CustomAutomationLaunchCriteriaOutcome | null>(),
-    runWhenSnapshot: jsonb(
-      'run_when_snapshot',
-    ).$type<CustomAutomationRunWhen | null>(),
-    runWhenAnswers: jsonb('run_when_answers').$type<Record<
-      string,
-      CustomAutomationRunWhenJudgmentAnswer
-    > | null>(),
-    runWhenOutcome: text(
-      'run_when_outcome',
-    ).$type<CustomAutomationRunWhenOutcome | null>(),
+    ).$type<CustomAutomationLaunchCriteriaOutcomes | null>(),
     resultKind: text('result_kind')
       .notNull()
       .default('outcome')

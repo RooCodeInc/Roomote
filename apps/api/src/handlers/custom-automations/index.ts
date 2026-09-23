@@ -462,19 +462,27 @@ customAutomationsRouter.get('/:id', async (c) => {
       launchCriteria: automation.launchCriteria,
       runWhen: automation.runWhen,
     },
-    conditionRuns: conditionRuns.map((run) => ({
-      id: run.id,
-      createdAt: run.createdAt,
-      outcome: run.runWhenOutcome ?? run.launchCriteriaOutcome,
-      runWhen: run.runWhenSnapshot,
-      answers: run.runWhenAnswers,
-      ...(run.launchCriteriaOutcome
-        ? { findingsExcerpt: run.content.slice(0, 2_000) }
-        : { reportExcerpt: run.content.slice(0, 2_000) }),
-      launchCriteria: run.launchCriteriaSnapshot,
-      launchCriteriaOutcome: run.launchCriteriaOutcome,
-      launchCriteriaAnswers: run.launchCriteriaAnswers,
-    })),
+    conditionRuns: conditionRuns.map((run) => {
+      const outcomes = run.launchCriteriaOutcome;
+      const launchCriteriaOutcome = outcomes?.launchCriteria ?? null;
+      const runWhenOutcome = outcomes?.runWhen ?? null;
+      const answers = run.launchCriteriaAnswers;
+      return {
+        id: run.id,
+        createdAt: run.createdAt,
+        outcome: runWhenOutcome ?? launchCriteriaOutcome,
+        runWhen: run.launchCriteriaSnapshot?.runWhen ?? null,
+        answers: answers?.runWhen ?? null,
+        ...(launchCriteriaOutcome || runWhenOutcome
+          ? { findingsExcerpt: run.content.slice(0, 2_000) }
+          : { reportExcerpt: run.content.slice(0, 2_000) }),
+        launchCriteria: run.launchCriteriaSnapshot?.launchCriteria ?? null,
+        launchCriteriaOutcome,
+        launchCriteriaAnswers: answers?.criteriaMet
+          ? { criteriaMet: answers.criteriaMet }
+          : null,
+      };
+    }),
   });
 });
 

@@ -255,36 +255,45 @@ describe('automation result acceptance', () => {
       content: 'No new regression was found.',
       dedupeKey,
       visibility: 'private',
-      runWhenSnapshot: runWhen,
-      runWhenAnswers: {
-        new_regression: { type: 'noul', noul: 0.1 },
+      launchCriteriaSnapshot: { runWhen },
+      launchCriteriaAnswers: {
+        runWhen: { new_regression: { type: 'noul', noul: 0.1 } },
       },
-      runWhenOutcome: 'skipped',
+      launchCriteriaOutcome: { runWhen: 'skipped' },
     });
 
     expect(saved).toMatchObject({
-      runWhenSnapshot: runWhen,
-      runWhenAnswers: {
-        new_regression: { type: 'noul', noul: 0.1 },
+      launchCriteriaSnapshot: { runWhen },
+      launchCriteriaAnswers: {
+        runWhen: { new_regression: { type: 'noul', noul: 0.1 } },
       },
-      runWhenOutcome: 'skipped',
+      launchCriteriaOutcome: { runWhen: 'skipped' },
       preparationStatus: 'ready',
-      headline: 'Report skipped by run condition',
+      headline: 'Run skipped by saved conditions',
     });
     await expect(
       getAutomationResultByDedupeKey(dedupeKey),
     ).resolves.toMatchObject({
-      runWhenOutcome: 'skipped',
+      launchCriteriaOutcome: { runWhen: 'skipped' },
     });
     await expect(
       listCustomAutomationConditionRuns(automation.id),
     ).resolves.toEqual([
       expect.objectContaining({
         id: saved!.id,
-        runWhenOutcome: 'skipped',
-        runWhenAnswers: {
-          new_regression: { type: 'noul', noul: 0.1 },
+        launchCriteriaOutcome: { runWhen: 'skipped' },
+        launchCriteriaAnswers: {
+          runWhen: { new_regression: { type: 'noul', noul: 0.1 } },
         },
+      }),
+    ]);
+    await expect(
+      listRecentCustomAutomationResults(automation.id),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        content: 'No new regression was found.',
+        launchCriteriaOutcome: null,
+        runWhenOutcome: 'skipped',
       }),
     ]);
   });
@@ -311,20 +320,20 @@ describe('automation result acceptance', () => {
       content: 'The latest issue is a known duplicate.',
       dedupeKey: `launch-gate:${automation.id}`,
       visibility: 'private',
-      launchCriteriaSnapshot: launchCriteria,
+      launchCriteriaSnapshot: { launchCriteria },
       launchCriteriaAnswers: {
         criteriaMet: { type: 'noul', noul: 0.08 },
       },
-      launchCriteriaOutcome: 'skipped',
+      launchCriteriaOutcome: { launchCriteria: 'skipped' },
     });
 
     expect(saved).toMatchObject({
       resultVisibility: 'private',
-      launchCriteriaSnapshot: launchCriteria,
+      launchCriteriaSnapshot: { launchCriteria },
       launchCriteriaAnswers: {
         criteriaMet: { type: 'noul', noul: 0.08 },
       },
-      launchCriteriaOutcome: 'skipped',
+      launchCriteriaOutcome: { launchCriteria: 'skipped' },
       preparationStatus: 'ready',
       headline: 'Run skipped by launch criteria',
     });
@@ -334,8 +343,8 @@ describe('automation result acceptance', () => {
       expect.objectContaining({
         id: saved!.id,
         content: 'The latest issue is a known duplicate.',
-        launchCriteriaSnapshot: launchCriteria,
-        launchCriteriaOutcome: 'skipped',
+        launchCriteriaSnapshot: { launchCriteria },
+        launchCriteriaOutcome: { launchCriteria: 'skipped' },
       }),
     ]);
     await expect(
@@ -344,6 +353,7 @@ describe('automation result acceptance', () => {
       expect.objectContaining({
         content: 'The latest issue is a known duplicate.',
         launchCriteriaOutcome: 'skipped',
+        runWhenOutcome: null,
       }),
     ]);
   });

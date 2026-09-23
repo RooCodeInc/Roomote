@@ -162,11 +162,46 @@ describe('custom automation launch gate', () => {
       evaluateCustomAutomationLaunchGate({ ...base, runWhen }),
     ).resolves.toMatchObject({
       decision: 'stop',
-      launchCriteriaOutcome: 'skipped',
+      launchCriteriaOutcome: 'passed',
       runWhenOutcome: 'skipped',
       runWhenAnswers: {
         regression: { type: 'noul', noul: 0.5 },
       },
     });
+  });
+
+  it('records typed outcomes without inventing a plain launch-criteria outcome', async () => {
+    const runWhen = customAutomationRunWhenSchema.parse({
+      all: [
+        {
+          id: 'regression',
+          ask: 'Does `findingsReport` show a new regression?',
+          type: 'yes_no',
+          criteria: {
+            true: 'A new regression is evidenced.',
+            false: 'No new regression is evidenced.',
+          },
+          min: 0.75,
+        },
+      ],
+    });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      run_when_regression: { type: 'noul', noul: 0.9 },
+    });
+
+    const result = await evaluateCustomAutomationLaunchGate({
+      ...base,
+      launchCriteria: null,
+      runWhen,
+    });
+
+    expect(result).toMatchObject({
+      decision: 'continue',
+      runWhenOutcome: 'passed',
+      runWhenAnswers: {
+        regression: { type: 'noul', noul: 0.9 },
+      },
+    });
+    expect(result).not.toHaveProperty('launchCriteriaOutcome');
   });
 });

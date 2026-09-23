@@ -69,25 +69,27 @@ describe('Results commands', () => {
         content: 'No matching report.',
         priority: 'normal',
         dedupeKey: `test:${user.id}:skipped-report`,
-        runWhenOutcome: 'skipped',
-        runWhenSnapshot: {
-          all: [
-            {
-              id: 'new_regression',
-              ask: 'Does `report` describe a new regression?',
-              type: 'yes_no',
-              criteria: {
-                true: 'New regression.',
-                false: 'No new regression.',
+        launchCriteriaSnapshot: {
+          runWhen: {
+            all: [
+              {
+                id: 'new_regression',
+                ask: 'Does `report` describe a new regression?',
+                type: 'yes_no',
+                criteria: {
+                  true: 'New regression.',
+                  false: 'No new regression.',
+                },
+                min: 0.75,
               },
-              min: 0.75,
-            },
-          ],
-          onUncertain: 'skip',
+            ],
+            onUncertain: 'skip',
+          },
         },
-        runWhenAnswers: {
-          new_regression: { type: 'noul', noul: 0.1 },
+        launchCriteriaAnswers: {
+          runWhen: { new_regression: { type: 'noul', noul: 0.1 } },
         },
+        launchCriteriaOutcome: { runWhen: 'skipped' },
       })
       .returning({ id: automationResults.id });
     const [skippedCriteriaReport] = await db
@@ -99,8 +101,10 @@ describe('Results commands', () => {
         content: 'No qualifying regression was found.',
         priority: 'normal',
         dedupeKey: `test:${user.id}:skipped-criteria-report`,
-        launchCriteriaSnapshot: 'Only investigate new regressions.',
-        launchCriteriaOutcome: 'skipped',
+        launchCriteriaSnapshot: {
+          launchCriteria: 'Only investigate new regressions.',
+        },
+        launchCriteriaOutcome: { launchCriteria: 'skipped' },
       })
       .returning({ id: automationResults.id });
     const [suggestion] = await db

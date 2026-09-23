@@ -48,7 +48,7 @@ type CustomAutomationLaunchGateRecentResult = {
 
 type CustomAutomationLaunchGateEvaluation = {
   decision: 'continue' | 'stop';
-  launchCriteriaOutcome: CustomAutomationLaunchCriteriaOutcome;
+  launchCriteriaOutcome?: CustomAutomationLaunchCriteriaOutcome;
   launchCriteriaAnswers?: {
     criteriaMet: CustomAutomationLaunchCriteriaAnswer;
   };
@@ -129,10 +129,7 @@ export async function evaluateCustomAutomationLaunchGate(params: {
   };
 
   if (Object.keys(questions).length === 0) {
-    return {
-      decision: 'continue',
-      launchCriteriaOutcome: 'unavailable',
-    };
+    return { decision: 'continue' };
   }
 
   try {
@@ -146,15 +143,20 @@ export async function evaluateCustomAutomationLaunchGate(params: {
     if (!answers) {
       return {
         decision: 'continue',
-        launchCriteriaOutcome: 'unavailable',
+        ...(params.launchCriteria?.trim()
+          ? { launchCriteriaOutcome: 'unavailable' as const }
+          : {}),
         ...(params.runWhen ? { runWhenOutcome: 'unavailable' } : {}),
       };
     }
 
-    const criteriaMetAnswer = params.launchCriteria
+    const hasLaunchCriteria = Boolean(params.launchCriteria?.trim());
+    const criteriaMetAnswer = hasLaunchCriteria
       ? (answers.criteriaMet as CustomAutomationLaunchCriteriaAnswer)
       : undefined;
     const criteriaProbability = criteriaMetAnswer?.noul;
+    const criteriaUnavailable =
+      hasLaunchCriteria && criteriaProbability === undefined;
     const criteriaFailed =
       criteriaProbability !== undefined && criteriaProbability <= 0.2;
     const criteriaUncertain =
@@ -187,16 +189,19 @@ export async function evaluateCustomAutomationLaunchGate(params: {
     }
 
     const stopped = criteriaFailed || runWhenFailed;
-    const uncertain = criteriaUncertain || runWhenOutcome === 'uncertain';
-    const launchCriteriaOutcome: CustomAutomationLaunchCriteriaOutcome = stopped
-      ? 'skipped'
-      : uncertain
-        ? 'uncertain'
-        : 'passed';
+    const launchCriteriaOutcome = hasLaunchCriteria
+      ? criteriaUnavailable
+        ? 'unavailable'
+        : criteriaFailed
+          ? 'skipped'
+          : criteriaUncertain
+            ? 'uncertain'
+            : 'passed'
+      : undefined;
 
     return {
       decision: stopped ? 'stop' : 'continue',
-      launchCriteriaOutcome,
+      ...(launchCriteriaOutcome ? { launchCriteriaOutcome } : {}),
       ...(criteriaMetAnswer
         ? { launchCriteriaAnswers: { criteriaMet: criteriaMetAnswer } }
         : {}),
@@ -209,7 +214,9 @@ export async function evaluateCustomAutomationLaunchGate(params: {
     );
     return {
       decision: 'continue',
-      launchCriteriaOutcome: 'error',
+      ...(params.launchCriteria?.trim()
+        ? { launchCriteriaOutcome: 'error' as const }
+        : {}),
       ...(params.runWhen ? { runWhenOutcome: 'error' } : {}),
     };
   }

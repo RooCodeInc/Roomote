@@ -3113,8 +3113,8 @@ export async function deliverFastAgentParentEventWithLock(
               >,
             ) => ({
               decision:
-                result?.launchCriteriaOutcome === 'skipped' ||
-                result?.runWhenOutcome === 'skipped'
+                result?.launchCriteriaOutcome?.launchCriteria === 'skipped' ||
+                result?.launchCriteriaOutcome?.runWhen === 'skipped'
                   ? ('stop' as const)
                   : ('continue' as const),
             });
@@ -3162,22 +3162,35 @@ export async function deliverFastAgentParentEventWithLock(
                 resultKind: 'outcome',
                 dedupeKey,
                 visibility: 'private',
-                ...(launchEvent.launchCriteria?.trim()
-                  ? { launchCriteriaSnapshot: launchEvent.launchCriteria }
+                launchCriteriaSnapshot: {
+                  ...(launchEvent.launchCriteria?.trim()
+                    ? { launchCriteria: launchEvent.launchCriteria }
+                    : {}),
+                  ...(launchEvent.runWhen
+                    ? { runWhen: launchEvent.runWhen }
+                    : {}),
+                },
+                ...(evaluation.launchCriteriaAnswers ||
+                evaluation.runWhenAnswers
+                  ? {
+                      launchCriteriaAnswers: {
+                        ...(evaluation.launchCriteriaAnswers
+                          ? evaluation.launchCriteriaAnswers
+                          : {}),
+                        ...(evaluation.runWhenAnswers
+                          ? { runWhen: evaluation.runWhenAnswers }
+                          : {}),
+                      },
+                    }
                   : {}),
-                ...(evaluation.launchCriteriaAnswers
-                  ? { launchCriteriaAnswers: evaluation.launchCriteriaAnswers }
-                  : {}),
-                launchCriteriaOutcome: evaluation.launchCriteriaOutcome,
-                ...(launchEvent.runWhen
-                  ? { runWhenSnapshot: launchEvent.runWhen }
-                  : {}),
-                ...(evaluation.runWhenAnswers
-                  ? { runWhenAnswers: evaluation.runWhenAnswers }
-                  : {}),
-                ...(evaluation.runWhenOutcome
-                  ? { runWhenOutcome: evaluation.runWhenOutcome }
-                  : {}),
+                launchCriteriaOutcome: {
+                  ...(evaluation.launchCriteriaOutcome
+                    ? { launchCriteria: evaluation.launchCriteriaOutcome }
+                    : {}),
+                  ...(evaluation.runWhenOutcome
+                    ? { runWhen: evaluation.runWhenOutcome }
+                    : {}),
+                },
               });
               const saved =
                 recorded ?? (await getAutomationResultByDedupeKey(dedupeKey));

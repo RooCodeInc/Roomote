@@ -2130,7 +2130,7 @@ describe('deliverFastAgentParentEvent', () => {
     );
     expect(
       mocks.recordCustomAutomationResult.mock.calls[0]?.[0],
-    ).not.toHaveProperty('runWhenSnapshot');
+    ).not.toHaveProperty('launchCriteriaSnapshot');
   });
 
   it('evaluates and privately records launch criteria before reporting', async () => {
@@ -2172,7 +2172,7 @@ describe('deliverFastAgentParentEvent', () => {
     mocks.recordCustomAutomationResult
       .mockResolvedValueOnce({
         id: 'gate-result-1',
-        launchCriteriaOutcome: 'passed',
+        launchCriteriaOutcome: { launchCriteria: 'passed', runWhen: 'passed' },
       })
       .mockResolvedValueOnce({ id: 'report-result-1' });
     const order: string[] = [];
@@ -2234,15 +2234,12 @@ describe('deliverFastAgentParentEvent', () => {
       expect.objectContaining({
         dedupeKey: 'fast-launch-gate:automation-1:occurrence-1',
         visibility: 'private',
-        launchCriteriaSnapshot: launchCriteria,
+        launchCriteriaSnapshot: { launchCriteria, runWhen },
         launchCriteriaAnswers: {
           criteriaMet: { type: 'noul', noul: 0.95 },
+          runWhen: { regression: { type: 'noul', noul: 0.9 } },
         },
-        launchCriteriaOutcome: 'passed',
-        runWhenSnapshot: runWhen,
-        runWhenAnswers: {
-          regression: { type: 'noul', noul: 0.9 },
-        },
+        launchCriteriaOutcome: { launchCriteria: 'passed', runWhen: 'passed' },
         content: 'A new checkout regression is affecting users.',
       }),
     );
@@ -2300,7 +2297,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
     mocks.recordCustomAutomationResult.mockResolvedValueOnce({
       id: 'gate-result-1',
-      launchCriteriaOutcome: 'passed',
+      launchCriteriaOutcome: { launchCriteria: 'passed' },
     });
     mocks.createDiscordThread.mockImplementationOnce(async () => {
       order.push('root');
