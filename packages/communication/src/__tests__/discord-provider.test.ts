@@ -1331,6 +1331,42 @@ describe('chunkDiscordMessage', () => {
     ).toBe(true);
   });
 
+  it('does not add a blank line when a fenced split falls before CRLF', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`ts\r\n${'x'.repeat(29)}\r\nsecond line\r\n\`\`\``,
+      40,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+    expect(chunks[1]).toMatch(/^```ts\nx\r\nsecond line/u);
+    expect(
+      chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) === 2),
+    ).toBe(true);
+  });
+
+  it('keeps a surrogate pair intact when backing off before CRLF', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`ts\r\n${'x'.repeat(27)}🧪\r\nsecond line\r\n\`\`\``,
+      40,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+    expect(chunks[1]).toMatch(/^```ts\n🧪\r\nsecond line/u);
+    expect(
+      chunks.some((chunk) => /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u.test(chunk)),
+    ).toBe(false);
+  });
+
+  it('avoids empty continuation lines across nearby CRLF boundaries', () => {
+    const text = `\`\`\`ts\r\n${'x'.repeat(50)}\r\nsecond line\r\n\`\`\``;
+    for (let limit = 24; limit <= 60; limit += 1) {
+      const chunks = chunkDiscordMessage(text, limit);
+      expect(chunks.every((chunk) => chunk.length <= limit)).toBe(true);
+      expect(
+        chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) === 2),
+      ).toBe(true);
+      expect(chunks.some((chunk) => /^```ts\n\r\n/u.test(chunk))).toBe(false);
+    }
+  });
+
   it('does not duplicate an LF when it meets the fenced chunk boundary', () => {
     const chunks = chunkDiscordMessage(
       `\`\`\`ts\n${'x'.repeat(30)}\nsecond line\n\`\`\``,

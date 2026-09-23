@@ -374,6 +374,16 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
       }
       let take = Math.min(capacity, remaining.length);
       if (
+        open &&
+        take < remaining.length &&
+        remaining[take] === '\r' &&
+        remaining[take + 1] === '\n'
+      ) {
+        // The whole CRLF pair cannot fit in the single reserved newline
+        // slot. Move content with it to the next chunk instead.
+        take -= 1;
+      }
+      if (
         take < remaining.length &&
         /[\uD800-\uDBFF]/u.test(remaining[take - 1] ?? '') &&
         /[\uDC00-\uDFFF]/u.test(remaining[take] ?? '')
