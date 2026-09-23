@@ -4,13 +4,13 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.13.0 (2026-09-23)
 
-Roomote 1.13 adds reusable analysis environments, easier session and automation management, broader model support, and smarter tool approvals.
+Roomote 1.13 adds reusable analysis environments, generally available automation Results, easier session management, broader model support, and smarter tool approvals.
 
 ### Highlights
 
 - Provision reusable R/Bioconductor analysis environments directly from attached R requests.
 - Manage integration tools with per-tool policies, answer approval requests in supported chats, and ask Sessions to enable GitHub pull-request auto-merge.
-- Rename, stop, and archive sessions; review automation reports in the redesigned Results inbox and opt in to important delegated-task updates.
+- Results is generally available to every deployment member, and its redesigned inbox makes reports easier to review; rename, stop, and archive sessions, and opt in to important delegated-task updates.
 - Use new GPT-6, Claude Opus 5.5, and Grok 4.7 provider models, and let Roomote save useful session and task details to Memory when a judgment model is configured.
 
 ### Minor changes
@@ -26,6 +26,7 @@ Roomote 1.13 adds reusable analysis environments, easier session and automation 
 - Rename sessions from their workspace header, stop all active session tasks while keeping them resumable, or archive and restore sessions from the workspace or Sessions list; archived sessions and linked tasks stay out of ordinary lists and search.
 - Admins can opt in to Task communication triage, which keeps routine delegated-task activity quiet while surfacing blockers, changed assumptions, consequential choices, actionable milestones, or off-track work in the parent session.
 - With a judgment model configured, Roomote can automatically save durable preferences, decisions, and corrections from settled eligible session and task turns that agents did not explicitly save; successful saves appear in transcripts while private, sensitive, duplicate, and planted content is skipped.
+- Automation Results is now available to every deployment member without an Experimental opt-in, while the inbox keeps its existing result visibility and privacy rules.
 
 ### Patch changes
 
