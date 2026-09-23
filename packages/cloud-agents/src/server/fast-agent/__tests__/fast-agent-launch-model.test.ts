@@ -105,7 +105,7 @@ describe('resolveFastAgentLaunchModel', () => {
         resolve({
           claimedModel: opus.id,
           claimedReasoningEffort: 'high',
-          userMessages: ['Fix checkout.', 'Actually, use the priciest Claude.'],
+          userMessages: ['Fix checkout.', 'Actually, use the newest Opus.'],
         }),
       ).resolves.toEqual({
         model: opus.id,
@@ -115,7 +115,7 @@ describe('resolveFastAgentLaunchModel', () => {
       const { state, questions } = mockEvaluateDecisionModel.mock.calls[0]![0];
       expect(state).toEqual({
         work: 'Refactor the scheduler.',
-        latestRequest: 'Actually, use the priciest Claude.',
+        latestRequest: 'Actually, use the newest Opus.',
         earlierMessages: ['Fix checkout.'],
       });
       expect(Object.keys(questions)).toEqual(['requestedModel']);
