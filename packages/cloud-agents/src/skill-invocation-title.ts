@@ -5,7 +5,7 @@ const PACKAGED_INITIAL_SKILL_INVOCATION_SET = new Set<string>(
 );
 
 const LEADING_SKILL_INVOCATION_PATTERN = /^\s*[$/]([A-Za-z0-9._-]+)/u;
-const LEADING_TITLE_SEPARATOR_PATTERN = /^\p{P}\s*/u;
+const LEADING_TITLE_SEPARATOR_PATTERN = /^\p{P}+\s*/u;
 
 export function matchInitialSkillInvocationPrefix(
   value: string,

@@ -13,6 +13,7 @@ describe('stripRecognizedInitialSkillInvocationsForTitle', () => {
     ['/review-code: Fix the task', 'Fix the task'],
     ['$review-code, Fix the task', 'Fix the task'],
     ['$review-code) Fix the task', 'Fix the task'],
+    ['$review-code): Fix the task', 'Fix the task'],
   ])('recognizes punctuation-delimited invocations: %s', (prompt, title) => {
     expect(stripRecognizedInitialSkillInvocationsForTitle(prompt)).toBe(title);
   });
