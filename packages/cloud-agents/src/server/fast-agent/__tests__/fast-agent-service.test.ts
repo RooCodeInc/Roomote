@@ -58,6 +58,8 @@ const mocks = vi.hoisted(() => ({
   findUnresolvedRequest: vi.fn(),
   markDurableDelivered: vi.fn(),
   releaseDurableClaim: vi.fn(),
+  claimHumanFollowUpSteers: vi.fn(),
+  releaseHumanFollowUpSteerClaims: vi.fn(),
   renewDurableClaim: vi.fn(),
   revokeDurableReplay: vi.fn(),
   scheduleDurableRetry: vi.fn(),
@@ -192,6 +194,9 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   findFastAgentUnresolvedRequest: mocks.findUnresolvedRequest,
   markFastAgentDurableTurnDelivered: mocks.markDurableDelivered,
   releaseFastAgentDurableTurnClaim: mocks.releaseDurableClaim,
+  claimFastAgentHumanFollowUpSteers: mocks.claimHumanFollowUpSteers,
+  releaseFastAgentHumanFollowUpSteerClaims:
+    mocks.releaseHumanFollowUpSteerClaims,
   renewFastAgentDurableTurnClaim: mocks.renewDurableClaim,
   revokeFastAgentDurableTurnReplay: mocks.revokeDurableReplay,
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
@@ -587,6 +592,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       goal: null,
     });
     mocks.updateParentEventWhere.mockResolvedValue(undefined);
+    mocks.claimHumanFollowUpSteers.mockImplementation(
+      async (ids: string[]) => new Set(ids),
+    );
+    mocks.releaseHumanFollowUpSteerClaims.mockResolvedValue(undefined);
     mocks.nativeSteer.mockResolvedValue(undefined);
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
@@ -2758,6 +2767,156 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('records the client message id on a steered web follow-up so its queue entry can retire', async () => {
+    vi.useFakeTimers();
+    try {
+      const webFollowUp = {
+        id: '88888888-8888-4888-8888-888888888888',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'web-client-1',
+          currentMessageId: 'web-client-1',
+          userId: 'user-1',
+          question: 'Queued from the web composer.',
+          webFollowUp: true,
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([webFollowUp])
+        .mockResolvedValue([]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      // The web transcript retires a queued follow-up only when the persisted
+      // prompt carries its client id, exactly as a whole-turn delivery does.
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'conversation-1',
+          message: expect.objectContaining({
+            eventId: 'web-client-1:user',
+            turnId: 'web-client-1',
+            eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+            metadata: expect.objectContaining({
+              clientMessageId: 'web-client-1',
+              turnSource: 'human',
+              userId: 'user-1',
+              visibleInTranscript: true,
+            }),
+          }),
+        }),
+      );
+
+      finishGeneration?.('Steered web answer');
+      await expect(resultPromise).resolves.toBe('Steered web answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never persists or steers a follow-up withdrawn before the steer claims it', async () => {
+    vi.useFakeTimers();
+    try {
+      const withdrawn = {
+        id: '99999999-9999-4999-8999-999999999991',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'web-withdrawn',
+          currentMessageId: 'web-withdrawn',
+          userId: 'user-1',
+          question: 'Withdrawn before delivery.',
+          webFollowUp: true,
+        },
+      };
+      const kept = {
+        id: '99999999-9999-4999-8999-999999999992',
+        createdAt: new Date('2026-08-31T12:00:01.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'web-kept',
+          currentMessageId: 'web-kept',
+          userId: 'user-1',
+          question: 'Still wanted.',
+          webFollowUp: true,
+        },
+      };
+      // The lookup still sees both rows, but the sender withdrew the first
+      // before the steer's claim, which is the write that decides.
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([withdrawn, kept])
+        .mockResolvedValue([]);
+      mocks.claimHumanFollowUpSteers.mockImplementationOnce(
+        async () => new Set([kept.id]),
+      );
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      expect(mocks.claimHumanFollowUpSteers).toHaveBeenCalledWith([
+        withdrawn.id,
+        kept.id,
+      ]);
+      const steerText = mocks.nativeSteer.mock.calls[0]?.[0]?.text;
+      expect(steerText).toContain('Still wanted.');
+      expect(steerText).not.toContain('Withdrawn before delivery.');
+      const persistedEventIds = mocks.upsertMessage.mock.calls.map(
+        ([call]) => (call as { message: { eventId: string } }).message.eventId,
+      );
+      expect(persistedEventIds).toContain('web-kept:user');
+      expect(persistedEventIds).not.toContain('web-withdrawn:user');
+      await vi.waitFor(() =>
+        expect(mocks.inArray).toHaveBeenCalledWith('id', [kept.id]),
+      );
+      expect(mocks.inArray).not.toHaveBeenCalledWith(
+        'id',
+        expect.arrayContaining([withdrawn.id]),
+      );
+      expect(mocks.releaseHumanFollowUpSteerClaims).not.toHaveBeenCalled();
+
+      finishGeneration?.('Answered the remaining follow-up');
+      await expect(resultPromise).resolves.toBe(
+        'Answered the remaining follow-up',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('batches the pending same-user prefix into one native steer', async () => {
     vi.useFakeTimers();
     try {
@@ -3028,12 +3187,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       await vi.advanceTimersByTimeAsync(250);
       await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
-      // The rejected steer leaves the follow-up pending; the next boundary
-      // drains it again.
+      // The rejected steer hands its claim back, leaving the follow-up
+      // pending; the next boundary drains it again.
+      await vi.waitFor(() =>
+        expect(mocks.releaseHumanFollowUpSteerClaims).toHaveBeenCalledWith([
+          followUp.id,
+        ]),
+      );
       await completeAssistantBoundary?.();
       await vi.waitFor(() =>
         expect(mocks.nativeSteer).toHaveBeenCalledTimes(2),
       );
+      // The accepted retry is delivered, so its claim is not handed back.
+      expect(mocks.releaseHumanFollowUpSteerClaims).toHaveBeenCalledOnce();
 
       for (const call of mocks.nativeSteer.mock.calls) {
         expect(call[0]?.files).toEqual([]);
