@@ -95,7 +95,6 @@ import { handleReportPlatformIssue } from './report-platform-issue.js';
 import { handleManageSourceControl } from './source-control.js';
 import { getArtifactConfig, getRoomoteConfig } from './config.js';
 import { handleSaveTaskMemory } from './task-memory.js';
-import { handleGetDiffRiskHints } from './diff-risk-hints.js';
 import { handleUpdatePersonalization } from './user-personalization.js';
 import { ABOUT_ME_CONTENT } from './about-me.js';
 import { INTEGRATION_SETUP_CONTENT } from './integration-setup.js';
@@ -552,20 +551,6 @@ function shouldRegisterEnvVarRequestTool(): boolean {
  * and setup-mcps mirrors that into this flag — so agents without a Brain
  * never see a memory tool that cannot work.
  */
-/**
- * Every coding task run can screen its own diff. Pull request reviews are
- * excluded: their reviewer already receives the same hints.
- */
-function shouldRegisterDiffRiskHintsTool(): boolean {
-  const taskType = process.env.ROOMOTE_TASK_TYPE?.trim();
-
-  return (
-    Boolean(process.env.ROOMOTE_TASK_RUN_ID?.trim()) &&
-    taskType !== TaskPayloadKind.GithubPrReview &&
-    taskType !== TaskPayloadKind.GithubPrReviewSync
-  );
-}
-
 function shouldRegisterTaskMemoryTool(): boolean {
   return process.env.ROOMOTE_BRAIN_AVAILABLE === 'true';
 }
@@ -1330,28 +1315,6 @@ if (shouldRegisterOnDemandIntegrationTools()) {
         );
       }
     },
-  );
-}
-
-if (shouldRegisterDiffRiskHintsTool()) {
-  roomoteMcpServer.registerTool(
-    'get_diff_risk_hints',
-    {
-      title: 'Get Diff Risk Hints',
-      description:
-        "Before you push or open a pull request, call this once during your self-review. It runs the same fast pre-screen Roomote's pull request review uses on your branch's diff (committed, uncommitted, and new files against the default branch) and returns up to three changed hunks most likely to contain a defect, each with the kind of issue suspected. Re-read those hunks and fix what the code confirms. The hints are questions, not findings, and they miss about half of real defects, so they never clear the rest of the change. Returns a result with `available: false` when the deployment has no hosted judgment model.",
-      inputSchema: {
-        repositoryPath: z
-          .string()
-          .trim()
-          .optional()
-          .describe(
-            'Absolute path of the git checkout you changed. Defaults to the workspace root; pass it when the workspace holds several repositories.',
-          ),
-      },
-      annotations: { readOnlyHint: true },
-    },
-    async (input) => handleGetDiffRiskHints(input),
   );
 }
 

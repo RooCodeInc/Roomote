@@ -15,10 +15,6 @@ describe('githubPrReviewSync', () => {
     const workflowContent = fs.readFileSync(workflowPath, 'utf8');
 
     expect(workflowContent).not.toContain('therapistModeEnabled');
-    expect(workflowContent).toContain(
-      'const reviewPrescreenPromise = hasReviewableChanges',
-    );
-    expect(workflowContent).toContain('review_prescreen: reviewPrescreen');
   });
 
   describe('getMarkdownChecklist unit tests', () => {
