@@ -1126,6 +1126,12 @@ async function findModelSupportingInputModality(input: {
         input.allowUnknownModalityFallback &&
         unknownModalityCandidate === undefined &&
         (inputCapability !== false ||
+          generatedOpenAiCompatibleProviderIds.has(providerID)) &&
+        // The helper contract is modality input plus text output. Unknown
+        // output metadata is tolerated like unknown input metadata, but a
+        // model the catalog explicitly marks as not producing text is
+        // known-unsupported even when its input metadata is missing.
+        (model?.capabilities.output.text !== false ||
           generatedOpenAiCompatibleProviderIds.has(providerID))
       ) {
         unknownModalityCandidate = candidate;

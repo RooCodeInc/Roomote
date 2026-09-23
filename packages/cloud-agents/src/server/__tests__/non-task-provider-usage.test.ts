@@ -3028,6 +3028,52 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('rejects fallback candidates the catalog marks as not producing text', async () => {
+    // A model whose catalog entry reports audio input but no text output
+    // breaks the helper's modality-in/text-out contract; unknown-metadata
+    // fallback must not select it and must keep the unsupported-model result.
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/acme/audio-only-1',
+      OPENROUTER_API_KEY: 'test-key',
+      OPENCODE_CONFIG_CONTENT: '',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'acme/audio-only-1': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: false },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const {
+      generateTrackedNonTaskText,
+      NonTaskInputModalityUnsupportedError,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+        prompt: 'Transcribe the audio.',
+        requiredInputModality: 'audio',
+      }),
+    ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
   it('keeps a native session on its own model when it can view attached images', async () => {
     process.env = {
       ...originalEnv,
