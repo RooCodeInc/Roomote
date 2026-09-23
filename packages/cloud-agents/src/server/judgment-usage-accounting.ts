@@ -37,7 +37,7 @@ export type TrackedJudgmentResponse = JudgmentUsageResponse & {
   finish: (outcome: JudgmentRequestOutcome) => void;
 };
 
-export type NormalizedJudgmentUsage = {
+type NormalizedJudgmentUsage = {
   modelId?: string;
   inputTokens?: number;
   outputTokens?: number;
