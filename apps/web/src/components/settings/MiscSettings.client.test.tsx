@@ -50,7 +50,7 @@ describe('MiscSettings', () => {
     render(<MiscSettings />);
 
     expect(
-      screen.queryByRole('switch', { name: 'Toggle Private Sessions' }),
+      screen.queryByRole('switch', { name: 'Toggle private sessions' }),
     ).not.toBeInTheDocument();
   });
 });

@@ -34,7 +34,7 @@ vi.mock('@/components/settings/SettingsShell', () => ({
 }));
 
 vi.mock('@/components/settings/PrivateSessionsExperimentalSetting', () => ({
-  PrivateSessionsExperimentalSetting: () => <div>Private Sessions setting</div>,
+  PrivateSessionsExperimentalSetting: () => <div>Private sessions setting</div>,
 }));
 
 vi.mock(
@@ -63,7 +63,7 @@ vi.mock(
   '@/components/settings/FastSessionCommunicationJevExperimentalSetting',
   () => ({
     FastSessionCommunicationJevExperimentalSetting: () => (
-      <div>Jev Session communication setting</div>
+      <div>Real-time session/task communication setting</div>
     ),
   }),
 );
@@ -84,7 +84,7 @@ describe('ExperimentalSettingsPage', () => {
       'data-admin-only',
       'true',
     );
-    expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
+    expect(screen.getByText('Private sessions setting')).toBeInTheDocument();
     expect(
       screen.getByText('Browser notifications setting'),
     ).toBeInTheDocument();
@@ -92,7 +92,7 @@ describe('ExperimentalSettingsPage', () => {
       screen.getByText('Integration tool approvals setting'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('Jev Session communication setting'),
+      screen.getByText('Real-time session/task communication setting'),
     ).toBeInTheDocument();
   });
 

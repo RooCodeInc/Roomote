@@ -10,10 +10,10 @@ export function PrivateSessionsExperimentalSetting() {
     usePrivateSessionsExperiment();
 
   return (
-    <Section icon={Lock} title="Private Sessions">
+    <Section icon={Lock} title="Private sessions">
       <div className="flex gap-3">
         <Switch
-          aria-label="Toggle Private Sessions"
+          aria-label="Toggle private sessions"
           checked={enabled}
           disabled={isLoading || isUpdating}
           onCheckedChange={setEnabled}

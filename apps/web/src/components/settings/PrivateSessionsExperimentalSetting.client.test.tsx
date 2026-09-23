@@ -30,8 +30,9 @@ describe('PrivateSessionsExperimentalSetting', () => {
     state.enabled = true;
     render(<PrivateSessionsExperimentalSetting />);
 
+    expect(screen.getByText('Private sessions')).toBeInTheDocument();
     const toggle = screen.getByRole('switch', {
-      name: 'Toggle Private Sessions',
+      name: 'Toggle private sessions',
     });
     expect(toggle).toBeChecked();
     expect(screen.queryByText(/disabled by default/i)).not.toBeInTheDocument();
@@ -44,7 +45,7 @@ describe('PrivateSessionsExperimentalSetting', () => {
     render(<PrivateSessionsExperimentalSetting />);
 
     expect(
-      screen.getByRole('switch', { name: 'Toggle Private Sessions' }),
+      screen.getByRole('switch', { name: 'Toggle private sessions' }),
     ).toBeDisabled();
   });
 });

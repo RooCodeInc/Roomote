@@ -10,20 +10,17 @@ export function FastSessionCommunicationJevExperimentalSetting() {
     useFastSessionCommunicationJevExperiment();
 
   return (
-    <Section icon={MessagesSquare} title="Jev Session communication">
+    <Section icon={MessagesSquare} title="Real-time session/task communication">
       <div className="flex gap-3">
         <Switch
-          aria-label="Toggle Jev Session communication"
+          aria-label="Toggle real-time session/task communication"
           checked={enabled}
           disabled={isLoading || isUpdating}
           onCheckedChange={setEnabled}
         />
         <p className="text-sm text-muted-foreground">
-          Experimental deployment-wide control. Use Jev for high-confidence,
-          low-risk task reports, blocked-input detection, redundant-update
-          suppression, and evidenced completion reporting. Explicit steering,
-          permissions, cancellation, lifecycle, and destructive actions stay on
-          deterministic or regular-LLM paths.
+          Send all task activity to the parent session and let it use the
+          decision model to determine when to take action.
         </p>
       </div>
     </Section>
