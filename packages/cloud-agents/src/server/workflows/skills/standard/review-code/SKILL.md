@@ -1464,6 +1464,8 @@ Create a structured summary of findings.
 <step number="2">
 <name>Evaluate resolution correctness</name>
 <instructions>
+Hunt for candidates with every angle in `<review_angles>`, scoped to the resolved conflict hunks and the code they touch, then verify each candidate against the code before keeping it. Classify each confirmed finding with the severity checks below.
+
 For each resolved conflict, evaluate:
 
 **Hard-fail checks (HIGH severity):**

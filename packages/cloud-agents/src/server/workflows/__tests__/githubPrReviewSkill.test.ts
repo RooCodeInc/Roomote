@@ -66,7 +66,10 @@ describe('review-code GitHub workflow paths', () => {
       skillContent.match(
         /Hunt for candidates with every angle in `<review_angles>`/g,
       )?.length,
-    ).toBe(4);
+    ).toBe(5);
+    expect(readAppendix(skillContent, 'review-merge-resolution')).toContain(
+      'Hunt for candidates with every angle in `<review_angles>`, scoped to the resolved conflict hunks',
+    );
     expect(skillContent).toContain(
       'First hunt for candidates with every angle in `<review_angles>` below',
     );
