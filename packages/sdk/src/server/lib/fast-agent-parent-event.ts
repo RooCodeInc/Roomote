@@ -85,6 +85,7 @@ import {
   gateDelegatedTaskCommunication,
   isTaskCommunicationTriageEnabled,
   listUnsharedTaskUpdates,
+  markTaskCloseoutRelayed,
   wasTaskCloseoutRelayed,
   type TaskActivityDigestItem,
 } from './task-communication-triage';
@@ -3169,6 +3170,14 @@ export async function deliverFastAgentParentEventWithLock(
           : {}),
       },
     });
+    if (
+      taskCommunicationTriage &&
+      replyPosted &&
+      params.event.type === 'child_message' &&
+      params.event.purpose === 'closeout'
+    ) {
+      await markTaskCloseoutRelayed(params.event.runId);
+    }
     return 'delivered';
   } catch (error) {
     if (error instanceof FastAgentParentEventDeliveryError) {

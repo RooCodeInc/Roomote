@@ -83,6 +83,7 @@ const mocks = vi.hoisted(() => ({
   listUnsharedTaskUpdates: vi.fn(async (): Promise<string[]> => []),
   isTaskCommunicationTriageEnabled: vi.fn(async () => false),
   wasTaskCloseoutRelayed: vi.fn(async () => false),
+  markTaskCloseoutRelayed: vi.fn(async () => {}),
 }));
 
 vi.mock('./task-communication-triage', () => ({
@@ -90,6 +91,7 @@ vi.mock('./task-communication-triage', () => ({
   listUnsharedTaskUpdates: mocks.listUnsharedTaskUpdates,
   isTaskCommunicationTriageEnabled: mocks.isTaskCommunicationTriageEnabled,
   wasTaskCloseoutRelayed: mocks.wasTaskCloseoutRelayed,
+  markTaskCloseoutRelayed: mocks.markTaskCloseoutRelayed,
 }));
 
 vi.mock('./fast-agent-session-videos', () => ({
@@ -1325,6 +1327,47 @@ describe('deliverFastAgentParentEvent', () => {
       }),
     );
   });
+
+  it.each([
+    [true, 1],
+    [false, 0],
+  ] as const)(
+    'marks a triaged closeout relayed only after a reply posts (posted=%s)',
+    async (posts, marks) => {
+      mocks.gateTaskCommunication.mockResolvedValueOnce({
+        kind: 'deliver',
+        hint: { decision: 'relay', reason: 'task_result' },
+      });
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { postReply: (reply: unknown) => unknown };
+        }) => {
+          if (posts) {
+            await adapter.postReply({ purpose: 'closeout', message: 'Done.' });
+          }
+        },
+      );
+
+      await deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'child_message',
+          taskId: 'task-1',
+          runId: 42,
+          messageId: '66666666-6666-4666-8666-666666666666',
+          purpose: 'closeout',
+          message: 'The fix is in place.',
+        },
+      });
+
+      expect(mocks.markTaskCloseoutRelayed).toHaveBeenCalledTimes(marks);
+      if (marks) {
+        expect(mocks.markTaskCloseoutRelayed).toHaveBeenCalledWith(42);
+      }
+    },
+  );
 
   it('hands unshared task updates to the settle closeout', async () => {
     mocks.listUnsharedTaskUpdates.mockResolvedValueOnce([

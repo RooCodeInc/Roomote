@@ -256,6 +256,20 @@ export async function wasTaskCloseoutRelayed(runId: number): Promise<boolean> {
   );
 }
 
+/**
+ * Record that the task's own closeout reached the user. Called only after
+ * the parent turn posted a reply, so a turn that stays silent or fails keeps
+ * the settle turn required and the result still reaches the user.
+ */
+export async function markTaskCloseoutRelayed(runId: number): Promise<void> {
+  await getRedis()
+    .multi()
+    .set(closeoutRelayedKey(runId), '1', 'EX', UNSHARED_UPDATES_TTL_SECONDS)
+    .set(recentCloseoutKey(runId), '1', 'EX', RECENT_CLOSEOUT_QUIET_SECONDS)
+    .exec()
+    .catch(() => {});
+}
+
 /** Claim the per-task relay slot; false when the task relayed recently. */
 async function claimRelaySlot(runId: number, force: boolean): Promise<boolean> {
   const key = `session-task-relay:${runId}`;
@@ -395,24 +409,6 @@ export async function gateDelegatedTaskCommunication(params: {
         return { kind: 'skip' };
       }
       capture(decision);
-      if (event.type === 'child_message' && event.purpose === 'closeout') {
-        await getRedis()
-          .multi()
-          .set(
-            closeoutRelayedKey(event.runId),
-            '1',
-            'EX',
-            UNSHARED_UPDATES_TTL_SECONDS,
-          )
-          .set(
-            recentCloseoutKey(event.runId),
-            '1',
-            'EX',
-            RECENT_CLOSEOUT_QUIET_SECONDS,
-          )
-          .exec()
-          .catch(() => {});
-      }
       return { kind: 'deliver', hint: { decision, reason } };
     }
     case 'uncertain':
