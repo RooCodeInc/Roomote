@@ -47,15 +47,6 @@ vi.mock(
 );
 
 vi.mock(
-  '@/components/settings/IntegrationToolAutoApprovalsExperimentalSetting',
-  () => ({
-    IntegrationToolAutoApprovalsExperimentalSetting: () => (
-      <div>Integration tool approvals setting</div>
-    ),
-  }),
-);
-
-vi.mock(
   '@/components/settings/SessionTaskCommunicationTriageExperimentalSetting',
   () => ({
     SessionTaskCommunicationTriageExperimentalSetting: () => (
@@ -78,7 +69,7 @@ describe('ExperimentalSettingsPage', () => {
     state.isFetching = false;
   });
 
-  it('marks every experimental setting as admin-only', () => {
+  it('keeps experimental settings admin-only and hides Auto tool approvals', () => {
     render(<ExperimentalSettingsPage />);
 
     expect(screen.getByTestId('experimental-settings')).toHaveAttribute(
@@ -90,8 +81,8 @@ describe('ExperimentalSettingsPage', () => {
       screen.getByText('Browser notifications setting'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('Integration tool approvals setting'),
-    ).toBeInTheDocument();
+      screen.queryByRole('switch', { name: 'Toggle Auto tool approvals' }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByText('Task communication triage setting'),
     ).toBeInTheDocument();
