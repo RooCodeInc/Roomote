@@ -5,7 +5,8 @@ import { truncateWithEllipsis } from './truncate';
 
 const SLACK_LIVE_TASK_STREAM_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SLACK_LIVE_TASK_TITLE_MAX_LENGTH = 160;
-const LEADING_SKILL_INVOCATION_PATTERN = /^\s*[$/]([A-Za-z0-9._-]+)/u;
+const LEADING_SKILL_INVOCATION_PATTERN =
+  /^\s*[$/]([A-Za-z0-9._-]+)[,;:!?]?\s*/u;
 
 export interface SlackLiveTaskStreamData {
   /** Workspace that owns the card; every update must use this team's bot token. */
