@@ -643,6 +643,21 @@ describe('buildChatProviderMessageInstructions', () => {
     expect(discordInstructions).toContain(
       'Do not output GFM/Markdown pipe-table syntax for Discord',
     );
+    expect(discordInstructions).toContain(
+      'send it through separate `send_chat_reply` calls as multiple complete table blocks',
+    );
+    expect(discordInstructions).toContain(
+      'use `progress` for non-final chunks and `closeout` only for the final chunk',
+    );
+    expect(discordInstructions).toContain(
+      'within 2,000 characters (prefer at most 1,900)',
+    );
+    expect(discordInstructions).toContain(
+      'repeat the header and separator in every block',
+    );
+    expect(discordInstructions).toContain(
+      'Balance all triple-backtick fences in each message',
+    );
     expect(discordInstructions).toContain('<example>\n  ```\n');
     expect(discordInstructions).toContain('\n  ```\n  </example>');
     expect(teamsInstructions).not.toContain('<discord_table_formatting>');
