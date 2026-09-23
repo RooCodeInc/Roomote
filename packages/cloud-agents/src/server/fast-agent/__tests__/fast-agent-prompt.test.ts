@@ -139,14 +139,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'Complex reasoning and engineering tasks -> GPT 5.6 [id: openai/gpt-5.6] with high reasoning',
     );
     expect(prompt).toContain(
-      'Explicit user model or effort choices take precedence',
+      'Explicit user model choices take precedence over these rules',
     );
     expect(prompt).toContain(
-      'Evaluate every routing rule and use the strongest matching rule only when its condition clearly and strongly matches',
-    );
-    expect(prompt).toContain('Do not use a weak best-available match');
-    expect(prompt).toContain(
-      'If no rule is a strong match, omit both fields to use the deployment defaults',
+      'Roomote applies them itself when it launches delegated work',
     );
   });
 
@@ -782,7 +778,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'GPT-5.6 [id: openai/gpt-5.6] (deployment default)',
     );
     expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
-    expect(prompt).toContain('Omit both to use the deployment defaults');
+    expect(prompt).toContain('Roomote decides the model for delegated work');
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');

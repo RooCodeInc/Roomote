@@ -270,14 +270,8 @@ import {
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
-import {
-  resolveFastAgentLaunchModelSelection,
-  resolveFastAgentRoutingHint,
-} from './fast-agent-routing-hint';
-import {
-  describeRejectedLaunchModel,
-  verifyFastAgentLaunchModelRequest,
-} from './fast-agent-launch-model-guard';
+import { resolveFastAgentRoutingHint } from './fast-agent-routing-hint';
+import { resolveFastAgentLaunchModel } from './fast-agent-launch-model';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -3587,8 +3581,6 @@ export async function answerFastAgentQuestion({
             environments: availableEnvironments,
             routingRules:
               agentBehaviorSettings?.workspaceRoutingSettings?.rules,
-            models: taskModelOptions.models,
-            codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
           })
         : undefined;
     const [personalizationContext, availableSkills] = await Promise.all([
@@ -3884,59 +3876,16 @@ export async function answerFastAgentQuestion({
     const routingHint = userMessageResult?.initialHumanTurn
       ? await routingHintRequest
       : undefined;
-    // A delegated-task model override the agent chose on its own must trace
-    // back to a user asking for that model, or to an administrator's
-    // coding-model routing rule. The agent reads those rules from its prompt
-    // and may apply them on any turn, so a rule target is re-checked through
-    // the same routing-hint judgment the first turn uses, against the work
-    // being delegated, rather than trusted because some rule names it.
-    const rejectUnrequestedLaunchModel = async (
-      modelId: string | null | undefined,
-      work: string | undefined,
-    ): Promise<string | undefined> => {
-      if (
-        !modelId ||
-        modelId === routingHint?.model ||
-        modelId === taskModelOptions.defaultModelId
-      ) {
-        return undefined;
-      }
-      const model = taskModelOptions.models.find(
-        (candidate) => candidate.id === modelId,
-      );
-      if (!model) return undefined;
-      const userMessages = [
-        ...new Set([
-          ...threadContext
-            .filter((message) => !message.bot_id)
-            .map((message) => message.text),
-          ...[...session.compatibilityMessages, ...turnVisibleMessages]
-            .filter((message) => message.role === 'user')
-            .flatMap(extractModelMessageText),
-        ]),
-      ];
-      if (
-        taskModelOptions.codingModelRoutingRules.some(
-          (rule) => rule.modelId === modelId,
-        )
-      ) {
-        const launchRoutingHint = await resolveFastAgentRoutingHint({
-          request: work ?? userMessages.at(-1) ?? '',
-          environments: [],
-          models: taskModelOptions.models,
-          codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
-        });
-        if (launchRoutingHint?.model === modelId) return undefined;
-      }
-      const verdict = await verifyFastAgentLaunchModelRequest({
-        model,
-        userMessages,
-        userId,
-      });
-      return verdict.allowed
-        ? undefined
-        : describeRejectedLaunchModel(model, verdict.reason);
-    };
+    const collectUserMessageTexts = (): string[] => [
+      ...new Set([
+        ...threadContext
+          .filter((message) => !message.bot_id)
+          .map((message) => message.text),
+        ...[...session.compatibilityMessages, ...turnVisibleMessages]
+          .filter((message) => message.role === 'user')
+          .flatMap(extractModelMessageText),
+      ]),
+    ];
     const {
       bootstrapMessages,
       turnMessages,
@@ -5201,14 +5150,6 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
             const args = launchTaskArgsSchema.parse(call.args);
-            const {
-              model: selectedModel,
-              reasoningEffort: selectedReasoningEffort,
-            } = resolveFastAgentLaunchModelSelection({
-              explicitModel: args.model,
-              explicitReasoningEffort: args.reasoningEffort,
-              routingHint,
-            });
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
               NO_REPOSITORIES,
@@ -5265,23 +5206,26 @@ export async function answerFastAgentQuestion({
               }
             }
             if (
-              selectedModel &&
-              !taskModelOptions.models.some(
-                (model) => model.id === selectedModel,
-              )
+              args.model &&
+              !taskModelOptions.models.some((model) => model.id === args.model)
             ) {
               return {
                 success: false,
-                error: `Model "${selectedModel}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
+                error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
             }
-            const unrequestedModelError = await rejectUnrequestedLaunchModel(
-              selectedModel,
-              args.prompt,
-            );
-            if (unrequestedModelError) {
-              return { success: false, error: unrequestedModelError };
-            }
+            const launchModel = await resolveFastAgentLaunchModel({
+              claimedModel: args.model,
+              claimedReasoningEffort: args.reasoningEffort,
+              work: args.prompt,
+              userMessages: collectUserMessageTexts(),
+              models: taskModelOptions.models,
+              codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
+              defaultModelId: taskModelOptions.defaultModelId,
+              userId,
+            });
+            const selectedModel = launchModel.model;
+            const selectedReasoningEffort = launchModel.reasoningEffort;
             const reasoningModelId =
               selectedModel ?? taskModelOptions.defaultModelId;
             if (
@@ -5431,7 +5375,9 @@ export async function answerFastAgentQuestion({
                 await postTaskLink(preparedTaskLink ?? result);
               }
             }
-            return result;
+            return launchModel.modelNote
+              ? { ...result, modelNote: launchModel.modelNote }
+              : result;
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
@@ -5458,11 +5404,17 @@ export async function answerFastAgentQuestion({
                 error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
             }
-            const unrequestedReviewModelError =
-              await rejectUnrequestedLaunchModel(args.model, undefined);
-            if (unrequestedReviewModelError) {
-              return { success: false, error: unrequestedReviewModelError };
-            }
+            // Coding-model routing rules do not apply to reviews, whose
+            // default is the deployment's code-review model.
+            const reviewModel = await resolveFastAgentLaunchModel({
+              claimedModel: args.model,
+              claimedReasoningEffort: args.reasoningEffort,
+              work: `Review pull request ${repository}#${pullRequestNumber}`,
+              userMessages: collectUserMessageTexts(),
+              models: taskModelOptions.models,
+              codingModelRoutingRules: [],
+              userId,
+            });
             const signature = `review_pull_request:${repository}#${pullRequestNumber}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -5481,8 +5433,8 @@ export async function answerFastAgentQuestion({
                   repository,
                   pullRequestNumber,
                   fastConversationId: session.id,
-                  model: args.model ?? undefined,
-                  reasoningEffort: args.reasoningEffort ?? undefined,
+                  model: reviewModel.model ?? undefined,
+                  reasoningEffort: reviewModel.reasoningEffort ?? undefined,
                 },
               );
             } catch (error) {
@@ -5523,7 +5475,9 @@ export async function answerFastAgentQuestion({
               true,
             );
             visibleUpdatePosted = true;
-            return result;
+            return reviewModel.modelNote
+              ? { ...result, modelNote: reviewModel.modelNote }
+              : result;
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage: {
