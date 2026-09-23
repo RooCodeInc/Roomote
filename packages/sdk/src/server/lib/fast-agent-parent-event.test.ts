@@ -81,11 +81,13 @@ const mocks = vi.hoisted(() => ({
     > => ({ kind: 'deliver' }),
   ),
   listUnsharedTaskUpdates: vi.fn(async (): Promise<string[]> => []),
+  isTaskCommunicationTriageEnabled: vi.fn(async () => false),
 }));
 
 vi.mock('./task-communication-triage', () => ({
   gateDelegatedTaskCommunication: mocks.gateTaskCommunication,
   listUnsharedTaskUpdates: mocks.listUnsharedTaskUpdates,
+  isTaskCommunicationTriageEnabled: mocks.isTaskCommunicationTriageEnabled,
 }));
 
 vi.mock('./fast-agent-session-videos', () => ({
@@ -4536,6 +4538,33 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
     expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('tells a wakeup turn when task updates are triaged', async () => {
+    mocks.findWakeup.mockResolvedValueOnce({ status: 'active' });
+    mocks.findWakeupSession.mockResolvedValueOnce({ archivedAt: null });
+    mocks.isTaskCommunicationTriageEnabled.mockResolvedValueOnce(true);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:1',
+        wakeupId: 'wakeup-1',
+        name: 'Follow through on session tasks',
+        prompt: 'Run the Own Coding Task Follow-Through session check.',
+        runNumber: 1,
+        maxRuns: 1,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'only_when_notable',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ taskCommunicationTriageEnabled: true }),
+    );
   });
 
   it('skips a scheduled wakeup that was cancelled after its occurrence was admitted', async () => {

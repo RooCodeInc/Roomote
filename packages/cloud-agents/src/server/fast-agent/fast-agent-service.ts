@@ -1913,6 +1913,7 @@ export async function answerFastAgentQuestion({
   platformEventTimestampMs,
   automationReport = false,
   taskCommunicationTriage,
+  taskCommunicationTriageEnabled = false,
   serviceCredentialPlatformActorUserId,
   serviceCredentialPlatformDenialReason,
   defaultImageArtifactIds = [],
@@ -1965,6 +1966,8 @@ export async function answerFastAgentQuestion({
   /** Judgment-model triage of a delegated task update, when the experiment
    * routed this turn to the parent model. */
   taskCommunicationTriage?: TaskCommunicationTriageHint;
+  /** The Session's task updates go through judgment-model triage. */
+  taskCommunicationTriageEnabled?: boolean;
   /** Trusted owner actor for a delegated-task continuation, resolved server-side. */
   serviceCredentialPlatformActorUserId?: string;
   serviceCredentialPlatformDenialReason?:
@@ -3864,6 +3867,7 @@ export async function answerFastAgentQuestion({
       platformEventKind,
       automationReport,
       ...(taskCommunicationTriage ? { taskCommunicationTriage } : {}),
+      taskCommunicationTriageEnabled,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       peerDirectedTurn: resolvedPeerDirectedTurn,

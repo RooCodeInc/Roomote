@@ -301,6 +301,9 @@ function formatAvailableSkillsForPrompt(
   return lines.join('\n');
 }
 
+const TRIAGED_FOLLOW_THROUGH_REPORTING =
+  '- Task updates reach this Session separately: a judgment model already decides which task developments, milestones, blockers, and questions the user hears about. This check does not report those. With at least one task still running, post one brief factual message only when inspection shows a task is stuck and the user needs to know: it has made no progress since the previous check, is repeating the same failure, or is waiting on something it has not asked for. Also post one brief message when you sent a corrective instruction, saying what you steered and why. Never post a routine or cadence status, and do not repeat what the user was already told.';
+
 const TASK_COMMUNICATION_RELAY_REASONS: Partial<
   Record<TaskCommunicationTriageHint['reason'], string>
 > = {
@@ -346,6 +349,7 @@ export function buildFastAgentSystemPrompt({
   platformEventKind = 'delegated_task',
   automationReport = false,
   taskCommunicationTriage,
+  taskCommunicationTriageEnabled = false,
   retryTaskStartAvailable = false,
   allowSilentAmbientReply = false,
   peerDirectedTurn = false,
@@ -390,6 +394,9 @@ export function buildFastAgentSystemPrompt({
   automationReport?: boolean;
   /** Judgment-model triage of the delegated task update in this event. */
   taskCommunicationTriage?: TaskCommunicationTriageHint;
+  /** Task updates reach this Session through judgment-model triage, so the
+   * own-task check only watches for stuck work. */
+  taskCommunicationTriageEnabled?: boolean;
   retryTaskStartAvailable?: boolean;
   allowSilentAmbientReply?: boolean;
   peerDirectedTurn?: boolean;
@@ -797,7 +804,11 @@ ${emailCadenceGuidance}- Prefer one direct closeout over an acknowledgement foll
 - For a scheduled check, use the current turn's platform-generated voice marker only to decide whether its reply will be spoken. Never infer voice activity from the originating turn or choose the next wakeup delay yourself; the server resolves current persisted call state when scheduling.
 - On that session check, inspect every task currently listed in this prompt as active or resumable for this conversation: get each current summary and recent messages, then compare the evidence with the user's goals and accepted instructions in this conversation. Count a task as still running only when current evidence shows it is booting or actively executing. A task that is stopped, waiting for input, completed, failed, canceled, or merely resumable does not keep the monitor alive. Never treat an inspection failure or missing evidence as success; report a concise capability blocker when useful, do not rearm, and stop the monitor on capability loss.
 - When concrete evidence shows drift, a missed requirement, or an actionable blocker a running task can resolve within the accepted scope, use "send_task_message" to send one specific corrective instruction to that task, naming the evidence and expected correction. Before sending, verify the same correction is not already queued, accepted, recorded, addressed, or superseded. Do not steer on silence alone, invent progress or problems, expand scope, or reactivate stopped, waiting, finished, failed, or canceled work.
-- If at least one task remains running, post one brief consolidated factual status for the Session when either inspection finds a genuinely notable new development, such as an important milestone, actionable blocker, needed input, or corrective action, or the user has received no useful user-visible work update during the current automatic-check interval. Important news is immediate and has no minimum wait. Check the conversation's actual visible updates: a recent useful update suppresses only a routine cadence status, not inspection, corrective action, or the next timer. Say what remains underway or blocked based on the inspected evidence; do not narrate routine logs, invent progress, repeat an already reported development, or emit separate per-task or duplicate lifecycle notifications. Keep routine spoken updates especially concise, applying these same reporting and repetition rules rather than inventing another suppression policy. When neither reporting condition is met, call "ignore_event" after ensuring the next check. In all cases with running work, list active wakeups and ensure exactly one equivalent next one-shot check exists by creating it with the stable nominal schedule "in 10m", the same name, prompt, and reportPolicy, passing "internal": true; the server replaces that nominal delay with "in 1m" while voice is currently active and otherwise keeps "in 10m", retiring a mismatched active check. Delivery timing is best effort. If no task remains running, do not rearm; report only newly useful completion, blocker, needed input, or corrective action not already reported, otherwise call "ignore_event". This rearming exception is only for automatic own-task Session follow-through; it does not loosen the consent, finite-bound, or no-renewal rules for unrelated external-process monitoring.
+${
+  taskCommunicationTriageEnabled
+    ? TRIAGED_FOLLOW_THROUGH_REPORTING
+    : `- If at least one task remains running, post one brief consolidated factual status for the Session when either inspection finds a genuinely notable new development, such as an important milestone, actionable blocker, needed input, or corrective action, or the user has received no useful user-visible work update during the current automatic-check interval. Important news is immediate and has no minimum wait. Check the conversation's actual visible updates: a recent useful update suppresses only a routine cadence status, not inspection, corrective action, or the next timer. Say what remains underway or blocked based on the inspected evidence; do not narrate routine logs, invent progress, repeat an already reported development, or emit separate per-task or duplicate lifecycle notifications. Keep routine spoken updates especially concise, applying these same reporting and repetition rules rather than inventing another suppression policy.`
+} When neither reporting condition is met, call "ignore_event" after ensuring the next check. In all cases with running work, list active wakeups and ensure exactly one equivalent next one-shot check exists by creating it with the stable nominal schedule "in 10m", the same name, prompt, and reportPolicy, passing "internal": true; the server replaces that nominal delay with "in 1m" while voice is currently active and otherwise keeps "in 10m", retiring a mismatched active check. Delivery timing is best effort. If no task remains running, do not rearm; report only newly useful completion, blocker, needed input, or corrective action not already reported, otherwise call "ignore_event". This rearming exception is only for automatic own-task Session follow-through; it does not loosen the consent, finite-bound, or no-renewal rules for unrelated external-process monitoring.
 - Migrate only legacy automatic own-task monitors created under the prior exact-task recurring policy: on launch, cancel those active per-task monitors before ensuring the session check; when one of their wakeups fires, cancel it if still active and treat it as this session check only when no equivalent session check is already active. If an equivalent session check already exists, stay silent instead of duplicating its inspection or report. Leave every unrelated reminder or external-process monitor unchanged.
 
 ## Orchestration Policy
@@ -866,7 +877,11 @@ ${
 - Do the work the prompt asks for. Apply the same scope-based exploration and execution delegation rules as human turns.
 - \`reportPolicy\` governs whether to speak. With "always", finish with one closeout addressed to the user. With "only_when_notable", post a closeout only when there is news, a result, a blocker, or a required decision; otherwise call "ignore_event".
 - When the monitored condition has resolved or the wakeup is no longer relevant, cancel it with "manage_wakeups" (action "cancel", the event's \`wakeupId\`) and say so in the closeout. \`nextRunAt\` is null when this was the final run; a finished wakeup needs no cancel.
-- For the own-task session check above, follow its reporting and rearming rules instead: report notable new developments immediately or one factual consolidated status when there has been no useful visible work update during the current automatic-check interval; otherwise stay silent while still rearming if work runs. A check with no running work stays silent unless it found newly useful completion, blocker, input, or corrective-action news. This overrides the generic instruction to announce a resolved monitor. The session check's prompt explicitly authorizes creating its next one-shot only while running work remains.
+- For the own-task session check above, follow its reporting and rearming rules instead: ${
+        taskCommunicationTriageEnabled
+          ? 'report only a stuck task or a corrective action you took'
+          : 'report notable new developments immediately or one factual consolidated status when there has been no useful visible work update during the current automatic-check interval'
+      }; otherwise stay silent while still rearming if work runs. A check with no running work stays silent unless it found newly useful completion, blocker, input, or corrective-action news. This overrides the generic instruction to announce a resolved monitor. The session check's prompt explicitly authorizes creating its next one-shot only while running work remains.
 - Do not create another wakeup from a wakeup turn unless the prompt explicitly asks you to schedule the next check.
 `
     : ''

@@ -456,6 +456,30 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('limits the own-task check to stuck work when task updates are triaged', () => {
+    const standard = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    const triaged = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      taskCommunicationTriageEnabled: true,
+    });
+
+    expect(standard).toContain(
+      'post one brief consolidated factual status for the Session',
+    );
+    expect(triaged).not.toContain(
+      'post one brief consolidated factual status for the Session',
+    );
+    expect(triaged).toContain('Never post a routine or cadence status');
+    expect(triaged).toContain(
+      'it has made no progress since the previous check',
+    );
+    // Inspection, correction, and rearming are unchanged.
+    expect(triaged).toContain('send one specific corrective instruction');
+    expect(triaged).toContain(
+      'ensure exactly one equivalent next one-shot check exists',
+    );
+  });
+
   it('frames triaged task updates by the judgment decision', () => {
     const untriaged = buildFastAgentSystemPrompt({
       availableEnvironments: [],

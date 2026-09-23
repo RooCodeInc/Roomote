@@ -83,6 +83,7 @@ import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 import { notifyFastWebSessionAttention } from './session-attention-notification';
 import {
   gateDelegatedTaskCommunication,
+  isTaskCommunicationTriageEnabled,
   listUnsharedTaskUpdates,
   type TaskActivityDigestItem,
 } from './task-communication-triage';
@@ -2977,6 +2978,10 @@ export async function deliverFastAgentParentEventWithLock(
       params.event.type === 'scheduled_wakeup'
         ? await isFastAgentVoiceCallActive(params.parent.sessionId)
         : humanFollowUp?.voiceMode;
+    // Only the own-task check reads this; other turns see triage per event.
+    const taskCommunicationTriageEnabled =
+      params.event.type === 'scheduled_wakeup' &&
+      (await isTaskCommunicationTriageEnabled());
     await answerFastAgentQuestion({
       question:
         humanFollowUp?.question ??
@@ -3081,6 +3086,9 @@ export async function deliverFastAgentParentEventWithLock(
         params.event.type === 'task_settled' &&
         Boolean(params.event.customAutomationId),
       ...(taskCommunicationTriage ? { taskCommunicationTriage } : {}),
+      ...(taskCommunicationTriageEnabled
+        ? { taskCommunicationTriageEnabled: true }
+        : {}),
       ...(delegatedTaskActor?.userId
         ? {
             serviceCredentialPlatformActorUserId: delegatedTaskActor.userId,
