@@ -31,6 +31,7 @@ import {
   FAST_EXECUTION,
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   customAutomationRunWhenSchema,
   getAutomationTargetEmailIdentityId,
@@ -81,6 +82,12 @@ const writeSchema = z.object({
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
   runWhen: customAutomationRunWhenSchema.nullable().optional(),
+  launchCriteria: z
+    .string()
+    .trim()
+    .max(CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH)
+    .nullable()
+    .optional(),
 });
 
 const updateSchema = z.object({
@@ -104,6 +111,12 @@ const updateSchema = z.object({
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
   runWhen: customAutomationRunWhenSchema.nullable().optional(),
+  launchCriteria: z
+    .string()
+    .trim()
+    .max(CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH)
+    .nullable()
+    .optional(),
 });
 
 const UNIQUE_VIOLATION_CODE = '23505';
@@ -446,15 +459,21 @@ customAutomationsRouter.get('/:id', async (c) => {
       id: automation.id,
       name: automation.name,
       prompt: automation.prompt,
+      launchCriteria: automation.launchCriteria,
       runWhen: automation.runWhen,
     },
     conditionRuns: conditionRuns.map((run) => ({
       id: run.id,
       createdAt: run.createdAt,
-      outcome: run.runWhenOutcome,
+      outcome: run.runWhenOutcome ?? run.launchCriteriaOutcome,
       runWhen: run.runWhenSnapshot,
       answers: run.runWhenAnswers,
-      reportExcerpt: run.content.slice(0, 2_000),
+      ...(run.launchCriteriaOutcome
+        ? { findingsExcerpt: run.content.slice(0, 2_000) }
+        : { reportExcerpt: run.content.slice(0, 2_000) }),
+      launchCriteria: run.launchCriteriaSnapshot,
+      launchCriteriaOutcome: run.launchCriteriaOutcome,
+      launchCriteriaAnswers: run.launchCriteriaAnswers,
     })),
   });
 });
@@ -515,6 +534,9 @@ customAutomationsRouter.post('/', async (c) => {
       reasoningEffort: parsed.data.reasoningEffort ?? null,
       environmentId: parsed.data.environmentId,
       target: buildTarget(parsed.data, actorId(c)),
+      ...(parsed.data.launchCriteria !== undefined
+        ? { launchCriteria: parsed.data.launchCriteria }
+        : {}),
       ...(parsed.data.runWhen !== undefined
         ? { runWhen: parsed.data.runWhen }
         : {}),
@@ -659,6 +681,9 @@ customAutomationsRouter.patch('/:id', async (c) => {
               existing.createdByUserId ?? actorId(c),
             )
           : existingTarget,
+      ...(parsed.data.launchCriteria !== undefined
+        ? { launchCriteria: parsed.data.launchCriteria }
+        : {}),
       ...(parsed.data.runWhen !== undefined
         ? { runWhen: parsed.data.runWhen }
         : {}),

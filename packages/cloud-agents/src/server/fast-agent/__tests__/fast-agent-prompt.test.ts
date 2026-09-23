@@ -817,7 +817,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('runWhen');
     expect(prompt).toContain('Noul near 0.5 is uncertain, not medium');
     expect(prompt).toContain(
-      'inspect recorded run answers and tune against past runs',
+      'inspect recorded launch answers and tune against past runs',
     );
     expect(prompt).toContain('same actor-authorized remote');
     expect(prompt).toContain('local stdio servers remain sandbox-only');
@@ -2114,6 +2114,27 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('`__fast__`');
     expect(prompt).toContain('do not promise reaction-triggered launching');
     expect(prompt).not.toContain('<slack_modern_markdown>');
+  });
+
+  it('gathers evidence before the criteria gate on custom automation sessions', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'slack',
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+      automationLaunchCriteriaRequired: true,
+    });
+
+    expect(prompt).toContain(
+      'normal read-only tools available in this Session',
+    );
+    expect(prompt).toContain('evaluate_automation_launch_criteria');
+    expect(prompt).toContain('bounded raw tool results');
+    expect(prompt).toContain('A confident stop ends this run quietly');
+    expect(prompt).toContain(
+      'uncertainty or an unavailable evaluation continues by default',
+    );
   });
 
   it('treats optional reactions as non-reactable human conversation', () => {

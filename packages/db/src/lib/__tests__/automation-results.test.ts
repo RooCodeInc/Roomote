@@ -10,6 +10,7 @@ import {
   eq,
   getAutomationResultByDedupeKey,
   listCustomAutomationConditionRuns,
+  listRecentCustomAutomationResults,
   recordCustomAutomationResult,
   recordAutomationResultForTask,
   recordBackgroundAutomationResult,
@@ -284,6 +285,65 @@ describe('automation result acceptance', () => {
         runWhenAnswers: {
           new_regression: { type: 'noul', noul: 0.1 },
         },
+      }),
+    ]);
+  });
+
+  it('stores private launch findings and Jev answers outside shared results', async () => {
+    const owner = await userFactory.create();
+    userIds.push(owner.id);
+    const launchCriteria = 'Only investigate new regressions.';
+    const automation = await createCustomAutomation({
+      name: `Launch gate ${Date.now()}`,
+      prompt: 'Check current production issues.',
+      launchCriteria,
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+      createdByUserId: owner.id,
+    });
+    customAutomationIds.push(automation.id);
+
+    const saved = await recordCustomAutomationResult({
+      automationId: automation.id,
+      userId: owner.id,
+      content: 'The latest issue is a known duplicate.',
+      dedupeKey: `launch-gate:${automation.id}`,
+      visibility: 'private',
+      launchCriteriaSnapshot: launchCriteria,
+      launchCriteriaAnswers: {
+        criteriaMet: { type: 'noul', noul: 0.08 },
+      },
+      launchCriteriaOutcome: 'skipped',
+    });
+
+    expect(saved).toMatchObject({
+      resultVisibility: 'private',
+      launchCriteriaSnapshot: launchCriteria,
+      launchCriteriaAnswers: {
+        criteriaMet: { type: 'noul', noul: 0.08 },
+      },
+      launchCriteriaOutcome: 'skipped',
+      preparationStatus: 'ready',
+      headline: 'Run skipped by launch criteria',
+    });
+    await expect(
+      listCustomAutomationConditionRuns(automation.id),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: saved!.id,
+        content: 'The latest issue is a known duplicate.',
+        launchCriteriaSnapshot: launchCriteria,
+        launchCriteriaOutcome: 'skipped',
+      }),
+    ]);
+    await expect(
+      listRecentCustomAutomationResults(automation.id),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        content: 'The latest issue is a known duplicate.',
+        launchCriteriaOutcome: 'skipped',
       }),
     ]);
   });

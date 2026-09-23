@@ -25,7 +25,8 @@ import {
 } from '../../server';
 
 describe('custom automations helpers', () => {
-  it('persists, preserves, and clears runWhen during automation edits', async () => {
+  it('persists, preserves, and clears launch criteria and runWhen during edits', async () => {
+    const launchCriteria = 'Only investigate new regressions.';
     const runWhen = customAutomationRunWhenSchema.parse({
       all: [
         {
@@ -44,9 +45,11 @@ describe('custom automations helpers', () => {
       scheduleMode: 'daily',
       environmentId: FAST_EXECUTION,
       target: {},
+      launchCriteria,
       runWhen,
     });
 
+    expect(created.launchCriteria).toBe(launchCriteria);
     expect(created.runWhen).toEqual(runWhen);
 
     const preserved = await updateCustomAutomation(created.id, {
@@ -57,6 +60,7 @@ describe('custom automations helpers', () => {
       environmentId: FAST_EXECUTION,
       target: {},
     });
+    expect(preserved.launchCriteria).toBe(launchCriteria);
     expect(preserved.runWhen).toEqual(runWhen);
 
     const cleared = await updateCustomAutomation(created.id, {
@@ -66,8 +70,10 @@ describe('custom automations helpers', () => {
       scheduleMode: 'daily',
       environmentId: FAST_EXECUTION,
       target: {},
+      launchCriteria: null,
       runWhen: null,
     });
+    expect(cleared.launchCriteria).toBeNull();
     expect(cleared.runWhen).toBeNull();
 
     await deleteCustomAutomation(created.id);

@@ -676,6 +676,49 @@ describe('customAutomationsJob', () => {
     });
   });
 
+  it('defers a criteria-bearing Discord root until the session continues', async () => {
+    const launchCriteria = 'Only investigate new regressions.';
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        launchCriteria,
+        target: {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'discord-channel-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'discord',
+    ]);
+
+    await customAutomationsJob();
+
+    expect(fastMocks.createDiscordThread).not.toHaveBeenCalled();
+    expect(fastMocks.discordPostMessage).not.toHaveBeenCalled();
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild-1',
+        conversationId: expect.stringContaining(`${automation.id}:`),
+        replyTarget: { channelId: 'discord-channel-1' },
+      },
+    });
+    expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          launchCriteria,
+          targetKind: 'discord_channel',
+        }),
+      }),
+    );
+  });
+
   it('fails closed when a configured Discord channel is unavailable', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {

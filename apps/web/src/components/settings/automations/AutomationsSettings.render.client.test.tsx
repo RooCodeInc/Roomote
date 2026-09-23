@@ -684,6 +684,61 @@ it('opens the standalone custom editor without querying admin settings', () => {
   expect(state.queriedKeys).not.toContainEqual(['comms', 'status']);
 });
 
+it('saves optional launch criteria when creating a custom automation', () => {
+  render(<CustomAutomationsSection />);
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+    target: { value: 'Regression scan' },
+  });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+    target: { value: 'Check current production issues.' },
+  });
+  const launchCriteria = screen.getByRole('textbox', {
+    name: 'Launch criteria (optional)',
+  });
+  expect(launchCriteria).toHaveAttribute('maxLength', '4000');
+  fireEvent.change(launchCriteria, {
+    target: { value: 'Only investigate new production regressions.' },
+  });
+  fireEvent.click(
+    screen.getByRole('combobox', { name: 'Preferred environment' }),
+  );
+  fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+  expect(mutations.updateSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: 'Regression scan',
+      launchCriteria: 'Only investigate new production regressions.',
+    }),
+  );
+});
+
+it('prefills and updates launch criteria when editing a custom automation', async () => {
+  setRunnableCustomAutomation('Only investigate new checkout regressions.');
+  render(<AutomationsSettings />);
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Configure Daily scan' }),
+  );
+  const launchCriteria = screen.getByRole('textbox', {
+    name: 'Launch criteria (optional)',
+  });
+  expect(launchCriteria).toHaveValue(
+    'Only investigate new checkout regressions.',
+  );
+  fireEvent.change(launchCriteria, {
+    target: { value: 'Only investigate regressions affecting active users.' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  expect(mutations.updateSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: 'automation-1',
+      launchCriteria: 'Only investigate regressions affecting active users.',
+    }),
+  );
+});
+
 it('validates required custom automation fields before creating', () => {
   render(<CustomAutomationsSection />);
   fireEvent.click(screen.getByRole('button', { name: 'New' }));
@@ -794,12 +849,13 @@ function closeAutomationDialog() {
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 }
 
-function setRunnableCustomAutomation() {
+function setRunnableCustomAutomation(launchCriteria?: string) {
   state.customAutomations = [
     {
       id: 'automation-1',
       name: 'Daily scan',
       prompt: 'Find flaky tests.',
+      ...(launchCriteria !== undefined ? { launchCriteria } : {}),
       enabled: true,
       scheduleMode: 'daily',
       cronExpression: null,

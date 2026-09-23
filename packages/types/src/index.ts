@@ -38,6 +38,7 @@ export * from './memory-mcp';
 export * from './memory-events';
 export * from './custom-mcp-servers';
 export * from './custom-automation-run-when';
+export * from './custom-automation-launch-criteria';
 export * from './environment-config';
 export * from './environment-recipe';
 export * from './reserved-mcp-env-vars';

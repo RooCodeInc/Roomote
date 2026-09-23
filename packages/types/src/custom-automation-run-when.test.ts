@@ -29,7 +29,7 @@ describe('custom automation runWhen schema', () => {
       ],
     });
 
-    expect(parsed.onUncertain).toBe('skip');
+    expect(parsed.onUncertain).toBe('run');
     expect(parsed.all?.[1]).toMatchObject({
       id: 'impact',
       min: 'moderate',

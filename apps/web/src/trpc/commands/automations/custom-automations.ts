@@ -30,6 +30,7 @@ import {
 import {
   ALL_REPOSITORIES,
   AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   FAST_EXECUTION,
   NO_REPOSITORIES,
   getAutomationTargetEmailIdentityId,
@@ -72,6 +73,7 @@ export type CustomAutomationListItem = {
   executionMode: 'sandbox_task' | 'fast';
   environmentId: string | null;
   target: OptionalAutomationTarget;
+  launchCriteria?: string | null;
   lastRunAt: Date | null;
   lastSucceededAt: Date | null;
   lastFailedAt: Date | null;
@@ -125,6 +127,7 @@ export type CustomAutomationWriteInput = {
   targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram' | 'email';
   targetMode?: 'channel' | 'direct_message';
   targetChannelId?: string;
+  launchCriteria?: string | null;
   runWhen?: CustomAutomationRunWhen | null;
 };
 
@@ -162,6 +165,7 @@ function toListItem(
             ? NO_REPOSITORIES
             : row.environmentId,
     target: row.target,
+    launchCriteria: row.launchCriteria,
     lastRunAt: row.lastRunAt,
     lastSucceededAt: row.lastSucceededAt,
     lastFailedAt: row.lastFailedAt,
@@ -303,6 +307,17 @@ async function assertAutomationModelSelection(
   }
 }
 
+function assertLaunchCriteria(value?: string | null): void {
+  if (
+    value &&
+    value.trim().length > CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH
+  ) {
+    throw new Error(
+      `Launch criteria must be at most ${CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH} characters.`,
+    );
+  }
+}
+
 export async function listCustomAutomationsCommand(
   auth: UserAuthSuccess,
 ): Promise<CustomAutomationListItem[]> {
@@ -409,6 +424,8 @@ export async function createCustomAutomationCommand(
   }
   await assertAutomationModelSelection(input.model, input.reasoningEffort);
 
+  assertLaunchCriteria(input.launchCriteria);
+
   const created = await createCustomAutomation({
     name: input.name,
     prompt: input.prompt,
@@ -420,6 +437,9 @@ export async function createCustomAutomationCommand(
     reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
     target: buildTarget(input, auth.userId),
+    ...(input.launchCriteria !== undefined
+      ? { launchCriteria: input.launchCriteria }
+      : {}),
     ...(input.runWhen !== undefined ? { runWhen: input.runWhen } : {}),
     createdByUserId: auth.userId,
   });
@@ -463,6 +483,8 @@ export async function updateCustomAutomationCommand(
   }
   await assertAutomationModelSelection(input.model, input.reasoningEffort);
 
+  assertLaunchCriteria(input.launchCriteria);
+
   const updated = await updateCustomAutomation(input.id, {
     name: input.name,
     prompt: input.prompt,
@@ -474,6 +496,9 @@ export async function updateCustomAutomationCommand(
     reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
     target,
+    ...(input.launchCriteria !== undefined
+      ? { launchCriteria: input.launchCriteria }
+      : {}),
     ...(input.runWhen !== undefined ? { runWhen: input.runWhen } : {}),
   });
 

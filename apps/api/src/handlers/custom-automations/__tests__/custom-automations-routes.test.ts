@@ -8,6 +8,7 @@ import type {
 } from '@roomote/types';
 import {
   ALL_REPOSITORIES,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   FAST_EXECUTION,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
@@ -652,6 +653,7 @@ describe('custom-automations MCP routes', () => {
       id: 'automation-1',
       name: 'Nightly report',
       prompt: 'Inspect this stored prompt.',
+      launchCriteria: 'Only investigate new regressions.',
       runWhen,
       enabled: true,
       lastError: 'previous failure',
@@ -665,6 +667,11 @@ describe('custom-automations MCP routes', () => {
         runWhenAnswers: {
           new_regression: { type: 'noul', noul: 0.2 },
         },
+        launchCriteriaSnapshot: 'Only investigate new regressions.',
+        launchCriteriaAnswers: {
+          criteriaMet: { type: 'noul', noul: 0.1 },
+        },
+        launchCriteriaOutcome: 'skipped',
         content: 'No qualifying regression found.',
       },
     ]);
@@ -677,6 +684,7 @@ describe('custom-automations MCP routes', () => {
         id: 'automation-1',
         name: 'Nightly report',
         prompt: 'Inspect this stored prompt.',
+        launchCriteria: 'Only investigate new regressions.',
         runWhen,
       },
       conditionRuns: [
@@ -688,7 +696,12 @@ describe('custom-automations MCP routes', () => {
           answers: {
             new_regression: { type: 'noul', noul: 0.2 },
           },
-          reportExcerpt: 'No qualifying regression found.',
+          launchCriteria: 'Only investigate new regressions.',
+          launchCriteriaOutcome: 'skipped',
+          launchCriteriaAnswers: {
+            criteriaMet: { type: 'noul', noul: 0.1 },
+          },
+          findingsExcerpt: 'No qualifying regression found.',
         },
       ],
     });
@@ -729,6 +742,37 @@ describe('custom-automations MCP routes', () => {
       expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
         expect.objectContaining({ runWhen }),
       );
+    });
+
+    it('accepts bounded plain-language launch criteria', async () => {
+      const { app } = createApp();
+      const launchCriteria = 'Only investigate new regressions.';
+      mockCreateCustomAutomation.mockResolvedValue({
+        id: 'automation-1',
+        launchCriteria,
+      });
+
+      const res = await postCreate(app, createBody({ launchCriteria }));
+
+      expect(res.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({ launchCriteria }),
+      );
+    });
+
+    it('rejects launch criteria beyond the shared limit', async () => {
+      const { app } = createApp();
+      const res = await postCreate(
+        app,
+        createBody({
+          launchCriteria: 'x'.repeat(
+            CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH + 1,
+          ),
+        }),
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
     });
 
     it('accepts a prompt at the shared 16,000-character limit', async () => {

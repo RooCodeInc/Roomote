@@ -57,19 +57,19 @@ describe('custom automation runWhen evaluation', () => {
         regression: { type: 'noul', noul: 0.82 },
         impact: { type: 'score', score: 2.3, confidence: 0.9 },
       }),
-    ).toEqual({ outcome: 'passed', skipDelivery: false });
+    ).toEqual({ outcome: 'passed', skipRun: false });
     expect(
       evaluateCustomAutomationRunWhenAnswers(runWhen, {
         regression: { type: 'noul', noul: 0.82 },
         impact: { type: 'score', score: 1.2, confidence: 0.9 },
       }),
-    ).toEqual({ outcome: 'skipped', skipDelivery: true });
+    ).toEqual({ outcome: 'skipped', skipRun: true });
     expect(
       evaluateCustomAutomationRunWhenAnswers(runWhen, {
         regression: { type: 'noul', noul: 0.5 },
         impact: { type: 'score', score: 3, confidence: 1 },
       }),
-    ).toEqual({ outcome: 'skipped', skipDelivery: true });
+    ).toEqual({ outcome: 'uncertain', skipRun: false });
   });
 
   it('uses any as OR and combines any with all as AND', () => {
@@ -110,17 +110,17 @@ describe('custom automation runWhen evaluation', () => {
         regression: { type: 'noul', noul: 0.1 },
         impact: { type: 'score', score: 3, confidence: 1 },
       }),
-    ).toEqual({ outcome: 'passed', skipDelivery: false });
+    ).toEqual({ outcome: 'passed', skipRun: false });
     expect(
       evaluateCustomAutomationRunWhenAnswers(runWhen, {
         has_detail: { type: 'noul', noul: 0.1 },
         regression: { type: 'noul', noul: 0.9 },
         impact: { type: 'score', score: 3, confidence: 1 },
       }),
-    ).toEqual({ outcome: 'skipped', skipDelivery: true });
+    ).toEqual({ outcome: 'skipped', skipRun: true });
   });
 
-  it('lets onUncertain run reports whose judgments are ambiguous', () => {
+  it('lets onUncertain run automation occurrences whose judgments are ambiguous', () => {
     const runWhen = rule({
       all: [
         {
@@ -138,10 +138,10 @@ describe('custom automation runWhen evaluation', () => {
       evaluateCustomAutomationRunWhenAnswers(runWhen, {
         regression: { type: 'noul', noul: 0.5 },
       }),
-    ).toEqual({ outcome: 'uncertain', skipDelivery: false });
+    ).toEqual({ outcome: 'uncertain', skipRun: false });
   });
 
-  it('preserves existing delivery when no high-volume judgment model is available', async () => {
+  it('continues the run when no high-volume judgment model is available', async () => {
     mocks.evaluateDecisionModel.mockResolvedValue(null);
     const runWhen = rule({
       all: [
@@ -158,12 +158,12 @@ describe('custom automation runWhen evaluation', () => {
     await expect(
       evaluateCustomAutomationRunWhen({
         runWhen,
-        report: 'No issues found.',
+        state: { report: 'No issues found.' },
         userId: 'user-1',
       }),
     ).resolves.toEqual({
       outcome: 'unavailable',
-      skipDelivery: false,
+      skipRun: false,
       answers: null,
     });
     expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
@@ -175,7 +175,7 @@ describe('custom automation runWhen evaluation', () => {
     );
   });
 
-  it('preserves delivery when model evaluation fails', async () => {
+  it('continues the run when model evaluation fails', async () => {
     mocks.evaluateDecisionModel.mockRejectedValue(new Error('timeout'));
     const runWhen = rule({
       all: [
@@ -190,7 +190,10 @@ describe('custom automation runWhen evaluation', () => {
     });
 
     await expect(
-      evaluateCustomAutomationRunWhen({ runWhen, report: 'No issues found.' }),
-    ).resolves.toMatchObject({ outcome: 'error', skipDelivery: false });
+      evaluateCustomAutomationRunWhen({
+        runWhen,
+        state: { report: 'No issues found.' },
+      }),
+    ).resolves.toMatchObject({ outcome: 'error', skipRun: false });
   });
 });

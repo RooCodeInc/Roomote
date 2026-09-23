@@ -122,6 +122,7 @@ const nativeToolNames = vi.hoisted(
       ensureEnvironment: 'ensure_environment',
       reportPlatformIssue: 'report_platform_issue',
       findIntegrationTools: 'find_integration_tools',
+      evaluateAutomationLaunchCriteria: 'evaluate_automation_launch_criteria',
       ignoreEvent: 'ignore_event',
       inspectImages: 'inspect_images',
       launchTask: 'launch_task',
@@ -6889,6 +6890,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ]),
       {
         addRemoteMcpEnabled: true,
+        automationLaunchCriteriaEnabled: false,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,
@@ -11215,6 +11217,153 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       }),
     );
+  });
+
+  it('allows read-only integration evidence, then creates the root and permits work after continue', async () => {
+    const order: string[] = [];
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => {
+      order.push('launch');
+      return {
+        success: true,
+        taskId: 'task-after-gate',
+        kickoffDelivered: true,
+      };
+    });
+    const evaluateAutomationLaunchCriteria = vi.fn(
+      async ({ rawToolResults }) => {
+        order.push('evaluate');
+        expect(rawToolResults).toEqual([
+          expect.objectContaining({
+            integrationId: 'sentry',
+            toolName: 'search_issues',
+            result: expect.stringContaining('current regression'),
+          }),
+        ]);
+        return { decision: 'continue' as const };
+      },
+    );
+    const prepareAutomationLaunch = vi.fn(async () => {
+      order.push('root');
+    });
+    const adapter = callbacks({
+      launchTask,
+      evaluateAutomationLaunchCriteria,
+      prepareAutomationLaunch,
+      postReply: vi.fn(async (reply) => {
+        if (reply.purpose === 'closeout') order.push('reply');
+      }),
+    });
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'sentry',
+        name: 'Sentry',
+        description: 'Read Sentry issues.',
+        tools: [{ name: 'search_issues' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({
+      issue: 'current regression in checkout',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Do not send before the decision.',
+          }),
+        ).resolves.toMatchObject({ success: false });
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Do not start before the decision.',
+          }),
+        ).resolves.toMatchObject({ success: false });
+        await invokeMcpTool('sentry', 'search_issues', {});
+        await expect(
+          invokeTool(nativeToolNames.evaluateAutomationLaunchCriteria, {
+            findingsReport: 'Sentry shows a new checkout regression.',
+          }),
+        ).resolves.toMatchObject({ success: true, decision: 'continue' });
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Investigate the checkout regression.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The investigation has started.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+      automationLaunchCriteriaRequired: true,
+    });
+
+    expect(evaluateAutomationLaunchCriteria).toHaveBeenCalledOnce();
+    expect(prepareAutomationLaunch).toHaveBeenCalledOnce();
+    expect(launchTask).toHaveBeenCalledOnce();
+    expect(order.indexOf('evaluate')).toBeLessThan(order.indexOf('root'));
+    expect(order.indexOf('root')).toBeLessThan(order.indexOf('launch'));
+    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.any(Array),
+      expect.objectContaining({ automationLaunchCriteriaEnabled: true }),
+    );
+  });
+
+  it('settles a confident gate stop quietly without creating a root or launching a task', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const prepareAutomationLaunch = vi.fn();
+    const adapter = callbacks({
+      launchTask,
+      prepareAutomationLaunch,
+      evaluateAutomationLaunchCriteria: vi.fn(async () => ({
+        decision: 'stop' as const,
+      })),
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'This must stay private to the session.',
+          }),
+        ).resolves.toMatchObject({ success: false });
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'This must not launch.',
+          }),
+        ).resolves.toMatchObject({ success: false });
+        await expect(
+          invokeTool(nativeToolNames.evaluateAutomationLaunchCriteria, {
+            findingsReport: 'No current regression was found.',
+          }),
+        ).resolves.toMatchObject({ success: true, decision: 'stop' });
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'required',
+        automationLaunchCriteriaRequired: true,
+      }),
+    ).resolves.toBe('');
+
+    expect(launchTask).not.toHaveBeenCalled();
+    expect(adapter.postReply).not.toHaveBeenCalled();
+    expect(prepareAutomationLaunch).not.toHaveBeenCalled();
+    expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
   });
 
   it('keeps an automation clarification eligible after delegated work starts', async () => {

@@ -114,7 +114,7 @@ export const customAutomationRunWhenSchema = z
       .min(1)
       .max(CUSTOM_AUTOMATION_RUN_WHEN_MAX_CONDITIONS)
       .optional(),
-    onUncertain: z.enum(['skip', 'run']).default('skip'),
+    onUncertain: z.enum(['skip', 'run']).default('run'),
   })
   .strict()
   .superRefine((runWhen, context) => {

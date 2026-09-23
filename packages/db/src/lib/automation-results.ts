@@ -4,11 +4,13 @@ import {
   type AutomationResultPriority,
   type AutomationResultKind,
   type AutomationResultVisibility,
+  type CustomAutomationLaunchCriteriaAnswer,
+  type CustomAutomationLaunchCriteriaOutcome,
   type CustomAutomationRunWhen,
   type CustomAutomationRunWhenJudgmentAnswer,
   type CustomAutomationRunWhenOutcome,
 } from '@roomote/types';
-import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, or } from 'drizzle-orm';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import {
@@ -301,6 +303,11 @@ async function recordCustomAutomationResultWithClient(
     dedupeKey: string;
     priority?: AutomationResultPriority;
     visibility: AutomationResultVisibility;
+    launchCriteriaSnapshot?: string;
+    launchCriteriaAnswers?: {
+      criteriaMet?: CustomAutomationLaunchCriteriaAnswer;
+    };
+    launchCriteriaOutcome?: CustomAutomationLaunchCriteriaOutcome;
     runWhenSnapshot?: CustomAutomationRunWhen;
     runWhenAnswers?: Record<string, CustomAutomationRunWhenJudgmentAnswer>;
     runWhenOutcome?: CustomAutomationRunWhenOutcome;
@@ -328,7 +335,9 @@ async function recordCustomAutomationResultWithClient(
   });
   if (!automation) return null;
   const fallback = fallbackResultCopy(params.content, automation.name);
-  const conditionSkipped = params.runWhenOutcome === 'skipped';
+  const conditionSkipped =
+    params.runWhenOutcome === 'skipped' ||
+    params.launchCriteriaOutcome === 'skipped';
   const preparedAt = conditionSkipped ? new Date() : null;
 
   const [result] = await client
@@ -347,6 +356,9 @@ async function recordCustomAutomationResultWithClient(
       resultVisibility: params.visibility,
       automationName: automation.name,
       content: params.content,
+      launchCriteriaSnapshot: params.launchCriteriaSnapshot ?? null,
+      launchCriteriaAnswers: params.launchCriteriaAnswers ?? null,
+      launchCriteriaOutcome: params.launchCriteriaOutcome ?? null,
       runWhenSnapshot: params.runWhenSnapshot ?? null,
       runWhenAnswers: params.runWhenAnswers ?? null,
       runWhenOutcome: params.runWhenOutcome ?? null,
@@ -354,9 +366,18 @@ async function recordCustomAutomationResultWithClient(
       ...fallback,
       ...(conditionSkipped
         ? {
-            headline: 'Report skipped by run condition',
+            headline:
+              params.launchCriteriaOutcome === 'skipped'
+                ? params.launchCriteriaSnapshot
+                  ? 'Run skipped by launch criteria'
+                  : 'Run skipped by saved conditions'
+                : 'Report skipped by run condition',
             decisionContext:
-              'This report was not posted because its saved run conditions did not pass. Inspect the automation to review the questions and raw answers.',
+              params.launchCriteriaOutcome === 'skipped'
+                ? params.launchCriteriaSnapshot
+                  ? 'The automation work did not start because its saved launch criteria did not pass. Inspect the automation to review the findings and raw answers.'
+                  : 'The automation work did not start because its saved typed conditions did not pass. Inspect the automation to review the questions and raw answers.'
+                : 'This report was not posted because its saved run conditions did not pass. Inspect the automation to review the questions and raw answers.',
             preparationStatus: 'ready' as const,
             preparedAt,
           }
@@ -394,18 +415,48 @@ export async function listCustomAutomationConditionRuns(
   return client.query.automationResults.findMany({
     where: and(
       eq(automationResults.customAutomationId, automationId),
-      isNotNull(automationResults.runWhenSnapshot),
+      or(
+        isNotNull(automationResults.runWhenSnapshot),
+        isNotNull(automationResults.launchCriteriaSnapshot),
+      ),
     ),
     columns: {
       id: true,
       content: true,
       createdAt: true,
+      launchCriteriaSnapshot: true,
+      launchCriteriaAnswers: true,
+      launchCriteriaOutcome: true,
       runWhenSnapshot: true,
       runWhenAnswers: true,
       runWhenOutcome: true,
     },
     orderBy: [desc(automationResults.createdAt)],
     limit: Math.min(Math.max(Math.trunc(limit) || 1, 1), 20),
+  });
+}
+
+/** Recent private/shared custom automation results supplied to its launch gate. */
+export async function listRecentCustomAutomationResults(
+  automationId: string,
+  limit = 5,
+  client: DatabaseOrTransaction = db,
+) {
+  return client.query.automationResults.findMany({
+    where: and(
+      eq(automationResults.customAutomationId, automationId),
+      eq(automationResults.resultKind, 'outcome'),
+      isNull(automationResults.supersededAt),
+      isNull(automationResults.ignoredAt),
+    ),
+    columns: {
+      content: true,
+      createdAt: true,
+      launchCriteriaOutcome: true,
+      runWhenOutcome: true,
+    },
+    orderBy: [desc(automationResults.createdAt)],
+    limit: Math.min(Math.max(Math.trunc(limit) || 1, 1), 10),
   });
 }
 
@@ -473,6 +524,11 @@ export async function recordCustomAutomationResult(
     dedupeKey: string;
     priority?: AutomationResultPriority;
     visibility: AutomationResultVisibility;
+    launchCriteriaSnapshot?: string;
+    launchCriteriaAnswers?: {
+      criteriaMet?: CustomAutomationLaunchCriteriaAnswer;
+    };
+    launchCriteriaOutcome?: CustomAutomationLaunchCriteriaOutcome;
     runWhenSnapshot?: CustomAutomationRunWhen;
     runWhenAnswers?: Record<string, CustomAutomationRunWhenJudgmentAnswer>;
     runWhenOutcome?: CustomAutomationRunWhenOutcome;

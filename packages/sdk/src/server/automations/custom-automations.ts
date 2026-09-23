@@ -288,11 +288,13 @@ async function buildFastAutomationConversation(params: {
   eventId: string;
   destination: CustomAutomationDestination | null;
   target: AutomationTarget | null;
+  deferDestinationRoots?: boolean;
 }): Promise<{
   conversation: FastAgentConversation;
   rootMessageId?: string;
 }> {
   const { automation, destination, eventId, target } = params;
+  const deferDestinationRoots = params.deferDestinationRoots === true;
   if (!destination) {
     return { conversation: buildAutomationConversation(automation, eventId) };
   }
@@ -357,6 +359,16 @@ async function buildFastAutomationConversation(params: {
       throw new Error('Discord is not connected.');
     }
     if (target?.targetKind === 'discord_user') {
+      if (deferDestinationRoots) {
+        return {
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'dm',
+            conversationId: eventId,
+            replyTarget: { channelId: destination.channelId },
+          },
+        };
+      }
       const posted = await provider.postMessage({
         channelId: destination.channelId,
         text: `${automation.name} is running.`,
@@ -383,6 +395,16 @@ async function buildFastAutomationConversation(params: {
     });
     if (!channel?.installation.isActive) {
       throw new Error('Discord destination is no longer available.');
+    }
+    if (deferDestinationRoots) {
+      return {
+        conversation: {
+          surface: 'discord',
+          workspaceId: channel.installation.guildId,
+          conversationId: eventId,
+          replyTarget: { channelId: destination.channelId },
+        },
+      };
     }
     const thread = await provider.createTaskThread({
       channelId: destination.channelId,
@@ -412,6 +434,19 @@ async function buildFastAutomationConversation(params: {
     if (!provider) {
       throw new Error('Teams is not connected.');
     }
+    if (deferDestinationRoots) {
+      return {
+        conversation: {
+          surface: 'teams',
+          workspaceId: destination.teamId,
+          conversationId: eventId,
+          replyTarget: {
+            channelId: destination.channelId,
+            serviceUrl: destination.serviceUrl,
+          },
+        },
+      };
+    }
     const posted = await provider.postMessage({
       channelId: destination.channelId,
       serviceUrl: destination.serviceUrl,
@@ -439,6 +474,16 @@ async function buildFastAutomationConversation(params: {
       await createTelegramCommunicationProviderFromRuntimeCredentials();
     if (!provider) {
       throw new Error('Telegram is not connected.');
+    }
+    if (deferDestinationRoots) {
+      return {
+        conversation: {
+          surface: 'telegram',
+          workspaceId: destination.channelId,
+          conversationId: eventId,
+          replyTarget: { channelId: destination.channelId },
+        },
+      };
     }
     const managedThreadId =
       target?.targetKind === 'telegram_user'
@@ -484,14 +529,19 @@ async function runFastCustomAutomation(params: {
     throw new Error('Fast automation run-as user is not configured.');
   }
   const eventId = `${params.automation.id}:${params.eventClaimedAt.toISOString()}`;
+  const target = isConfiguredAutomationTarget(params.automation.target)
+    ? params.automation.target
+    : null;
+  const launchCriteriaRequired = Boolean(
+    params.automation.launchCriteria?.trim() || params.automation.runWhen,
+  );
   const { conversation, rootMessageId } = await buildFastAutomationConversation(
     {
       automation: params.automation,
       eventId,
       destination: params.destination,
-      target: isConfiguredAutomationTarget(params.automation.target)
-        ? params.automation.target
-        : null,
+      target,
+      deferDestinationRoots: launchCriteriaRequired,
     },
   );
   try {
@@ -515,6 +565,15 @@ async function runFastCustomAutomation(params: {
       automationName: params.automation.name,
       launchClaimedAt: params.launchClaimedAt.toISOString(),
       prompt: params.automation.prompt,
+      ...(params.automation.launchCriteria?.trim()
+        ? { launchCriteria: params.automation.launchCriteria }
+        : {}),
+      ...(params.automation.runWhen
+        ? { runWhen: params.automation.runWhen }
+        : {}),
+      ...(launchCriteriaRequired && target
+        ? { targetKind: target.targetKind }
+        : {}),
       trigger: params.trigger,
       ...(params.preferredEnvironmentId
         ? { preferredEnvironmentId: params.preferredEnvironmentId }

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { FAST_EXECUTION, NO_REPOSITORIES } from './constants';
-import { CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH } from './background-agents';
+import {
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+} from './background-agents';
 import {
   MANAGE_CUSTOM_AUTOMATIONS_ACTIONS,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
@@ -35,6 +38,32 @@ describe('manage custom automations tool contract', () => {
       manageCustomAutomationsInputSchema.safeParse({
         ...input,
         prompt: `${input.prompt}x`,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('bounds optional launch criteria', () => {
+    const base = {
+      action: 'create' as const,
+      name: 'Evidence-based run',
+      prompt: 'Review the latest issues.',
+      schedule: 'daily',
+      environmentId: 'environment-1',
+    };
+    expect(
+      manageCustomAutomationsInputSchema.safeParse({
+        ...base,
+        launchCriteria: 'x'.repeat(
+          CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
+        ),
+      }).success,
+    ).toBe(true);
+    expect(
+      manageCustomAutomationsInputSchema.safeParse({
+        ...base,
+        launchCriteria: 'x'.repeat(
+          CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH + 1,
+        ),
       }).success,
     ).toBe(false);
   });
@@ -93,12 +122,19 @@ describe('manage custom automations tool contract', () => {
     ).toContain('all means every condition must pass; any means at least one');
     expect(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.runWhen.description,
-    ).toContain('Example — a quiet Sentry report');
+    ).toContain('Example — a quiet Sentry run');
     expect(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.runWhen.description,
-    ).toContain('Example — a digest posts if either check is satisfied');
+    ).toContain(
+      'Example — a digest continues if either launch check is satisfied',
+    );
+    expect(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.launchCriteria.description,
+    ).toContain(
+      'Unavailable judgments and uncertain plain-language criteria continue',
+    );
     expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
-      'inspect shows recent run evaluations',
+      'Inspect shows recent decisions',
     );
   });
 
@@ -194,6 +230,7 @@ describe('manage custom automations tool contract', () => {
           id: 'automation-1',
           name: 'Daily report',
           prompt: 'Inspect this stored prompt.',
+          launchCriteria: 'Only investigate new regressions.',
           runWhen,
           enabled: true,
           scheduleMode: 'daily',
@@ -215,6 +252,7 @@ describe('manage custom automations tool contract', () => {
         id: 'automation-1',
         name: 'Daily report',
         prompt: 'Inspect this stored prompt.',
+        launchCriteria: 'Only investigate new regressions.',
         runWhen,
       },
       conditionRuns: [
@@ -263,21 +301,32 @@ describe('manage custom automations tool contract', () => {
         prompt: 'Check for new issues.',
         schedule: 'daily',
         environmentId: 'environment-1',
+        launchCriteria: 'Only investigate new regressions.',
         runWhen,
       }),
     ).toMatchObject({
       ok: true,
-      request: { method: 'POST', body: { runWhen } },
+      request: {
+        method: 'POST',
+        body: {
+          runWhen,
+          launchCriteria: 'Only investigate new regressions.',
+        },
+      },
     });
     expect(
       buildManageCustomAutomationsRequest({
         action: 'update',
         automationId: 'automation-1',
+        launchCriteria: null,
         runWhen: null,
       }),
     ).toMatchObject({
       ok: true,
-      request: { method: 'PATCH', body: { runWhen: null } },
+      request: {
+        method: 'PATCH',
+        body: { launchCriteria: null, runWhen: null },
+      },
     });
   });
 
