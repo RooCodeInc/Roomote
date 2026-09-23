@@ -101,6 +101,7 @@ import {
   LLM_TITLE_LOCKED_CHECKPOINT,
 } from './llm-task-title';
 import { resolveRequestedWorkKindDecision } from './requested-work-kind';
+import { withAutomationScanReplyPolicy } from './automation-scan-chat-policy';
 
 enum TaskRunQueueKeys {
   // Keep the v2 layout during the debounce rollout. Old and new producers and
@@ -1371,7 +1372,7 @@ export async function enqueueTask(
   }
 
   return enqueueFreshLaunch(
-    input as FreshTaskLaunch,
+    withAutomationScanReplyPolicy(input as FreshTaskLaunch),
     options,
     chatInitiationOrder,
   );

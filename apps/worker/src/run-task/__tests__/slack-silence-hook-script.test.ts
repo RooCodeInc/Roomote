@@ -353,12 +353,12 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
   });
 
   it.each(['ack', 'progress'])(
-    'rejects %s replies from silent automation tasks',
+    'rejects %s replies when channel-only suppression is enabled',
     (purpose) => {
       const stateFilePath = writeState({
         startedAtMs: Date.now(),
         currentTurnRequiresInitialAck: false,
-        requiresTerminalCloseoutWithoutTurn: true,
+        suppressNonTerminalRepliesWithoutTurn: true,
       });
 
       const result = runHook({
@@ -390,7 +390,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
       const stateFilePath = writeState({
         startedAtMs: Date.now(),
         currentTurnRequiresInitialAck: false,
-        requiresTerminalCloseoutWithoutTurn: true,
+        suppressNonTerminalRepliesWithoutTurn: true,
       });
 
       const result = runHook({
@@ -415,7 +415,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     const stateFilePath = writeState({
       startedAtMs: Date.now(),
       currentTurnRequiresInitialAck: false,
-      requiresTerminalCloseoutWithoutTurn: true,
+      suppressNonTerminalRepliesWithoutTurn: true,
     });
 
     const result = runHook({
@@ -446,7 +446,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     const stateFilePath = writeState({
       startedAtMs: Date.now(),
       currentTurnRequiresInitialAck: false,
-      requiresTerminalCloseoutWithoutTurn: true,
+      suppressNonTerminalRepliesWithoutTurn: true,
     });
 
     const result = runHook({
@@ -454,6 +454,28 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
         hook_event_name: 'PreToolUse',
         tool_name: 'roomote_send_chat_reply',
         tool_args: { purpose: 'clarification' },
+      },
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('does not infer reply suppression from a terminal-closeout requirement', () => {
+    const stateFilePath = writeState({
+      startedAtMs: Date.now(),
+      currentTurnRequiresInitialAck: false,
+      requiresTerminalCloseoutWithoutTurn: true,
+    });
+
+    const result = runHook({
+      input: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'roomote_send_chat_reply',
+        tool_args: { purpose: 'progress' },
       },
       env: {
         ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,

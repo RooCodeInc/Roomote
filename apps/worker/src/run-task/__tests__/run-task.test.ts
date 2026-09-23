@@ -1322,16 +1322,27 @@ describe('runTask', () => {
 
   it.each([
     {
+      suggestionSource: 'suggest_ideas',
+      suppressNonTerminalRepliesWithoutTurn: true,
+      requiresTerminalCloseoutWithoutTurn: true,
+    },
+    {
       suggestionSource: 'codeql_triage',
+      suppressNonTerminalRepliesWithoutTurn: true,
       requiresTerminalCloseoutWithoutTurn: false,
     },
     {
       suggestionSource: 'suggest_ideas',
-      requiresTerminalCloseoutWithoutTurn: true,
+      suppressNonTerminalRepliesWithoutTurn: false,
+      requiresTerminalCloseoutWithoutTurn: false,
     },
   ])(
-    'initializes scheduled $suggestionSource scans with the expected closeout policy',
-    async ({ suggestionSource, requiresTerminalCloseoutWithoutTurn }) => {
+    'copies explicit reply policies for $suggestionSource scans',
+    async ({
+      suggestionSource,
+      suppressNonTerminalRepliesWithoutTurn,
+      requiresTerminalCloseoutWithoutTurn,
+    }) => {
       const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(456_000);
 
       try {
@@ -1346,6 +1357,12 @@ describe('runTask', () => {
               slackChannel: 'C123',
               channel: 'C123',
               suggestionSource,
+              ...(suppressNonTerminalRepliesWithoutTurn
+                ? { suppressNonTerminalRepliesWithoutTurn: true }
+                : {}),
+              ...(requiresTerminalCloseoutWithoutTurn
+                ? { requiresTerminalCloseoutWithoutTurn: true }
+                : {}),
             },
             result: null,
           } as never,
@@ -1383,6 +1400,9 @@ describe('runTask', () => {
         JSON.stringify({
           startedAtMs: 456_000,
           currentTurnRequiresInitialAck: false,
+          ...(suppressNonTerminalRepliesWithoutTurn
+            ? { suppressNonTerminalRepliesWithoutTurn: true }
+            : {}),
           ...(requiresTerminalCloseoutWithoutTurn
             ? { requiresTerminalCloseoutWithoutTurn: true }
             : {}),

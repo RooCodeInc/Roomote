@@ -1489,6 +1489,16 @@ const standardTaskBootstrapSchema = z
 const delegatedTaskPayloadSchema = sharedTaskPayloadSchema.extend({
   description: z.string().optional(),
   /**
+   * When true, suppress nonterminal chat replies for a channel-only task that
+   * has no inbound turn. This does not require the task to send a reply.
+   */
+  suppressNonTerminalRepliesWithoutTurn: z.boolean().optional(),
+  /**
+   * When true, require a terminal closeout when this task has no inbound turn.
+   * This is independent from suppressNonTerminalRepliesWithoutTurn.
+   */
+  requiresTerminalCloseoutWithoutTurn: z.boolean().optional(),
+  /**
    * Optional agent-facing prompt override. When set, the workflow builds the
    * task prompt from this text (e.g. channel auto-start instructions prepended
    * to the message) while `description` stays the user-visible task text.

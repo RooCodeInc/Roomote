@@ -20,10 +20,11 @@ export type ChatReplyPurpose =
 
 interface ChatReplySatisfactionState {
   startedAtMs?: number;
+  /** Blocks nonterminal chat replies for channel-only launches when enabled. */
+  suppressNonTerminalRepliesWithoutTurn?: boolean;
   /**
-   * Set at launch for channel-only automation tasks that have no inbound chat
-   * turn but require a terminal report. The Stop hook blocks silent
-   * completion, and the silence hook stamps post-closeout work.
+   * Set at launch when a channel-only task with no inbound turn must deliver a
+   * terminal closeout. Independent from suppressNonTerminalRepliesWithoutTurn.
    */
   requiresTerminalCloseoutWithoutTurn?: boolean;
   parentThreadId?: string;
