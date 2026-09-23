@@ -8,6 +8,7 @@ const {
   mockAutoState,
   mockShadow,
   mockLatestUserRequest,
+  mockLatestFastUserRequest,
 } = vi.hoisted(() => ({
   mockExperiment: vi.fn(async () => true),
   mockDeployment: vi.fn(async () => [] as unknown[]),
@@ -18,6 +19,7 @@ const {
   mockAutoState: vi.fn(async () => ({ mode: 'off' }) as unknown),
   mockShadow: vi.fn(),
   mockLatestUserRequest: vi.fn(async () => 'Look up the open invoices.'),
+  mockLatestFastUserRequest: vi.fn(async () => 'What is open for ENG?'),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -30,6 +32,7 @@ vi.mock('@roomote/db/server', () => ({
   claimTaskIntegrationToolCall: mockClaim,
   fingerprintIntegrationToolCall: (input: unknown) => JSON.stringify(input),
   findLatestTaskUserRequest: mockLatestUserRequest,
+  findLatestFastConversationUserRequest: mockLatestFastUserRequest,
 }));
 vi.mock(
   '@roomote/cloud-agents/server/integration-tool-auto-evaluation',
@@ -43,6 +46,7 @@ import {
   claimProxyTaskToolCall,
   resolveProxyToolApprovalBlock,
   resolveProxyToolApprovalBlocks,
+  readFastConversationIdHeader,
   shadowProxyToolCall,
 } from '../tool-approval-enforcement';
 
@@ -293,6 +297,56 @@ describe('resolveProxyToolApprovalBlocks', () => {
       { resolveUserRequest?: unknown },
     ];
     expect(sessionCall.resolveUserRequest).toBeUndefined();
+  });
+
+  it("assesses a Session's call against the caller's latest prompt in its Fast conversation", async () => {
+    mockAutoState.mockResolvedValue({ mode: 'shadow' });
+    const approvals = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      tokenType: 'auth',
+      resolveActingUserId: async () => 'user-1',
+    });
+    const conversationId = '0b9c1c52-5f55-4d3e-9c1f-3f1e2c4b8a11';
+    shadowProxyToolCall(approvals, {
+      integrationId: 'linear',
+      toolName: 'list_issues',
+      args: {},
+      userId: 'user-1',
+      taskId: null,
+      fastConversationId: conversationId,
+    });
+    const [sessionCall] = mockShadow.mock.calls.at(-1) as [
+      {
+        fastConversationId?: unknown;
+        resolveUserRequest?: () => Promise<string | undefined>;
+      },
+    ];
+    expect(sessionCall).not.toHaveProperty('fastConversationId');
+    expect(mockLatestFastUserRequest).not.toHaveBeenCalled();
+    await expect(sessionCall.resolveUserRequest?.()).resolves.toBe(
+      'What is open for ENG?',
+    );
+    expect(mockLatestFastUserRequest).toHaveBeenCalledWith({
+      conversationId,
+      userId: 'user-1',
+    });
+  });
+});
+
+describe('readFastConversationIdHeader', () => {
+  it('reads only a well-formed conversation id', () => {
+    const conversationId = '0b9c1c52-5f55-4d3e-9c1f-3f1e2c4b8a11';
+    expect(
+      readFastConversationIdHeader(
+        new Headers({ 'x-roomote-fast-conversation-id': conversationId }),
+      ),
+    ).toBe(conversationId);
+    expect(
+      readFastConversationIdHeader(
+        new Headers({ 'x-roomote-fast-conversation-id': 'not-a-uuid' }),
+      ),
+    ).toBeNull();
+    expect(readFastConversationIdHeader(new Headers())).toBeNull();
   });
 });
 

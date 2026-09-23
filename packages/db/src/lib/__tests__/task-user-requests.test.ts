@@ -1,6 +1,9 @@
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import {
+  fastAgentConversations,
+  fastAgentMessages,
+  findLatestFastConversationUserRequest,
   taskRuns,
   db,
   eq,
@@ -100,5 +103,79 @@ describe('findLatestTaskUserRequest', () => {
     await expect(findLatestTaskUserRequest(TEST_TASK_ID)).resolves.toBe(
       'File the bug.',
     );
+  });
+});
+
+describe('findLatestFastConversationUserRequest', () => {
+  async function seedConversation() {
+    const owner = await userFactory.create();
+    const participant = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: `W-${owner.id}`,
+        conversationId: `C-${owner.id}`,
+      })
+      .returning({ id: fastAgentConversations.id });
+    let turnSeq = 0;
+    const insertMessage = (input: {
+      ts: number;
+      text: string;
+      userId?: string;
+      role?: 'user' | 'assistant';
+    }) => {
+      turnSeq += 1;
+      return db.insert(fastAgentMessages).values({
+        conversationId: conversation!.id,
+        eventId: `event-${turnSeq}`,
+        turnId: `turn-${turnSeq}`,
+        turnSeq,
+        ts: input.ts,
+        eventType:
+          input.role === 'assistant'
+            ? ACP_ENVELOPE_EVENT_TYPES.AssistantMessage
+            : ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: input.role ?? 'user',
+        contentBlocks: [{ type: 'text', text: input.text }],
+        metadata: input.userId ? { userId: input.userId } : {},
+        payload: {},
+      });
+    };
+    return {
+      conversationId: conversation!.id,
+      owner: owner.id,
+      participant: participant.id,
+      insertMessage,
+    };
+  }
+
+  it("returns the calling user's latest prompt in the conversation", async () => {
+    const { conversationId, owner, participant, insertMessage } =
+      await seedConversation();
+    await expect(
+      findLatestFastConversationUserRequest({ conversationId, userId: owner }),
+    ).resolves.toBe(undefined);
+
+    await insertMessage({ ts: 1_000, text: 'Look up ENG.', userId: owner });
+    await insertMessage({ ts: 2_000, text: 'Close ENG-1.', userId: owner });
+    await insertMessage({ ts: 3_000, text: 'Done.', role: 'assistant' });
+    // Someone else's later prompt is never the caller's request.
+    await insertMessage({
+      ts: 4_000,
+      text: 'Delete the project.',
+      userId: participant,
+    });
+
+    await expect(
+      findLatestFastConversationUserRequest({ conversationId, userId: owner }),
+    ).resolves.toBe('Close ENG-1.');
+    await expect(
+      findLatestFastConversationUserRequest({
+        conversationId,
+        userId: participant,
+      }),
+    ).resolves.toBe('Delete the project.');
   });
 });

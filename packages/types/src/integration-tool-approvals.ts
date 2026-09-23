@@ -278,21 +278,32 @@ export function integrationToolModeIsAutoAssessed(input: {
   );
 }
 
+/**
+ * Names the Fast conversation behind a deployment-proxy integration call, so
+ * the proxy can shadow-assess it against that conversation's latest prompt
+ * from the calling user. Never forwarded upstream.
+ */
+export const INTEGRATION_TOOL_FAST_CONVERSATION_HEADER =
+  'x-roomote-fast-conversation-id';
+
 /** The longest user request Auto mode is shown for one tool call. */
 export const INTEGRATION_TOOL_USER_REQUEST_MAX_CHARS = 20_000;
+
+const REQUEST_ENVELOPE_PATTERN = /<request>[\s\S]*<\/request>/;
 
 /**
  * What the user asked for, as Auto mode is shown it next to a tool call:
  * the visible text of their latest prompt, without Roomote's injected
- * wrapper blocks or chat-surface envelopes, bounded in length. Undefined
- * when nothing visible remains.
+ * wrapper blocks, the task `<request>` envelope, or chat-surface envelopes,
+ * bounded in length. Undefined when nothing visible remains.
  */
 export function toIntegrationToolUserRequest(
   promptText: string | null | undefined,
 ): string | undefined {
   if (!promptText) return undefined;
   const visible = normalizeTranscriptUserText(
-    isSystemInjectedAcpPromptText(promptText)
+    isSystemInjectedAcpPromptText(promptText) ||
+      REQUEST_ENVELOPE_PATTERN.test(promptText)
       ? extractVisibleAcpPromptText(promptText)
       : promptText,
   )?.trim();
