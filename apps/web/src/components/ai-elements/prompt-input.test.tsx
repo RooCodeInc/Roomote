@@ -26,6 +26,9 @@ vi.mock('@/hooks/useIsMobile', () => ({
 
 import {
   PromptInput,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
   PromptInputBody,
   PromptInputTextarea,
   usePromptInputAttachments,
@@ -114,6 +117,46 @@ describe('PromptInput', () => {
     expect(form).toHaveAttribute('name');
     expect(form?.getAttribute('id')).toMatch(/^prompt-input-form-/);
     expect(form?.getAttribute('name')).toMatch(/^prompt-input-form-/);
+  });
+
+  it('names the default attachment action and opens and closes its menu with the keyboard', async () => {
+    render(
+      <PromptInputActionMenu>
+        <PromptInputActionMenuTrigger />
+        <PromptInputActionMenuContent>
+          <button type="button">Files</button>
+        </PromptInputActionMenuContent>
+      </PromptInputActionMenu>,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Add attachments' });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown', code: 'ArrowDown' });
+
+    expect(await screen.findByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Files' })).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByRole('menu'), {
+      key: 'Escape',
+      code: 'Escape',
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument(),
+    );
+    expect(trigger).toHaveFocus();
+  });
+
+  it('allows a composer to override the default action name', () => {
+    render(
+      <PromptInputActionMenu>
+        <PromptInputActionMenuTrigger aria-label="Add to session" />
+        <PromptInputActionMenuContent>Files</PromptInputActionMenuContent>
+      </PromptInputActionMenu>,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Add to session' }),
+    ).toBeInTheDocument();
   });
 
   it('gives the prompt textarea a stable opt-out id and ignore attributes', () => {
