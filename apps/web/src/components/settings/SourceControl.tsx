@@ -814,6 +814,7 @@ function SourceControlProviderBlock({
           Not configured.{' '}
           <button
             type="button"
+            aria-label={`Set it up for ${title}`}
             className="cursor-pointer underline underline-offset-4 hover:text-accent-foreground"
             onClick={() => setIsExpanded(true)}
           >
