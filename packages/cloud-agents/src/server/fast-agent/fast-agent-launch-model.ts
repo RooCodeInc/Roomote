@@ -236,42 +236,40 @@ export async function resolveFastAgentLaunchModel(params: {
   userId: string;
 }): Promise<FastAgentLaunchModel> {
   const claimedModel = params.claimedModel ?? undefined;
-  // Choosing the deployment default needs no check.
-  if (claimedModel && claimedModel === params.defaultModelId) {
-    return {
-      model: claimedModel,
-      reasoningEffort: params.claimedReasoningEffort ?? null,
-      source: 'default',
-    };
-  }
-  const modelsById = new Map(params.models.map((model) => [model.id, model]));
   const claimedReasoningEffort = params.claimedReasoningEffort ?? undefined;
-  // An effort-only choice keeps the default model, as before. Null fillers
-  // count as omitted, so an ordinary launch still gets routing rules.
-  const routable = claimedModel !== undefined || !claimedReasoningEffort;
+  const claimsDefault =
+    claimedModel !== undefined && claimedModel === params.defaultModelId;
+  const modelsById = new Map(params.models.map((model) => [model.id, model]));
+  // An effort-only choice (or an explicit pick of the default) keeps coding
+  // rules out, as before. Null fillers count as omitted, so an ordinary
+  // launch still gets routing rules.
+  const routable = claimsDefault
+    ? false
+    : claimedModel !== undefined || !claimedReasoningEffort;
   const rules = routable
     ? params.codingModelRoutingRules
         .filter((rule) => modelsById.has(rule.modelId))
         .slice(0, MAX_ROUTING_RULES)
     : [];
   const defaultLaunch: Omit<FastAgentLaunchModel, 'modelNote'> = {
-    model: null,
-    reasoningEffort: claimedModel
-      ? null
-      : (params.claimedReasoningEffort ?? null),
+    model: claimsDefault ? claimedModel : null,
+    reasoningEffort:
+      !claimedModel || claimsDefault ? (claimedReasoningEffort ?? null) : null,
     source: 'default',
   };
-  if (!claimedModel && rules.length === 0) return defaultLaunch;
+  // The explicit-request question is asked on every launch, claim or not, so
+  // a user's model request still applies when the agent does not pass it.
+  const requestableModels = selectRequestableModels({
+    models: params.models,
+    mustInclude: new Set([
+      ...(claimedModel ? [claimedModel] : []),
+      ...rules.map((rule) => rule.modelId),
+    ]),
+  });
+  if (requestableModels.length === 0 && rules.length === 0) {
+    return defaultLaunch;
+  }
 
-  const requestableModels = claimedModel
-    ? selectRequestableModels({
-        models: params.models,
-        mustInclude: new Set([
-          claimedModel,
-          ...rules.map((rule) => rule.modelId),
-        ]),
-      })
-    : [];
   const questions: Record<string, TypeSafeChoiceQuestion> = {
     ...(requestableModels.length > 0
       ? { requestedModel: buildRequestedModelQuestion(requestableModels) }
@@ -325,8 +323,8 @@ export async function resolveFastAgentLaunchModel(params: {
     ? {
         model: requestedModel.id,
         reasoningEffort:
-          requestedModel.id === claimedModel
-            ? (params.claimedReasoningEffort ?? null)
+          !claimedModel || requestedModel.id === claimedModel
+            ? (claimedReasoningEffort ?? null)
             : null,
         source: 'user_request',
       }
@@ -336,7 +334,7 @@ export async function resolveFastAgentLaunchModel(params: {
           reasoningEffort:
             rule.reasoningEffort ??
             (rule.modelId === claimedModel
-              ? (params.claimedReasoningEffort ?? null)
+              ? (claimedReasoningEffort ?? null)
               : null),
           source: 'routing_rule',
         }

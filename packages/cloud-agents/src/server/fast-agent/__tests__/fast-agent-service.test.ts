@@ -707,12 +707,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       codingModelRoutingRules: [],
     });
     // Fixture models: model_1 = GPT-5.6 (default), model_2 = Claude Sonnet 5.
+    // Launches ask about a user model request every time; none by default.
     mocks.evaluateDecisionModel.mockResolvedValue({
       requestedModel: {
         type: 'choice',
-        choice: 'model_2',
-        confidence: 0.95,
-        probabilities: { model_2: 0.95 },
+        choice: 'none',
+        confidence: 0.97,
+        probabilities: { none: 0.97 },
       },
     });
     mocks.getDeploymentSettings.mockResolvedValue(undefined);
@@ -10961,6 +10962,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('launches before the first reply and then posts the task link', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.95,
+        probabilities: { model_2: 0.95 },
+      },
+    });
     const order: string[] = [];
     const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
       await postKickoff({
@@ -11648,6 +11657,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('allows a corrected launch after rejecting an unavailable model', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.95,
+        probabilities: { model_2: 0.95 },
+      },
+    });
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
       taskId: 'task-corrected',
@@ -11872,6 +11889,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({
         state: expect.objectContaining({ work: 'Restyle the checkout page.' }),
         questions: {
+          requestedModel: expect.anything(),
           routingRule: expect.objectContaining({
             criteria: expect.objectContaining({
               model_rule_1: expect.stringContaining('"Frontend UI work"'),
@@ -11941,7 +11959,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('launches on the deployment default model without confirmation', async () => {
+  it('keeps the deployment default model the agent passes', async () => {
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
       taskId: 'task-1',
@@ -11967,13 +11985,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       adapter,
     });
 
-    expect(mocks.evaluateDecisionModel).not.toHaveBeenCalled();
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'openai/gpt-5.6' }),
     );
   });
 
   it('validates and forwards pull request review model overrides', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.95,
+        probabilities: { model_2: 0.95 },
+      },
+    });
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {

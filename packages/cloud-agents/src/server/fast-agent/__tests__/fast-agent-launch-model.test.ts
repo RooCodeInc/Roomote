@@ -69,23 +69,63 @@ describe('resolveFastAgentLaunchModel', () => {
   });
 
   describe('without routing rules', () => {
-    it('uses the default without a decision call when nothing is claimed', async () => {
+    it('asks about a user request even without a claim', async () => {
+      mockEvaluateDecisionModel.mockResolvedValue({
+        requestedModel: choice('none', 0.97),
+      });
+
       await expect(resolve()).resolves.toEqual({
         model: null,
         reasoningEffort: null,
         source: 'default',
       });
-      expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
+      const { questions } = mockEvaluateDecisionModel.mock.calls[0]![0];
+      expect(Object.keys(questions)).toEqual(['requestedModel']);
+    });
+
+    it('applies a confident user request the agent did not pass', async () => {
+      mockEvaluateDecisionModel.mockResolvedValue({
+        requestedModel: choice('model_3', 0.9),
+      });
+
+      await expect(resolve()).resolves.toEqual({
+        model: opus.id,
+        reasoningEffort: null,
+        source: 'user_request',
+      });
+    });
+
+    it('needs a confident pick without a claim to break a split request', async () => {
+      mockEvaluateDecisionModel.mockResolvedValue({
+        requestedModel: {
+          type: 'choice',
+          choice: 'model_3',
+          confidence: 0.4,
+          probabilities: { model_3: 0.4, model_2: 0.26, none: 0.34 },
+        },
+      });
+
+      await expect(resolve()).resolves.toMatchObject({
+        model: null,
+        source: 'default',
+      });
     });
 
     it('keeps an effort-only choice on the default model', async () => {
+      mockEvaluateDecisionModel.mockResolvedValue({
+        requestedModel: choice('none', 0.97),
+      });
+
       await expect(resolve({ claimedReasoningEffort: 'max' })).resolves.toEqual(
         { model: null, reasoningEffort: 'max', source: 'default' },
       );
-      expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
     });
 
-    it('accepts the deployment default without a decision call', async () => {
+    it('keeps a claimed deployment default and its effort', async () => {
+      mockEvaluateDecisionModel.mockResolvedValue({
+        requestedModel: choice('none', 0.97),
+      });
+
       await expect(
         resolve({ claimedModel: gpt.id, claimedReasoningEffort: 'high' }),
       ).resolves.toEqual({
@@ -93,7 +133,6 @@ describe('resolveFastAgentLaunchModel', () => {
         reasoningEffort: 'high',
         source: 'default',
       });
-      expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
     });
 
     it('uses a model the user asked for, with the claimed effort', async () => {
@@ -266,7 +305,7 @@ describe('resolveFastAgentLaunchModel', () => {
         source: 'routing_rule',
       });
       const { questions } = mockEvaluateDecisionModel.mock.calls[0]![0];
-      expect(Object.keys(questions)).toEqual(['routingRule']);
+      expect(Object.keys(questions)).toEqual(['requestedModel', 'routingRule']);
       expect(questions.routingRule.instructions).toContain(
         'independent of list order',
       );
@@ -351,14 +390,18 @@ describe('resolveFastAgentLaunchModel', () => {
         reasoningEffort: 'medium',
         source: 'default',
       });
-      expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
+      expect(
+        Object.keys(mockEvaluateDecisionModel.mock.calls[0]![0].questions),
+      ).toEqual(['requestedModel']);
     });
 
     it('ignores rules for models that are no longer enabled', async () => {
       await expect(
         resolve({ models: [gpt], codingModelRoutingRules: [rules[1]!] }),
       ).resolves.toMatchObject({ model: null, source: 'default' });
-      expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
+      expect(
+        Object.keys(mockEvaluateDecisionModel.mock.calls[0]![0].questions),
+      ).toEqual(['requestedModel']);
     });
   });
 
