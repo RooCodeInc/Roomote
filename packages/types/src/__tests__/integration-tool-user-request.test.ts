@@ -29,6 +29,13 @@ describe('toIntegrationToolUserRequest', () => {
     );
   });
 
+  it('handles an unclosed run of request tags in linear time', () => {
+    const started = performance.now();
+    const request = toIntegrationToolUserRequest('<request>'.repeat(20_000));
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(request?.startsWith('<request>')).toBe(true);
+  });
+
   it('bounds the request and drops an empty one', () => {
     expect(toIntegrationToolUserRequest('x'.repeat(25_000))?.length).toBe(
       INTEGRATION_TOOL_USER_REQUEST_MAX_CHARS,

@@ -289,7 +289,11 @@ export const INTEGRATION_TOOL_FAST_CONVERSATION_HEADER =
 /** The longest user request Auto mode is shown for one tool call. */
 export const INTEGRATION_TOOL_USER_REQUEST_MAX_CHARS = 20_000;
 
-const REQUEST_ENVELOPE_PATTERN = /<request>[\s\S]*<\/request>/;
+/** Whether the prompt carries a task `<request>…</request>` envelope. */
+function hasRequestEnvelope(text: string): boolean {
+  const start = text.indexOf('<request>');
+  return start !== -1 && text.includes('</request>', start);
+}
 
 /**
  * What the user asked for, as Auto mode is shown it next to a tool call:
@@ -302,8 +306,7 @@ export function toIntegrationToolUserRequest(
 ): string | undefined {
   if (!promptText) return undefined;
   const visible = normalizeTranscriptUserText(
-    isSystemInjectedAcpPromptText(promptText) ||
-      REQUEST_ENVELOPE_PATTERN.test(promptText)
+    isSystemInjectedAcpPromptText(promptText) || hasRequestEnvelope(promptText)
       ? extractVisibleAcpPromptText(promptText)
       : promptText,
   )?.trim();
