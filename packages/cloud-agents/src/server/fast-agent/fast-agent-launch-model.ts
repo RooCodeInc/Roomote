@@ -19,16 +19,12 @@ import {
 const REQUESTED_MODEL_MIN_CONFIDENCE = 0.6;
 /**
  * A user must want a model other than the default with at least this
- * probability before any non-default model is used from a request.
- * Starting value, not tuned on real traffic.
+ * probability before any non-default model is used from a request. In
+ * synthetic runs, incidental mentions (attribution trailers, model questions,
+ * hard work) scored at most 0.11 and real asks, including capability asks
+ * such as "the best model we have", at least 0.43. Not tuned on real traffic.
  */
-const WANTS_NON_DEFAULT_MIN_PROBABILITY = 0.5;
-/**
- * When a user wants a different model but the decision model cannot name
- * one (a capability ask such as "your strongest model"), the agent's claim
- * is used unless some other model already draws this much probability.
- */
-const MODEL_FAVORED_MIN_PROBABILITY = 0.3;
+const WANTS_NON_DEFAULT_MIN_PROBABILITY = 0.3;
 /** A coding-model routing rule applies only at this confidence. */
 const ROUTING_RULE_MIN_CONFIDENCE = 0.8;
 
@@ -192,11 +188,7 @@ function describeModelNote(params: {
 /**
  * Reads the request answers in two parts: whether a user wants a model other
  * than the default at all, then which one. A confident pick from the decision
- * model wins. Otherwise the agent's claim settles which one, since the agent
- * knows the catalog and can resolve descriptions ("the newest Fable") or
- * capability asks ("your strongest model") that the decision model can only
- * narrow down or not name at all. The claim is used when it is the top-ranked
- * model, or when no other model is clearly favored.
+ * model wins; otherwise the agent's claim settles which one.
  */
 function selectRequestedModel(params: {
   wantsNonDefaultProbability: number;
@@ -217,24 +209,10 @@ function selectRequestedModel(params: {
   if (answer.confidence >= REQUESTED_MODEL_MIN_CONFIDENCE && choiceIndex >= 0) {
     return requestableModels[choiceIndex];
   }
-  const claimIndex = requestableModels.findIndex(
-    (model) => model.id === params.claimedModel,
-  );
-  if (claimIndex < 0) return undefined;
-  const modelProbabilities = requestableModels.map(
-    (_, index) => answer.probabilities[`model_${index + 1}`] ?? 0,
-  );
-  const claimProbability = modelProbabilities[claimIndex]!;
-  const topOtherProbability = Math.max(
-    0,
-    ...modelProbabilities.filter((_, index) => index !== claimIndex),
-  );
-  const claimIsTop =
-    claimProbability > 0 && claimProbability >= topOtherProbability;
-  const noOtherFavored = topOtherProbability < MODEL_FAVORED_MIN_PROBABILITY;
-  return claimIsTop || noOtherFavored
-    ? requestableModels[claimIndex]
-    : undefined;
+  // No confident pick of its own: the agent's claim resolves which model,
+  // since the agent can read descriptions and capability asks the decision
+  // model can only narrow down or not name at all.
+  return requestableModels.find((model) => model.id === params.claimedModel);
 }
 
 /**

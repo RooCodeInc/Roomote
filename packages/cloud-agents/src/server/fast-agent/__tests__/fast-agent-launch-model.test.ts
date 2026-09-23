@@ -281,14 +281,15 @@ describe('resolveFastAgentLaunchModel', () => {
       });
     });
 
-    it('rejects a claim that is not the top-ranked model', async () => {
+    it('uses the claim when a different model is wanted but none is picked confidently', async () => {
+      // "The newest Fable": Fable 5 and 5.1 split the probability.
       mockEvaluateDecisionModel.mockResolvedValue(
-        split({ model_2: 0.4, model_3: 0.26, none: 0.34 }),
+        split({ model_2: 0.34, model_3: 0.31, none: 0.35 }),
       );
 
       await expect(resolve({ claimedModel: opus.id })).resolves.toMatchObject({
-        model: null,
-        source: 'default',
+        model: opus.id,
+        source: 'user_request',
       });
     });
 
@@ -303,14 +304,14 @@ describe('resolveFastAgentLaunchModel', () => {
       });
     });
 
-    it('needs a confident pick to override the claim with another model', async () => {
+    it('uses a confident pick over a different claim', async () => {
       mockEvaluateDecisionModel.mockResolvedValue(
-        split({ model_2: 0.55, model_3: 0, none: 0.45 }),
+        split({ model_2: 0.65, model_3: 0, none: 0.35 }),
       );
 
       await expect(resolve({ claimedModel: opus.id })).resolves.toMatchObject({
-        model: null,
-        source: 'default',
+        model: sonnet.id,
+        source: 'user_request',
       });
     });
 
