@@ -5,7 +5,6 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
   'privateSessions',
   'browserNotifications',
   'integrationToolApprovals',
-  'fastSessionCommunicationJev',
 ] as const;
 
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
@@ -15,8 +14,6 @@ export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
   privateSessions: 'private_sessions_experiment_enabled',
   browserNotifications: 'browser_notifications_experiment_enabled',
   integrationToolApprovals: 'integration_tool_approvals_experiment_enabled',
-  fastSessionCommunicationJev:
-    'fast_session_communication_jev_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
 
 export type DeploymentExperimentValues = Record<
@@ -66,11 +63,5 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     group: null,
     description:
       'Configure per-integration-tool approval policies for code-mode integration calls in sessions and let the session requester allow or reject each gated call before it runs. Disabled by default; absent means disabled.',
-  },
-  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.fastSessionCommunicationJev]: {
-    kind: 'deployment-control',
-    group: null,
-    description:
-      'Use Jev for high-confidence, low-risk Fast task-report communication decisions. Disabled by default; absent means disabled.',
   },
 };
