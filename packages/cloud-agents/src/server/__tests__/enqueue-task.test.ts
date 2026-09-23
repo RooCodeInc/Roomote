@@ -2170,6 +2170,58 @@ describe('enqueueTaskRelaunch failed start', () => {
     });
   });
 
+  it('drops launch idempotency keys so failed-start retry does not hit the unique index', async () => {
+    const userId = await createUser();
+    const launchIdempotencyKey = 'fast:session-1:turn-1:retry-key';
+
+    const failedRun = await enqueueTask(
+      {
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+        task: standardTaskInput({
+          payload: {
+            repo: 'acme/widgets',
+            description: 'Do the thing',
+            launchIdempotencyKey,
+          },
+        }),
+      } as FreshTaskLaunch,
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+    createdTaskIds.push(failedRun.taskId);
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error:
+          'Credential egress registration failed: Control-plane request failed (503).',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, failedRun.id));
+
+    await db
+      .update(tasks)
+      .set({ state: 'failed' })
+      .where(eq(tasks.id, failedRun.taskId));
+
+    const relaunchRun = await enqueueTaskRelaunch(
+      {
+        sourceRunId: failedRun.id,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+
+    expect(relaunchRun.taskId).toBe(failedRun.taskId);
+    expect(relaunchRun.id).not.toBe(failedRun.id);
+    expect(relaunchRun.payload).toMatchObject({ repo: 'acme/widgets' });
+    expect(relaunchRun.payload).not.toHaveProperty('launchIdempotencyKey');
+    expect(failedRun.payload).toMatchObject({ launchIdempotencyKey });
+  });
+
   it('allows relaunch when only a provider kickoff message exists', async () => {
     const userId = await createUser();
 
