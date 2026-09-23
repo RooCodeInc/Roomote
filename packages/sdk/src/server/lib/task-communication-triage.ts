@@ -361,7 +361,14 @@ export async function gateDelegatedTaskCommunication(params: {
       capture(decision);
       return { kind: 'deliver', hint: { decision, reason } };
     case 'relay': {
-      if (!(await claimRelaySlot(event.runId, reason === 'needs_user'))) {
+      if (
+        !(await claimRelaySlot(
+          event.runId,
+          reason === 'needs_user' ||
+            reason === 'task_result' ||
+            reason === 'task_question',
+        ))
+      ) {
         capture('rate_limited');
         await rememberUnsharedUpdate(event.runId, update);
         return { kind: 'skip' };

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decideTaskCommunication,
   type TaskCommunicationSignals,
+  type TaskCommunicationTriageState,
 } from '../fast-agent-task-communication-triage';
 
 const quietSignals: TaskCommunicationSignals = {
@@ -13,10 +14,19 @@ const quietSignals: TaskCommunicationSignals = {
   already_told: 0.2,
 };
 
-const absent = {
+const absent: Pick<
+  TaskCommunicationTriageState,
+  'requesterIsPresent' | 'silenceSinceRequesterLastHeard' | 'update'
+> = {
   requesterIsPresent: false,
   silenceSinceRequesterLastHeard: 'under_5_minutes',
-} as const;
+  update: { kind: 'task_activity', items: [] },
+};
+
+const report = (purpose: 'progress' | 'closeout' | 'clarification') => ({
+  ...absent,
+  update: { kind: 'task_report' as const, purpose, text: 'Report.' },
+});
 
 describe('decideTaskCommunication', () => {
   it('stays quiet for routine progress', () => {
@@ -75,6 +85,32 @@ describe('decideTaskCommunication', () => {
         silenceSinceRequesterLastHeard: 'over_20_minutes',
       }),
     ).toEqual({ decision: 'relay', reason: 'actionable_milestone' });
+  });
+
+  it('always relays the task result or question unless already told', () => {
+    expect(decideTaskCommunication(quietSignals, report('closeout'))).toEqual({
+      decision: 'relay',
+      reason: 'task_result',
+    });
+    expect(
+      decideTaskCommunication(
+        { ...quietSignals, actionable_milestone: 0.9 },
+        report('closeout'),
+      ),
+    ).toEqual({ decision: 'relay', reason: 'task_result' });
+    expect(
+      decideTaskCommunication(quietSignals, report('clarification')),
+    ).toEqual({ decision: 'relay', reason: 'task_question' });
+    expect(
+      decideTaskCommunication(
+        { ...quietSignals, already_told: 0.9 },
+        report('closeout'),
+      ),
+    ).toEqual({ decision: 'quiet', reason: 'already_told' });
+    expect(decideTaskCommunication(quietSignals, report('progress'))).toEqual({
+      decision: 'quiet',
+      reason: 'routine',
+    });
   });
 
   it('is uncertain when an action signal sits in the middle', () => {

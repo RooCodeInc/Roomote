@@ -311,6 +311,8 @@ const TASK_COMMUNICATION_RELAY_REASONS: Partial<
   changes_picture: 'it changes what the user expects or would want',
   actionable_milestone:
     'it gives the user something they can look at or act on now',
+  task_result: "it is the task's own result for what the user asked",
+  task_question: 'it is a question the task needs the user to answer',
 };
 
 function buildTaskCommunicationTriageGuidance(

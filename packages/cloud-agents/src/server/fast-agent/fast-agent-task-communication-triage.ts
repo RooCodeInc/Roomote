@@ -115,6 +115,8 @@ export type TaskCommunicationDecisionReason =
   | 'changes_picture'
   | 'actionable_milestone'
   | 'already_told'
+  | 'task_result'
+  | 'task_question'
   | 'milestone_can_wait'
   | 'routine'
   | 'mixed_signals';
@@ -141,7 +143,7 @@ export function decideTaskCommunication(
   signals: TaskCommunicationSignals,
   context: Pick<
     TaskCommunicationTriageState,
-    'requesterIsPresent' | 'silenceSinceRequesterLastHeard'
+    'requesterIsPresent' | 'silenceSinceRequesterLastHeard' | 'update'
   >,
 ): {
   decision: TaskCommunicationDecision;
@@ -155,6 +157,16 @@ export function decideTaskCommunication(
   }
   if (high('already_told')) {
     return { decision: 'quiet', reason: 'already_told' };
+  }
+  // The task's own result or question is what the user is waiting for; it
+  // is never deferred or dropped on the strength of a low score.
+  if (context.update.kind === 'task_report') {
+    if (context.update.purpose === 'closeout') {
+      return { decision: 'relay', reason: 'task_result' };
+    }
+    if (context.update.purpose === 'clarification') {
+      return { decision: 'relay', reason: 'task_question' };
+    }
   }
   if (high('needs_user')) {
     return { decision: 'relay', reason: 'needs_user' };
