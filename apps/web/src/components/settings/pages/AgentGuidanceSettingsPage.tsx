@@ -7,8 +7,8 @@ import { SettingsShell } from '@/components/settings/SettingsShell';
 export function AgentGuidanceSettingsPage() {
   return (
     <SettingsShell pageId="agent-guidance" adminOnly={true}>
-      <AgentGuidanceSection />
       <IntegrationToolAutoModeSection />
+      <AgentGuidanceSection />
     </SettingsShell>
   );
 }

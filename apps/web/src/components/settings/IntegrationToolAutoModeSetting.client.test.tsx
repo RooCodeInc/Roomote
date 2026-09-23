@@ -104,7 +104,7 @@ describe('IntegrationToolAutoModeSetting', () => {
     expect(state.setAuto).toHaveBeenCalledWith({ mode: 'on', policy: '' });
   });
 
-  it('cannot be turned on until the deployment is set up for it, and says so plainly', () => {
+  it('keeps the switch disabled with no availability message when off and no hosted model exists', () => {
     state.settings = {
       mode: 'off',
       policy: '',
@@ -115,18 +115,28 @@ describe('IntegrationToolAutoModeSetting', () => {
       screen.getByRole('switch', { name: 'Enable auto-approval' }),
     ).toBeDisabled();
     expect(
-      screen.getByText('Auto mode isn’t available yet.'),
-    ).toBeInTheDocument();
+      screen.queryByText('Auto mode isn’t available yet.'),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByLabelText('Additional instructions'),
     ).not.toBeInTheDocument();
   });
 
-  it('still allows disabling auto-approval if the model becomes unavailable', () => {
-    state.settings = { mode: 'on', policy: 'Existing guidance', model: null };
-    render(<IntegrationToolAutoModeSetting />);
+  it('keeps guidance visible and allows disabling if the hosted model becomes unavailable', () => {
+    state.settings = {
+      mode: 'on',
+      policy: 'Existing guidance',
+      model: { kind: 'judgment' },
+    };
+    const { rerender } = render(<IntegrationToolAutoModeSetting />);
+    state.settings = { ...state.settings, model: null };
+    rerender(<IntegrationToolAutoModeSetting />);
     const toggle = screen.getByRole('switch', { name: 'Enable auto-approval' });
     expect(toggle).toBeEnabled();
+    expect(toggle).toBeChecked();
+    expect(
+      screen.getByText('Auto mode isn’t available yet.'),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText('Additional instructions')).toHaveValue(
       'Existing guidance',
     );

@@ -85,11 +85,11 @@ export function IntegrationToolAutoModeSetting() {
           <p className="text-sm text-foreground">{COPY.switchHelp}</p>
         </div>
       </div>
-      {available ? null : (
-        <p className="text-sm text-muted-foreground">{COPY.unavailable}</p>
-      )}
       {mode === 'on' ? (
         <div className="flex flex-col gap-2">
+          {!available ? (
+            <p className="text-sm text-muted-foreground">{COPY.unavailable}</p>
+          ) : null}
           <Label htmlFor="integration-tool-auto-policy">
             {COPY.guidanceLabel}
           </Label>

@@ -16,7 +16,7 @@ export function IntegrationToolAutoModeSection() {
   const { enabled } = useIntegrationToolApprovalsExperiment();
   if (!isAdmin || !enabled) return null;
   return (
-    <Section icon={Sparkles} title="Auto mode">
+    <Section icon={Sparkles} title="Auto-approval decisions">
       <IntegrationToolAutoModeSetting />
     </Section>
   );
