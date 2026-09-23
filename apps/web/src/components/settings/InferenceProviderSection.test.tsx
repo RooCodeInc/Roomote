@@ -559,6 +559,7 @@ describe('InferenceProviderSection', () => {
             resetsAt: new Date(Date.now() + 5 * 3_600_000).toISOString(),
           },
         ],
+        credits: { balance: 12.9999 },
         fetchedAt: new Date().toISOString(),
       },
       {
@@ -573,6 +574,7 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.getByText('Weekly limit: 8% used (resets in 5h)'),
     ).toBeInTheDocument();
+    expect(screen.getByText('Credits: 12 left')).toBeInTheDocument();
     expect(
       screen.getByText('Premium requests: 211 of 300 left'),
     ).toBeInTheDocument();
@@ -582,6 +584,55 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.getByRole('progressbar', { name: 'Premium requests usage' }),
     ).toHaveAttribute('aria-valuenow', '30');
+    expect(
+      screen.queryByRole('progressbar', { name: 'Credits usage' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows unlimited subscription credits without a quota bar', () => {
+    providerSetupData.current = buildProviderSetup({ chatgptConnected: true });
+    chatgptStatusData.current = {
+      connected: true,
+      status: 'connected',
+    };
+    subscriptionUsageData.current = [
+      {
+        providerId: 'chatgpt',
+        windows: [],
+        credits: { unlimited: true },
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    expect(screen.getByText('Credits: unlimited')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('progressbar', { name: 'Credits usage' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows a reported zero subscription credit balance', () => {
+    providerSetupData.current = buildProviderSetup({ chatgptConnected: true });
+    chatgptStatusData.current = {
+      connected: true,
+      status: 'connected',
+    };
+    subscriptionUsageData.current = [
+      {
+        providerId: 'chatgpt',
+        windows: [],
+        credits: { balance: 0 },
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    expect(screen.getByText('Credits: 0 left')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('progressbar', { name: 'Credits usage' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows a credit balance line under a connected OpenRouter row', () => {
