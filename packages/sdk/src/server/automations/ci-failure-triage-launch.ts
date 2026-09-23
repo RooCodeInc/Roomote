@@ -10,6 +10,7 @@ import {
   type FailedCiRun,
 } from '@roomote/cloud-agents/server';
 import {
+  asc,
   and,
   db,
   eq,
@@ -91,6 +92,7 @@ async function resolveActiveSlackNotifier(
         ...(teamId ? [eq(slackInstallations.teamId, teamId)] : []),
       ),
     )
+    .orderBy(asc(slackInstallations.createdAt), asc(slackInstallations.id))
     .limit(1);
 
   if (!installation?.botAccessToken) {
