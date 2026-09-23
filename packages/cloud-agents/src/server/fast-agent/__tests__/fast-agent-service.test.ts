@@ -1152,6 +1152,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       columns: {
         globalAgentInstructions: true,
         workspaceRoutingSettings: true,
+        taskModelSettings: true,
       },
     });
     expect(systemPrompt).toContain('## Routing Rules');
@@ -2313,6 +2314,48 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         modelId: 'openai/test',
         surface: 'session',
         fallback: null,
+      }),
+    );
+    expect(mocks.generateText.mock.calls[0]?.[0].reasoningEffort).toBe('high');
+  });
+
+  it('uses the full catalog for an orchestration model outside enabled task models', async () => {
+    mocks.resolveOrchestrationModel.mockResolvedValueOnce(
+      'openai/orchestrator',
+    );
+    mocks.getTaskModelOptions.mockResolvedValueOnce({
+      models: [{ id: 'openai/task-only', displayName: 'Task only' }],
+      defaultModelId: 'openai/task-only',
+      codingModelRoutingRules: [],
+    });
+    mocks.getDeploymentSettings.mockResolvedValueOnce({
+      taskModelSettings: {
+        models: [
+          {
+            id: 'openai/orchestrator',
+            displayName: 'Orchestrator',
+            family: 'OpenAI',
+            metadata: {
+              contextWindow: null,
+              inputTypes: null,
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+              supportsReasoning: true,
+            },
+          },
+        ],
+        allowedModelIds: ['openai/task-only'],
+        defaultModelId: 'openai/task-only',
+      },
+    });
+    mocks.chooseAdaptiveEffort.mockResolvedValueOnce('high');
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    expect(mocks.chooseAdaptiveEffort).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: 'openai/orchestrator',
+        model: expect.objectContaining({ id: 'openai/orchestrator' }),
       }),
     );
     expect(mocks.generateText.mock.calls[0]?.[0].reasoningEffort).toBe('high');

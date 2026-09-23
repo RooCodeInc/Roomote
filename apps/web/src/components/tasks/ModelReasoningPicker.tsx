@@ -43,7 +43,6 @@ import {
   PopoverTrigger,
   Settings,
   Slider,
-  Sparkles,
 } from '@/components/system';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useUser } from '@/hooks/useUser';
@@ -129,6 +128,41 @@ function closestSupportedEffort(
 
 function getPickerReasoningEffortLabel(effort: ReasoningEffort): string {
   return effort === 'xhigh' ? 'X-High' : getReasoningEffortLabel(effort);
+}
+
+/** Tiny selected-state glints; no icon or motion for reduced-motion users. */
+function AutoEffortSparkle() {
+  const reducedMotion = useReducedMotion();
+  return (
+    <span className="relative inline-block px-0.5 text-accent-foreground">
+      Auto
+      <motion.span
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-1 top-0 size-1 rounded-full bg-accent-foreground opacity-50 shadow-[0_0_5px_currentColor]"
+        animate={
+          reducedMotion
+            ? undefined
+            : { opacity: [0.1, 0.8, 0.1], scale: [0.5, 1, 0.5] }
+        }
+        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.span
+        aria-hidden="true"
+        className="pointer-events-none absolute -left-1 bottom-0 size-0.5 rounded-full bg-accent-foreground opacity-50 shadow-[0_0_4px_currentColor]"
+        animate={
+          reducedMotion
+            ? undefined
+            : { opacity: [0.1, 0.65, 0.1], scale: [0.5, 1, 0.5] }
+        }
+        transition={{
+          duration: 2.4,
+          delay: 0.8,
+          repeat: Infinity,
+          ease: 'easeInOut',
+        }}
+      />
+    </span>
+  );
 }
 
 function PickerContent({
@@ -602,17 +636,7 @@ function PickerContent({
               animate="center"
               exit="exit"
             >
-              {effortLabel === 'Auto' ? (
-                <span className="inline-flex items-center justify-center gap-0.5">
-                  <Sparkles
-                    aria-hidden="true"
-                    className="size-3 text-accent-foreground motion-safe:animate-pulse"
-                  />
-                  Auto
-                </span>
-              ) : (
-                effortLabel
-              )}
+              {effortLabel === 'Auto' ? <AutoEffortSparkle /> : effortLabel}
             </motion.span>
           </AnimatePresence>
           <span className="sr-only" role="status" aria-label={effortLabel} />
@@ -828,13 +852,7 @@ export const ModelReasoningPickerTrigger = forwardRef<
     >
       <span className="max-w-48 truncate">{label}</span>
       {autoEffort && !reasoningEffort ? (
-        <span className="inline-flex items-center gap-0.5 text-accent-foreground">
-          <Sparkles
-            aria-hidden="true"
-            className="size-3 motion-safe:animate-pulse"
-          />
-          Auto
-        </span>
+        <AutoEffortSparkle />
       ) : reasoningEffort ? (
         <span
           className={cn(

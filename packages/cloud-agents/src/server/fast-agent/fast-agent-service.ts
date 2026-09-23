@@ -30,6 +30,7 @@ import {
   NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
   REASONING_EFFORT_VALUES,
+  getTaskModelCatalog,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
   buildEnvironmentVerificationPrompt,
@@ -3464,6 +3465,7 @@ export async function answerFastAgentQuestion({
           columns: {
             globalAgentInstructions: true,
             workspaceRoutingSettings: true,
+            taskModelSettings: true,
           },
         })
         .catch((error) => {
@@ -3579,9 +3581,9 @@ export async function answerFastAgentQuestion({
         reasoningEffort = await chooseAdaptiveReasoningEffort({
           request: question,
           modelId,
-          model: taskModelOptions.models.find(
-            (option) => option.id === modelId,
-          ),
+          model: getTaskModelCatalog(
+            agentBehaviorSettings?.taskModelSettings,
+          ).find((option) => option.id === modelId),
           fallback: null,
           surface: 'session',
         });
