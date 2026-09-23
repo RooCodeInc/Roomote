@@ -1,6 +1,9 @@
+import { randomUUID } from 'node:crypto';
+
 import { Env } from '@roomote/env';
 import {
   getDeploymentJudgmentModelSelection,
+  recordLlmUsage,
   resolveModelProviderEnvValue,
 } from '@roomote/db/server';
 import {
@@ -332,6 +335,7 @@ class JudgmentHttpError extends Error {
   constructor(
     readonly status: number,
     detail: string,
+    readonly headers?: Headers,
   ) {
     super(
       `Judgment model request failed with HTTP ${status}${
@@ -342,10 +346,359 @@ class JudgmentHttpError extends Error {
   }
 }
 
+class JudgmentResponseParseError extends Error {
+  constructor(
+    readonly status: number,
+    readonly headers: Headers,
+  ) {
+    super('Judgment model response was not valid JSON');
+    this.name = 'JudgmentResponseParseError';
+  }
+}
+
+type JudgmentRequestRole = 'primary' | 'shadow';
+
+type JudgmentUsageOutcome =
+  | 'success'
+  | 'http_error'
+  | 'timeout'
+  | 'transport_error'
+  | 'response_parse_error'
+  | 'response_error'
+  | 'validation_error';
+
+type JudgmentResponse = {
+  body: Record<string, unknown>;
+  status: number;
+  headers: Headers;
+};
+
+type JudgmentTracking = {
+  requestId: string;
+  provider: JudgmentBackend['provider'];
+  model: string;
+  role: JudgmentRequestRole;
+  primaryProvider?: JudgmentBackend['provider'];
+};
+
+type ParsedJudgmentUsage = {
+  modelId?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  costMicroUsd?: number;
+  pricingMetadata?: Record<string, unknown>;
+  usageMetadataAvailable: boolean;
+  usageMetadataSource: 'response' | 'header' | 'none';
+  metadataReadFailed: boolean;
+  missingUsageFields: string[];
+};
+
+type TrackedJudgmentResponse = JudgmentResponse & {
+  finish: (outcome: JudgmentUsageOutcome) => void;
+};
+
+type JudgmentRequestResult = {
+  answers: Record<string, unknown> | undefined;
+  response: TrackedJudgmentResponse;
+};
+
+function nonNegativeNumber(value: unknown): number | undefined {
+  const number =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : undefined;
+
+  return number !== undefined && Number.isFinite(number) && number >= 0
+    ? number
+    : undefined;
+}
+
+function firstNonNegativeNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const number = nonNegativeNumber(value);
+    if (number !== undefined) return number;
+  }
+
+  return undefined;
+}
+
+function readHeaderNumber(
+  headers: Headers | undefined,
+  names: readonly string[],
+): number | undefined {
+  if (!headers) return undefined;
+
+  for (const name of names) {
+    const number = nonNegativeNumber(headers.get(name));
+    if (number !== undefined) return number;
+  }
+
+  return undefined;
+}
+
+function readHeaderString(
+  headers: Headers | undefined,
+  names: readonly string[],
+): string | undefined {
+  if (!headers) return undefined;
+
+  for (const name of names) {
+    const value = headers.get(name)?.trim();
+    if (value) return value;
+  }
+
+  return undefined;
+}
+
+function parseJudgmentUsage(
+  response: JudgmentResponse | undefined,
+  metadataReadFailed = false,
+): ParsedJudgmentUsage {
+  const body = response?.body ?? {};
+  const usage =
+    asRecord(body.usage) ??
+    asRecord(body.usageMetadata) ??
+    asRecord(body.usage_metadata);
+  const headers = response?.headers;
+
+  const responseInputTokens = firstNonNegativeNumber(
+    usage?.input_tokens,
+    usage?.prompt_tokens,
+    usage?.inputTokens,
+    usage?.promptTokens,
+  );
+  const responseOutputTokens = firstNonNegativeNumber(
+    usage?.output_tokens,
+    usage?.completion_tokens,
+    usage?.outputTokens,
+    usage?.completionTokens,
+  );
+  const responseTotalTokens = firstNonNegativeNumber(
+    usage?.total_tokens,
+    usage?.totalTokens,
+  );
+  const responseCostMicroUsd = firstNonNegativeNumber(
+    usage?.cost_micro_usd,
+    usage?.costMicroUsd,
+  );
+  const responseCostUsd = firstNonNegativeNumber(
+    usage?.cost,
+    usage?.cost_usd,
+    usage?.costUsd,
+  );
+
+  const headerInputTokens = readHeaderNumber(headers, [
+    'x-input-tokens',
+    'x-prompt-tokens',
+    'x-usage-input-tokens',
+    'x-openrouter-input-tokens',
+  ]);
+  const headerOutputTokens = readHeaderNumber(headers, [
+    'x-output-tokens',
+    'x-completion-tokens',
+    'x-usage-output-tokens',
+    'x-openrouter-output-tokens',
+  ]);
+  const headerTotalTokens = readHeaderNumber(headers, [
+    'x-total-tokens',
+    'x-usage-total-tokens',
+    'x-openrouter-total-tokens',
+  ]);
+  const headerCostMicroUsd = readHeaderNumber(headers, [
+    'x-cost-micro-usd',
+    'x-usage-cost-micro-usd',
+  ]);
+  const headerCostUsd = readHeaderNumber(headers, [
+    'x-cost-usd',
+    'x-cost',
+    'x-provider-cost',
+    'x-openrouter-cost',
+  ]);
+
+  const inputTokens = responseInputTokens ?? headerInputTokens;
+  const outputTokens = responseOutputTokens ?? headerOutputTokens;
+  const totalTokens = responseTotalTokens ?? headerTotalTokens;
+  const costMicroUsd =
+    responseCostMicroUsd ??
+    (responseCostUsd === undefined
+      ? (headerCostMicroUsd ??
+        (headerCostUsd === undefined
+          ? undefined
+          : Math.round(headerCostUsd * 1_000_000)))
+      : Math.round(responseCostUsd * 1_000_000));
+  const responseMetadataAvailable =
+    responseInputTokens !== undefined ||
+    responseOutputTokens !== undefined ||
+    responseTotalTokens !== undefined ||
+    responseCostMicroUsd !== undefined ||
+    responseCostUsd !== undefined;
+  const headerMetadataAvailable =
+    headerInputTokens !== undefined ||
+    headerOutputTokens !== undefined ||
+    headerTotalTokens !== undefined ||
+    headerCostMicroUsd !== undefined ||
+    headerCostUsd !== undefined;
+  const missingUsageFields: string[] = [];
+
+  if (inputTokens === undefined) missingUsageFields.push('input_tokens');
+  if (outputTokens === undefined) missingUsageFields.push('output_tokens');
+  if (totalTokens === undefined) missingUsageFields.push('total_tokens');
+  if (costMicroUsd === undefined) missingUsageFields.push('cost');
+
+  const costDetails = asRecord(usage?.cost_details ?? usage?.costDetails);
+  const responseModel =
+    typeof body.model === 'string' && body.model.trim()
+      ? body.model.trim()
+      : undefined;
+
+  return {
+    ...(responseModel ||
+    readHeaderString(headers, ['x-model', 'x-provider-model'])
+      ? {
+          modelId:
+            responseModel ??
+            readHeaderString(headers, ['x-model', 'x-provider-model']),
+        }
+      : {}),
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(totalTokens === undefined ? {} : { totalTokens }),
+    ...(costMicroUsd === undefined ? {} : { costMicroUsd }),
+    ...(costDetails ? { pricingMetadata: { costDetails } } : {}),
+    usageMetadataAvailable:
+      responseMetadataAvailable || headerMetadataAvailable,
+    usageMetadataSource: responseMetadataAvailable
+      ? 'response'
+      : headerMetadataAvailable
+        ? 'header'
+        : 'none',
+    metadataReadFailed,
+    missingUsageFields,
+  };
+}
+
+function judgmentModelForBackend(backend: JudgmentBackend): string {
+  switch (backend.provider) {
+    case 'roomote':
+      return ROOMOTE_JUDGMENT_MODEL_ID;
+    case 'typesafe':
+      return TYPESAFE_MODEL;
+    case 'openrouter':
+      return OPENROUTER_JEV_MODEL_ID;
+    case 'vercel':
+      return VERCEL_AI_GATEWAY_JEV_MODEL_ID;
+  }
+}
+
+function classifyJudgmentRequestError(error: unknown): {
+  outcome: JudgmentUsageOutcome;
+  status: number | null;
+  headers?: Headers;
+  metadataReadFailed: boolean;
+} {
+  if (error instanceof JudgmentHttpError) {
+    return {
+      outcome: 'http_error',
+      status: error.status,
+      headers: error.headers,
+      metadataReadFailed: false,
+    };
+  }
+
+  if (error instanceof JudgmentResponseParseError) {
+    return {
+      outcome: 'response_parse_error',
+      status: error.status,
+      headers: error.headers,
+      metadataReadFailed: true,
+    };
+  }
+
+  if (
+    error instanceof Error &&
+    (error.name === 'TimeoutError' || error.name === 'AbortError')
+  ) {
+    return {
+      outcome: 'timeout',
+      status: null,
+      metadataReadFailed: false,
+    };
+  }
+
+  return {
+    outcome: 'transport_error',
+    status: null,
+    metadataReadFailed: false,
+  };
+}
+
+function recordJudgmentUsage(input: {
+  tracking: JudgmentTracking;
+  startedAt: number;
+  response?: JudgmentResponse;
+  status: number | null;
+  outcome: JudgmentUsageOutcome;
+  headers?: Headers;
+  metadataReadFailed?: boolean;
+}): void {
+  const response =
+    input.response ??
+    (input.headers
+      ? { body: {}, status: input.status ?? 0, headers: input.headers }
+      : undefined);
+  const usage = parseJudgmentUsage(response, input.metadataReadFailed ?? false);
+  const eventKey = `judgment-model:${input.tracking.provider}:${input.tracking.role}:${input.tracking.requestId}`;
+  const details: Record<string, unknown> = {
+    surface: NON_TASK_INFERENCE_SURFACES.judgmentModel,
+    requestRole: input.tracking.role,
+    status: input.status,
+    outcome: input.outcome,
+    latencyMs: Math.max(0, Date.now() - input.startedAt),
+    usageMetadataAvailable: usage.usageMetadataAvailable,
+    usageMetadataSource: usage.usageMetadataSource,
+    metadataReadFailed: usage.metadataReadFailed,
+    missingUsageFields: usage.missingUsageFields,
+    ...(input.tracking.primaryProvider
+      ? { primaryProvider: input.tracking.primaryProvider }
+      : {}),
+  };
+
+  const persist = async () => {
+    await recordLlmUsage({
+      source: NON_TASK_INFERENCE_SURFACES.judgmentModel,
+      usageType: 'inference',
+      eventKey,
+      providerId: input.tracking.provider,
+      modelId: usage.modelId ?? input.tracking.model,
+      inputTokens: usage.inputTokens ?? null,
+      outputTokens: usage.outputTokens ?? null,
+      totalTokens: usage.totalTokens ?? 0,
+      contextTokens: usage.inputTokens ?? 0,
+      costMicroUsd: usage.costMicroUsd ?? null,
+      costSource:
+        usage.costMicroUsd === undefined ? 'missing' : 'provider_response',
+      ...(usage.pricingMetadata
+        ? { pricingMetadata: usage.pricingMetadata }
+        : {}),
+      details,
+    });
+  };
+
+  void persist().catch(() => {
+    // Usage telemetry must never change judgment behavior.
+    console.warn(
+      `[JudgmentUsage] Failed to record ${input.tracking.provider} ${input.tracking.role} usage`,
+    );
+  });
+}
+
 async function postJson(
   url: string,
   init: { headers: Record<string, string>; body: unknown; timeoutMs: number },
-): Promise<Record<string, unknown>> {
+): Promise<JudgmentResponse> {
   const response = await fetch(url, {
     method: 'POST',
     headers: { ...init.headers, 'Content-Type': 'application/json' },
@@ -357,10 +710,58 @@ async function postJson(
     throw new JudgmentHttpError(
       response.status,
       await response.text().catch(() => ''),
+      response.headers,
     );
   }
 
-  return (await response.json()) as Record<string, unknown>;
+  try {
+    return {
+      body: (await response.json()) as Record<string, unknown>,
+      status: response.status,
+      headers: response.headers,
+    };
+  } catch {
+    throw new JudgmentResponseParseError(response.status, response.headers);
+  }
+}
+
+async function postTrackedJson(
+  url: string,
+  init: { headers: Record<string, string>; body: unknown; timeoutMs: number },
+  tracking: JudgmentTracking,
+): Promise<TrackedJudgmentResponse> {
+  const startedAt = Date.now();
+
+  try {
+    const response = await postJson(url, init);
+    let finished = false;
+
+    return {
+      ...response,
+      finish: (outcome) => {
+        if (finished) return;
+        finished = true;
+        recordJudgmentUsage({
+          tracking,
+          startedAt,
+          response,
+          status: response.status,
+          outcome,
+        });
+      },
+    };
+  } catch (error) {
+    const failure = classifyJudgmentRequestError(error);
+    recordJudgmentUsage({
+      tracking,
+      startedAt,
+      status: failure.status,
+      outcome: failure.outcome,
+      headers: failure.headers,
+      metadataReadFailed: failure.metadataReadFailed,
+    });
+    throw error;
+  }
 }
 
 async function requestNativeDecisions(
@@ -369,14 +770,24 @@ async function requestNativeDecisions(
   questions: Record<string, TypeSafeQuestion>,
   timeoutMs: number,
   options: { url: string; model: string },
-): Promise<Record<string, unknown> | undefined> {
-  const body = await postJson(options.url, {
-    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-    body: { state, model: options.model, questions },
-    timeoutMs,
-  });
+  tracking: JudgmentTracking,
+): Promise<JudgmentRequestResult> {
+  const response = await postTrackedJson(
+    options.url,
+    {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      body: { state, model: options.model, questions },
+      timeoutMs,
+    },
+    tracking,
+  );
 
-  return body.answers as Record<string, unknown> | undefined;
+  return {
+    answers: asRecord(response.body)?.answers as
+      | Record<string, unknown>
+      | undefined,
+    response,
+  };
 }
 
 async function requestRoomoteDecisions(
@@ -384,15 +795,28 @@ async function requestRoomoteDecisions(
   state: unknown,
   questions: Record<string, TypeSafeQuestion>,
   timeoutMs: number,
-): Promise<Record<string, unknown> | undefined> {
+  tracking: JudgmentTracking,
+): Promise<JudgmentRequestResult> {
   // The upstream reports probabilities; confidence is derived here the same
   // way it is for OpenRouter so every backend yields one answer shape.
-  return withDerivedConfidence(
-    await requestNativeDecisions(upstream.apiKey, state, questions, timeoutMs, {
+  const request = await requestNativeDecisions(
+    upstream.apiKey,
+    state,
+    questions,
+    timeoutMs,
+    {
       url: `${upstream.url}${ROOMOTE_DECISIONS_PATH}`,
       model: ROOMOTE_JUDGMENT_MODEL_ID,
-    }),
+    },
+    tracking,
   );
+
+  try {
+    return { ...request, answers: withDerivedConfidence(request.answers) };
+  } catch (error) {
+    request.response.finish('response_error');
+    throw error;
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -450,70 +874,84 @@ async function requestVercelGateway(
   state: unknown,
   questions: Record<string, TypeSafeQuestion>,
   timeoutMs: number,
-): Promise<Record<string, unknown> | undefined> {
-  const body = await postJson(VERCEL_AI_GATEWAY_EVALUATION_URL, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'ai-gateway-protocol-version': VERCEL_AI_GATEWAY_PROTOCOL_VERSION,
-      'ai-gateway-auth-method': 'api-key',
-      'ai-evaluation-model-specification-version': '4',
-      'ai-model-id': VERCEL_AI_GATEWAY_JEV_MODEL_ID,
+  tracking: JudgmentTracking,
+): Promise<JudgmentRequestResult> {
+  const response = await postTrackedJson(
+    VERCEL_AI_GATEWAY_EVALUATION_URL,
+    {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'ai-gateway-protocol-version': VERCEL_AI_GATEWAY_PROTOCOL_VERSION,
+        'ai-gateway-auth-method': 'api-key',
+        'ai-evaluation-model-specification-version': '4',
+        'ai-model-id': VERCEL_AI_GATEWAY_JEV_MODEL_ID,
+      },
+      body: {
+        state,
+        questions: Object.fromEntries(
+          Object.entries(questions).map(([id, question]) => [
+            id,
+            question.type === 'noul'
+              ? { ...question, type: 'boolean' }
+              : question,
+          ]),
+        ),
+      },
+      timeoutMs,
     },
-    body: {
-      state,
-      questions: Object.fromEntries(
-        Object.entries(questions).map(([id, question]) => [
-          id,
-          question.type === 'noul'
-            ? { ...question, type: 'boolean' }
-            : question,
-        ]),
+    tracking,
+  );
+
+  try {
+    const answers = asRecord(asRecord(response.body)?.answers);
+
+    if (!answers) {
+      return { answers: undefined, response };
+    }
+
+    const confidence = asRecord(
+      asRecord(asRecord(asRecord(response.body)?.providerMetadata)?.typesafe)
+        ?.confidence,
+    );
+
+    return {
+      answers: Object.fromEntries(
+        Object.entries(answers).map(([id, raw]) => {
+          const answer = asRecord(raw);
+
+          if (answer?.type === 'boolean') {
+            return [id, { type: 'noul', noul: answer.probability }];
+          }
+
+          const probabilities = asRecord(answer?.probabilities);
+          const reportedConfidence = confidence?.[id];
+
+          return [
+            id,
+            {
+              ...answer,
+              // Without TypeSafe's own confidence, the top probability is the
+              // closest stand-in for how concentrated the distribution is.
+              confidence:
+                typeof reportedConfidence === 'number'
+                  ? reportedConfidence
+                  : probabilities
+                    ? Math.max(
+                        ...Object.values(probabilities).filter(
+                          (value): value is number => typeof value === 'number',
+                        ),
+                      )
+                    : undefined,
+            },
+          ];
+        }),
       ),
-    },
-    timeoutMs,
-  });
-
-  const answers = asRecord(body.answers);
-
-  if (!answers) {
-    return undefined;
+      response,
+    };
+  } catch (error) {
+    response.finish('response_error');
+    throw error;
   }
-
-  const confidence = asRecord(
-    asRecord(asRecord(body.providerMetadata)?.typesafe)?.confidence,
-  );
-
-  return Object.fromEntries(
-    Object.entries(answers).map(([id, raw]) => {
-      const answer = asRecord(raw);
-
-      if (answer?.type === 'boolean') {
-        return [id, { type: 'noul', noul: answer.probability }];
-      }
-
-      const probabilities = asRecord(answer?.probabilities);
-      const reportedConfidence = confidence?.[id];
-
-      return [
-        id,
-        {
-          ...answer,
-          // Without TypeSafe's own confidence, the top probability is the
-          // closest stand-in for how concentrated the distribution is.
-          confidence:
-            typeof reportedConfidence === 'number'
-              ? reportedConfidence
-              : probabilities
-                ? Math.max(
-                    ...Object.values(probabilities).filter(
-                      (value): value is number => typeof value === 'number',
-                    ),
-                  )
-                : undefined,
-        },
-      ];
-    }),
-  );
 }
 
 /**
@@ -546,65 +984,92 @@ export async function evaluateTypeSafeJudgments<
     (backend.provider === 'roomote'
       ? DEFAULT_ROOMOTE_TIMEOUT_MS
       : DEFAULT_TYPESAFE_TIMEOUT_MS);
+  const requestId = randomUUID();
+  const tracking: JudgmentTracking = {
+    requestId,
+    provider: backend.provider,
+    model: judgmentModelForBackend(backend),
+    role: 'primary',
+  };
   let answers: Record<string, unknown> | undefined;
+  let response: TrackedJudgmentResponse | undefined;
 
   params.timing?.onRequestStarted?.();
   try {
     switch (backend.provider) {
-      case 'roomote':
-        answers = await requestRoomoteDecisions(
+      case 'roomote': {
+        const request = await requestRoomoteDecisions(
           backend,
           params.state,
           params.questions,
           timeoutMs,
+          tracking,
         );
+        answers = request.answers;
+        response = request.response;
         break;
-      case 'typesafe':
-        answers = await requestNativeDecisions(
+      }
+      case 'typesafe': {
+        const request = await requestNativeDecisions(
           backend.apiKey,
           params.state,
           params.questions,
           timeoutMs,
           { url: TYPESAFE_API_URL, model: TYPESAFE_MODEL },
+          tracking,
         );
+        answers = request.answers;
+        response = request.response;
         break;
-      case 'openrouter':
-        answers = withDerivedConfidence(
-          await requestNativeDecisions(
-            backend.apiKey,
-            params.state,
-            params.questions,
-            timeoutMs,
-            {
-              url: OPENROUTER_DECISIONS_URL,
-              model: OPENROUTER_JEV_MODEL_ID,
-            },
-          ),
-        );
-        break;
-      case 'vercel':
-        answers = await requestVercelGateway(
+      }
+      case 'openrouter': {
+        const request = await requestNativeDecisions(
           backend.apiKey,
           params.state,
           params.questions,
           timeoutMs,
+          {
+            url: OPENROUTER_DECISIONS_URL,
+            model: OPENROUTER_JEV_MODEL_ID,
+          },
+          tracking,
         );
+        response = request.response;
+        answers = withDerivedConfidence(request.answers);
         break;
+      }
+      case 'vercel': {
+        const request = await requestVercelGateway(
+          backend.apiKey,
+          params.state,
+          params.questions,
+          timeoutMs,
+          tracking,
+        );
+        answers = request.answers;
+        response = request.response;
+        break;
+      }
     }
+
+    for (const [questionId, question] of Object.entries(params.questions)) {
+      if (!isValidAnswer(question, answers?.[questionId])) {
+        throw new Error(
+          `Judgment model response is missing a valid answer for "${questionId}"`,
+        );
+      }
+    }
+
+    response?.finish('success');
+  } catch (error) {
+    response?.finish('validation_error');
+    throw error;
   } finally {
     params.timing?.onRequestCompleted?.();
   }
 
-  for (const [questionId, question] of Object.entries(params.questions)) {
-    if (!isValidAnswer(question, answers?.[questionId])) {
-      throw new Error(
-        `Judgment model response is missing a valid answer for "${questionId}"`,
-      );
-    }
-  }
-
   if (backend.provider !== 'roomote' && Env.R_JUDGMENT_SHADOW === 'on') {
-    void shadowRoomoteJudgment(backend.provider, params, answers);
+    void shadowRoomoteJudgment(backend.provider, requestId, params, answers);
   }
 
   if (isJudgmentCaptureEnabled()) {
@@ -693,6 +1158,7 @@ function shadowFailureCategory(error: unknown): string {
  */
 async function shadowRoomoteJudgment(
   primaryProvider: JudgmentBackend['provider'],
+  requestId: string,
   params: { state: unknown; questions: Record<string, TypeSafeQuestion> },
   primary: Record<string, unknown> | undefined,
 ): Promise<void> {
@@ -703,20 +1169,32 @@ async function shadowRoomoteJudgment(
   }
 
   const started = Date.now();
+  let response: TrackedJudgmentResponse | undefined;
 
   try {
-    const shadow = await requestRoomoteDecisions(
+    const request = await requestRoomoteDecisions(
       upstream,
       params.state,
       params.questions,
       DEFAULT_ROOMOTE_TIMEOUT_MS,
+      {
+        requestId,
+        provider: 'roomote',
+        model: ROOMOTE_JUDGMENT_MODEL_ID,
+        role: 'shadow',
+        primaryProvider,
+      },
     );
+    response = request.response;
+    const shadow = request.answers;
     const entries = Object.entries(params.questions);
     let agreed = 0;
+    let valid = true;
     const rows = entries.map(([id, question]) => {
       const answer = shadow?.[id];
 
       if (!isValidAnswer(question, answer)) {
+        valid = false;
         return `${id}:${question.type}:invalid`;
       }
 
@@ -729,6 +1207,8 @@ async function shadowRoomoteJudgment(
       )}/${shadowMetric(question, answer)}`;
     });
 
+    response.finish(valid ? 'success' : 'validation_error');
+
     console.info(
       `[JudgmentShadow] primary=${primaryProvider} questions=${entries.length} agreed=${agreed} latencyMs=${Date.now() - started} ${rows.join(' ')}`,
     );
@@ -736,6 +1216,7 @@ async function shadowRoomoteJudgment(
     console.warn(
       `[JudgmentShadow] Roomote judgment upstream failed after ${Date.now() - started}ms: ${shadowFailureCategory(error)}`,
     );
+    response?.finish('response_error');
   }
 }
 

@@ -144,6 +144,7 @@ export async function recordLlmUsage(
     costSource: costSource as
       | 'opencode_message'
       | 'litellm_gateway'
+      | 'provider_response'
       | 'missing',
     messageCreatedAt: input.messageCreatedAt ?? null,
     messageCompletedAt: input.messageCompletedAt ?? null,
