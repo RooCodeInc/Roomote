@@ -7,8 +7,8 @@ import {
 } from './acp';
 
 /**
- * Experiment-gated (`integrationToolApprovals`) per-integration-tool approval
- * policies and requests for code-mode integration calls in Sessions.
+ * Per-integration-tool approval policies and requests for code-mode
+ * integration calls in Sessions.
  *
  * Policies are deployment-scoped and admin-configured: one row per
  * (integration, tool) selects the approval mode, and the absence of a row is

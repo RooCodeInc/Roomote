@@ -92,6 +92,7 @@ const mocks = vi.hoisted(() => ({
   getActiveRecipeVerificationTaskId: vi.fn(),
   withEnvironmentVerificationRetryLock: vi.fn(),
   evaluateJudgments: vi.fn(),
+  evaluateDecisionModel: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -329,6 +330,7 @@ vi.mock('../../non-task-provider-usage', async (importOriginal) => {
 });
 
 vi.mock('../../typesafe-judgment', () => ({
+  evaluateDecisionModel: mocks.evaluateDecisionModel,
   evaluateTypeSafeJudgments: mocks.evaluateJudgments,
   scoreTypeSafeRelevance: mocks.scoreTypeSafeRelevance,
 }));
@@ -416,6 +418,14 @@ vi.mock('../fast-agent-surface-reply-stream', async (importOriginal) => {
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({ publish: mocks.publishReplyStream }),
+}));
+
+// Per-tool approvals run for every deployment now. These service tests
+// cover other behavior, so the turn compiles no approval rules, exactly as
+// for a deployment where nobody has made a choice.
+vi.mock('../fast-agent-tool-approvals', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../fast-agent-tool-approvals')>()),
+  resolveFastAgentToolApprovalRules: vi.fn(async () => undefined),
 }));
 
 vi.mock('../fast-agent-turn-lock', () => ({
@@ -703,6 +713,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
       ],
       defaultModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [],
+    });
+    // Fixture models: model_1 = GPT-5.6 (default), model_2 = Claude Sonnet 5.
+    // Launches ask about a user model request every time; none by default.
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'none',
+        confidence: 0.97,
+        probabilities: { none: 0.97 },
+      },
     });
     mocks.getDeploymentSettings.mockResolvedValue(undefined);
     mocks.listIntegrations.mockResolvedValue([]);
@@ -1198,7 +1220,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const firstTurn = mocks.generateText.mock.calls[0]?.[0];
     const followUp = mocks.generateText.mock.calls[1]?.[0];
     expect(firstTurn?.prompt).toContain(
-      '<routing_hint>\nRouting hint: Infra [id: env-2] looks like the best environment (judgment model confidence 0.82). Verify against the configured routing rules before delegating; explicit user model and effort choices take precedence, and ask when the request is still ambiguous.',
+      '<routing_hint>\nRouting hint: Infra [id: env-2] looks like the best environment (judgment model confidence 0.82). Verify against the configured routing rules before delegating, and ask when the request is still ambiguous.',
     );
     expect(followUp?.prompt).not.toContain('<routing_hint>');
     expect(followUp?.system).toBe(firstTurn?.system);
@@ -10951,6 +10973,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('launches before the first reply and then posts the task link', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.95,
+        probabilities: { model_2: 0.95 },
+      },
+    });
     const order: string[] = [];
     const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
       await postKickoff({
@@ -10991,7 +11022,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
-      question: 'Fix checkout.',
+      question: 'Fix checkout. Use Claude Sonnet 5 for it.',
       images: [
         'data:image/png;base64,c2NyZWVuc2hvdC0x',
         'data:image/gif;base64,c2NyZWVuc2hvdC0y',
@@ -11785,6 +11816,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('allows a corrected launch after rejecting an unavailable model', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.95,
+        probabilities: { model_2: 0.95 },
+      },
+    });
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
       taskId: 'task-corrected',
@@ -11819,7 +11859,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Fix checkout on Sonnet 5.',
+      adapter,
+    });
 
     expect(launchTask).toHaveBeenCalledOnce();
     expect(launchTask).toHaveBeenCalledWith(
@@ -11895,7 +11939,286 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(launchTask).not.toHaveBeenCalled();
   });
 
+  function decisionChoice(choice: string, confidence: number) {
+    return {
+      type: 'choice',
+      choice,
+      confidence,
+      probabilities: { [choice]: confidence },
+    };
+  }
+
+  it('launches on the default model with a note when no user asked for the pick', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
+      requestedModel: decisionChoice('none', 0.97),
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Build the currency brief.',
+            model: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            kickoffMessage: 'I’m delegating the build.',
+          }),
+        ).resolves.toEqual({
+          success: true,
+          taskId: 'task-1',
+          modelNote: expect.stringContaining(
+            'Launched on the deployment default model instead of "anthropic/claude-sonnet-5"',
+          ),
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        'Build the currency brief below.\n\nCommits end with Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          work: 'Build the currency brief.',
+          latestRequest: expect.stringContaining(
+            'Co-Authored-By: Claude Sonnet 5',
+          ),
+        }),
+      }),
+    );
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: null, reasoningEffort: null }),
+    );
+  });
+
+  it('applies a matching coding-model routing rule at launch', async () => {
+    mocks.getTaskModelOptions.mockResolvedValue({
+      models: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6' },
+        { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
+      ],
+      defaultModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [
+        {
+          condition: 'Frontend UI work',
+          modelId: 'anthropic/claude-sonnet-5',
+          reasoningEffort: 'high',
+        },
+      ],
+    });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      routingRule: decisionChoice('model_rule_1', 0.92),
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Restyle the checkout page.',
+            // GPT-5.x fills optional arguments with null; still routed.
+            model: null,
+            reasoningEffort: null,
+            kickoffMessage: 'I’m delegating the checkout restyle.',
+          }),
+        ).resolves.toEqual({ success: true, taskId: 'task-1' });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Can you clean up checkout?',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({ work: 'Restyle the checkout page.' }),
+        questions: {
+          wantsNonDefaultModel: expect.anything(),
+          requestedModel: expect.anything(),
+          routingRule: expect.objectContaining({
+            criteria: expect.objectContaining({
+              model_rule_1: expect.stringContaining('"Frontend UI work"'),
+            }),
+          }),
+        },
+      }),
+    );
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+      }),
+    );
+  });
+
+  it('does not apply a routing rule whose condition does not fit the work', async () => {
+    mocks.getTaskModelOptions.mockResolvedValue({
+      models: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6' },
+        { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
+      ],
+      defaultModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [
+        {
+          condition: 'Frontend UI work',
+          modelId: 'anthropic/claude-sonnet-5',
+          reasoningEffort: null,
+        },
+      ],
+    });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
+      requestedModel: decisionChoice('none', 0.95),
+      routingRule: decisionChoice('default_model', 0.9),
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the billing migration.',
+            model: 'anthropic/claude-sonnet-5',
+            kickoffMessage: 'I’m delegating the migration fix.',
+          }),
+        ).resolves.toMatchObject({
+          success: true,
+          modelNote: expect.stringContaining('no routing rule selected it'),
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Fix the billing migration.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: null }),
+    );
+  });
+
+  it('keeps the deployment default model the agent passes', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix checkout.',
+            model: 'openai/gpt-5.6',
+            kickoffMessage: 'I’m delegating the checkout fix.',
+          }),
+        ).resolves.toEqual({ success: true, taskId: 'task-1' });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Fix checkout.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'openai/gpt-5.6' }),
+    );
+  });
+
+  it('resolves review models against the code-review default', async () => {
+    mocks.getTaskModelOptions.mockResolvedValue({
+      models: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6' },
+        { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
+      ],
+      defaultModelId: 'openai/gpt-5.6',
+      codeReviewModelId: 'anthropic/claude-sonnet-5',
+      codingModelRoutingRules: [],
+    });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.92 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_1',
+        confidence: 0.93,
+        probabilities: { model_1: 0.93 },
+      },
+    });
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.reviewPullRequest, {
+            repository: 'acme/api',
+            pullRequestNumber: 42,
+            model: 'openai/gpt-5.6',
+            kickoffMessage: 'Reviewing this now.',
+          }),
+        ).resolves.toMatchObject({ success: true });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Review acme/api#42 with GPT-5.6 instead of the usual model.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          defaultModel:
+            'Claude Sonnet 5 [id: anthropic/claude-sonnet-5], the deployment default',
+        }),
+      }),
+    );
+    expect(mocks.launchPrReview).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ model: 'openai/gpt-5.6' }),
+    );
+  });
+
   it('validates and forwards pull request review model overrides', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.95,
+        probabilities: { model_2: 0.95 },
+      },
+    });
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -11929,7 +12252,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Review acme/api#42 with claude-sonnet-5.',
+      adapter,
+    });
 
     expect(mocks.launchPrReview).toHaveBeenCalledOnce();
     expect(mocks.launchPrReview).toHaveBeenCalledWith(

@@ -4586,7 +4586,7 @@ export const serviceCredentialAudit = pgTable('service_credential_audit', {
 /**
  * integration_tool_policies
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`) durable
+ * Integration tool approvals: durable
  * approval policy for code-mode integration tool calls in Sessions. One row
  * per (integration, tool); deployment-scoped and admin-configured. Absence of
  * a row is the default `allow`, which preserves the pre-experiment behavior.
@@ -4622,7 +4622,7 @@ export const integrationToolPolicies = pgTable(
 /**
  * integration_tool_user_policies
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`) personal
+ * Integration tool approvals: personal
  * per-tool approval modes. Same modes as `integration_tool_policies`, scoped
  * to one user's own Sessions, and only ever tightening: the stricter of the
  * deployment and personal mode applies. `allow` is stored as no row. Rows
@@ -4657,7 +4657,7 @@ export const integrationToolUserPolicies = pgTable(
 /**
  * integration_tool_approval_requests
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`) pending
+ * Integration tool approvals: pending
  * and decided approval requests for code-mode integration tool calls gated by
  * an `ask` policy. One row is both the pending request and its redacted audit
  * outcome: arguments are stored only as a redacted display summary; the
@@ -4770,7 +4770,7 @@ export const integrationToolAutoEvaluations = pgTable(
 /**
  * integration_tool_session_overrides
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`)
+ * Integration tool approvals:
  * requester-owned, session-scoped overrides of a tool's approval mode. `allow`
  * records "don't ask again this session" for a tool the deployment gates with
  * `ask`; `ask` gates a default-allow tool for this session only. A deployment

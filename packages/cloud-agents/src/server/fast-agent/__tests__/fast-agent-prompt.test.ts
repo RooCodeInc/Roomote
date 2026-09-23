@@ -139,14 +139,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'Complex reasoning and engineering tasks -> GPT 5.6 [id: openai/gpt-5.6] with high reasoning',
     );
     expect(prompt).toContain(
-      'Explicit user model or effort choices take precedence',
+      'Explicit user model choices take precedence over these rules',
     );
     expect(prompt).toContain(
-      'Evaluate every routing rule and use the strongest matching rule only when its condition clearly and strongly matches',
-    );
-    expect(prompt).toContain('Do not use a weak best-available match');
-    expect(prompt).toContain(
-      'If no rule is a strong match, omit both fields to use the deployment defaults',
+      'Roomote applies them itself when it launches delegated work',
     );
   });
 
@@ -454,6 +450,73 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).toContain(
       'That handoff is retained in the Session but is not the automation result',
     );
+  });
+
+  it('limits the own-task check to stuck work when task updates are triaged', () => {
+    const standard = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    const triaged = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      taskCommunicationTriageEnabled: true,
+    });
+
+    expect(standard).toContain(
+      'post one brief consolidated factual status for the Session',
+    );
+    expect(triaged).not.toContain(
+      'post one brief consolidated factual status for the Session',
+    );
+    expect(triaged).toContain('Never post a routine or cadence status');
+    expect(triaged).toContain(
+      'it has made no progress since the previous check',
+    );
+    // Inspection, correction, and rearming are unchanged.
+    expect(triaged).toContain('send one specific corrective instruction');
+    expect(triaged).toContain(
+      'ensure exactly one equivalent next one-shot check exists',
+    );
+  });
+
+  it('frames triaged task updates by the judgment decision', () => {
+    const untriaged = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+    });
+    const relay = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: { decision: 'relay', reason: 'needs_user' },
+    });
+    const redirect = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: { decision: 'redirect', reason: 'off_track' },
+    });
+    const uncertain = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: {
+        decision: 'uncertain',
+        reason: 'mixed_signals',
+      },
+    });
+
+    expect(untriaged).toContain('roughly 10 minutes of silence');
+    expect(untriaged).not.toContain(
+      'A judgment model triaged this task update',
+    );
+    for (const prompt of [relay, redirect, uncertain]) {
+      expect(prompt).toContain('A judgment model triaged this task update');
+      expect(prompt).not.toContain('roughly 10 minutes of silence');
+    }
+    expect(relay).toContain(
+      'the task needs something only the user can provide',
+    );
+    expect(redirect).toContain('send one corrective "send_task_message"');
+    expect(uncertain).toContain('Silence is the right answer');
   });
 
   it('offers suggestions on an automation task-settled report only', () => {
@@ -782,7 +845,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'GPT-5.6 [id: openai/gpt-5.6] (deployment default)',
     );
     expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
-    expect(prompt).toContain('Omit both to use the deployment defaults');
+    expect(prompt).toContain('Roomote decides the model for delegated work');
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');

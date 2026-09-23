@@ -13,6 +13,5 @@ export * from './fast-agent-task-launcher';
 export * from './fast-agent-title';
 export * from './session-title-refresh-job';
 export * from './fast-agent-tasks';
+export * from './fast-agent-task-communication-triage';
 export * from './fast-agent-pinned-launch';
-export * from './fast-agent-communication-experiment';
-export * from './fast-agent-context-telemetry';
