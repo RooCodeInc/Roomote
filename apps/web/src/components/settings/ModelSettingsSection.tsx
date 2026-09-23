@@ -27,7 +27,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Eye,
+  Image,
   GitPullRequest,
   HandHelping,
   Input,
@@ -184,12 +184,12 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   },
   {
     role: 'vision',
-    label: 'Vision model',
+    label: 'Media model',
     description:
-      'Used for image understanding and visual information extraction.',
-    icon: Eye,
-    placeholder: 'Select a vision model',
-    reasoningAriaLabel: 'Vision model reasoning level',
+      'Handles image, audio, and video attachments. Choose a model that supports these inputs.',
+    icon: Image,
+    placeholder: 'Select a media model',
+    reasoningAriaLabel: 'Media model reasoning level',
   },
   {
     role: 'codeReview',
@@ -278,6 +278,17 @@ function TaskModelRoleEditor({
       ]
     : models;
   const selectedModel = pickerModels.find(({ id }) => id === selectValue);
+  const mediaInputTypes =
+    config.role === 'vision'
+      ? selectValue === SAME_AS_CODING_MODEL_VALUE
+        ? codingModelMetadata?.inputTypes
+        : selectedModel?.metadata?.inputTypes
+      : null;
+  const unsupportedMediaInputs = mediaInputTypes?.length
+    ? (['image', 'sound'] as const).filter(
+        (type) => !mediaInputTypes.includes(type),
+      )
+    : [];
   const selectedReasoningEffort =
     reasoningEffort ?? DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role];
 
@@ -329,6 +340,18 @@ function TaskModelRoleEditor({
           modelDisabled={managedByEnv}
           reasoningDisabled={reasoningManagedByEnv}
         />
+        {unsupportedMediaInputs.length > 0 && (
+          <p
+            className="text-xs text-amber-800 dark:text-amber-300"
+            role="status"
+          >
+            This model is not listed as supporting{' '}
+            {unsupportedMediaInputs
+              .map((type) => (type === 'sound' ? 'audio' : type))
+              .join(' or ')}{' '}
+            input. Media attachments of these types may not work.
+          </p>
+        )}
         {children}
       </div>
     </div>

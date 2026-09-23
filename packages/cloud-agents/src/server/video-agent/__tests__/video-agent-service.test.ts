@@ -70,7 +70,9 @@ describe('video-agent-service', () => {
 
     expect(description).toBeNull();
     expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining('no configured model supports video input'),
+      expect.stringContaining(
+        'Choose a video-capable Media model in Settings > Models',
+      ),
     );
   });
 

@@ -201,7 +201,7 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
     settingsModelInputKey: 'visionModelId',
     settingsReasoningInputKey: 'visionModelReasoningEffort',
     settingsModelInputOptional: false,
-    invalidModelMessage: 'Choose a valid vision model.',
+    invalidModelMessage: 'Choose a valid media model.',
     includeInSandbox: true,
   },
   codeReview: {

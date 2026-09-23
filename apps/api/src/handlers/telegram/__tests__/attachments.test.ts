@@ -109,6 +109,8 @@ describe('attachTelegramMediaToQueuedMessage audio', () => {
       botToken: 'secret-token',
     });
 
-    expect(result.text).toContain('no configured model supports audio input');
+    expect(result.text).toContain(
+      'Choose an audio-capable Media model in Settings > Models',
+    );
   });
 });

@@ -87,7 +87,7 @@ export function formatAudioTranscriptionResult(
   if (result.status === 'unsupported_model') {
     return formatAudioAttachmentWarning(
       filename,
-      'could not be transcribed because no configured model supports audio input',
+      'could not be transcribed: no available model supports audio input. Choose an audio-capable Media model in Settings > Models',
     );
   }
   if (result.status === 'oversized') {

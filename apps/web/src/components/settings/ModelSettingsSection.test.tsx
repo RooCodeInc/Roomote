@@ -435,6 +435,53 @@ describe('ModelSettingsSection', () => {
     );
   };
 
+  it('explains the media role and warns when the selected model lacks audio input', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    expect(screen.getByText('Media model')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Handles image, audio, and video attachments. Choose a model that supports these inputs.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'not listed as supporting audio input',
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Media model and reasoning' }),
+    );
+    fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
+
+    expect(screen.getByText(/This model is not listed/)).toHaveTextContent(
+      'not listed as supporting image or audio input',
+    );
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({ visionModelId: 'openrouter/z-ai/glm-5.2' }),
+      );
+    });
+  });
+
+  it('does not infer missing media inputs when model metadata is unavailable', () => {
+    const data = buildSettingsData();
+    data.models[0]!.metadata = null as never;
+    settingsData.current = data;
+    renderModelSettingsSection();
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('recognizes sound as audio support in catalog metadata', () => {
+    const data = buildSettingsData();
+    data.models[0]!.metadata.inputTypes = ['text', 'image', 'sound'];
+    settingsData.current = data;
+    renderModelSettingsSection();
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
   it('disables the runtime model selects when env-managed and omits the per-row Make default button', () => {
     settingsData.current = buildSettingsData({
       codingManagedByEnv: true,

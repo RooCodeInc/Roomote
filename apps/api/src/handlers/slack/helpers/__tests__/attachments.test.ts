@@ -31,7 +31,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       result.status === 'transcribed'
         ? `Audio attachment transcript ("${filename}"):\n${result.transcript}`
         : result.status === 'unsupported_model'
-          ? `[Audio attachment "${filename}" could not be transcribed because no configured model supports audio input.]`
+          ? `[Audio attachment "${filename}" could not be transcribed: no available model supports audio input. Choose an audio-capable Media model in Settings > Models.]`
           : result.status === 'oversized'
             ? `[Audio attachment "${filename}" could not be transcribed because it exceeds the 20 MiB limit.]`
             : `[Audio attachment "${filename}" could not be transcribed.]`,
@@ -121,7 +121,7 @@ describe('processSlackAttachments audio', () => {
     });
 
     expect(result.attachmentTexts).toEqual([
-      '[Audio attachment "Audio Clip.m4a" could not be transcribed because no configured model supports audio input.]',
+      '[Audio attachment "Audio Clip.m4a" could not be transcribed: no available model supports audio input. Choose an audio-capable Media model in Settings > Models.]',
     ]);
   });
 

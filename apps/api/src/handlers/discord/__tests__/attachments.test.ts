@@ -146,7 +146,7 @@ describe('processDiscordAttachments', () => {
     );
 
     expect(unsupported.attachmentTexts[0]).toContain(
-      'no configured model supports audio input',
+      'Choose an audio-capable Media model in Settings > Models',
     );
     expect(oversized.attachmentTexts[0]).toContain('20 MiB limit');
   });

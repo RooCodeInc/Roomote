@@ -62,7 +62,7 @@ export async function describeVideoAttachment(input: {
   } catch (error) {
     if (error instanceof NonTaskInputModalityUnsupportedError) {
       console.warn(
-        `[Video Agent] Skipping video description because no configured model supports video input (${Date.now() - startedAt}ms)`,
+        `[Video Agent] Skipping video description: no available model supports video input. Choose a video-capable Media model in Settings > Models (${Date.now() - startedAt}ms)`,
       );
       return null;
     }

@@ -43,7 +43,7 @@ const OVERRIDE_ROLE_ROWS: Array<{
   { role: 'codeReview', label: 'Code review' },
   { role: 'explore', label: 'Explore' },
   { role: 'helper', label: 'Helper' },
-  { role: 'vision', label: 'Vision' },
+  { role: 'vision', label: 'Media' },
 ];
 
 type RoleSelection = {

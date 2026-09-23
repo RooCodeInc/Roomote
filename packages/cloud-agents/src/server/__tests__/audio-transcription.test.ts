@@ -103,6 +103,6 @@ describe('audio transcription', () => {
       formatAudioTranscriptionResult('voice.ogg', {
         status: 'unsupported_model',
       }),
-    ).toContain('no configured model supports audio input');
+    ).toContain('Choose an audio-capable Media model in Settings > Models');
   });
 });
