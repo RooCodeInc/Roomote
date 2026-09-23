@@ -366,6 +366,92 @@ describe('sendMessageToTask', () => {
     );
   });
 
+  it('queues Fast steers in FIFO order while preparing even with a sandbox URL', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        status: 'preparing',
+        taskPhase: null,
+        runtimeTaskStartedAt: null,
+      }),
+    );
+    mockQueueTaskFollowUp
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    const first = {
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'First instruction.',
+      clientMessageId: 'first-startup-steer',
+      senderMode: 'fast_agent' as const,
+    };
+    expect(await steerMessageToTask(first)).toEqual({
+      success: true,
+      result: { queued: true, messageId: first.clientMessageId },
+    });
+    expect(await steerMessageToTask(first)).toEqual({
+      success: true,
+      result: {
+        queued: true,
+        messageId: first.clientMessageId,
+        alreadyQueued: true,
+      },
+    });
+    expect(
+      await steerMessageToTask({
+        ...first,
+        message: 'Second instruction.',
+        clientMessageId: 'second-startup-steer',
+      }),
+    ).toMatchObject({ success: true, result: { queued: true } });
+
+    expect(mockQueueTaskFollowUp.mock.calls.map(([, entry]) => entry)).toEqual([
+      expect.objectContaining({
+        clientMessageId: 'first-startup-steer',
+        prompt: 'First instruction.',
+        deliveryMode: 'steer',
+      }),
+      expect.objectContaining({
+        clientMessageId: 'first-startup-steer',
+        prompt: 'First instruction.',
+        deliveryMode: 'steer',
+      }),
+      expect.objectContaining({
+        clientMessageId: 'second-startup-steer',
+        prompt: 'Second instruction.',
+        deliveryMode: 'steer',
+      }),
+    ]);
+    expect(mockSteerTaskMutate).not.toHaveBeenCalled();
+    expect(mockCreateRunToken).not.toHaveBeenCalled();
+  });
+
+  it('queues a normal message while preparing with a published sandbox URL', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ status: 'preparing', taskPhase: null }),
+    );
+
+    expect(
+      await sendMessageToTask({
+        taskId: 'task-1',
+        userId: 'user-1',
+        message: 'Follow the first instruction.',
+        clientMessageId: 'web-startup-message',
+      }),
+    ).toEqual({
+      success: true,
+      result: { queued: true, messageId: 'web-startup-message' },
+    });
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+    expect(mockQueueTaskFollowUp).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        clientMessageId: 'web-startup-message',
+        deliveryMode: 'send',
+      }),
+    );
+  });
+
   it('queues a normal follow-up before sandbox startup instead of rejecting it', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({ sandboxServerUrl: null }),

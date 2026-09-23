@@ -36,6 +36,7 @@ import {
   TaskPayloadKind,
   buildFastAgentChildTaskMetadata,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
+  isBootingRunStatus,
   getFastAgentParentFromPayload,
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
@@ -1216,10 +1217,12 @@ export async function sendMessageToTask({
     const requiresActorHandoff =
       !shouldPreserveActor && run.actingUserId !== senderUserId;
 
-    // Queue while the sandbox cannot take commands, and keep queueing while
-    // earlier queued follow-ups are undelivered so this one cannot jump them.
+    // The controller can publish the sandbox URL while the worker is still
+    // preparing. Queue until the run is ready, and behind undelivered entries.
     const queueBeforeLiveDelivery =
-      !run.sandboxServerUrl || (await hasQueuedTaskFollowUps(run.id));
+      isBootingRunStatus(run.status) ||
+      !run.sandboxServerUrl ||
+      (await hasQueuedTaskFollowUps(run.id));
 
     if (queueBeforeLiveDelivery) {
       await touchTaskActivity(db, taskId);
@@ -1446,7 +1449,9 @@ export async function steerMessageToTask({
     }
 
     const queueBeforeLiveDelivery =
-      !run.sandboxServerUrl || (await hasQueuedTaskFollowUps(run.id));
+      isBootingRunStatus(run.status) ||
+      !run.sandboxServerUrl ||
+      (await hasQueuedTaskFollowUps(run.id));
 
     if (queueBeforeLiveDelivery) {
       await touchTaskActivity(db, taskId);
