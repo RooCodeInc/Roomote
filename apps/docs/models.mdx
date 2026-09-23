@@ -355,9 +355,9 @@ When a judgment model is on, Roomote asks it first for:
 - choosing the forum tag when Roomote opens a thread in a Discord forum channel
 - whether a settled session or task turn holds something worth saving to
   [Memory](/memory) that the agent did not record itself
-- ranking a task's own changed hunks by defect risk during its self-review,
-  before it pushes or opens a pull request (the same pre-screen pull request
-  reviews use), as advisory hints the agent re-reads
+- an advisory ranking of a task's own changed hunks by defect risk during its
+  self-review, before it pushes or opens a pull request (the same pre-screen
+  pull request reviews use), so the agent can re-read the riskiest hunks
 
 Roomote acts on the judgment model only when it is confident. When it is
 unsure, unavailable, or returns an error, Roomote keeps the behavior it has

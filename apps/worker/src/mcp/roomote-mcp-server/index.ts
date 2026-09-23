@@ -1339,7 +1339,7 @@ if (shouldRegisterDiffRiskHintsTool()) {
     {
       title: 'Get Diff Risk Hints',
       description:
-        "Before you push or open a pull request, call this once during your self-review. It runs the same fast pre-screen Roomote's pull request review uses on your branch's diff (committed, uncommitted, and new files against the default branch) and returns up to three changed hunks most likely to contain a defect, each with the kind of issue suspected. Re-read those hunks and fix what the code confirms. The hints are questions, not findings, and they miss about half of real defects, so they never clear the rest of the change. Returns available: false when the deployment has no hosted judgment model.",
+        "Before you push or open a pull request, call this once during your self-review. It runs the same fast pre-screen Roomote's pull request review uses on your branch's diff (committed, uncommitted, and new files against the default branch) and returns up to three changed hunks most likely to contain a defect, each with the kind of issue suspected. Re-read those hunks and fix what the code confirms. The hints are questions, not findings, and they miss about half of real defects, so they never clear the rest of the change. Returns a result with `available: false` when the deployment has no hosted judgment model.",
       inputSchema: {
         repositoryPath: z
           .string()
