@@ -22,9 +22,11 @@ x-roomote-env: &roomote-env
   R_APP_URL: ${R_PUBLIC_URL:-http://localhost:13000}
   R_INSTANCE_ID: ${R_INSTANCE_ID:-}
   R_CURATED_INTEGRATIONS_DISABLED: ${R_CURATED_INTEGRATIONS_DISABLED:-false}
-  # The Brain: supplying this key gives the deployment shared memory that
-  # agents consult. It powers the brain service's embeddings and is the
-  # single activation signal — there is no Settings UI for it.
+  # The Brain: optional provider keys for the shared memory agents consult.
+  # They power the brain service's embeddings and synthesis; an enabled Brain
+  # otherwise falls back to the deployment's regular provider key. Admins turn
+  # Memory on or off in Settings > Memory. Until that toggle has been set, a
+  # key here also turns Memory on (legacy behavior).
   R_BRAIN_OPENROUTER_API_KEY: ${R_BRAIN_OPENROUTER_API_KEY:-}
   R_BRAIN_OPENAI_API_KEY: ${R_BRAIN_OPENAI_API_KEY:-}
   # Shared secret the Brain presents to /api/brain/inference. REQUIRED to
