@@ -10,7 +10,6 @@ import type {
   CommunicationReactionResult,
   CommunicationThreadLookupResult,
 } from './provider';
-import { renderDiscordMarkdownTables } from './discord-markdown';
 
 export const DISCORD_MAX_MESSAGE_LENGTH = 2_000;
 const DISCORD_MAX_EMBEDS_PER_MESSAGE = 10;
@@ -278,7 +277,10 @@ function normalizeRoute(method: string, path: string): string {
   return `${method.toUpperCase()} ${normalized.join('/')}`;
 }
 
-function chunkPlainDiscordMessage(text: string, limit: number): string[] {
+export function chunkDiscordMessage(
+  text: string,
+  limit = DISCORD_MAX_MESSAGE_LENGTH,
+): string[] {
   if (text.length <= limit) return text ? [text] : [];
   const chunks: string[] = [];
   let remaining = text;
@@ -300,359 +302,12 @@ function chunkPlainDiscordMessage(text: string, limit: number): string[] {
   return chunks;
 }
 
-type DiscordMessageSegment =
-  | { kind: 'plain'; text: string }
-  | {
-      kind: 'fenced';
-      text: string;
-      opening: string;
-      closing: string;
-      eol: string;
-      closed: boolean;
-    };
-
-function discordFenceOpening(line: string): {
-  marker: string;
-  character: '`' | '~';
-} | null {
-  const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/u);
-  if (!match || (match[1]![0] === '`' && match[2]!.includes('`'))) {
-    return null;
-  }
-  return {
-    marker: match[1]!,
-    character: match[1]![0] as '`' | '~',
-  };
-}
-
-function discordFenceClosing(
-  line: string,
-  opening: { marker: string; character: '`' | '~' },
-): boolean {
-  const match = line.match(/^ {0,3}(`+|~+)[ \t]*$/u);
-  return Boolean(
-    match &&
-    match[1]![0] === opening.character &&
-    match[1]!.length >= opening.marker.length,
-  );
-}
-
-function splitDiscordMessageSegments(text: string): DiscordMessageSegment[] {
-  const tokens = text.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
-  const segments: DiscordMessageSegment[] = [];
-  let plain = '';
-  let fenced = '';
-  let opening: { marker: string; character: '`' | '~' } | null = null;
-  let openingLine = '';
-  let closeLine = '';
-  let eol = '\n';
-
-  const flushPlain = () => {
-    if (plain) segments.push({ kind: 'plain', text: plain });
-    plain = '';
-  };
-
-  for (const token of tokens) {
-    const line = token.replace(/\r?\n$/u, '');
-    if (!opening) {
-      const candidate = discordFenceOpening(line);
-      if (!candidate) {
-        plain += token;
-        continue;
-      }
-      flushPlain();
-      opening = candidate;
-      openingLine = line;
-      eol = token.endsWith('\r\n') ? '\r\n' : '\n';
-      fenced = token;
-      continue;
-    }
-
-    fenced += token;
-    if (discordFenceClosing(line, opening)) {
-      closeLine = line;
-      segments.push({
-        kind: 'fenced',
-        text: fenced,
-        opening: openingLine,
-        closing: closeLine,
-        eol,
-        closed: true,
-      });
-      opening = null;
-      fenced = '';
-      openingLine = '';
-      closeLine = '';
-    }
-  }
-
-  if (opening) {
-    segments.push({
-      kind: 'fenced',
-      text: fenced,
-      opening: openingLine,
-      closing: opening.marker,
-      eol,
-      closed: false,
-    });
-  } else {
-    flushPlain();
-  }
-  return segments;
-}
-
-function splitPreservingText(text: string, limit: number): string[] {
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > limit) {
-    const candidate = remaining.slice(0, limit + 1);
-    const newline = candidate.lastIndexOf('\n');
-    const whitespace = candidate.search(/\s+\S*$/u);
-    const splitAt =
-      newline >= limit / 2
-        ? newline + 1
-        : whitespace >= limit / 2
-          ? whitespace + 1
-          : limit;
-    chunks.push(remaining.slice(0, splitAt));
-    remaining = remaining.slice(splitAt);
-  }
-  if (remaining) chunks.push(remaining);
-  return chunks;
-}
-
-function isAsciiTableBorder(line: string, character: '-' | '='): boolean {
-  return character === '-'
-    ? /^\+(?:-+\+)+$/u.test(line)
-    : /^\+(?:=+\+)+$/u.test(line);
-}
-
-function containsAsciiTable(text: string): boolean {
-  const lines = text.split(/\r?\n/u);
-  return lines.some(
-    (line, index) =>
-      index > 0 &&
-      isAsciiTableBorder(line, '-') &&
-      Boolean(lines[index + 1]?.startsWith('|')),
-  );
-}
-
-function chunkAsciiTable(
-  segment: Extract<DiscordMessageSegment, { kind: 'fenced' }>,
-  content: string,
-  limit: number,
-): string[] | null {
-  const lines = content.split(/\r?\n/u);
-  if (lines.at(-1) === '') lines.pop();
-  if (!isAsciiTableBorder(lines[0] ?? '', '-')) return null;
-  const headerSeparator = lines.findIndex(
-    (line, index) => index > 0 && isAsciiTableBorder(line, '='),
-  );
-  if (headerSeparator < 2) return null;
-  const prefix = lines.slice(0, headerSeparator + 1);
-  const rowGroups: string[][] = [];
-  let row: string[] = [];
-  for (const line of lines.slice(headerSeparator + 1)) {
-    row.push(line);
-    if (isAsciiTableBorder(line, '-')) {
-      rowGroups.push(row);
-      row = [];
-    }
-  }
-  if (row.length || !rowGroups.length) return null;
-
-  const renderChunk = (groups: string[][]) =>
-    `${segment.opening}${segment.eol}${[...prefix, ...groups.flat()].join(segment.eol)}${segment.eol}${segment.closing}`;
-  const chunks: string[] = [];
-  let groups: string[][] = [];
-  for (const group of rowGroups) {
-    const candidate = renderChunk([...groups, group]);
-    if (candidate.length <= limit) {
-      groups.push(group);
-      continue;
-    }
-    if (groups.length) {
-      chunks.push(renderChunk(groups));
-      groups = [];
-    }
-    if (renderChunk([group]).length <= limit) {
-      groups.push(group);
-      continue;
-    }
-
-    const border = group.at(-1);
-    const rowLines = group.slice(0, -1);
-    if (!border || !rowLines.length) return null;
-    let fragment: string[] = [];
-    for (const line of rowLines) {
-      const fragmentWithLine = [...fragment, line, border];
-      if (renderChunk([fragmentWithLine]).length > limit) {
-        if (!fragment.length) return null;
-        chunks.push(renderChunk([[...fragment, border]]));
-        fragment = [line];
-        if (renderChunk([[...fragment, border]]).length > limit) return null;
-      } else {
-        fragment.push(line);
-      }
-    }
-    if (fragment.length) chunks.push(renderChunk([[...fragment, border]]));
-  }
-  if (groups.length) chunks.push(renderChunk(groups));
-  return chunks;
-}
-
-function chunkFencedDiscordMessage(
-  segment: Extract<DiscordMessageSegment, { kind: 'fenced' }>,
-  limit: number,
-): string[] {
-  if (segment.text.length <= limit) return [segment.text];
-  const openingLineEnd = segment.text.indexOf('\n');
-  const closingLineStart = segment.closed
-    ? segment.text.lastIndexOf(segment.closing)
-    : -1;
-  const contentStart =
-    openingLineEnd === -1 ? segment.text.length : openingLineEnd + 1;
-  const content =
-    closingLineStart >= contentStart
-      ? segment.text.slice(contentStart, closingLineStart)
-      : segment.text.slice(contentStart);
-  const tableChunks = chunkAsciiTable(segment, content, limit);
-  if (tableChunks) return tableChunks;
-  const contentLimit =
-    limit -
-    segment.opening.length -
-    segment.closing.length -
-    2 * segment.eol.length;
-  if (contentLimit <= 0) {
-    return splitPreservingText(segment.text, limit);
-  }
-
-  return splitPreservingText(content, contentLimit).map(
-    (part) =>
-      `${segment.opening}${segment.eol}${part}${part.endsWith(segment.eol) ? '' : segment.eol}${segment.closing}`,
-  );
-}
-
-function chunkRenderedDiscordMessage(text: string, limit: number): string[] {
-  if (text.length <= limit) return text ? [text] : [];
-  const segments = splitDiscordMessageSegments(text);
-  if (!segments.some((segment) => segment.kind === 'fenced')) {
-    return chunkPlainDiscordMessage(text, limit);
-  }
-
-  const chunks: string[] = [];
-  for (const segment of segments) {
-    const pieces =
-      segment.kind === 'plain'
-        ? chunkPlainDiscordMessage(segment.text, limit)
-        : chunkFencedDiscordMessage(segment, limit);
-    for (const piece of pieces) {
-      const previous = chunks.at(-1);
-      if (previous && previous.length + piece.length <= limit) {
-        chunks[chunks.length - 1] = previous + piece;
-      } else {
-        chunks.push(piece);
-      }
-    }
-  }
-  return chunks;
-}
-
-function appendDiscordTruncationMark(text: string, limit: number): string {
-  if (text.length < limit) return `${text}…`;
-  const segments = splitDiscordMessageSegments(text);
-  if (segments.length === 1 && segments[0]?.kind === 'fenced') {
-    const segment = segments[0];
-    const overhead =
-      segment.opening.length +
-      segment.closing.length +
-      2 * segment.eol.length +
-      1;
-    const contentLimit = limit - overhead;
-    if (contentLimit > 0) {
-      const openingEnd = text.indexOf('\n') + 1;
-      const closingStart = text.lastIndexOf(segment.closing);
-      const content = text.slice(openingEnd, closingStart);
-      const shortened = splitPreservingText(content, contentLimit)[0] ?? '';
-      const trimmed = shortened.trimEnd();
-      return `${segment.opening}${segment.eol}${trimmed}…${segment.eol}${segment.closing}`;
-    }
-  }
-  return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
-}
-
-function firstDiscordTableChunk(chunks: string[]): string | null {
-  for (const chunk of chunks) {
-    if (!containsAsciiTable(chunk)) continue;
-    const table = splitDiscordMessageSegments(chunk).find(
-      (segment) =>
-        segment.kind === 'fenced' && containsAsciiTable(segment.text),
-    );
-    return table?.text ?? chunk;
-  }
-  return null;
-}
-
-function truncateDiscordTableWithPreamble(
-  chunks: string[],
-  limit: number,
-): string | null {
-  const tableChunk = firstDiscordTableChunk(chunks);
-  if (!tableChunk) return null;
-
-  const tableIndex = chunks.findIndex((chunk) => containsAsciiTable(chunk));
-  const priorChunks = chunks.slice(0, tableIndex);
-  const hasEarlierCode = priorChunks.some((chunk) =>
-    splitDiscordMessageSegments(chunk).some(
-      (segment) => segment.kind === 'fenced',
-    ),
-  );
-  let preamble = hasEarlierCode ? '' : priorChunks.join('\n').trim();
-  const preambleLimit = Math.min(400, Math.floor(limit / 4));
-  if (preamble.length > preambleLimit) {
-    preamble = `${preamble.slice(0, Math.max(0, preambleLimit - 1)).trimEnd()}…`;
-  }
-
-  const lead = preamble ? `${preamble}\n\n` : '';
-  const tableLimit = limit - lead.length;
-  if (tableLimit <= 0) return appendDiscordTruncationMark(tableChunk, limit);
-  return `${lead}${appendDiscordTruncationMark(tableChunk, tableLimit)}`;
-}
-
-function renderDiscordSingleMessage(text: string): string {
-  const rendered = renderDiscordMarkdownTables(text);
-  if (rendered.length <= DISCORD_MAX_MESSAGE_LENGTH) return rendered;
-  const compact = renderDiscordMarkdownTables(
-    text,
-    DISCORD_MAX_MESSAGE_LENGTH,
-    'compact',
-  );
-  return compact.length <= DISCORD_MAX_MESSAGE_LENGTH ? compact : text;
-}
-
-export function chunkDiscordMessage(
-  text: string,
-  limit = DISCORD_MAX_MESSAGE_LENGTH,
-): string[] {
-  return chunkRenderedDiscordMessage(
-    renderDiscordMarkdownTables(text, limit),
-    limit,
-  );
-}
-
 export function truncateDiscordMessage(
   text: string,
   limit = DISCORD_MAX_MESSAGE_LENGTH,
 ): string {
-  const rendered = renderDiscordMarkdownTables(text, limit);
-  if (rendered.length <= limit) return rendered;
-  const chunks = chunkRenderedDiscordMessage(rendered, limit);
-  const firstChunk = chunks[0] ?? '';
-  if (!containsAsciiTable(firstChunk)) {
-    const table = truncateDiscordTableWithPreamble(chunks, limit);
-    if (table) return table;
-  }
-  return appendDiscordTruncationMark(firstChunk, limit);
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
 function buildDiscordComponents(
@@ -969,12 +624,11 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         'Discord edited message text cannot exceed 2000 characters.',
       );
     }
-    const text = renderDiscordSingleMessage(input.text);
     await this.request(
       'PATCH',
       `/channels/${input.channelId}/messages/${input.messageId}`,
       {
-        content: text,
+        content: input.text,
         allowed_mentions: { parse: [] },
         ...(input.preserveButtons
           ? {}
@@ -1085,7 +739,6 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     if (input.text.length > DISCORD_MAX_MESSAGE_LENGTH) {
       throw new Error('Discord forum post text cannot exceed 2000 characters.');
     }
-    const text = renderDiscordSingleMessage(input.text);
     const nonce = this.nonceFactory();
     const channel = await this.request<
       DiscordApiChannel & { message?: DiscordApiMessage }
@@ -1099,7 +752,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
           ? { applied_tags: input.appliedTagIds }
           : {}),
         message: {
-          content: text,
+          content: input.text,
           allowed_mentions: { parse: [] },
           nonce,
           enforce_nonce: true,
@@ -1474,12 +1127,11 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         'Discord interaction response text cannot exceed 2000 characters.',
       );
     }
-    const text = renderDiscordSingleMessage(input.text);
     const message = await this.request<DiscordApiMessage>(
       'PATCH',
       `/webhooks/${input.applicationId}/${input.interactionToken}/messages/@original`,
       {
-        content: text,
+        content: input.text,
         allowed_mentions: { parse: [] },
         components: buildDiscordComponents(input.buttons) ?? [],
       },

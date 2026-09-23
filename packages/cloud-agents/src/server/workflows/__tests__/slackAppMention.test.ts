@@ -6,6 +6,7 @@ import {
 import type { ResolvedTaskCommitAuthor } from '../../commit-author';
 
 import {
+  buildSlackMessageInstructions,
   buildChatProviderMessageInstructions,
   slackAppMention,
 } from '../slackAppMention';
@@ -630,6 +631,25 @@ describe('slackAppMention', () => {
 });
 
 describe('buildChatProviderMessageInstructions', () => {
+  it('instructs Discord turns to emit padded ASCII tables directly', () => {
+    const discordInstructions = buildChatProviderMessageInstructions('discord');
+    const teamsInstructions = buildChatProviderMessageInstructions('teams');
+    const slackInstructions = buildSlackMessageInstructions();
+
+    expect(discordInstructions).toContain('<discord_table_formatting>');
+    expect(discordInstructions).toContain('padded ASCII table');
+    expect(discordInstructions).toContain('triple-backtick code fence');
+    expect(discordInstructions).toContain('horizontal scrolling is acceptable');
+    expect(discordInstructions).toContain(
+      'Do not output GFM/Markdown pipe-table syntax for Discord',
+    );
+    expect(discordInstructions).toContain('<example>\n  ```\n');
+    expect(discordInstructions).toContain('\n  ```\n  </example>');
+    expect(teamsInstructions).not.toContain('<discord_table_formatting>');
+    expect(slackInstructions).toContain('Markdown tables');
+    expect(slackInstructions).not.toContain('<discord_table_formatting>');
+  });
+
   it.each(['discord', 'teams', 'telegram'] as const)(
     'allows send_chat_reaction_emoji for %s turns (not Slack-only)',
     (provider) => {

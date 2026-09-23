@@ -28,6 +28,7 @@ import type { FastAgentActiveTask } from './fast-agent-session';
 import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 import { NATIVE_ROOMOTE_TOOL_SELECTION_INSTRUCTIONS } from '../../http-integrations';
 import { buildPrivateSessionGuidance } from '../../private-session-guidance';
+import { DISCORD_TABLE_FORMATTING_INSTRUCTIONS } from '../discord-table-formatting';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 import { buildRoomoteReleaseIdentifier } from '../../release-version';
 import { buildUserPersonalizationInstructions } from '../user-personalization';
@@ -923,6 +924,7 @@ ${surface === 'slack' ? '<slack_modern_markdown>\nSlack replies from `send_chat_
 Use modern Markdown when it improves scanability. Supported formatting includes headings, horizontal rules, blockquotes, fenced code blocks, tables, bold, italic, strikethrough, inline code, and Markdown links.
 
 ${surface === 'slack' ? 'Do not assume Slack formatting is limited to old mrkdwn. Use richer Markdown when it makes the reply clearer.\n</slack_modern_markdown>' : ''}
+${surface === 'discord' ? `${DISCORD_TABLE_FORMATTING_INSTRUCTIONS}\n` : ''}
 - Keep paragraphs short and structure longer replies lightly.
 - Keep bullets and numbered lists tight: one idea per item.
 - Reserve inline code for literal commands, paths, identifiers, and syntax.

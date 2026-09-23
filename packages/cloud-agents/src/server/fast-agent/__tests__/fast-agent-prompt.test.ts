@@ -1873,6 +1873,9 @@ describe('buildFastAgentSystemPrompt', () => {
 
     expect(prompt).toContain('fast mode on Discord');
     expect(prompt).toContain('Emoji reactions are unavailable on this surface');
+    expect(prompt).toContain('<discord_table_formatting>');
+    expect(prompt).toContain('padded ASCII table');
+    expect(prompt).toContain('horizontal scrolling is acceptable');
     expect(prompt).not.toContain('<slack_modern_markdown>');
     expect(prompt).not.toContain(
       'attributes on the current `<slack_message>` identify its sender',
@@ -1880,6 +1883,13 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       '`sender_name` and `sender_github` fields identify the human sender',
     );
+
+    const slackPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'slack',
+    });
+    expect(slackPrompt).toContain('<slack_modern_markdown>');
+    expect(slackPrompt).not.toContain('<discord_table_formatting>');
   });
 
   it('tells an addressed turn to answer without re-deciding directedness', () => {
