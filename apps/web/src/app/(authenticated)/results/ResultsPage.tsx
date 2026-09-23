@@ -431,7 +431,7 @@ export function ResultsPage() {
         ) : results.length === 0 ? (
           <Empty>
             <EmptyHeader>
-              <EmptyTitle>You're all caught up</EmptyTitle>
+              <EmptyTitle>You&apos;re all caught up</EmptyTitle>
             </EmptyHeader>
             <EmptyDescription>
               New automation reports and suggested follow-ups will appear here
