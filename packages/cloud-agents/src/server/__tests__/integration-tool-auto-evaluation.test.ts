@@ -246,6 +246,43 @@ describe('recordIntegrationToolShadowEvaluationInBackground', () => {
     warn.mockRestore();
   });
 
+  it("asks whether a task's call matches what the user asked for", async () => {
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    const resolveUserRequest = vi.fn(async () => 'What is open for ENG?');
+    recordIntegrationToolShadowEvaluationInBackground({
+      ...shadowCall,
+      taskId: 'task-1',
+      resolveUserRequest,
+    });
+    await vi.waitFor(() => expect(mocks.recordShadow).toHaveBeenCalled());
+    expect(mocks.evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          userRequest: 'What is open for ENG?',
+        }),
+        questions: expect.objectContaining({
+          matchesRequest: expect.anything(),
+        }),
+      }),
+    );
+
+    // A failed lookup still records an assessment, without the request.
+    mocks.evaluate.mockClear();
+    mocks.recordShadow.mockClear();
+    resolveUserRequest.mockRejectedValueOnce(new Error('db down'));
+    recordIntegrationToolShadowEvaluationInBackground({
+      ...shadowCall,
+      taskId: 'task-1',
+      resolveUserRequest,
+    });
+    await vi.waitFor(() => expect(mocks.recordShadow).toHaveBeenCalled());
+    expect(mocks.evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({ userRequest: null }),
+      }),
+    );
+  });
+
   it('records nothing while Auto is on or fully off', async () => {
     mocks.settings.mockResolvedValue({ mode: 'on', policy: '' });
     recordIntegrationToolShadowEvaluationInBackground(shadowCall);

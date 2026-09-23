@@ -1,6 +1,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
+import { INTEGRATION_TOOL_USER_REQUEST_MAX_CHARS } from '@roomote/types';
+
 import {
   getTaskToolApprovalStatus,
   requestTaskToolApproval,
@@ -31,7 +33,10 @@ export const toolApprovalsRouter = router({
           toolName: z.string().min(1).max(200),
           nativeRequestId: z.string().min(1).max(200),
           args: z.unknown(),
-          userRequest: z.string().max(20_000).optional(),
+          userRequest: z
+            .string()
+            .max(INTEGRATION_TOOL_USER_REQUEST_MAX_CHARS)
+            .optional(),
         })
         .strict(),
     )

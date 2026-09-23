@@ -7,6 +7,7 @@ const {
   mockClaim,
   mockAutoState,
   mockShadow,
+  mockLatestUserRequest,
 } = vi.hoisted(() => ({
   mockExperiment: vi.fn(async () => true),
   mockDeployment: vi.fn(async () => [] as unknown[]),
@@ -16,6 +17,7 @@ const {
   mockClaim: vi.fn(async () => true),
   mockAutoState: vi.fn(async () => ({ mode: 'off' }) as unknown),
   mockShadow: vi.fn(),
+  mockLatestUserRequest: vi.fn(async () => 'Look up the open invoices.'),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -27,6 +29,7 @@ vi.mock('@roomote/db/server', () => ({
   listIntegrationToolSessionOverrides: mockOverrides,
   claimTaskIntegrationToolCall: mockClaim,
   fingerprintIntegrationToolCall: (input: unknown) => JSON.stringify(input),
+  findLatestTaskUserRequest: mockLatestUserRequest,
 }));
 vi.mock(
   '@roomote/cloud-agents/server/integration-tool-auto-evaluation',
@@ -257,6 +260,39 @@ describe('resolveProxyToolApprovalBlocks', () => {
     });
     shadowProxyToolCall(off, { ...call, toolName: 'list_issues' });
     expect(mockShadow).toHaveBeenCalledTimes(1);
+  });
+
+  it("assesses a task's call against the task's latest request", async () => {
+    mockAutoState.mockResolvedValue({ mode: 'shadow' });
+    const approvals = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      tokenType: 'run',
+      resolveActingUserId: async () => 'user-1',
+      resolveTaskId: async () => 'task-1',
+    });
+    const call = {
+      integrationId: 'linear',
+      toolName: 'list_issues',
+      args: {},
+      userId: 'user-1',
+    };
+
+    shadowProxyToolCall(approvals, { ...call, taskId: 'task-1' });
+    const [taskCall] = mockShadow.mock.calls.at(-1) as [
+      { resolveUserRequest?: () => Promise<string | undefined> },
+    ];
+    // Looked up only when the assessment runs, not on the request path.
+    expect(mockLatestUserRequest).not.toHaveBeenCalled();
+    await expect(taskCall.resolveUserRequest?.()).resolves.toBe(
+      'Look up the open invoices.',
+    );
+    expect(mockLatestUserRequest).toHaveBeenCalledWith('task-1');
+
+    shadowProxyToolCall(approvals, { ...call, taskId: null });
+    const [sessionCall] = mockShadow.mock.calls.at(-1) as [
+      { resolveUserRequest?: unknown },
+    ];
+    expect(sessionCall.resolveUserRequest).toBeUndefined();
   });
 });
 

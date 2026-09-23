@@ -5,6 +5,7 @@ import {
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
   getIntegrationToolApproval,
+  findLatestTaskUserRequest,
   getSessionForTask,
   insertAutoApprovedIntegrationToolApproval,
   insertAutoRejectedIntegrationToolApproval,
@@ -26,6 +27,7 @@ import {
   integrationToolModeIsAutoAssessed,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
+  toIntegrationToolUserRequest,
   type IntegrationToolApprovalStatus,
   type IntegrationToolPolicyScope,
   type TaskIntegrationToolApprovals,
@@ -176,7 +178,10 @@ export async function requestTaskToolApproval(input: {
   toolName: string;
   nativeRequestId: string;
   args?: unknown;
-  /** What the user last asked for; Auto mode checks the call against it. */
+  /**
+   * What the user last asked for; Auto mode checks the call against it.
+   * Without one, the task's latest recorded prompt stands in.
+   */
   userRequest?: string;
   /** Whose personal policies apply, and what the run mounts: they decide who answers. */
   actingUserId?: string;
@@ -229,7 +234,11 @@ export async function requestTaskToolApproval(input: {
         integrationId: input.integrationId,
         toolName: input.toolName,
         args: input.args,
-        userRequest: input.userRequest,
+        userRequest:
+          toIntegrationToolUserRequest(input.userRequest) ??
+          (await findLatestTaskUserRequest(session.taskId).catch(
+            () => undefined,
+          )),
         userId: session.ownerUserId,
         taskId: session.taskId,
       }).catch(() => ({

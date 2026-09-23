@@ -1,6 +1,7 @@
 import {
   claimTaskIntegrationToolCall,
   db,
+  findLatestTaskUserRequest,
   fingerprintIntegrationToolCall,
   getSessionForTask,
   isDeploymentExperimentEnabled,
@@ -146,7 +147,10 @@ export function resolveProxyToolApprovalBlock(
   return approvals.blocks.get(toolName) ?? approvals.defaultBlock;
 }
 
-/** Shadow-assess a call to a default tool; never awaited. */
+/**
+ * Shadow-assess a call to a default tool; never awaited. A task's call is
+ * assessed against what the user last asked that task for.
+ */
 export function shadowProxyToolCall(
   approvals: ProxyToolApprovals,
   input: {
@@ -160,7 +164,13 @@ export function shadowProxyToolCall(
   if (!approvals.shadowDefaultTools || approvals.blocks.has(input.toolName)) {
     return;
   }
-  recordIntegrationToolShadowEvaluationInBackground(input);
+  const { taskId } = input;
+  recordIntegrationToolShadowEvaluationInBackground({
+    ...input,
+    ...(taskId
+      ? { resolveUserRequest: () => findLatestTaskUserRequest(taskId) }
+      : {}),
+  });
 }
 
 /**
