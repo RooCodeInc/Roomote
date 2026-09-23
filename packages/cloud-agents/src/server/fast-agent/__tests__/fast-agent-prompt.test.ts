@@ -1878,6 +1878,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('under 2,000 characters');
     expect(prompt).not.toContain('<slack_modern_markdown>');
     expect(prompt).not.toContain(
+      'Use modern Markdown when it improves scanability',
+    );
+    expect(prompt).not.toContain('Markdown tables');
+    expect(prompt).not.toContain(
       'attributes on the current `<slack_message>` identify its sender',
     );
     expect(prompt).toContain(
@@ -1889,6 +1893,9 @@ describe('buildFastAgentSystemPrompt', () => {
       surface: 'slack',
     });
     expect(slackPrompt).toContain('<slack_modern_markdown>');
+    expect(slackPrompt).toContain(
+      'Use modern Markdown when it improves scanability. Supported formatting includes headings, horizontal rules, blockquotes, fenced code blocks, tables, bold, italic, strikethrough, inline code, and Markdown links.',
+    );
     expect(slackPrompt).not.toContain('<discord_table_formatting>');
   });
 

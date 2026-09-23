@@ -650,6 +650,7 @@ describe('buildChatProviderMessageInstructions', () => {
       'wrap overlong values as labeled continuations',
     );
     expect(teamsInstructions).not.toContain('<discord_table_formatting>');
+    expect(discordInstructions).not.toContain('Markdown tables');
     expect(slackInstructions).toContain('Markdown tables');
     expect(slackInstructions).not.toContain('<discord_table_formatting>');
   });
