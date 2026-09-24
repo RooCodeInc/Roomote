@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { Env } from '@roomote/env';
 import {
   getDeploymentJudgmentModelSelection,
-  recordLlmUsage,
   resolveModelProviderEnvValue,
 } from '@roomote/db/server';
 import {
@@ -19,6 +18,15 @@ import {
   NON_TASK_INFERENCE_SURFACES,
   resolveNonTaskHelperModel,
 } from './non-task-provider-usage';
+import {
+  JudgmentHttpError,
+  JudgmentResponseParseError,
+  trackJudgmentRequest,
+  type JudgmentRequestTracking,
+  type JudgmentUsageProvider,
+  type JudgmentUsageResponse,
+  type TrackedJudgmentResponse,
+} from './judgment-usage-accounting';
 
 /**
  * Optional judgment-model backend. A judgment model answers typed questions
@@ -134,9 +142,7 @@ export type DecisionModelResolution =
  */
 export type JudgmentBackend =
   | { provider: 'roomote'; url: string; apiKey: string | undefined }
-  | { provider: 'typesafe'; apiKey: string }
-  | { provider: 'openrouter'; apiKey: string }
-  | { provider: 'vercel'; apiKey: string };
+  | { provider: Exclude<JudgmentUsageProvider, 'roomote'>; apiKey: string };
 
 type RoomoteJudgmentUpstream = { url: string; apiKey: string | undefined };
 
@@ -297,255 +303,10 @@ function isValidAnswer(question: TypeSafeQuestion, answer: unknown): boolean {
   );
 }
 
-/** Carries the status separately so a caller can report it without the body. */
-class JudgmentHttpError extends Error {
-  constructor(
-    readonly status: number,
-    detail: string,
-    readonly headers?: Headers,
-  ) {
-    super(
-      `Judgment model request failed with HTTP ${status}${
-        detail ? `: ${detail.slice(0, 200)}` : ''
-      }`,
-    );
-    this.name = 'JudgmentHttpError';
-  }
-}
-
-class JudgmentResponseParseError extends Error {
-  constructor(
-    readonly status: number,
-    readonly headers: Headers,
-  ) {
-    super('Judgment model response was not valid JSON');
-    this.name = 'JudgmentResponseParseError';
-  }
-}
-
-type JudgmentRequestRole = 'primary' | 'shadow';
-
-type JudgmentUsageOutcome =
-  | 'success'
-  | 'http_error'
-  | 'timeout'
-  | 'transport_error'
-  | 'response_parse_error'
-  | 'response_error'
-  | 'validation_error';
-
-type JudgmentResponse = {
-  body: Record<string, unknown>;
-  status: number;
-  headers: Headers;
-};
-
-type JudgmentTracking = {
-  requestId: string;
-  provider: JudgmentBackend['provider'];
-  model: string;
-  role: JudgmentRequestRole;
-  primaryProvider?: JudgmentBackend['provider'];
-};
-
-type ParsedJudgmentUsage = {
-  modelId?: string;
-  inputTokens?: number;
-  outputTokens?: number;
-  totalTokens?: number;
-  costMicroUsd?: number;
-  pricingMetadata?: Record<string, unknown>;
-  usageMetadataAvailable: boolean;
-  usageMetadataSource: 'response' | 'header' | 'none';
-  metadataReadFailed: boolean;
-  missingUsageFields: string[];
-};
-
-type TrackedJudgmentResponse = JudgmentResponse & {
-  finish: (outcome: JudgmentUsageOutcome) => void;
-};
-
 type JudgmentRequestResult = {
   answers: Record<string, unknown> | undefined;
   response: TrackedJudgmentResponse;
 };
-
-function nonNegativeNumber(value: unknown): number | undefined {
-  const number =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string' && value.trim()
-        ? Number(value)
-        : undefined;
-
-  return number !== undefined && Number.isFinite(number) && number >= 0
-    ? number
-    : undefined;
-}
-
-function firstNonNegativeNumber(...values: unknown[]): number | undefined {
-  for (const value of values) {
-    const number = nonNegativeNumber(value);
-    if (number !== undefined) return number;
-  }
-
-  return undefined;
-}
-
-function readHeaderNumber(
-  headers: Headers | undefined,
-  names: readonly string[],
-): number | undefined {
-  if (!headers) return undefined;
-
-  for (const name of names) {
-    const number = nonNegativeNumber(headers.get(name));
-    if (number !== undefined) return number;
-  }
-
-  return undefined;
-}
-
-function readHeaderString(
-  headers: Headers | undefined,
-  names: readonly string[],
-): string | undefined {
-  if (!headers) return undefined;
-
-  for (const name of names) {
-    const value = headers.get(name)?.trim();
-    if (value) return value;
-  }
-
-  return undefined;
-}
-
-function parseJudgmentUsage(
-  response: JudgmentResponse | undefined,
-  metadataReadFailed = false,
-): ParsedJudgmentUsage {
-  const body = response?.body ?? {};
-  const usage =
-    asRecord(body.usage) ??
-    asRecord(body.usageMetadata) ??
-    asRecord(body.usage_metadata);
-  const headers = response?.headers;
-
-  const responseInputTokens = firstNonNegativeNumber(
-    usage?.input_tokens,
-    usage?.prompt_tokens,
-    usage?.inputTokens,
-    usage?.promptTokens,
-  );
-  const responseOutputTokens = firstNonNegativeNumber(
-    usage?.output_tokens,
-    usage?.completion_tokens,
-    usage?.outputTokens,
-    usage?.completionTokens,
-  );
-  const responseTotalTokens = firstNonNegativeNumber(
-    usage?.total_tokens,
-    usage?.totalTokens,
-  );
-  const responseCostMicroUsd = firstNonNegativeNumber(
-    usage?.cost_micro_usd,
-    usage?.costMicroUsd,
-  );
-  const responseCostUsd = firstNonNegativeNumber(
-    usage?.cost,
-    usage?.cost_usd,
-    usage?.costUsd,
-  );
-
-  const headerInputTokens = readHeaderNumber(headers, [
-    'x-input-tokens',
-    'x-prompt-tokens',
-    'x-usage-input-tokens',
-    'x-openrouter-input-tokens',
-  ]);
-  const headerOutputTokens = readHeaderNumber(headers, [
-    'x-output-tokens',
-    'x-completion-tokens',
-    'x-usage-output-tokens',
-    'x-openrouter-output-tokens',
-  ]);
-  const headerTotalTokens = readHeaderNumber(headers, [
-    'x-total-tokens',
-    'x-usage-total-tokens',
-    'x-openrouter-total-tokens',
-  ]);
-  const headerCostMicroUsd = readHeaderNumber(headers, [
-    'x-cost-micro-usd',
-    'x-usage-cost-micro-usd',
-  ]);
-  const headerCostUsd = readHeaderNumber(headers, [
-    'x-cost-usd',
-    'x-cost',
-    'x-provider-cost',
-    'x-openrouter-cost',
-  ]);
-
-  const inputTokens = responseInputTokens ?? headerInputTokens;
-  const outputTokens = responseOutputTokens ?? headerOutputTokens;
-  const totalTokens = responseTotalTokens ?? headerTotalTokens;
-  const costMicroUsd =
-    responseCostMicroUsd ??
-    (responseCostUsd === undefined
-      ? (headerCostMicroUsd ??
-        (headerCostUsd === undefined
-          ? undefined
-          : Math.round(headerCostUsd * 1_000_000)))
-      : Math.round(responseCostUsd * 1_000_000));
-  const responseMetadataAvailable =
-    responseInputTokens !== undefined ||
-    responseOutputTokens !== undefined ||
-    responseTotalTokens !== undefined ||
-    responseCostMicroUsd !== undefined ||
-    responseCostUsd !== undefined;
-  const headerMetadataAvailable =
-    headerInputTokens !== undefined ||
-    headerOutputTokens !== undefined ||
-    headerTotalTokens !== undefined ||
-    headerCostMicroUsd !== undefined ||
-    headerCostUsd !== undefined;
-  const missingUsageFields: string[] = [];
-
-  if (inputTokens === undefined) missingUsageFields.push('input_tokens');
-  if (outputTokens === undefined) missingUsageFields.push('output_tokens');
-  if (totalTokens === undefined) missingUsageFields.push('total_tokens');
-  if (costMicroUsd === undefined) missingUsageFields.push('cost');
-
-  const costDetails = asRecord(usage?.cost_details ?? usage?.costDetails);
-  const responseModel =
-    typeof body.model === 'string' && body.model.trim()
-      ? body.model.trim()
-      : undefined;
-
-  return {
-    ...(responseModel ||
-    readHeaderString(headers, ['x-model', 'x-provider-model'])
-      ? {
-          modelId:
-            responseModel ??
-            readHeaderString(headers, ['x-model', 'x-provider-model']),
-        }
-      : {}),
-    ...(inputTokens === undefined ? {} : { inputTokens }),
-    ...(outputTokens === undefined ? {} : { outputTokens }),
-    ...(totalTokens === undefined ? {} : { totalTokens }),
-    ...(costMicroUsd === undefined ? {} : { costMicroUsd }),
-    ...(costDetails ? { pricingMetadata: { costDetails } } : {}),
-    usageMetadataAvailable:
-      responseMetadataAvailable || headerMetadataAvailable,
-    usageMetadataSource: responseMetadataAvailable
-      ? 'response'
-      : headerMetadataAvailable
-        ? 'header'
-        : 'none',
-    metadataReadFailed,
-    missingUsageFields,
-  };
-}
 
 function judgmentModelForBackend(backend: JudgmentBackend): string {
   switch (backend.provider) {
@@ -560,112 +321,10 @@ function judgmentModelForBackend(backend: JudgmentBackend): string {
   }
 }
 
-function classifyJudgmentRequestError(error: unknown): {
-  outcome: JudgmentUsageOutcome;
-  status: number | null;
-  headers?: Headers;
-  metadataReadFailed: boolean;
-} {
-  if (error instanceof JudgmentHttpError) {
-    return {
-      outcome: 'http_error',
-      status: error.status,
-      headers: error.headers,
-      metadataReadFailed: false,
-    };
-  }
-
-  if (error instanceof JudgmentResponseParseError) {
-    return {
-      outcome: 'response_parse_error',
-      status: error.status,
-      headers: error.headers,
-      metadataReadFailed: true,
-    };
-  }
-
-  if (
-    error instanceof Error &&
-    (error.name === 'TimeoutError' || error.name === 'AbortError')
-  ) {
-    return {
-      outcome: 'timeout',
-      status: null,
-      metadataReadFailed: false,
-    };
-  }
-
-  return {
-    outcome: 'transport_error',
-    status: null,
-    metadataReadFailed: false,
-  };
-}
-
-function recordJudgmentUsage(input: {
-  tracking: JudgmentTracking;
-  startedAt: number;
-  response?: JudgmentResponse;
-  status: number | null;
-  outcome: JudgmentUsageOutcome;
-  headers?: Headers;
-  metadataReadFailed?: boolean;
-}): void {
-  const response =
-    input.response ??
-    (input.headers
-      ? { body: {}, status: input.status ?? 0, headers: input.headers }
-      : undefined);
-  const usage = parseJudgmentUsage(response, input.metadataReadFailed ?? false);
-  const eventKey = `judgment-model:${input.tracking.provider}:${input.tracking.role}:${input.tracking.requestId}`;
-  const details: Record<string, unknown> = {
-    surface: NON_TASK_INFERENCE_SURFACES.judgmentModel,
-    requestRole: input.tracking.role,
-    status: input.status,
-    outcome: input.outcome,
-    latencyMs: Math.max(0, Date.now() - input.startedAt),
-    usageMetadataAvailable: usage.usageMetadataAvailable,
-    usageMetadataSource: usage.usageMetadataSource,
-    metadataReadFailed: usage.metadataReadFailed,
-    missingUsageFields: usage.missingUsageFields,
-    ...(input.tracking.primaryProvider
-      ? { primaryProvider: input.tracking.primaryProvider }
-      : {}),
-  };
-
-  const persist = async () => {
-    await recordLlmUsage({
-      source: NON_TASK_INFERENCE_SURFACES.judgmentModel,
-      usageType: 'inference',
-      eventKey,
-      providerId: input.tracking.provider,
-      modelId: usage.modelId ?? input.tracking.model,
-      inputTokens: usage.inputTokens ?? null,
-      outputTokens: usage.outputTokens ?? null,
-      totalTokens: usage.totalTokens ?? 0,
-      contextTokens: usage.inputTokens ?? 0,
-      costMicroUsd: usage.costMicroUsd ?? null,
-      costSource:
-        usage.costMicroUsd === undefined ? 'missing' : 'provider_response',
-      ...(usage.pricingMetadata
-        ? { pricingMetadata: usage.pricingMetadata }
-        : {}),
-      details,
-    });
-  };
-
-  void persist().catch(() => {
-    // Usage telemetry must never change judgment behavior.
-    console.warn(
-      `[JudgmentUsage] Failed to record ${input.tracking.provider} ${input.tracking.role} usage`,
-    );
-  });
-}
-
 async function postJson(
   url: string,
   init: { headers: Record<string, string>; body: unknown; timeoutMs: number },
-): Promise<JudgmentResponse> {
+): Promise<JudgmentUsageResponse> {
   const response = await fetch(url, {
     method: 'POST',
     headers: { ...init.headers, 'Content-Type': 'application/json' },
@@ -695,40 +354,9 @@ async function postJson(
 async function postTrackedJson(
   url: string,
   init: { headers: Record<string, string>; body: unknown; timeoutMs: number },
-  tracking: JudgmentTracking,
+  tracking: JudgmentRequestTracking,
 ): Promise<TrackedJudgmentResponse> {
-  const startedAt = Date.now();
-
-  try {
-    const response = await postJson(url, init);
-    let finished = false;
-
-    return {
-      ...response,
-      finish: (outcome) => {
-        if (finished) return;
-        finished = true;
-        recordJudgmentUsage({
-          tracking,
-          startedAt,
-          response,
-          status: response.status,
-          outcome,
-        });
-      },
-    };
-  } catch (error) {
-    const failure = classifyJudgmentRequestError(error);
-    recordJudgmentUsage({
-      tracking,
-      startedAt,
-      status: failure.status,
-      outcome: failure.outcome,
-      headers: failure.headers,
-      metadataReadFailed: failure.metadataReadFailed,
-    });
-    throw error;
-  }
+  return trackJudgmentRequest(tracking, () => postJson(url, init));
 }
 
 async function requestNativeDecisions(
@@ -737,7 +365,7 @@ async function requestNativeDecisions(
   questions: Record<string, TypeSafeQuestion>,
   timeoutMs: number,
   options: { url: string; model: string },
-  tracking: JudgmentTracking,
+  tracking: JudgmentRequestTracking,
 ): Promise<JudgmentRequestResult> {
   const response = await postTrackedJson(
     options.url,
@@ -762,7 +390,7 @@ async function requestRoomoteDecisions(
   state: unknown,
   questions: Record<string, TypeSafeQuestion>,
   timeoutMs: number,
-  tracking: JudgmentTracking,
+  tracking: JudgmentRequestTracking,
 ): Promise<JudgmentRequestResult> {
   // The upstream reports probabilities; confidence is derived here the same
   // way it is for OpenRouter so every backend yields one answer shape.
@@ -841,7 +469,7 @@ async function requestVercelGateway(
   state: unknown,
   questions: Record<string, TypeSafeQuestion>,
   timeoutMs: number,
-  tracking: JudgmentTracking,
+  tracking: JudgmentRequestTracking,
 ): Promise<JudgmentRequestResult> {
   const response = await postTrackedJson(
     VERCEL_AI_GATEWAY_EVALUATION_URL,
@@ -947,7 +575,7 @@ export async function evaluateTypeSafeJudgments<
       ? DEFAULT_ROOMOTE_TIMEOUT_MS
       : DEFAULT_TYPESAFE_TIMEOUT_MS);
   const requestId = randomUUID();
-  const tracking: JudgmentTracking = {
+  const tracking: JudgmentRequestTracking = {
     requestId,
     provider: backend.provider,
     model: judgmentModelForBackend(backend),
