@@ -48,6 +48,12 @@ const results: ResultInboxItem[] = [
         repository: 'RooCodeInc/Docs',
         number: 12,
       },
+      {
+        url: 'https://github.com/RooCodeInc/Roomote/pull/2',
+        title: 'Legacy PR association',
+        repository: null,
+        number: null,
+      },
     ],
     actions: [
       {
@@ -269,6 +275,9 @@ describe('ResultsPage', () => {
     const gitlabPr = screen.getByRole('link', {
       name: 'Docs#12',
     });
+    const fallbackPr = screen.getByRole('link', {
+      name: 'Legacy PR association',
+    });
 
     expect(githubPr).toHaveAttribute(
       'href',
@@ -281,10 +290,34 @@ describe('ResultsPage', () => {
       'href',
       'https://gitlab.com/RooCodeInc/Docs/-/merge_requests/12',
     );
+    expect(fallbackPr).toHaveAttribute(
+      'href',
+      'https://github.com/RooCodeInc/Roomote/pull/2',
+    );
     expect(first).not.toContainElement(githubPr);
 
     const suggestionRow = screen.getAllByRole('listitem')[1]!;
     expect(within(suggestionRow).queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('selects from the footer without treating PR links as row clicks', async () => {
+    renderPage();
+    const selectionButton = await screen.findByRole('button', {
+      name: /Three dependency risks need review/,
+    });
+    const resultRow = selectionButton.parentElement!;
+
+    fireEvent.click(within(resultRow).getByRole('link', { name: 'Roomote#1' }));
+    expect(selectionButton).not.toHaveAttribute('aria-current');
+
+    fireEvent.click(within(resultRow).getByText('Security Auditor'));
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Three dependency risks need review',
+      }),
+    ).toBeInTheDocument();
+
+    expect(selectionButton).toHaveAttribute('aria-current', 'true');
   });
 
   it('opens an explicitly selected result from the URL', async () => {

@@ -472,11 +472,12 @@ export function ResultsPage() {
                           key={key}
                           role="listitem"
                           className={cn(
-                            'transition-colors',
+                            'group cursor-pointer transition-colors has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ring',
                             isSelected
                               ? 'bg-accent-foreground text-black'
                               : 'hover:bg-accent-foreground/10',
                           )}
+                          onClick={() => selectResult(result)}
                         >
                           <button
                             ref={(node) => {
@@ -487,10 +488,9 @@ export function ResultsPage() {
                             aria-current={isSelected ? 'true' : undefined}
                             data-result-select
                             className={cn(
-                              'flex w-full cursor-pointer items-start gap-3 pt-4 pr-3 pb-0 pl-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                              'flex w-full cursor-pointer items-start gap-3 pt-4 pr-3 pb-0 pl-1.5 text-left outline-none transition-colors',
                               isSelected ? 'text-black' : 'text-foreground',
                             )}
-                            onClick={() => selectResult(result)}
                           >
                             <AutomationAvatar result={result} />
                             <span className="min-w-0 flex-1">
