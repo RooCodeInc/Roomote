@@ -99,6 +99,7 @@ describe('Telegram task topic launch', () => {
           replyTarget: { channelId: '555' },
         },
       },
+      visibleInTranscript: false,
       beforeEnqueue,
     });
 
@@ -109,7 +110,7 @@ describe('Telegram task topic launch', () => {
           payload: expect.objectContaining({
             reportConsumer: 'orchestrator',
             fastAgentSessionId: '66666666-6666-4666-8666-666666666666',
-            visibleInTranscript: true,
+            visibleInTranscript: false,
             fastAgentParent: expect.objectContaining({
               sessionId: '66666666-6666-4666-8666-666666666666',
             }),

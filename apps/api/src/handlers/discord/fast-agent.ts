@@ -498,6 +498,7 @@ export async function processDiscordFastAgentMessage(
             applicationId: input.applicationId,
             requesterDiscordUserId: input.sender.id,
             launchOwnerUserId: input.senderUserId,
+            visibleInTranscript: true,
             ...(input.delegatedTaskInitiator
               ? { initiator: input.delegatedTaskInitiator }
               : {}),

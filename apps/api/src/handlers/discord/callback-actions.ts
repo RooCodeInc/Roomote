@@ -468,6 +468,7 @@ async function launchClaimedDiscordSuggestion(input: {
               applicationId: input.applicationId,
               requesterDiscordUserId: input.sender.id,
               launchOwnerUserId: input.senderUserId,
+              visibleInTranscript: false,
               queuedMessage,
               metadata,
               channel: launchChannel,

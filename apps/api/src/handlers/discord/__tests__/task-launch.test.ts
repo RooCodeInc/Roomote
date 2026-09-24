@@ -124,6 +124,7 @@ describe('launchDiscordTask', () => {
         userId: 'user-1',
         ts: 'message-1',
       },
+      visibleInTranscript: true,
       metadata: {
         communicationProvider: 'discord',
         communicationGuildId: 'guild-1',
