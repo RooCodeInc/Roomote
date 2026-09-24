@@ -13,6 +13,7 @@ export const SETTINGS_PATHS = {
   memory: '/settings/memory',
   skills: '/settings/skills',
   experimental: '/settings/experimental',
+  nightlyExperiments: '/settings/nightly-experiments',
   misc: '/settings/misc',
   newEnvironment: '/settings/environments/new',
   editEnvironment: (environmentId: string) =>

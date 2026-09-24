@@ -36,6 +36,7 @@ import {
 
 import type {
   FastSessionMessage,
+  FastSessionMessageCursor,
   FastSessionQueuedMessage,
 } from '@/lib/server/fast-sessions';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
@@ -53,7 +54,12 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
-import { Alert, AlertDescription, AlertTitle } from '@/components/system';
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Button,
+} from '@/components/system';
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
@@ -455,11 +461,156 @@ function SessionScrollRestoration({ sessionId }: { sessionId: string }) {
   return null;
 }
 
+function TranscriptHistoryControls({
+  hasOlderMessages,
+  oldestMessageId,
+  onLoadOlder,
+  restoreScrollTop,
+}: {
+  hasOlderMessages: boolean;
+  oldestMessageId: string | undefined;
+  onLoadOlder: () => Promise<boolean>;
+  restoreScrollTop?: number;
+}) {
+  const { scrollRef, stopScroll } = useStickToBottomContext();
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const pendingScrollAdjustmentRef = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
+  const restoreScrollTopRef = useRef<number | null>(restoreScrollTop ?? null);
+  const automaticLoadArmedRef = useRef(true);
+  const loadInFlightRef = useRef(false);
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollAdjustmentRef.current;
+    const scrollElement = scrollRef.current;
+    if (!pending || !scrollElement) return;
+
+    scrollElement.scrollTop =
+      pending.scrollTop + (scrollElement.scrollHeight - pending.scrollHeight);
+    pendingScrollAdjustmentRef.current = null;
+  }, [oldestMessageId, scrollRef]);
+
+  const loadOlder = useCallback(async () => {
+    if (!hasOlderMessages || loadInFlightRef.current) return;
+
+    automaticLoadArmedRef.current = false;
+    loadInFlightRef.current = true;
+    setIsLoading(true);
+    setHasError(false);
+    const scrollElement = scrollRef.current;
+    if (scrollElement) {
+      stopScroll();
+      pendingScrollAdjustmentRef.current = {
+        scrollHeight: scrollElement.scrollHeight,
+        scrollTop: scrollElement.scrollTop,
+      };
+    }
+
+    try {
+      const loaded = await onLoadOlder();
+      if (!loaded) pendingScrollAdjustmentRef.current = null;
+    } catch {
+      pendingScrollAdjustmentRef.current = null;
+      setHasError(true);
+    } finally {
+      loadInFlightRef.current = false;
+      setIsLoading(false);
+    }
+  }, [hasOlderMessages, onLoadOlder, scrollRef, stopScroll]);
+
+  useLayoutEffect(() => {
+    const target = restoreScrollTopRef.current;
+    const scrollElement = scrollRef.current;
+    if (target === null || !scrollElement || isLoading || hasError) return;
+
+    const maxScrollTop =
+      scrollElement.scrollHeight - scrollElement.clientHeight;
+    if (maxScrollTop >= target) {
+      stopScroll();
+      scrollElement.scrollTop = target;
+      restoreScrollTopRef.current = null;
+      return;
+    }
+
+    if (hasOlderMessages) {
+      void loadOlder();
+    } else {
+      restoreScrollTopRef.current = null;
+    }
+  }, [
+    hasError,
+    hasOlderMessages,
+    isLoading,
+    loadOlder,
+    oldestMessageId,
+    scrollRef,
+    stopScroll,
+  ]);
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) return;
+
+    const handleScroll = () => {
+      if (scrollElement.scrollTop > 800) {
+        automaticLoadArmedRef.current = true;
+        return;
+      }
+
+      if (
+        automaticLoadArmedRef.current &&
+        hasOlderMessages &&
+        !isLoading &&
+        !hasError
+      ) {
+        void loadOlder();
+      }
+    };
+
+    scrollElement.addEventListener('scroll', handleScroll, { passive: true });
+    return () => scrollElement.removeEventListener('scroll', handleScroll);
+  }, [hasError, hasOlderMessages, isLoading, loadOlder, scrollRef]);
+
+  if (hasError) {
+    return (
+      <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
+        <span>Older messages could not be loaded.</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isLoading}
+          onClick={() => void loadOlder()}
+        >
+          {isLoading ? 'Retrying...' : 'Retry loading older messages'}
+        </Button>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <p
+        className="mb-4 text-center text-xs text-muted-foreground"
+        role="status"
+      >
+        Loading older messages...
+      </p>
+    );
+  }
+
+  return null;
+}
+
 export function FastSessionTranscript({
   sessionId,
   initialMessages,
   initialQueuedMessages = [],
-  hasOlderMessages,
+  initialMessagesCursor = null,
+  initialStreamCursor = null,
   canReply,
   initialTitle = null,
   fallbackTitle = 'New session',
@@ -480,7 +631,8 @@ export function FastSessionTranscript({
   sessionId: string;
   initialMessages: FastSessionMessage[];
   initialQueuedMessages?: FastSessionQueuedMessage[];
-  hasOlderMessages?: boolean;
+  initialMessagesCursor?: FastSessionMessageCursor | null;
+  initialStreamCursor?: number | null;
   canReply?: boolean;
   initialTitle?: string | null;
   fallbackTitle?: string;
@@ -539,8 +691,8 @@ export function FastSessionTranscript({
     [authenticatedUser],
   );
   const navigationState = useSessionNavigationState();
-  const hasSavedScrollPosition =
-    navigationState?.getScrollPosition(sessionId) !== undefined;
+  const savedScrollPosition = navigationState?.getScrollPosition(sessionId);
+  const hasSavedScrollPosition = savedScrollPosition !== undefined;
   const openTaskPanel = useOpenSessionTaskPanel();
   const openTasksPanel = useOpenSessionTasksPanel();
   const runningTaskCount = useSessionRunningTaskCount();
@@ -558,6 +710,9 @@ export function FastSessionTranscript({
     () => new Map(initialMessages.map((message) => [message.eventId, message])),
   );
   const serverMessagesRef = useRef(serverMessages);
+  const olderMessageEventIdsRef = useRef(new Set<string>());
+  const [messagesCursor, setMessagesCursor] =
+    useState<FastSessionMessageCursor | null>(initialMessagesCursor);
   const [serverQueuedMessages, setServerQueuedMessages] = useState<
     FastSessionQueuedMessage[]
   >(initialQueuedMessages);
@@ -629,9 +784,33 @@ export function FastSessionTranscript({
     replaceStreamMessages([]);
   }, [getStreamService, replaceStreamMessages]);
 
+  const loadOlderMessages = useCallback(async () => {
+    if (!messagesCursor) return false;
+    const page = await trpcClient.fastSessions.olderMessages.query({
+      sessionId,
+      cursor: messagesCursor,
+    });
+    const next = new Map(serverMessagesRef.current);
+    for (const message of page.messages as TranscriptMessage[]) {
+      if (!next.has(message.eventId)) {
+        olderMessageEventIdsRef.current.add(message.eventId);
+        next.set(message.eventId, message);
+      }
+    }
+    serverMessagesRef.current = next;
+    setServerMessages(next);
+    setMessagesCursor(page.nextCursor);
+    return true;
+  }, [messagesCursor, sessionId, trpcClient]);
+
   useEffect(() => {
     hasReceivedInitialSessionStateRef.current = false;
-    const source = new EventSource(`/api/sessions/${sessionId}/stream`);
+    const streamUrl = `/api/sessions/${sessionId}/stream${
+      initialStreamCursor === null
+        ? ''
+        : `?since=${encodeURIComponent(String(initialStreamCursor))}`
+    }`;
+    const source = new EventSource(streamUrl);
     const onOpen = () => {
       hasReceivedInitialSessionStateRef.current = false;
       // Chunks missed while disconnected cannot be recovered; the persisted
@@ -902,6 +1081,7 @@ export function FastSessionTranscript({
     };
   }, [
     sessionId,
+    initialStreamCursor,
     clearStreamMessages,
     getStreamService,
     replaceOptimisticMessages,
@@ -957,6 +1137,7 @@ export function FastSessionTranscript({
     let messageCount = 0;
     let assistantCount = 0;
     for (const message of serverMessages.values()) {
+      if (olderMessageEventIdsRef.current.has(message.eventId)) continue;
       const isAssistant =
         message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage;
       if (
@@ -2041,11 +2222,12 @@ export function FastSessionTranscript({
           initial={hasSavedScrollPosition ? false : 'instant'}
         >
           <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">
-            {hasOlderMessages ? (
-              <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
-                Older messages in this session are not shown.
-              </p>
-            ) : null}
+            <TranscriptHistoryControls
+              hasOlderMessages={messagesCursor !== null}
+              oldestMessageId={messages[0]?.eventId}
+              onLoadOlder={loadOlderMessages}
+              restoreScrollTop={savedScrollPosition}
+            />
             <AcpTranscriptBlockList
               blocks={renderBlocksBeforeInput}
               showInternalMessages={false}

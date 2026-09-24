@@ -38,7 +38,9 @@ import {
   findReadableFastSession,
   getFastSessionPrReviewOfferStatus,
   getFastSessionById,
+  getFastSessionTranscriptPage,
   getFastSessionTasks,
+  FAST_SESSION_TRANSCRIPT_PAGE_SIZE,
   getFastSessionMessagesSince,
   getFastSessionDisplayTitle,
   getFastSessionSuggestableMessages,
@@ -921,6 +923,78 @@ describe('Session queries', () => {
       expect(JSON.stringify(result?.messages)).not.toContain('platform_event');
     },
   );
+
+  it('pages older Fast transcript messages without gaps or duplicates at a tied cursor', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'fast-transcript-paged-history',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const messageCount = FAST_SESSION_TRANSCRIPT_PAGE_SIZE * 2 + 31;
+    await db.insert(fastAgentMessages).values(
+      Array.from({ length: messageCount }, (_, index) => ({
+        conversationId: session.id,
+        id: `00000000-0000-4000-8000-${index.toString().padStart(12, '0')}`,
+        eventId: `paged-message-${index}`,
+        turnId: `turn-${index}`,
+        turnSeq: 0,
+        ts: 1,
+        createdAt: sql`'2026-01-01 00:00:00.123456+00'::timestamptz`,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant' as const,
+        contentBlocks: [{ type: 'text' as const, text: `message-${index}` }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+        source: 'web',
+      })),
+    );
+    await db
+      .update(fastAgentConversations)
+      .set({ updatedAt: sql`now()` })
+      .where(eq(fastAgentConversations.id, session.id));
+
+    const auth = { userId: owner.id, isAdmin: false };
+    const initial = await getFastSessionById(auth, session.id, {
+      transcriptLimit: FAST_SESSION_TRANSCRIPT_PAGE_SIZE,
+    });
+    expect(initial?.initialStreamCursor).toEqual(expect.any(Number));
+    expect(initial?.messages).toHaveLength(FAST_SESSION_TRANSCRIPT_PAGE_SIZE);
+    expect(initial?.messagesCursor).toMatchObject({
+      ts: 1,
+      turnSeq: 0,
+      id: `00000000-0000-4000-8000-${(
+        messageCount - FAST_SESSION_TRANSCRIPT_PAGE_SIZE
+      )
+        .toString()
+        .padStart(12, '0')}`,
+    });
+    await expect(
+      getFastSessionMessagesSince(
+        session.id,
+        initial?.initialStreamCursor ?? 0,
+      ),
+    ).resolves.toMatchObject({ messages: [] });
+
+    let cursor = initial?.messagesCursor ?? null;
+    let combined = initial?.messages ?? [];
+    while (cursor) {
+      const page = await getFastSessionTranscriptPage(auth, session.id, cursor);
+      expect(page).not.toBeNull();
+      combined = [...(page?.messages ?? []), ...combined];
+      cursor = page?.nextCursor ?? null;
+    }
+
+    expect(combined.map((message) => message.eventId)).toEqual(
+      Array.from(
+        { length: messageCount },
+        (_, index) => `paged-message-${index}`,
+      ),
+    );
+    expect(new Set(combined.map((message) => message.eventId)).size).toBe(
+      messageCount,
+    );
+  });
 
   it('returns only the newest 60 visible conversational suggestion messages', async () => {
     const owner = await userFactory.create();

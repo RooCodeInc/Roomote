@@ -9,23 +9,16 @@ import {
 
 import type { Variables } from '../../../types';
 
-const {
-  mockResolveConnection,
-  mockIsBrainEmbeddingAvailable,
-  mockScoreTypeSafeRelevance,
-} = vi.hoisted(() => ({
-  mockResolveConnection: vi.fn(),
-  mockIsBrainEmbeddingAvailable: vi.fn(),
-  mockScoreTypeSafeRelevance: vi.fn(),
-}));
+const { mockResolveConnection, mockIsBrainEmbeddingAvailable } = vi.hoisted(
+  () => ({
+    mockResolveConnection: vi.fn(),
+    mockIsBrainEmbeddingAvailable: vi.fn(),
+  }),
+);
 
 vi.mock('@roomote/sdk/server', () => ({
   resolveBrainConnection: mockResolveConnection,
   isBrainEmbeddingAvailable: mockIsBrainEmbeddingAvailable,
-}));
-
-vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
-  scoreTypeSafeRelevance: mockScoreTypeSafeRelevance,
 }));
 
 import { createGbrainMcpProxy, GBRAIN_READ_TOOL_NAMES } from '../gbrain';
@@ -83,8 +76,6 @@ describe('createGbrainMcpProxy', () => {
     // default for these cases is "an embedder is available".
     mockIsBrainEmbeddingAvailable.mockReset();
     mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
-    mockScoreTypeSafeRelevance.mockReset();
-    mockScoreTypeSafeRelevance.mockResolvedValue(null);
   });
 
   afterEach(async () => {
@@ -195,7 +186,7 @@ describe('createGbrainMcpProxy', () => {
     expect(upstreamRequests[0]?.body).toContain('"query"');
   });
 
-  describe('query reranking', () => {
+  describe('query results', () => {
     const passages = ['a', 'b', 'c'].map((slug) => ({
       slug,
       page_id: slug.charCodeAt(0),
@@ -227,41 +218,20 @@ describe('createGbrainMcpProxy', () => {
       ).map((item) => item.slug);
     }
 
-    it('returns gbrain order unchanged without a judgment model', async () => {
+    it.each([
+      ['JSON', false],
+      ['SSE', true],
+    ])('returns a %s query reply in gbrain order', async (_label, sse) => {
       mockResolveConnection.mockResolvedValue({
-        baseUrl: await startUpstream({ result: upstreamResult }),
+        baseUrl: await startUpstream({ result: upstreamResult, sse }),
         token: 'agent-token',
       });
 
       const response = await postMcp(createApp(), queryCall());
 
+      expect(response.status).toBe(200);
       expect(await returnedSlugs(response)).toEqual(['a', 'b', 'c']);
     });
-
-    it.each([
-      ['JSON', false],
-      ['SSE', true],
-    ])(
-      'reorders a %s query reply by confident relevance',
-      async (_label, sse) => {
-        mockResolveConnection.mockResolvedValue({
-          baseUrl: await startUpstream({ result: upstreamResult, sse }),
-          token: 'agent-token',
-        });
-        mockScoreTypeSafeRelevance.mockResolvedValue(
-          new Map([
-            ['0', 0.05],
-            ['1', 0.5],
-            ['2', 0.95],
-          ]),
-        );
-
-        const response = await postMcp(createApp(), queryCall());
-
-        expect(response.status).toBe(200);
-        expect(await returnedSlugs(response)).toEqual(['c', 'b', 'a']);
-      },
-    );
   });
 
   it('does not include write verbs in the read allowlist', () => {

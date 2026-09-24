@@ -125,6 +125,10 @@ requirements, pagination limits, and the code-search deprecation.
 A session header shows the other people currently viewing that session. Your
 own avatar is omitted from the viewer list.
 
+Select the generated title in the header to rename the session. A title you set
+manually stays in the workspace and Sessions list instead of being replaced by
+later generated titles.
+
 A session timeline shows prompts, replies, and delegated execution activity.
 Execution cards show their status, workspace, pull requests, artifacts, latest
 error, and cost. Select a card to open its details panel. For a live nested
@@ -139,6 +143,13 @@ The parent session and sibling tasks continue. Explicitly canceling the task is
 different: cancellation terminally ends the current run and shuts down its
 sandbox. Stop or cancellation errors appear on the card; check the resulting
 task status rather than assuming the request succeeded.
+
+The session overflow menu in the workspace and each manageable Sessions-list
+row also offers **Stop**, **Archive**, and **Delete**. Stopping a session pauses
+all of its active tasks without permanently canceling them. Archiving is
+reversible and hides the session and its linked tasks from ordinary lists and
+search until it is unarchived. Deleting a session uses the existing confirmation
+and cleanup safeguards.
 
 On desktop, you can keep several task workspaces open beside the session,
 resize them, and switch between the conversation and task panels without losing
@@ -168,6 +179,14 @@ idle. It reports meaningful progress, blockers, and questions that need input,
 and can send an evidence-backed correction when a task is drifting from the
 request. Routine status stays quiet. Follow-through stops when the session's
 coding work settles instead of leaving a recurring monitor behind.
+
+Admins can enable **Task communication triage** under **Settings > Experimental**
+to decide which delegated-task updates should reach the session between reports.
+With a judgment model configured, Roomote keeps routine activity quiet and
+surfaces blockers, changed assumptions, consequential choices, useful
+milestones, or off-track work. The setting is off by default. Without a
+configured judgment model, activity digests are dropped and explicit task
+reports continue as before.
 
 **Session info** shows the total inference cost for the conversation and its
 attached tasks. Open the cost breakdown to separate direct session orchestration

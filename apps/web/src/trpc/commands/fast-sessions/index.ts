@@ -77,11 +77,13 @@ import {
   findReadableFastSession,
   buildFastSessionPrReviewDestinationKey,
   getFastSessionById,
+  getFastSessionTranscriptPage,
   getFastSessionPrReviewOfferStatus,
   getFastSessionTasks,
   hasFastSessionQueuedMessages,
   updateFastSessionPrReviewOfferStatus,
   withdrawFastSessionQueuedMessage,
+  type FastSessionMessageCursor,
 } from '@/lib/server/fast-sessions';
 import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
 import {
@@ -745,6 +747,22 @@ export async function getFastSessionMessagesCommand(
     queuedMessages: detail.queuedMessages,
     hasOlderMessages: detail.hasOlderMessages,
   };
+}
+
+export async function getFastSessionOlderMessagesCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    cursor: FastSessionMessageCursor;
+  },
+) {
+  const page = await getFastSessionTranscriptPage(
+    auth,
+    input.sessionId,
+    input.cursor,
+  );
+  if (!page) throw new Error('Session not found');
+  return page;
 }
 
 export async function updateFastSessionModelSelectionCommand(

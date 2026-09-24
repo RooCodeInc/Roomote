@@ -132,6 +132,8 @@ export interface IntegrationToolAutoEvaluation {
   answers?: Record<string, number>;
   /** Why there are no answers: nothing could evaluate the call. */
   unavailable?: 'no_model' | 'error';
+  /** Deterministic policy reason that did not require a model judgment. */
+  reason?: string;
   evaluatedAt: string;
 }
 

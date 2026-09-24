@@ -64,7 +64,8 @@ silently bypassed with another connection method.
 
 Some connected integrations expose a **Manage tools** action on the
 **Integrations** page. Admins use it to choose how Roomote can use each of the
-integration's tools:
+integration's tools. These per-tool choices are available without an
+Experimental opt-in:
 
 - **Always allow**: the tool runs without asking. This is also what a tool you
   have not made a choice about does.
@@ -78,7 +79,10 @@ Tools are grouped into read-only and write/delete tools when the integration
 describes them, and each group can be set in one click. Choices apply to the
 whole deployment from the next session turn. In a session, the owner can also
 ask to be asked about any tool for the rest of that session from the tool's
-call in the transcript.
+call in the transcript. When an approval is pending, it can be decided from the
+session; Slack, Discord, and Telegram also show approval buttons in the
+conversation. Microsoft Teams keeps the approval action in the linked web
+session.
 
 Members manage the same choices for their own private MCP servers from
 [Personal Settings](/personal-settings); those apply to their own sessions
