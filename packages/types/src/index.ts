@@ -23,6 +23,7 @@ export * from './fast-agent-tool-catalog';
 export * from './list-repositories-tool';
 export * from './integration-tool-lookup';
 export * from './chatgpt-subscription';
+export * from './model-fast-mode';
 export * from './github-copilot-subscription';
 export * from './xai-subscription';
 export * from './communication';

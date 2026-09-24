@@ -776,9 +776,11 @@ function ChatGptSubscriptionRow({
         <span className="min-w-0 truncate text-sm font-medium">
           {getModelProviderLabel(CHATGPT_SUBSCRIPTION_PROVIDER_ID)}
         </span>
-        <BasicTooltip content="Uses more ChatGPT credits for faster responses.">
+        <BasicTooltip content="Inherit uses this account-level Fast mode setting. Fast mode uses more ChatGPT credits for faster responses.">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Fast mode</span>
+            <span className="text-sm text-muted-foreground">
+              Default Fast mode
+            </span>
             <Switch
               aria-label="ChatGPT fast mode"
               checked={fastMode}

@@ -83,6 +83,7 @@ import {
 } from './model-runtime-config';
 import {
   DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
+  MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
 } from '@roomote/types';
@@ -846,6 +847,65 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env.R_CHATGPT_FAST_MODE).toBe('1');
+    expect(
+      JSON.parse(env[MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME]!),
+    ).toMatchObject({
+      'openai/gpt-6-astra': 'priority',
+      'openai/gpt-6-luna': 'priority',
+    });
+  });
+
+  it('resolves direct OpenAI Fast overrides only on the API-key route', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openai/gpt-6-astra' },
+      taskModelSettings: {
+        models: [],
+        allowedModelIds: [],
+        defaultModelId: 'openrouter/openai/gpt-6-luna',
+        fastModeOverrides: {
+          'openai:openai-api-key:gpt-6-astra:responses': 'fast',
+        },
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: { OPENAI_API_KEY: 'sk-openai' },
+      deploymentEnvVars: {},
+    });
+
+    expect(JSON.parse(env[MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME]!)).toEqual({
+      'openai/gpt-6-astra': 'priority',
+    });
+    expect(env).not.toHaveProperty('R_CHATGPT_FAST_MODE');
+  });
+
+  it('prefers ChatGPT OAuth overrides when both OpenAI credentials are connected', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openai/gpt-6-astra' },
+      taskModelSettings: {
+        models: [],
+        allowedModelIds: [],
+        defaultModelId: 'openrouter/openai/gpt-6-luna',
+        fastModeOverrides: {
+          'openai:chatgpt-oauth:gpt-6-astra:responses': 'normal',
+          'openai:openai-api-key:gpt-6-astra:responses': 'fast',
+        },
+      },
+    });
+    mockResolveOpenCodeAuthContent.mockResolvedValue(
+      JSON.stringify({
+        openai: { type: 'oauth', refresh: 'rt', access: 'at', expires: 123 },
+      }),
+    );
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: { OPENAI_API_KEY: 'sk-openai' },
+      deploymentEnvVars: {},
+    });
+
+    expect(JSON.parse(env[MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME]!)).toEqual({
+      'openai/gpt-6-astra': 'default',
+    });
   });
 
   it('emits the ChatGPT gateway marker instead of OPENCODE_AUTH_CONTENT for task sandboxes', async () => {

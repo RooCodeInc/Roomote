@@ -25,6 +25,7 @@ import {
   buildInferenceGatewayOpenCodeBaseUrl,
   buildOpenCodeModelReasoningOptions,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
+  MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME,
   CHATGPT_GATEWAY_PROVIDER_ID,
   CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
@@ -57,8 +58,10 @@ import {
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
+  mergeOpenCodeModelFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  parseModelFastModeRequestOptions,
   parseInferenceGatewayKeys,
   parseTaskModelContextWindows,
   parseTaskModelCosts,
@@ -1530,6 +1533,9 @@ function resolveModelBackedOpenCodeConfig(
   );
   const chatGptFastMode =
     runtimeEnv[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1';
+  const modelFastModeRequestOptions = parseModelFastModeRequestOptions(
+    runtimeEnv[MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME],
+  );
   validateRoomoteModelEnv('R_MODEL', rawModel);
 
   if (rawSmallModel) {
@@ -1617,6 +1623,7 @@ function resolveModelBackedOpenCodeConfig(
   delete runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_MODEL_ENV_KEYS;
   delete runtimeEnv[CHATGPT_FAST_MODE_ENV_VAR_NAME];
+  delete runtimeEnv[MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME];
 
   const visualAgent =
     visionModel && visionModel !== effectiveCodingModel
@@ -1775,12 +1782,18 @@ function resolveModelBackedOpenCodeConfig(
     // config entry or its cost block is silently dropped.
     ...Object.keys(modelCosts),
   ];
-  const providerModelConfig = chatGptFastMode
-    ? mergeOpenCodeChatGptFastModeOptions(
-        providerReasoningConfig,
-        configuredModelIds,
-      )
-    : providerReasoningConfig;
+  const providerModelConfig =
+    Object.keys(modelFastModeRequestOptions).length > 0
+      ? mergeOpenCodeModelFastModeOptions(
+          providerReasoningConfig,
+          modelFastModeRequestOptions,
+        )
+      : chatGptFastMode
+        ? mergeOpenCodeChatGptFastModeOptions(
+            providerReasoningConfig,
+            configuredModelIds,
+          )
+        : providerReasoningConfig;
   const providerConfig = mergeInferenceGatewayProviderConfig(
     // Binds the keys OpenCode would not find under its catalog's env var
     // names. Gateway mode replaces the key and base URL just above.
