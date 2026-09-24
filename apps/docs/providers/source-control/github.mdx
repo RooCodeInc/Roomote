@@ -253,21 +253,26 @@ repositories connected on that installation, the same boundary a coding task
 has. What the token may do there is set by the App's permissions on GitHub. No
 personal GitHub OAuth connection is required. Ask for the specific change and
 identify the repository and target issue, pull request, or comment. Every call
-appears in the Session transcript with its inputs and result.
+appears in the session transcript with its inputs and result.
 
 For example, ask Roomote to:
 
 - mark PR #42 in `example/repo` ready for review
 - request a review from `octocat` on that PR
 - merge PR #42 after its required checks and reviews pass
+- enable auto-merge on PR #42 so it merges once its checks and reviews pass
 - add a thumbs-up reaction to an existing comment, providing its GitHub URL
 
 Retargeting a pull request's base to an existing branch does not write a branch
-or change files. A merge requires an explicit request from the current human
-message. Roomote reads the pull request immediately before the merge, binds the
-request to the current head SHA when the native schema supports it, leaves
-branch protections and merge permissions to GitHub, and reads the pull request
-again before reporting success or retrying an ambiguous result. Work that needs a
+or change files. A merge or auto-merge request requires an explicit request
+from the current human message. Roomote reads the pull request immediately
+before the mutation and binds the request to the current head SHA; for
+auto-merge, GitHub enforces that binding atomically and rejects the call when
+the head has moved. Branch protections, required checks, and merge
+permissions stay with GitHub, and Roomote reads the pull request again before
+reporting success or retrying an ambiguous result. Auto-merge is only enabled when
+GitHub confirms it, and only where the repository allows auto-merge and the
+requested merge method. Work that needs a
 checkout, a build, or tests to get right still belongs in a coding task, which
 also remains read-only on this GitHub tool path and writes through its own
 checkout instead.
@@ -320,7 +325,7 @@ Once the app is installed and an environment maps the repository:
 - link your GitHub account under Settings -> Linked Accounts so Roomote can
   run the conversation as you
 
-Each pull request or issue is a Roomote Session. Roomote reads the discussion,
+Each pull request or issue is a Roomote session. Roomote reads the discussion,
 answers as a comment when no workspace is needed, and otherwise starts a task
 on the pull request's branch (or the issue's repository) and reports back in
 the same discussion. Mention it again to redirect it, ask a follow-up, or
@@ -338,15 +343,15 @@ GitHub App.
 Roomote only responds to comments that `@mention` it, including replies inside
 a review thread it opened, so people can discuss a finding among themselves
 without summoning it. On a pull request that a Roomote task opened, replies in
-its review threads are collected as review feedback for the owning Session,
+its review threads are collected as review feedback for the owning session,
 described below.
 
-A pull request that a Roomote task opened already belongs to the Session that
+A pull request that a Roomote task opened already belongs to the session that
 started the work, for example the Slack thread where the task was requested.
-Mentions on that pull request join that Session instead of opening a second
-one: Roomote answers on the pull request and in the Session's home surface,
+Mentions on that pull request join that session instead of opening a second
+one: Roomote answers on the pull request and in the session's home surface,
 and any work it delegates runs on the pull request's branch from the same
-Session.
+session.
 
 When a Roomote task opens a pull request, actionable review feedback returns to
 the owning session and appears in both session and standard web task transcripts.

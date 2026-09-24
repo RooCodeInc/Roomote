@@ -294,6 +294,14 @@ export const queueCommunicationMessage = (
   options: AppRouterInput['taskRuns']['queueCommunicationMessage'],
 ) => client.taskRuns.queueCommunicationMessage.mutate(options);
 
+export const peekTaskFollowUps = (
+  options: AppRouterInput['taskRuns']['peekTaskFollowUps'],
+) => client.taskRuns.peekTaskFollowUps.query(options);
+
+export const removeTaskFollowUp = (
+  options: AppRouterInput['taskRuns']['removeTaskFollowUp'],
+) => client.taskRuns.removeTaskFollowUp.mutate(options);
+
 export const getSlackStartedMessageData = (
   options: AppRouterInput['taskRuns']['getSlackStartedMessageData'],
 ) => client.taskRuns.getSlackStartedMessageData.query(options);

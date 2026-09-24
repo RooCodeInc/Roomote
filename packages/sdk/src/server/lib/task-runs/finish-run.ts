@@ -9,6 +9,7 @@ import {
   getFastAgentParentFromPayload,
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
+  isExitedRunStatus,
   parseConflictResolutionSummary,
   resolveComputeProviderTarget,
   stripRunErrorMarkers,
@@ -37,7 +38,9 @@ import {
   deploymentSettings,
   markTaskStartParallelCountEndedAt,
   maybeEnqueueBrainMemoryEvent,
+  markEnvironmentVerificationFailedIfCurrent,
   recordTaskRunLifecycleEvent,
+  recordSilentAutomationResultForRun,
   resolveDefaultComputeProvider,
   slackInstallations,
   slackUserMappings,
@@ -53,6 +56,7 @@ import {
 } from '@roomote/db/server';
 import {
   buildTerminalReviewStatus,
+  distillTaskRunTurnMemory,
   finalizeGithubPrReviewComment,
   getTaskUrl,
   releaseTaskRun,
@@ -81,7 +85,10 @@ import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-set
 import { notifyWebTaskInitiatorOnSettle } from './notify-web-task-initiator-on-settle';
 import { enqueueWebTaskInitiatorSettleNotification } from './enqueue-web-task-initiator-settle-notification';
 import { settleLiveTaskMessageOnExit } from './settle-live-task-message-on-exit';
-import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
+import {
+  refreshTaskSessionTitleOnCompletion,
+  refreshTaskTitleOnCompletion,
+} from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 import {
@@ -355,6 +362,14 @@ export const finishRun = async ({
         taskPhase: status === RunStatus.Idle ? run.taskPhase : null,
         error: sanitizedError ?? null,
         errorCode: errorCode ?? null,
+        terminalReason: isExitedRunStatus(status)
+          ? {
+              kind: 'terminal',
+              status,
+              errorCode: errorCode ?? null,
+              message: sanitizedError ?? null,
+            }
+          : null,
       },
       createdAt: now,
     });
@@ -397,6 +412,16 @@ export const finishRun = async ({
     return;
   }
 
+  if (status === RunStatus.Completed && task.initiatorAutomation) {
+    try {
+      await recordSilentAutomationResultForRun(id);
+    } catch (resultError) {
+      console.error(
+        `[finishRun] Failed to record silent automation outcome for run ${id}: ${resultError instanceof Error ? resultError.message : String(resultError)}`,
+      );
+    }
+  }
+
   if (status !== RunStatus.Idle) {
     try {
       await refreshFinishedAutomationSlackResult(run);
@@ -428,6 +453,36 @@ export const finishRun = async ({
       console.error(
         `[finishRun] Failed to record environment snapshot failure for run ${id}: ${
           err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  const verifiesEnvironmentId =
+    run.payload &&
+    typeof run.payload === 'object' &&
+    !Array.isArray(run.payload)
+      ? (run.payload as Record<string, unknown>).verifiesEnvironmentId
+      : null;
+  if (
+    typeof verifiesEnvironmentId === 'string' &&
+    (status === RunStatus.Failed || status === RunStatus.Canceled)
+  ) {
+    try {
+      await markEnvironmentVerificationFailedIfCurrent(db, {
+        environmentId: verifiesEnvironmentId,
+        verificationTaskId: run.taskId,
+        error:
+          status === RunStatus.Canceled
+            ? 'The verification task was canceled before reporting a result.'
+            : 'The verification task failed before reporting a result.',
+      });
+    } catch (verificationError) {
+      console.error(
+        `[finishRun] Failed to record environment verification failure for run ${id}: ${
+          verificationError instanceof Error
+            ? verificationError.message
+            : String(verificationError)
         }`,
       );
     }
@@ -489,6 +544,22 @@ export const finishRun = async ({
     void captureTaskSettled(run.id, status, errorCode);
   }
 
+  // A settled turn, whether the run stays up for follow-ups or ends here.
+  // Detached and best effort; the Memory outbox drainer repeats the check for
+  // a completed run, so a pass lost with this process is not lost for good.
+  if (
+    (status === RunStatus.Idle || status === RunStatus.Completed) &&
+    run.payloadKind !== TaskPayloadKind.SnapshotEnvironment
+  ) {
+    void distillTaskRunTurnMemory({
+      runId: run.id,
+      taskId: run.taskId,
+      userId: run.task.initiatorUserId,
+      workflow: run.task.workflow,
+      requeue: true,
+    });
+  }
+
   if (status === RunStatus.Completed || status === RunStatus.Failed) {
     try {
       await refreshTaskTitleOnCompletion({
@@ -498,6 +569,16 @@ export const finishRun = async ({
     } catch (error) {
       console.warn(
         `[finishRun] Failed to refresh final title for run ${id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  } else if (status === RunStatus.Canceled) {
+    try {
+      await refreshTaskSessionTitleOnCompletion({ taskId: run.taskId });
+    } catch (error) {
+      console.warn(
+        `[finishRun] Failed to refresh final Session title for run ${id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

@@ -42,6 +42,8 @@ import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
+  integrationToolApprovalButtons,
+  integrationToolApprovalMessage,
   type FastAgentConversation,
   type TaskInitiator,
 } from '@roomote/types';
@@ -128,7 +130,12 @@ export async function processDiscordFastAgentMessage(
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
     directedAtRoomote?: boolean;
-    peerConversationsExperimentEnabled?: boolean;
+    /**
+     * The judgment model found this unmentioned message addressed to Roomote:
+     * answer it, but a sign-off or an explicit ask may still end silently.
+     */
+    addressedToRoomote?: boolean;
+    peerConversationsEnabled?: boolean;
     /** Attribution for tasks Fast delegates from this turn; automation-identity
      * turns pass their automation initiator so delegated work keeps automation
      * provenance instead of appearing installer-initiated. */
@@ -144,10 +151,12 @@ export async function processDiscordFastAgentMessage(
     attachmentTexts: input.attachmentTexts,
   });
   const isDirected = Boolean(input.directedAtRoomote);
+  const addressedToRoomote = !isDirected && input.addressedToRoomote === true;
+  const turnDirectedAtRoomote = isDirected || addressedToRoomote;
   const needsPeerCaution =
-    input.peerConversationsExperimentEnabled === true &&
+    input.peerConversationsEnabled === true &&
     message != null &&
-    !isDirected &&
+    !turnDirectedAtRoomote &&
     mentionsDiscordUserOtherThanBotOrUser(
       getDiscordMessageContent(message),
       input.botUserId,
@@ -250,7 +259,8 @@ export async function processDiscordFastAgentMessage(
         : [];
     const allowSilentAmbientReply =
       !isDirected &&
-      (needsPeerCaution ||
+      (addressedToRoomote ||
+        needsPeerCaution ||
         history.some(
           (entry) =>
             !entry.botId &&
@@ -276,7 +286,7 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       senderExternalId: input.sender.id,
-      directedAtRoomote: isDirected,
+      directedAtRoomote: turnDirectedAtRoomote,
       allowSilentAmbientReply,
       ...(needsPeerCaution ? { peerDirectedTurn: true } : {}),
       ...(agentContext ? { agentContext } : {}),
@@ -346,7 +356,7 @@ export async function processDiscordFastAgentMessage(
         channelId,
         footerStateThreadId,
         lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
-        logRef: `fast session ${session.id}`,
+        logRef: `session ${session.id}`,
         logContext: 'DiscordFastAgent',
         postReplyWithFooter: async () => {
           const posted = await replyToDiscordEvent({
@@ -418,7 +428,7 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       activeTasks: input.activeTasks,
-      directedAtRoomote: isDirected,
+      directedAtRoomote: turnDirectedAtRoomote,
       allowSilentAmbientReply,
       peerDirectedTurn: needsPeerCaution,
       adapter: {
@@ -533,7 +543,15 @@ export async function processDiscordFastAgentMessage(
             kickoffDelivered: true,
           };
         },
-        postReply: async ({ message: text }) => {
+        postReply: async ({ message: text, toolApproval }) => {
+          if (toolApproval) {
+            const posted = await input.provider.postMessage({
+              ...conversation.replyTarget,
+              text: integrationToolApprovalMessage(toolApproval),
+              buttons: integrationToolApprovalButtons(toolApproval.approvalId),
+            });
+            return { messageId: posted.messageId };
+          }
           const posted = await postFastReplyWithFooter(text);
           didSendVisibleResponse = true;
           return { messageId: posted.messageId };

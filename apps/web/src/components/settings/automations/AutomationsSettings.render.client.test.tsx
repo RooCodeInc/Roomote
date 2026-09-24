@@ -8,6 +8,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { toast } from 'sonner';
+import { CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH } from '@roomote/types';
 const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
@@ -693,6 +694,10 @@ it('validates required custom automation fields before creating', () => {
 
   const name = screen.getByRole('textbox', { name: 'Name' });
   const prompt = screen.getByRole('textbox', { name: 'Prompt' });
+  expect(prompt).toHaveAttribute(
+    'maxLength',
+    String(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH),
+  );
   fireEvent.change(name, { target: { value: '   ' } });
   fireEvent.change(prompt, { target: { value: '\n ' } });
   mutations.updateSettings.mockClear();
@@ -721,6 +726,49 @@ it('validates required custom automation fields before creating', () => {
     expect.objectContaining({
       name: 'Local validation proof',
       prompt: 'Verify required-field validation.',
+      environmentId: '__fast__',
+    }),
+  );
+});
+
+it('shows and clears preferred-environment validation before creating', () => {
+  render(<CustomAutomationsSection />);
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+
+  const name = screen.getByRole('textbox', { name: 'Name' });
+  const prompt = screen.getByRole('textbox', { name: 'Prompt' });
+  const environment = screen.getByRole('combobox', {
+    name: 'Preferred environment',
+  });
+
+  fireEvent.change(name, { target: { value: 'Environment validation proof' } });
+  fireEvent.change(prompt, {
+    target: { value: 'Verify environment recovery.' },
+  });
+  mutations.updateSettings.mockClear();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+  expect(mutations.updateSettings).not.toHaveBeenCalled();
+  expect(toast.error).not.toHaveBeenCalledWith('Choose an environment.');
+  expect(environment).toHaveFocus();
+  expect(environment).toHaveAttribute('aria-invalid', 'true');
+  expect(environment).toHaveAccessibleDescription('Choose an environment.');
+  expect(
+    screen.getByText('Choose an environment.', { selector: '[role="alert"]' }),
+  ).toBeInTheDocument();
+
+  fireEvent.click(environment);
+  fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+
+  expect(environment).not.toHaveAttribute('aria-invalid');
+  expect(screen.queryByText('Choose an environment.')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+  expect(mutations.updateSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: 'Environment validation proof',
+      prompt: 'Verify environment recovery.',
       environmentId: '__fast__',
     }),
   );
@@ -990,6 +1038,47 @@ describe('AutomationsSettings', () => {
     ).toHaveTextContent('Default');
     expect(
       screen.getByText('Reports to: not configured — set a Manager Channel.'),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps Suggest Ideas and Summarize Merged PRs setup available without a default destination', async () => {
+    state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
+    state.settingsQuery.data.resolvedDestinations.suggester = null;
+    state.settingsQuery.data.resolvedDestinations.announcer = null;
+
+    render(<AutomationsSettings />);
+
+    const suggesterSwitch = await screen.findByRole('switch', {
+      name: 'Enable Suggest Ideas',
+    });
+    const announcerSwitch = screen.getByRole('switch', {
+      name: 'Enable Summarize Merged PRs',
+    });
+    expect(suggesterSwitch).toBeEnabled();
+    expect(announcerSwitch).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Set up Suggest Ideas' }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Set up Summarize Merged PRs' }),
+    ).toBeEnabled();
+
+    fireEvent.click(suggesterSwitch);
+    expect(
+      await screen.findByRole('dialog', { name: 'Suggest Ideas' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toBeInTheDocument();
+    closeAutomationDialog();
+
+    fireEvent.click(announcerSwitch);
+    expect(
+      await screen.findByRole('dialog', { name: 'Summarize Merged PRs' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
     ).toBeInTheDocument();
   });
 
@@ -2263,7 +2352,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('explains that Teams replies continue the Fast session', async () => {
+  it('explains that Teams replies continue the session', async () => {
     state.settingsQuery.data.capabilities.teamsConnected = true;
     state.customAutomations = [
       {
@@ -2306,7 +2395,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('explains that Telegram replies continue the Fast session', async () => {
+  it('explains that Telegram replies continue the session', async () => {
     state.settingsQuery.data.capabilities.telegramConnected = true;
     state.customAutomations = [
       {

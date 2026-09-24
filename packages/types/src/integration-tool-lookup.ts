@@ -33,6 +33,11 @@ export const INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE =
   'No integration tools are exposed in this catalog. Check the connection, granted permissions, and disabled tool settings.';
 export const INTEGRATION_TOOL_LOOKUP_PARTIALLY_UNAVAILABLE_GUIDANCE =
   'Some integrations could not list tools, so this empty result is inconclusive. Retry each unavailable integration by exact integrationId.';
+export function getIntegrationToolLookupUnavailableGuidance(
+  integrationIds: string[],
+): string {
+  return `Could not list tools for ${integrationIds.join(', ')}. Retry with the exact integrationId${integrationIds.length === 1 ? '' : 's'} listed above. If the problem persists, check the integration connection and permissions.`;
+}
 
 /**
  * Select tools for a lookup. An exact tool name wins; otherwise every query

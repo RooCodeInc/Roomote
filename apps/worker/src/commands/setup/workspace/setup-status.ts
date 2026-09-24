@@ -29,6 +29,8 @@ type EnvironmentSetupCommandState =
 
 export interface EnvironmentSetupCommandStatus {
   repository: string;
+  kind?: 'repository' | 'recipe';
+  recipe?: string;
   name: string;
   state: EnvironmentSetupCommandState;
   detached?: boolean;
@@ -186,6 +188,32 @@ export class EnvironmentSetupStatusWriter {
     this.accumulatedWarnings.push(...messages);
     this.status.warnings = [...this.accumulatedWarnings];
     this.write();
+  }
+
+  addRecipeCommands(recipe: string, commandNames: string[]): void {
+    for (const name of commandNames) {
+      const repository = `recipe:${recipe}`;
+      const key = commandKey(repository, name);
+      const indices = this.commandIndex.get(key) ?? [];
+      indices.push(this.status.commands.length);
+      this.commandIndex.set(key, indices);
+      this.status.commands.push({
+        repository,
+        kind: 'recipe',
+        recipe,
+        name,
+        state: 'pending',
+      });
+    }
+    this.write();
+  }
+
+  markRecipeCommandRunning(recipe: string, commandName: string): void {
+    this.markCommandRunning(`recipe:${recipe}`, commandName);
+  }
+
+  markRecipeCommandResult(recipe: string, result: ExecutionResult): void {
+    this.markCommandResult(`recipe:${recipe}`, result);
   }
 
   markCommandRunning(repository: string, commandName: string): void {

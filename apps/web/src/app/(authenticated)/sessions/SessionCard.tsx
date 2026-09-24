@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow, isSameDay, isSameYear } from 'date-fns';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import {
@@ -20,6 +20,7 @@ import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInfe
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
+import { SessionActions } from '../../(sandbox)/sessions/[sessionId]/SessionDeleteAction';
 
 type SessionCardData = {
   id: string;
@@ -57,7 +58,14 @@ type SessionCardData = {
     repositoryName: string | null;
     inferenceCostMicroUsd: number;
   }>;
+  canManage?: boolean;
 };
+
+export function formatSessionMobileTimestamp(date: Date, now = new Date()) {
+  if (isSameDay(date, now)) return format(date, 'hh:mm b');
+  if (isSameYear(date, now)) return format(date, 'LLL d');
+  return format(date, 'LLL d Y', { useAdditionalWeekYearTokens: true });
+}
 
 export function SessionCard({
   session,
@@ -81,6 +89,7 @@ export function SessionCard({
   const surfaceLabel = getSessionSurfaceLabel(session.sourceSurface);
   const hasOutputMetadata =
     session.pullRequests.length > 0 || session.artifactCount > 0;
+  const activityDate = new Date(session.activityAt * 1000);
   const artifactHref = session.singleArtifact
     ? getStandaloneArtifactViewUrl(
         '',
@@ -104,7 +113,7 @@ export function SessionCard({
         {session.ownerKind === 'automation' ? (
           <span
             className="flex size-8 items-center justify-center overflow-clip rounded-full border border-border bg-white dark:bg-muted"
-            aria-label={actorName}
+            aria-hidden="true"
           >
             <TaskAutomationIcon
               automationKey={session.ownerAutomation}
@@ -117,7 +126,9 @@ export function SessionCard({
             name={ownerDisplayName}
             email={session.ownerEmail ?? undefined}
             size="md"
-            alt={ownerDisplayName}
+            alt=""
+            loading="eager"
+            decoding="sync"
           />
         )}
         {session.unread && session.ownerUserId === viewerUserId ? (
@@ -157,10 +168,11 @@ export function SessionCard({
               <SessionStatusBadge status={status} className="capitalize" />
             )}
           </div>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatDistanceToNow(new Date(session.activityAt * 1000), {
-              addSuffix: true,
-            })}
+          <span className="shrink-0 text-xs text-muted-foreground md:hidden">
+            {formatSessionMobileTimestamp(activityDate)}
+          </span>
+          <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">
+            {formatDistanceToNow(activityDate, { addSuffix: true })}
           </span>
         </div>
         <p className="mt-1 line-clamp-2 wrap-anywhere text-base font-medium group-hover:underline">
@@ -193,6 +205,11 @@ export function SessionCard({
           </div>
         ) : null}
       </div>
+      {session.canManage ? (
+        <div className="pointer-events-auto relative -top-2 z-20 shrink-0 self-start">
+          <SessionActions sessionId={session.id} listRow />
+        </div>
+      ) : null}
     </div>
   );
 }

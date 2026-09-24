@@ -241,6 +241,85 @@ describe('fetchChatGptUsage', () => {
     expect(usage?.windows[0]?.resetsAt).toBe(
       new Date(1_784_949_989 * 1000).toISOString(),
     );
+    expect(usage?.credits).toBeUndefined();
+  });
+
+  it('parses available credits separately from quota-window percentages', async () => {
+    const { executor } = makeSecretExecutor([chatGptRecord()]);
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        plan_type: 'plus',
+        rate_limit: {
+          primary_window: { used_percent: 24 },
+          secondary_window: { used_percent: 8 },
+        },
+        credits: { has_credits: true, unlimited: false, balance: '12.5' },
+      }),
+    );
+
+    const usage = await fetchChatGptUsage({ executor, fetchImpl });
+
+    expect(usage).toMatchObject({
+      providerId: 'chatgpt',
+      windows: [
+        { label: '5h limit', usedPercent: 24 },
+        { label: 'Weekly limit', usedPercent: 8 },
+      ],
+      credits: { balance: 12.5 },
+    });
+  });
+
+  it('preserves an explicit zero balance when credits are available', async () => {
+    const { executor } = makeSecretExecutor([chatGptRecord()]);
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        credits: { has_credits: true, unlimited: false, balance: '0' },
+      }),
+    );
+
+    await expect(
+      fetchChatGptUsage({ executor, fetchImpl }),
+    ).resolves.toMatchObject({
+      providerId: 'chatgpt',
+      windows: [],
+      credits: { balance: 0 },
+    });
+  });
+
+  it('represents unlimited credits without requiring a numeric balance', async () => {
+    const { executor } = makeSecretExecutor([chatGptRecord()]);
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        credits: { has_credits: true, unlimited: true, balance: null },
+      }),
+    );
+
+    await expect(
+      fetchChatGptUsage({ executor, fetchImpl }),
+    ).resolves.toMatchObject({
+      providerId: 'chatgpt',
+      windows: [],
+      credits: { unlimited: true },
+    });
+  });
+
+  it('ignores invalid or unavailable credit balances', async () => {
+    const { executor } = makeSecretExecutor([chatGptRecord(), chatGptRecord()]);
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ credits: { has_credits: true, balance: '-2' } }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ credits: { has_credits: true, unlimited: false } }),
+      );
+
+    await expect(
+      fetchChatGptUsage({ executor, fetchImpl }),
+    ).resolves.toBeNull();
+    await expect(
+      fetchChatGptUsage({ executor, fetchImpl }),
+    ).resolves.toBeNull();
   });
 
   it('resolves null when no subscription is connected', async () => {

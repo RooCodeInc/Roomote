@@ -154,7 +154,10 @@ const serverSchema = {
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
-  // Operator policy for the curated Settings > Integrations catalog. Enabled
+  // Operator-only settings surface for internal nightly experiments. Off by
+  // default and enforced by the web server for both page and API access.
+  R_NIGHTLY_EXPERIMENTS_ENABLED: optInBoolean(),
+  // Operator policy for the curated Integrations page catalog. Enabled
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.
   R_CURATED_INTEGRATIONS_DISABLED: optInBoolean(),
@@ -193,8 +196,25 @@ const serverSchema = {
   // `vercel`). Overrides the Settings > Models choice.
   // Unset defers to Settings, where a TypeSafe key alone selects `typesafe`.
   R_JUDGMENT_MODEL: z
-    .enum(['off', 'typesafe', 'openrouter', 'vercel'])
+    .enum(['off', 'roomote', 'typesafe', 'openrouter', 'vercel'])
     .optional(),
+  // A judgment model Roomote runs itself, speaking the same typed decisions
+  // request as Jev. Hosting injects it for managed deployments so routing
+  // and triage text never leaves Roomote-operated infrastructure unless an
+  // admin explicitly chooses a third-party judgment model. The key is
+  // optional because a private-network upstream may carry no auth.
+  R_JUDGMENT_UPSTREAM_URL: z.string().url().optional(),
+  R_JUDGMENT_UPSTREAM_API_KEY: z.string().min(1).optional(),
+  // `on` also scores every third-party (Jev) judgment with the Roomote-run
+  // upstream and logs how the two agree, without changing the answer callers
+  // get. Calibration evidence for the hosted model, collected only from
+  // deployments that already send that text to Jev.
+  R_JUDGMENT_SHADOW: z.enum(['on', 'off']).optional(),
+  // `on` writes every answered decision (scrubbed state, questions, answer)
+  // to the deployment's own artifact bucket under `judgment-capture/`, for
+  // an operator to build a training set from. Off by default: it keeps
+  // decision text, so only for deployments the operator owns.
+  R_JUDGMENT_CAPTURE: z.enum(['on', 'off']).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -623,6 +643,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
   'R_TRIAL_OPENROUTER_API_KEY',
+  'R_NIGHTLY_EXPERIMENTS_ENABLED',
   // Cloud clears managed-email variables with empty strings on disable;
   // an empty enum flag must fall back to its default, not fail boot.
   'R_EMAIL_CHANNEL_ENABLED',
@@ -660,6 +681,10 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_VOICE_OPENAI_API_KEY',
   'R_TYPESAFE_API_KEY',
   'R_JUDGMENT_MODEL',
+  'R_JUDGMENT_UPSTREAM_URL',
+  'R_JUDGMENT_UPSTREAM_API_KEY',
+  'R_JUDGMENT_SHADOW',
+  'R_JUDGMENT_CAPTURE',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',
@@ -789,7 +814,10 @@ export const AUTH_KEYPAIR_ENV_KEYS = [
 export type AuthKeypairEnvKey = (typeof AUTH_KEYPAIR_ENV_KEYS)[number];
 
 /** Parses an opt-in boolean env flag: `true` or `1`, case-insensitive. */
-export function isEnvFlagEnabled(value: string | undefined): boolean {
+export function isEnvFlagEnabled(value: string | boolean | undefined): boolean {
+  if (value === true) return true;
+  if (typeof value !== 'string') return false;
+
   const normalized = value?.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
 }

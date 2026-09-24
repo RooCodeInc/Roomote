@@ -10,9 +10,11 @@ x-roomote-app-image: &roomote-app-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMES
 
 x-roomote-base-env: &roomote-base-env
   NODE_ENV: production
-  # The Brain: supplying this key gives the deployment shared memory that
-  # agents consult. It powers the brain service's embeddings and is the
-  # single activation signal — there is no Settings UI for it.
+  # The Brain: optional provider keys for the shared memory agents consult.
+  # They power the brain service's embeddings and synthesis; an enabled Brain
+  # otherwise falls back to the deployment's regular provider key. Admins turn
+  # Memory on or off in Settings > Memory. Until that toggle has been set, a
+  # key here also turns Memory on (legacy behavior).
   R_BRAIN_OPENROUTER_API_KEY: ${R_BRAIN_OPENROUTER_API_KEY:-}
   R_BRAIN_OPENAI_API_KEY: ${R_BRAIN_OPENAI_API_KEY:-}
   # Shared secret the Brain presents to /api/brain/inference. REQUIRED to
@@ -29,6 +31,13 @@ x-roomote-base-env: &roomote-base-env
   # server. Chat synthesis keeps flowing to the configured model provider.
   R_BRAIN_EMBEDDINGS_UPSTREAM_URL: ${R_BRAIN_EMBEDDINGS_UPSTREAM_URL:-}
   R_BRAIN_INFERENCE_UPSTREAM_API_KEY: ${R_BRAIN_INFERENCE_UPSTREAM_API_KEY:-}
+  # Optional self-run judgment model for routing and triage decisions; it
+  # answers the same typed decisions request as Jev at /v1/decisions.
+  R_JUDGMENT_UPSTREAM_URL: ${R_JUDGMENT_UPSTREAM_URL:-}
+  R_JUDGMENT_UPSTREAM_API_KEY: ${R_JUDGMENT_UPSTREAM_API_KEY:-}
+  R_JUDGMENT_SHADOW: ${R_JUDGMENT_SHADOW:-}
+  R_JUDGMENT_CAPTURE: ${R_JUDGMENT_CAPTURE:-}
+  R_JUDGMENT_MODEL: ${R_JUDGMENT_MODEL:-}
   R_GBRAIN_URL: ${R_GBRAIN_URL:-http://gbrain:8931}
   R_GBRAIN_ADMIN_TOKEN_FILE: /gbrain-data/admin-bootstrap-token
   # Written by the Brain on first boot when no token was supplied, so a stack
@@ -79,6 +88,7 @@ x-roomote-inference-env: &roomote-inference-env
   AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
   AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
@@ -527,12 +537,13 @@ services:
   # no published ports and no Caddy route; the API fronts it at
   # /api/mcp/gbrain. By default it uses the same registry, namespace, and
   # release tag as the app image; GBRAIN_IMAGE can override the complete ref.
-  # Wire R_GBRAIN_URL plus static tokens into api/bullmq
-  # (operator-pinned), or the normal path: set GBRAIN_ADMIN_BOOTSTRAP_TOKEN
-  # (>= 32 chars of [A-Za-z0-9_-]) and paste http://gbrain:8931 plus that
-  # same token into Settings > Integrations > Brain; Roomote then
-  # registers its own scoped clients via the admin API. If left unset, the
-  # entrypoint generates one at /data/admin-bootstrap-token on the volume.
+  # Wire static tokens into api/bullmq (operator-pinned), or the normal path:
+  # api/bullmq already point R_GBRAIN_URL at http://gbrain:8931 and read the
+  # admin bootstrap token from the shared volume, so Roomote registers its own
+  # scoped clients via the admin API once Memory is enabled in
+  # Settings > Memory. Set GBRAIN_ADMIN_BOOTSTRAP_TOKEN (>= 32 chars of
+  # [A-Za-z0-9_-]) to pin the token; if left unset, the entrypoint generates
+  # one at /data/admin-bootstrap-token on the volume.
   gbrain:
     profiles:
       - brain

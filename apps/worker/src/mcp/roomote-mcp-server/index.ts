@@ -16,6 +16,7 @@ import {
   chatDestinationLookupInputSchema,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   CREATE_CUSTOM_SKILL_TOOL,
+  OPEN_ARTIFACT_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
@@ -56,6 +57,7 @@ import { handleUpload } from './upload.js';
 import { handleDescribeVideo } from './describe-video.js';
 import { handleDownload } from './download.js';
 import { handleListArtifacts } from './list-artifacts.js';
+import { handleOpenArtifact } from './open-artifact.js';
 import { handleSearchTasks } from './search-tasks.js';
 import { handleGetTaskMessages } from './task-messages.js';
 import { handleGetTaskSummary } from './task-summary.js';
@@ -66,6 +68,7 @@ import { handleSendMessage } from './send-message.js';
 import { handleListTaskModels } from './list-models.js';
 import {
   handleCreateEnvironment,
+  handlePreviewEnvironment,
   handleRecordVerification,
   handleUpdateEnvironment,
 } from './create-environment.js';
@@ -353,12 +356,45 @@ roomoteMcpServer.registerTool(
 );
 
 roomoteMcpServer.registerTool(
+  OPEN_ARTIFACT_TOOL.name,
+  {
+    title: OPEN_ARTIFACT_TOOL.title,
+    description: OPEN_ARTIFACT_TOOL.description,
+    inputSchema: z.object(OPEN_ARTIFACT_TOOL.inputSchema).strict(),
+    annotations: OPEN_ARTIFACT_TOOL.annotations,
+  },
+  async (params): Promise<ToolResult> => {
+    const config = getArtifactConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+
+    const taskId =
+      params.taskId ??
+      (!params.sessionId ? process.env.ROOMOTE_TASK_ID : undefined);
+    if (!taskId && !params.sessionId) {
+      return errorResult(
+        'taskId or sessionId is required (taskId defaults to ROOMOTE_TASK_ID)',
+      );
+    }
+
+    return handleOpenArtifact(
+      {
+        ...params,
+        ...(taskId ? { taskId } : {}),
+      },
+      config,
+    );
+  },
+);
+
+roomoteMcpServer.registerTool(
   'manage_artifacts',
   {
     title: 'Manage Artifacts',
     description:
       'Create, upload, download, and list artifacts in Roomote. ' +
-      'Use action "create_plan" to create a markdown plan artifact (requires title and content). Creation results return viewUrl for the artifact in its task or Session and standaloneViewUrl to open the document, image, or file on its own page with a direct shareable link; share whichever returned URL fits the context rather than constructing an artifact URL. ' +
+      'Use action "create_plan" to create a markdown plan artifact (requires title and content). Creation results return viewUrl for the artifact in its task or session and standaloneViewUrl to open the document, image, or file on its own page with a direct shareable link; share whichever returned URL fits the context rather than constructing an artifact URL. ' +
       'Use action "upload" to upload a workspace-relative file or an absolute file under /tmp (requires path and type). Use type "general" for ordinary files. ' +
       (isFastAgentChild()
         ? 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not sent to the parent Session automatically; pass returned artifact IDs to `report_to_parent_session` via `imageArtifactIds` when they belong in the report (or include `viewUrl`/`rawUrl` in the report text for non-images). '
@@ -619,10 +655,10 @@ const manageTasksToolDescription =
   'Use action "search_tasks" only to search direct tasks by query or status. ' +
   `Use action "get_summary" with taskId to inspect a specific task's latest status, failure details, and uploaded image artifact IDs and viewer links. Use those stable IDs to attach a delegated task's images to a later reply. ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
-  'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript; results are newest first. ' +
+  'Use action "get_messages" with sessionId for session history, or taskId for a specific task transcript; results are newest first. ' +
   'Use action "get_updates" with sessionId or taskId and its returned cursor for compact, chronological relay narrative and state deltas; unchanged polls return no narrative. ' +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
-  'Use action "send_message" with sessionId to continue a Session, or taskId to message a specific task. ' +
+  'Use action "send_message" with sessionId to continue a session, or taskId to message a specific task. ' +
   'Use action "list_models" to list the enabled model IDs available for task model selection. Call it before "update_models" when resolving a requested model name to an exact ID. ' +
   'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Users usually phrase both together: in "switch to Luna Max" or "use GPT 5.4 medium", the trailing low/medium/high/extra high/max word is the reasoningEffort and the rest names the model — set BOTH fields in one call. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
@@ -1116,10 +1152,10 @@ roomoteMcpServer.registerTool(
   'manage_environments',
   {
     title: 'Manage Environments',
-    description: `Create or update ${PRODUCT_NAME} environments, or record an environment verification result.`,
+    description: `Preview, create, or update ${PRODUCT_NAME} environments, or record an environment verification result. Before create/update, tell the user what will change and ask whether to proceed. Only perform the write after an affirmative response; admin authorization remains separate.`,
     inputSchema: {
       action: z
-        .enum(['create', 'update', 'record_verification'])
+        .enum(['preview', 'create', 'update', 'record_verification'])
         .describe('The environment action to perform'),
       definition: z
         .string()
@@ -1190,6 +1226,19 @@ roomoteMcpServer.registerTool(
         },
         config,
       );
+    }
+
+    if (params.action === 'preview') {
+      if (params.definition === undefined) {
+        return errorResult('definition is required for action "preview"');
+      }
+      return handlePreviewEnvironment({
+        definition: params.definition,
+        format: params.format,
+        name: params.name,
+        description: params.description,
+        environmentId: params.environmentId,
+      });
     }
 
     if (params.definition === undefined) {

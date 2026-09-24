@@ -35,8 +35,9 @@ export function TaskModelSettingsPage() {
       pageId="models"
       adminOnly={true}
       headerAction={recommendationsCallout}
+      boundedContentOnDesktop
     >
-      <div className="space-y-6">
+      <div className="space-y-6 md:relative md:min-h-0 md:flex-1 md:overflow-y-auto">
         <div className="md:hidden">{recommendationsCallout}</div>
         <InferenceProviderSection
           providerSetup={providerSetup}

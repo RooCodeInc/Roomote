@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from '@testing-library/react';
 import { useState } from 'react';
@@ -40,6 +41,12 @@ vi.mock('@/hooks/useSessionIntegrationApprovals', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useSessionIntegrationToolApprovals', () => ({
+  useSessionIntegrationToolApprovals: () => ({
+    data: { pending: [] },
+  }),
+}));
+
 vi.mock('./CapabilityOfferCard', () => ({
   CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
     <div>Capability offer: {offer.capability}</div>
@@ -48,6 +55,7 @@ vi.mock('./CapabilityOfferCard', () => ({
 
 const {
   replyMutate,
+  deleteQueuedMessageMutate,
   startGoalMutate,
   reviewActionMutate,
   updateModelSelectionMutate,
@@ -63,8 +71,10 @@ const {
   liveVoiceState,
   authenticatedUserState,
   invalidateQueries,
+  fetchOlderMessages,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
+  deleteQueuedMessageMutate: vi.fn(),
   startGoalMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
   updateModelSelectionMutate: vi.fn(),
@@ -91,6 +101,7 @@ const {
     },
   },
   invalidateQueries: vi.fn(),
+  fetchOlderMessages: vi.fn(),
   liveVoiceState: {
     active: false,
     status: 'idle' as
@@ -179,9 +190,11 @@ vi.mock('@/trpc/client', () => ({
         queryKey: (input: unknown) => ['fastSessions.tasks', input],
       },
       reply: { mutate: replyMutate },
+      deleteQueuedMessage: { mutate: deleteQueuedMessageMutate },
       startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
+      olderMessages: { query: fetchOlderMessages },
     },
     voice: {
       status: { query: voiceStatusQuery },
@@ -190,6 +203,11 @@ vi.mock('@/trpc/client', () => ({
     },
   }),
   useTRPC: () => ({
+    sessions: {
+      list: {
+        queryKey: () => ['sessions.list'],
+      },
+    },
     slack: {
       resolveUsers: {
         queryOptions: (input: unknown) => ({
@@ -248,12 +266,17 @@ vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
     onModelChange,
     reasoningEffort,
     onReasoningEffortChange,
+    onModelSelectionChange,
     disabled,
   }: {
     model: string;
     onModelChange: (model: string) => void;
     reasoningEffort: string | null;
     onReasoningEffortChange: (effort: 'high') => void;
+    onModelSelectionChange?: (selection: {
+      model: string;
+      reasoningEffort: string | null;
+    }) => void;
     disabled?: boolean;
   }) => (
     <div>
@@ -269,9 +292,28 @@ vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
       <button
         type="button"
         disabled={disabled}
+        onClick={() => onModelChange('')}
+      >
+        Use default model
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
         onClick={() => onReasoningEffortChange('high')}
       >
         Use high reasoning
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          onModelSelectionChange?.({
+            model: 'openrouter/anthropic/claude-fable-5',
+            reasoningEffort: 'medium',
+          })
+        }
+      >
+        Use combined selection
       </button>
     </div>
   ),
@@ -317,7 +359,21 @@ vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
 
 vi.mock('./SessionUserInputCard', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./SessionUserInputCard')>()),
-  SessionUserInputCard: () => <div>Structured input request</div>,
+  SessionUserInputCard: ({ request }: { request: { requestId: string } }) => {
+    const [selected, setSelected] = useState(false);
+    return (
+      <div>
+        <div>Structured input request</div>
+        <div data-testid="structured-request-id">{request.requestId}</div>
+        <button type="button" onClick={() => setSelected(true)}>
+          Select answer
+        </button>
+        <div data-testid="structured-selection">
+          {selected ? 'selected' : 'empty'}
+        </div>
+      </div>
+    );
+  },
 }));
 
 vi.mock('./setup/SetupStarterTasksCard', () => ({
@@ -368,6 +424,7 @@ beforeEach(() => {
   window.location.hash = '';
   FakeEventSource.instances = [];
   replyMutate.mockReset();
+  deleteQueuedMessageMutate.mockReset();
   startGoalMutate.mockReset();
   startGoalMutate.mockResolvedValue({ success: true, goal: {} });
   reviewActionMutate.mockReset();
@@ -381,6 +438,7 @@ beforeEach(() => {
   openTasksPanel.mockReset();
   invalidateQueries.mockReset();
   invalidateQueries.mockResolvedValue(undefined);
+  fetchOlderMessages.mockReset();
   voiceStatusQuery.mockReset();
   voiceStatusQuery.mockResolvedValue({ enabled: false });
   recordVoiceTurnMutate.mockReset();
@@ -787,6 +845,200 @@ describe('FastSessionTranscript', () => {
     userEmail,
     userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  it('records synthetic long-transcript render and event-loop timing', async () => {
+    const datasetMessages = 1_200;
+    const initialMessages = Array.from(
+      { length: datasetMessages },
+      (_, index) =>
+        textMessage({
+          id: `synthetic-${index}`,
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          text: `${index} ${'synthetic transcript paragraph '.repeat(16)}`,
+          ts: index + 1,
+        }),
+    );
+    const renderWindow = initialMessages.slice(-50);
+    const payloadBytes = new TextEncoder().encode(
+      JSON.stringify(renderWindow),
+    ).byteLength;
+    const startedAt = performance.now();
+    // In jsdom this timer can only run after synchronous React render returns;
+    // it is a main-thread proxy, not browser paint or animation evidence.
+    const nextEventLoopTurn = new Promise<number>((resolve) => {
+      setTimeout(() => resolve(performance.now() - startedAt), 0);
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="synthetic-long-transcript"
+        initialMessages={renderWindow}
+        initialMessagesCursor={{
+          createdAt: '2026-01-01 00:00:00.123456+00',
+          ts: 1_000,
+          turnSeq: 1,
+          id: '00000000-0000-4000-8000-000000000050',
+        }}
+      />,
+    );
+    const renderMs = performance.now() - startedAt;
+    const eventLoopDelayMs = await nextEventLoopTurn;
+
+    console.info(
+      '[synthetic-long-transcript-page]',
+      JSON.stringify({
+        datasetMessages,
+        initialMessages: renderWindow.length,
+        payloadBytes,
+        renderMs: Number(renderMs.toFixed(2)),
+        eventLoopDelayMs: Number(eventLoopDelayMs.toFixed(2)),
+      }),
+    );
+
+    expect(initialMessages).toHaveLength(datasetMessages);
+    expect(renderWindow).toHaveLength(50);
+  });
+
+  it('loads older messages near the top, preserves their order, and offers retry after failure', async () => {
+    const initialStreamCursor = 1_780_000_000_000.125;
+    const cursor = {
+      createdAt: '2026-01-01 00:00:00.123456+00',
+      ts: 2,
+      turnSeq: 1,
+      id: '00000000-0000-4000-8000-000000000002',
+    };
+    const olderMessages = [
+      textMessage({
+        id: 'older-user',
+        role: 'user',
+        text: 'An older user request',
+        ts: 1,
+      }),
+      textMessage({
+        id: 'older-assistant',
+        role: 'assistant',
+        text: 'An older assistant reply',
+        ts: 2,
+      }),
+    ];
+    fetchOlderMessages
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce({ messages: olderMessages, nextCursor: null });
+
+    const { container } = render(
+      <FastSessionTranscript
+        sessionId="synthetic-long-transcript"
+        initialMessagesCursor={cursor}
+        initialStreamCursor={initialStreamCursor}
+        initialMessages={[
+          textMessage({
+            id: 'current-user',
+            role: 'user',
+            text: 'Current user request',
+            ts: 3,
+          }),
+          textMessage({
+            id: 'current-assistant',
+            role: 'assistant',
+            text: 'Current assistant reply',
+            ts: 4,
+          }),
+        ]}
+      />,
+    );
+    expect(FakeEventSource.instances[0]?.url).toBe(
+      `/api/sessions/synthetic-long-transcript/stream?since=${initialStreamCursor}`,
+    );
+    const scrollElement = screen.getByRole('log')
+      .firstElementChild as HTMLElement;
+    scrollElement.scrollTop = 0;
+    fireEvent.scroll(scrollElement);
+
+    const retryButton = await screen.findByRole('button', {
+      name: 'Retry loading older messages',
+    });
+    expect(fetchOlderMessages).toHaveBeenCalledWith({
+      sessionId: 'synthetic-long-transcript',
+      cursor,
+    });
+
+    fireEvent.click(retryButton);
+    await screen.findByText('An older assistant reply');
+    const transcriptText = container.textContent ?? '';
+    expect(transcriptText.indexOf('An older user request')).toBeLessThan(
+      transcriptText.indexOf('An older assistant reply'),
+    );
+    expect(transcriptText.indexOf('An older assistant reply')).toBeLessThan(
+      transcriptText.indexOf('Current user request'),
+    );
+    expect(fetchOlderMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows automatic memory saves and expands their distilled facts', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'memory-save',
+              role: 'assistant',
+              text: 'Saved to memory',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+            role: 'system' as const,
+            payload: {
+              memories: ['Staging deploys use the release branch.'],
+            },
+          },
+        ]}
+        canReply
+      />,
+    );
+
+    const summary = screen.getByText('Saved to memory');
+    expect(summary).toBeInTheDocument();
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    fireEvent.click(summary);
+    expect(summary.closest('details')).toHaveAttribute('open');
+    expect(
+      screen.getByText('Staging deploys use the release branch.'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders a persisted memory-save row delivered by the transcript messages stream', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const source = FakeEventSource.instances[0];
+    expect(source).toBeDefined();
+    act(() => {
+      source?.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'memory-save-streamed',
+              role: 'assistant',
+              text: 'Saved to memory',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+            role: 'system' as const,
+            payload: { memories: ['The release branch deploys staging.'] },
+          },
+        ],
+        conversationResponding: false,
+      });
+    });
+
+    expect(screen.getByText('Saved to memory')).toBeInTheDocument();
   });
 
   it('restores each Session draft and scroll position without focusing after a direct switch', () => {
@@ -2307,6 +2559,84 @@ describe('FastSessionTranscript', () => {
     expect(screen.queryByText('Working')).not.toBeInTheDocument();
   });
 
+  it('shows a validation error dialog and preserves composer state instead of raw JSON', async () => {
+    const rawValidationError = JSON.stringify([
+      {
+        code: 'custom',
+        message:
+          'Extracted attachment text exceeds the 200,000 character limit',
+        path: ['attachmentTexts'],
+      },
+    ]);
+    replyMutate.mockRejectedValue(new Error(rawValidationError));
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First question',
+            ts: 1,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Retry this' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Attachment too large');
+    expect(dialog).toHaveTextContent(
+      'attachmentTexts: Extracted attachment text exceeds the 200,000 character limit',
+    );
+    expect(dialog).toHaveTextContent(
+      'Try a different file, or provide a URL and Roomote will download it.',
+    );
+    expect(screen.queryByText(rawValidationError)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    expect(input).toHaveValue('Retry this');
+  });
+
+  it('keeps the inline alert for non-validation send failures', async () => {
+    replyMutate.mockRejectedValue(new Error('turn is busy'));
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First question',
+            ts: 1,
+          }),
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'First answer',
+            ts: 2,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Retry this' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('turn is busy');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('keeps Working for an earlier pending response when a later send fails', async () => {
     replyMutate.mockRejectedValue(new Error('turn is busy'));
     render(
@@ -2907,12 +3237,278 @@ describe('FastSessionTranscript', () => {
     // Attachment preparation is async before the mutation fires.
     await waitFor(() => expect(replyMutate).toHaveBeenCalled());
     expect(await screen.findByText('Follow up question')).toBeInTheDocument();
-    expect(replyMutate).toHaveBeenCalledWith({
-      sessionId: 'session-1',
-      text: 'Follow up question',
-      model: null,
-      reasoningEffort: null,
+    expect(replyMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        text: 'Follow up question',
+        model: null,
+        reasoningEffort: null,
+        clientMessageId: expect.any(String),
+      }),
+    );
+  });
+
+  it('keeps a durably queued admission out of the transcript until delivery', async () => {
+    replyMutate.mockResolvedValue({
+      success: true,
+      admission: 'queued',
+      clientMessageId: 'queued-client-1',
     });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'The active turn is still running.',
+            ts: 1,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Queued follow-up' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    const queue = screen.getByRole('list', { name: 'Queued messages' });
+    expect(within(queue).getByText('Queued follow-up')).toBeInTheDocument();
+    expect(screen.getByRole('log')).not.toHaveTextContent('Queued follow-up');
+    // The queue belongs to the composer card, above the message input.
+    expect(queue.parentElement).toContainElement(input);
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'delivered-user-1',
+              role: 'user',
+              text: 'Queued follow-up',
+              ts: 3,
+            }),
+            eventId: 'queued-client-1:user',
+            turnId: 'queued-client-1',
+            metadata: {
+              visibleInTranscript: true,
+              clientMessageId: 'queued-client-1',
+            },
+          },
+        ],
+      });
+    });
+
+    expect(screen.getByRole('log')).toHaveTextContent('Queued follow-up');
+    expect(
+      within(screen.getByRole('log')).getAllByText('Queued follow-up'),
+    ).toHaveLength(1);
+  });
+
+  it('retires a locally queued follow-up once its steered prompt persists with the client id', async () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: { primaryEmailAddress: null, imageUrl: '' },
+    };
+    replyMutate.mockResolvedValue({
+      success: true,
+      admission: 'queued',
+      clientMessageId: 'ignored',
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Steer this in' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    const { clientMessageId } = replyMutate.mock.calls[0]![0] as {
+      clientMessageId: string;
+    };
+    const queue = screen.getByRole('list', { name: 'Queued messages' });
+    expect(within(queue).getByText('Steer this in')).toBeInTheDocument();
+
+    // Native steering delivers it mid-turn: the queue row settles and the
+    // persisted prompt carries the client id the composer sent.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', { queuedMessages: [] });
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'steered-user-1',
+              role: 'user',
+              text: 'Steer this in',
+              ts: 3,
+            }),
+            eventId: `${clientMessageId}:user`,
+            turnId: clientMessageId,
+            metadata: {
+              visibleInTranscript: true,
+              turnSource: 'human',
+              userId: 'current-user',
+              clientMessageId,
+            },
+          },
+        ],
+      });
+    });
+
+    expect(
+      screen.queryByRole('list', { name: 'Queued messages' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('log')).getAllByText('Steer this in'),
+    ).toHaveLength(1);
+  });
+
+  it('deletes the sender’s queued follow-up from the composer card and keeps it gone', async () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: { primaryEmailAddress: null, imageUrl: '' },
+    };
+    replyMutate.mockResolvedValue({
+      success: true,
+      admission: 'queued',
+      clientMessageId: 'ignored',
+    });
+    const deletion = Promise.withResolvers<{ outcome: 'withdrawn' }>();
+    deleteQueuedMessageMutate.mockReturnValue(deletion.promise);
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Never mind this' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    const { clientMessageId } = replyMutate.mock.calls[0]![0] as {
+      clientMessageId: string;
+    };
+    const serverRow = {
+      id: 'parent-event-1',
+      clientMessageId,
+      userId: 'current-user',
+      text: 'Never mind this',
+      timestamp: 2,
+    };
+    // The server's row replaces the optimistic entry under the same client id.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', {
+        queuedMessages: [serverRow],
+      });
+    });
+
+    const queue = screen.getByRole('list', { name: 'Queued messages' });
+    fireEvent.click(
+      within(queue).getByRole('button', { name: 'Delete queued message' }),
+    );
+    expect(deleteQueuedMessageMutate).toHaveBeenCalledExactlyOnceWith({
+      sessionId: 'session-1',
+      clientMessageId,
+    });
+    expect(
+      within(queue).getByRole('button', { name: 'Deleting queued message' }),
+    ).toBeDisabled();
+
+    await act(async () => deletion.resolve({ outcome: 'withdrawn' }));
+    expect(
+      screen.queryByRole('list', { name: 'Queued messages' }),
+    ).not.toBeInTheDocument();
+
+    // A snapshot polled before the withdrawal cannot bring it back.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', {
+        queuedMessages: [serverRow],
+      });
+    });
+    expect(screen.queryByText('Never mind this')).not.toBeInTheDocument();
+  });
+
+  it('hydrates a pending queue item after reload and reconciles it by client id', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        initialQueuedMessages={[
+          {
+            id: 'parent-event-1',
+            clientMessageId: 'reload-client-1',
+            text: 'Survives reload',
+            timestamp: 2,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Survives reload')).toBeInTheDocument();
+    expect(screen.getByRole('log')).not.toHaveTextContent('Survives reload');
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'reload-delivered-user',
+              role: 'user',
+              text: 'Survives reload',
+              ts: 3,
+            }),
+            eventId: 'reload-client-1:user',
+            turnId: 'reload-client-1',
+            metadata: {
+              visibleInTranscript: true,
+              clientMessageId: 'reload-client-1',
+            },
+          },
+        ],
+      });
+    });
+
+    expect(screen.getByRole('log')).toHaveTextContent('Survives reload');
+    expect(
+      within(screen.getByRole('log')).getAllByText('Survives reload'),
+    ).toHaveLength(1);
+  });
+
+  it('renders an immediate turn admission in the transcript without queueing it', async () => {
+    replyMutate.mockResolvedValue({
+      success: true,
+      admission: 'turn',
+      clientMessageId: 'immediate-client-1',
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Immediate message' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    expect(screen.getByRole('log')).toHaveTextContent('Immediate message');
+    expect(screen.queryByText('Queued messages')).not.toBeInTheDocument();
   });
 
   it('keeps the current-user avatar mounted while an optimistic reply reconciles', async () => {
@@ -3155,11 +3751,71 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     await waitFor(() => {
-      expect(replyMutate).toHaveBeenCalledWith({
+      expect(replyMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          text: 'Use these settings',
+          model: 'openrouter/z-ai/glm-5.2',
+          reasoningEffort: 'high',
+          clientMessageId: expect.any(String),
+        }),
+      );
+    });
+  });
+
+  it('persists clearing the session model override', async () => {
+    updateModelSelectionMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionModel="openrouter/z-ai/glm-5.2"
+        canReply
+      />,
+    );
+
+    expect(screen.getByTestId('session-model')).toHaveTextContent(
+      'openrouter/z-ai/glm-5.2',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use default model' }));
+
+    expect(screen.getByTestId('session-model')).toBeEmptyDOMElement();
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenCalledWith({
         sessionId: 'session-1',
-        text: 'Use these settings',
-        model: 'openrouter/z-ai/glm-5.2',
-        reasoningEffort: 'high',
+        model: null,
+      });
+    });
+  });
+
+  it('applies a combined model and effort selection atomically', async () => {
+    updateModelSelectionMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionModel="openrouter/openai/gpt-5.6-terra"
+        canReply
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use combined selection' }),
+    );
+
+    // Both values update together so the voice-turn selection ref never
+    // observes a stale intermediate model or effort.
+    expect(screen.getByTestId('session-model')).toHaveTextContent(
+      'openrouter/anthropic/claude-fable-5',
+    );
+    expect(screen.getByTestId('session-reasoning')).toHaveTextContent('medium');
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        model: 'openrouter/anthropic/claude-fable-5',
+        reasoningEffort: 'medium',
       });
     });
   });
@@ -3194,12 +3850,15 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     await waitFor(() => {
-      expect(replyMutate).toHaveBeenCalledWith({
-        sessionId: 'session-1',
-        text: 'Wait for the model save',
-        model: 'openrouter/z-ai/glm-5.2',
-        reasoningEffort: null,
-      });
+      expect(replyMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          text: 'Wait for the model save',
+          model: 'openrouter/z-ai/glm-5.2',
+          reasoningEffort: null,
+          clientMessageId: expect.any(String),
+        }),
+      );
     });
   });
 
@@ -3223,13 +3882,16 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     await waitFor(() => {
-      expect(replyMutate).toHaveBeenCalledWith({
-        sessionId: 'session-1',
-        text: '',
-        images: ['data:image/png;base64,image-1'],
-        model: null,
-        reasoningEffort: null,
-      });
+      expect(replyMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          text: '',
+          images: ['data:image/png;base64,image-1'],
+          model: null,
+          reasoningEffort: null,
+          clientMessageId: expect.any(String),
+        }),
+      );
     });
 
     expect(
@@ -3338,7 +4000,66 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByPlaceholderText('Message agent')).toBeInTheDocument();
   });
 
-  it('updates the header title from the session stream event', () => {
+  it('resets generic structured input state when the transcript request changes', () => {
+    const request = (requestId: string, ts: number) => ({
+      id: requestId,
+      eventId: requestId,
+      turnId: `turn-${requestId}`,
+      turnSeq: 1,
+      ts,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      role: 'assistant' as const,
+      contentBlocks: [{ type: 'text' as const, text: 'Choose one' }],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        requestId,
+        status: 'pending' as const,
+        sessionId: 'session-1',
+        turnId: `turn-${requestId}`,
+        callId: `call-${requestId}`,
+        questions: [
+          {
+            id: 'choice',
+            header: 'Choice',
+            question: 'Choose one',
+            isOther: false,
+            isSecret: false,
+            options: [{ label: 'One', description: 'First choice' }],
+          },
+        ],
+      },
+      source: 'web' as const,
+      nativeSessionId: null,
+      nativeMessageId: null,
+      createdAt: new Date(ts),
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[request('rui:request-1', 1)]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Select answer' }));
+    expect(screen.getByTestId('structured-selection')).toHaveTextContent(
+      'selected',
+    );
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [request('rui:request-2', 2)],
+      });
+    });
+
+    expect(screen.getByTestId('structured-request-id')).toHaveTextContent(
+      'rui:request-2',
+    );
+    expect(screen.getByTestId('structured-selection')).toHaveTextContent(
+      'empty',
+    );
+  });
+
+  it('updates the header title and refreshes session lists from the session stream event', async () => {
     document.title = 'Roomote';
     render(
       <FastSessionTranscript
@@ -3369,6 +4090,11 @@ describe('FastSessionTranscript', () => {
     );
     expect(document.title).toBe(
       'Rotate the API keys across every production environment with... | Roomote',
+    );
+    await waitFor(() =>
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ['sessions.list'],
+      }),
     );
   });
 

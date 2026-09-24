@@ -97,6 +97,7 @@ export async function dispatchSuggestionScan(params: {
             }),
             trigger: 'scheduled',
             notifySlack: true,
+            requiresTerminalCloseoutWithoutTurn: true,
             suggestionSource: 'suggest_ideas',
             visibleInTranscript: false,
             ...(isSlackDestination ? { slackChannel: params.channelId } : {}),

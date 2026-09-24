@@ -1200,6 +1200,9 @@ export function InferenceProviderSection({
               : `Saved the ${providerLabel} API key.`,
         );
         setProviderDialog(null);
+        if (result.validationWarning) {
+          toast.warning(result.validationWarning);
+        }
         if (result.discoveryError) {
           toast.error(result.discoveryError);
         }

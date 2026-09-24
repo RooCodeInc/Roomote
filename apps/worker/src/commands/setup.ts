@@ -52,6 +52,10 @@ import {
   setupOrganizationEnvironment,
   EnvironmentSetupStatusWriter,
 } from './setup/index';
+import {
+  getEnvironmentRecipeSetupPlan,
+  setupEnvironmentRecipe,
+} from './setup/workspace/environment-recipe';
 
 export type SetupMode = 'full' | 'directDispatch';
 
@@ -487,6 +491,29 @@ async function runSetup({
         workspace.environmentConfig.repositories,
         initializeRepositoriesResult.environment?.repoPaths,
       );
+
+      const environmentRecipe = workspace.environmentConfig.environment_recipe;
+      if (environmentRecipe) {
+        const plan = getEnvironmentRecipeSetupPlan(environmentRecipe);
+        setupStatusWriter.addRecipeCommands(plan.planName, plan.commandNames);
+        try {
+          await setupEnvironmentRecipe(logger, {
+            recipe: environmentRecipe,
+            workspacePath: initializeRepositoriesResult.workspacePath,
+            environmentId: workspace.environmentId,
+            envVars: workspaceOptions.envVars,
+            onCommandStart: (recipeName, name) =>
+              setupStatusWriter.markRecipeCommandRunning(recipeName, name),
+            onCommandResult: (recipeName, result) =>
+              setupStatusWriter.markRecipeCommandResult(recipeName, result),
+          });
+        } catch (error) {
+          setupStatusWriter.finalize({
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
+      }
 
       if (!backgroundEnvironmentSetup) {
         const warnings =

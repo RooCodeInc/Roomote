@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEPLOYMENT_EXPERIMENT_AUDIENCE,
+  DEPLOYMENT_EXPERIMENT_AUDIENCES,
+  DEPLOYMENT_EXPERIMENT_IDS,
   getBooleanMetadataDescriptorByKey,
+  getDeploymentExperimentAudience,
+  getDeploymentExperimentIdsForAudience,
   getDeploymentExperimentValues,
 } from '../index';
 
@@ -17,6 +22,9 @@ describe('metadata descriptions', () => {
     'opencode_code_mode',
     'composerSuggestions',
     'integration_keys_enabled',
+    'code_mode_integrations_experiment_enabled',
+    'integration_tool_approvals_experiment_enabled',
+    'results_page_enabled',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
@@ -32,23 +40,38 @@ describe('metadata descriptions', () => {
     expect(
       getBooleanMetadataDescriptorByKey('anonymous_analytics_enabled').kind,
     ).toBe('deployment-control');
-    expect(getBooleanMetadataDescriptorByKey('results_page_enabled').kind).toBe(
-      'deployment-control',
-    );
   });
 
   it('enables deployment experiments only from explicit true metadata', () => {
     expect(
       getDeploymentExperimentValues({
         results_page_enabled: true,
+        private_sessions_experiment_enabled: true,
         integration_keys_enabled: 'true',
       }),
     ).toEqual({
-      results: true,
-      slackPeerConversations: false,
-      privateSessions: false,
+      privateSessions: true,
       browserNotifications: false,
-      codeModeIntegrations: false,
+      integrationToolAutoApprovals: false,
+      sessionTaskCommunicationTriage: false,
+      dizzy: false,
     });
+  });
+
+  it('requires an explicit supported audience for every experiment', () => {
+    expect(Object.keys(DEPLOYMENT_EXPERIMENT_AUDIENCE).sort()).toEqual(
+      [...DEPLOYMENT_EXPERIMENT_IDS].sort(),
+    );
+    expect(
+      Object.values(DEPLOYMENT_EXPERIMENT_AUDIENCE).every((audience) =>
+        DEPLOYMENT_EXPERIMENT_AUDIENCES.includes(audience),
+      ),
+    ).toBe(true);
+    expect(getDeploymentExperimentAudience('unclassifiedFeature')).toBe(
+      undefined,
+    );
+    expect(getDeploymentExperimentIdsForAudience('internal-nightly')).toEqual([
+      'dizzy',
+    ]);
   });
 });

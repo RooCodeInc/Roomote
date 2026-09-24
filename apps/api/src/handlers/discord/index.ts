@@ -27,7 +27,6 @@ import {
   hasFastAgentSession,
   type FastAgentReactionExternalInput,
 } from '@roomote/cloud-agents/server';
-import { isDeploymentExperimentEnabled } from '@roomote/db/server';
 import {
   RunStatus,
   activeRunStatuses,
@@ -757,7 +756,8 @@ async function processDiscordGatewayEvent(
     repliedToAutomationReport ||
     isFastAgentConversation,
   );
-  let peerConversationsExperimentEnabled = false;
+  let peerConversationsEnabled = false;
+  let unmentionedReplyAddressedToRoomote = false;
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
     isTaskThread: isRoomoteThread,
@@ -836,9 +836,7 @@ async function processDiscordGatewayEvent(
           },
         })
       : null;
-    peerConversationsExperimentEnabled =
-      fastSessionOwner?.kind === 'user' &&
-      (await isDeploymentExperimentEnabled('slackPeerConversations'));
+    peerConversationsEnabled = fastSessionOwner?.kind === 'user';
     const shouldRouteUnmentioned =
       await shouldRouteUnmentionedDiscordThreadReplyToAgent({
         message,
@@ -852,7 +850,7 @@ async function processDiscordGatewayEvent(
           null,
         isAutomationReportThread: Boolean(repliedToAutomationReport),
         isOpenConversationThread: isFastAgentConversation,
-        peerConversationsExperimentEnabled,
+        peerConversationsEnabled,
         fetchThreadMessages: async () => {
           const history = await fetchDiscordThreadHistoryBestEffort({
             provider: resolved.provider,
@@ -864,7 +862,7 @@ async function processDiscordGatewayEvent(
           return history.length > 0 ? history : null;
         },
       });
-    if (!shouldRouteUnmentioned) {
+    if (!shouldRouteUnmentioned.shouldRoute) {
       apiLogger.debug(
         `[discord] Ignoring unmentioned guild-thread reply from ${sender.id} (requires @mention after interjection or ineligible sender)`,
       );
@@ -873,6 +871,8 @@ async function processDiscordGatewayEvent(
         ignored: 'discord_unmentioned_requires_mention',
       };
     }
+    unmentionedReplyAddressedToRoomote =
+      shouldRouteUnmentioned.addressedToRoomote === true;
   }
   await refreshDiscordUserMappingBestEffort({
     discordUserId: sender.id,
@@ -1105,7 +1105,8 @@ async function processDiscordGatewayEvent(
           channel.isDirectMessage ||
           Boolean(repliedFastSession) ||
           isDiscordBotMentioned(message, resolved.botUserId),
-        peerConversationsExperimentEnabled,
+        addressedToRoomote: unmentionedReplyAddressedToRoomote,
+        peerConversationsEnabled,
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
     }

@@ -563,7 +563,7 @@ describe('processDiscordFastAgentMessage', () => {
         communicationThreadId: 'channel-1',
       } as never,
       conversationId: 'channel-1',
-      peerConversationsExperimentEnabled: true,
+      peerConversationsEnabled: true,
     });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(

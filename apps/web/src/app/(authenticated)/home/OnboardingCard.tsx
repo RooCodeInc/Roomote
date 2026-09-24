@@ -23,6 +23,7 @@ import { useAuthenticateSlackAccount } from '@/hooks/slack';
 import { useAuthenticateLinearAccount } from '@/hooks/linear';
 import { useEnvironments } from '@/hooks/environments';
 import { useFastSessionLauncher } from '@/hooks/task-runs';
+import { ComposerErrorDialog } from '@/components/tasks/ComposerErrorDialog';
 import {
   useAuthenticateAdoAccount,
   useAuthenticateBitbucketAccount,
@@ -147,7 +148,11 @@ export function OnboardingCard() {
   const userMcpConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
   const { data: automationOnboardingStatus, isPending: automationsPending } =
-    useQuery(trpc.automations.onboardingStatus.queryOptions());
+    useQuery(
+      trpc.automations.onboardingStatus.queryOptions(undefined, {
+        enabled: isAdmin,
+      }),
+    );
 
   const authenticateSlackAccount = useAuthenticateSlackAccount();
   const authenticateGitHubAccount = useAuthenticateGitHubAccount();
@@ -456,6 +461,7 @@ export function OnboardingCard() {
       buttonLabel: 'Go',
       onClick: () => router.push('/automations'),
       visible:
+        isAdmin &&
         !automationsPending &&
         Boolean(automationOnboardingStatus) &&
         !automationOnboardingStatus?.hasEnabledAutomations,
@@ -481,10 +487,23 @@ export function OnboardingCard() {
   ];
 
   const activeCard = cards.find((card) => card.visible && !dismissed[card.id]);
-  if (!activeCard) return null;
+  if (!activeCard) {
+    // Keep a pending launch validation failure visible even after every
+    // onboarding card is dismissed.
+    return (
+      <ComposerErrorDialog
+        error={delegationSession.error}
+        onClose={delegationSession.clearError}
+      />
+    );
+  }
 
   return (
     <>
+      <ComposerErrorDialog
+        error={delegationSession.error}
+        onClose={delegationSession.clearError}
+      />
       <div className="relative overflow-clip">
         <AnimatePresence initial={false} mode="popLayout">
           <motion.div

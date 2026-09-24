@@ -109,7 +109,7 @@ describe('AcpToolDetails', () => {
 
   it.each([
     ['inspect_images', 'question', 'Inspected Images'],
-    ['report_to_parent_session', 'message', 'Sent report to Session'],
+    ['report_to_parent_session', 'message', 'Sent report to session'],
     ['send_task_message', 'message', 'Sent message to task'],
   ])(
     'expands %s through the existing accessible trigger',

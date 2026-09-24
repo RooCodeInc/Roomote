@@ -190,6 +190,68 @@ describe('getOpenCodeProviderErrorRecovery', () => {
       }),
     ).toMatchObject({ kind: 'provider_error', maxRetries: 6 });
   });
+
+  it.each([
+    [
+      'a ChatGPT usage-limit retry status',
+      {
+        type: 'retry',
+        attempt: 1,
+        message: 'The usage limit has been reached',
+        next: 1_790_000_000_000,
+      },
+    ],
+    [
+      'an OpenAI insufficient_quota 429 marked retryable',
+      {
+        name: 'APIError',
+        data: {
+          message: 'You exceeded your current quota.',
+          statusCode: 429,
+          isRetryable: true,
+          responseBody: JSON.stringify({
+            error: { type: 'insufficient_quota', code: 'insufficient_quota' },
+          }),
+        },
+      },
+    ],
+    [
+      "an Anthropic monthly spend cap 429 nested below OpenCode's depth",
+      {
+        name: 'APIError',
+        data: {
+          message: 'Rate limited',
+          statusCode: 429,
+          isRetryable: true,
+          responseBody: JSON.stringify({
+            type: 'error',
+            error: {
+              type: 'rate_limit_error',
+              details: { error_code: 'enforced_spend_limit_reached' },
+            },
+          }),
+        },
+      },
+    ],
+  ])('treats %s as an exhausted account, not a retry', (_label, error) => {
+    expect(isOpenCodeTerminalProviderError(error)).toBe(true);
+    expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
+  });
+
+  it('keeps a plain rate-limit retry status retryable', () => {
+    const status = {
+      type: 'retry',
+      attempt: 1,
+      message: 'Rate limit reached for gpt-5.5. Please try again in 11s.',
+      next: 1_790_000_000_000,
+    };
+
+    expect(isOpenCodeTerminalProviderError(status)).toBe(false);
+    expect(getOpenCodeProviderErrorRecovery(status)).toMatchObject({
+      kind: 'provider_error',
+      maxRetries: 6,
+    });
+  });
 });
 
 describe('summarizeOpenCodeProviderError', () => {

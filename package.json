@@ -1,6 +1,6 @@
 {
   "name": "roomote",
-  "version": "1.12.4",
+  "version": "1.13.0",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
@@ -39,7 +39,7 @@
     "storybook": "pnpm --filter @roomote/web storybook",
     "changeset": "changeset",
     "version": "node scripts/release/apply-version.mjs",
-    "test:release-scripts": "node --test scripts/release/__tests__/*.test.mjs"
+    "test:release-scripts": "node --test scripts/release/__tests__/*.test.mjs scripts/modal/__tests__/*.test.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
@@ -87,7 +87,7 @@
     "overrides": {
       "@eslint/eslintrc>ajv": "6.14.0",
       "@opentelemetry/core": "2.8.0",
-      "@smithy/types": "^4.14.3",
+      "@smithy/types": "4.15.1",
       "axios": "1.18.1",
       "@vercel/routing-utils>ajv": "6.14.0",
       "@vercel/routing-utils>path-to-regexp": "6.3.0",

@@ -14,6 +14,7 @@ import {
 import { authorize } from '@/lib/server/auth-context';
 import { truncatePageTitle } from '@/lib/page-title';
 import {
+  FAST_SESSION_TRANSCRIPT_INITIAL_LIMIT,
   getFastSessionById,
   getFastSessionTasks,
 } from '@/lib/server/fast-sessions';
@@ -36,6 +37,7 @@ import {
   SESSION_HEADER_CONTENT_CLASS_NAME,
   SESSION_HEADER_TITLE_CLASS_NAME,
 } from './session-header-layout';
+import { LiveSessionTitle } from './LiveSessionTitle';
 
 const getSessionPageData = cache(async (sessionId: string) => {
   const authorizedUser = await authorize();
@@ -56,10 +58,13 @@ const getSessionPageData = cache(async (sessionId: string) => {
     ? await getFastSessionById(
         authorizedUser,
         unifiedSession.fastConversationId,
+        { transcriptLimit: FAST_SESSION_TRANSCRIPT_INITIAL_LIMIT },
       )
     : unifiedSession
       ? null
-      : await getFastSessionById(authorizedUser, sessionId);
+      : await getFastSessionById(authorizedUser, sessionId, {
+          transcriptLimit: FAST_SESSION_TRANSCRIPT_INITIAL_LIMIT,
+        });
 
   if (!unifiedSession && !session) {
     notFound();
@@ -158,6 +163,7 @@ export default async function SessionDetailPage({
             <div className="flex min-h-0 flex-1">
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <FastSessionTranscript
+                  key={session.id}
                   sessionId={session.id}
                   secretSessionId={
                     unifiedSession.ownerUserId === authorizedUser.userId
@@ -165,7 +171,9 @@ export default async function SessionDetailPage({
                       : undefined
                   }
                   initialMessages={session.messages}
-                  hasOlderMessages={session.hasOlderMessages}
+                  initialQueuedMessages={session.queuedMessages}
+                  initialMessagesCursor={session.messagesCursor}
+                  initialStreamCursor={session.initialStreamCursor}
                   canReply
                   initialTitle={unifiedSession.title}
                   fallbackTitle={unifiedSession.title}
@@ -176,6 +184,8 @@ export default async function SessionDetailPage({
                   autoStartVoice={autoStartVoice}
                   privateSession={unifiedSession.privacy === 'private'}
                   sessionGoal={unifiedSession.goal}
+                  canRenameTitle={sessionInfo.canDelete}
+                  titleSessionId={unifiedSession.id}
                   {...(unifiedSession.ownerUserId
                     ? {
                         owner: {
@@ -213,9 +223,12 @@ export default async function SessionDetailPage({
                 }
               >
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
-                    {unifiedSession.title}
-                  </h1>
+                  <LiveSessionTitle
+                    sessionId={unifiedSession.id}
+                    initialTitle={unifiedSession.title}
+                    canRename={sessionInfo.canDelete}
+                    className={SESSION_HEADER_TITLE_CLASS_NAME}
+                  />
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
                     {unifiedSession.privacy === 'private' ? (
                       <PrivateSessionIcon className="text-accent-foreground" />
@@ -279,9 +292,12 @@ export default async function SessionDetailPage({
     <SessionWorkspace session={sessionInfo}>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
         <FastSessionTranscript
+          key={session.id}
           sessionId={session.id}
           initialMessages={session.messages}
-          hasOlderMessages={session.hasOlderMessages}
+          initialQueuedMessages={session.queuedMessages}
+          initialMessagesCursor={session.messagesCursor}
+          initialStreamCursor={session.initialStreamCursor}
           canReply
           initialTitle={session.title}
           fallbackTitle={fallbackTitle}

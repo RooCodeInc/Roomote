@@ -10,13 +10,18 @@ import {
   asRecord,
   asString,
   buildAcpRequestUserInputRequestId,
+  formatInferenceCreditsExhaustedMessage,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
   INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS,
   INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS,
+  isInferenceCreditsExhaustedError,
   normalizeAcpReasoningText,
   parseAcpFlattenedMcpToolName,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
+  resolveInferenceProviderDisplayName,
   TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY,
   TaskEventName,
 } from '@roomote/types';
@@ -31,6 +36,7 @@ import type {
   AcpTurnCompletedEvent,
   ProviderRetryNotice,
   TaskEvent,
+  TaskIntegrationToolApprovals,
 } from '@roomote/types';
 
 import type {
@@ -61,6 +67,7 @@ import {
 import { RuntimePromptQueue } from '../runtime-prompt-queue';
 
 import { OpenCodeRuntimeEventEmitter } from './runtime-event-emitter';
+import { createTaskToolApprovalRelay } from './tool-approvals';
 import {
   OpenCodeServerClient,
   createOpenCodePromptParts,
@@ -140,6 +147,8 @@ interface OpenCodeServerHarnessOptions {
   providerErrorBaseDelayMs?: number;
   providerErrorMaxDelayMs?: number;
   mcpServerNames?: string[];
+  /** Which integration tool each gated native permission key stands for. */
+  toolApprovalTools?: TaskIntegrationToolApprovals['tools'];
   /**
    * Observer-only breadcrumb for rare harness failures that need a durable
    * post-mortem outside the sandbox (e.g. infinite OpenCode session create).
@@ -852,6 +861,8 @@ function extractOpenCodeExitCode(
 
   return (
     asFiniteNumber(metadata.exitCode) ??
+    // OpenCode's shell tool (1.18) reports the code as `metadata.exit`.
+    asFiniteNumber(metadata.exit) ??
     asFiniteNumber(metadata.code) ??
     asFiniteNumber(outputRecord?.exitCode) ??
     asFiniteNumber(outputRecord?.code) ??
@@ -1655,11 +1666,21 @@ export class OpenCodeServerHarness
   private readonly emittedTodoPlanKeys = new Set<string>();
   private readonly submittedUserMessageIds = new Set<string>();
   private readonly messageRoleById = new Map<string, OpenCodeMessageRole>();
+  // Provider behind each session's latest model request, used to name it in
+  // user-facing errors. The configured model is usually not known here: it
+  // comes from the generated OpenCode config unless a launch override set it.
+  private readonly assistantProviderIdBySession = new Map<string, string>();
   private readonly pendingUserInputRequests = new Map<
     string,
     HarnessPendingUserInputRequest
   >();
   private readonly nativeQuestionRequestIds = new Map<string, string>();
+  private readonly toolApprovalRelay?: ReturnType<
+    typeof createTaskToolApprovalRelay
+  >;
+  private pendingToolApprovals = 0;
+  /** What the user last asked for; Auto mode checks a gated call against it. */
+  private latestUserRequest: string | undefined;
   // Request ids that have already been answered or abandoned. A late answer
   // (e.g. a web POST opened before a steer abandoned the question) for one
   // of these must be rejected rather than fabricated into the replayed turn.
@@ -1818,6 +1839,19 @@ export class OpenCodeServerHarness
     ].sort((left, right) => right.length - left.length);
     this.beforeQueuedPrompt = options.beforeQueuedPrompt;
     this.onDiagnostic = options.onDiagnostic;
+    if (options.toolApprovalTools) {
+      this.toolApprovalRelay = createTaskToolApprovalRelay({
+        tools: options.toolApprovalTools,
+        client: this.client,
+        logger: this.logger,
+        signal: this.eventAbortController.signal,
+        getUserRequest: () => this.latestUserRequest,
+        onPendingCountChange: (pending) => {
+          this.pendingToolApprovals = pending;
+          this.stallWatchdogs.noteActivity();
+        },
+      });
+    }
     this.runtimeEvents = new OpenCodeRuntimeEventEmitter({
       taskEvent: (event) => this.emit('taskEvent', event),
       runtimeOutput: (event) => this.emit('runtimeOutput', event),
@@ -1839,6 +1873,7 @@ export class OpenCodeServerHarness
       getSessionId: () => this.sessionId,
       hasDeferringActivity: () =>
         this.pendingUserInputRequests.size > 0 ||
+        this.pendingToolApprovals > 0 ||
         this.activeExecuteToolProgress.size > 0 ||
         this.activeSubagentWatchdogs.size > 0 ||
         this.nativeSteerSubmissionsInFlight > 0,
@@ -3780,6 +3815,7 @@ export class OpenCodeServerHarness
     const queuedId = this.prompts.enqueue({
       text: VISUAL_PROOF_TIMEOUT_RECOVERY_PROMPT,
       visibleInTranscript: false,
+      source: 'opencode-visual-proof-recovery',
     });
     this.prompts.prioritize(queuedId);
 
@@ -3816,6 +3852,7 @@ export class OpenCodeServerHarness
     this.prompts.enqueue({
       text: PLAN_EXIT_CONTINUATION_PROMPT,
       visibleInTranscript: false,
+      source: 'opencode-plan-exit-continuation',
     });
   }
 
@@ -3832,6 +3869,7 @@ export class OpenCodeServerHarness
 
   private async submitPrompt(prompt: PromptInput): Promise<void> {
     this.suppressAssistantOutputUntilNextPrompt = false;
+    this.latestUserRequest = prompt.text;
     const sessionId = await this.ensureSession(prompt.text);
     // OpenCode determines whether a user turn is pending by comparing message
     // IDs lexicographically. A snapshot can resume on a process whose clock or
@@ -3933,6 +3971,14 @@ export class OpenCodeServerHarness
     }
 
     const payload = unwrapped.payload;
+
+    // A subagent's gated call pauses its own session, so an ask is relayed
+    // whichever session in this workspace raised it.
+    if (payload.type === 'permission.asked') {
+      this.handlePermissionAsked(payload);
+      return;
+    }
+
     const sessionId = eventSessionId(payload);
 
     if (sessionId && this.sessionId && sessionId !== this.sessionId) {
@@ -4242,7 +4288,11 @@ export class OpenCodeServerHarness
     }
 
     if (sessionId) {
-      const errorText = formatOpenCodeSessionErrorText(error);
+      const errorText = isInferenceCreditsExhaustedError(error)
+        ? formatInferenceCreditsExhaustedMessage(
+            this.resolveProviderDisplayName(sessionId),
+          )
+        : formatOpenCodeSessionErrorText(error);
 
       this.logger.error(
         `OpenCode session error sessionId=${sessionId}: ${JSON.stringify(error ?? {})}`,
@@ -4289,6 +4339,24 @@ export class OpenCodeServerHarness
 
     await this.cleanupVisualAttachmentDirectories();
     this.inFlight = false;
+  }
+
+  /**
+   * Display name of the provider behind a session's failing request. The
+   * gateway markers say whether `openai/` and `xai/` models run on a
+   * connected ChatGPT or Grok subscription rather than an API key.
+   */
+  private resolveProviderDisplayName(sessionId: string): string | undefined {
+    return resolveInferenceProviderDisplayName(
+      this.assistantProviderIdBySession.get(sessionId) ??
+        this.model?.providerID,
+      {
+        chatgptConnected:
+          this.commandEnv?.[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1',
+        xaiSubscriptionConnected:
+          this.commandEnv?.[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME] === '1',
+      },
+    );
   }
 
   private async failPendingContextOverflow(): Promise<boolean> {
@@ -4393,6 +4461,7 @@ export class OpenCodeServerHarness
     const queuedId = this.prompts.enqueue({
       text: recovery.promptText,
       visibleInTranscript: false,
+      source: 'opencode-provider-error-recovery',
     });
     this.prompts.prioritize(queuedId);
     this.providerErrorRecoveryQueuedPromptId = queuedId;
@@ -4454,6 +4523,7 @@ export class OpenCodeServerHarness
     const queuedId = this.prompts.enqueue({
       text: OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT,
       visibleInTranscript: false,
+      source: 'opencode-rate-limit-retry',
     });
     this.prompts.prioritize(queuedId);
 
@@ -5000,6 +5070,26 @@ export class OpenCodeServerHarness
     this.runtimeEvents.requestUserInput(pendingRequest);
   }
 
+  private handlePermissionAsked(payload: OpenCodeEventPayload): void {
+    const properties = asRecord(payload.properties);
+    const requestId = asString(properties?.id);
+    const sessionId = asString(properties?.sessionID);
+    const permission = asString(properties?.permission);
+    const tool = asRecord(properties?.tool);
+
+    if (!this.toolApprovalRelay || !requestId || !sessionId || !permission) {
+      return;
+    }
+
+    this.toolApprovalRelay.handleAsk({
+      requestId,
+      sessionId,
+      permission,
+      messageId: asString(tool?.messageID),
+      callId: asString(tool?.callID),
+    });
+  }
+
   private handleQuestionAsked(payload: OpenCodeEventPayload): void {
     const properties = asRecord(payload.properties);
     const nativeRequestId = asString(properties?.id);
@@ -5166,6 +5256,15 @@ export class OpenCodeServerHarness
 
     if (typeof info.parentID === 'string' && info.parentID) {
       this.assistantParentById.set(info.id, info.parentID);
+    }
+
+    if (
+      typeof info.sessionID === 'string' &&
+      info.sessionID &&
+      typeof info.providerID === 'string' &&
+      info.providerID
+    ) {
+      this.assistantProviderIdBySession.set(info.sessionID, info.providerID);
     }
 
     this.stallWatchdogs.noteProgress();
@@ -5364,7 +5463,6 @@ export class OpenCodeServerHarness
     this.inFlight = false;
     const reminderCount = this.stopHookReminderCount;
     this.stopHookReminderCount = 0;
-
     if (this.lastBlockedCloseoutAssistantText?.trim()) {
       this.runtimeEvents.turnCompleted(
         sessionId,
@@ -5683,6 +5781,7 @@ export class OpenCodeServerHarness
       userName: next.userName,
       userImageUrl: next.userImageUrl,
       clientMessageId: next.clientMessageId,
+      source: next.source,
     });
     await this.submitPrompt({
       text: next.text,
@@ -5693,6 +5792,7 @@ export class OpenCodeServerHarness
       userName: next.userName,
       userImageUrl: next.userImageUrl,
       clientMessageId: next.clientMessageId,
+      source: next.source,
     });
   }
 

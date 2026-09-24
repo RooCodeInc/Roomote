@@ -17,8 +17,8 @@ priority, or discussion.
 
 <Steps>
   <Step title="Set up the OAuth app">
-    On a self-hosted deployment, an administrator goes to **Settings >
-    Integrations**, selects **Set up Linear**, and then selects **Create the
+    On a self-hosted deployment, an administrator goes to the **Integrations**
+    page, selects **Set up Linear**, and then selects **Create the
     app** to open the pre-filled manifest. The app name defaults to `Roomote`.
     After creating the private app, copy its client ID, client secret, and
     webhook secret back into Roomote. Roomote encrypts the saved credentials.
@@ -33,7 +33,7 @@ priority, or discussion.
     `AgentSessionEvent` webhook URL.
   </Step>
   <Step title="Update or remove saved credentials">
-    A deployment administrator can return to **Settings > Integrations** and
+    A deployment administrator can return to the **Integrations** page and
     select **Configure** on Linear. Saving a new client ID or client secret
     disconnects the current workspace so it can be authorized again. Removing
     saved credentials disables Linear but does not delete the app in Linear.
@@ -52,11 +52,11 @@ priority, or discussion.
 ## Starting work from Linear
 
 You can start Roomote work from a Linear agent session or by mentioning Roomote
-on an issue. Each agent session is a Roomote Session: Roomote reads the issue,
+on an issue. Each agent session is a Roomote session: Roomote reads the issue,
 its comments, and any agent guidance, answers directly when no workspace is
 needed, and otherwise picks the environment and starts a task bound to the
 session. Reply in the same session to redirect it, ask a follow-up, or steer a
-running task. The session links to the Session page in Roomote so you can
+running task. The session links to the session page in Roomote so you can
 follow the full transcript there.
 
 Good Linear asks include:
@@ -72,7 +72,7 @@ Good Linear asks include:
 Roomote posts its replies and the outcome of delegated tasks back to the agent
 session. While a delegated task runs, its thoughts, actions, and plan updates
 stream into the session live, and it asks its questions there when it needs
-your input. The Roomote Session and task views remain the best place to
+your input. The Roomote session and task views remain the best place to
 inspect logs, diffs, artifacts, and previews.
 
 ## Brain context

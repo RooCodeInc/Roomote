@@ -135,7 +135,10 @@ describe('authenticated preview warmup', () => {
       if (request.url === '/auth/dev-login') login(response);
       else response.end('Home');
     });
-    await warmDevPreview({ port, requestTimeoutMs: 30, retryMs: 1 });
+    // Leave enough scheduling headroom for the follow-up requests on loaded CI
+    // runners while still forcing the intentionally hanging first request to
+    // time out quickly.
+    await warmDevPreview({ port, requestTimeoutMs: 100, retryMs: 1 });
     expect(requests).toBe(3);
   });
 

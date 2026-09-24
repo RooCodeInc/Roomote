@@ -253,6 +253,23 @@ the session's own memory entry, which the platform redacts and files just
 like a task memory. Saved facts become searchable after the next ingestion
 pass, so they surface in later sessions rather than instantly.
 
+With a [judgment model](/models#judgment-model) on, Roomote also catches what
+the agent did not save itself, after every settled turn. In a session it
+checks for a stated preference, decision, or correction, an explicit request
+to remember, or a finding that took real investigation. In a task it checks
+the turn's report for a decision, finding, dead end, or open item a later task
+could reuse, and the person's message for a correction or convention that
+should guide future work. Credential-shaped strings, email addresses, phone
+numbers, and card and ID numbers are scrubbed from the turn before either
+model sees it. Only a confident yes leads to a save; the
+helper model then writes the memory, which goes through the same redaction
+and filing. A task memory written this way says so, grows turn by turn, and is
+replaced if the agent records its own. Turns that look sensitive, try to plant
+approvals or bypass rules, or repeat what was already saved are skipped,
+trivial task work keeps the plain completion line unless it came with a
+correction, and [private sessions](/private-sessions) and private tasks are
+never checked.
+
 Additional memory integrations, such as Supermemory, can also provide shared
 context to tasks and sessions. Roomote chooses one connected memory
 store for the initial recall so multiple stores do not repeat the same preflight.
@@ -277,11 +294,7 @@ Leave them unset and memory uses OpenAI's `gpt-5.6-luna` and
 
 Memory search does not use a cross-encoder reranker: retrieval is hybrid
 (vector + keyword fusion), which keeps search latency flat and provider
-requirements minimal. When the optional [judgment model](/models#judgment-model)
-is on, Roomote reorders `query` results it returns to agents: passages the
-judgment model confidently finds relevant move up and ones it confidently finds
-irrelevant move down. Nothing is removed, and the passage text is sent to the
-judgment model provider.
+requirements minimal. Agents receive `query` results in that order.
 
 The synthesis model is applied by Roomote when it forwards the call and passed
 to the provider as written, so use that provider's naming

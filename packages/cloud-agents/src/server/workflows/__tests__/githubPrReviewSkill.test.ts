@@ -49,6 +49,32 @@ describe('review-code GitHub workflow paths', () => {
     );
   });
 
+  it('hunts with shared review angles in every review path before filtering', () => {
+    expect(skillContent).toContain('<review_angles>');
+    for (const angle of [
+      'line_by_line',
+      'removed_behavior',
+      'callers_and_callees',
+      'alternate_paths',
+      'cost_and_hot_paths',
+      'user_facing_behavior',
+      'repository_rules',
+    ]) {
+      expect(skillContent).toContain(`<angle name="${angle}">`);
+    }
+    expect(
+      skillContent.match(
+        /Hunt for candidates with every angle in `<review_angles>`/g,
+      )?.length,
+    ).toBe(5);
+    expect(readAppendix(skillContent, 'review-merge-resolution')).toContain(
+      'Hunt for candidates with every angle in `<review_angles>`, scoped to the resolved conflict hunks',
+    );
+    expect(skillContent).toContain(
+      'First hunt for candidates with every angle in `<review_angles>` below',
+    );
+  });
+
   it('publishes findings as comments instead of change-request reviews', () => {
     expect(skillContent).toContain(
       'Do not submit a `request_changes` review in any pull-request review path.',

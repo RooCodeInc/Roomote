@@ -14,3 +14,6 @@ export const markCredentialEgressBootstrapReady = (nonce: string) =>
 
 export const getCustomStdioMcpServers = () =>
   client.mcpConnections.getCustomStdioMcpServers.query();
+
+export const getTaskToolApprovals = () =>
+  client.mcpConnections.getTaskToolApprovals.query();

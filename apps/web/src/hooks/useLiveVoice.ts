@@ -41,7 +41,7 @@ export type LiveVoiceStatus =
 
 interface UseLiveVoiceOptions {
   /**
-   * Called with each finished utterance for the Fast session. The delegation
+   * Called with each finished utterance for the session. The delegation
    * id is null when the utterance was flushed on silence rather than through
    * a GPT-Live delegation; its reply is then spoken as session-wide commentary.
    */
@@ -138,7 +138,7 @@ async function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
 }
 
 /**
- * One GPT-Live WebRTC conversation backed by the existing Fast session. Live
+ * One GPT-Live WebRTC conversation backed by the existing session. Live
  * owns microphone turn-taking, native audio, and interruption; client
  * delegation sends substantive work through the caller's normal Fast path.
  */

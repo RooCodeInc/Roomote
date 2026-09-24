@@ -22,7 +22,9 @@ import {
 } from '@roomote/types';
 import {
   getCommunicationMessages,
+  peekTaskFollowUps,
   queueCommunicationMessage,
+  removeTaskFollowUp,
 } from '@roomote/communication/messages';
 import {
   clearPendingCommunicationRequestUserInput,
@@ -567,6 +569,16 @@ export const taskRunsRouter = router({
   ).mutation(async ({ input }) =>
     queueCommunicationMessage(input.provider, input.runId, input.message),
   ),
+  // Sandboxed workers have no Redis access, so they drain API-queued task
+  // follow-ups through these procedures instead of reading the list directly.
+  peekTaskFollowUps: runTokenOnlyScoped(
+    z.object({ runId: z.number() }),
+    'runId',
+  ).query(({ input }) => peekTaskFollowUps(input.runId)),
+  removeTaskFollowUp: runTokenOnlyScoped(
+    z.object({ runId: z.number(), raw: z.string() }),
+    'runId',
+  ).mutation(({ input }) => removeTaskFollowUp(input.runId, input.raw)),
   getSlackStartedMessageData: runScoped(
     z.object({ runId: z.number() }),
     'runId',

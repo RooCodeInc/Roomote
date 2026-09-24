@@ -18,6 +18,7 @@ import {
   workspaceRoutingSettingsSchema,
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -34,12 +35,18 @@ import {
   sourceControlTokenBackedProviderSchema,
   sessionGoalInputSchema,
   codingModelRoutingRuleSchema,
+  integrationToolAutoSettingsSchema,
+  integrationToolPolicyUpsertSchema,
+  integrationToolPoliciesUpsertSchema,
   taskModelMetadataSchema,
+  userTaskModelMappingPresetCreateSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
 
 import {
+  deleteFastSessionQueuedMessageCommand,
   getFastSessionMessagesCommand,
+  getFastSessionOlderMessagesCommand,
   getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
@@ -51,6 +58,7 @@ import {
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
+  deleteFastSessionQueuedMessageInputSchema,
   replyToFastSessionInputSchema,
   fastSessionPrReviewActionInputSchema,
   fastSessionCapabilityOfferResponseInputSchema,
@@ -72,6 +80,7 @@ import {
   getSessionTimeline,
   archiveSessionCommand,
   deleteSessionCommand,
+  stopSessionTasksCommand,
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
@@ -219,9 +228,22 @@ import {
   updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
+  getDizzyExperimentEnabledCommand,
   getDeploymentExperimentsCommand,
+  getNightlyExperimentsCommand,
   setDeploymentExperimentCommand,
+  setNightlyExperimentCommand,
 } from '../commands/deployment-experiments';
+import {
+  listIntegrationToolPoliciesCommand,
+  getIntegrationToolAutoSettingsCommand,
+  listPersonalIntegrationToolPoliciesCommand,
+  setIntegrationToolAutoSettingsCommand,
+  setIntegrationToolPolicyCommand,
+  setIntegrationToolPoliciesCommand,
+  setPersonalIntegrationToolPolicyCommand,
+  setPersonalIntegrationToolPoliciesCommand,
+} from '../commands/integration-tool-policies';
 import {
   type EnvironmentConfigVersionDetail,
   getActiveEnvironmentDefinitionTaskCommand,
@@ -440,6 +462,10 @@ import {
   actOnResultCommand,
   clearResultsCommand,
   getUnreadResultCountCommand,
+  getPendingResultCountCommand,
+  getResultCommand,
+  clearResultCommand,
+  acceptSuggestionResultCommand,
   listResultsCommand,
 } from '../commands/results';
 import {
@@ -471,6 +497,11 @@ import {
   suggestTaskModelsCommand,
   updateTaskModelSettingsCommand,
 } from '../commands/task-models';
+import {
+  createUserTaskModelMappingPresetCommand,
+  deleteUserTaskModelMappingPresetCommand,
+  listUserTaskModelMappingPresetsCommand,
+} from '../commands/task-models/user-mapping-presets';
 import { LOCAL_TASK_MODEL_PROVIDER_IDS } from '../commands/task-models/local-provider-discovery';
 import {
   deleteJudgmentTypeSafeKeyCommand,
@@ -931,7 +962,11 @@ const automationsRouter = createRouter({
     .input(
       z.object({
         name: z.string().trim().min(1).max(100),
-        prompt: z.string().trim().min(1).max(8_000),
+        prompt: z
+          .string()
+          .trim()
+          .min(1)
+          .max(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH),
         enabled: z.boolean(),
         resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
@@ -974,7 +1009,11 @@ const automationsRouter = createRouter({
       z.object({
         id: z.string().uuid(),
         name: z.string().trim().min(1).max(100),
-        prompt: z.string().trim().min(1).max(8_000),
+        prompt: z
+          .string()
+          .trim()
+          .min(1)
+          .max(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH),
         enabled: z.boolean(),
         resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
@@ -2490,6 +2529,24 @@ export const appRouter = createRouter({
   }),
 
   taskModels: createRouter({
+    customPresets: createRouter({
+      list: protectedProcedure.query(({ ctx: { auth } }) =>
+        listUserTaskModelMappingPresetsCommand(auth),
+      ),
+
+      create: protectedProcedure
+        .input(userTaskModelMappingPresetCreateSchema)
+        .mutation(({ ctx: { auth }, input }) =>
+          createUserTaskModelMappingPresetCommand(auth, input),
+        ),
+
+      delete: protectedProcedure
+        .input(z.object({ id: z.string().uuid() }))
+        .mutation(({ ctx: { auth }, input }) =>
+          deleteUserTaskModelMappingPresetCommand(auth, input),
+        ),
+    }),
+
     launchOptions: protectedProcedure.query(({ ctx: { auth } }) =>
       getLaunchTaskModelsCommand(auth),
     ),
@@ -3138,8 +3195,19 @@ export const appRouter = createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       listResultsCommand(auth),
     ),
+    get: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          kind: z.enum(['report', 'suggestion']),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => getResultCommand(auth, input)),
     unreadCount: protectedProcedure.query(({ ctx: { auth } }) =>
       getUnreadResultCountCommand(auth),
+    ),
+    pendingCount: protectedProcedure.query(({ ctx: { auth } }) =>
+      getPendingResultCountCommand(auth),
     ),
     act: protectedProcedure
       .input(
@@ -3153,6 +3221,19 @@ export const appRouter = createRouter({
     clear: protectedProcedure.mutation(({ ctx: { auth } }) =>
       clearResultsCommand(auth),
     ),
+    clearOne: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          kind: z.enum(['report', 'suggestion']),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => clearResultCommand(auth, input)),
+    acceptSuggestion: protectedProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        acceptSuggestionResultCommand(auth, input),
+      ),
   }),
 
   backgroundAgents: automationsRouter,
@@ -3169,6 +3250,11 @@ export const appRouter = createRouter({
       .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
+      ),
+    deleteQueuedMessage: protectedProcedure
+      .input(deleteFastSessionQueuedMessageInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        deleteFastSessionQueuedMessageCommand(auth, input),
       ),
     startGoal: protectedProcedure
       .input(
@@ -3205,6 +3291,21 @@ export const appRouter = createRouter({
       .input(z.object({ sessionId: z.string().uuid() }))
       .query(({ ctx: { auth }, input }) =>
         getFastSessionMessagesCommand(auth, input.sessionId),
+      ),
+    olderMessages: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          cursor: z.object({
+            createdAt: z.string().min(1).max(64),
+            ts: z.number().int(),
+            turnSeq: z.number().int(),
+            id: z.string().uuid(),
+          }),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionOlderMessagesCommand(auth, input),
       ),
     submitUserInput: protectedProcedure
       .input(
@@ -3342,6 +3443,11 @@ export const appRouter = createRouter({
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
+      ),
+    stopTasks: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        stopSessionTasksCommand(auth, input.sessionId),
       ),
     delete: protectedProcedure
       .input(sessionIdInputSchema)
@@ -3568,6 +3674,62 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setDeploymentExperimentCommand(auth, input),
+      ),
+  }),
+
+  nightlyExperiments: createRouter({
+    dizzyEnabled: protectedProcedure.query(({ ctx: { auth } }) =>
+      getDizzyExperimentEnabledCommand(auth),
+    ),
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getNightlyExperimentsCommand(auth),
+    ),
+    set: protectedProcedure
+      .input(
+        z.object({
+          id: z.enum(DEPLOYMENT_EXPERIMENT_IDS),
+          enabled: z.boolean(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setNightlyExperimentCommand(auth, input),
+      ),
+  }),
+
+  integrationToolPolicies: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      listIntegrationToolPoliciesCommand(auth),
+    ),
+    set: protectedProcedure
+      .input(integrationToolPolicyUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setIntegrationToolPolicyCommand(auth, input),
+      ),
+    setMany: protectedProcedure
+      .input(integrationToolPoliciesUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setIntegrationToolPoliciesCommand(auth, input),
+      ),
+    listPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
+      listPersonalIntegrationToolPoliciesCommand(auth),
+    ),
+    setPersonal: protectedProcedure
+      .input(integrationToolPolicyUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setPersonalIntegrationToolPolicyCommand(auth, input),
+      ),
+    setManyPersonal: protectedProcedure
+      .input(integrationToolPoliciesUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setPersonalIntegrationToolPoliciesCommand(auth, input),
+      ),
+    getAuto: protectedProcedure.query(({ ctx: { auth } }) =>
+      getIntegrationToolAutoSettingsCommand(auth),
+    ),
+    setAuto: protectedProcedure
+      .input(integrationToolAutoSettingsSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setIntegrationToolAutoSettingsCommand(auth, input),
       ),
   }),
 

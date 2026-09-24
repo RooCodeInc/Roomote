@@ -1,6 +1,24 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import { SessionCard } from './SessionCard';
+vi.mock('../../(sandbox)/sessions/[sessionId]/SessionDeleteAction', () => ({
+  SessionActions: () => (
+    <button type="button" aria-label="More session actions" />
+  ),
+}));
+
+import { formatSessionMobileTimestamp, SessionCard } from './SessionCard';
+
+describe('formatSessionMobileTimestamp', () => {
+  const now = new Date(2026, 8, 21, 15, 30);
+
+  it.each([
+    [new Date(2026, 8, 21, 9, 5), '09:05 AM'],
+    [new Date(2026, 8, 20, 23, 59), 'Sep 20'],
+    [new Date(2025, 6, 4, 12, 0), 'Jul 4 2025'],
+  ])('formats %s for compact mobile display', (date, expected) => {
+    expect(formatSessionMobileTimestamp(date, now)).toBe(expected);
+  });
+});
 
 describe('SessionCard', () => {
   it('links to the transcript without repository or execution metadata', async () => {
@@ -42,6 +60,7 @@ describe('SessionCard', () => {
               inferenceCostMicroUsd: 6_000,
             },
           ],
+          canManage: true,
         }}
       />,
     );
@@ -70,6 +89,10 @@ describe('SessionCard', () => {
     );
     expect(screen.queryByText('Roomote')).not.toBeInTheDocument();
     expect(screen.queryByText('1 execution')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'More session actions' })
+        .parentElement,
+    ).toHaveClass('self-start', '-top-2');
   });
 
   it('shows a contextual matching transcript snippet', () => {
@@ -231,9 +254,42 @@ describe('SessionCard', () => {
     expect(
       screen.getByText('Sentry Triage from Automation'),
     ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText('Sentry Triage').querySelector('img'),
-    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Sentry Triage')).not.toBeInTheDocument();
+  });
+
+  it('keeps the user avatar decorative when the card text names the actor', () => {
+    render(
+      <SessionCard
+        viewerUserId="user-1"
+        session={{
+          id: 'session-avatar',
+          title: 'Review avatar semantics',
+          ownerKind: 'user',
+          ownerAutomation: null,
+          ownerName: 'Test User',
+          ownerEmail: 'test@example.com',
+          ownerImageUrl: '/api/avatars/user-1/avatar-123.png',
+          ownerUserId: 'user-1',
+          privacy: 'shared',
+          sourceSurface: 'web',
+          activityAt: Date.now() / 1000,
+          cachedStatus: 'ready',
+          executionCount: 0,
+          inferenceCostMicroUsd: 0,
+          directInferenceCostMicroUsd: 0,
+          unread: false,
+          artifactCount: 0,
+          singleArtifact: null,
+          pullRequests: [],
+          tasks: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Test User from Web')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Test User')).not.toBeInTheDocument();
+    expect(document.querySelector('img')).toHaveAttribute('loading', 'eager');
+    expect(document.querySelector('img')).toHaveAttribute('decoding', 'sync');
   });
 
   it('uses canonical identity for the viewer without changing other users', () => {
@@ -268,7 +324,9 @@ describe('SessionCard', () => {
 
     rerender(<SessionCard session={session} viewerUserId="owner-user" />);
     expect(screen.getByText('Same Display Name from Web')).toBeInTheDocument();
-    expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
+    expect(
+      screen.queryByLabelText('Same Display Name'),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('Y')).not.toBeInTheDocument();
   });
 

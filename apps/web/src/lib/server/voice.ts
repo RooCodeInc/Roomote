@@ -34,7 +34,8 @@ import {
  * GPT-Live bill, and OpenRouter-only deployments have none at all.
  *
  * The key comes from `R_VOICE_OPENAI_API_KEY` when the operator sets it, and
- * otherwise from the Voice integration an admin configures in Settings.
+ * otherwise from the Voice integration an admin configures on the Integrations
+ * page.
  */
 const VOICE_OPENAI_ENV_VAR_NAMES = ['R_VOICE_OPENAI_API_KEY'] as const;
 
@@ -42,7 +43,7 @@ const VOICE_OPENAI_ENV_VAR_NAMES = ['R_VOICE_OPENAI_API_KEY'] as const;
  * Whether a deployment admin has switched Voice off for this deployment.
  * Applies to both key sources: an operator- or fleet-provided environment
  * key decides who pays for Voice, and the deployment's admins decide whether
- * it is on. Read on every call so a toggle in Settings applies at once.
+ * it is on. Read on every call so a toggle on the Voice card applies at once.
  */
 export async function isVoiceDisabledForDeployment(): Promise<boolean> {
   const enablement = await db.query.deploymentMcpEnablements.findFirst({
@@ -52,7 +53,7 @@ export async function isVoiceDisabledForDeployment(): Promise<boolean> {
   return enablement?.enabled === false;
 }
 
-/** The admin-entered key from Settings › Integrations › Voice, if any. */
+/** The admin-entered key from Integrations › Voice, if any. */
 async function resolveStoredVoiceKey(): Promise<string | undefined> {
   if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
     return undefined;
@@ -139,8 +140,8 @@ Output only the cleaned text.`;
 
 /**
  * Only the environment-provided key value is cached. The deployment's on/off
- * state and the Settings-managed key are read on every call so a toggle,
- * save, rotation, or disconnect in Settings takes effect immediately instead
+ * state and the admin-entered key are read on every call so a toggle, save,
+ * rotation, or disconnect on the Voice card takes effect immediately instead
  * of after the cache window; each lookup is one indexed read.
  */
 const VOICE_KEY_CACHE_TTL_MS = 30_000;
@@ -183,7 +184,7 @@ export type VoiceLiveSession = {
 /**
  * Exchange a browser WebRTC offer for a GPT-Live answer. Client delegation
  * keeps task reasoning, tools, model choice, and durable state in Roomote's
- * existing Fast session rather than creating a second agent in OpenAI.
+ * existing session rather than creating a second agent in OpenAI.
  */
 function buildVoiceLiveInstructions(context: VoiceWorkspaceContext): string {
   return `You are Roomote, an AI software engineer, on a voice call with a member of the team. Speak naturally and concisely, like a capable colleague on the phone. This call is being transcribed into the team's written session, so what you say is the record.
@@ -309,7 +310,7 @@ export async function createVoicePreview(options: {
   };
 }
 
-/** Clean one spoken utterance before it is sent to the Fast session. */
+/** Clean one spoken utterance before it is sent to the session. */
 export async function cleanVoiceTranscript(options: {
   userId: string;
   text: string;

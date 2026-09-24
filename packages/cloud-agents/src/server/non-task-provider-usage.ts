@@ -12,6 +12,8 @@ import {
 } from '@roomote/db/server';
 import {
   getOpenAiCompatibleRuntimeConfigs,
+  isInferenceCreditsExhaustedError,
+  isOpenRouterInFlightBudgetError,
   isReasoningEffort,
   toBedrockMantleRuntimeModelId,
   type ReasoningEffort,
@@ -115,12 +117,16 @@ export const NON_TASK_INFERENCE_SURFACES = {
   brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
+  decisionModelFallback: 'decision_model_fallback',
   composerSuggestionGeneration: 'composer_suggestion_generation',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
+  automationResultPreparation: 'automation_result_preparation',
   ciFailureTriageRulesResolution: 'ci_failure_triage_rules_resolution',
   fastAgentImageInspection: 'fast_agent_image_inspection',
+  fastAgentMemoryDistillation: 'fast_agent_memory_distillation',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
+  judgmentModel: 'judgment_model',
   prReviewNotificationTriage: 'pr_review_notification_triage',
   routerChannelLaunchGate: 'router_channel_launch_gate',
   routerDiscordForumTag: 'router_discord_forum_tag',
@@ -129,6 +135,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   routerTaskRouting: 'router_task_routing',
   routerRequestedWorkKind: 'router_requested_work_kind',
   slackQuestionChannelSuggestions: 'slack_question_channel_suggestions',
+  taskMemoryDistillation: 'task_memory_distillation',
   taskSummaryGeneration: 'task_summary_generation',
   taskTitleGeneration: 'task_title_generation',
   voiceTranscriptCleanup: 'voice_transcript_cleanup',
@@ -311,14 +318,6 @@ export type NonTaskOpenCodeAssistantText = {
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
-  /**
-   * Code-mode integrations experiment: the leased OpenCode server runs with
-   * code mode enabled and the prompt-only helper subagents drop the generic
-   * integration dispatcher from their tool filter. Forwarded into the server
-   * lease so experiment and non-experiment conversations never share a
-   * pooled server.
-   */
-  codeModeIntegrations?: boolean;
   onModelResolved?: (model: string) => void;
   onMessageCompleted?: (
     message: NonTaskOpenCodeCompletedMessage,
@@ -341,6 +340,18 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   ) => Promise<void> | void;
   /** Live assistant text from the parent session, part by part. */
   onAssistantTextUpdated?: (text: NonTaskOpenCodeAssistantText) => void;
+  /**
+   * Native permission ask for the session tree (parent and helper
+   * subagents). Fire-and-forget: the handler owns the decision wait and the
+   * eventual reply through the supplied helpers; errors must be absorbed by
+   * the handler so an approval failure never rejects the prompt stream.
+   */
+  onPermissionAsked?: (
+    ask: NonTaskOpenCodePermissionAsk,
+    helpers: NonTaskOpenCodePermissionAskHelpers,
+  ) => void;
+  /** See the matching option on the prompt runner. */
+  disposeInstanceBeforeSession?: { completed: boolean };
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
@@ -348,6 +359,162 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   tools: Record<string, boolean>;
   validateSession?: boolean;
 };
+
+/** Upper bound on one attempt to deliver a native permission reply. */
+export const PERMISSION_REPLY_TIMEOUT_MS = 10_000;
+
+type PermissionReplyClient = {
+  permission: {
+    reply: (
+      parameters: {
+        requestID: string;
+        directory: string;
+        reply: 'once' | 'reject';
+        message?: string;
+      },
+      options?: { signal?: AbortSignal },
+    ) => Promise<{ error?: unknown }>;
+  };
+};
+
+/**
+ * Deliver one native permission reply without ever waiting on OpenCode
+ * indefinitely. The approval decision is already committed when this runs
+ * and no lock is held across it, so bounding it only bounds how long the
+ * paused call waits on an unresponsive server. A reply is keyed by the
+ * request id and a repeat for an already-answered request changes nothing,
+ * so one retry is safe and covers a reply that was dropped in transit. A
+ * second failure throws, so the caller can fail the ask closed instead of
+ * assuming it landed; the decision record stays as committed.
+ */
+export async function replyToPermissionAsk(
+  client: PermissionReplyClient,
+  sessionDirectory: string,
+  requestId: string,
+  response: 'once' | 'reject',
+  message?: string,
+  timeoutMs: number = PERMISSION_REPLY_TIMEOUT_MS,
+): Promise<{ error?: unknown }> {
+  // The SDK reports a failed request as a resolved `{ error }` rather than a
+  // rejection, so both shapes count as a failed attempt. Treating a returned
+  // error as delivered would leave the native ask pending while the caller
+  // believes it landed, and its reject fallback would never run.
+  const attempt = async () => {
+    const result = await client.permission.reply(
+      {
+        requestID: requestId,
+        directory: sessionDirectory,
+        reply: response,
+        ...(message ? { message } : {}),
+      },
+      { signal: AbortSignal.timeout(timeoutMs) },
+    );
+    if (result.error) throw new PermissionReplyFailedError(result.error);
+    return result;
+  };
+  try {
+    return await attempt();
+  } catch {
+    return attempt();
+  }
+}
+
+/** A native permission reply that could not be delivered after its retry. */
+export class PermissionReplyFailedError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super('OpenCode permission reply failed');
+    this.cause = cause;
+  }
+}
+
+/** One native OpenCode `permission.asked` event, normalized for consumers. */
+export interface NonTaskOpenCodePermissionAsk {
+  requestId: string;
+  sessionId: string;
+  permission: string;
+  messageId?: string;
+  callId?: string;
+}
+
+/** Bounded OpenCode client operations handed to permission-ask consumers. */
+export interface NonTaskOpenCodePermissionAskHelpers {
+  fetchCallArgs: (input: {
+    sessionId: string;
+    messageId?: string;
+    callId?: string;
+  }) => Promise<
+    | {
+        input?: unknown;
+        toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        /** Completed tool results earlier in the paused call's turn. */
+        readContent?: string;
+      }
+    | undefined
+  >;
+  reply: (
+    requestId: string,
+    response: 'once' | 'reject',
+    message?: string,
+  ) => Promise<void>;
+}
+
+/**
+ * Find the paused tool call in an OpenCode transcript, with the tool results
+ * the agent read earlier in the same turn (since the last user message), so
+ * Auto can judge whether the call follows an instruction planted in them.
+ * Under code mode the paused part is the outer `execute` call; its metadata
+ * carries the child tool calls with their structured inputs.
+ */
+export function findPausedOpenCodeToolCall(
+  messages: ReadonlyArray<{ info?: unknown; parts?: ReadonlyArray<unknown> }>,
+  callId: string,
+):
+  | {
+      input?: unknown;
+      toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+      readContent?: string;
+    }
+  | undefined {
+  let turnReads: string[] = [];
+  for (const message of messages) {
+    if (asRecord(message.info)?.role === 'user') turnReads = [];
+    for (const part of message.parts ?? []) {
+      const record = asRecord(part);
+      if (!record) continue;
+      const state = asRecord(record.state);
+      if (record.callID !== callId) {
+        if (
+          record.type === 'tool' &&
+          state?.status === 'completed' &&
+          typeof state.output === 'string' &&
+          state.output.trim()
+        ) {
+          turnReads.push(state.output);
+        }
+        continue;
+      }
+      const metadata = asRecord(state?.metadata);
+      const toolCalls = Array.isArray(metadata?.toolCalls)
+        ? metadata.toolCalls
+            .map((entry) => asRecord(entry))
+            .filter(
+              (entry): entry is Record<string, unknown> => entry !== undefined,
+            )
+            .map((entry) => ({ tool: entry.tool, input: entry.input }))
+        : undefined;
+      return {
+        input: state?.input,
+        toolCalls,
+        ...(turnReads.length > 0
+          ? { readContent: turnReads.join('\n\n') }
+          : {}),
+      };
+    }
+  }
+  return undefined;
+}
 
 export class NonTaskOpenCodeSessionNotFoundError extends Error {
   constructor() {
@@ -794,6 +961,7 @@ async function resolveNonTaskModelRuntime(
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
 ): Promise<{
   model: string;
+  catalogModelId: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
 }> {
   const requestedModel = model?.trim();
@@ -871,6 +1039,7 @@ async function resolveNonTaskModelRuntime(
     // server's config registered (Bedrock Mantle GPT ids run under
     // `bedrock-mantle-openai`), mirroring the task worker's rewrite.
     model: toBedrockMantleRuntimeModelId(resolvedModel),
+    catalogModelId: resolvedModel,
     // An explicit model rides into the server lease env as the primary role
     // model so the config builder registers its provider — the deployment's
     // role models may not include it, and an unregistered Bedrock (or
@@ -878,6 +1047,27 @@ async function resolveNonTaskModelRuntime(
     // request is made. The lease cache keys on env, so distinct explicit
     // models get their own servers instead of colliding.
     resolvedModelRuntimeEnv: selectedRuntimeEnv,
+  };
+}
+
+/**
+ * Resolve the deployment helper model once through the same role path used by
+ * ordinary non-task calls. `catalogModelId` stays in the task-model namespace
+ * so callers can look up metadata even when OpenCode rewrites its runtime id.
+ */
+export async function resolveNonTaskHelperModel(): Promise<{
+  model: string;
+  catalogModelId: string;
+  reasoningEffort?: ReasoningEffort;
+}> {
+  const runtime = await resolveNonTaskModelRuntime(undefined, 'small');
+  const reasoningEffort =
+    runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL_REASONING_EFFORT;
+
+  return {
+    model: runtime.model,
+    catalogModelId: runtime.catalogModelId,
+    ...(isReasoningEffort(reasoningEffort) ? { reasoningEffort } : {}),
   };
 }
 
@@ -916,6 +1106,16 @@ async function findModelSupportingInputModality(input: {
   modality: NonTaskInputModality;
   candidates: Array<string | undefined>;
   defaultFirstCandidateOnUnknown?: boolean;
+  /**
+   * When no candidate has positive modality metadata, fall back to the first
+   * candidate whose metadata is merely unknown instead of declaring the
+   * modality unsupported. Catalog metadata is absent for newly released
+   * models and defaulted to text-only for custom OpenAI-compatible providers,
+   * so absence is not proof the model rejects the input; the inference call
+   * itself remains the authority. An explicit `false` from a cataloged
+   * provider still counts as known-unsupported.
+   */
+  allowUnknownModalityFallback?: boolean;
   timeoutMs?: number | null;
 }): Promise<string | undefined> {
   const candidates = input.candidates
@@ -955,6 +1155,8 @@ async function findModelSupportingInputModality(input: {
       );
     }
 
+    let unknownModalityCandidate: string | undefined;
+
     for (const [index, candidate] of candidates.entries()) {
       const { providerID, modelID } = splitOpenCodeModelId(candidate);
       const provider = result.data.providers.find(
@@ -975,12 +1177,27 @@ async function findModelSupportingInputModality(input: {
       ) {
         return candidate;
       }
+
+      if (
+        input.allowUnknownModalityFallback &&
+        unknownModalityCandidate === undefined &&
+        (inputCapability !== false ||
+          generatedOpenAiCompatibleProviderIds.has(providerID)) &&
+        // The helper contract is modality input plus text output. Unknown
+        // output metadata is tolerated like unknown input metadata, but a
+        // model explicitly marked as not producing text is known-unsupported
+        // regardless of provider — an explicit declaration on a custom
+        // OpenAI-compatible provider is user config, not defaulted metadata.
+        model?.capabilities.output.text !== false
+      ) {
+        unknownModalityCandidate = candidate;
+      }
     }
+
+    return unknownModalityCandidate;
   } finally {
     server.release();
   }
-
-  return undefined;
 }
 
 async function resolveModelForInputModality(
@@ -1014,6 +1231,7 @@ async function resolveModelForInputModality(
       runtime.resolvedModelRuntimeEnv.R_MODEL,
       runtime.model,
     ],
+    allowUnknownModalityFallback: true,
     timeoutMs: params.timeoutMs,
   });
   if (!model) {
@@ -1134,7 +1352,6 @@ async function runNonTaskSdkPrompt(
     directory?: string;
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
-    codeModeIntegrations?: boolean;
     onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
     /** Called with the leased server's base URL before the prompt starts. */
     onServerLeased?: (url: string) => void;
@@ -1155,6 +1372,19 @@ async function runNonTaskSdkPrompt(
       part: NonTaskOpenCodeTaskPart,
     ) => Promise<void> | void;
     onAssistantTextUpdated?: (text: NonTaskOpenCodeAssistantText) => void;
+    onPermissionAsked?: (
+      ask: NonTaskOpenCodePermissionAsk,
+      helpers: NonTaskOpenCodePermissionAskHelpers,
+    ) => void;
+    /**
+     * Dispose the directory's cached OpenCode instance before any session
+     * call, so its agent/tool state is rebuilt from the freshly written
+     * config. Sessions and transcripts persist on disk; only the in-memory
+     * instance cache is dropped. The shared object's `completed` flag is set
+     * on success (including "nothing cached to dispose") so the caller can
+     * retry the refresh on a later turn when the dispose genuinely failed.
+     */
+    disposeInstanceBeforeSession?: { completed: boolean };
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
@@ -1187,7 +1417,6 @@ async function runNonTaskSdkPrompt(
     preserveReasoning:
       options.preserveReasoning ?? Boolean(params.reasoningEffort),
     promptOnlySubagents: options.promptOnlySubagents,
-    codeModeIntegrations: options.codeModeIntegrations,
     reasoningOverride: params.reasoningEffort
       ? { model, effort: params.reasoningEffort }
       : undefined,
@@ -1228,6 +1457,63 @@ async function runNonTaskSdkPrompt(
       baseUrl: server.url,
       fetch: openCodeSdkFetch,
     });
+    if (options.disposeInstanceBeforeSession) {
+      try {
+        const disposeUrl = new URL(`${server.url}/instance/dispose`);
+        disposeUrl.searchParams.set('directory', sessionDirectory);
+        const disposeResponse = await fetch(disposeUrl, {
+          method: 'POST',
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (disposeResponse.ok) {
+          options.disposeInstanceBeforeSession.completed = true;
+        } else {
+          console.warn(
+            `[NonTaskProviderUsage] OpenCode instance dispose returned ${disposeResponse.status}.`,
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode instance dispose failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+    }
+    const permissionAskHelpers: NonTaskOpenCodePermissionAskHelpers = {
+      // Native asks identify the paused call (messageID/callID) but carry no
+      // arguments. Recover them from the asking session's own transcript so
+      // the approval surface can show a redacted view of exactly what is
+      // about to run. Under code mode the paused part is the outer `execute`
+      // call; its metadata carries the child tool calls with their
+      // structured inputs, so consumers can still show the real arguments.
+      fetchCallArgs: async ({ sessionId: askSessionId, callId }) => {
+        if (!callId) return undefined;
+        const result = await client.session.messages({
+          sessionID: askSessionId,
+          directory: sessionDirectory,
+        });
+        return findPausedOpenCodeToolCall(result.data ?? [], callId);
+      },
+      reply: async (requestId, response, message) => {
+        try {
+          await replyToPermissionAsk(
+            client,
+            sessionDirectory,
+            requestId,
+            response,
+            message,
+          );
+        } catch (error) {
+          console.warn(
+            `[NonTaskProviderUsage] OpenCode permission reply failed: ${formatOpenCodeSdkError(
+              error instanceof PermissionReplyFailedError ? error.cause : error,
+            )}`,
+          );
+          // Propagate: the approval bridge rejects the ask when a claimed
+          // `once` cannot be delivered, so the session is never left paused.
+          throw error;
+        }
+      },
+    };
     let sessionId = options.session?.id;
     if (sessionId && options.validateSession) {
       const validateStartedAtMs = Date.now();
@@ -1343,214 +1629,253 @@ async function runNonTaskSdkPrompt(
     // Reasoning parts stream deltas under the same `field: "text"`; only
     // parts announced as text parts are reply text.
     const assistantTextPartIds = new Set<string>();
-    const needsEventMonitor = Boolean(
-      params.onProviderRetry ||
-      options.onAssistantMessageStarted ||
-      options.onAssistantMessageCompleted ||
-      options.onSubagentSessionReady ||
-      options.onParentTaskPartUpdated ||
-      options.onAssistantTextUpdated ||
-      options.trackSessionTreeUsage,
-    );
-
-    if (needsEventMonitor) {
-      try {
-        const subscribeStartedAtMs = Date.now();
-        const subscription = await client.event.subscribe(
-          { directory: sessionDirectory },
-          { signal: eventAbortController.signal },
-        );
-        setupTiming.eventSubscribeMs = Date.now() - subscribeStartedAtMs;
-        eventMonitor = (async () => {
-          try {
-            for await (const event of subscription.stream) {
-              if (
-                (event.type === 'session.created' ||
-                  event.type === 'session.updated') &&
-                event.properties.info.parentID === sessionId
-              ) {
-                trackedSessionIds.add(event.properties.sessionID);
-                if (event.type === 'session.created') {
-                  sessionsCreatedThisTurn.add(event.properties.sessionID);
-                }
+    // The event stream is always watched, even when the caller wants no
+    // callbacks: OpenCode retries an account out of credits like a rate
+    // limit, and only its retry status reveals that before the prompt
+    // settles. Without it a helper call or credential validation would sit
+    // through OpenCode's whole backoff, or time out, instead of failing fast.
+    try {
+      const subscribeStartedAtMs = Date.now();
+      const subscription = await client.event.subscribe(
+        { directory: sessionDirectory },
+        { signal: eventAbortController.signal },
+      );
+      setupTiming.eventSubscribeMs = Date.now() - subscribeStartedAtMs;
+      eventMonitor = (async () => {
+        try {
+          for await (const event of subscription.stream) {
+            if (
+              (event.type === 'session.created' ||
+                event.type === 'session.updated') &&
+              event.properties.info.parentID === sessionId
+            ) {
+              trackedSessionIds.add(event.properties.sessionID);
+              if (event.type === 'session.created') {
+                sessionsCreatedThisTurn.add(event.properties.sessionID);
+              }
+              try {
+                await options.onSubagentSessionReady?.(
+                  event.properties.sessionID,
+                );
+              } catch (error) {
+                rejectSessionError(error);
+                return;
+              }
+            } else if (event.type === 'message.part.updated') {
+              const taskPart = normalizeParentOpenCodeTaskPart(
+                event.properties.part,
+                sessionId,
+              );
+              if (taskPart) {
                 try {
-                  await options.onSubagentSessionReady?.(
-                    event.properties.sessionID,
-                  );
+                  await options.onParentTaskPartUpdated?.(taskPart);
                 } catch (error) {
                   rejectSessionError(error);
                   return;
                 }
-              } else if (event.type === 'message.part.updated') {
-                const taskPart = normalizeParentOpenCodeTaskPart(
-                  event.properties.part,
-                  sessionId,
-                );
-                if (taskPart) {
-                  try {
-                    await options.onParentTaskPartUpdated?.(taskPart);
-                  } catch (error) {
-                    rejectSessionError(error);
-                    return;
-                  }
-                }
-                const streamedDelta = asRecord(event.properties)?.delta;
-                const assistantText = normalizeParentOpenCodeTextPart(
-                  event.properties.part,
-                  sessionId,
-                  // Older servers attach the streamed delta to this event.
-                  typeof streamedDelta === 'string' ? streamedDelta : undefined,
-                );
-                // Parts carry no role; the user prompt's own text part must
-                // never read as reply text.
-                if (
-                  assistantText &&
-                  observedAssistantMessageIds.has(assistantText.messageId)
-                ) {
-                  assistantTextPartIds.add(assistantText.partId);
-                  options.onAssistantTextUpdated?.(assistantText);
-                }
-              } else if (
-                isOpenCodeTextPartDeltaEvent(event, sessionId) &&
-                assistantTextPartIds.has(event.properties.partID)
+              }
+              const streamedDelta = asRecord(event.properties)?.delta;
+              const assistantText = normalizeParentOpenCodeTextPart(
+                event.properties.part,
+                sessionId,
+                // Older servers attach the streamed delta to this event.
+                typeof streamedDelta === 'string' ? streamedDelta : undefined,
+              );
+              // Parts carry no role; the user prompt's own text part must
+              // never read as reply text.
+              if (
+                assistantText &&
+                observedAssistantMessageIds.has(assistantText.messageId)
               ) {
-                options.onAssistantTextUpdated?.({
-                  messageId: event.properties.messageID,
-                  partId: event.properties.partID,
-                  delta: event.properties.delta,
-                  completed: false,
-                });
-              } else if (
-                event.type === 'message.updated' &&
-                event.properties.info.role === 'assistant' &&
-                trackedSessionIds.has(event.properties.info.sessionID)
+                assistantTextPartIds.add(assistantText.partId);
+                options.onAssistantTextUpdated?.(assistantText);
+              }
+            } else if (
+              isOpenCodeTextPartDeltaEvent(event, sessionId) &&
+              assistantTextPartIds.has(event.properties.partID)
+            ) {
+              options.onAssistantTextUpdated?.({
+                messageId: event.properties.messageID,
+                partId: event.properties.partID,
+                delta: event.properties.delta,
+                completed: false,
+              });
+            } else if (
+              event.type === 'message.updated' &&
+              event.properties.info.role === 'assistant' &&
+              trackedSessionIds.has(event.properties.info.sessionID)
+            ) {
+              const info = event.properties.info;
+              const messageId = asString(info.id);
+              if (
+                info.sessionID === sessionId &&
+                messageId &&
+                !observedAssistantMessageIds.has(messageId)
               ) {
-                const info = event.properties.info;
-                const messageId = asString(info.id);
-                if (
-                  info.sessionID === sessionId &&
-                  messageId &&
-                  !observedAssistantMessageIds.has(messageId)
-                ) {
-                  observedAssistantMessageIds.add(messageId);
-                  try {
-                    await options.onAssistantMessageStarted?.({
-                      id: messageId,
-                      sessionId,
-                      parentId: asString(info.parentID) ?? null,
-                      createdAtMs: asFiniteNumber(info.time.created) ?? null,
-                    });
-                  } catch (error) {
-                    rejectSessionError(error);
-                    return;
-                  }
-                }
-                if (
-                  info.sessionID === sessionId &&
-                  messageId &&
-                  info.time.completed !== undefined &&
-                  !completedAssistantMessageIds.has(messageId)
-                ) {
-                  completedAssistantMessageIds.add(messageId);
-                  try {
-                    const tokens = readNonTaskOpenCodeMessageTokens(info);
-                    await options.onAssistantMessageCompleted?.({
-                      id: messageId,
-                      sessionId,
-                      createdAtMs: asFiniteNumber(info.time.created) ?? null,
-                      completedAtMs:
-                        asFiniteNumber(info.time.completed) ?? null,
-                      ...(tokens ? { tokens } : {}),
-                    });
-                  } catch (error) {
-                    rejectSessionError(error);
-                    return;
-                  }
-                }
-                if (
-                  options.trackSessionTreeUsage &&
-                  info.time.completed !== undefined
-                ) {
-                  void recordUsageOnce(info);
-                  markUsageEventObserved(info);
-                }
-              } else if (
-                event.type === 'session.status' &&
-                event.properties.sessionID === sessionId &&
-                event.properties.status.type === 'retry'
-              ) {
+                observedAssistantMessageIds.add(messageId);
                 try {
-                  await params.onProviderRetry?.({
-                    attempt: event.properties.status.attempt,
-                    message: event.properties.status.message,
-                    ...(Number.isFinite(event.properties.status.next)
-                      ? { nextRetryAtMs: event.properties.status.next }
-                      : {}),
+                  await options.onAssistantMessageStarted?.({
+                    id: messageId,
+                    sessionId,
+                    parentId: asString(info.parentID) ?? null,
+                    createdAtMs: asFiniteNumber(info.time.created) ?? null,
                   });
                 } catch (error) {
-                  // Retry reporting is auxiliary. A transient Slack or Discord
-                  // post failure must not stop observation of the provider's
-                  // eventual session error.
-                  console.warn(
-                    `[NonTaskProviderUsage] OpenCode provider retry reporter failed: ${formatOpenCodeSdkError(error)}`,
-                  );
-                }
-                if (
-                  params.maxProviderRetryAttempts !== undefined &&
-                  event.properties.status.attempt >=
-                    params.maxProviderRetryAttempts
-                ) {
-                  rejectSessionError(
-                    new NonTaskOpenCodePromptError(
-                      {
-                        name: 'APIError',
-                        data: {
-                          message: event.properties.status.message,
-                          isRetryable: false,
-                        },
-                      },
-                      promptErrorLabel,
-                    ),
-                  );
+                  rejectSessionError(error);
                   return;
                 }
-              } else if (
-                event.type === 'session.error' &&
-                event.properties.sessionID === sessionId
+              }
+              if (
+                info.sessionID === sessionId &&
+                messageId &&
+                info.time.completed !== undefined &&
+                !completedAssistantMessageIds.has(messageId)
+              ) {
+                completedAssistantMessageIds.add(messageId);
+                try {
+                  const tokens = readNonTaskOpenCodeMessageTokens(info);
+                  await options.onAssistantMessageCompleted?.({
+                    id: messageId,
+                    sessionId,
+                    createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                    completedAtMs: asFiniteNumber(info.time.completed) ?? null,
+                    ...(tokens ? { tokens } : {}),
+                  });
+                } catch (error) {
+                  rejectSessionError(error);
+                  return;
+                }
+              }
+              if (
+                options.trackSessionTreeUsage &&
+                info.time.completed !== undefined
+              ) {
+                void recordUsageOnce(info);
+                markUsageEventObserved(info);
+              }
+            } else if (
+              event.type === 'session.status' &&
+              event.properties.sessionID === sessionId &&
+              event.properties.status.type === 'retry'
+            ) {
+              // OpenCode retries an exhausted account like a rate limit,
+              // and its status carries only the provider message. No retry
+              // can succeed until the account is topped up, so end the
+              // prompt instead of reporting a temporary error.
+              if (
+                isInferenceCreditsExhaustedError(
+                  event.properties.status.message,
+                )
               ) {
                 rejectSessionError(
                   new NonTaskOpenCodePromptError(
-                    event.properties.error ??
-                      new Error(
-                        'OpenCode session failed without error detail.',
-                      ),
+                    {
+                      name: 'APIError',
+                      data: {
+                        message: event.properties.status.message,
+                        isRetryable: false,
+                      },
+                    },
                     promptErrorLabel,
                   ),
                 );
                 return;
               }
-            }
-          } catch (error) {
-            if (!eventAbortController.signal.aborted) {
-              console.warn(
-                `[NonTaskProviderUsage] OpenCode event monitor failed: ${formatOpenCodeSdkError(error)}`,
+              try {
+                await params.onProviderRetry?.({
+                  attempt: event.properties.status.attempt,
+                  message: event.properties.status.message,
+                  ...(Number.isFinite(event.properties.status.next)
+                    ? { nextRetryAtMs: event.properties.status.next }
+                    : {}),
+                });
+              } catch (error) {
+                // Retry reporting is auxiliary. A transient Slack or Discord
+                // post failure must not stop observation of the provider's
+                // eventual session error.
+                console.warn(
+                  `[NonTaskProviderUsage] OpenCode provider retry reporter failed: ${formatOpenCodeSdkError(error)}`,
+                );
+              }
+              if (
+                params.maxProviderRetryAttempts !== undefined &&
+                event.properties.status.attempt >=
+                  params.maxProviderRetryAttempts
+              ) {
+                rejectSessionError(
+                  new NonTaskOpenCodePromptError(
+                    {
+                      name: 'APIError',
+                      data: {
+                        message: event.properties.status.message,
+                        isRetryable: false,
+                      },
+                    },
+                    promptErrorLabel,
+                  ),
+                );
+                return;
+              }
+            } else if (event.type === 'permission.asked') {
+              // Permission asks are owned by the consumer (decision wait
+              // and native reply), never by this monitor: a consumer
+              // failure must not reject the prompt stream, and the pause
+              // itself is the intended behavior.
+              try {
+                const properties = event.properties;
+                options.onPermissionAsked?.(
+                  {
+                    requestId: properties.id,
+                    sessionId: properties.sessionID,
+                    permission: properties.permission,
+                    ...(properties.tool?.messageID
+                      ? { messageId: properties.tool.messageID }
+                      : {}),
+                    ...(properties.tool?.callID
+                      ? { callId: properties.tool.callID }
+                      : {}),
+                  },
+                  permissionAskHelpers,
+                );
+              } catch (error) {
+                console.warn(
+                  `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
+                );
+              }
+            } else if (
+              event.type === 'session.error' &&
+              event.properties.sessionID === sessionId
+            ) {
+              rejectSessionError(
+                new NonTaskOpenCodePromptError(
+                  event.properties.error ??
+                    new Error('OpenCode session failed without error detail.'),
+                  promptErrorLabel,
+                ),
               );
+              return;
             }
           }
-        })();
-      } catch (error) {
-        if (options.onSubagentSessionReady) {
-          throw new Error(
-            `OpenCode subagent session discovery is unavailable: ${formatOpenCodeSdkError(error)}`,
-          );
+        } catch (error) {
+          if (!eventAbortController.signal.aborted) {
+            console.warn(
+              `[NonTaskProviderUsage] OpenCode event monitor failed: ${formatOpenCodeSdkError(error)}`,
+            );
+          }
         }
-        // Retry reporting is additive. Keep the prompt path available if an
-        // older externally configured OpenCode server cannot stream events.
-        if (!eventAbortController.signal.aborted) {
-          console.warn(
-            `[NonTaskProviderUsage] Could not subscribe to OpenCode events: ${formatOpenCodeSdkError(error)}`,
-          );
-        }
+      })();
+    } catch (error) {
+      if (options.onSubagentSessionReady) {
+        throw new Error(
+          `OpenCode subagent session discovery is unavailable: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+      // Retry reporting is additive. Keep the prompt path available if an
+      // older externally configured OpenCode server cannot stream events.
+      if (!eventAbortController.signal.aborted) {
+        console.warn(
+          `[NonTaskProviderUsage] Could not subscribe to OpenCode events: ${formatOpenCodeSdkError(error)}`,
+        );
       }
     }
 
@@ -1572,9 +1897,7 @@ async function runNonTaskSdkPrompt(
       // unavailable so human follow-ups use the durable whole-turn queue.
       let promptResult: Awaited<typeof promptRequest>;
       try {
-        promptResult = needsEventMonitor
-          ? await Promise.race([promptRequest, sessionError])
-          : await promptRequest;
+        promptResult = await Promise.race([promptRequest, sessionError]);
       } finally {
         options.onNativeSteerClosed?.();
       }
@@ -1874,7 +2197,6 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
     {
       directory: options.directory,
       env: options.env,
-      codeModeIntegrations: options.codeModeIntegrations,
       onPromptStarted: options.onPromptStarted,
       onNativeSteerReady: options.onNativeSteerReady,
       onServerLeased: options.onServerLeased,
@@ -1886,6 +2208,10 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onSubagentSessionReady: options.onSubagentSessionReady,
       onParentTaskPartUpdated: options.onParentTaskPartUpdated,
       onAssistantTextUpdated: options.onAssistantTextUpdated,
+      onPermissionAsked: options.onPermissionAsked,
+      ...(options.disposeInstanceBeforeSession
+        ? { disposeInstanceBeforeSession: options.disposeInstanceBeforeSession }
+        : {}),
       permission: options.permission,
       preserveReasoning: true,
       promptOnlySubagents: options.promptOnlySubagents,
@@ -2088,6 +2414,19 @@ export function classifyNonTaskInferenceError(
     };
   }
 
+  // An account out of credits or quota outranks the provider's own retry
+  // flag: ChatGPT and OpenAI send it as a retryable 429, and OpenCode's retry
+  // cap turns it into a generic rejection. Neither a retry nor a fresh
+  // session can succeed until the account is topped up.
+  if (isInferenceCreditsExhaustedError(inferenceError)) {
+    return {
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      reason: 'insufficient_credits',
+      retryable: false,
+    };
+  }
+
   if (isInferenceErrorExplicitlyNonRetryable(inferenceError)) {
     return {
       message: 'The inference provider rejected the request.',
@@ -2168,15 +2507,6 @@ export function classifyNonTaskInferenceError(
     };
   }
 
-  if (statusCode === 402) {
-    return {
-      message:
-        'The inference provider account does not have enough credits or quota.',
-      reason: 'insufficient_credits',
-      retryable: false,
-    };
-  }
-
   if (statusCode === 404) {
     return {
       message: 'The selected model is unavailable with these credentials.',
@@ -2207,12 +2537,13 @@ export function classifyNonTaskInferenceError(
   }
 
   if (
-    detail.includes('insufficient_quota') ||
-    detail.includes('insufficient quota') ||
-    detail.includes('insufficient credit') ||
-    detail.includes('payment required') ||
-    detail.includes('billing') ||
-    /\b402\b/u.test(detail)
+    (detail.includes('insufficient_quota') ||
+      detail.includes('insufficient quota') ||
+      detail.includes('insufficient credit') ||
+      detail.includes('payment required') ||
+      detail.includes('billing') ||
+      /\b402\b/u.test(detail)) &&
+    !isOpenRouterInFlightBudgetError(inferenceError)
   ) {
     return {
       message:
@@ -2283,7 +2614,8 @@ export function classifyNonTaskInferenceError(
 
   // Remaining structured 4xx responses (400, 413, 422, …) are client errors:
   // resending the same request cannot recover them. 408 stays retryable as a
-  // timeout; 401/402/403/404/429 were classified above.
+  // timeout; 401/403/404/429 were classified above, and every 402 except
+  // OpenRouter's in-flight budget hold by the credits check.
   if (
     statusCode !== undefined &&
     statusCode >= 400 &&

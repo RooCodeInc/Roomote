@@ -239,13 +239,38 @@ describe('steerTask procedure', () => {
     expect(result).toEqual({ success: true });
     expect(cancelTaskAndWaitForTurnExit).not.toHaveBeenCalled();
     expect(mockPrepareActorScopedTurn).toHaveBeenCalledWith('sender-user-1', {
-      allowMcpReconnect: false,
+      allowMcpReconnect: true,
     });
     expect(sendFollowUpPrompt).toHaveBeenCalledWith({
       prompt: 'Steer this into the current turn',
       images: ['data:image/png;base64,abc'],
       autoSteerWhenQueued: true,
       userId: 'sender-user-1',
+    });
+  });
+
+  it('refreshes actor-scoped MCP state before native steering', async () => {
+    const order: string[] = [];
+    mockPrepareActorScopedTurn.mockImplementationOnce(async () => {
+      order.push('mcp-refresh');
+      return { effectiveUserId: 'sender-user-1' };
+    });
+    const { caller } = createCaller({
+      supportsNativeTurnSteering: true,
+      sendFollowUpPrompt: () => {
+        order.push('native-steer');
+        return true;
+      },
+    });
+
+    await caller.commands.steerTask({
+      prompt: 'Steer after the actor transition',
+      quoteText: 'Steer after the actor transition',
+    });
+
+    expect(order).toEqual(['mcp-refresh', 'native-steer']);
+    expect(mockPrepareActorScopedTurn).toHaveBeenCalledWith('sender-user-1', {
+      allowMcpReconnect: true,
     });
   });
 

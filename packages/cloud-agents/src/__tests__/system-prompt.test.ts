@@ -32,7 +32,7 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
       'Preserve official names and capitalization for external or provider features, including ChatGPT Fast mode',
     );
     expect(ROOMOTE_SYSTEM_PROMPT).toContain(
-      'Never expose Roomote-internal Fast terminology such as "Fast session" or "Roomote Fast mode"',
+      'Never expose Roomote-internal mode terminology',
     );
   });
 

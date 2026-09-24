@@ -55,6 +55,7 @@ vi.mock('next/navigation', () => ({
   },
 }));
 vi.mock('@/lib/server/fast-sessions', () => ({
+  FAST_SESSION_TRANSCRIPT_INITIAL_LIMIT: 50,
   getFastSessionById: getFastSessionByIdMock,
   getFastSessionTasks: getFastSessionTasksMock,
 }));
@@ -94,8 +95,24 @@ vi.mock('@/components/layout', () => ({
 vi.mock('./FastSessionTranscript', () => ({
   FastSessionTranscript: transcriptMock,
 }));
+vi.mock('./EditableSessionTitle', () => ({
+  EditableSessionTitle: ({
+    title,
+    className,
+  }: {
+    title: string;
+    className: string;
+  }) => <h1 className={className}>{title}</h1>,
+}));
 vi.mock('./SessionTaskTimeline', () => ({
   SessionTaskTimeline: sessionTaskTimelineMock,
+}));
+vi.mock('./LiveSessionTitle', () => ({
+  LiveSessionTitle: ({ initialTitle }: { initialTitle: string }) => (
+    <h1 className="min-w-0 max-w-full flex-[0_1_auto] cursor-default break-words text-sm font-medium @[600px]:truncate">
+      {initialTitle}
+    </h1>
+  ),
 }));
 vi.mock('./SessionWorkspace', () => ({
   SessionWorkspace: sessionWorkspaceMock,
@@ -415,6 +432,8 @@ describe('Session detail page', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       messages: [],
       hasOlderMessages: false,
+      messagesCursor: null,
+      initialStreamCursor: 1_780_000_000_000.125,
     });
 
     const html = renderToStaticMarkup(
@@ -432,6 +451,7 @@ describe('Session detail page', () => {
     expect(getFastSessionByIdMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       '6a1f8f1e-0000-4000-8000-000000000005',
+      { transcriptLimit: 50 },
     );
     expect(getFastSessionTasksMock).not.toHaveBeenCalled();
     expect(html).toContain('data-testid="session-viewers"');
@@ -472,6 +492,7 @@ describe('Session detail page', () => {
         initialTitle: 'Session title',
         fallbackTitle: 'Session title',
         privateSession: true,
+        initialStreamCursor: 1_780_000_000_000.125,
       }),
       undefined,
     );
@@ -577,6 +598,8 @@ describe('Session detail page', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       messages: [],
       hasOlderMessages: false,
+      messagesCursor: null,
+      initialStreamCursor: 1_780_000_000_000.125,
     });
     getFastSessionTasksMock.mockResolvedValue([
       {
@@ -623,6 +646,7 @@ describe('Session detail page', () => {
     expect(getFastSessionByIdMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       '6a1f8f1e-0000-4000-8000-000000000005',
+      { transcriptLimit: 50 },
     );
     expect(getFastSessionTasksMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),

@@ -472,7 +472,6 @@ export async function githubPrReviewSync({
     rangeDiff: rangeResult,
   });
   const pullRequestChangedFiles = pullRequestDiffResult.changedFiles;
-
   const commits = hasReviewableChanges
     ? await GitHubCli.fetchCommitsInRange({ ...prParams, sha })
     : [];

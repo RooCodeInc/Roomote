@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getAccessibleSettingsNavigation,
   getSettingsNavigationItem,
+  getSettingsTitleForPath,
 } from './settings-navigation';
 
 describe('settings navigation', () => {
@@ -20,5 +21,17 @@ describe('settings navigation', () => {
 
     expect(items.map((item) => item.id)).not.toContain('experimental');
     expect(items.map((item) => item.id)).not.toContain('models');
+  });
+
+  it('keeps the Nightly page out of settings navigation but gives its hidden route a plain title', () => {
+    const items = getAccessibleSettingsNavigation({
+      isAdmin: true,
+      cloudEnabled: false,
+    });
+    expect(items.map((item) => item.id)).not.toContain('nightly-experiments');
+    expect(getSettingsNavigationItem('nightly-experiments')).toBeUndefined();
+    expect(getSettingsTitleForPath('/settings/nightly-experiments')).toBe(
+      'Nightly Experiments',
+    );
   });
 });

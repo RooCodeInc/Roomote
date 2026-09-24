@@ -112,3 +112,23 @@ export async function syncActingUserForInboundMessage({
     );
   }
 }
+
+/**
+ * Strict pre-queue actor sync for web/API task follow-ups. Unlike chat
+ * messages, these may have no bound thread to receive the worker's resend
+ * notice, so a failed switch must fail admission instead of queueing a prompt
+ * the worker would skip as a sender mismatch.
+ */
+export async function syncActingUserForQueuedFollowUp({
+  runId,
+  senderUserId,
+}: {
+  runId: number;
+  senderUserId: string | undefined;
+}): Promise<void> {
+  if (!senderUserId) {
+    return;
+  }
+
+  await setTrustedRunActingUser({ runId, userId: senderUserId });
+}

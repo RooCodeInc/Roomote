@@ -15,7 +15,11 @@ const mocks = vi.hoisted(() => ({
   discordPostMessage: vi.fn(),
   discordEditMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
-  createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
+  createActivity: vi.fn(() => ({
+    start: vi.fn(),
+    settle: vi.fn(),
+    dispose: vi.fn().mockResolvedValue(undefined),
+  })),
   slackPostThreadMessage: vi.fn(),
   deliverVideos: vi.fn(),
   slackUpdateMessage: vi.fn(),
@@ -223,6 +227,57 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       abort: vi.fn(),
     });
   });
+
+  it.each(['discord', 'telegram'] as const)(
+    'posts a %s approval as a native actionable message without consuming the reply quote',
+    async (surface) => {
+      const user = await userFactory.create();
+      const conversation = await createConversation({
+        userId: user.id,
+        surface,
+        replyTarget: { channelId: '123', threadId: '456' },
+      });
+      const delivery = await buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Dana',
+        question: 'Run the tool',
+      });
+      const approval = {
+        approvalId: '3f0c8f0e-1111-4222-8333-444455556666',
+        integrationId: 'example',
+        toolName: 'write',
+        argsSummary: { token: '[REDACTED]' },
+        status: 'pending' as const,
+        taskId: null,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        createdAt: new Date().toISOString(),
+      };
+      await delivery!.adapter.postReply({
+        purpose: 'progress',
+        message: 'fallback link',
+        toolApproval: approval,
+      });
+      const post =
+        surface === 'discord'
+          ? mocks.discordPostMessage
+          : mocks.telegramPostMessage;
+      expect(post).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId: '123',
+          threadId: '456',
+          text: expect.stringContaining('[REDACTED]'),
+          buttons: [
+            [
+              expect.objectContaining({ text: 'Allow once' }),
+              expect.objectContaining({ text: 'Allow for session' }),
+              expect.objectContaining({ text: 'Deny' }),
+            ],
+          ],
+        }),
+      );
+    },
+  );
 
   it.each(['discord', 'telegram'] as const)(
     'wires %s typing to the reply target for only the active turn',
@@ -810,7 +865,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
   });
 
   it.each(['', '[View video](https://roomote.example/video)'])(
-    'binds Slack surface replies and selected videos to the Fast session with fallback %j',
+    'binds Slack surface replies and selected videos to the session with fallback %j',
     async (fallback) => {
       mocks.deliverVideos.mockResolvedValueOnce(fallback);
       const user = await userFactory.create();

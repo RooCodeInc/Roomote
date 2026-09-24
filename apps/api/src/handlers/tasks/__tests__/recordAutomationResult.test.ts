@@ -6,6 +6,11 @@ import type { McpAuth } from '../../mcp/middleware';
 const mocks = vi.hoisted(() => ({
   findRun: vi.fn(),
   recordResult: vi.fn(),
+  enqueuePreparation: vi.fn(),
+}));
+
+vi.mock('@roomote/sdk/server/automation-result-preparation', () => ({
+  enqueueAutomationResultPreparation: mocks.enqueuePreparation,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -62,7 +67,24 @@ describe('recordAutomationResult', () => {
       content: 'Result body',
       dedupeKey: 'result-1',
       visibility: 'private',
+      sourceRunId: 42,
+      resultKind: undefined,
     });
+    expect(mocks.enqueuePreparation).toHaveBeenCalledWith('result-1');
+  });
+
+  it('does not enqueue preparation for an already cleared no-op', async () => {
+    mocks.findRun.mockResolvedValue({ taskId: 'task-1' });
+    mocks.recordResult.mockResolvedValue({
+      id: 'result-1',
+      ignoredAt: new Date(),
+    });
+
+    const response = await postResult(createApp(42), 'task-1');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ recorded: true });
+    expect(mocks.enqueuePreparation).not.toHaveBeenCalled();
   });
 
   it('rejects a run token bound to another task', async () => {

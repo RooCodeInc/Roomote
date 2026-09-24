@@ -69,6 +69,7 @@ describe('judgment model settings commands', () => {
     vi.stubEnv('R_JUDGMENT_MODEL', '');
     vi.stubEnv('OPENROUTER_API_KEY', '');
     vi.stubEnv('AI_GATEWAY_API_KEY', '');
+    vi.stubEnv('R_JUDGMENT_UPSTREAM_URL', '');
     const admin = await userFactory.create();
     adminAuth = {
       success: true,
@@ -90,10 +91,44 @@ describe('judgment model settings commands', () => {
       typeSafe: { connected: false, source: null },
       openRouterConnected: false,
       vercelGatewayConnected: false,
+      roomoteConnected: false,
       storedSelection: null,
       envSelection: null,
       effectiveSelection: 'off',
       effectiveSelectionUsable: true,
+    });
+  });
+
+  it('uses a configured Roomote judgment upstream only when selected and never exposes it', async () => {
+    vi.stubEnv('R_JUDGMENT_UPSTREAM_URL', 'https://judgment.example.test');
+    vi.stubEnv('R_JUDGMENT_UPSTREAM_API_KEY', 'upstream-secret');
+
+    const settings = await getJudgmentModelSettingsCommand(adminAuth);
+    expect(settings).toMatchObject({
+      roomoteConnected: true,
+      storedSelection: null,
+      effectiveSelection: 'off',
+      effectiveSelectionUsable: true,
+    });
+    expect(JSON.stringify(settings)).not.toContain('upstream-secret');
+    expect(JSON.stringify(settings)).not.toContain('judgment.example.test');
+
+    await expect(
+      setJudgmentModelSelectionCommand(adminAuth, { selection: 'roomote' }),
+    ).resolves.toMatchObject({
+      roomoteConnected: true,
+      storedSelection: 'roomote',
+      effectiveSelection: 'roomote',
+      effectiveSelectionUsable: true,
+    });
+
+    vi.stubEnv('OPENROUTER_API_KEY', 'openrouter-key');
+    await expect(
+      setJudgmentModelSelectionCommand(adminAuth, { selection: 'openrouter' }),
+    ).resolves.toMatchObject({
+      roomoteConnected: true,
+      storedSelection: 'openrouter',
+      effectiveSelection: 'openrouter',
     });
   });
 
@@ -217,6 +252,11 @@ describe('judgment model settings commands', () => {
   });
 
   it('only allows selections whose provider is connected', async () => {
+    await expect(
+      setJudgmentModelSelectionCommand(adminAuth, { selection: 'roomote' }),
+    ).rejects.toThrow(
+      'Set R_JUDGMENT_UPSTREAM_URL before choosing Roomote judgment model.',
+    );
     await expect(
       setJudgmentModelSelectionCommand(adminAuth, { selection: 'typesafe' }),
     ).rejects.toThrow('Connect TypeSafe before choosing Jev via TypeSafe.');

@@ -18,6 +18,7 @@ import {
   createSlackMessageInterval,
   createLinearMessageInterval,
   createGitHubTokenRefreshInterval,
+  createTaskFollowUpInterval,
 } from './polling/index';
 
 export const startPolling = (options: ListenerOptions) => {
@@ -52,7 +53,7 @@ export const startPolling = (options: ListenerOptions) => {
   }
 
   // Answers to a Linear elicitation reach the run through this poller, so a
-  // task delegated from a Linear Fast Session needs it as much as a direct
+  // task delegated from a Linear session needs it as much as a direct
   // Linear task does.
   if (
     taskRun.payloadKind === TaskPayloadKind.LinearAgentSession ||
@@ -71,6 +72,13 @@ export const startPolling = (options: ListenerOptions) => {
     logger,
     initialExpiresAt: options.sourceControlTokenExpiresAt,
   });
+
+  if (options.drainTaskFollowUps) {
+    state.taskFollowUpInterval = createTaskFollowUpInterval({
+      drain: options.drainTaskFollowUps,
+      logger,
+    });
+  }
 };
 
 export const stopPolling = async (state: RunTaskState) => {
@@ -117,5 +125,10 @@ export const stopPolling = async (state: RunTaskState) => {
   if (state.githubTokenRefreshInterval) {
     clearInterval(state.githubTokenRefreshInterval);
     state.githubTokenRefreshInterval = undefined;
+  }
+
+  if (state.taskFollowUpInterval) {
+    clearInterval(state.taskFollowUpInterval);
+    state.taskFollowUpInterval = undefined;
   }
 };

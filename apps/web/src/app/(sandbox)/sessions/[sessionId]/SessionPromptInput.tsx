@@ -46,6 +46,11 @@ import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
+import {
+  SessionQueuedMessageList,
+  type SessionQueuedMessage,
+  type SessionQueuedMessageDeleteOutcome,
+} from './SessionQueuedMessageList';
 import { SessionWakeups } from './SessionWakeups';
 
 export type SessionPromptSubmission = PromptInputMessage & {
@@ -229,6 +234,9 @@ export function SessionPromptInput({
   assistantMessageCount = 0,
   taskStateRevision = '',
   agentWorking = false,
+  queuedMessages = [],
+  currentUserId = null,
+  onDeleteQueuedMessage,
   initialModel = null,
   initialReasoningEffort = null,
   defaultModelId = null,
@@ -250,6 +258,14 @@ export function SessionPromptInput({
   /** True while the agent is still responding; suggestions only exist while
    * the agent is waiting for the human. */
   agentWorking?: boolean;
+  /** Follow-ups waiting for delivery, shown inside the composer card until
+   * the agent picks them up. */
+  queuedMessages?: SessionQueuedMessage[];
+  /** The viewer, who may delete their own queued follow-ups. */
+  currentUserId?: string | null;
+  onDeleteQueuedMessage?: (
+    message: SessionQueuedMessage,
+  ) => Promise<SessionQueuedMessageDeleteOutcome>;
   initialModel?: string | null;
   initialReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
@@ -416,11 +432,44 @@ export function SessionPromptInput({
     });
   };
 
+  const handleModelSelectionChange = (selection: {
+    model: string;
+    reasoningEffort: ReasoningEffort | null;
+  }) => {
+    // The picker emits model and effort together (a model switch can
+    // normalize the effort); applying both atomically keeps the voice-turn
+    // selection ref from observing a stale intermediate model.
+    const previousModel = model;
+    const previousReasoningEffort = reasoningEffort;
+    setModel(selection.model);
+    setReasoningEffort(selection.reasoningEffort);
+    onModelSelectionChange?.(selection);
+    void updateModelSelection(
+      {
+        model: selection.model || null,
+        reasoningEffort: selection.reasoningEffort,
+      },
+      () => {
+        setModel(previousModel);
+        setReasoningEffort(previousReasoningEffort);
+        onModelSelectionChange?.({
+          model: previousModel || null,
+          reasoningEffort: previousReasoningEffort,
+        });
+      },
+    );
+  };
+
   const controlsDisabled = isBusy || isUpdatingModelSelection;
 
   return (
     <div className="mx-auto w-full max-w-4xl">
       <SessionWakeups key={sessionId} sessionId={sessionId} />
+      <SessionQueuedMessageList
+        queuedMessages={queuedMessages}
+        currentUserId={currentUserId}
+        onDelete={onDeleteQueuedMessage}
+      />
       <PromptInputRoot
         onSubmit={handleSubmit}
         accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
@@ -493,6 +542,7 @@ export function SessionPromptInput({
                 onModelChange={handleModelChange}
                 reasoningEffort={reasoningEffort}
                 onReasoningEffortChange={handleReasoningEffortChange}
+                onModelSelectionChange={handleModelSelectionChange}
                 defaultModelId={defaultModelId}
                 defaultReasoningEffort={defaultReasoningEffort}
                 disabled={controlsDisabled}

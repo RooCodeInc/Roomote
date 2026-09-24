@@ -1,3 +1,5 @@
+export const ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS = 200_000;
+
 const TEXT_ATTACHMENT_EXTENSIONS = [
   'txt',
   'md',
@@ -14,6 +16,8 @@ const TEXT_ATTACHMENT_EXTENSIONS = [
   'ts',
   'tsx',
   'py',
+  'r',
+  'ipynb',
   'rb',
   'go',
   'rs',
@@ -103,6 +107,8 @@ const TEXT_ATTACHMENT_MIME_TYPES = new Set([
   'application/ld+json',
   'application/sql',
   'application/toml',
+  'application/x-ipynb+json',
+  'application/x-r',
   'application/x-sh',
   'application/x-yaml',
   'application/xhtml+xml',
@@ -115,6 +121,8 @@ const TEXT_ATTACHMENT_MIME_TYPES = new Set([
   'text/plain',
   'text/tab-separated-values',
   'text/x-python',
+  'text/x-r',
+  'text/x-r-source',
   'text/x-ruby',
   'text/x-sql',
   'text/xml',

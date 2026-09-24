@@ -92,6 +92,8 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
       models: {
         'gpt-5.4': createModel('gpt-5.4'),
         'gpt-6-astra': createModel('gpt-6-astra'),
+        'gpt-6-sol': createModel('gpt-6-sol'),
+        'gpt-6-luna': createModel('gpt-6-luna'),
         'gpt-5.6-luna': createModel('gpt-5.6-luna'),
         'gpt-5.6': createModel('gpt-5.6'),
         'gpt-5.5-pro': createModel('gpt-5.5-pro'),
@@ -105,6 +107,8 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
     expect(Object.keys(models)).toEqual([
       'gpt-5.4',
       'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
       'gpt-5.6-luna',
       'gpt-5.6',
       'gpt-5.5-pro',

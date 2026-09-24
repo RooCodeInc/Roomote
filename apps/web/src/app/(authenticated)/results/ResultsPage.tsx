@@ -1,17 +1,14 @@
 'use client';
 
-import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { startTransition, useEffect, useRef, useState, type Ref } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import removeMd from 'remove-markdown';
 import { toast } from 'sonner';
+import { useMediaQuery } from 'usehooks-ts';
 
 import {
-  BasicTooltip,
   Button,
-  Card,
-  CardContent,
-  Check,
   CircleAlert,
   Dialog,
   DialogContent,
@@ -20,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
   Empty,
+  EmptyDescription,
   EmptyHeader,
   EmptyTitle,
   RetryableLoadError,
@@ -27,176 +25,148 @@ import {
   TriangleAlert,
   X,
 } from '@/components/system';
-import { CustomLink, MessageResponse } from '@/components/ai-elements';
+import { MessageResponse } from '@/components/ai-elements';
 import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
-import { useResultsPage } from '@/hooks/useResultsPage';
+import { cn } from '@/lib/utils';
+import { useTelemetry } from '@/hooks/useTelemetry';
 import { useTRPC } from '@/trpc/client';
 import type { ResultInboxItem } from '@/trpc/commands/results';
 
-function resultPreview(result: ResultInboxItem) {
+import { ResponsiveWorkspacePanels } from '../../(sandbox)/SandboxWorkspacePanels';
+
+const EMPTY_RESULTS: ResultInboxItem[] = [];
+const DETAIL_SKELETON_DELAY_MS = 500;
+const EMPTY_RESULT_ID = '00000000-0000-4000-8000-000000000000';
+
+function resultKey(result: Pick<ResultInboxItem, 'id' | 'kind'>) {
+  return `${result.kind}:${result.id}`;
+}
+
+function AutomationAvatar({
+  result,
+  size = 'default',
+}: {
+  result: ResultInboxItem;
+  size?: 'default' | 'large';
+}) {
+  const isLarge = size === 'large';
   return (
-    result.title ??
-    removeMd(result.content).replaceAll('\\n', ' ').replace(/\s+/gu, ' ').trim()
-  );
-}
-
-function resultTitle(result: ResultInboxItem) {
-  const title = result.title ?? resultPreview(result);
-  return title.length > 140 ? `${title.slice(0, 137)}...` : title;
-}
-
-function resultPrompt(result: ResultInboxItem) {
-  return result.title
-    ? `${result.title}\n\n${result.content}`.trim()
-    : result.content;
-}
-
-function ignoredResultToastTitle(result: ResultInboxItem) {
-  const title = result.title ?? resultPreview(result);
-  return title.length > 30 ? `${title.slice(0, 30)}...` : title;
-}
-
-function ResultTextBlock({ children }: { children?: ReactNode }) {
-  return <div>{children}</div>;
-}
-
-function ResultTextInline({ children }: { children?: ReactNode }) {
-  return <span>{children}</span>;
-}
-
-function ResultImageText({ alt }: { alt?: string }) {
-  return alt ? <span>{alt}</span> : null;
-}
-
-const resultMarkdownComponents = {
-  a: CustomLink,
-  blockquote: ResultTextBlock,
-  code: ResultTextInline,
-  del: ResultTextInline,
-  em: ResultTextInline,
-  h1: ResultTextBlock,
-  h2: ResultTextBlock,
-  h3: ResultTextBlock,
-  h4: ResultTextBlock,
-  h5: ResultTextBlock,
-  h6: ResultTextBlock,
-  img: ResultImageText,
-  li: ResultTextBlock,
-  ol: ResultTextBlock,
-  p: ResultTextBlock,
-  pre: ResultTextBlock,
-  strong: ResultTextInline,
-  ul: ResultTextBlock,
-};
-
-function AutomationAvatar({ result }: { result: ResultInboxItem }) {
-  return (
-    <span className="flex size-5 shrink-0 items-center justify-center overflow-clip rounded-full border border-border bg-white ring-1 ring-card dark:bg-muted">
+    <span
+      className={cn(
+        'flex shrink-0 items-center justify-center overflow-clip rounded-full border border-border bg-white ring-1 ring-card dark:bg-muted',
+        isLarge ? 'size-8' : 'size-7',
+      )}
+    >
       <TaskAutomationIcon
         automationKey={result.automationKey}
-        className="size-4"
+        className={isLarge ? 'size-6' : 'size-5'}
       />
     </span>
   );
 }
 
 function PriorityMarker({
-  priority,
+  result,
+  selected,
 }: {
-  priority: ResultInboxItem['priority'];
+  result: ResultInboxItem;
+  selected: boolean;
 }) {
-  if (priority === 'normal') return null;
-
-  const Icon = priority === 'critical' ? TriangleAlert : CircleAlert;
-  const label = priority === 'critical' ? 'Critical priority' : 'High priority';
-
+  if (result.priority === 'normal') return null;
+  const Icon = result.priority === 'critical' ? TriangleAlert : CircleAlert;
   return (
     <Icon
-      aria-label={label}
-      className={`size-5 ${
-        priority === 'critical' ? 'text-destructive' : 'text-warning'
-      }`}
+      aria-label={`${result.priority === 'critical' ? 'Critical' : 'High'} priority`}
+      className={cn(
+        'size-3 shrink-0',
+        selected
+          ? 'text-black'
+          : result.priority === 'critical'
+            ? 'text-destructive'
+            : 'text-warning',
+      )}
       strokeWidth={2}
     />
   );
 }
 
-function ResultContent({ result }: { result: ResultInboxItem }) {
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [truncated, setTruncated] = useState(false);
-
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content || expanded) return;
-
-    const measure = () => {
-      setTruncated(content.scrollHeight > content.clientHeight + 1);
-    };
-    measure();
-
-    const observer = new ResizeObserver(measure);
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [expanded]);
-
+function ResultsSkeleton() {
   return (
-    <div className="min-w-0">
-      <div
-        ref={contentRef}
-        data-testid={`result-content-${result.id}`}
-        className={
-          expanded
-            ? 'text-sm leading-normal text-foreground'
-            : 'line-clamp-3 text-sm leading-normal text-foreground'
-        }
-      >
-        <MessageResponse
-          components={resultMarkdownComponents}
-          pullRequestRepositoryUrl={result.repositoryUrl}
-        >
-          {result.title ?? result.content.replaceAll('\\n', ' ')}
-        </MessageResponse>
+    <div className="grid min-h-[34rem] grid-cols-1 overflow-hidden bg-background md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="space-y-1 bg-background p-3">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <Skeleton key={index} className="h-24 w-full" />
+        ))}
       </div>
-      {truncated && !expanded ? (
-        <button
-          type="button"
-          className="mt-0.5 block cursor-pointer bg-transparent text-sm font-medium text-primary underline underline-offset-2 hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-          onClick={(event) => {
-            event.stopPropagation();
-            setExpanded(true);
-          }}
-        >
-          More
-        </button>
-      ) : null}
+      <div className="hidden space-y-4 bg-background p-8 md:block">
+        <Skeleton className="h-8 w-3/5" />
+        <Skeleton className="h-4 w-2/5" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    </div>
+  );
+}
+
+function DetailSkeleton() {
+  return (
+    <div className="space-y-4 px-5 py-6 md:px-8 md:py-8">
+      <Skeleton className="h-7 w-3/5" />
+      <Skeleton className="h-4 w-4/5" />
+      <Skeleton className="h-4 w-2/5" />
+      <Skeleton className="mt-8 h-44 w-full" />
     </div>
   );
 }
 
 export function ResultsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const { enabled, isLoading: isFlagLoading } = useResultsPage();
-  const [selected, setSelected] = useState<ResultInboxItem | null>(null);
+  const { capture } = useTelemetry();
+  const isDesktop = useMediaQuery('(min-width: 768px)', {
+    initializeWithValue: false,
+  });
+  const requestedResultKey = searchParams.get('result') ?? '';
+  const [selectedKey, setSelectedKey] = useState(requestedResultKey);
+  const previousResultParamRef = useRef(requestedResultKey);
+  const [showSuggestionComposer, setShowSuggestionComposer] = useState(false);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const [displayedResult, setDisplayedResult] =
+    useState<ResultInboxItem | null>(null);
+  const [showDetailSkeleton, setShowDetailSkeleton] = useState(false);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const resultListRef = useRef<HTMLDivElement>(null);
+  const detailHeadingRef = useRef<HTMLHeadingElement>(null);
+  const mainActionRef = useRef<HTMLAnchorElement | HTMLButtonElement>(null);
+  const trackedInboxViewRef = useRef(false);
+  const [canScrollResultsUp, setCanScrollResultsUp] = useState(false);
+  const [canScrollResultsDown, setCanScrollResultsDown] = useState(false);
+  const replaceResultParam = (key: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (key) params.set('result', key);
+    else params.delete('result');
+    const href = params.size > 0 ? `/results?${params.toString()}` : '/results';
+    startTransition(() => router.replace(href));
+  };
   const listQueryKey = trpc.results.list.queryKey();
-  const listQuery = useQuery(
-    trpc.results.list.queryOptions(undefined, { enabled }),
-  );
+  const listQuery = useQuery(trpc.results.list.queryOptions(undefined));
+
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: listQueryKey }),
+      queryClient.invalidateQueries({
+        queryKey: trpc.results.pendingCount.queryKey(),
+      }),
       queryClient.invalidateQueries({
         queryKey: trpc.results.unreadCount.queryKey(),
       }),
     ]);
   };
-  const actionMutation = useMutation(
-    trpc.results.act.mutationOptions({
+  const clearMutation = useMutation(
+    trpc.results.clearOne.mutationOptions({
       onMutate: async (variables) => {
         await queryClient.cancelQueries({ queryKey: listQueryKey });
         const previous =
@@ -207,80 +177,243 @@ export function ResultsPage() {
               result.id !== variables.id || result.kind !== variables.kind,
           ),
         );
-        if (selected?.id === variables.id && selected.kind === variables.kind) {
-          setSelected(null);
-        }
         return { previous };
       },
       onError: (error, _variables, context) => {
         queryClient.setQueryData(listQueryKey, context?.previous);
         toast.error(error.message);
+      },
+      onSuccess: (result) => {
+        if (result.success) toast.success('Result cleared');
       },
       onSettled: () => void invalidate(),
     }),
   );
-  const clearMutation = useMutation(
+  const clearAllMutation = useMutation(
     trpc.results.clear.mutationOptions({
-      onMutate: async () => {
-        await queryClient.cancelQueries({ queryKey: listQueryKey });
-        const previous =
-          queryClient.getQueryData<ResultInboxItem[]>(listQueryKey);
-        queryClient.setQueryData<ResultInboxItem[]>(listQueryKey, []);
-        setSelected(null);
-        return { previous };
+      onSuccess: (result) => {
+        capture('results_cleared_all', { count: result.clearedCount });
+        setSelectedKey('');
+        setDisplayedResult(null);
+        replaceResultParam('');
+        void invalidate();
       },
-      onError: (error, _variables, context) => {
-        queryClient.setQueryData(listQueryKey, context?.previous);
-        toast.error(error.message);
-      },
-      onSettled: () => void invalidate(),
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+  const acceptSuggestionMutation = useMutation(
+    trpc.results.acceptSuggestion.mutationOptions({
+      onSuccess: () => void invalidate(),
+      onError: (error) => toast.error(error.message),
     }),
   );
 
   useEffect(() => {
-    if (!isFlagLoading && !enabled) router.replace('/');
-  }, [enabled, isFlagLoading, router]);
+    if (previousResultParamRef.current === requestedResultKey) return;
+    previousResultParamRef.current = requestedResultKey;
+    setSelectedKey(requestedResultKey);
+    setShowSuggestionComposer(false);
+  }, [requestedResultKey]);
 
-  if (isFlagLoading || !enabled || listQuery.isPending) {
+  const results = listQuery.data ?? EMPTY_RESULTS;
+  const selectedSummary =
+    results.find((result) => resultKey(result) === selectedKey) ?? null;
+  const updateResultScrollBoundaries = () => {
+    const list = resultListRef.current;
+    if (!list) return;
+    setCanScrollResultsUp(list.scrollTop > 1);
+    setCanScrollResultsDown(
+      list.scrollTop + list.clientHeight < list.scrollHeight - 1,
+    );
+  };
+  const detailQuery = useQuery(
+    trpc.results.get.queryOptions(
+      {
+        id: selectedSummary?.id ?? EMPTY_RESULT_ID,
+        kind: selectedSummary?.kind ?? 'report',
+      },
+      { enabled: selectedSummary !== null },
+    ),
+  );
+  const displayedKey = displayedResult ? resultKey(displayedResult) : '';
+  const isDetailTransition =
+    selectedSummary !== null && displayedKey !== selectedKey;
+  const actionableResult = isDetailTransition ? null : displayedResult;
+
+  useEffect(() => {
+    const list = resultListRef.current;
+    if (!list) return;
+    updateResultScrollBoundaries();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateResultScrollBoundaries);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [results.length]);
+
+  useEffect(() => {
+    if (!trackedInboxViewRef.current && listQuery.isSuccess) {
+      trackedInboxViewRef.current = true;
+      capture('results_inbox_viewed', { count: results.length });
+    }
+  }, [capture, listQuery.isSuccess, results.length]);
+
+  useEffect(() => {
+    if (!selectedSummary || displayedKey === selectedKey) {
+      setShowDetailSkeleton(false);
+      return;
+    }
+
+    setShowDetailSkeleton(false);
+    const timeout = window.setTimeout(
+      () => setShowDetailSkeleton(true),
+      DETAIL_SKELETON_DELAY_MS,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [displayedKey, selectedKey, selectedSummary]);
+
+  useEffect(() => {
+    const next = detailQuery.data;
+    if (next && resultKey(next) === selectedKey) {
+      setDisplayedResult(next);
+      setShowDetailSkeleton(false);
+      return;
+    }
+    // A rejected detail fetch falls back to the already-loaded list item so
+    // the pane never stays on a skeleton or goes blank; recovery retries the
+    // list query, which re-populates the detail cache.
+    if (detailQuery.isError && selectedSummary) {
+      setDisplayedResult(selectedSummary);
+      setShowDetailSkeleton(false);
+    }
+  }, [detailQuery.data, detailQuery.isError, selectedKey, selectedSummary]);
+
+  const closeResultDetail = () => {
+    const prior = selectedKey;
+    setSelectedKey('');
+    setShowSuggestionComposer(false);
+    setDisplayedResult(null);
+    setShowDetailSkeleton(false);
+    replaceResultParam('');
+    requestAnimationFrame(() => rowRefs.current.get(prior)?.focus());
+  };
+
+  const selectResult = (result: ResultInboxItem) => {
+    const key = resultKey(result);
+    setSelectedKey(key);
+    setShowSuggestionComposer(false);
+    capture('result_selected', {
+      kind: result.kind,
+      priority: result.priority,
+      preparation: result.preparationStatus,
+    });
+    replaceResultParam(key);
+    if (!isDesktop) {
+      requestAnimationFrame(() => detailHeadingRef.current?.focus());
+    }
+  };
+
+  const clearResult = (result: ResultInboxItem) => {
+    if (resultKey(result) !== selectedKey) return;
+    const index = results.findIndex(
+      (candidate) => resultKey(candidate) === resultKey(result),
+    );
+    const next = results[index + 1] ?? results[index - 1] ?? null;
+    const nextKey = next ? resultKey(next) : '';
+    setSelectedKey(nextKey);
+    setShowSuggestionComposer(false);
+    if (!next) setDisplayedResult(null);
+    replaceResultParam(nextKey);
+    capture('result_cleared', { kind: result.kind, priority: result.priority });
+    clearMutation.mutate({ id: result.id, kind: result.kind });
+  };
+
+  useEffect(() => {
+    const handleKeyboardNavigation = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+        return;
+      }
+      const target = event.target;
+      const element = target instanceof Element ? target : null;
+      const editable = Boolean(
+        element?.closest('input, textarea, select, [contenteditable="true"]'),
+      );
+      if (editable) return;
+
+      const ordinaryControl = element?.closest(
+        'a, button:not([role="option"]), [role="button"]',
+      );
+      if (ordinaryControl) return;
+
+      const selectedIndex = results.findIndex(
+        (result) => resultKey(result) === selectedKey,
+      );
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        const nextIndex =
+          selectedIndex === -1
+            ? event.key === 'ArrowDown'
+              ? 0
+              : results.length - 1
+            : selectedIndex + (event.key === 'ArrowDown' ? 1 : -1);
+        const next = results[nextIndex];
+        if (!next) return;
+        event.preventDefault();
+        selectResult(next);
+        if (isDesktop) {
+          requestAnimationFrame(() =>
+            rowRefs.current.get(resultKey(next))?.focus(),
+          );
+        }
+        return;
+      }
+
+      if (event.repeat || !selectedSummary) return;
+      if (event.key === 'Delete') {
+        event.preventDefault();
+        clearResult(selectedSummary);
+      } else if (
+        (event.key === 'Enter' || event.key === 'Return') &&
+        actionableResult &&
+        mainActionRef.current
+      ) {
+        event.preventDefault();
+        mainActionRef.current?.click();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyboardNavigation);
+    return () =>
+      document.removeEventListener('keydown', handleKeyboardNavigation);
+  });
+
+  const primaryAction = actionableResult?.actions[0] ?? null;
+  const secondaryActions = actionableResult?.actions.slice(1) ?? [];
+
+  if (listQuery.isPending) {
     return (
-      <div className="min-h-full w-full space-y-6 overflow-auto bg-background px-4 py-8 md:px-8">
-        <Skeleton className="h-8 w-52" />
-        <Skeleton className="h-64 w-full" />
+      <div className="min-h-full w-full overflow-auto bg-background px-4 py-8 md:px-8">
+        <div className="mx-auto w-full max-w-6xl space-y-6">
+          <Skeleton className="h-8 w-52" />
+          <ResultsSkeleton />
+        </div>
       </div>
     );
   }
 
-  const results = listQuery.data ?? [];
-  const actOnResult = (
-    result: ResultInboxItem,
-    action: 'accept' | 'ignore',
-  ) => {
-    const ignoredTitle =
-      action === 'ignore' && result.kind === 'suggestion'
-        ? ignoredResultToastTitle(result)
-        : null;
-    actionMutation.mutate(
-      { id: result.id, kind: result.kind, action },
-      {
-        onSuccess: () => {
-          if (ignoredTitle) toast.success(`${ignoredTitle} was ignored`);
-        },
-      },
-    );
-  };
-
   return (
-    <div className="min-h-full w-full overflow-auto bg-background px-4 py-8 md:px-8">
-      <div className="max-w-8xl space-y-6">
-        <header className="flex items-center justify-between gap-4">
-          <h1 className="text-2xl font-semibold text-foreground">
-            Automation Results
-          </h1>
+    <div className="flex min-h-full w-full flex-col overflow-hidden bg-background px-4 py-6 md:px-8">
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col">
+        <header className="mb-5 flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground">Results</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Review automation reports and suggested follow-ups.
+            </p>
+          </div>
           {results.length > 0 ? (
             <Button
               size="sm"
               variant="outline"
-              disabled={clearMutation.isPending}
+              disabled={clearAllMutation.isPending}
               onClick={() => setIsClearConfirmOpen(true)}
             >
               Clear all
@@ -296,181 +429,313 @@ export function ResultsPage() {
             onRetry={() => void listQuery.refetch()}
           />
         ) : results.length === 0 ? (
-          <Empty className="border">
+          <Empty>
             <EmptyHeader>
-              <EmptyTitle>No unread results</EmptyTitle>
+              <EmptyTitle>You&apos;re all caught up</EmptyTitle>
             </EmptyHeader>
+            <EmptyDescription>
+              New automation reports and suggested follow-ups will appear here
+              when they are ready.
+            </EmptyDescription>
           </Empty>
         ) : (
-          <Card variant="snug" className="gap-0 p-0">
-            <CardContent className="p-0!">
-              <div
-                role="row"
-                className="mb-0 hidden grid-cols-[3rem_5.5rem_minmax(0,2fr)_minmax(0,8fr)_5rem] gap-4 border-b border-background px-6 py-2 text-xs font-medium text-muted-foreground md:grid"
-              >
-                <span aria-hidden="true" />
-                <span role="columnheader">Produced</span>
-                <span role="columnheader">Automation</span>
-                <span role="columnheader">Result</span>
-                <span role="columnheader" className="sr-only">
-                  Actions
-                </span>
-              </div>
-              <div role="rowgroup" className="divide-y divide-background">
-                {results.map((result) => (
+          <div className="flex min-h-0 flex-1 overflow-hidden bg-background">
+            <ResponsiveWorkspacePanels
+              isPanelOpen={selectedSummary !== null}
+              mainSize={40}
+              panelSize={60}
+              mainMinSize={30}
+              panelMinSize={40}
+              panelId="result-detail"
+              main={
+                <div className="relative h-full min-h-0 overflow-hidden bg-background">
                   <div
-                    key={`${result.kind}:${result.id}`}
-                    role="row"
-                    className="group grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 px-4 py-3 transition-colors hover:bg-accent-foreground/20 md:grid-cols-[3rem_5.5rem_minmax(0,2fr)_minmax(0,8fr)_5rem] md:gap-4 md:px-6"
-                    tabIndex={0}
-                    onClick={(event) => {
-                      if (
-                        event.target instanceof Element &&
-                        event.target.closest('a, button')
-                      ) {
-                        return;
-                      }
-                      setSelected(result);
-                    }}
-                    onKeyDown={(event) => {
-                      if (
-                        event.target instanceof Element &&
-                        event.target.closest('a, button')
-                      ) {
-                        return;
-                      }
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setSelected(result);
-                      }
-                    }}
+                    ref={resultListRef}
+                    role="listbox"
+                    aria-label="Pending automation results"
+                    className="scroll-thin h-full overflow-y-auto divide-y divide-card bg-background"
+                    onScroll={updateResultScrollBoundaries}
                   >
-                    <div
-                      role="cell"
-                      className="col-start-2 row-start-1 flex justify-end md:col-start-1 md:justify-center"
-                    >
-                      <PriorityMarker priority={result.priority} />
-                    </div>
-                    <div
-                      role="cell"
-                      className="col-start-1 row-start-2 pl-7 text-xs text-muted-foreground md:col-start-2 md:row-start-1 md:pl-0 md:text-sm"
-                    >
-                      {formatDistanceToNowCompact(result.createdAt, {
-                        addSuffix: true,
-                      })}
-                    </div>
-                    <div
-                      role="cell"
-                      className="col-start-1 row-start-1 flex min-w-0 items-start gap-2 md:col-start-3"
-                    >
-                      <AutomationAvatar result={result} />
-                      <span className="truncate text-sm font-semibold">
-                        {result.automationName}
-                      </span>
-                    </div>
-                    <div
-                      role="cell"
-                      className="col-span-2 col-start-1 row-start-3 min-w-0 pl-7 text-foreground md:col-span-1 md:col-start-4 md:row-start-1 md:pl-0"
-                    >
-                      <ResultContent result={result} />
-                    </div>
-                    <div
-                      role="cell"
-                      className="col-span-2 col-start-1 row-start-4 -ml-2 flex items-start gap-1 pl-7 md:col-span-1 md:col-start-5 md:row-start-1 md:ml-0 md:justify-end md:pl-0"
-                    >
-                      <BasicTooltip content="Accept">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="hover:text-accent-foreground"
-                          aria-label={`Accept ${resultTitle(result)}`}
-                          disabled={actionMutation.isPending}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            actOnResult(result, 'accept');
+                    {results.map((result) => {
+                      const key = resultKey(result);
+                      const isSelected = selectedKey === key;
+                      return (
+                        <button
+                          key={key}
+                          ref={(node) => {
+                            if (node) rowRefs.current.set(key, node);
+                            else rowRefs.current.delete(key);
                           }}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          className={cn(
+                            'group flex w-full cursor-pointer items-start gap-3 py-4 pr-3 pl-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                            isSelected
+                              ? 'bg-accent-foreground text-black'
+                              : 'hover:bg-accent-foreground/10',
+                          )}
+                          onClick={() => selectResult(result)}
                         >
-                          <Check />
-                        </Button>
-                      </BasicTooltip>
-                      <BasicTooltip content="Clear">
+                          <AutomationAvatar result={result} />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-start gap-2">
+                              <span className="line-clamp-2 flex-1 text-base font-medium leading-snug">
+                                {result.headline}
+                              </span>
+                              <PriorityMarker
+                                result={result}
+                                selected={isSelected}
+                              />
+                            </span>
+                            <span
+                              className={cn(
+                                'mt-1 line-clamp-3 block text-sm leading-snug',
+                                isSelected
+                                  ? 'text-black/80'
+                                  : 'text-muted-foreground',
+                              )}
+                            >
+                              {result.decisionContext}
+                            </span>
+                            <span
+                              className={cn(
+                                'mt-2 flex items-center gap-1.5 text-xs',
+                                isSelected
+                                  ? 'text-black/75'
+                                  : 'text-muted-foreground',
+                              )}
+                            >
+                              <span className="truncate">
+                                {result.automationName}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span className="shrink-0">
+                                {formatDistanceToNowCompact(result.createdAt, {
+                                  addSuffix: true,
+                                })}
+                              </span>
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div
+                    aria-hidden="true"
+                    data-visible={canScrollResultsUp}
+                    className={cn(
+                      'pointer-events-none absolute inset-x-0 top-0 h-12 bg-linear-to-b from-background to-transparent transition-transform motion-reduce:transition-none',
+                      canScrollResultsUp ? 'opacity-80' : 'opacity-0',
+                    )}
+                  />
+                  <div
+                    aria-hidden="true"
+                    data-visible={canScrollResultsDown}
+                    className={cn(
+                      'pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-linear-to-t from-background to-transparent transition-transform motion-reduce:transition-none',
+                      canScrollResultsDown ? 'opacity-80' : 'opacity-0',
+                    )}
+                  />
+                </div>
+              }
+              panel={
+                selectedSummary ? (
+                  showDetailSkeleton || !displayedResult ? (
+                    <div className="h-full overflow-y-auto bg-card">
+                      <DetailSkeleton />
+                    </div>
+                  ) : (
+                    <article
+                      aria-busy={isDetailTransition}
+                      className="flex h-full min-h-0 flex-col bg-card text-left"
+                    >
+                      <div className="min-h-0 flex-1 overflow-y-auto">
+                        <div className="mr-auto w-full max-w-3xl px-5 pb-5 pt-6 text-left md:px-8 md:pb-5 md:pt-8">
+                          <div className="flex items-start gap-3">
+                            <AutomationAvatar
+                              result={displayedResult}
+                              size="large"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <h2
+                                ref={detailHeadingRef}
+                                tabIndex={-1}
+                                className="text-balance text-xl font-semibold leading-tight outline-none"
+                              >
+                                {displayedResult.headline}
+                              </h2>
+                              <p className="mt-2 text-sm text-muted-foreground">
+                                {displayedResult.automationName} ·{' '}
+                                {formatDistanceToNowCompact(
+                                  displayedResult.createdAt,
+                                  { addSuffix: true },
+                                )}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="-mr-1.5 -mt-1.5 shrink-0"
+                              aria-label="Close result details"
+                              onClick={closeResultDetail}
+                            >
+                              <X />
+                            </Button>
+                          </div>
+                        </div>
+                        <div aria-hidden="true" className="border-t" />
+                        <div className="mr-auto w-full max-w-3xl px-5 pb-6 pt-4 text-left md:px-8 md:pb-8 md:pl-10">
+                          {displayedResult.decisionContext ? (
+                            <p className="text-base leading-relaxed text-muted-foreground">
+                              {displayedResult.decisionContext}
+                            </p>
+                          ) : null}
+                          {showSuggestionComposer &&
+                          actionableResult?.kind === 'suggestion' ? (
+                            <div className="mt-4 rounded-xl border bg-card p-4">
+                              <NewTaskForm
+                                key={actionableResult.id}
+                                animate={false}
+                                initialPrompt={
+                                  actionableResult.actions.find(
+                                    (action) =>
+                                      action.kind === 'start_suggestion',
+                                  )?.initialPrompt ?? ''
+                                }
+                                placeholder="Add details"
+                                textareaMaxHeight={260}
+                                modelSelectorSize="base"
+                                onTaskStarted={() => {
+                                  capture('suggestion_start_succeeded', {
+                                    kind: actionableResult.kind,
+                                  });
+                                  acceptSuggestionMutation.mutate({
+                                    id: actionableResult.id,
+                                  });
+                                }}
+                              />
+                            </div>
+                          ) : null}
+                          {displayedResult.content ? (
+                            <div className="mt-4 max-w-none">
+                              <MessageResponse className="break-words text-sm **:data-[streamdown='heading-1']:text-xl! **:data-[streamdown='heading-2']:text-base! **:data-[streamdown='heading-3']:text-base!">
+                                {displayedResult.content}
+                              </MessageResponse>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-card px-5 py-4 md:px-8">
+                        {primaryAction?.kind === 'navigate' ? (
+                          <Button asChild>
+                            <Link
+                              ref={mainActionRef as Ref<HTMLAnchorElement>}
+                              href={primaryAction.href}
+                              target={
+                                primaryAction.external ? '_blank' : undefined
+                              }
+                              rel={
+                                primaryAction.external
+                                  ? 'noopener noreferrer'
+                                  : undefined
+                              }
+                              onClick={() =>
+                                capture('result_navigation_opened', {
+                                  kind: actionableResult!.kind,
+                                  action: primaryAction.action,
+                                })
+                              }
+                            >
+                              {primaryAction.label}
+                            </Link>
+                          </Button>
+                        ) : primaryAction ? (
+                          <Button
+                            ref={mainActionRef as Ref<HTMLButtonElement>}
+                            onClick={() => {
+                              capture('suggestion_start_requested', {
+                                kind: actionableResult!.kind,
+                              });
+                              setShowSuggestionComposer(true);
+                            }}
+                          >
+                            {primaryAction.label}
+                          </Button>
+                        ) : null}
+                        {secondaryActions.map((action) =>
+                          action.kind === 'navigate' ? (
+                            <Button
+                              key={`${action.action}:${action.href}`}
+                              variant="outline"
+                              asChild
+                            >
+                              <Link
+                                href={action.href}
+                                target={action.external ? '_blank' : undefined}
+                                rel={
+                                  action.external
+                                    ? 'noopener noreferrer'
+                                    : undefined
+                                }
+                                onClick={() =>
+                                  capture('result_navigation_opened', {
+                                    kind: actionableResult!.kind,
+                                    action: action.action,
+                                  })
+                                }
+                              >
+                                {action.label}
+                              </Link>
+                            </Button>
+                          ) : (
+                            <Button
+                              key={action.action}
+                              variant="outline"
+                              onClick={() => {
+                                capture('suggestion_start_requested', {
+                                  kind: actionableResult!.kind,
+                                });
+                                setShowSuggestionComposer(true);
+                              }}
+                            >
+                              {action.label}
+                            </Button>
+                          ),
+                        )}
                         <Button
-                          size="icon"
-                          variant="ghost"
-                          className="hover:text-destructive"
-                          aria-label={`Clear ${resultTitle(result)}`}
-                          disabled={actionMutation.isPending}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            actOnResult(result, 'ignore');
-                          }}
+                          variant="outline"
+                          disabled={clearMutation.isPending || !selectedSummary}
+                          onClick={() =>
+                            selectedSummary && clearResult(selectedSummary)
+                          }
                         >
                           <X />
+                          Clear
                         </Button>
-                      </BasicTooltip>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                        <p className="hidden self-center text-xs text-muted-foreground md:ml-auto md:block md:text-right">
+                          {
+                            'Use ↑/↓ keys to navigate, Return to act, Delete to clear'
+                          }
+                        </p>
+                      </div>
+                    </article>
+                  )
+                ) : null
+              }
+            />
+          </div>
         )}
       </div>
-
-      <Dialog
-        open={selected !== null}
-        onOpenChange={(open) => !open && setSelected(null)}
-      >
-        <DialogContent size="4xl" className="[&_textarea]:md:min-h-42">
-          {selected ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>{resultTitle(selected)}</DialogTitle>
-                <DialogDescription asChild>
-                  <div className="flex items-center gap-1.5">
-                    <AutomationAvatar result={selected} />
-                    <span>{selected.automationName}</span>
-                    <span aria-hidden="true">&middot;</span>
-                    <span>
-                      {formatDistanceToNowCompact(selected.createdAt, {
-                        addSuffix: true,
-                      })}
-                    </span>
-                  </div>
-                </DialogDescription>
-              </DialogHeader>
-              <NewTaskForm
-                key={`${selected.kind}:${selected.id}`}
-                animate={false}
-                initialPrompt={resultPrompt(selected)}
-                placeholder="Add details"
-                textareaMaxHeight={320}
-                onTaskStarted={() => actOnResult(selected, 'accept')}
-              />
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  disabled={actionMutation.isPending}
-                  onClick={() => actOnResult(selected, 'ignore')}
-                >
-                  <X />
-                  Clear
-                </Button>
-                <Button variant="outline" onClick={() => setSelected(null)}>
-                  Close
-                </Button>
-              </DialogFooter>
-            </>
-          ) : null}
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={isClearConfirmOpen} onOpenChange={setIsClearConfirmOpen}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>Clear all results?</DialogTitle>
             <DialogDescription>
-              This will ignore all unread automation results.
+              This removes {results.length} pending{' '}
+              {results.length === 1 ? 'result' : 'results'} from the inbox.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -482,10 +747,10 @@ export function ResultsPage() {
             </Button>
             <Button
               variant="destructive"
-              disabled={clearMutation.isPending}
+              disabled={clearAllMutation.isPending}
               onClick={() => {
                 setIsClearConfirmOpen(false);
-                clearMutation.mutate();
+                clearAllMutation.mutate();
               }}
             >
               Clear all

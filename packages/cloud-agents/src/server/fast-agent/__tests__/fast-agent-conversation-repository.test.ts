@@ -23,6 +23,7 @@ import {
 import type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
 
 import {
+  claimFastAgentHumanFollowUpSteers,
   fastAgentConversationRepository,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
@@ -31,6 +32,7 @@ import {
   scheduleFastAgentDurableTurnRetry,
   markFastAgentDurableTurnDelivered,
   releaseFastAgentDurableTurnClaim,
+  releaseFastAgentHumanFollowUpSteerClaims,
   renewFastAgentDurableTurnClaim,
   revokeFastAgentDurableTurnReplay,
   markFastAgentInferenceRetryNoticeInterruption,
@@ -777,7 +779,7 @@ describe('Fast conversation repository', () => {
     expect(resolved?.conversation).toEqual(movedConversation);
   });
 
-  it('resolves a delayed Slack root to the original Fast session', async () => {
+  it('resolves a delayed Slack root to the original session', async () => {
     const user = await createUser();
     const pendingConversation = {
       surface: 'slack' as const,
@@ -1969,6 +1971,82 @@ describe('Fast conversation repository', () => {
     await expect(
       revokeFastAgentDurableTurnReplay(completed, 'late'),
     ).resolves.toBe(false);
+  });
+
+  it('claims only still-pending queued follow-ups for a native steer and hands back undelivered ones', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const parent = { sessionId: session.id, conversation: slackConversation };
+    const insertRow = async (
+      eventKey: string,
+      values: Partial<typeof fastAgentParentEvents.$inferInsert> = {},
+    ) => {
+      const [row] = await db
+        .insert(fastAgentParentEvents)
+        .values({
+          conversationId: session.id,
+          eventKey,
+          parent,
+          event: { type: 'human_follow_up', eventId: eventKey },
+          ...values,
+        })
+        .returning({ id: fastAgentParentEvents.id });
+      return row!.id;
+    };
+    const readClaim = async (id: string) => {
+      const [row] = await db
+        .select({ claimedUntil: fastAgentParentEvents.claimedUntil })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, id));
+      return row!.claimedUntil;
+    };
+
+    const pending = await insertRow('steer-pending');
+    const alsoPending = await insertRow('steer-also-pending');
+    const withdrawn = await insertRow('steer-withdrawn', {
+      discardedAt: new Date(),
+    });
+    const delivered = await insertRow('steer-delivered', {
+      deliveredAt: new Date(),
+    });
+    const inlineClaim = new Date(Date.now() + 60_000);
+    const inline = await insertRow('steer-inline', {
+      admission: 'inline',
+      claimedUntil: inlineClaim,
+    });
+
+    const before = Date.now();
+    const claimed = await claimFastAgentHumanFollowUpSteers([
+      pending,
+      alsoPending,
+      withdrawn,
+      delivered,
+      inline,
+    ]);
+    // A withdrawn, settled, or inline-owned row is never handed to the steer.
+    expect([...claimed].sort()).toEqual([pending, alsoPending].sort());
+    expect((await readClaim(pending))!.getTime()).toBeGreaterThan(before);
+    expect(await readClaim(withdrawn)).toBeNull();
+    expect(await readClaim(delivered)).toBeNull();
+
+    // After the steer delivers one row, only the undelivered claim goes back;
+    // an inline owner's claim is never touched.
+    await db
+      .update(fastAgentParentEvents)
+      .set({ deliveredAt: new Date() })
+      .where(eq(fastAgentParentEvents.id, alsoPending));
+    const deliveredClaim = await readClaim(alsoPending);
+    await releaseFastAgentHumanFollowUpSteerClaims([
+      pending,
+      alsoPending,
+      inline,
+    ]);
+    expect(await readClaim(pending)).toBeNull();
+    expect(await readClaim(alsoPending)).toEqual(deliveredClaim);
+    expect(await readClaim(inline)).toEqual(inlineClaim);
   });
 
   it('parks a durable turn for a scheduled retry and lets a resumed run find its notice', async () => {

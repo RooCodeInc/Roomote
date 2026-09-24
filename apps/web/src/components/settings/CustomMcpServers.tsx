@@ -8,11 +8,9 @@ import { toast } from 'sonner';
 
 import {
   Button,
-  Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   Input,
@@ -38,6 +36,7 @@ import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-server
 import { useAuthorizedUser } from '@/hooks/useUser';
 
 import type { IntegrationItem } from './integration-card';
+import { IntegrationToolApprovalList } from './IntegrationToolApprovalControls';
 import { useTRPC } from '@/trpc/client';
 
 type Transport = 'remote' | 'stdio';
@@ -377,7 +376,7 @@ function ServerFormDialog({
           </DialogTitle>
           <DialogDescription>
             {visibility === 'owner'
-              ? 'A personal server is available only to your own Sessions and tasks. It is reached through an authenticated Roomote proxy, so credentials stay server-side.'
+              ? 'A personal server is available only to your own sessions and tasks. It is reached through an authenticated Roomote proxy, so credentials stay server-side.'
               : 'Custom servers are available to agents in every task. Remote servers are reached through an authenticated Roomote proxy, so credentials stay server-side. Local servers run inside the task sandbox with the same privileges as the agent.'}
           </DialogDescription>
         </DialogHeader>
@@ -746,73 +745,35 @@ function ServerFormDialog({
 
 function CustomToolManagementDialog({
   server,
+  scope,
   open,
   onOpenChange,
-  onSaved,
 }: {
   server: ListedServer | null;
+  scope: CustomMcpServerVisibility;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
 }) {
   const trpc = useTRPC();
-
+  const { isAdmin } = useAuthorizedUser();
+  // A custom server mounts under its name. Shared servers take the
+  // deployment-wide, admin-managed approval policies; a personal server takes
+  // its owner's personal policies, which apply to their own Sessions only.
   const toolsQuery = useQuery(
     trpc.customMcpServers.listTools.queryOptions(
       { id: server?.id ?? '' },
       { enabled: open && Boolean(server), retry: false },
     ),
   );
-
-  const setDisabledTools = useMutation(
-    trpc.customMcpServers.setDisabledTools.mutationOptions(),
-  );
-
-  const [disabledNames, setDisabledNames] = useState<Set<string>>(new Set());
-
-  const loadedKey = useMemo(
-    () =>
-      toolsQuery.data
-        ? `${server?.id}:${toolsQuery.data.tools.map((tool) => tool.name).join(',')}`
-        : null,
-    [toolsQuery.data, server?.id],
-  );
-
-  useEffect(() => {
-    if (loadedKey && toolsQuery.data) {
-      setDisabledNames(
-        new Set(
-          toolsQuery.data.tools
-            .filter((tool) => !tool.enabled)
-            .map((tool) => tool.name),
-        ),
-      );
-    }
-  }, [loadedKey, toolsQuery.data]);
-
-  const save = async () => {
-    if (!server) {
-      return;
-    }
-
-    await setDisabledTools.mutateAsync({
-      id: server.id,
-      disabledTools: [...disabledNames],
-    });
-    onSaved();
-    onOpenChange(false);
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="xl">
+      <DialogContent size="2xl">
         <DialogHeader>
           <DialogTitle>
             Manage tools for {server?.name ?? 'integration'}
           </DialogTitle>
           <DialogDescription>
-            Disabled tools are blocked at the Roomote proxy and hidden from
-            agents.
+            Choose how the model can use tools from this integration.
           </DialogDescription>
         </DialogHeader>
 
@@ -830,57 +791,16 @@ function CustomToolManagementDialog({
           </p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {toolsQuery.data?.tools.map((tool) => (
-              <label
-                key={tool.name}
-                className="flex items-start gap-3 text-sm cursor-pointer"
-              >
-                <Checkbox
-                  checked={!disabledNames.has(tool.name)}
-                  onCheckedChange={(checked) => {
-                    setDisabledNames((current) => {
-                      const next = new Set(current);
-
-                      if (checked === true) {
-                        next.delete(tool.name);
-                      } else {
-                        next.add(tool.name);
-                      }
-
-                      return next;
-                    });
-                  }}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-mono">{tool.name}</span>
-                  {tool.description && (
-                    <span className="block text-xs text-muted-foreground">
-                      {tool.description}
-                    </span>
-                  )}
-                </span>
-              </label>
-            ))}
+            <IntegrationToolApprovalList
+              integrationId={server?.name ?? null}
+              integrationName={server?.name ?? null}
+              scope={scope === 'owner' ? 'personal' : 'deployment'}
+              canManage={scope === 'owner' || isAdmin}
+              open={open}
+              tools={toolsQuery.data?.tools ?? []}
+            />
           </div>
         )}
-
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={save}
-            disabled={setDisabledTools.isPending || toolsQuery.isPending}
-          >
-            {setDisabledTools.isPending ? <Loading /> : 'Save'}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -894,8 +814,8 @@ function CustomToolManagementDialog({
  * section of its own.
  */
 /**
- * `deployment` (the default) lists the servers everyone shares, for Settings
- * → Integrations; `owner` lists the viewer's own private servers, for
+ * `deployment` (the default) lists the servers everyone shares, for the
+ * Integrations page; `owner` lists the viewer's own private servers, for
  * Personal settings. Members see shared servers they did not add read-only.
  */
 export function useCustomMcpServers(
@@ -1133,6 +1053,7 @@ export function useCustomMcpServers(
         }}
       />
       <CustomToolManagementDialog
+        scope={scope}
         server={toolsServer}
         open={Boolean(toolsServer)}
         onOpenChange={(open) => {
@@ -1140,7 +1061,6 @@ export function useCustomMcpServers(
             setToolsServer(null);
           }
         }}
-        onSaved={refresh}
       />
     </>
   );

@@ -126,6 +126,7 @@ export {
 export * from './lib/manager-slack';
 export * from './lib/automation-result-metadata';
 export * from './lib/automation-result-visibility';
+export * from './lib/automation-result-preparation';
 export * from './automations';
 export * from './lib/manager-stats';
 export {
@@ -286,6 +287,11 @@ export {
   wakeFastAgentParentEventsOnTurnRelease,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
+export {
+  flushTaskActivityDigest,
+  TASK_ACTIVITY_DIGEST_QUEUE_NAME,
+  type TaskActivityDigestJob,
+} from './lib/task-activity-digest';
 export {
   SESSION_WAKEUP_FIRE_JOB_NAME,
   SESSION_WAKEUP_QUEUE_NAME,

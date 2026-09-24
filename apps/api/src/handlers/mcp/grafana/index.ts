@@ -7,6 +7,10 @@ import { isMcpConnectionGrafanaConfig } from '@roomote/types';
 import type { Variables } from '../../../types';
 
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
+import {
+  readNativeMcpRequestBody,
+  resolveNativeToolApprovalGuard,
+} from '../native-tool-approvals';
 import { McpProxyError } from '../proxy-utils';
 import { registerGrafanaTools } from './tools';
 
@@ -67,12 +71,26 @@ grafanaMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
   const transport = createGrafanaTransport();
 
   try {
-    await resolveDeploymentMcpAuth(c.get('authContext'), 'Grafana');
+    const auth = await resolveDeploymentMcpAuth(
+      c.get('authContext'),
+      'Grafana',
+    );
+    const guard = await resolveNativeToolApprovalGuard({
+      auth,
+      integrationId: 'grafana',
+      requestHeaders: c.req.raw.headers,
+    });
+    const body = await readNativeMcpRequestBody(c.req.raw);
+    const refusal = await guard.checkCall(body);
+    if (refusal) return refusal;
     const connectionConfig = await resolveGrafanaConnection();
     const server = createGrafanaMcpServer(connectionConfig);
 
     await server.connect(transport);
-    return await transport.handleRequest(c.req.raw);
+    return guard.filterToolsList(
+      body,
+      await transport.handleRequest(c.req.raw),
+    );
   } catch (error) {
     if (error instanceof McpProxyError) {
       return Response.json(

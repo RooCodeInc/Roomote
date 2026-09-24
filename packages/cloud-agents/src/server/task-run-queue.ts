@@ -101,6 +101,7 @@ import {
   LLM_TITLE_LOCKED_CHECKPOINT,
 } from './llm-task-title';
 import { resolveRequestedWorkKindDecision } from './requested-work-kind';
+import { withAutomationScanReplyPolicy } from './automation-scan-chat-policy';
 
 enum TaskRunQueueKeys {
   // Keep the v2 layout during the debounce rollout. Old and new producers and
@@ -1371,7 +1372,7 @@ export async function enqueueTask(
   }
 
   return enqueueFreshLaunch(
-    input as FreshTaskLaunch,
+    withAutomationScanReplyPolicy(input as FreshTaskLaunch),
     options,
     chatInitiationOrder,
   );
@@ -1627,7 +1628,7 @@ async function enqueueFreshLaunch(
             existingFastAgentSessionId !== fastAgentSessionId
           ) {
             throw new Error(
-              'Launch idempotency key is already attached to another Fast Session.',
+              'Launch idempotency key is already attached to another session.',
             );
           }
           if (fastAgentSessionId) {
@@ -1642,7 +1643,7 @@ async function enqueueFreshLaunch(
               existingSession.fastConversationId !== fastAgentSessionId
             ) {
               throw new Error(
-                'Launch idempotency key is already attached to another Session.',
+                'Launch idempotency key is already attached to another session.',
               );
             }
           }
@@ -1992,9 +1993,7 @@ async function enqueueFreshLaunch(
     resolvedTaskPolicy.launchClass !== 'automation' &&
     taskRun.payloadKind !== TaskPayloadKind.SnapshotEnvironment &&
     visibility === 'visible' &&
-    taskWithHarnessOverrides.sourceRunId == null &&
-    taskWithHarnessOverrides.payload.environmentDefinitionId == null &&
-    taskWithHarnessOverrides.payload.verifiesEnvironmentId == null;
+    taskWithHarnessOverrides.sourceRunId == null;
   if (userStartedSession) {
     captureUserStartedSessionCreated({
       userId: linkedUserId,
@@ -2337,12 +2336,15 @@ function reconstructFreshTaskFromFailedRun(sourceRun: TaskRun): FreshTask {
     ...(sourceRun.payload as Record<string, unknown>),
   };
 
-  // Discord launch idempotency keys the original gateway event on the first
-  // run via task_runs_discord_source_event_unique (uncanceled rows only). A
-  // failed-start relaunch creates another uncanceled run on the same task and
-  // must not re-claim that source event, or Postgres rejects the insert with
-  // 23505 and the UI surfaces a raw Failed query / stuck Booting state.
+  // Launch-dedupe keys belong to the original run: Discord source events via
+  // task_runs_discord_source_event_unique and launch idempotency keys (every
+  // Fast-launched task) via task_runs_launch_idempotency_key_unique, both
+  // scoped to uncanceled rows. A failed-start relaunch creates another
+  // uncanceled run on the same task and must not re-claim either, or Postgres
+  // rejects the insert with 23505 and the UI surfaces a raw Failed query /
+  // stuck Booting state.
   delete payload.communicationSourceEventId;
+  delete payload.launchIdempotencyKey;
 
   return {
     type: sourceRun.payloadKind,
@@ -2545,11 +2547,14 @@ export async function enqueueTaskRelaunch(
       sql`SELECT id FROM tasks WHERE id = ${existingTask.id} FOR UPDATE`,
     );
 
+    // Only a retry that is still in flight answers a repeated request. One
+    // that was canceled or failed must not stand in for the new attempt.
     const existingRetry = await tx.query.taskRuns.findFirst({
       where: and(
         eq(taskRuns.taskId, existingTask.id),
         eq(taskRuns.sourceRunId, sourceRun.id),
         eq(taskRuns.kind, 'fresh'),
+        inArray(taskRuns.status, [...activeRunStatuses]),
       ),
     });
 

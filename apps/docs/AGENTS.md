@@ -28,7 +28,7 @@ workflows.
   running and make agent work useful for their team.
 - Prefer practical workflow guidance: what to do, what happens next, how to
   verify it worked, and what to check when setup fails.
--   Keep repository setup, communications providers, inference providers, sandbox
+- Keep repository setup, communications providers, inference providers, sandbox
   providers, environments, and source-control flows prominent.
 - Be direct about prerequisites, tradeoffs, permissions, callback URLs,
   credentials, Docker or Compose issues, tunnels, sandbox limits, and restart or
@@ -48,6 +48,11 @@ Use these terms consistently: `Roomote`, `Roomote agent`, `Roomote task`,
 When a change alters user-facing behavior, setup, integrations, or workflow
 copy, update the relevant page in `apps/docs` **in the same change** so the
 public docs do not drift from shipped behavior.
+
+Changes limited to explicitly internal-nightly experiments are an exception to
+that automatic documentation requirement. Do not add or update public pages for
+their controls or behavior, even when they change the dashboard. Keep public
+docs updates for any other customer-facing behavior included in the same change.
 
 When adding, changing, or removing a built-in integration from
 `packages/types/src/mcp-oauth.ts`, update the public Integrations section in the

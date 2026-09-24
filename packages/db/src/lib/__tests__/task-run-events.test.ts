@@ -70,6 +70,12 @@ describe('task run event helpers', () => {
         taskId: TEST_TASK_ID,
         source: 'sleep_check',
         eventType: 'decision',
+        details: expect.objectContaining({
+          correlation: {
+            taskId: TEST_TASK_ID,
+            runId: testRunId,
+          },
+        }),
       }),
     );
   });

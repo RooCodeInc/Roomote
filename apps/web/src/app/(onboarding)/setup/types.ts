@@ -16,7 +16,7 @@ const SETUP_STEP_DEFINITIONS = [
   },
   {
     id: 'env-vars',
-    title: 'Configure inference provider',
+    title: 'Choose your LLM provider',
   },
 ] as const satisfies readonly SetupStepConfig[];
 

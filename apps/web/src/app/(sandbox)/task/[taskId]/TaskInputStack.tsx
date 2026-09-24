@@ -6,6 +6,7 @@ import {
   usePendingUserInputRequestState,
 } from './PendingUserInputRequestPanel';
 import { PendingEnvVarRequestPanel } from './PendingEnvVarRequestPanel';
+import { PendingToolApprovalsPanel } from './PendingToolApprovalsPanel';
 import { PromptInput, type PromptInputHandle } from './prompt-input';
 import { QueuedMessages } from './QueuedMessages';
 import { ActiveSubtasksList } from './ActiveSubtasksList';
@@ -35,6 +36,7 @@ export function TaskInputStack({
       <ActiveSubtasksList taskEntryKey={session.taskId} />
       <PendingUserInputRequestPanel />
       <PendingEnvVarRequestPanel taskId={session.taskId} />
+      <PendingToolApprovalsPanel taskId={session.taskId} />
       <QueuedMessages />
       {!isBooting && (
         <div className={shouldHidePromptInput ? 'hidden' : undefined}>

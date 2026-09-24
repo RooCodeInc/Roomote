@@ -2,7 +2,7 @@ import {
   generateLlmTaskTitle,
   isFallbackTaskTitle,
   LLM_TITLE_LOCKED_CHECKPOINT,
-  refreshTaskSessionTitle,
+  refreshTaskSessionTitleWithRetry,
 } from '@roomote/cloud-agents/server';
 import {
   db,
@@ -54,6 +54,7 @@ import { extractShowWidgetFallbackDelivery } from './show-widget-fallback-delive
 import { maybeNotifySourceThreadOfTerminalProviderError } from './notify-source-thread-provider-error';
 import { syncTaskCommunicationThreadTitleBestEffort } from '../task-thread-title-sync';
 import { notifyPlatformIssueReport } from '../platform-issue-reporting';
+import { maybeScheduleTaskActivityDigest } from '../task-activity-digest';
 
 interface RecordTaskMessageEnvelopeInput {
   runId: number;
@@ -529,7 +530,7 @@ async function maybeRefreshTaskTitle(input: RecordTaskMessageEnvelopeInput) {
       userId: input.userId,
       mode: 'checkpoint',
     }),
-    refreshTaskSessionTitle({
+    refreshTaskSessionTitleWithRetry({
       taskId: input.taskId,
       userId: input.userId,
       mode: 'checkpoint',
@@ -717,12 +718,28 @@ export async function refreshTaskTitleOnCompletion(input: {
       userId: input.userId,
       mode: 'final',
     }),
-    refreshTaskSessionTitle({
+    refreshTaskSessionTitleWithRetry({
       taskId: input.taskId,
       userId: input.userId,
       mode: 'final',
     }),
   ]);
+}
+
+export async function refreshTaskSessionTitleOnCompletion(input: {
+  taskId: string;
+  userId?: string;
+}): Promise<void> {
+  const pendingRefresh = pendingTaskTitleRefreshes.get(input.taskId);
+  if (pendingRefresh) {
+    await pendingRefresh.catch(() => {});
+  }
+
+  await refreshTaskSessionTitleWithRetry({
+    taskId: input.taskId,
+    userId: input.userId,
+    mode: 'final',
+  });
 }
 
 function scheduleTaskTitleRefresh(input: RecordTaskMessageEnvelopeInput) {
@@ -816,6 +833,14 @@ export async function recordTaskMessageEnvelope(
   });
 
   void maybeHandleRequestedDeploymentEnvVars(input);
+
+  void maybeScheduleTaskActivityDigest({ runId, envelope }).catch((error) => {
+    console.warn(
+      `[recordTaskMessageEnvelope] Failed to schedule task activity digest for run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 
   // A terminal provider error ends the model turn without ending the task, so
   // the run settles idle and never reaches the terminal-failure notifications in

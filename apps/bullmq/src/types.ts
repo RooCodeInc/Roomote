@@ -6,6 +6,7 @@ import type { TriggerableBackgroundAutomationKey } from '@roomote/types';
 export enum ScheduledJobName {
   Heartbeat = 'Heartbeat',
   RefreshSnapshots = 'RefreshSnapshots',
+  RebuildRetiredSnapshots = 'RebuildRetiredSnapshots',
   SleepCheck = 'SleepCheck',
   PullRequestAnalyticsSync = 'PullRequestAnalyticsSync',
   InstancePing = 'InstancePing',
@@ -22,6 +23,7 @@ export enum ScheduledJobName {
   ThreadFooterRefresh = 'ThreadFooterRefresh',
   WebTaskInitiatorSettleNotification = 'WebTaskInitiatorSettleNotification',
   SessionAttentionNotification = 'SessionAttentionNotification',
+  SessionTitleRefresh = 'SessionTitleRefresh',
   ReleaseAnnouncements = 'ReleaseAnnouncements',
 }
 

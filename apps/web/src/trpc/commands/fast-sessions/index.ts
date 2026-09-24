@@ -2,6 +2,7 @@ export { getFastSessionComposerSuggestionCommand } from './composer-suggestion';
 
 import { randomUUID } from 'node:crypto';
 import { after } from 'next/server';
+import { TRPCError } from '@trpc/server';
 
 import {
   acquireFastAgentTurnLock,
@@ -20,6 +21,7 @@ import {
   buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
+  admitFastAgentHumanFollowUp,
   notifyFastWebSessionAttention,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
@@ -28,6 +30,7 @@ import {
   wakeFastAgentParentEventNow,
   wakeFastAgentParentEventsOnTurnRelease,
   type FastAgentSurfaceReplyDelivery,
+  type FastAgentHumanFollowUpAdmission,
 } from '@roomote/sdk/server';
 import {
   and,
@@ -74,9 +77,13 @@ import {
   findReadableFastSession,
   buildFastSessionPrReviewDestinationKey,
   getFastSessionById,
+  getFastSessionTranscriptPage,
   getFastSessionPrReviewOfferStatus,
   getFastSessionTasks,
+  hasFastSessionQueuedMessages,
   updateFastSessionPrReviewOfferStatus,
+  withdrawFastSessionQueuedMessage,
+  type FastSessionMessageCursor,
 } from '@/lib/server/fast-sessions';
 import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
 import {
@@ -179,6 +186,7 @@ type WebFastAgentTurnInput = {
   voiceMode?: boolean;
   setupContext?: FastAgentSetupTurnContext;
   adapterExtensions?: Partial<FastAgentTurnAdapter>;
+  preAdmitted?: Extract<FastAgentHumanFollowUpAdmission, { kind: 'turn' }>;
 };
 
 async function hasCompletedWebFastAgentTurn(input: {
@@ -235,9 +243,13 @@ async function runWebFastAgentTurn({
   setupContext,
   adapterExtensions,
   durableSessionId,
+  preAdmitted,
 }: WebFastAgentTurnInput): Promise<void> {
   const conversation = delivery.conversation;
-  const release = await acquireFastAgentTurnLock({ conversation });
+  const release =
+    preAdmitted?.kind === 'turn'
+      ? preAdmitted.turnLock
+      : await acquireFastAgentTurnLock({ conversation });
   if (!release) {
     console.error(
       `[Fast Web] Turn lock did not become available for ${conversation.conversationId}`,
@@ -250,6 +262,10 @@ async function runWebFastAgentTurn({
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
+    if (preAdmitted?.settled) {
+      return;
+    }
+
     if (skipIfEventExists) {
       const [existingEvent] = await db
         .select({ id: fastAgentMessages.id })
@@ -286,8 +302,9 @@ async function runWebFastAgentTurn({
     // before it runs, so an interruption hands it to the queue. Platform
     // events ride the same row with their framing recorded. Setup context is
     // serializable, so its trusted adapter can be rebuilt by queue recovery.
-    const durableTurn =
-      durableSessionId && (!adapterExtensions || setupContext)
+    const durableTurn = preAdmitted?.durable
+      ? preAdmitted.durable
+      : durableSessionId && (!adapterExtensions || setupContext)
         ? await persistFastAgentInlineHumanTurn({
             parent: { sessionId: durableSessionId, conversation },
             event: {
@@ -298,6 +315,7 @@ async function runWebFastAgentTurn({
               question,
               webFollowUp: true,
               ...(images?.length ? { images } : {}),
+              ...(attachmentTexts?.length ? { attachmentTexts } : {}),
               ...(senderDisplayName ? { senderDisplayName } : {}),
               ...(turnSource === 'platform_event'
                 ? {
@@ -726,8 +744,25 @@ export async function getFastSessionMessagesCommand(
     model: detail.model,
     reasoningEffort: detail.reasoningEffort,
     messages: detail.messages,
+    queuedMessages: detail.queuedMessages,
     hasOlderMessages: detail.hasOlderMessages,
   };
+}
+
+export async function getFastSessionOlderMessagesCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    cursor: FastSessionMessageCursor;
+  },
+) {
+  const page = await getFastSessionTranscriptPage(
+    auth,
+    input.sessionId,
+    input.cursor,
+  );
+  if (!page) throw new Error('Session not found');
+  return page;
 }
 
 export async function updateFastSessionModelSelectionCommand(
@@ -763,7 +798,11 @@ export async function replyToFastSessionCommand(
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
   },
-): Promise<{ success: true }> {
+): Promise<{
+  success: true;
+  admission: 'turn' | 'queued';
+  clientMessageId: string;
+}> {
   const session = await findAccessibleFastSession(auth, input.sessionId);
   if (!session) {
     throw new Error('Session not found');
@@ -774,6 +813,7 @@ export async function replyToFastSessionCommand(
 
   const senderDisplayName =
     getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null;
+  const clientMessageId = input.clientMessageId ?? randomUUID();
   const [settings, delivery] = await Promise.all([
     resolveSessionModelSettings(session.id, input, {
       model: session.model,
@@ -784,6 +824,7 @@ export async function replyToFastSessionCommand(
       userId: auth.userId,
       senderDisplayName,
       question: input.text,
+      currentMessageId: clientMessageId,
       webFollowUp: true,
     }),
   ]);
@@ -804,22 +845,86 @@ export async function replyToFastSessionCommand(
     'dismissed',
   );
 
-  scheduleWebFastAgentTurn({
-    userId: auth.userId,
-    delivery,
-    question: input.text,
-    images: input.images,
-    attachmentTexts: input.attachmentTexts,
-    model: settings.model,
-    reasoningEffort: settings.reasoningEffort,
-    ...(senderDisplayName ? { senderDisplayName } : {}),
-    currentMessageId: input.clientMessageId,
-    durableSessionId: session.id,
-    ...(input.voiceMode ? { voiceMode: true } : {}),
-    ...setupContext,
+  const hasQueuedMessages = await hasFastSessionQueuedMessages(session.id);
+  const admission = await admitFastAgentHumanFollowUp({
+    parent: {
+      sessionId: session.id,
+      conversation: delivery.canonicalConversation ?? delivery.conversation,
+    },
+    event: {
+      type: 'human_follow_up',
+      eventId: clientMessageId,
+      currentMessageId: clientMessageId,
+      userId: auth.userId,
+      question: input.text,
+      ...(input.images?.length ? { images: input.images } : {}),
+      ...(input.attachmentTexts?.length
+        ? { attachmentTexts: input.attachmentTexts }
+        : {}),
+      ...(senderDisplayName ? { senderDisplayName } : {}),
+      webFollowUp: true,
+      ...(input.voiceMode ? { voiceMode: true } : {}),
+      ...(setupContext?.setupContext
+        ? { setupContext: setupContext.setupContext }
+        : {}),
+      ...(setupContext?.setupSession ? { setupSession: true } : {}),
+    },
+    forceQueue: hasQueuedMessages,
   });
 
-  return { success: true };
+  if (admission.kind === 'turn') {
+    after(() =>
+      runWebFastAgentTurn({
+        userId: auth.userId,
+        delivery,
+        question: input.text,
+        images: input.images,
+        attachmentTexts: input.attachmentTexts,
+        model: settings.model,
+        reasoningEffort: settings.reasoningEffort,
+        ...(senderDisplayName ? { senderDisplayName } : {}),
+        currentMessageId: clientMessageId,
+        durableSessionId: session.id,
+        ...(input.voiceMode ? { voiceMode: true } : {}),
+        ...setupContext,
+        preAdmitted: admission,
+      }),
+    );
+  }
+
+  return {
+    success: true,
+    admission: admission.kind === 'turn' ? 'turn' : 'queued',
+    clientMessageId,
+  };
+}
+
+/**
+ * Withdraw the caller's own follow-up while it still waits in the Session
+ * queue. `not_queued` means delivery already started or the message is no
+ * longer pending, so there is nothing left to withdraw.
+ */
+export async function deleteFastSessionQueuedMessageCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId: string; clientMessageId: string },
+): Promise<{ outcome: 'withdrawn' | 'not_queued' }> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) {
+    throw new Error('Session not found');
+  }
+
+  const outcome = await withdrawFastSessionQueuedMessage({
+    sessionId: session.id,
+    clientMessageId: input.clientMessageId,
+    userId: auth.userId,
+  });
+  if (outcome === 'forbidden') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Only the sender can delete a queued message',
+    });
+  }
+  return { outcome };
 }
 
 export async function startFastSessionGoalCommand(
@@ -1061,7 +1166,7 @@ export async function resolveFastSessionCapabilityOfferCommand(
 }
 
 /**
- * Submit an authenticated structured response to a Fast session's pending
+ * Submit an authenticated structured response to a session's pending
  * `request_user_input` request. The response is persisted as a canonical
  * transcript event, duplicate or already-resolved submissions are rejected,
  * and the same Fast conversation resumes automatically with a hidden

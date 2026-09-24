@@ -11,6 +11,9 @@ import { describe, expect, it, vi } from 'vitest';
 const settingsData = vi.hoisted(() => ({
   current: null as Record<string, unknown> | null,
 }));
+const customPresetsData = vi.hoisted(() => ({
+  current: [] as Array<Record<string, unknown>>,
+}));
 const providerSetupData = vi.hoisted(() => ({
   current: null as Record<string, unknown> | null,
 }));
@@ -21,6 +24,9 @@ const suggestionQueryError = vi.hoisted(() => ({ current: false }));
 const lookupMutateAsyncMock = vi.hoisted(() => vi.fn());
 const updateMutateAsyncMock = vi.hoisted(() => vi.fn());
 const refreshMutateAsyncMock = vi.hoisted(() => vi.fn());
+const createCustomPresetMutateAsyncMock = vi.hoisted(() => vi.fn());
+const deleteCustomPresetMutateAsyncMock = vi.hoisted(() => vi.fn());
+const invalidateQueriesMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (options: { queryKey?: unknown[] }) => {
@@ -29,11 +35,16 @@ vi.mock('@tanstack/react-query', () => ({
       options.queryKey[1] === 'providerSetup';
     const isSuggestions =
       Array.isArray(options?.queryKey) && options.queryKey[1] === 'suggest';
+    const isCustomPresets =
+      Array.isArray(options?.queryKey) &&
+      options.queryKey[1] === 'customPresets';
     const data = isProviderSetup
       ? providerSetupData.current
       : isSuggestions && suggestionData.current !== undefined
         ? suggestionData.current
-        : settingsData.current;
+        : isCustomPresets
+          ? customPresetsData.current
+          : settingsData.current;
 
     return {
       data,
@@ -54,9 +65,23 @@ vi.mock('@tanstack/react-query', () => ({
       return { mutateAsync: refreshMutateAsyncMock };
     }
 
+    if (mutationKey === 'customPresets.create') {
+      return {
+        mutateAsync: createCustomPresetMutateAsyncMock,
+        isPending: false,
+      };
+    }
+
+    if (mutationKey === 'customPresets.delete') {
+      return {
+        mutateAsync: deleteCustomPresetMutateAsyncMock,
+        isPending: false,
+      };
+    }
+
     return { mutateAsync: updateMutateAsyncMock };
   },
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: invalidateQueriesMock }),
 }));
 
 vi.mock('sonner', () => ({
@@ -69,6 +94,20 @@ vi.mock('@/trpc/client', () => ({
       get: {
         queryOptions: () => ({ queryKey: ['taskModels', 'get'] }),
         queryKey: () => ['taskModels', 'get'],
+      },
+      customPresets: {
+        list: {
+          queryOptions: () => ({
+            queryKey: ['taskModels', 'customPresets', 'list'],
+          }),
+          queryKey: () => ['taskModels', 'customPresets', 'list'],
+        },
+        create: {
+          mutationOptions: () => ({ mutationKey: ['customPresets.create'] }),
+        },
+        delete: {
+          mutationOptions: () => ({ mutationKey: ['customPresets.delete'] }),
+        },
       },
       providerSetup: {
         queryOptions: () => ({ queryKey: ['taskModels', 'providerSetup'] }),
@@ -101,6 +140,7 @@ vi.mock('@/hooks/task-models/useJudgmentModelSettings', () => ({
       typeSafe: { connected: false, source: null },
       openRouterConnected: false,
       vercelGatewayConnected: false,
+      roomoteConnected: false,
       storedSelection: null,
       envSelection: null,
       effectiveSelection: 'off',
@@ -139,7 +179,13 @@ import type {
   RecommendedModelPreset,
   RecommendedRoleModels,
   SetupModelProviderId,
+  TaskModelRole,
   TaskModelMetadata,
+  UserTaskModelMapping,
+} from '@roomote/types';
+import {
+  DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
+  TASK_MODEL_ROLES,
 } from '@roomote/types';
 import { toast } from 'sonner';
 import { ModelSettingsSection } from './ModelSettingsSection';
@@ -164,6 +210,7 @@ function buildSettingsData(
     orchestrationEffectiveModelId?: string | null;
     orchestrationPersistedModelId?: string | null;
     helperEffectiveModelId?: string | null;
+    helperPersistedModelId?: string | null;
     visionEffectiveModelId?: string | null;
     codeReviewEffectiveModelId?: string | null;
     exploreEffectiveModelId?: string | null;
@@ -233,7 +280,7 @@ function buildSettingsData(
       },
       helperModel: {
         effectiveModelId: overrides.helperEffectiveModelId ?? null,
-        persistedModelId: null,
+        persistedModelId: overrides.helperPersistedModelId ?? null,
         source: 'same-as-coding',
         managedByEnv: overrides.helperManagedByEnv ?? false,
         reasoningEffort: overrides.helperReasoningEffort ?? null,
@@ -391,13 +438,36 @@ function buildProviderSetupData(
   };
 }
 
+function buildUserModelMapping(
+  modelOverrides: Partial<Record<TaskModelRole, string>> = {},
+  reasoningOverrides: Partial<
+    Record<TaskModelRole, ReasoningEffort | null>
+  > = {},
+): UserTaskModelMapping {
+  return Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => [
+      role,
+      {
+        modelId: modelOverrides[role] ?? 'openrouter/openai/gpt-5.4',
+        reasoningEffort: Object.hasOwn(reasoningOverrides, role)
+          ? reasoningOverrides[role]!
+          : DEFAULT_MODEL_ROLE_REASONING_EFFORTS[role],
+      },
+    ]),
+  ) as UserTaskModelMapping;
+}
+
 describe('ModelSettingsSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     lookupMutateAsyncMock.mockReset();
     updateMutateAsyncMock.mockReset();
     refreshMutateAsyncMock.mockReset();
+    createCustomPresetMutateAsyncMock.mockReset();
+    deleteCustomPresetMutateAsyncMock.mockReset();
+    invalidateQueriesMock.mockReset();
     settingsData.current = null;
+    customPresetsData.current = [];
     providerSetupData.current = buildProviderSetupData();
     suggestionData.current = undefined;
     suggestionQueryError.current = false;
@@ -412,6 +482,15 @@ describe('ModelSettingsSection', () => {
       metadata: null,
     });
     updateMutateAsyncMock.mockResolvedValue({ success: true });
+    createCustomPresetMutateAsyncMock.mockResolvedValue({
+      id: 'created-preset',
+      name: 'Created preset',
+      roles: {},
+    });
+    deleteCustomPresetMutateAsyncMock.mockResolvedValue({
+      id: 'custom-preset',
+      name: 'Custom preset',
+    });
   });
 
   const renderModelSettingsSection = () => {
@@ -454,33 +533,14 @@ describe('ModelSettingsSection', () => {
 
     const { container } = renderModelSettingsSection();
 
-    const triggers = Array.from(
+    const pickerTriggers = Array.from(
       container.querySelectorAll<HTMLButtonElement>(
-        '[data-slot="select-trigger"]',
+        '[data-slot="model-reasoning-picker-trigger"]',
       ),
     );
-    // 7 model selects + 7 reasoning selects + the judgment model select + the
-    // add-model provider select.
-    expect(triggers).toHaveLength(16);
-    expect(triggers[0]).toBeDisabled();
-    expect(triggers[2]).toBeDisabled();
-    expect(triggers[4]).toBeDisabled();
-    expect(triggers[6]).toBeDisabled();
-    expect(triggers[8]).toBeDisabled();
-    expect(triggers[10]).toBeDisabled();
-    expect(triggers[12]).toBeDisabled();
-    // Reasoning selects stay enabled unless the reasoning env override is set.
-    expect(triggers[1]).not.toBeDisabled();
-    expect(triggers[3]).not.toBeDisabled();
-    expect(triggers[5]).not.toBeDisabled();
-    expect(triggers[7]).not.toBeDisabled();
-    expect(triggers[9]).not.toBeDisabled();
-    expect(triggers[11]).not.toBeDisabled();
-    expect(triggers[13]).not.toBeDisabled();
-    // The judgment model and add-model provider selects stay enabled
-    // regardless of env-managed runtime models.
-    expect(triggers[14]).not.toBeDisabled();
-    expect(triggers[15]).not.toBeDisabled();
+    expect(pickerTriggers).toHaveLength(7);
+    // The combined picker stays available because reasoning is not env-managed.
+    for (const trigger of pickerTriggers) expect(trigger).not.toBeDisabled();
 
     expect(screen.queryByText('Make default')).toBeNull();
     expect(screen.queryByText('Env-managed')).toBeNull();
@@ -503,15 +563,13 @@ describe('ModelSettingsSection', () => {
 
     const triggers = Array.from(
       container.querySelectorAll<HTMLButtonElement>(
-        '[data-slot="select-trigger"]',
+        '[data-slot="model-reasoning-picker-trigger"]',
       ),
     );
 
-    expect(triggers).toHaveLength(16);
+    expect(triggers).toHaveLength(7);
     expect(triggers[0]).not.toBeDisabled();
-    expect(triggers[1]).toBeDisabled();
-    expect(triggers[12]).not.toBeDisabled();
-    expect(triggers[13]).toBeDisabled();
+    expect(triggers[6]).not.toBeDisabled();
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
       screen.getByLabelText(
@@ -584,8 +642,10 @@ describe('ModelSettingsSection', () => {
 
     const { container } = renderModelSettingsSection();
 
-    const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    expect(triggers).toHaveLength(16);
+    const triggers = container.querySelectorAll(
+      '[data-slot="model-reasoning-picker-trigger"]',
+    );
+    expect(triggers).toHaveLength(7);
     for (const trigger of Array.from(triggers)) {
       expect(trigger).not.toBeDisabled();
     }
@@ -620,9 +680,7 @@ describe('ModelSettingsSection', () => {
 
     const modelMappingSection = screen.getByTestId('section-Model mapping');
     expect(within(modelMappingSection).getAllByText('High')).toHaveLength(2);
-    expect(
-      within(modelMappingSection).getByText('Extra high'),
-    ).toBeInTheDocument();
+    expect(within(modelMappingSection).getByText('X-High')).toBeInTheDocument();
     // Orchestration, helper, vision, and explore fall back to Low.
     expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
   });
@@ -648,6 +706,17 @@ describe('ModelSettingsSection', () => {
         name: 'Add a model routing rule',
       }),
     );
+    const routingModelTrigger = screen.getByRole('button', {
+      name: 'Routing rule 1 model and reasoning',
+    });
+    expect(routingModelTrigger).toHaveAttribute(
+      'data-slot',
+      'model-reasoning-picker-trigger',
+    );
+    fireEvent.click(routingModelTrigger);
+    fireEvent.click(screen.getByRole('option', { name: 'GLM 5.2' }));
+    // The model/reasoning picker closes on Enter without dismissing its parent dialog.
+    fireEvent.keyDown(document, { key: 'Enter' });
     const condition = screen.getByLabelText('Routing rule 1 condition');
     fireEvent.change(condition, {
       target: { value: 'Routine tasks where speed matters' },
@@ -660,7 +729,7 @@ describe('ModelSettingsSection', () => {
       expect.objectContaining({
         codingModelRoutingRules: [
           {
-            modelId: 'openrouter/openai/gpt-5.4',
+            modelId: 'openrouter/z-ai/glm-5.2',
             reasoningEffort: 'medium',
             condition: 'Routine tasks where speed matters',
           },
@@ -754,12 +823,52 @@ describe('ModelSettingsSection', () => {
     data.models[0]!.metadata.supportsReasoning = false;
     settingsData.current = data;
 
-    const { container } = renderModelSettingsSection();
+    renderModelSettingsSection();
 
-    const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    // 7 model selects + the judgment model select + the add-model provider
-    // select; no reasoning selectors.
-    expect(triggers).toHaveLength(9);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Coding model and reasoning' }),
+    );
+    expect(screen.getByText('N/A')).toBeInTheDocument();
+  });
+
+  it('limits the same-as-coding picker to the effective coding model efforts', () => {
+    const data = buildSettingsData();
+    // The coding default model publishes a restricted effort list; secondary
+    // roles resolve to it via the "Same as coding model" sentinel.
+    (data.models[0]!.metadata as TaskModelMetadata).supportedReasoningEfforts =
+      ['low', 'high'];
+    settingsData.current = data;
+
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Orchestration model and reasoning' }),
+    );
+
+    // Two supported efforts (low, high) rather than the unrestricted scale.
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    expect(slider).toHaveAttribute('aria-valuemax', '1');
+  });
+
+  it('limits the same-as-coding sentinel for env-managed coding models', () => {
+    // The coding model comes from an env-only override; the settings catalog
+    // still lists it (with metadata), so the sentinel stays constrained.
+    const data = buildSettingsData({
+      codingManagedByEnv: true,
+      codingEffectiveModelId: 'openrouter/openai/gpt-5.4',
+    });
+    (data.models[0]!.metadata as TaskModelMetadata).supportedReasoningEfforts =
+      ['low', 'high'];
+    settingsData.current = data;
+
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Orchestration model and reasoning' }),
+    );
+
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    expect(slider).toHaveAttribute('aria-valuemax', '1');
   });
 
   it('clears orchestration reasoning when switching to a non-reasoning model', async () => {
@@ -772,12 +881,12 @@ describe('ModelSettingsSection', () => {
     data.models[1]!.metadata.supportsReasoning = false;
     settingsData.current = data;
 
-    const { container } = renderModelSettingsSection();
-    const triggers = container.querySelectorAll<HTMLButtonElement>(
-      '[data-slot="select-trigger"]',
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
+      }),
     );
-
-    fireEvent.click(triggers[2]!);
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
 
     await waitFor(() => {
@@ -790,10 +899,10 @@ describe('ModelSettingsSection', () => {
       }),
     );
     expect(
-      screen.queryByRole('combobox', {
-        name: 'Orchestration model reasoning level',
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
       }),
-    ).toBeNull();
+    ).toHaveTextContent('GLM 5.2');
   });
 
   it('stops retrying a rejected save and allows a deliberate retry', async () => {
@@ -806,11 +915,11 @@ describe('ModelSettingsSection', () => {
       .mockRejectedValueOnce(new Error('Network unavailable'))
       // Bound a regression to one extra attempt instead of an infinite loop.
       .mockImplementationOnce(() => new Promise(() => {}));
-    const { container } = renderModelSettingsSection();
+    renderModelSettingsSection();
     const orchestrationTrigger = () =>
-      container.querySelectorAll<HTMLButtonElement>(
-        '[data-slot="select-trigger"]',
-      )[2]!;
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
+      });
     const originalSelection = orchestrationTrigger().textContent;
 
     fireEvent.click(orchestrationTrigger());
@@ -824,7 +933,6 @@ describe('ModelSettingsSection', () => {
     expect(orchestrationTrigger().textContent).toBe(originalSelection);
 
     updateMutateAsyncMock.mockReset().mockResolvedValue({ success: true });
-    fireEvent.click(orchestrationTrigger());
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
     await waitFor(() => expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1));
     expect(orchestrationTrigger()).toHaveTextContent('GLM 5.2');
@@ -1555,6 +1663,333 @@ describe('ModelSettingsSection', () => {
     );
   });
 
+  it('opens the custom-preset form with the current role mapping and saves it', async () => {
+    settingsData.current = buildSettingsData({
+      helperPersistedModelId: 'openrouter/z-ai/glm-5.2',
+    });
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Add your own' }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(
+      within(dialog).getByRole('heading', {
+        name: 'Create model mapping preset',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("Define your own, it's OK to mix providers"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByPlaceholderText('Something easy to recognize'),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getAllByRole('button', { name: /and reasoning$/u }),
+    ).toHaveLength(7);
+    expect(
+      within(dialog).getByRole('button', {
+        name: 'Coding model and reasoning',
+      }),
+    ).toHaveTextContent(/GPT 5\.4\s*Medium/u);
+    expect(
+      within(dialog).getByRole('button', {
+        name: 'Helper model and reasoning',
+      }),
+    ).toHaveTextContent(/GLM 5\.2\s*Low/u);
+    expect(within(dialog).queryByText('Default')).not.toBeInTheDocument();
+
+    const nameInput = within(dialog).getByPlaceholderText(
+      'Something easy to recognize',
+    );
+    const createButton = within(dialog).getByRole('button', {
+      name: 'Create preset',
+    });
+    expect(createButton).toBeDisabled();
+    fireEvent.change(nameInput, { target: { value: 'Mixed provider setup' } });
+    expect(createButton).toBeEnabled();
+
+    const helperPicker = within(dialog).getByRole('button', {
+      name: 'Helper model and reasoning',
+    });
+    fireEvent.click(helperPicker);
+    const reasoningSlider = await screen.findByRole('slider', {
+      name: 'Reasoning level',
+    });
+    fireEvent.wheel(reasoningSlider, { deltaY: -40 });
+    reasoningSlider.focus();
+    fireEvent.keyDown(reasoningSlider, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(helperPicker).toHaveAttribute('aria-expanded', 'false'),
+    );
+    expect(dialog).toBeInTheDocument();
+    expect(nameInput).toHaveValue('Mixed provider setup');
+    expect(helperPicker).toHaveTextContent(/GLM 5\.2\s*Medium/u);
+    expect(createButton).toBeEnabled();
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(createCustomPresetMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    const createInput = createCustomPresetMutateAsyncMock.mock.calls[0]![0] as {
+      name: string;
+      roles: UserTaskModelMapping;
+    };
+    expect(createInput).toEqual({
+      name: 'Mixed provider setup',
+      roles: buildUserModelMapping(
+        { helper: 'openrouter/z-ai/glm-5.2' },
+        { helper: 'medium' },
+      ),
+    });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+      queryKey: ['taskModels', 'customPresets', 'list'],
+    });
+    expect(toast.success).toHaveBeenCalledWith(
+      'Saved the Mixed provider setup preset.',
+    );
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('keeps an unavailable current model visible and requires a replacement', async () => {
+    settingsData.current = buildSettingsData({
+      helperPersistedModelId: 'openrouter/removed-model',
+    });
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Add your own' }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    const helperModelPicker = within(dialog).getByRole('button', {
+      name: 'Helper model and reasoning',
+    });
+    expect(helperModelPicker).toHaveTextContent(
+      'Unavailable — openrouter/removed-model',
+    );
+    const createButton = within(dialog).getByRole('button', {
+      name: 'Create preset',
+    });
+    expect(createButton).toBeDisabled();
+
+    fireEvent.click(helperModelPicker);
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'GLM 5.2',
+      }),
+    );
+    fireEvent.change(
+      within(dialog).getByPlaceholderText('Something easy to recognize'),
+      { target: { value: 'Updated mapping' } },
+    );
+
+    expect(helperModelPicker).toHaveTextContent('GLM 5.2');
+    expect(createButton).toBeEnabled();
+  });
+
+  it('applies a saved custom mapping through the existing confirmation dialog', async () => {
+    settingsData.current = buildSettingsData();
+    customPresetsData.current = [
+      {
+        id: 'custom-preset-1',
+        name: 'Cross-provider review',
+        roles: buildUserModelMapping(
+          {
+            coding: 'openrouter/z-ai/glm-5.2',
+            helper: 'openrouter/z-ai/glm-5.2',
+            codeReview: 'openrouter/z-ai/glm-5.2',
+            planning: 'openrouter/z-ai/glm-5.2',
+          },
+          { coding: 'high', codeReview: 'xhigh', planning: 'high' },
+        ),
+      },
+    ];
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Custom preset: Cross-provider review',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(
+      within(dialog).getByRole('heading', {
+        name: 'Apply Cross-provider review preset',
+      }),
+    ).toBeInTheDocument();
+    expect(within(dialog).getAllByText('GLM 5.2')).toHaveLength(4);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultModelId: 'openrouter/z-ai/glm-5.2',
+        orchestrationModelId: 'openrouter/openai/gpt-5.4',
+        helperModelId: 'openrouter/z-ai/glm-5.2',
+        visionModelId: 'openrouter/openai/gpt-5.4',
+        codeReviewModelId: 'openrouter/z-ai/glm-5.2',
+        exploreModelId: 'openrouter/openai/gpt-5.4',
+        planningModelId: 'openrouter/z-ai/glm-5.2',
+        codingModelReasoningEffort: 'high',
+        codeReviewModelReasoningEffort: 'xhigh',
+        planningModelReasoningEffort: 'high',
+      }),
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      'Applied the Cross-provider review preset.',
+    );
+  });
+
+  it('normalizes saved reasoning efforts against each model’s current metadata', async () => {
+    const data = buildSettingsData();
+    const codingMetadata = data.models[0]!.metadata as TaskModelMetadata;
+    codingMetadata.supportsReasoning = false;
+    const helperMetadata = data.models[1]!.metadata as TaskModelMetadata;
+    helperMetadata.supportsReasoning = true;
+    helperMetadata.supportedReasoningEfforts = ['low', 'high', 'max'];
+    settingsData.current = data;
+    customPresetsData.current = [
+      {
+        id: 'reasoning-preset',
+        name: 'Reasoning changed upstream',
+        roles: buildUserModelMapping(
+          {
+            helper: 'openrouter/z-ai/glm-5.2',
+            codeReview: 'openrouter/z-ai/glm-5.2',
+          },
+          {
+            coding: 'high',
+            helper: 'xhigh',
+            codeReview: 'medium',
+          },
+        ),
+      },
+    ];
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Custom preset: Reasoning changed upstream',
+      }),
+    );
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Apply',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codingModelReasoningEffort: null,
+        helperModelReasoningEffort: 'high',
+        codeReviewModelReasoningEffort: 'low',
+      }),
+    );
+  });
+
+  it('keeps stale custom presets visible but prevents applying them', async () => {
+    settingsData.current = buildSettingsData();
+    customPresetsData.current = [
+      {
+        id: 'stale-preset',
+        name: 'Old model map',
+        roles: buildUserModelMapping({ coding: 'openrouter/old-model' }),
+      },
+    ];
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Custom preset: Old model map (unavailable models)',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/unavailable models/i)).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('openrouter/old-model (unavailable)'),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('button', { name: 'Apply' }),
+    ).toBeDisabled();
+    expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('confirms custom preset deletion without changing the active mapping', async () => {
+    settingsData.current = buildSettingsData();
+    customPresetsData.current = [
+      {
+        id: 'custom-preset-delete',
+        name: 'Delete me',
+        roles: buildUserModelMapping(),
+      },
+    ];
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Delete Delete me' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Custom preset: Delete me',
+      }),
+    );
+
+    const applyDialog = screen.getByRole('dialog');
+    expect(
+      within(applyDialog).getByRole('button', { name: 'Delete Delete me' }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(applyDialog).getByRole('button', { name: 'Delete Delete me' }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(
+      within(dialog).getByRole('heading', { name: 'Delete Delete me preset?' }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/current model mapping will not change/i),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Delete preset' }),
+    );
+
+    await waitFor(() => {
+      expect(deleteCustomPresetMutateAsyncMock).toHaveBeenCalledWith({
+        id: 'custom-preset-delete',
+      });
+    });
+    expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith('Deleted the Delete me preset.');
+  });
+
   it('composes openai/ model ids when the ChatGPT provider is selected', async () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({
@@ -1578,7 +2013,7 @@ describe('ModelSettingsSection', () => {
       // subscription models keep the openai/ model-id prefix.
       expect(screen.getByLabelText('New model slug')).toHaveAttribute(
         'placeholder',
-        'Eg: gpt-5.6-sol',
+        'Eg: gpt-6-luna',
       );
 
       fireEvent.change(screen.getByLabelText('New model slug'), {
@@ -1841,7 +2276,7 @@ describe('ModelSettingsSection', () => {
 
     expect(screen.getByText('Advisor model')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', { name: 'Advisor model reasoning level' }),
+      screen.getByRole('button', { name: 'Advisor model and reasoning' }),
     ).toBeInTheDocument();
   });
 
@@ -1852,8 +2287,8 @@ describe('ModelSettingsSection', () => {
 
     expect(screen.getByText('Orchestration model')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', {
-        name: 'Orchestration model reasoning level',
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
       }),
     ).toBeInTheDocument();
   });
@@ -1865,7 +2300,7 @@ describe('ModelSettingsSection', () => {
 
     expect(screen.getByText('Explore model')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', { name: 'Explore model reasoning level' }),
+      screen.getByRole('button', { name: 'Explore model and reasoning' }),
     ).toBeInTheDocument();
   });
 });

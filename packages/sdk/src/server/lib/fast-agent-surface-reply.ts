@@ -1,4 +1,9 @@
-import { stripLeadingIntegrationSavedBlock } from '@roomote/types';
+import {
+  stripLeadingIntegrationSavedBlock,
+  integrationToolApprovalButtons,
+  integrationToolApprovalMessage,
+  integrationToolApprovalSlackBlocks,
+} from '@roomote/types';
 import { createHash } from 'node:crypto';
 
 import {
@@ -8,6 +13,7 @@ import {
   FastAgentDurableRetryScheduledError,
   fastAgentConversationRepository,
   getActiveFastAgentTasks,
+  registerFastAgentTurnActivity,
   resolveApiBaseUrl,
   type FastAgentActiveTask,
   type FastAgentConversation,
@@ -313,10 +319,22 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         }),
         postReply: async ({
           message,
+          toolApproval,
           imageArtifactIds = [],
           videoArtifactIds = [],
           charts = [],
         }) => {
+          if (toolApproval) {
+            const messageTs = await slack.postMessage({
+              channel: conversation.replyTarget.channelId,
+              thread_ts: threadId,
+              text: integrationToolApprovalMessage(toolApproval),
+              blocks: integrationToolApprovalSlackBlocks(toolApproval),
+            });
+            if (!messageTs)
+              throw new Error('Slack did not accept the approval request.');
+            return { messageId: messageTs };
+          }
           const quote = pendingReplyQuote.peek(buildSlackReplyQuote);
           const images = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
@@ -390,7 +408,15 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         userId: params.userId,
         conversation,
       }),
-      postReply: async ({ message }) => {
+      postReply: async ({ message, toolApproval }) => {
+        if (toolApproval) {
+          const result = await provider.postMessage({
+            ...conversation.replyTarget,
+            text: integrationToolApprovalMessage(toolApproval),
+            buttons: integrationToolApprovalButtons(toolApproval.approvalId),
+          });
+          return { messageId: result.messageId };
+        }
         const quote = pendingReplyQuote.peek(buildMarkdownReplyQuote);
         const footerText = buildFastSessionReplyFooterText({
           provider: 'discord',
@@ -410,7 +436,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           channelId,
           footerStateThreadId,
           lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
-          logRef: `fast session ${session.id}`,
+          logRef: `session ${session.id}`,
           logContext: 'fastAgentSurfaceReply',
           postReplyWithFooter: async () => {
             const result = await provider.postMessage({
@@ -623,7 +649,16 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     });
     const postReply: FastAgentTurnAdapter['postReply'] = async ({
       message,
+      toolApproval,
     }) => {
+      if (toolApproval) {
+        const posted = await provider.postMessage({
+          ...conversation.replyTarget,
+          text: integrationToolApprovalMessage(toolApproval),
+          buttons: integrationToolApprovalButtons(toolApproval.approvalId),
+        });
+        return { messageId: posted.messageId };
+      }
       const quote = pendingReplyQuote.peek(buildMarkdownReplyQuote);
       const posted = await postTextThreadReplyWithFooter({
         provider,
@@ -891,12 +926,6 @@ async function runFastAgentSurfaceReplyWithLock(
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   {
-    const activeTasks = params.externalInput
-      ? [
-          ...(params.activeTasks ?? []),
-          ...(await getActiveFastAgentTasks(params.sessionId)),
-        ]
-      : params.activeTasks;
     // Durable admission: persisted under this owner's claim before the turn
     // runs. A reaction rides the same row with its input recorded, so the
     // queue resumes it as a reaction turn rather than a typed message. A
@@ -933,6 +962,43 @@ async function runFastAgentSurfaceReplyWithLock(
           conversationId: params.sessionId,
           eventKey,
         });
+    }
+    const earlyActivity =
+      admittedTurn && delivery.conversation.surface === 'slack'
+        ? delivery.adapter.activity
+        : undefined;
+    const unregisterActivity = earlyActivity
+      ? registerFastAgentTurnActivity(release.signal, earlyActivity)
+      : undefined;
+    if (earlyActivity) {
+      try {
+        earlyActivity.start();
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Failed to start Slack session activity: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    const disposeEarlyActivity = async () => {
+      await earlyActivity?.dispose().catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to dispose Slack session activity: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+      unregisterActivity?.();
+    };
+    let activeTasks: FastAgentActiveTask[] | undefined;
+    try {
+      activeTasks = params.externalInput
+        ? [
+            ...(params.activeTasks ?? []),
+            ...(await getActiveFastAgentTasks(params.sessionId)),
+          ]
+        : params.activeTasks;
+    } catch (error) {
+      await disposeEarlyActivity();
+      throw error;
     }
     return answerFastAgentQuestion({
       question: params.question,
@@ -993,20 +1059,22 @@ async function runFastAgentSurfaceReplyWithLock(
         createArtifact: buildFastAgentArtifactCreator(params.sessionId),
         ...delivery.adapter,
       },
-    }).then(
-      (): FastAgentSurfaceReplyWithLockOutcome => ({ outcome: 'delivered' }),
-      (error: unknown): FastAgentSurfaceReplyWithLockOutcome => {
-        // Not a failure: the turn parked itself for a durable retry and the
-        // queue re-runs it at the scheduled time, so the reply is on its way.
-        if (error instanceof FastAgentDurableRetryScheduledError) {
-          console.info(
-            `[Fast Agent] Surface reply turn parked for a durable retry: ${error.message}`,
-          );
-          return { outcome: 'parked', retryAt: error.retryAt };
-        }
-        throw error;
-      },
-    );
+    })
+      .then(
+        (): FastAgentSurfaceReplyWithLockOutcome => ({ outcome: 'delivered' }),
+        (error: unknown): FastAgentSurfaceReplyWithLockOutcome => {
+          // Not a failure: the turn parked itself for a durable retry and the
+          // queue re-runs it at the scheduled time, so the reply is on its way.
+          if (error instanceof FastAgentDurableRetryScheduledError) {
+            console.info(
+              `[Fast Agent] Surface reply turn parked for a durable retry: ${error.message}`,
+            );
+            return { outcome: 'parked', retryAt: error.retryAt };
+          }
+          throw error;
+        },
+      )
+      .finally(disposeEarlyActivity);
   }
 }
 
@@ -1063,7 +1131,7 @@ export async function startFastSessionGoal(
     await activation.rollback();
     return {
       success: false,
-      error: 'The Session goal could not be delivered. Please try again.',
+      error: 'The session goal could not be delivered. Please try again.',
     };
   } catch (error) {
     await activation.rollback().catch(() => undefined);

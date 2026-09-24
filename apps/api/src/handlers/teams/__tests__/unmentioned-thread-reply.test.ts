@@ -135,10 +135,79 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         text: '@Roomote please fix the bug',
         mentions: [botMention()],
       }),
+      humanGraphMessage({
+        id: '1700000000050',
+        userId: 'aad-user-2',
+        text: 'following along',
+      }),
       botGraphMessage('1700000000100'),
     ]);
 
     await expect(routeDecision(threadReplyActivity())).resolves.toBe(true);
+  });
+
+  it('routes a clear follow-up to Roomote through the judgment gate', async () => {
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.94,
+        probabilities: { roomote: 0.94, participant: 0.03, unclear: 0.03 },
+      },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanGraphMessage({
+        id: THREAD_ROOT_ID,
+        userId: 'aad-user-1',
+        text: '@Roomote please fix the bug',
+        mentions: [botMention()],
+      }),
+      humanGraphMessage({
+        id: '1700000000050',
+        userId: 'aad-user-2',
+        text: 'following along',
+      }),
+      botGraphMessage('1700000000100'),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyActivity({ text: 'Can you also add a test?' })),
+    ).resolves.toBe(true);
+    expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledOnce();
+  });
+
+  it('suppresses a human-to-human reply when the judgment model says participant', async () => {
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'participant',
+        confidence: 0.93,
+        probabilities: { roomote: 0.02, participant: 0.93, unclear: 0.05 },
+      },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanGraphMessage({
+        id: THREAD_ROOT_ID,
+        userId: 'aad-user-1',
+        text: '@Roomote please fix the bug',
+        mentions: [botMention()],
+      }),
+      humanGraphMessage({
+        id: '1700000000050',
+        userId: 'aad-user-2',
+        text: 'following along',
+      }),
+      botGraphMessage('1700000000100'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyActivity({ text: 'Dan, can you send the logs?' }),
+      ),
+    ).resolves.toBe(false);
+    expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledOnce();
   });
 
   it('recognizes an announcer report root when no regular task run owns the thread', async () => {
@@ -226,18 +295,22 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         confidence: 0.95,
         probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
       },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanGraphMessage({
         id: THREAD_ROOT_ID,
         userId: 'aad-user-1',
+        // Graph text as teamsGraphHtmlToText renders it.
+        text: '@Roomote please fix the bug',
         mentions: [botMention()],
       }),
       botGraphMessage('1700000000100'),
       humanGraphMessage({
         id: '1700000000200',
         userId: 'aad-user-2',
-        text: 'interesting thread',
+        text: 'interesting thread, @Ada Lovelace',
+        mentions: [{ userId: 'aad-user-1', name: 'Ada Lovelace' }],
       }),
     ]);
 
@@ -246,12 +319,22 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         threadReplyActivity({ text: 'can you also add a unit test?' }),
       ),
     ).resolves.toBe(true);
+    const { state } = evaluateTypeSafeJudgmentsMock.mock.calls[0]![0];
+    expect(
+      state.thread.messages.map((message: { text: string }) => message.text),
+    ).toEqual([
+      '@Roomote please fix the bug',
+      'bot reply',
+      'interesting thread, @reply author',
+    ]);
     expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         state: expect.objectContaining({
           reply: {
             author: 'reply author',
             text: 'can you also add a unit test?',
+            mentionsRoomote: false,
+            mentionsSomebodyElse: false,
           },
         }),
       }),
@@ -432,6 +515,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
       ),
     ).resolves.toBe(false);
     expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+    expect(evaluateTypeSafeJudgmentsMock).not.toHaveBeenCalled();
   });
 
   it('ignores replies that mention another user', async () => {

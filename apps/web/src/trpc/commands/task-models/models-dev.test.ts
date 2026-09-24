@@ -1,13 +1,29 @@
 import { describe, expect, it } from 'vitest';
 
+import type { TaskModelMetadata } from '@roomote/types';
+
 import {
   fetchModelsDevCatalog,
   listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
+  mergeMetadata,
   resolveModelsDevSlug,
   suggestModelsFromCatalog,
   type ModelsDevCatalog,
 } from './models-dev';
+
+function buildMetadata(
+  overrides: Partial<TaskModelMetadata> = {},
+): TaskModelMetadata {
+  return {
+    contextWindow: null,
+    inputTypes: null,
+    inputPricePerToken: null,
+    outputPricePerToken: null,
+    lastRefreshedAt: null,
+    ...overrides,
+  };
+}
 
 function buildCatalog(
   overrides: Partial<ModelsDevCatalog> = {},
@@ -19,6 +35,36 @@ function buildCatalog(
     ...overrides,
   };
 }
+
+describe('mergeMetadata', () => {
+  it('preserves provider-supported reasoning efforts from the patch', () => {
+    const merged = mergeMetadata(buildMetadata({ supportsReasoning: true }), {
+      supportsReasoning: true,
+      supportedReasoningEfforts: ['low', 'medium', 'high'],
+    });
+
+    expect(merged.supportedReasoningEfforts).toEqual(['low', 'medium', 'high']);
+  });
+
+  it('keeps base reasoning efforts when the patch omits them', () => {
+    const merged = mergeMetadata(
+      buildMetadata({
+        supportsReasoning: true,
+        supportedReasoningEfforts: ['low', 'high'],
+      }),
+      { contextWindow: 200000 },
+    );
+
+    expect(merged.supportedReasoningEfforts).toEqual(['low', 'high']);
+    expect(merged.contextWindow).toBe(200000);
+  });
+
+  it('omits the efforts field when neither side publishes it', () => {
+    const merged = mergeMetadata(buildMetadata(), { contextWindow: 100000 });
+
+    expect(merged.supportedReasoningEfforts).toBeUndefined();
+  });
+});
 
 describe('resolveModelsDevSlug', () => {
   it('strips the openrouter/ prefix and ~ alias marker', () => {
@@ -274,6 +320,10 @@ describe('lookupModelMetadataFromCatalog', () => {
       lookupModelMetadataFromCatalog(catalog, 'github-copilot/gpt-5.6-luna')
         .metadata.supportsReasoning,
     ).toBe(true);
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'github-copilot/gpt-5.6-luna')
+        .metadata.supportedReasoningEfforts,
+    ).toEqual(['low', 'medium', 'high']);
     // Entries predating reasoning_options keep the bare flag's meaning.
     expect(
       lookupModelMetadataFromCatalog(catalog, 'github-copilot/claude-haiku-4.5')

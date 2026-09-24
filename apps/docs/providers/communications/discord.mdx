@@ -108,7 +108,7 @@ unmoderated tag, or a moderated tag when the bot has Manage Threads.
 
 Individual automations can also report to their own Discord channel instead of
 the default: pick a Discord channel in that automation's destination selector
-under **Settings > Automations**, the same way you would pick a Slack channel.
+on the **Automations** page, the same way you would pick a Slack channel.
 
 ## Start and continue tasks
 
@@ -149,13 +149,15 @@ all-repositories environment.
 Session automation reports can be delivered to configured Discord channels or the
 automation owner's DM. Replies continue the report's session in Discord.
 
-**Peer conversations** under **Settings > Experimental** is off by default. The
-deployment admin can enable it so linked participants' messages in established
-Roomote Discord threads continue reaching Roomote after a peer is mentioned. Roomote
-may ignore ambient discussion, while explicit bot mentions, commands, DMs, and
-replies to Roomote continue to receive a response normally. This applies only
-inside the established thread; it does not make Roomote monitor the surrounding
-channel.
+Linked participants' messages in established Roomote Discord threads keep
+reaching Roomote after a peer is mentioned. When a
+[judgment model](/models#judgment-model) is configured, every unmentioned
+reply in such a thread with more than one person is judged before it can start
+a turn and routes when
+it is addressed to Roomote and is more than a closing acknowledgement;
+otherwise Roomote may ignore ambient discussion. Explicit bot mentions, commands, DMs, and replies to
+Roomote always receive a response. This applies only inside the established
+thread; it does not make Roomote monitor the surrounding channel.
 
 Every Roomote reply ends with a compact footer: **Reply anytime**, a plain
 running-task count when at least one task is running, links to pull requests the

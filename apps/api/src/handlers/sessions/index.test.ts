@@ -45,7 +45,7 @@ import {
 
 import type { Variables } from '../../types';
 import { mcpAuthMiddleware } from '../mcp/middleware';
-import { sessionsRouter } from '.';
+import { findAccessibleSession, sessionsRouter } from '.';
 
 const createdSessionIds: string[] = [];
 const createdTaskIds: string[] = [];
@@ -516,11 +516,11 @@ describe('MCP session routes', () => {
     };
     expect(updates.narrative).toEqual([
       expect.objectContaining({
-        direction: 'Codex → Roomote',
+        direction: 'Client → Roomote',
         text: 'Older message',
       }),
       expect.objectContaining({
-        direction: 'Roomote → Codex',
+        direction: 'Roomote → Client',
         text: 'Same timestamp, later sequence',
       }),
     ]);
@@ -547,7 +547,7 @@ describe('MCP session routes', () => {
     expect(sendResponse.status).toBe(200);
     await expect(sendResponse.clone().json()).resolves.toMatchObject({
       sent: {
-        direction: 'Codex → Roomote',
+        direction: 'Client → Roomote',
         target: { kind: 'session', id: session.id },
         text: 'Continue this Session',
       },
@@ -622,5 +622,36 @@ describe('MCP session routes', () => {
       sessionId: summary.id,
       messages: [{ text: 'Inspect this Session' }],
     });
+  });
+
+  it('does not backfill a missing Session for read-only Fast conversation lookup', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    createdConversationIds.push(conversation!.id);
+
+    const result = await findAccessibleSession(
+      conversation!.id,
+      {
+        userId: owner.id,
+        authContext: { userId: owner.id, tokenType: 'auth', version: 1 },
+      },
+      { backfill: false },
+    );
+
+    expect(result).toBeNull();
+    expect(
+      await db.query.sessions.findFirst({
+        where: eq(sessions.fastConversationId, conversation!.id),
+      }),
+    ).toBeUndefined();
   });
 });

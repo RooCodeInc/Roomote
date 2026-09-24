@@ -68,6 +68,30 @@ const mocks = vi.hoisted(() => ({
   linearEmitResponse: vi.fn(),
   createConversationArtifact: vi.fn(),
   isVoiceCallActive: vi.fn(),
+  gateTaskCommunication: vi.fn(
+    async (): Promise<
+      | { kind: 'skip' }
+      | {
+          kind: 'deliver';
+          hint?: {
+            decision: 'relay' | 'redirect' | 'uncertain';
+            reason: string;
+          };
+        }
+    > => ({ kind: 'deliver' }),
+  ),
+  listUnsharedTaskUpdates: vi.fn(async (): Promise<string[]> => []),
+  isTaskCommunicationTriageEnabled: vi.fn(async () => false),
+  wasTaskCloseoutRelayed: vi.fn(async () => false),
+  markTaskCloseoutRelayed: vi.fn(async () => {}),
+}));
+
+vi.mock('./task-communication-triage', () => ({
+  gateDelegatedTaskCommunication: mocks.gateTaskCommunication,
+  listUnsharedTaskUpdates: mocks.listUnsharedTaskUpdates,
+  isTaskCommunicationTriageEnabled: mocks.isTaskCommunicationTriageEnabled,
+  wasTaskCloseoutRelayed: mocks.wasTaskCloseoutRelayed,
+  markTaskCloseoutRelayed: mocks.markTaskCloseoutRelayed,
 }));
 
 vi.mock('./fast-agent-session-videos', () => ({
@@ -790,7 +814,7 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('rejects a recovered image from a task outside the Fast Session', async () => {
+  it('rejects a recovered image from a task outside the session', async () => {
     mocks.findTaskRuns.mockResolvedValueOnce([]);
 
     await expect(
@@ -1009,6 +1033,42 @@ describe('deliverFastAgentParentEvent', () => {
     });
   });
 
+  it.each([
+    [false, 'idle', 'required'],
+    [true, 'idle', 'optional'],
+    [true, 'completed', 'optional'],
+    [true, 'failed', 'required'],
+  ] as const)(
+    'makes a web settle optional only after triage relayed its closeout (relayed=%s, %s)',
+    async (closeoutRelayed, status, visibility) => {
+      mocks.wasTaskCloseoutRelayed.mockResolvedValueOnce(closeoutRelayed);
+      mocks.answerQuestion.mockResolvedValue('Settled');
+
+      await deliverFastAgentParentEvent({
+        parent: {
+          sessionId: parent.sessionId,
+          conversation: {
+            surface: 'web',
+            workspaceId: 'user-1',
+            conversationId: 'session-1',
+          },
+        },
+        event: {
+          type: 'task_settled',
+          taskId: 'task-1',
+          runId: 42,
+          status,
+          taskUrl: 'https://roomote.example/task/task-1',
+          pullRequests: [],
+        },
+      });
+
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({ platformEventVisibility: visibility }),
+      );
+    },
+  );
+
   it('passes a canonical review offer into the web transcript payload', async () => {
     const webParent = {
       sessionId: parent.sessionId,
@@ -1200,6 +1260,162 @@ describe('deliverFastAgentParentEvent', () => {
       conversation: parent.conversation,
       messageId: '101.001',
     });
+  });
+
+  it('skips the parent turn when task communication triage stays quiet', async () => {
+    mocks.gateTaskCommunication.mockResolvedValueOnce({ kind: 'skip' });
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'child_message',
+          taskId: 'task-1',
+          runId: 42,
+          actingUserId: 'u1',
+          messageId: '55555555-5555-4555-8555-555555555555',
+          purpose: 'progress',
+          message: 'Still running the test suite.',
+        },
+      }),
+    ).resolves.toBe('skipped');
+
+    expect(mocks.gateTaskCommunication).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent,
+        surface: 'slack',
+        requesterUserId: 'u1',
+        event: expect.objectContaining({ type: 'child_message' }),
+      }),
+    );
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('passes the triage decision to the parent turn for task activity', async () => {
+    mocks.gateTaskCommunication.mockResolvedValueOnce({
+      kind: 'deliver',
+      hint: { decision: 'redirect', reason: 'off_track' },
+    });
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_activity',
+        taskId: 'task-1',
+        runId: 42,
+        actingUserId: 'u1',
+        throughTs: 1_789_660_000_000,
+        items: [
+          {
+            kind: 'assistant_message',
+            text: 'Rewriting the API layer to use the new client.',
+          },
+        ],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining(
+          'Rewriting the API layer to use the new client.',
+        ),
+        turnSource: 'platform_event',
+        platformEventKind: 'delegated_task',
+        taskCommunicationTriage: { decision: 'redirect', reason: 'off_track' },
+        serviceCredentialPlatformActorUserId: 'u1',
+      }),
+    );
+  });
+
+  it.each([
+    [true, 1],
+    [false, 0],
+  ] as const)(
+    'marks a triaged closeout relayed only after a reply posts (posted=%s)',
+    async (posts, marks) => {
+      mocks.gateTaskCommunication.mockResolvedValueOnce({
+        kind: 'deliver',
+        hint: { decision: 'relay', reason: 'task_result' },
+      });
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { postReply: (reply: unknown) => unknown };
+        }) => {
+          if (posts) {
+            await adapter.postReply({ purpose: 'closeout', message: 'Done.' });
+          }
+        },
+      );
+
+      await deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'child_message',
+          taskId: 'task-1',
+          runId: 42,
+          messageId: '66666666-6666-4666-8666-666666666666',
+          purpose: 'closeout',
+          message: 'The fix is in place.',
+        },
+      });
+
+      expect(mocks.markTaskCloseoutRelayed).toHaveBeenCalledTimes(marks);
+      if (marks) {
+        expect(mocks.markTaskCloseoutRelayed).toHaveBeenCalledWith(42);
+      }
+    },
+  );
+
+  it('hands unshared task updates to the settle closeout', async () => {
+    mocks.listUnsharedTaskUpdates.mockResolvedValueOnce([
+      'The flaky test was a timezone assumption.',
+    ]);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_settled',
+        taskId: 'task-1',
+        runId: 42,
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.listUnsharedTaskUpdates).toHaveBeenCalledWith(42);
+    expect(mocks.gateTaskCommunication).not.toHaveBeenCalled();
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining(
+          '"unsharedTaskUpdates":["The flaky test was a timezone assumption."]',
+        ),
+      }),
+    );
+  });
+
+  it('authorizes a child continuation for the active Session owner recorded on the run', async () => {
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'child_message',
+        taskId: 'task-1',
+        runId: 42,
+        actingUserId: 'u1',
+        messageId: '44444444-4444-4444-8444-444444444444',
+        purpose: 'closeout',
+        message: 'The environment was created and is ready for verification.',
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceCredentialPlatformActorUserId: 'u1',
+      }),
+    );
   });
 
   it('carries child-selected images and charts into the Fast parent turn by default', async () => {
@@ -1484,7 +1700,7 @@ describe('deliverFastAgentParentEvent', () => {
         );
       } else {
         await expect(delivery).rejects.toThrow(
-          'Fast suggestion origin Session was not found.',
+          'Fast suggestion origin session was not found.',
         );
         expect(mocks.postSlackSuggestions).not.toHaveBeenCalled();
       }
@@ -4403,6 +4619,33 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
     expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('tells a wakeup turn when task updates are triaged', async () => {
+    mocks.findWakeup.mockResolvedValueOnce({ status: 'active' });
+    mocks.findWakeupSession.mockResolvedValueOnce({ archivedAt: null });
+    mocks.isTaskCommunicationTriageEnabled.mockResolvedValueOnce(true);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:1',
+        wakeupId: 'wakeup-1',
+        name: 'Follow through on session tasks',
+        prompt: 'Run the Own Coding Task Follow-Through session check.',
+        runNumber: 1,
+        maxRuns: 1,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'only_when_notable',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ taskCommunicationTriageEnabled: true }),
+    );
   });
 
   it('skips a scheduled wakeup that was cancelled after its occurrence was admitted', async () => {

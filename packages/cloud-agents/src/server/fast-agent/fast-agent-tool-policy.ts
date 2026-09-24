@@ -22,6 +22,7 @@ export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
   [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: false,
   [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: false,
   [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: false,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: false,
 };
 
 export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
@@ -33,20 +34,45 @@ export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
   ...Object.fromEntries(
     Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, false]),
   ),
-  // Subagents reach on-demand deployment MCP servers the same way the parent
-  // does; these two are the only Fast tools they share.
+  // Discovery remains available for the built-in integration catalog and
+  // connection statuses. Connected tools are reached through code mode.
   [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: true,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: true,
 };
+
+export function buildFastAgentCodeModeServerNames(
+  integrationIds: string[],
+): Map<string, string> {
+  const sanitizedNames = integrationIds.map((id) =>
+    id.replace(/[^a-zA-Z0-9_-]/gu, '_'),
+  );
+  const allSanitizedNames = new Set(sanitizedNames);
+  const usedNames = new Set<string>();
+  const names = new Map<string, string>();
+
+  integrationIds.forEach((id, index) => {
+    const baseName = sanitizedNames[index]!;
+    let name = baseName;
+    if (usedNames.has(name) || sanitizedNames.indexOf(baseName) !== index) {
+      let suffix = 1;
+      do {
+        name = `${baseName}__roomote_${index + suffix}`;
+        suffix += 1;
+      } while (usedNames.has(name) || allSanitizedNames.has(name));
+    }
+    usedNames.add(name);
+    names.set(id, name);
+  });
+
+  return names;
+}
 
 /**
  * Deployment MCP servers whose tools are registered with OpenCode directly,
  * so every tool schema rides along in each model request. The Roomote member
  * tools are referenced by name throughout the system prompt and memory recall
  * is a required first call, so both stay native. Every other server is
- * exposed on demand through `find_integration_tools` and
- * `call_integration_tool`, which keeps a deployment with hundreds of tools
- * from inflating every request.
+ * exposed through OpenCode code mode, which keeps a deployment with hundreds
+ * of tools from inflating every request.
  */
 export function isFastAgentNativeIntegration(integrationId: string): boolean {
   return integrationId === ROOMOTE_MCP_ID || isMemoryMcpServer(integrationId);
@@ -59,7 +85,6 @@ export function buildFastAgentToolFilter(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
-    codeModeIntegrationsEnabled?: boolean;
   } = {},
 ): Record<string, boolean> {
   return {
@@ -77,36 +102,21 @@ export function buildFastAgentToolFilter(
           [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: false,
         }
       : {}),
-    ...(options.codeModeIntegrationsEnabled === true
-      ? {
-          // OpenCode code mode replaces every mounted MCP tool with the
-          // confined `execute` runner; the generic dispatcher must not stay
-          // reachable or the model keeps routing calls through it. Discovery
-          // (`find_integration_tools`) stays available for the built-in
-          // integration catalog and connection statuses.
-          execute: true,
-          [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: false,
-        }
-      : {}),
+    // OpenCode code mode replaces every mounted MCP tool with the confined
+    // `execute` runner. Discovery stays available for the built-in integration
+    // catalog and connection statuses.
+    execute: true,
     ...Object.fromEntries(integrationIds.map((id) => [`${id}_*`, true])),
   };
 }
 
 /**
- * Subagent variant of the tool filter for the code-mode integrations
- * experiment. Helper subagents already see every MCP tool (`*': true`), so
- * OpenCode code mode's `execute` runner is visible to them unchanged; the
- * only adjustment is retiring the generic dispatcher alongside the parent.
+ * Helper subagents already see every MCP tool (`*': true`), so OpenCode code
+ * mode's `execute` runner is visible to them unchanged.
  */
-export function buildFastAgentSubagentToolFilter(
-  options: { codeModeIntegrationsEnabled?: boolean } = {},
-): Record<string, boolean> {
-  if (options.codeModeIntegrationsEnabled !== true) {
-    return FAST_AGENT_SUBAGENT_TOOL_FILTER;
-  }
+export function buildFastAgentSubagentToolFilter(): Record<string, boolean> {
   return {
     ...FAST_AGENT_SUBAGENT_TOOL_FILTER,
-    [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: false,
   };
 }
 

@@ -9,7 +9,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const state = vi.hoisted(() => ({
   setOpen: vi.fn(),
   user: {},
-  drawerSetupIncomplete: false,
+  dizzyEnabled: false,
 }));
 
 vi.mock('next/image', () => ({
@@ -59,6 +59,10 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
 }));
 
+vi.mock('@/hooks/useDizzyExperiment', () => ({
+  useDizzyExperiment: () => state.dizzyEnabled,
+}));
+
 vi.mock('../UserMenu', () => ({
   UserMenu: () => <div>UserMenu</div>,
 }));
@@ -70,14 +74,7 @@ vi.mock('@/components/tasks/NewTaskDialog', () => ({
 }));
 
 vi.mock('./NavbarDrawer', () => ({
-  NavbarDrawer: ({
-    setupIncomplete,
-    onNewSession,
-  }: {
-    setupIncomplete?: boolean;
-    onNewSession?: () => void;
-  }) => {
-    state.drawerSetupIncomplete = setupIncomplete ?? false;
+  NavbarDrawer: ({ onNewSession }: { onNewSession?: () => void }) => {
     return (
       <button type="button" onClick={onNewSession}>
         Drawer New Session
@@ -91,15 +88,7 @@ import { NavbarHeader } from './NavbarHeader';
 describe('NavbarHeader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    state.drawerSetupIncomplete = false;
-  });
-
-  it('disables Home and passes incomplete setup state to the drawer', () => {
-    render(<NavbarHeader setupIncomplete />);
-
-    expect(screen.queryByRole('link')).not.toBeInTheDocument();
-    expect(screen.getByAltText('Roomote')).toHaveClass('opacity-50');
-    expect(state.drawerSetupIncomplete).toBe(true);
+    state.dizzyEnabled = false;
   });
 
   it('renders the current Roomote mark in the mobile header', () => {
@@ -110,6 +99,18 @@ describe('NavbarHeader', () => {
       'src',
       '/logos/r.svg',
     );
+  });
+
+  it('spins the mobile logo only when Dizzy is enabled', () => {
+    const view = render(<NavbarHeader />);
+    const logo = screen.getByAltText('Roomote');
+
+    expect(logo).not.toHaveClass('motion-safe:animate-spin');
+
+    state.dizzyEnabled = true;
+    view.rerender(<NavbarHeader />);
+
+    expect(logo).toHaveClass('motion-safe:animate-spin');
   });
 
   it('opens the command palette from the mobile search button', () => {

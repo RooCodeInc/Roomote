@@ -2913,7 +2913,6 @@ export function AutomationsSettings({
       isSaving: isAutomationSaving(automationId),
       blockedReason,
     });
-  const slackAutomationsDisabled = !managerChannelConfigured;
   const sentryTriageBlockedReason = !sentryConnected
     ? 'Connect Sentry first'
     : null;
@@ -4563,7 +4562,7 @@ export function AutomationsSettings({
                       })
                     ) {
                       toast.error(
-                        'Configure Sentry in Settings > Integrations before enabling Triage Sentry Issues.',
+                        'Configure Sentry on the Integrations page before enabling Triage Sentry Issues.',
                       );
                       return;
                     }
@@ -4644,8 +4643,7 @@ export function AutomationsSettings({
                     })}
 
                     <p className="text-xs text-muted-foreground md:max-w-160">
-                      Requires Sentry to be configured in Settings &gt;
-                      Integrations.
+                      Requires Sentry to be configured on the Integrations page.
                     </p>
 
                     <div className="space-y-2">
@@ -4689,7 +4687,6 @@ export function AutomationsSettings({
               isOpen={openAutomationIds.has('suggester')}
               onOpenChange={(open) => setAutomationOpen('suggester', open)}
               iconEnabled={iconEnabled.suggester}
-              disabled={slackAutomationsDisabled}
               debugSection={renderDebugRunsSection('suggester')}
               runAction={
                 <BasicTooltip
@@ -4827,7 +4824,6 @@ export function AutomationsSettings({
               isOpen={openAutomationIds.has('announcer')}
               onOpenChange={(open) => setAutomationOpen('announcer', open)}
               iconEnabled={iconEnabled.announcer}
-              disabled={slackAutomationsDisabled}
               debugSection={renderDebugRunsSection('announcer')}
               runAction={
                 <BasicTooltip

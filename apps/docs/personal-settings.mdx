@@ -44,28 +44,27 @@ for the deployment yet, or the integration does not require personal linking.
 ## Manage personal integrations
 
 Use **Personal integrations** to add, edit, or revoke API-key integrations that
-only your Sessions and coding tasks can use. Roomote keeps the key server-side;
+only your sessions and coding tasks can use. Roomote keeps the key server-side;
 agents receive an opaque reference or a task-scoped substitute rather than the
 key itself.
 
-An integration-key approval created from a Session also appears here when you
-choose **Only me**. Deployment-wide integration keys instead appear under the
-administrator's **Settings → Integrations** page. If an administrator changes a
-shared integration to owner-only access, Roomote moves it to that owner's
-Personal integrations card.
+An integration-key approval created from a session also appears here when you
+choose **Only me**. Deployment-wide integration keys instead appear on the
+**Integrations** page. If an administrator changes a shared integration to
+owner-only access, Roomote moves it to that owner's Personal integrations card.
 
 See [Integration keys](/integration-keys) for approval methods, security
 boundaries, task behavior, and self-hosting options.
 
 ## Manage personal MCP servers
 
-Use **Personal MCP servers** to add remote MCP servers that only your Sessions
+Use **Personal MCP servers** to add remote MCP servers that only your sessions
 and coding tasks can use, for example a service you authorize with your own
 account. Roomote reaches the server through its proxy and keeps headers and
 OAuth tokens server-side. A server you ask Roomote to connect privately in a
-Session appears here too. Open a server to edit it, manage which tools agents
+session appears here too. Open a server to edit it, manage which tools agents
 may use, or share it with everyone in the deployment; Roomote then moves it to
-**Settings → Integrations**.
+the **Integrations** page.
 
 See [Custom MCP servers](/integrations/custom-mcp-servers) for authentication
 options and security boundaries.
@@ -114,23 +113,25 @@ generation is unavailable, Home keeps the standard non-personalized suggestions.
 An admin can turn the experiment off to stop personalized suggestion requests
 for every member.
 
-### Continue peer conversations
+### Peer conversations
 
-**Peer conversations** is a deployment-wide experiment controlled by admins
-under **Settings > Experimental**. When enabled, eligible human replies in
-established Slack or Discord session threads can continue reaching Roomote after
-someone mentions another participant. Roomote is instructed to stay quiet around
-peer discussion unless Roomote is addressed directly or the context clearly
-calls for its response. Direct Roomote mentions work normally with the experiment
-on or off.
+Peer conversations are standard behavior in established Slack and Discord
+session threads; there is no Experimental setting to enable them. When a
+[judgment model](/models#judgment-model) is configured, each eligible unmentioned
+reply from a linked participant is checked for who it addresses and whether it
+expects a response or action. Only confident replies addressed to Roomote start
+a turn, while messages for another participant and simple acknowledgements stay
+quiet. Without a judgment model, the existing provider-specific routing
+heuristics apply. Direct Roomote mentions continue to work.
 
-The experiment does not monitor whole channels. Discord supplies messages from
-the established thread and resolved user mentions. Telegram is not included:
-bot privacy settings can prevent ambient group messages from reaching Roomote,
-and Telegram sessions are isolated per linked sender. Microsoft Teams
-is also not included because its channel sessions are isolated per
-linked sender; webhook delivery and delegated Graph history are not a single
-shared, owner-bound session signal.
+Teams sessions remain isolated by linked Roomote user, so they do not share a
+peer conversation across participants. With a judgment model configured,
+eligible unmentioned replies in Teams threads are still checked for their
+addressee and response intent before they start a turn. These behaviors do not
+monitor whole channels. Discord supplies messages from the established thread
+and resolved user mentions. Telegram is not included: bot privacy settings can
+prevent ambient group messages from reaching Roomote, and Telegram sessions are
+isolated per linked sender.
 
 ## Personalize how Roomote works with you
 
@@ -173,7 +174,7 @@ feature.
 ## Common issues
 
 - **A linked account is missing.** Ask an admin to enable the integration from
-  **Settings > Integrations**.
+  the **Integrations** page.
 - **A task uses the wrong identity.** Check that the relevant account is
   linked and that you started the task from the expected chat, source-control,
   or dashboard user.

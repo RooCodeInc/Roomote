@@ -21,6 +21,10 @@ import {
 import { z } from 'zod';
 
 import type { Variables } from '../../types';
+import {
+  readNativeMcpRequestBody,
+  resolveNativeToolApprovalGuard,
+} from './native-tool-approvals';
 import { McpProxyError, toMcpToolResult } from './proxy-utils';
 
 const number = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -80,6 +84,14 @@ function createNativeProviderMergeMcp(provider: Provider) {
       const auth = c.get('authContext');
       const host = await resolveHost();
       await authorize(auth, provider, host);
+      const guard = await resolveNativeToolApprovalGuard({
+        auth: { userId: auth?.userId ?? null, tokenType: 'auth' },
+        integrationId: provider,
+        requestHeaders: c.req.raw.headers,
+      });
+      const body = await readNativeMcpRequestBody(c.req.raw);
+      const refusal = await guard.checkCall(body);
+      if (refusal) return refusal;
       const server = new McpServer({
         name: `roomote-${provider}-merge-mcp`,
         version: '1.0.0',
@@ -252,7 +264,10 @@ function createNativeProviderMergeMcp(provider: Provider) {
         enableJsonResponse: true,
       });
       await server.connect(transport);
-      return await transport.handleRequest(c.req.raw);
+      return guard.filterToolsList(
+        body,
+        await transport.handleRequest(c.req.raw),
+      );
     } catch (error) {
       return Response.json(
         {

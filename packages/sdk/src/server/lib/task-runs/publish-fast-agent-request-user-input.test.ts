@@ -14,6 +14,10 @@ const mocks = vi.hoisted(() => ({
   postMessage: vi.fn(),
   updateMessage: vi.fn(),
   getTaskUrl: vi.fn(),
+  getSourceSession: vi.fn(),
+  recordResult: vi.fn(),
+  enqueuePreparation: vi.fn(),
+  resolveVisibility: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -26,11 +30,21 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((...args: unknown[]) => args),
   getCustomAutomationById: mocks.findCustomAutomation,
+  getSessionForFastConversation: mocks.getSourceSession,
+  recordCustomAutomationResult: mocks.recordResult,
   taskRuns: { id: 'task_runs.id', taskId: 'task_runs.task_id' },
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
   },
+}));
+
+vi.mock('../automation-result-visibility', () => ({
+  resolveCustomAutomationResultVisibility: mocks.resolveVisibility,
+}));
+
+vi.mock('../automation-result-preparation', () => ({
+  enqueueAutomationResultPreparation: mocks.enqueuePreparation,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -91,7 +105,7 @@ describe('publishFastAgentRequestUserInput', () => {
     mocks.findRun.mockResolvedValue({
       id: 42,
       taskId: 'task-1',
-      payload: { fastAgentParent: parent },
+      payload: { fastAgentParent: parent, customAutomationId: 'automation-1' },
     });
     mocks.findSession.mockResolvedValue({
       id: parent.sessionId,
@@ -103,7 +117,12 @@ describe('publishFastAgentRequestUserInput', () => {
     mocks.findCustomAutomation.mockResolvedValue({
       id: 'automation-1',
       name: 'Weekly scan',
+      createdByUserId: 'u1',
     });
+    mocks.getSourceSession.mockResolvedValue({ id: 'session-1' });
+    mocks.recordResult.mockResolvedValue({ id: 'result-1' });
+    mocks.enqueuePreparation.mockResolvedValue(true);
+    mocks.resolveVisibility.mockResolvedValue('shared');
     mocks.acquireRootBindingLock.mockResolvedValue(
       mocks.releaseRootBindingLock,
     );
@@ -141,6 +160,15 @@ describe('publishFastAgentRequestUserInput', () => {
         promptMessageTs: '101.001',
       }),
     );
+    expect(mocks.recordResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceRunId: 42,
+        sourceSessionId: 'session-1',
+        resultKind: 'input_request',
+        content: 'Weekly scan needs input to continue.\n\nWhich animal?',
+      }),
+    );
+    expect(mocks.enqueuePreparation).toHaveBeenCalledWith('result-1');
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 

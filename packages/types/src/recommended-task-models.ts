@@ -35,12 +35,12 @@ export const RECOMMENDED_TASK_MODELS = [
   },
   { id: 'claude-fable-5', displayName: 'Claude Fable 5', family: 'Fable' },
   { id: 'claude-haiku-4-5', displayName: 'Claude Haiku 4.5', family: 'Haiku' },
-  { id: 'claude-opus-5', displayName: 'Claude Opus 5', family: 'Opus' },
+  { id: 'claude-opus-5-5', displayName: 'Claude Opus 5.5', family: 'Opus' },
   { id: 'claude-sonnet-5', displayName: 'Claude Sonnet 5', family: 'Sonnet' },
   { id: 'gpt-6-astra', displayName: 'GPT-6 Astra', family: 'GPT' },
-  { id: 'gpt-5-6-sol', displayName: 'GPT 5.6 Sol', family: 'GPT' },
+  { id: 'gpt-6-sol', displayName: 'GPT-6 Sol', family: 'GPT' },
   { id: 'gpt-5-6-terra', displayName: 'GPT 5.6 Terra', family: 'GPT' },
-  { id: 'gpt-5-6-luna', displayName: 'GPT 5.6 Luna', family: 'GPT' },
+  { id: 'gpt-6-luna', displayName: 'GPT-6 Luna', family: 'GPT' },
   {
     id: 'gemini-3-8-flash',
     displayName: 'Gemini 3.8 Flash',
@@ -63,7 +63,7 @@ export const RECOMMENDED_TASK_MODELS = [
   { id: 'kimi-k2-7-code', displayName: 'Kimi K2.7 Code', family: 'Kimi' },
   { id: 'qwen3-8-max', displayName: 'Qwen3.8 Max', family: 'Qwen' },
   { id: 'minimax-m3', displayName: 'MiniMax M3', family: 'Minimax' },
-  { id: 'grok-4-6', displayName: 'Grok 4.6', family: 'Grok' },
+  { id: 'grok-4-7', displayName: 'Grok 4.7', family: 'Grok' },
 ] as const satisfies readonly RecommendedTaskModel[];
 
 export type RecommendedTaskModelId =
@@ -104,12 +104,12 @@ export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
   'claude-fable-5-1': 'openrouter/anthropic/claude-fable-5.1',
   'claude-fable-5': 'openrouter/anthropic/claude-fable-5',
   'claude-haiku-4-5': 'openrouter/anthropic/claude-haiku-4.5',
-  'claude-opus-5': 'openrouter/anthropic/claude-opus-5',
+  'claude-opus-5-5': 'openrouter/anthropic/claude-opus-5.5',
   'claude-sonnet-5': 'openrouter/anthropic/claude-sonnet-5',
   'gpt-6-astra': 'openrouter/openai/gpt-6-astra',
-  'gpt-5-6-sol': 'openrouter/openai/gpt-5.6-sol',
+  'gpt-6-sol': 'openrouter/openai/gpt-6-sol',
   'gpt-5-6-terra': 'openrouter/openai/gpt-5.6-terra',
-  'gpt-5-6-luna': 'openrouter/openai/gpt-5.6-luna',
+  'gpt-6-luna': 'openrouter/openai/gpt-6-luna',
   'gemini-3-8-flash': 'openrouter/google/gemini-3.8-flash',
   'deepseek-v4-1-flash': 'openrouter/deepseek/deepseek-v4.1-flash',
   'deepseek-v4-pro-0813': 'openrouter/deepseek/deepseek-v4-pro-0813',
@@ -119,5 +119,5 @@ export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
   'kimi-k2-7-code': 'openrouter/moonshotai/kimi-k2.7-code',
   'qwen3-8-max': 'openrouter/qwen/qwen3.8-max-0902',
   'minimax-m3': 'openrouter/minimax/minimax-m3',
-  'grok-4-6': 'openrouter/x-ai/grok-4.6',
+  'grok-4-7': 'openrouter/x-ai/grok-4.7',
 } as const satisfies RecommendedTaskModelSlugMap;

@@ -15,6 +15,7 @@ import {
   type FastAgentReplyHandle,
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
+  type TaskCommunicationTriageHint,
 } from '@roomote/cloud-agents/server';
 import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
 import {
@@ -80,6 +81,14 @@ import {
 
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 import { notifyFastWebSessionAttention } from './session-attention-notification';
+import {
+  gateDelegatedTaskCommunication,
+  isTaskCommunicationTriageEnabled,
+  listUnsharedTaskUpdates,
+  markTaskCloseoutRelayed,
+  wasTaskCloseoutRelayed,
+  type TaskActivityDigestItem,
+} from './task-communication-triage';
 import { buildDeterministicMessageId } from './deterministic-message-id';
 import {
   buildLinearFastReplyMessageId,
@@ -98,6 +107,7 @@ import {
   buildCustomAutomationSlackMessage,
 } from './manager-slack';
 import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
+import { enqueueAutomationResultPreparation } from './automation-result-preparation';
 import {
   appendFastAutomationSuggestionInstruction,
   postFastAutomationSuggestionsToDiscord,
@@ -165,7 +175,7 @@ function requireFastAgentActorUserId(
   const userId = actorUserId ?? session.userId;
   if (!userId) {
     throw new FastAgentParentEventDeliveryError(
-      'Automation-owned Fast sessions require a human actor for this turn.',
+      'Automation-owned sessions require a human actor for this turn.',
       { replyPosted: false, permanent: true },
     );
   }
@@ -227,12 +237,25 @@ export type FastAgentParentEvent =
       type: 'child_message';
       taskId: string;
       runId: number;
+      /** Trusted latest actor copied from task_runs when the report is queued. */
+      actingUserId?: string;
       messageId: string;
       admittedAtMs?: number;
       purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
       message: string;
       imageArtifactIds?: string[];
       charts?: DataVisualizationInput[];
+    }
+  | {
+      /** Condensed delegated-task activity; only produced while the
+       * `sessionTaskCommunicationTriage` experiment is on. */
+      type: 'task_activity';
+      taskId: string;
+      runId: number;
+      actingUserId?: string;
+      /** Latest `task_messages.ts` covered; the next digest starts after it. */
+      throughTs: number;
+      items: TaskActivityDigestItem[];
     }
   | {
       type: 'artifact_published';
@@ -253,6 +276,8 @@ export type FastAgentParentEvent =
       /** Trusted latest actor copied from task_runs at settle time. */
       actingUserId?: string;
       customAutomationId?: string;
+      /** Task updates triage kept from the user, attached at delivery. */
+      unsharedTaskUpdates?: string[];
       title?: string;
       status: string;
       error?: string;
@@ -428,6 +453,8 @@ export function buildEventClientMessageSeed(
       return `fast-parent-wakeup:${event.eventId}`;
     case 'child_message':
       return `fast-parent-child-message:${event.messageId}`;
+    case 'task_activity':
+      return `fast-parent-task-activity:${event.runId}:${event.throughTs}`;
     case 'artifact_published':
       return `fast-parent-artifact:${event.artifact.id}:v${event.artifact.version}`;
     case 'pull_request_opened':
@@ -1419,7 +1446,7 @@ async function postDiscordFastParentMessageWithFooter(params: {
     channelId,
     footerStateThreadId,
     lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
-    logRef: `fast session ${params.sessionId}`,
+    logRef: `session ${params.sessionId}`,
     logContext: 'fastAgentParentEvent',
     postReplyWithFooter: async () => {
       const result = await params.post();
@@ -2640,9 +2667,19 @@ function buildFastAutomationFailureReport(
     : `${subject} failed${detail}\n${event.taskUrl}`;
 }
 
-async function resolveTaskSettledCredentialActor(
-  parent: FastAgentParent,
+async function withUnsharedTaskUpdates(
   event: Extract<FastAgentParentEvent, { type: 'task_settled' }>,
+): Promise<FastAgentParentEvent> {
+  const unsharedTaskUpdates = await listUnsharedTaskUpdates(event.runId);
+  return unsharedTaskUpdates.length ? { ...event, unsharedTaskUpdates } : event;
+}
+
+async function resolveDelegatedTaskActor(
+  parent: FastAgentParent,
+  event: Extract<
+    FastAgentParentEvent,
+    { type: 'child_message' | 'task_activity' | 'task_settled' }
+  >,
 ): Promise<{
   userId?: string;
   denialReason?: 'no_acting_user' | 'actor_owner_mismatch';
@@ -2769,7 +2806,7 @@ function createScheduledWakeupReplyGuard(params: {
         );
         controller.abort(
           new Error(
-            'Scheduled wakeup was cancelled or its Session archived while the turn was running.',
+            'Scheduled wakeup was cancelled or its session archived while the turn was running.',
           ),
         );
       }
@@ -2821,11 +2858,42 @@ export async function deliverFastAgentParentEventWithLock(
       return 'skipped';
     }
 
+    let taskCommunicationTriage: TaskCommunicationTriageHint | undefined;
+    if (
+      params.event.type === 'child_message' ||
+      params.event.type === 'task_activity'
+    ) {
+      const gate = await gateDelegatedTaskCommunication({
+        parent: params.parent,
+        surface: params.parent.conversation.surface,
+        requesterUserId: params.event.actingUserId ?? null,
+        telemetryUserId: params.event.actingUserId ?? params.parent.sessionId,
+        event: params.event,
+      });
+      if (gate.kind === 'skip') {
+        return 'skipped';
+      }
+      taskCommunicationTriage = gate.hint;
+    }
+    const promptEvent: FastAgentParentEvent =
+      params.event.type === 'task_settled'
+        ? await withUnsharedTaskUpdates(params.event)
+        : params.event;
+    // A web settle must normally speak so the user sees an outcome; when
+    // triage already relayed the task's closeout, it speaks only for news.
+    const settleCloseoutAlreadyRelayed =
+      params.event.type === 'task_settled' &&
+      (params.event.status === RunStatus.Completed ||
+        params.event.status === RunStatus.Idle) &&
+      (await wasTaskCloseoutRelayed(params.event.runId));
+
     const humanFollowUp =
       params.event.type === 'human_follow_up' ? params.event : null;
-    const taskSettledCredentialActor =
+    const delegatedTaskActor =
+      params.event.type === 'child_message' ||
+      params.event.type === 'task_activity' ||
       params.event.type === 'task_settled'
-        ? await resolveTaskSettledCredentialActor(params.parent, params.event)
+        ? await resolveDelegatedTaskActor(params.parent, params.event)
         : undefined;
     let parentTurn = await createFastAgentParentTurn({
       parent: params.parent,
@@ -2854,24 +2922,40 @@ export async function deliverFastAgentParentEventWithLock(
             if (reply.kickoff) {
               return;
             }
+            const posted = await baseAdapter.postReply(reply);
             if (
               reply.purpose === 'closeout' ||
               reply.purpose === 'clarification'
             ) {
-              await recordCustomAutomationResult({
+              const sourceSession = await getSessionForFastConversation(
+                db,
+                params.parent.sessionId,
+              );
+              const result = await recordCustomAutomationResult({
                 automationId,
                 userId: parentTurn.userId,
                 ...(reportEvent.type === 'task_settled'
-                  ? { sourceTaskId: reportEvent.taskId }
+                  ? {
+                      sourceTaskId: reportEvent.taskId,
+                      sourceRunId: reportEvent.runId,
+                    }
                   : {}),
+                ...(sourceSession ? { sourceSessionId: sourceSession.id } : {}),
                 content: reply.message,
+                resultKind:
+                  reply.purpose === 'clarification'
+                    ? 'input_request'
+                    : 'outcome',
                 dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
                 visibility: await resolveCustomAutomationResultVisibility(
                   automationId,
                 ).catch(() => 'private' as const),
               }).catch(() => undefined);
+              if (result) {
+                await enqueueAutomationResultPreparation(result.id);
+              }
             }
-            return baseAdapter.postReply(reply);
+            return posted;
           },
         },
       };
@@ -2903,10 +2987,14 @@ export async function deliverFastAgentParentEventWithLock(
       params.event.type === 'scheduled_wakeup'
         ? await isFastAgentVoiceCallActive(params.parent.sessionId)
         : humanFollowUp?.voiceMode;
+    // Only the own-task check reads this; other turns see triage per event.
+    const taskCommunicationTriageEnabled =
+      params.event.type === 'scheduled_wakeup' &&
+      (await isTaskCommunicationTriageEnabled());
     await answerFastAgentQuestion({
       question:
         humanFollowUp?.question ??
-        `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
+        `<platform_event>${JSON.stringify(promptEvent)}</platform_event>`,
       ...(humanFollowUp?.images ? { images: humanFollowUp.images } : {}),
       ...(humanFollowUp?.allowSilentAmbientReply === true &&
       !humanFollowUp.input &&
@@ -2988,7 +3076,8 @@ export async function deliverFastAgentParentEventWithLock(
         params.event.type === 'automation_triggered' ||
         params.event.type === 'task_turn_provider_error' ||
         (params.event.type === 'task_settled' &&
-          params.parent.conversation.surface === 'web') ||
+          params.parent.conversation.surface === 'web' &&
+          !settleCloseoutAlreadyRelayed) ||
         (params.event.type === 'scheduled_wakeup' &&
           params.event.reportPolicy === 'always')
           ? 'required'
@@ -3006,16 +3095,19 @@ export async function deliverFastAgentParentEventWithLock(
       automationReport:
         params.event.type === 'task_settled' &&
         Boolean(params.event.customAutomationId),
-      ...(taskSettledCredentialActor?.userId
+      ...(taskCommunicationTriage ? { taskCommunicationTriage } : {}),
+      ...(taskCommunicationTriageEnabled
+        ? { taskCommunicationTriageEnabled: true }
+        : {}),
+      ...(delegatedTaskActor?.userId
         ? {
-            serviceCredentialPlatformActorUserId:
-              taskSettledCredentialActor.userId,
+            serviceCredentialPlatformActorUserId: delegatedTaskActor.userId,
           }
         : {}),
-      ...(taskSettledCredentialActor?.denialReason
+      ...(delegatedTaskActor?.denialReason
         ? {
             serviceCredentialPlatformDenialReason:
-              taskSettledCredentialActor.denialReason,
+              delegatedTaskActor.denialReason,
           }
         : {}),
       ...(params.event.type === 'child_message' &&
@@ -3078,6 +3170,14 @@ export async function deliverFastAgentParentEventWithLock(
           : {}),
       },
     });
+    if (
+      taskCommunicationTriage &&
+      replyPosted &&
+      params.event.type === 'child_message' &&
+      params.event.purpose === 'closeout'
+    ) {
+      await markTaskCloseoutRelayed(params.event.runId);
+    }
     return 'delivered';
   } catch (error) {
     if (error instanceof FastAgentParentEventDeliveryError) {

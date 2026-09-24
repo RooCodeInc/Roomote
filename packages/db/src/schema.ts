@@ -79,6 +79,7 @@ import type {
   CredentialEgressPhase,
   CredentialEgressRevocationKind,
   TaskModelSettings,
+  UserTaskModelMapping,
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
   UserRole,
@@ -179,6 +180,32 @@ export const userPersonalizations = pgTable('user_personalizations', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+/** Private, per-user saved mappings for the task model roles. */
+export const userTaskModelMappingPresets = pgTable(
+  'user_task_model_mapping_presets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    nameKey: text('name_key').notNull(),
+    roles: jsonb('roles').$type<UserTaskModelMapping>().notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('user_task_model_mapping_presets_owner_name_unique_idx').on(
+      table.userId,
+      table.nameKey,
+    ),
+    index('user_task_model_mapping_presets_owner_created_idx').on(
+      table.userId,
+      table.createdAt,
+    ),
+  ],
+);
 
 export const instanceSkills = pgTable(
   'instance_skills',
@@ -872,6 +899,7 @@ export const tasks = pgTable(
     repositoryUrl: text('repository_url'),
     repositoryName: text('repository_name'),
     defaultBranch: text('default_branch'),
+    archivedAt: timestamp('archived_at'),
     // Soft delete; queries filter isNull(deletedAt).
     deletedAt: timestamp('deleted_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -1983,7 +2011,9 @@ export const llmUsageEvents = pgTable(
       .default(0),
     costSource: text('cost_source')
       .notNull()
-      .$type<'opencode_message' | 'litellm_gateway' | 'missing'>(),
+      .$type<
+        'opencode_message' | 'litellm_gateway' | 'provider_response' | 'missing'
+      >(),
     pricingMetadata: jsonb('pricing_metadata')
       .notNull()
       .default({})
@@ -3799,7 +3829,7 @@ export const fastAgentMessages = pgTable(
  * fast_agent_provider_messages
  *
  * Durable provider message bindings for communication surfaces whose stable
- * conversation address can host more than one Fast session. Inbound replies
+ * conversation address can host more than one session. Inbound replies
  * use these server-written rows to recover the canonical session without
  * trusting identifiers embedded in message text or webhook routing metadata.
  */
@@ -4272,7 +4302,7 @@ export const slackFastIntegrationCalls = pgTable(
  */
 
 /**
- * N-1 rollback: no longer written since Linear sessions enter Fast Sessions
+ * N-1 rollback: no longer written since Linear sessions use the session flow
  * (the workspace elicitation flow is gone). The previous release still reads
  * and writes this table; drop it only after that release is no longer the
  * supported rollback target.
@@ -4574,6 +4604,227 @@ export const serviceCredentialAudit = pgTable('service_credential_audit', {
     .$type<'started' | 'succeeded' | 'denied' | 'failed'>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+/**
+ * integration_tool_policies
+ *
+ * Integration tool approvals: durable
+ * approval policy for code-mode integration tool calls in Sessions. One row
+ * per (integration, tool); deployment-scoped and admin-configured. Absence of
+ * a row is the default `allow`, which preserves the pre-experiment behavior.
+ * Policies never widen access: provider, actor, and admin authorization
+ * ceilings still decide which tools are mounted at all. Additive; N-1 code
+ * never reads or writes it.
+ */
+export const integrationToolPolicies = pgTable(
+  'integration_tool_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /** N-1: unused since Auto became a deployment setting; drop next release. */
+    auto: boolean('auto').notNull().default(false),
+    updatedByUserId: text('updated_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_policies_tool_idx').on(
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
+
+/**
+ * integration_tool_user_policies
+ *
+ * Integration tool approvals: personal
+ * per-tool approval modes. Same modes as `integration_tool_policies`, scoped
+ * to one user's own Sessions, and only ever tightening: the stricter of the
+ * deployment and personal mode applies. `allow` is stored as no row. Rows
+ * cascade with their user. Additive; N-1 code never reads or writes it.
+ */
+export const integrationToolUserPolicies = pgTable(
+  'integration_tool_user_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /** N-1: unused since Auto became a deployment setting; drop next release. */
+    auto: boolean('auto').notNull().default(false),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_user_policies_tool_idx').on(
+      table.userId,
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
+
+/**
+ * integration_tool_approval_requests
+ *
+ * Integration tool approvals: pending
+ * and decided approval requests for code-mode integration tool calls gated by
+ * an `ask` policy. One row is both the pending request and its redacted audit
+ * outcome: arguments are stored only as a redacted display summary; the
+ * decision is bound to the exact native permission request and consumed once
+ * by the OpenCode runtime. Secret-looking values are redacted before insert;
+ * nothing here may carry raw credential material. Terminal states are never
+ * resurrected: an expired or cancelled row stays decided forever. Additive;
+ * N-1 code never reads or writes it.
+ */
+export const integrationToolApprovalRequests = pgTable(
+  'integration_tool_approval_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    /** The Session owner the agent acts for; only this user may decide. */
+    requesterUserId: text('requester_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * The task whose agent asked, or null for the Session's own agent. A
+     * task's approved row is claimed by the integration proxy for that task's
+     * exact call rather than relayed by a bridge.
+     */
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    /** The OpenCode permission request this decision replies to. */
+    nativeRequestId: text('native_request_id').notNull(),
+    /** SHA-256 hex of the canonical {integrationId, toolName, args} payload. */
+    argsFingerprint: text('args_fingerprint').notNull(),
+    /** Redacted argument preview for the approver and the audit trail. */
+    argsSummary: jsonb('args_summary').notNull(),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<import('@roomote/types').IntegrationToolApprovalStatus>(),
+    decidedByUserId: text('decided_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    decidedAt: timestamp('decided_at'),
+    /** Why a cancelled request was cancelled (for example experiment disabled). */
+    cancelReason: text('cancel_reason'),
+    /**
+     * What the decision model made of this Ask first call under Auto mode,
+     * recorded beside the decision.
+     */
+    autoEvaluation:
+      jsonb('auto_evaluation').$type<
+        import('@roomote/types').IntegrationToolAutoEvaluation
+      >(),
+    /** The window for the requester to answer; unresolved rows fail closed. */
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('integration_tool_approvals_session_requester_idx').on(
+      table.sessionId,
+      table.requesterUserId,
+      table.status,
+    ),
+    index('integration_tool_approvals_task_call_idx').on(
+      table.taskId,
+      table.argsFingerprint,
+      table.status,
+    ),
+    // One open ask per native permission request; the runtime never reuses
+    // request ids, so identical re-asks are separate decisions by design.
+    uniqueIndex('integration_tool_approvals_pending_native_idx')
+      .on(table.sessionId, table.nativeRequestId)
+      .where(sql`status = 'pending'`),
+  ],
+);
+
+/**
+ * Risk assessments Auto mode made of calls it did not decide (Auto off,
+ * hosted judgment model present): a log for comparing the model's view with
+ * real traffic before Auto is turned on. Not tied to an approval row, since
+ * those calls never asked anyone.
+ */
+export const integrationToolAutoEvaluations = pgTable(
+  'integration_tool_auto_evaluations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    /** Redacted argument preview, as on an approval row. */
+    argsSummary: jsonb('args_summary').notNull(),
+    evaluation: jsonb('evaluation')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolAutoEvaluation>(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('integration_tool_auto_evaluations_created_at_idx').on(
+      table.createdAt.desc(),
+    ),
+  ],
+);
+
+/**
+ * integration_tool_session_overrides
+ *
+ * Integration tool approvals:
+ * requester-owned, session-scoped overrides of a tool's approval mode. `allow`
+ * records "don't ask again this session" for a tool the deployment gates with
+ * `ask`; `ask` gates a default-allow tool for this session only. A deployment
+ * `reject` policy is never loosened by a row here, and rows cascade with
+ * their session. Additive; N-1 code never reads or writes it.
+ */
+export const integrationToolSessionOverrides = pgTable(
+  'integration_tool_session_overrides',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolSessionOverrideMode>(),
+    setByUserId: text('set_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_session_overrides_tool_idx').on(
+      table.sessionId,
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
 
 /**
  * Credential egress control plane (additive, N-1 safe: previous releases never
@@ -5002,6 +5253,12 @@ export const automationResults = pgTable(
     sourceTaskId: text('source_task_id').references(() => tasks.id, {
       onDelete: 'set null',
     }),
+    sourceRunId: integer('source_run_id').references(() => taskRuns.id, {
+      onDelete: 'set null',
+    }),
+    sourceSessionId: uuid('source_session_id').references(() => sessions.id, {
+      onDelete: 'set null',
+    }),
     userId: text('user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
@@ -5010,6 +5267,24 @@ export const automationResults = pgTable(
       text('result_visibility').$type<AutomationResultVisibility>(),
     automationName: text('automation_name').notNull(),
     content: text('content').notNull(),
+    resultKind: text('result_kind')
+      .notNull()
+      .default('outcome')
+      .$type<import('@roomote/types').AutomationResultKind>(),
+    headline: text('headline'),
+    decisionContext: text('decision_context'),
+    selectedReferenceKeys: jsonb('selected_reference_keys')
+      .notNull()
+      .default(sql`'[]'::jsonb`)
+      .$type<string[]>(),
+    preparationStatus: text('preparation_status')
+      .notNull()
+      .default('pending')
+      .$type<import('@roomote/types').AutomationResultPreparationStatus>(),
+    preparationAttempts: integer('preparation_attempts').notNull().default(0),
+    preparationVersion: integer('preparation_version').notNull().default(1),
+    preparedAt: timestamp('prepared_at'),
+    preparationErrorCode: text('preparation_error_code'),
     priority: text('priority')
       .notNull()
       .default('normal')
@@ -5020,6 +5295,7 @@ export const automationResults = pgTable(
       'manual' | 'pull_request_merged'
     >(),
     ignoredAt: timestamp('ignored_at'),
+    supersededAt: timestamp('superseded_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -5028,6 +5304,20 @@ export const automationResults = pgTable(
     index('automation_results_inbox_idx').on(table.priority, table.createdAt),
     index('automation_results_user_id_idx').on(table.userId),
     index('automation_results_source_task_id_idx').on(table.sourceTaskId),
+    index('automation_results_source_run_id_idx').on(table.sourceRunId),
+    index('automation_results_source_session_id_idx').on(table.sourceSessionId),
+    index('automation_results_preparation_status_created_at_idx').on(
+      table.preparationStatus,
+      table.createdAt,
+    ),
+    check(
+      'automation_results_result_kind_check',
+      sql`${table.resultKind} in ('outcome', 'input_request')`,
+    ),
+    check(
+      'automation_results_preparation_status_check',
+      sql`${table.preparationStatus} in ('pending', 'ready', 'failed')`,
+    ),
   ],
 );
 

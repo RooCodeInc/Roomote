@@ -6,6 +6,7 @@ import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   type ComputeProvider,
   RunStatus,
+  isExitedRunStatus,
   TaskRunErrorCode,
   type TaskRunErrorCode as TaskRunErrorCodeValue,
   resolveComputeProviderTarget,
@@ -24,6 +25,7 @@ import {
   recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
   syncTaskStateFromRuns,
+  markEnvironmentVerificationFailedIfCurrent,
   eq,
   and,
   asc,
@@ -49,6 +51,96 @@ import { resolveFromWorkspaceRoot } from './repo-paths';
 import { findPersistedWorkerBootstrapRestarts } from './worker-bootstrap-restarts';
 
 type WorkerBootstrapExitDisposition = 'ignore' | 'restart' | 'failed';
+
+const WORKER_EXIT_STATE_COLUMNS = {
+  status: true,
+  taskPhase: true,
+  vendor: true,
+  machineId: true,
+  dequeuedAt: true,
+  provisionStartedAt: true,
+  provisionReadyAt: true,
+  startedAt: true,
+  setupCompletedAt: true,
+  harnessStartedAt: true,
+  runtimeTaskStartedAt: true,
+  firstAssistantOutputAt: true,
+  workerHeartbeatAt: true,
+  completedAt: true,
+  canceledAt: true,
+  cancelRequestedAt: true,
+  sleepAt: true,
+  sleepRequestedAt: true,
+  snapshotRequestedAt: true,
+  snapshotCreatedAt: true,
+  snapshotFailedAt: true,
+} as const;
+
+type WorkerExitTaskRunState = Pick<
+  TaskRun,
+  keyof typeof WORKER_EXIT_STATE_COLUMNS
+>;
+
+type WorkerExitClassification = 'routine' | 'active_failure';
+
+function formatWorkerExitTimestamp(
+  value: Date | null | undefined,
+): string | null {
+  return value?.toISOString() ?? null;
+}
+
+function getWorkerExitAgeMs(
+  value: Date | null | undefined,
+  observedAt: Date,
+): number | null {
+  return value ? Math.max(0, observedAt.getTime() - value.getTime()) : null;
+}
+
+function getWorkerExitShutdownReason(
+  state: WorkerExitTaskRunState,
+): string | null {
+  if (state.cancelRequestedAt) {
+    return 'cancel_requested';
+  }
+
+  if (state.sleepRequestedAt) {
+    return 'sleep_requested';
+  }
+
+  if (state.snapshotRequestedAt) {
+    return 'snapshot_requested';
+  }
+
+  if (state.completedAt) {
+    return 'completed';
+  }
+
+  if (state.canceledAt) {
+    return 'canceled';
+  }
+
+  if (state.snapshotCreatedAt) {
+    return 'snapshot_created';
+  }
+
+  if (state.status === RunStatus.Completed) {
+    return 'completed';
+  }
+
+  if (state.status === RunStatus.Failed) {
+    return 'failed';
+  }
+
+  if (state.status === RunStatus.Canceled) {
+    return 'canceled';
+  }
+
+  if (state.status === RunStatus.Pending && !state.startedAt) {
+    return 'bootstrap_restart_pending';
+  }
+
+  return null;
+}
 
 export abstract class BaseController {
   private static readonly SOURCE_DIR = path.dirname(
@@ -215,6 +307,7 @@ export abstract class BaseController {
                 'Controller started task using database fallback logic',
                 {
                   runId: taskRun.id,
+                  taskId: taskRun.taskId,
                   runStatus: taskRun.status,
                   payloadKind: taskRun.payloadKind,
                   provider: taskRun.vendor,
@@ -585,6 +678,7 @@ export abstract class BaseController {
 
     captureControllerException(reportError, {
       runId: taskRun.id,
+      taskId: taskRun.taskId,
       payloadKind: taskRun.payloadKind,
       provider: taskRun.vendor,
       repo: taskRun.payload.repo,
@@ -639,7 +733,109 @@ export abstract class BaseController {
       },
     );
 
+    if (!failed) {
+      const currentState = await this.findWorkerExitState(taskRun.id);
+      this.recordWorkerExitObservation(taskRun, exitCode, currentState);
+    }
+
     return failed ? 'failed' : 'ignore';
+  }
+
+  private async findWorkerExitState(
+    runId: number,
+  ): Promise<WorkerExitTaskRunState | null> {
+    try {
+      return (await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, runId),
+        columns: WORKER_EXIT_STATE_COLUMNS,
+      })) as WorkerExitTaskRunState | null;
+    } catch (error) {
+      captureControllerException(error, {
+        runId,
+        phase: 'worker_exit_state_read',
+      });
+      return null;
+    }
+  }
+
+  private recordWorkerExitObservation(
+    taskRun: TaskRun,
+    exitCode: number,
+    state: WorkerExitTaskRunState | null,
+  ): void {
+    const observedAt = new Date();
+    const shutdownReason = state
+      ? getWorkerExitShutdownReason(state)
+      : 'state_unavailable';
+    const isActive = state !== null && !isExitedRunStatus(state.status);
+    const classification: WorkerExitClassification =
+      exitCode !== 0 && isActive && shutdownReason === null
+        ? 'active_failure'
+        : 'routine';
+    const observation = {
+      runId: taskRun.id,
+      payloadKind: taskRun.payloadKind,
+      provider: state?.vendor ?? taskRun.vendor ?? null,
+      originalStatus: taskRun.status,
+      currentStatus: state?.status ?? null,
+      taskPhase: state?.taskPhase ?? null,
+      machineId: state?.machineId ?? taskRun.machineId ?? null,
+      exitCode,
+      classification,
+      shutdownReason,
+      workerHeartbeatAgeMs: getWorkerExitAgeMs(
+        state?.workerHeartbeatAt,
+        observedAt,
+      ),
+      observedAt: observedAt.toISOString(),
+      dequeuedAt: formatWorkerExitTimestamp(state?.dequeuedAt),
+      provisionStartedAt: formatWorkerExitTimestamp(state?.provisionStartedAt),
+      provisionReadyAt: formatWorkerExitTimestamp(state?.provisionReadyAt),
+      startedAt: formatWorkerExitTimestamp(state?.startedAt),
+      setupCompletedAt: formatWorkerExitTimestamp(state?.setupCompletedAt),
+      harnessStartedAt: formatWorkerExitTimestamp(state?.harnessStartedAt),
+      runtimeTaskStartedAt: formatWorkerExitTimestamp(
+        state?.runtimeTaskStartedAt,
+      ),
+      firstAssistantOutputAt: formatWorkerExitTimestamp(
+        state?.firstAssistantOutputAt,
+      ),
+      completedAt: formatWorkerExitTimestamp(state?.completedAt),
+      canceledAt: formatWorkerExitTimestamp(state?.canceledAt),
+      cancelRequestedAt: formatWorkerExitTimestamp(state?.cancelRequestedAt),
+      sleepAt: formatWorkerExitTimestamp(state?.sleepAt),
+      sleepRequestedAt: formatWorkerExitTimestamp(state?.sleepRequestedAt),
+      snapshotRequestedAt: formatWorkerExitTimestamp(
+        state?.snapshotRequestedAt,
+      ),
+      snapshotCreatedAt: formatWorkerExitTimestamp(state?.snapshotCreatedAt),
+      snapshotFailedAt: formatWorkerExitTimestamp(state?.snapshotFailedAt),
+    };
+    const message =
+      classification === 'active_failure'
+        ? 'Detached worker exited while the task run remained active'
+        : 'Detached worker exit treated as routine after the task run advanced';
+    const signal =
+      classification === 'active_failure'
+        ? 'worker-post-claim-exit'
+        : 'worker-exit-routine';
+
+    captureControllerMessage(
+      message,
+      {
+        ...observation,
+        phase: 'worker_exit',
+      },
+      {
+        component: 'worker-lifecycle',
+        level: classification === 'active_failure' ? 'warning' : 'info',
+        signal,
+      },
+    );
+
+    const log =
+      classification === 'active_failure' ? console.warn : console.log;
+    log(`[BaseController] ${message}: ${JSON.stringify(observation)}`);
   }
 
   protected scheduleWorkerBootstrapRestart(taskRun: TaskRun): void {
@@ -782,16 +978,40 @@ export abstract class BaseController {
     });
 
     if (!claimed) {
-      console.log(
-        `[BaseController] Ignoring worker bootstrap failure for task run #${taskRun.id} because the run already advanced`,
-      );
       return false;
+    }
+
+    // An environment-bound verification task that never reached the agent
+    // (this Docker/bootstrap failure happens before the harness starts) marks
+    // its bound environment failed when it is still the current attempt.
+    const verifiesEnvironmentId =
+      taskRun.payload && typeof taskRun.payload === 'object'
+        ? (taskRun.payload as Record<string, unknown>).verifiesEnvironmentId
+        : null;
+    if (typeof verifiesEnvironmentId === 'string') {
+      try {
+        await markEnvironmentVerificationFailedIfCurrent(db, {
+          environmentId: verifiesEnvironmentId,
+          verificationTaskId: taskRun.taskId,
+          error:
+            'The verification task failed before the agent could report a result.',
+        });
+      } catch (error) {
+        captureControllerException(error, {
+          runId: taskRun.id,
+          taskId: taskRun.taskId,
+          payloadKind: taskRun.payloadKind,
+          provider: taskRun.vendor,
+          phase: 'environment-verification-failure-mark',
+        });
+      }
     }
 
     captureControllerMessage(
       diagnostic.message,
       {
         runId: taskRun.id,
+        taskId: taskRun.taskId,
         payloadKind: taskRun.payloadKind,
         provider: taskRun.vendor,
         ...(diagnostic.exitCode === undefined
@@ -814,6 +1034,7 @@ export abstract class BaseController {
     } catch (error) {
       captureControllerException(error, {
         runId: taskRun.id,
+        taskId: taskRun.taskId,
         payloadKind: taskRun.payloadKind,
         provider: taskRun.vendor,
         phase: 'worker_bootstrap_finalize',
@@ -905,6 +1126,7 @@ export abstract class BaseController {
       'Controller scheduled a fresh sandbox after worker bootstrap failure',
       {
         runId: taskRun.id,
+        taskId: taskRun.taskId,
         payloadKind: taskRun.payloadKind,
         provider: taskRun.vendor,
         exitCode,

@@ -8,6 +8,7 @@ import type {
 } from '@roomote/types';
 import {
   ALL_REPOSITORIES,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   FAST_EXECUTION,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
 } from '@roomote/types';
@@ -663,6 +664,39 @@ describe('custom-automations MCP routes', () => {
   });
 
   describe('POST / (create)', () => {
+    it('accepts a prompt at the shared 16,000-character limit', async () => {
+      const { app } = createApp();
+      const prompt = 'x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH);
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await postCreate(app, createBody({ prompt }));
+
+      expect(res.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt }),
+      );
+    });
+
+    it('rejects a prompt above the shared 16,000-character limit', async () => {
+      const { app } = createApp();
+
+      const res = await postCreate(
+        app,
+        createBody({
+          prompt: 'x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH + 1),
+        }),
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
+    });
+
     it('rejects a model that is not enabled for new tasks', async () => {
       const { app } = createApp();
 
@@ -1124,6 +1158,41 @@ describe('custom-automations MCP routes', () => {
       environmentId: ENVIRONMENT_ID,
       target: {},
     };
+
+    it('accepts a prompt at the shared 16,000-character limit', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue(existing);
+      mockUpdateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+      const prompt = 'x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH);
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({ prompt }),
+      );
+    });
+
+    it('rejects a prompt above the shared 16,000-character limit', async () => {
+      const { app } = createApp();
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH + 1),
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(mockGetCustomAutomationById).not.toHaveBeenCalled();
+      expect(mockUpdateCustomAutomation).not.toHaveBeenCalled();
+    });
 
     it('rejects an unavailable model before updating', async () => {
       const { app } = createApp();

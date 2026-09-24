@@ -2,6 +2,7 @@ import {
   CHATGPT_ACCOUNT_ID_HEADER,
   CHATGPT_USAGE_ENDPOINT,
   type SubscriptionProviderUsage,
+  type SubscriptionUsageCredits,
   type SubscriptionUsageWindow,
 } from '@roomote/types';
 
@@ -56,10 +57,26 @@ function parseWindow(
   };
 }
 
+function parseCredits(value: unknown): SubscriptionUsageCredits | undefined {
+  const credits = asRecord(value);
+  if (!credits) return undefined;
+
+  if (credits.unlimited === true) return { unlimited: true };
+  if (credits.has_credits === false || credits.hasCredits === false)
+    return undefined;
+
+  const balance = firstNumber(credits, ['balance']);
+  return balance !== undefined && balance >= 0 ? { balance } : undefined;
+}
+
 function parseChatGptUsage(
   payload: unknown,
   now: number,
-): { planType?: string; windows: SubscriptionUsageWindow[] } {
+): {
+  planType?: string;
+  windows: SubscriptionUsageWindow[];
+  credits?: SubscriptionUsageCredits;
+} {
   const root = asRecord(payload);
   if (!root) return { windows: [] };
   const raw = root.rate_limits ?? root.rateLimits ?? root.rate_limit;
@@ -81,7 +98,12 @@ function parseChatGptUsage(
     ),
   ].filter((window): window is SubscriptionUsageWindow => window !== undefined);
   const planType = firstString(root, ['plan_type', 'planType']);
-  return { ...(planType && { planType }), windows };
+  const credits = parseCredits(root.credits);
+  return {
+    ...(planType && { planType }),
+    windows,
+    ...(credits && { credits }),
+  };
 }
 
 export async function fetchChatGptUsage(
@@ -100,12 +122,13 @@ export async function fetchChatGptUsage(
     origin: 'https://chatgpt.com',
     ...(fresh.accountId && { [CHATGPT_ACCOUNT_ID_HEADER]: fresh.accountId }),
   });
-  const { planType, windows } = parseChatGptUsage(payload, Date.now());
-  return windows.length > 0
+  const { planType, windows, credits } = parseChatGptUsage(payload, Date.now());
+  return windows.length > 0 || credits !== undefined
     ? {
         providerId: 'chatgpt',
         ...(planType && { planType }),
         windows,
+        ...(credits && { credits }),
         fetchedAt: new Date().toISOString(),
       }
     : null;

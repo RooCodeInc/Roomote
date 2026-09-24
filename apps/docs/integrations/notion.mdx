@@ -33,7 +33,7 @@ access list in Notion whenever the page hierarchy changes.
    integration. You can manage this from the integration's **Content access**
    settings or a page's **Connections** menu.
 4. Copy the internal integration secret.
-5. In Roomote, open **Settings > Integrations**, choose **Configure Notion**,
+5. In Roomote, open the **Integrations** page, choose **Configure Notion**,
    and paste the secret.
 
 The secret is encrypted server-side and is never sent to task sandboxes.
@@ -41,7 +41,7 @@ The secret is encrypted server-side and is never sent to task sandboxes.
 ## Set up with OAuth
 
 Self-hosted operators can configure a Notion public connection so an admin can
-ask Roomote to connect Notion from a Session:
+ask Roomote to connect Notion from a session:
 
 1. Create a public connection in Notion's developer portal and configure the
    capabilities Roomote should receive.
@@ -49,11 +49,11 @@ ask Roomote to connect Notion from a Session:
    `/api/mcp-oauth/callback` as a redirect URI.
 3. Set `R_NOTION_CLIENT_ID` and `R_NOTION_CLIENT_SECRET` from that public
    connection, then restart Roomote.
-4. Ask Roomote to connect Notion from a Session and complete Notion's page
+4. Ask Roomote to connect Notion from a session and complete Notion's page
    selection and authorization screen.
 
-Roomote binds the authorization state to the requesting admin and Session,
-stores access and refresh tokens encrypted, and resumes the Session after a
+Roomote binds the authorization state to the requesting admin and session,
+stores access and refresh tokens encrypted, and resumes the session after a
 successful, canceled, or failed authorization attempt. If the operator has not
 configured the OAuth client, Roomote offers the existing internal-integration
 setup instead.

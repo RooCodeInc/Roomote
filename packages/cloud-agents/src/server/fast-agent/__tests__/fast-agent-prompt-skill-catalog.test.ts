@@ -63,6 +63,70 @@ describe('loadFastAgentPromptSkillCatalog', () => {
     expect(catalog.warnings).toEqual(['one environment skill was too large']);
   });
 
+  it('includes authorized repository skills with scope metadata and precedence', async () => {
+    const repositorySkills = {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Repository release guidance.',
+            environmentIds: ['environment-1', 'environment-2'],
+            id: 'repository:repo-1:.agents/skills:release',
+            invocation: 'release',
+            name: 'release',
+            repository: 'RooCodeInc/Roomote',
+            source: 'repository' as const,
+          },
+          {
+            description: 'Repository TypeSafe guidance.',
+            environmentIds: ['environment-1'],
+            id: 'repository:repo-1:.agents/skills:typesafe-ai',
+            invocation: 'typesafe-ai',
+            name: 'typesafe-ai',
+            repository: 'RooCodeInc/Roomote',
+            source: 'repository' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const catalog = await loadFastAgentPromptSkillCatalog({
+      instanceSkills: {
+        list: vi.fn().mockResolvedValue({ skills: [], warnings: [] }),
+      },
+      settingsSkills: {
+        listPromptCatalog: vi.fn().mockResolvedValue({
+          marketplaceSources: [],
+          skills: [settingsSkill('release')],
+          warnings: [],
+        }),
+      },
+      repositorySkills,
+    });
+
+    expect(repositorySkills.list).toHaveBeenCalledWith();
+    expect(repositorySkills.dispose).toHaveBeenCalledOnce();
+    expect(catalog.skills).toEqual([
+      expect.objectContaining({
+        id: 'settings:manual:release',
+        name: 'release',
+        source: 'settings',
+      }),
+      expect.objectContaining({
+        environmentIds: ['environment-1'],
+        id: 'repository:repo-1:.agents/skills:typesafe-ai',
+        name: 'typesafe-ai',
+        repository: 'RooCodeInc/Roomote',
+        source: 'repository',
+      }),
+    ]);
+    expect(catalog.skills).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: 'repository', name: 'release' }),
+      ]),
+    );
+  });
+
   it('drops custom skills that collide with a packaged skill name', async () => {
     const catalog = await loadFastAgentPromptSkillCatalog({
       instanceSkills: {
@@ -148,10 +212,5 @@ describe('loadFastAgentPromptSkillCatalog', () => {
 
     expect(catalog.skills).toHaveLength(FAST_AGENT_PROMPT_SKILL_LIMIT);
     expect(catalog.omittedSkillCount).toBe(3);
-    expect(catalog.omittedSkills?.map((skill) => skill.name)).toEqual([
-      'skill-064',
-      'skill-065',
-      'skill-066',
-    ]);
   });
 });

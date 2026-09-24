@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   acquireTurnLock: vi.fn(),
+  admitHumanFollowUp: vi.fn(),
   answerQuestion: vi.fn(),
   findAccessibleSession: vi.fn(),
   getOfferStatus: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   privateSessionsEnabled: vi.fn(),
   startSessionGoal: vi.fn(),
   getFastSessionTasks: vi.fn(),
+  hasQueuedMessages: vi.fn(),
   currentEpochSeconds: vi.fn(),
   createSessionArtifact: vi.fn(),
   createConversationArtifact: vi.fn(),
@@ -47,6 +49,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   buildFastAgentArtifactCreator: vi.fn(() => mocks.createConversationArtifact),
   buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
   createFastAgentSessionArtifact: mocks.createSessionArtifact,
@@ -81,6 +84,7 @@ vi.mock('@/lib/server/fast-sessions', () => ({
   buildFastSessionPrReviewDestinationKey: () => '["web","user-1","session-1"]',
   getFastSessionPrReviewOfferStatus: mocks.getOfferStatus,
   getFastSessionTasks: mocks.getFastSessionTasks,
+  hasFastSessionQueuedMessages: mocks.hasQueuedMessages,
   updateFastSessionPrReviewOfferStatus: mocks.updateOfferStatus,
 }));
 
@@ -117,7 +121,7 @@ import {
 } from './index';
 
 describe('getFastSessionTasksCommand', () => {
-  it('adds stable image and video preview URLs to Fast-session artifacts', async () => {
+  it('adds stable image and video preview URLs to session artifacts', async () => {
     mocks.currentEpochSeconds.mockReturnValue(7_201);
     mocks.getFastSessionTasks.mockResolvedValue([
       {
@@ -164,7 +168,7 @@ describe('getFastSessionTasksCommand', () => {
   });
 });
 
-describe('setup context on ordinary Fast session input', () => {
+describe('setup context on ordinary session input', () => {
   afterEach(() => {
     mocks.resolveSetupContext.mockReset().mockResolvedValue(null);
   });
@@ -226,6 +230,14 @@ describe('setup context on ordinary Fast session input', () => {
         signal: new AbortController().signal,
       }),
     );
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'turn',
+      turnLock: Object.assign(vi.fn().mockResolvedValue(undefined), {
+        signal: new AbortController().signal,
+      }),
+      durable: null,
+    });
+    mocks.hasQueuedMessages.mockResolvedValue(false);
     mocks.answerQuestion.mockResolvedValue('Ready');
     mocks.buildReplyDelivery.mockResolvedValue({
       conversation: {
@@ -292,6 +304,36 @@ describe('setup context on ordinary Fast session input', () => {
     expect(turn.setupSession).toBeUndefined();
     expect(turn.setupSnapshot).toBeUndefined();
     expect(turn.adapter.resolveUserInputPreset).toBeUndefined();
+  });
+
+  it('returns a durable queued admission without starting an inline turn', async () => {
+    mocks.hasQueuedMessages.mockResolvedValue(true);
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'queued',
+      abort: vi.fn(),
+    });
+
+    const result = await replyToFastSessionCommand(auth, {
+      sessionId: session.id,
+      text: 'Queue this follow-up',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      admission: 'queued',
+      clientMessageId: expect.any(String),
+    });
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        forceQueue: true,
+        event: expect.objectContaining({
+          question: 'Queue this follow-up',
+          webFollowUp: true,
+          currentMessageId: result.clientMessageId,
+        }),
+      }),
+    );
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 
   it('refreshes setup snapshots after category response persistence, overriding stale caller context', async () => {
@@ -645,7 +687,7 @@ describe('Session Goal Mode commands', () => {
     mocks.startSessionGoal.mockResolvedValue({ success: true, goal: {} });
   });
 
-  it('starts a goal directly on the Fast Session', async () => {
+  it('starts a goal directly on the session', async () => {
     await startFastSessionGoalCommand(auth, {
       sessionId: session.id,
       objective: 'Ship the release',
@@ -934,7 +976,7 @@ describe('startFastSessionCommand', () => {
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
-  it('lets the initial Fast Session turn create a Session-owned artifact', async () => {
+  it('lets the initial session turn create a session-owned artifact', async () => {
     let scheduled: (() => Promise<void>) | undefined;
     mocks.after.mockImplementation((callback) => {
       scheduled = callback;
@@ -1202,7 +1244,7 @@ describe('startSetupFastSessionCommand', () => {
   });
 });
 
-describe('Fast session PR review actions', () => {
+describe('Session PR review actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findAccessibleSession.mockResolvedValue(session);
@@ -1307,6 +1349,11 @@ describe('Fast session PR review actions', () => {
       adapter: { launchTask: mocks.launchTask, postReply: vi.fn() },
     });
     mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'turn',
+      turnLock: release,
+      durable: null,
+    });
     mocks.answerQuestion.mockResolvedValue('Continued');
 
     await replyToFastSessionCommand(auth, {
@@ -1315,13 +1362,16 @@ describe('Fast session PR review actions', () => {
       text: 'Continue this scheduled run.',
     });
 
-    expect(mocks.buildReplyDelivery).toHaveBeenCalledWith({
-      sessionId: automationSession.id,
-      userId: 'user-1',
-      senderDisplayName: 'User One',
-      question: 'Continue this scheduled run.',
-      webFollowUp: true,
-    });
+    expect(mocks.buildReplyDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: automationSession.id,
+        userId: 'user-1',
+        senderDisplayName: 'User One',
+        question: 'Continue this scheduled run.',
+        webFollowUp: true,
+        currentMessageId: '11111111-1111-4111-8111-111111111111',
+      }),
+    );
     const scheduled = mocks.after.mock.calls[0]?.[0];
     expect(scheduled).toBeTypeOf('function');
     await scheduled?.();

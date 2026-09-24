@@ -18,6 +18,8 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentParentEvents,
+  gt,
   llmUsageEvents,
   inArray,
   isNull,
@@ -89,6 +91,17 @@ export type FastSessionMessage = Pick<
   userImageUrl?: string | null;
 };
 
+export type FastSessionQueuedMessage = {
+  id: string;
+  clientMessageId: string;
+  /** Sender; only they may withdraw the message before delivery. */
+  userId?: string;
+  text: string;
+  images?: string[];
+  timestamp: number;
+  optimistic?: boolean;
+};
+
 const fastSessionMessageSelection = {
   id: fastAgentMessages.id,
   eventId: fastAgentMessages.eventId,
@@ -129,6 +142,14 @@ const fastSessionTranscriptVisibilityWhere = sql`(
     and ${fastAgentMessages.metadata} ->> 'platformEventKind' = 'delegated_task'
   )
 )`;
+
+const fastSessionQueuedFollowUpWhere = and(
+  isNull(fastAgentParentEvents.deliveredAt),
+  isNull(fastAgentParentEvents.discardedAt),
+  isNull(fastAgentParentEvents.admission),
+  sql`${fastAgentParentEvents.event} ->> 'type' = 'human_follow_up'`,
+  sql`${fastAgentParentEvents.event} ->> 'webFollowUp' = 'true'`,
+);
 
 /** Signed raw URLs are bucketed so a polling transcript stays byte-stable. */
 const REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS = 60 * 60;
@@ -309,7 +330,17 @@ export async function getFastSessionPrReviewOfferStatus(
   return parsePrReviewActionOffer(message?.payload)?.status ?? null;
 }
 
-const FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT = 1000;
+export const FAST_SESSION_TRANSCRIPT_PAGE_SIZE = 200;
+export const FAST_SESSION_TRANSCRIPT_INITIAL_LIMIT = 50;
+
+export type FastSessionMessageCursor = {
+  createdAt: string;
+  ts: number;
+  turnSeq: number;
+  id: string;
+};
+
+const FAST_SESSION_TRANSCRIPT_DEFAULT_LIMIT = 1000;
 
 const fastSessionSelection = {
   id: fastAgentConversations.id,
@@ -334,6 +365,9 @@ const fastSessionSelection = {
     from ${fastAgentMessages}
     where ${fastAgentMessages.conversationId} = ${fastAgentConversations.id}
   )`,
+  // Message writes touch the conversation in the same transaction. Preserve
+  // Postgres microseconds so the client can start SSE after this snapshot.
+  initialStreamCursorMs: sql<string>`extract(epoch from ${fastAgentConversations.updatedAt}) * 1000`,
   createdAt: fastAgentConversations.createdAt,
   updatedAt: fastAgentConversations.updatedAt,
 };
@@ -590,6 +624,161 @@ async function attachFastSessionTaskTitles(messages: FastSessionMessage[]) {
   });
 }
 
+function parseFastSessionQueuedMessage(row: {
+  id: string;
+  event: Record<string, unknown>;
+  createdAt: Date;
+}): FastSessionQueuedMessage | null {
+  const clientMessageId = row.event.currentMessageId;
+  const text = row.event.question;
+  const userId = row.event.userId;
+  const images = Array.isArray(row.event.images)
+    ? row.event.images.filter(
+        (image): image is string => typeof image === 'string',
+      )
+    : undefined;
+  const attachmentTexts = Array.isArray(row.event.attachmentTexts)
+    ? row.event.attachmentTexts.filter(
+        (text): text is string => typeof text === 'string' && text.length > 0,
+      )
+    : undefined;
+
+  if (
+    typeof clientMessageId !== 'string' ||
+    clientMessageId.length === 0 ||
+    typeof text !== 'string' ||
+    (text.length === 0 && !images?.length && !attachmentTexts?.length)
+  ) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    clientMessageId,
+    ...(typeof userId === 'string' && userId.length > 0 ? { userId } : {}),
+    text: text || (attachmentTexts?.length ? '(queued attachment)' : ''),
+    ...(images && images.length > 0 ? { images } : {}),
+    timestamp: row.createdAt.getTime(),
+  };
+}
+
+async function getFastSessionQueuedMessages(
+  sessionId: string,
+): Promise<FastSessionQueuedMessage[]> {
+  const rows = await db
+    .select({
+      id: fastAgentParentEvents.id,
+      event: fastAgentParentEvents.event,
+      createdAt: fastAgentParentEvents.createdAt,
+    })
+    .from(fastAgentParentEvents)
+    .where(
+      and(
+        eq(fastAgentParentEvents.conversationId, sessionId),
+        fastSessionQueuedFollowUpWhere,
+      ),
+    )
+    .orderBy(
+      asc(fastAgentParentEvents.createdAt),
+      asc(fastAgentParentEvents.id),
+    );
+
+  return rows.flatMap((row) => {
+    const message = parseFastSessionQueuedMessage(row);
+    return message ? [message] : [];
+  });
+}
+
+export async function hasFastSessionQueuedMessages(
+  sessionId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: fastAgentParentEvents.id })
+    .from(fastAgentParentEvents)
+    .where(
+      and(
+        eq(fastAgentParentEvents.conversationId, sessionId),
+        fastSessionQueuedFollowUpWhere,
+      ),
+    )
+    .limit(1);
+
+  return Boolean(row);
+}
+
+type FastSessionQueuedMessageWithdrawal =
+  | 'withdrawn'
+  | 'not_queued'
+  | 'forbidden';
+
+/**
+ * Withdraw a web follow-up that is still waiting in the Session queue. Only
+ * its sender may withdraw it, and only before any delivery path has taken
+ * it. Both paths mark the row with a conditional write before the agent can
+ * see the message (the queue worker starts an attempt, native steering
+ * claims it), and each skips a row already withdrawn, so this write and
+ * theirs exclude each other: `withdrawn` means the message will not be
+ * delivered, and a message already being delivered reports `not_queued`.
+ */
+export async function withdrawFastSessionQueuedMessage(params: {
+  sessionId: string;
+  clientMessageId: string;
+  userId: string;
+}): Promise<FastSessionQueuedMessageWithdrawal> {
+  const queuedMessageWhere = and(
+    eq(fastAgentParentEvents.conversationId, params.sessionId),
+    fastSessionQueuedFollowUpWhere,
+    sql`${fastAgentParentEvents.event} ->> 'currentMessageId' = ${params.clientMessageId}`,
+  );
+  const [queued] = await db
+    .select({
+      id: fastAgentParentEvents.id,
+      senderUserId: sql<
+        string | null
+      >`${fastAgentParentEvents.event} ->> 'userId'`,
+    })
+    .from(fastAgentParentEvents)
+    .where(queuedMessageWhere)
+    .limit(1);
+  if (!queued) return 'not_queued';
+  if (queued.senderUserId !== params.userId) return 'forbidden';
+
+  const now = new Date();
+  const withdrawn = await db
+    .update(fastAgentParentEvents)
+    .set({
+      discardedAt: now,
+      lastError: 'Withdrawn by its sender before delivery.',
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(fastAgentParentEvents.id, queued.id),
+        queuedMessageWhere,
+        // The queue worker counts an attempt before delivering; an attempt
+        // that failed and is parked for a later retry is idle again.
+        or(
+          eq(fastAgentParentEvents.attempts, 0),
+          gt(fastAgentParentEvents.retryAt, now),
+        ),
+        // Native steering claims the rows it is about to deliver and clears
+        // the claim only when it hands them back undelivered. A lapsed claim
+        // still blocks: its owner may be mid-delivery or gone, and the queue
+        // delivers the row after the lease either way.
+        isNull(fastAgentParentEvents.claimedUntil),
+        // A prompt that already persisted is in the transcript and will
+        // still be delivered, even after an interrupted steer released it.
+        sql`not exists (
+          select 1 from ${fastAgentMessages}
+          where ${fastAgentMessages.conversationId} = ${params.sessionId}
+            and ${fastAgentMessages.eventId} = ${`${params.clientMessageId}:user`}
+        )`,
+      ),
+    )
+    .returning({ id: fastAgentParentEvents.id });
+  return withdrawn.length > 0 ? 'withdrawn' : 'not_queued';
+}
+
 function prepareFastSessionMessageRow<
   T extends Pick<
     FastSessionMessage,
@@ -726,6 +915,7 @@ export async function getFastSessionMessagesSince(
   sinceMs: number,
 ): Promise<{
   messages: FastSessionMessage[];
+  queuedMessages: FastSessionQueuedMessage[];
   cursor: number;
 }> {
   const rows = await db
@@ -761,8 +951,13 @@ export async function getFastSessionMessagesSince(
       return prepared ? [prepared] : [];
     }),
   );
+  const queuedMessages = await getFastSessionQueuedMessages(sessionId);
 
-  return { messages: await attachFastSessionTaskTitles(messages), cursor };
+  return {
+    messages: await attachFastSessionTaskTitles(messages),
+    queuedMessages,
+    cursor,
+  };
 }
 
 /**
@@ -823,6 +1018,7 @@ export async function getFastSessionSuggestableMessages(
 export async function getFastSessionById(
   auth: FastSessionAuth,
   sessionId: string,
+  options: { transcriptLimit?: number } = {},
 ) {
   if (!auth.userId) return null;
   const [session] = await db
@@ -841,66 +1037,12 @@ export async function getFastSessionById(
     return null;
   }
 
-  const rows: FastSessionMessage[] = [];
-  let before: ReturnType<typeof sql> | undefined;
-  // Hidden platform events can fail projection; count only validated rows
-  // toward the window, without loading an unbounded backlog into memory.
-  while (rows.length <= FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) {
-    const batch = await db
-      .select({
-        ...fastSessionMessageSelection,
-        // Preserve Postgres microseconds for keyset ties instead of a JS Date.
-        cursorCreatedAt: sql<string>`${fastAgentMessages.createdAt}::text`,
-      })
-      .from(fastAgentMessages)
-      .leftJoin(users, fastSessionMessageUserJoin)
-      .where(
-        and(
-          eq(fastAgentMessages.conversationId, session.id),
-          fastSessionTranscriptVisibilityWhere,
-          before,
-        ),
-      )
-      .orderBy(
-        desc(fastAgentMessages.ts),
-        desc(fastAgentMessages.turnSeq),
-        desc(fastAgentMessages.createdAt),
-        desc(fastAgentMessages.id),
-      )
-      .limit(FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT + 1);
-
-    for (const { cursorCreatedAt: _cursorCreatedAt, ...row } of batch) {
-      const prepared = prepareFastSessionMessageRow(row);
-      if (prepared) rows.push(prepared);
-      if (rows.length > FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) break;
-    }
-    if (batch.length <= FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) break;
-    const last = batch[batch.length - 1]!;
-    before = sql`(${fastAgentMessages.ts}, ${fastAgentMessages.turnSeq}, ${fastAgentMessages.createdAt}, ${fastAgentMessages.id})
-      < (${last.ts}, ${last.turnSeq}, ${last.cursorCreatedAt}::timestamp, ${last.id}::uuid)`;
-  }
-
-  const hasOlderMessages = rows.length > FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT;
-  let windowed = rows.slice(0, FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT);
-  if (hasOlderMessages) {
-    // The window boundary can land mid-turn; drop the partial turn at the old
-    // end so the transcript starts on a turn boundary. If a single turn fills
-    // the whole window, keep it partial rather than rendering nothing — the
-    // truncation notice already tells the reader the transcript is incomplete.
-    const boundaryTurnId = rows[FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT]!.turnId;
-    let end = windowed.length;
-    while (end > 0 && windowed[end - 1]!.turnId === boundaryTurnId) {
-      end -= 1;
-    }
-    if (end > 0) {
-      windowed = windowed.slice(0, end);
-    }
-  }
-
-  const messages = await attachFastSessionReplyImages(
+  const transcriptPage = await getFastSessionTranscriptPageForConversation(
     session.id,
-    await attachFastSessionTaskTitles(windowed.reverse()),
+    options.transcriptLimit ?? FAST_SESSION_TRANSCRIPT_DEFAULT_LIMIT,
   );
+  const messages = transcriptPage.messages;
+  const queuedMessages = await getFastSessionQueuedMessages(session.id);
 
   // Fast usage events carry the OpenCode session id; a conversation can span
   // several (cold rebuilds), so sum across every session id the transcript
@@ -929,10 +1071,114 @@ export async function getFastSessionById(
   return {
     ...session,
     messages,
-    hasOlderMessages,
+    queuedMessages,
+    hasOlderMessages: transcriptPage.nextCursor !== null,
+    messagesCursor: transcriptPage.nextCursor,
+    initialStreamCursor: Number(session.initialStreamCursorMs),
     directInferenceCostMicroUsd,
     inferenceCostMicroUsd: directInferenceCostMicroUsd,
   };
+}
+
+export async function getFastSessionTranscriptPage(
+  auth: FastSessionAuth,
+  sessionId: string,
+  cursor: FastSessionMessageCursor,
+) {
+  const session = await findReadableFastSession(auth, sessionId);
+  if (!session) return null;
+
+  return getFastSessionTranscriptPageForConversation(
+    session.id,
+    FAST_SESSION_TRANSCRIPT_PAGE_SIZE,
+    cursor,
+  );
+}
+
+async function getFastSessionTranscriptPageForConversation(
+  sessionId: string,
+  limit: number,
+  cursor?: FastSessionMessageCursor,
+) {
+  const rows: Array<FastSessionMessage & { cursorCreatedAt: string }> = [];
+  let before: ReturnType<typeof sql> | undefined = cursor
+    ? sql`(${fastAgentMessages.ts}, ${fastAgentMessages.turnSeq}, ${fastAgentMessages.createdAt}, ${fastAgentMessages.id})
+        < (${cursor.ts}, ${cursor.turnSeq}, ${cursor.createdAt}::timestamp, ${cursor.id}::uuid)`
+    : undefined;
+
+  // Hidden platform events can fail projection; count only validated rows
+  // toward the page without reading an unbounded backlog into memory.
+  while (rows.length <= limit) {
+    const batch = await db
+      .select({
+        ...fastSessionMessageSelection,
+        // Preserve Postgres microseconds for keyset ties instead of a JS Date.
+        cursorCreatedAt: sql<string>`${fastAgentMessages.createdAt}::text`,
+      })
+      .from(fastAgentMessages)
+      .leftJoin(users, fastSessionMessageUserJoin)
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, sessionId),
+          fastSessionTranscriptVisibilityWhere,
+          before,
+        ),
+      )
+      .orderBy(
+        desc(fastAgentMessages.ts),
+        desc(fastAgentMessages.turnSeq),
+        desc(fastAgentMessages.createdAt),
+        desc(fastAgentMessages.id),
+      )
+      .limit(limit + 1);
+
+    for (const row of batch) {
+      const { cursorCreatedAt, ...message } = row;
+      const prepared = prepareFastSessionMessageRow(message);
+      if (prepared) rows.push({ ...prepared, cursorCreatedAt });
+      if (rows.length > limit) break;
+    }
+    if (rows.length > limit || batch.length <= limit) break;
+    const last = batch.at(-1);
+    if (!last) break;
+    before = sql`(${fastAgentMessages.ts}, ${fastAgentMessages.turnSeq}, ${fastAgentMessages.createdAt}, ${fastAgentMessages.id})
+      < (${last.ts}, ${last.turnSeq}, ${last.cursorCreatedAt}::timestamp, ${last.id}::uuid)`;
+  }
+
+  const hasOlderMessages = rows.length > limit;
+  let windowed = rows.slice(0, limit);
+  if (hasOlderMessages) {
+    // Keep the visible page aligned to a turn boundary when possible. Its
+    // cursor points to the last retained row, so the next page includes any
+    // older part of the split turn rather than dropping transcript history.
+    const boundaryTurnId = rows[limit]!.turnId;
+    let end = windowed.length;
+    while (end > 0 && windowed[end - 1]!.turnId === boundaryTurnId) {
+      end -= 1;
+    }
+    if (end > 0) windowed = windowed.slice(0, end);
+  }
+
+  const oldest = windowed.at(-1);
+  const nextCursor: FastSessionMessageCursor | null =
+    hasOlderMessages && oldest
+      ? {
+          createdAt: oldest.cursorCreatedAt,
+          ts: oldest.ts,
+          turnSeq: oldest.turnSeq,
+          id: oldest.id,
+        }
+      : null;
+  const messages = await attachFastSessionReplyImages(
+    sessionId,
+    await attachFastSessionTaskTitles(
+      windowed
+        .toReversed()
+        .map(({ cursorCreatedAt: _cursorCreatedAt, ...message }) => message),
+    ),
+  );
+
+  return { messages, nextCursor };
 }
 
 function visibleSuggestableText(text: string | null): string | null {

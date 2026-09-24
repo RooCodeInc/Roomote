@@ -1,0 +1,807 @@
+import {
+  db,
+  eq,
+  integrationToolApprovalRequests,
+  integrationToolAutoEvaluations,
+  sessionFactory,
+  sessions,
+  taskFactory,
+  userFactory,
+} from '../../server';
+import {
+  claimAutoApprovedIntegrationToolApproval,
+  claimTaskIntegrationToolCall,
+  decideIntegrationToolApproval,
+  expireIntegrationToolApproval,
+  fingerprintIntegrationToolCall,
+  getIntegrationToolApproval,
+  insertAutoApprovedIntegrationToolApproval,
+  insertAutoRejectedIntegrationToolApproval,
+  insertIntegrationToolApproval,
+  IntegrationToolApprovalUnavailableError,
+  listIntegrationToolPolicies,
+  listIntegrationToolSessionOverrides,
+  listPendingIntegrationToolApprovals,
+  markIntegrationToolApprovalConsumed,
+  recordIntegrationToolAutoEvaluation,
+  recordIntegrationToolShadowEvaluation,
+  redactIntegrationToolArgs,
+  upsertIntegrationToolPolicies,
+  upsertIntegrationToolPolicy,
+  upsertIntegrationToolUserPolicy,
+  listIntegrationToolUserPolicies,
+} from '../integration-tool-approvals';
+import {
+  getIntegrationToolAutoSettings,
+  setIntegrationToolAutoSettings,
+} from '../integration-tool-auto-settings';
+
+const userIds: string[] = [];
+const sessionIds: string[] = [];
+
+async function user() {
+  const created = await userFactory.create({ role: 'member' });
+  userIds.push(created.id);
+  return created.id;
+}
+
+async function ownedSession(ownerUserId: string) {
+  const created = await sessionFactory.create({
+    ownerKind: 'user',
+    ownerUserId,
+  });
+  sessionIds.push(created.id);
+  return created.id;
+}
+
+let nativeRequestCounter = 0;
+function nextNativeRequestId() {
+  nativeRequestCounter += 1;
+  return `native-request-${nativeRequestCounter}`;
+}
+
+const call = {
+  integrationId: 'mockslack',
+  toolName: 'post_to_channel',
+  args: { channel: 'C123', text: 'hello' },
+};
+
+function fingerprint(args: unknown = call.args) {
+  return fingerprintIntegrationToolCall({ ...call, args });
+}
+
+async function insertPending(
+  context: { sessionId: string; userId: string },
+  args: unknown = call.args,
+) {
+  return insertIntegrationToolApproval(context, {
+    integrationId: call.integrationId,
+    toolName: call.toolName,
+    nativeRequestId: nextNativeRequestId(),
+    argsFingerprint: fingerprint(args),
+    argsSummary: args,
+  });
+}
+
+afterAll(async () => {
+  await db.delete(integrationToolApprovalRequests);
+  for (const sessionId of sessionIds) {
+    await db.delete(sessions).where(eq(sessions.id, sessionId));
+  }
+});
+
+describe('fingerprintIntegrationToolCall', () => {
+  it('is stable across argument key order and changes with the arguments', () => {
+    const first = fingerprintIntegrationToolCall({
+      ...call,
+      args: { text: 'hello', channel: 'C123' },
+    });
+    expect(first).toBe(fingerprint());
+    expect(fingerprint({ channel: 'C123', text: 'changed' })).not.toBe(first);
+  });
+});
+
+describe('redactIntegrationToolArgs', () => {
+  it('redacts secret-looking keys and truncates oversized strings', () => {
+    const redacted = redactIntegrationToolArgs({
+      text: 'hello',
+      apiKey: 'sk-live-value',
+      nested: { authorization: 'Bearer x', note: 'ok' },
+      long: 'x'.repeat(500),
+    }) as Record<string, unknown>;
+    expect(redacted.text).toBe('hello');
+    expect(redacted.apiKey).toBe('[value omitted]');
+    expect((redacted.nested as Record<string, unknown>).authorization).toBe(
+      '[value omitted]',
+    );
+    expect((redacted.nested as Record<string, unknown>).note).toBe('ok');
+    expect(String(redacted.long)).toContain('[truncated]');
+    expect(String(redacted.long).length).toBeLessThan(230);
+  });
+});
+
+describe('integration tool policies', () => {
+  it('stores non-default modes, updates them, and deletes on reset to allow', async () => {
+    const admin = await user();
+    await upsertIntegrationToolPolicy({
+      integrationId: 'mockslack',
+      toolName: 'post_to_channel',
+      mode: 'ask',
+      updatedByUserId: admin,
+    });
+    await upsertIntegrationToolPolicy({
+      integrationId: 'mockslack',
+      toolName: 'delete_channel',
+      mode: 'reject',
+      updatedByUserId: admin,
+    });
+    let policies = await listIntegrationToolPolicies();
+    expect(
+      policies.map(
+        (policy) => `${policy.integrationId}:${policy.toolName}:${policy.mode}`,
+      ),
+    ).toEqual([
+      'mockslack:delete_channel:reject',
+      'mockslack:post_to_channel:ask',
+    ]);
+    await upsertIntegrationToolPolicy({
+      integrationId: 'mockslack',
+      toolName: 'post_to_channel',
+      mode: 'reject',
+      updatedByUserId: admin,
+    });
+    policies = await listIntegrationToolPolicies();
+    expect(
+      policies.find((policy) => policy.toolName === 'post_to_channel')?.mode,
+    ).toBe('reject');
+    // Resetting to the default removes the row instead of storing `allow`.
+    await upsertIntegrationToolPolicy({
+      integrationId: 'mockslack',
+      toolName: 'post_to_channel',
+      mode: 'allow',
+      updatedByUserId: admin,
+    });
+    policies = await listIntegrationToolPolicies();
+    expect(policies.map((policy) => policy.toolName)).toEqual([
+      'delete_channel',
+    ]);
+    await upsertIntegrationToolPolicy({
+      integrationId: 'mockslack',
+      toolName: 'delete_channel',
+      mode: 'allow',
+      updatedByUserId: admin,
+    });
+  });
+
+  it('updates and resets many tool modes together', async () => {
+    const admin = await user();
+    const input = {
+      integrationId: 'bulk-mock',
+      toolNames: ['first_tool', 'second_tool'],
+      updatedByUserId: admin,
+    };
+
+    await upsertIntegrationToolPolicies({ ...input, mode: 'ask' });
+    expect(
+      (await listIntegrationToolPolicies())
+        .filter((policy) => policy.integrationId === input.integrationId)
+        .map((policy) => `${policy.toolName}:${policy.mode}`),
+    ).toEqual(['first_tool:ask', 'second_tool:ask']);
+
+    await upsertIntegrationToolPolicies({ ...input, mode: 'reject' });
+    expect(
+      (await listIntegrationToolPolicies())
+        .filter((policy) => policy.integrationId === input.integrationId)
+        .map((policy) => `${policy.toolName}:${policy.mode}`),
+    ).toEqual(['first_tool:reject', 'second_tool:reject']);
+
+    await upsertIntegrationToolPolicies({ ...input, mode: 'allow' });
+    expect(
+      (await listIntegrationToolPolicies()).filter(
+        (policy) => policy.integrationId === input.integrationId,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('personal integration tool policies', () => {
+  it("keeps each user's modes separate and deletes on reset to allow", async () => {
+    const first = await user();
+    const second = await user();
+    await upsertIntegrationToolUserPolicy({
+      userId: first,
+      integrationId: 'my-server',
+      toolName: 'delete_page',
+      mode: 'ask',
+    });
+    await upsertIntegrationToolUserPolicy({
+      userId: first,
+      integrationId: 'my-server',
+      toolName: 'delete_page',
+      mode: 'reject',
+    });
+    await upsertIntegrationToolUserPolicy({
+      userId: second,
+      integrationId: 'my-server',
+      toolName: 'delete_page',
+      mode: 'ask',
+    });
+    expect(
+      (await listIntegrationToolUserPolicies(first)).map((p) => p.mode),
+    ).toEqual(['reject']);
+    expect(
+      (await listIntegrationToolUserPolicies(second)).map((p) => p.mode),
+    ).toEqual(['ask']);
+
+    await upsertIntegrationToolUserPolicy({
+      userId: first,
+      integrationId: 'my-server',
+      toolName: 'delete_page',
+      mode: 'allow',
+    });
+    expect(await listIntegrationToolUserPolicies(first)).toEqual([]);
+    expect(await listIntegrationToolUserPolicies(second)).toHaveLength(1);
+  });
+});
+
+describe('insertIntegrationToolApproval', () => {
+  it('creates a pending approval bound to the session owner', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const approval = await insertPending({ sessionId, userId });
+    expect(approval.status).toBe('pending');
+    expect(approval.integrationId).toBe(call.integrationId);
+    expect(Date.parse(approval.expiresAt)).toBeGreaterThan(Date.now());
+  });
+
+  it('reuses the open row for the same native request instead of stacking', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const nativeRequestId = nextNativeRequestId();
+    const insert = () =>
+      insertIntegrationToolApproval(context, {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId,
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      });
+    const first = await insert();
+    const second = await insert();
+    expect(second.approvalId).toBe(first.approvalId);
+    // Concurrent duplicate events for the same native request also collapse.
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () => insert()),
+    );
+    expect(new Set(results.map((result) => result.approvalId)).size).toBe(1);
+    expect((await listPendingIntegrationToolApprovals(context)).length).toBe(1);
+  });
+
+  it('treats a new native request as a separate decision even with identical arguments', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const first = await insertPending({ sessionId, userId });
+    const second = await insertPending({ sessionId, userId });
+    expect(second.approvalId).not.toBe(first.approvalId);
+  });
+
+  it('rejects insertions for a session the user does not own', async () => {
+    const ownerId = await user();
+    const otherId = await user();
+    const sessionId = await ownedSession(ownerId);
+    await expect(insertPending({ sessionId, userId: otherId })).rejects.toThrow(
+      IntegrationToolApprovalUnavailableError,
+    );
+  });
+});
+
+describe('decideIntegrationToolApproval', () => {
+  it('lets the requester approve exactly once', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const approval = await insertPending({ sessionId, userId });
+    const decided = await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: approval.approvalId, decision: 'approved' },
+    );
+    expect(decided.status).toBe('approved');
+    await expect(
+      decideIntegrationToolApproval(
+        { sessionId, userId },
+        { approvalId: approval.approvalId, decision: 'rejected' },
+      ),
+    ).rejects.toThrow(IntegrationToolApprovalUnavailableError);
+  });
+
+  it('fails closed for a wrong approver and leaves the ask answerable', async () => {
+    const userId = await user();
+    const otherId = await user();
+    const sessionId = await ownedSession(userId);
+    const approval = await insertPending({ sessionId, userId });
+    await expect(
+      decideIntegrationToolApproval(
+        { sessionId, userId: otherId },
+        { approvalId: approval.approvalId, decision: 'approved' },
+      ),
+    ).rejects.toThrow(IntegrationToolApprovalUnavailableError);
+    const decided = await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: approval.approvalId, decision: 'rejected' },
+    );
+    expect(decided.status).toBe('rejected');
+  });
+
+  it('fails closed once the approval has expired', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const approval = await insertPending({ sessionId, userId });
+    await db
+      .update(integrationToolApprovalRequests)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(integrationToolApprovalRequests.id, approval.approvalId));
+    await expect(
+      decideIntegrationToolApproval(
+        { sessionId, userId },
+        { approvalId: approval.approvalId, decision: 'approved' },
+      ),
+    ).rejects.toThrow(IntegrationToolApprovalUnavailableError);
+  });
+});
+
+describe('markIntegrationToolApprovalConsumed', () => {
+  it('consumes an approved row exactly once and never a pending or rejected one', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const approval = await insertPending({ sessionId, userId });
+    await expect(
+      markIntegrationToolApprovalConsumed({
+        approvalId: approval.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+    await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: approval.approvalId, decision: 'approved' },
+    );
+    await expect(
+      markIntegrationToolApprovalConsumed({
+        approvalId: approval.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      markIntegrationToolApprovalConsumed({
+        approvalId: approval.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+    expect(
+      (await getIntegrationToolApproval(approval.approvalId))?.status,
+    ).toBe('consumed');
+  });
+});
+
+describe('expireIntegrationToolApproval', () => {
+  it('fails an unanswered approval closed and hides it from pending lists', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const approval = await insertPending({ sessionId, userId });
+    await expireIntegrationToolApproval(approval.approvalId);
+    expect(
+      (await getIntegrationToolApproval(approval.approvalId))?.status,
+    ).toBe('expired');
+    expect(
+      await listPendingIntegrationToolApprovals({ sessionId, userId }),
+    ).toHaveLength(0);
+  });
+});
+
+describe('auto-approved reservations', () => {
+  it('inserts an unrelayed approved decision and claims it exactly once', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const reservation = await insertAutoApprovedIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      },
+    );
+    // Unrelayed: the row is an ordinary approved decision, never a terminal
+    // auto_approved record yet.
+    expect(reservation.status).toBe('approved');
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: reservation.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(true);
+    expect(
+      (await getIntegrationToolApproval(reservation.approvalId))?.status,
+    ).toBe('auto_approved');
+    // A second claim matches nothing: the reservation is terminal.
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: reservation.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+  });
+});
+
+describe('auto-rejected audit rows', () => {
+  it('inserts a born-terminal auto_rejected row with the model assessment and no decider', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const evaluation = {
+      recommendation: 'ask' as const,
+      answers: { riskScore: 0.9 },
+      evaluatedAt: new Date().toISOString(),
+    };
+    const denial = await insertAutoRejectedIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+        autoEvaluation: evaluation,
+      },
+    );
+    expect(denial.status).toBe('auto_rejected');
+    const row = await getIntegrationToolApproval(denial.approvalId);
+    expect(row?.status).toBe('auto_rejected');
+    expect(row?.decidedByUserId).toBeNull();
+    expect(row?.decidedAt).not.toBeNull();
+    expect(row?.autoEvaluation).toMatchObject({ recommendation: 'ask' });
+    // Terminal: nothing can claim, decide, or cancel it into a run.
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: denial.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      decideIntegrationToolApproval(
+        { sessionId, userId },
+        { approvalId: denial.approvalId, decision: 'approved' },
+      ),
+    ).rejects.toThrow();
+    expect((await getIntegrationToolApproval(denial.approvalId))?.status).toBe(
+      'auto_rejected',
+    );
+  });
+});
+
+describe('Auto mode', () => {
+  it('keeps the deployment Auto settings, defaulting to off', async () => {
+    await expect(getIntegrationToolAutoSettings()).resolves.toEqual({
+      mode: 'off',
+      policy: '',
+    });
+    await setIntegrationToolAutoSettings({
+      mode: 'on',
+      policy: 'Reads are fine. Never send messages.',
+    });
+    await expect(getIntegrationToolAutoSettings()).resolves.toEqual({
+      mode: 'on',
+      policy: 'Reads are fine. Never send messages.',
+    });
+    await setIntegrationToolAutoSettings({ mode: 'off', policy: '' });
+  });
+
+  it('stores Always allow as a choice of its own, unlike the default', async () => {
+    const userId = await user();
+    const integrationId = `always-${Date.now()}`;
+    const modeOf = async () =>
+      (await listIntegrationToolPolicies()).find(
+        (entry) => entry.integrationId === integrationId,
+      )?.mode;
+    await upsertIntegrationToolPolicy({
+      integrationId,
+      toolName: 'read',
+      mode: 'always_allow',
+      updatedByUserId: userId,
+    });
+    expect(await modeOf()).toBe('always_allow');
+    await upsertIntegrationToolPolicy({
+      integrationId,
+      toolName: 'read',
+      mode: 'allow',
+      updatedByUserId: userId,
+    });
+    expect(await modeOf()).toBeUndefined();
+  });
+
+  it('records a shadow assessment of a call nobody was asked about', async () => {
+    const userId = await user();
+    const evaluation = {
+      recommendation: 'approve' as const,
+      answers: { riskScore: 0 },
+      evaluatedAt: new Date().toISOString(),
+    };
+    await recordIntegrationToolShadowEvaluation({
+      userId,
+      taskId: null,
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+      argsSummary: { ...call.args, apiKey: 'sk-live' },
+      evaluation,
+    });
+    const [row] = await db
+      .select()
+      .from(integrationToolAutoEvaluations)
+      .where(eq(integrationToolAutoEvaluations.userId, userId));
+    expect(row).toMatchObject({
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+      argsSummary: { ...call.args, apiKey: '[value omitted]' },
+      evaluation,
+    });
+  });
+
+  it("records the model's view beside the requester's decision", async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const approval = await insertPending({ sessionId, userId });
+    const evaluation = {
+      recommendation: 'approve' as const,
+      answers: { matchesRequest: 0.95 },
+      evaluatedAt: new Date().toISOString(),
+    };
+    await recordIntegrationToolAutoEvaluation(approval.approvalId, evaluation);
+    await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: approval.approvalId, decision: 'rejected' },
+    );
+    expect(await getIntegrationToolApproval(approval.approvalId)).toMatchObject(
+      { status: 'rejected', autoEvaluation: evaluation },
+    );
+  });
+});
+
+describe("claiming a task's approved call", () => {
+  async function approvedTaskCall(args: unknown = call.args) {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const task = await taskFactory.create();
+    const approval = await insertIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        taskId: task.id,
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(args),
+        argsSummary: args,
+      },
+    );
+    expect(approval.taskId).toBe(task.id);
+    return { userId, sessionId, taskId: task.id, approval };
+  }
+
+  it('runs the exact approved call once, and nothing else', async () => {
+    const { userId, sessionId, taskId, approval } = await approvedTaskCall();
+    const claim = (input: { taskId?: string; args?: unknown } = {}) =>
+      claimTaskIntegrationToolCall({
+        taskId: input.taskId ?? taskId,
+        argsFingerprint: fingerprint(input.args ?? call.args),
+      });
+
+    // Asked but not yet answered.
+    await expect(claim()).resolves.toBe(false);
+    await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: approval.approvalId, decision: 'approved' },
+    );
+    // Other arguments and other tasks never ride on this approval.
+    await expect(claim({ args: { channel: 'C999' } })).resolves.toBe(false);
+    const otherTask = await taskFactory.create();
+    await expect(claim({ taskId: otherTask.id })).resolves.toBe(false);
+
+    await expect(claim()).resolves.toBe(true);
+    expect(
+      (await getIntegrationToolApproval(approval.approvalId))?.status,
+    ).toBe('consumed');
+    await expect(claim()).resolves.toBe(false);
+  });
+
+  it("never claims a Session agent's own approval, a rejection, or a stale decision", async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const sessionApproval = await insertPending({ sessionId, userId });
+    await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: sessionApproval.approvalId, decision: 'approved' },
+    );
+
+    const rejected = await approvedTaskCall();
+    await decideIntegrationToolApproval(
+      { sessionId: rejected.sessionId, userId: rejected.userId },
+      { approvalId: rejected.approval.approvalId, decision: 'rejected' },
+    );
+    await expect(
+      claimTaskIntegrationToolCall({
+        taskId: rejected.taskId,
+        argsFingerprint: fingerprint(),
+      }),
+    ).resolves.toBe(false);
+
+    const stale = await approvedTaskCall();
+    await decideIntegrationToolApproval(
+      { sessionId: stale.sessionId, userId: stale.userId },
+      { approvalId: stale.approval.approvalId, decision: 'approved' },
+    );
+    await db
+      .update(integrationToolApprovalRequests)
+      .set({ decidedAt: new Date(Date.now() - 60 * 60_000) })
+      .where(eq(integrationToolApprovalRequests.id, stale.approval.approvalId));
+    await expect(
+      claimTaskIntegrationToolCall({
+        taskId: stale.taskId,
+        argsFingerprint: fingerprint(),
+      }),
+    ).resolves.toBe(false);
+    expect(
+      (await getIntegrationToolApproval(sessionApproval.approvalId))?.status,
+    ).toBe('approved');
+  });
+
+  it('consumes a model-approved call as auto_approved, since nobody decided it', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const task = await taskFactory.create();
+    const evaluation = { recommendation: 'approve' as const, evaluatedAt: '' };
+    const approval = await insertAutoApprovedIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        taskId: task.id,
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+        decidedBy: 'model',
+        autoEvaluation: evaluation,
+      },
+    );
+    await expect(
+      claimTaskIntegrationToolCall({
+        taskId: task.id,
+        argsFingerprint: fingerprint(),
+      }),
+    ).resolves.toBe(true);
+    expect(await getIntegrationToolApproval(approval.approvalId)).toMatchObject(
+      {
+        status: 'auto_approved',
+        decidedByUserId: null,
+        autoEvaluation: evaluation,
+      },
+    );
+  });
+});
+
+describe('listPendingIntegrationToolApprovals', () => {
+  it('scopes pending approvals to the requester', async () => {
+    const userId = await user();
+    const otherId = await user();
+    const sessionId = await ownedSession(userId);
+    await insertPending({ sessionId, userId });
+    expect(
+      await listPendingIntegrationToolApprovals({ sessionId, userId: otherId }),
+    ).toHaveLength(0);
+    expect(
+      await listPendingIntegrationToolApprovals({ sessionId, userId }),
+    ).toHaveLength(1);
+  });
+});
+
+describe('integration tool session overrides', () => {
+  const tool = { integrationId: call.integrationId, toolName: call.toolName };
+
+  it('records an allow override when the requester approves for the session', async () => {
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    const pending = await insertPending(context);
+
+    const decided = await decideIntegrationToolApproval(context, {
+      approvalId: pending.approvalId,
+      decision: 'approved_for_session',
+    });
+
+    // The paused call still relays through the ordinary approved → consumed
+    // path; the override only affects later asks.
+    expect(decided.status).toBe('approved');
+    expect(
+      await listIntegrationToolSessionOverrides(context.sessionId),
+    ).toEqual([{ ...tool, mode: 'allow' }]);
+  });
+
+  it('never records an override from a wrong approver or a plain decision', async () => {
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    const pending = await insertPending(context);
+
+    await expect(
+      decideIntegrationToolApproval(
+        { sessionId: context.sessionId, userId: await user() },
+        { approvalId: pending.approvalId, decision: 'approved_for_session' },
+      ),
+    ).rejects.toBeInstanceOf(IntegrationToolApprovalUnavailableError);
+    await decideIntegrationToolApproval(context, {
+      approvalId: pending.approvalId,
+      decision: 'approved',
+    });
+
+    expect(
+      await listIntegrationToolSessionOverrides(context.sessionId),
+    ).toEqual([]);
+  });
+
+  it('keeps overrides inside their own session and cascades with it', async () => {
+    const userId = await user();
+    const first = { sessionId: await ownedSession(userId), userId };
+    const second = { sessionId: await ownedSession(userId), userId };
+    const pending = await insertPending(first);
+    await decideIntegrationToolApproval(first, {
+      approvalId: pending.approvalId,
+      decision: 'approved_for_session',
+    });
+
+    expect(await listIntegrationToolSessionOverrides(second.sessionId)).toEqual(
+      [],
+    );
+
+    await db.delete(sessions).where(eq(sessions.id, first.sessionId));
+    expect(await listIntegrationToolSessionOverrides(first.sessionId)).toEqual(
+      [],
+    );
+  });
+
+  it('writes auto-approved asks as terminal audit rows no decision can claim', async () => {
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    const reservation = await insertAutoApprovedIntegrationToolApproval(
+      context,
+      {
+        ...tool,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: { channel: 'C123', apiKey: 'sk-live' },
+      },
+    );
+    // The reservation is unrelayed until the bridge claims it atomically.
+    await claimAutoApprovedIntegrationToolApproval({
+      approvalId: reservation.approvalId,
+      requesterUserId: userId,
+    });
+
+    const [row] = await db
+      .select()
+      .from(integrationToolApprovalRequests)
+      .where(eq(integrationToolApprovalRequests.sessionId, context.sessionId));
+    expect(row?.status).toBe('auto_approved');
+    expect(row?.argsSummary).toEqual({
+      channel: 'C123',
+      apiKey: '[value omitted]',
+    });
+    expect(await listPendingIntegrationToolApprovals(context)).toEqual([]);
+    expect(
+      await markIntegrationToolApprovalConsumed({
+        approvalId: row!.id,
+        requesterUserId: userId,
+      }),
+    ).toBe(false);
+    await expect(
+      decideIntegrationToolApproval(context, {
+        approvalId: row!.id,
+        decision: 'approved',
+      }),
+    ).rejects.toBeInstanceOf(IntegrationToolApprovalUnavailableError);
+  });
+});

@@ -106,6 +106,10 @@ export const taskModelMetadataSchema = z.object({
    * list. Absent or null when the catalogs do not say either way.
    */
   supportsReasoning: z.boolean().nullable().optional(),
+  /** Supported configurable effort values when the provider publishes them. */
+  supportedReasoningEfforts: z
+    .array(z.enum(['low', 'medium', 'high', 'xhigh', 'max']))
+    .optional(),
 });
 
 export type TaskModelMetadata = z.infer<typeof taskModelMetadataSchema>;
@@ -167,7 +171,7 @@ function sortTaskModelOptionsById<T extends { id: string }>(models: T[]): T[] {
 export const TASK_MODEL_CATALOG: readonly TaskModelOption[] =
   mapRecommendedTaskModels(OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS);
 
-export const DEFAULT_TASK_MODEL_ID = 'openrouter/openai/gpt-5.6-terra';
+export const DEFAULT_TASK_MODEL_ID = 'openrouter/openai/gpt-6-luna';
 const LEGACY_DEFAULT_TASK_MODEL_ID = 'roomote-model-default';
 
 const TASK_MODEL_CATALOG_BY_ID = new Map<string, TaskModelOption>(

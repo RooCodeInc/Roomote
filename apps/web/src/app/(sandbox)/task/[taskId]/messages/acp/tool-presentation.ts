@@ -129,6 +129,8 @@ const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   get_chat_channel_messages: 'messages',
   get_chat_message_context: 'messages',
 };
+const FILE_NOT_FOUND_ERROR_RE =
+  /\b(?:ENOENT|no such file(?: or directory)?|(?:file|path|directory)?\s*not found|does not exist)\b/i;
 
 function normalized(value: string | null | undefined): string | null {
   const result = value?.trim().toLowerCase();
@@ -190,6 +192,7 @@ export function resolveToolPresentation(
     phase,
     readToolArguments(data),
     readToolResult(data),
+    readToolOutput(data),
     category,
     serverName,
     providerKind === 'native'
@@ -324,6 +327,7 @@ function resolveReceiptLanguage(
   phase: ToolPresentationPhase,
   args: ToolArguments | null,
   result: ToolArguments | null,
+  output: string | null,
   category: ToolPresentationCategory,
   serverName: string | null,
   nativeToolName: string | null,
@@ -375,7 +379,7 @@ function resolveReceiptLanguage(
     ) {
       return {
         verb: 'Checked',
-        object: `${remoteMcp}, needs setup in Settings`,
+        object: `${remoteMcp}, needs manual setup`,
       };
     }
     return { verb: 'Checked', object: remoteMcp };
@@ -441,7 +445,7 @@ function resolveReceiptLanguage(
   if (toolName === 'report_to_parent_session')
     return {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
-      object: 'report to Session',
+      object: 'report to session',
     };
   if (toolName === 'receive_task_report')
     return {
@@ -568,15 +572,22 @@ function resolveReceiptLanguage(
     nativeToolName === 'read_file' ||
     nativeToolName === 'spill_read' ||
     (toolName === null && nativeToolName !== null && category === 'read')
-  )
+  ) {
+    const object =
+      stringArgument(args, 'filePath', true) ??
+      stringArgument(args, 'file_path', true) ??
+      stringArgument(args, 'path', true) ??
+      'file';
+
+    if (phase === 'failed' && output && FILE_NOT_FOUND_ERROR_RE.test(output)) {
+      return { verb: '', object: `${object} not found` };
+    }
+
     return {
       verb: byPhase('Reading', 'Read', 'Failed to Read'),
-      object:
-        stringArgument(args, 'filePath', true) ??
-        stringArgument(args, 'file_path', true) ??
-        stringArgument(args, 'path', true) ??
-        'file',
+      object,
     };
+  }
   return null;
 }
 
@@ -608,6 +619,12 @@ function readToolResult(data: ToolData): ToolArguments | null {
   } catch {
     return null;
   }
+}
+
+function readToolOutput(data: ToolData): string | null {
+  return 'output' in data && typeof data.output === 'string'
+    ? data.output
+    : null;
 }
 
 function stringArgument(

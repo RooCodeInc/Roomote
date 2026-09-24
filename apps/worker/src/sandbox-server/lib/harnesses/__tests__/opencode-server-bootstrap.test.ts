@@ -272,6 +272,29 @@ describe('opencode-server bootstrap', () => {
     expect(commandEnv.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1');
   });
 
+  it('adds per-tool approval rules on top of the allow-all permissions', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: createDirectHarnessRuntimeEnv(homeDir),
+      workspacePath: '/tmp/workspace',
+      toolApprovalPermission: {
+        linear_save_issue: 'ask',
+        linear_delete_issue: 'deny',
+      },
+      logger: createLogger(),
+    });
+
+    const { permission } = JSON.parse(commandEnv.OPENCODE_CONFIG_CONTENT!);
+    expect(permission).toMatchObject({
+      bash: 'allow',
+      linear_save_issue: 'ask',
+      linear_delete_issue: 'deny',
+    });
+  });
+
   it('moves literal remote MCP header values into env vars before preparing the runtime overlay', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
@@ -822,12 +845,12 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, opens captured proof images to verify them, and returns concise review findings.',
+        'Opens the screenshots and keyframes a visual-proof step kept, checks that they show the shipped change honestly, and reports source changes made after proof capture began.',
       mode: 'subagent',
       hidden: true,
       model: 'test-provider/vision-model',
       options: { reasoningEffort: 'high' },
-      prompt: expect.stringContaining('implementation review support'),
+      prompt: expect.stringContaining('visual-proof review support'),
       permission: {
         read: 'allow',
         list: 'allow',
@@ -847,12 +870,12 @@ describe('opencode-server bootstrap', () => {
     });
     expect(baseConfig.agent?.judge).toMatchObject({
       prompt: expect.stringContaining(
-        'Avoid open-ended repository exploration',
+        'Do not review the implementation, plan coverage, logic, or tests',
       ),
     });
     expect(baseConfig.agent?.judge).toMatchObject({
       prompt: expect.stringContaining(
-        'When visual-proof evidence is included, verify it as part of the check',
+        'Open every supplied local screenshot and keyframe path with the read tool',
       ),
     });
     expect(config.agent).toEqual(baseConfig.agent);
@@ -871,16 +894,16 @@ describe('opencode-server bootstrap', () => {
       'Keep judge tool use minimal and targeted.',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'do not run the judge pass until that step has returned a capture result, honest no-op, not-applicable, unnecessary, or blocked outcome',
+      'When that step kept no images (a no-op, not-applicable, unnecessary, or blocked result), or the workflow required no proof step, do not spawn the judge.',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'open the kept screenshot and keyframe images and verify them against the plan and shipped change',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'the path `/tmp/capture-visual-proof/diff-at-start.patch` when it exists',
+      'the path `/tmp/capture-visual-proof/diff-at-start.patch`',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'If judge-driven fixes change repository files and this run requires a pre-delivery',
+      'If judge-driven fixes change repository files, re-run the `capture-visual-proof` step once',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).not.toContain(
       'background visual proof',
@@ -889,6 +912,35 @@ describe('opencode-server bootstrap', () => {
     expect(runtimeEnv).not.toHaveProperty(
       'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
     );
+  });
+
+  it('limits the judge to proof images', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+
+    await prepareOpenCodeCommandEnv({
+      runtimeEnv: createDirectHarnessRuntimeEnv(homeDir),
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    const instructions = fs.readFileSync(
+      path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'roomote-opencode-judge-model-instructions.md',
+      ),
+      'utf8',
+    );
+
+    expect(instructions).toContain('configured for visual-proof checks only');
+    expect(instructions).toContain(
+      'When that step kept no images (a no-op, not-applicable, unnecessary, or blocked result), or the workflow required no proof step, do not spawn the judge.',
+    );
+    expect(instructions).not.toContain('checked by the platform');
   });
 
   it('configures a hidden judge subagent with the coding model when no vision model is configured', async () => {
@@ -925,11 +977,11 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, opens captured proof images to verify them, and returns concise review findings.',
+        'Opens the screenshots and keyframes a visual-proof step kept, checks that they show the shipped change honestly, and reports source changes made after proof capture began.',
       mode: 'subagent',
       hidden: true,
       model: 'test-provider/main-model',
-      prompt: expect.stringContaining('implementation review support'),
+      prompt: expect.stringContaining('visual-proof review support'),
       permission: {
         read: 'allow',
         list: 'allow',
@@ -949,7 +1001,7 @@ describe('opencode-server bootstrap', () => {
     });
     expect(baseConfig.agent?.judge).toMatchObject({
       prompt: expect.stringContaining(
-        'Avoid open-ended repository exploration',
+        'Do not review the implementation, plan coverage, logic, or tests',
       ),
     });
     expect(config.agent).toEqual(baseConfig.agent);
@@ -961,7 +1013,7 @@ describe('opencode-server bootstrap', () => {
       'falls back to the active coding model',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'Start from the shipped diff, the plan, the validation state, and the latest pre-delivery visual-proof result',
+      'configured for visual-proof checks only',
     );
   });
 

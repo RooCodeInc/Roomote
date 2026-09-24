@@ -14,12 +14,14 @@ import {
   useStickToBottomContext,
   type ScrollToBottom,
 } from 'use-stick-to-bottom';
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
 } from '@/components/ai-elements';
+import { MemorySavedMessage } from '@/components/ai-elements/MemorySavedMessage';
 import {
   MessageUiOptionsProvider,
   type MessageUiOptions,
@@ -40,6 +42,7 @@ import {
   useSandboxTaskPhase,
   type TaskSession,
 } from './hooks';
+import type { AcpUiMessage } from './types';
 import { useInternalTranscriptRowsVisible } from './useInternalTranscriptRowsVisible';
 
 import { SleepWakeMessages } from './messages/index';
@@ -303,6 +306,13 @@ const MessagesBase = ({
     resetKey: session.taskId,
     isWorking: taskPhase === 'running',
   });
+  const renderMemoryMessage = useCallback(
+    (message: AcpUiMessage) =>
+      message.updateType === ACP_ENVELOPE_EVENT_TYPES.MemorySaved ? (
+        <MemorySavedMessage message={message} />
+      ) : undefined,
+    [],
+  );
   const shouldShowWorking =
     taskPhase === 'running' && !hasVisibleAssistantOutput(renderBlocks);
 
@@ -332,6 +342,7 @@ const MessagesBase = ({
               blocks={renderBlocks}
               showInternalMessages={showInternalMessages}
               onSuppress={suppressMessage}
+              renderMessage={renderMemoryMessage}
             />
             {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
             {shouldShowWorking && <DelayedWorkingMessage />}

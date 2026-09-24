@@ -233,7 +233,7 @@ describe('handlePrReviewLaunch', () => {
     );
 
     expect(json).toHaveBeenCalledWith(
-      { error: 'The requesting Session belongs to another user.' },
+      { error: 'The requesting session belongs to another user.' },
       403,
     );
     expect(mocks.enqueueTask).not.toHaveBeenCalled();

@@ -526,7 +526,9 @@ describe('SourceControl settings', () => {
 
     render(<SourceControl />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set it up for GitHub' }),
+    );
 
     expect(
       screen.getByRole('button', { name: 'Create GitHub App' }),
@@ -537,9 +539,51 @@ describe('SourceControl settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Connect GitHub' }),
     ).not.toBeInTheDocument();
+    expect(screen.getByLabelText('GitHub organization')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Show advanced config' }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByTestId('source-control-config-github'),
     ).not.toBeInTheDocument();
+  });
+
+  it('names each unconfigured setup action by provider and expands the chosen provider', () => {
+    state.configProviders = state.configProviders.map((provider) => ({
+      ...provider,
+      configSatisfied: false,
+    }));
+
+    render(<SourceControl />);
+
+    const providerNames = [
+      'GitHub',
+      'GitLab',
+      'Gitea',
+      'Bitbucket Cloud',
+      'Azure DevOps',
+    ];
+    for (const name of providerNames) {
+      const button = screen.getByRole('button', {
+        name: `Set it up for ${name}`,
+      });
+      expect(button).toHaveTextContent('Set it up');
+    }
+    expect(screen.queryByRole('button', { name: 'Set it up' })).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set it up for GitHub' }),
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Create GitHub App' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('source-control-config-github'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Set it up for GitLab' }),
+    ).toBeInTheDocument();
   });
 
   it('shows the recommendation highlight copy when targeted from a setup link', () => {
@@ -702,10 +746,12 @@ describe('SourceControl settings', () => {
       screen.queryByRole('button', { name: 'Refresh GitLab' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Set it up' }),
+      screen.getByRole('button', { name: 'Set it up for GitLab' }),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set it up for GitLab' }),
+    );
 
     expect(screen.getByTestId('source-control-config-gitlab')).toHaveAttribute(
       'data-show-setup-instructions',
@@ -735,7 +781,9 @@ describe('SourceControl settings', () => {
       screen.queryByRole('button', { name: 'Refresh Azure DevOps' }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set it up for Azure DevOps' }),
+    );
 
     expect(screen.getByTestId('source-control-config-ado')).toHaveAttribute(
       'data-show-setup-instructions',
@@ -756,8 +804,12 @@ describe('SourceControl settings', () => {
 
     render(<SourceControl />);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Set it up' })[0]!);
-    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set it up for Gitea' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set it up for Azure DevOps' }),
+    );
 
     expect(
       screen.getByTestId('source-control-config-gitea'),

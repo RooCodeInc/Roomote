@@ -139,14 +139,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'Complex reasoning and engineering tasks -> GPT 5.6 [id: openai/gpt-5.6] with high reasoning',
     );
     expect(prompt).toContain(
-      'Explicit user model or effort choices take precedence',
+      'Explicit user model choices take precedence over these rules',
     );
     expect(prompt).toContain(
-      'Evaluate every routing rule and use the strongest matching rule only when its condition clearly and strongly matches',
-    );
-    expect(prompt).toContain('Do not use a weak best-available match');
-    expect(prompt).toContain(
-      'If no rule is a strong match, omit both fields to use the deployment defaults',
+      'Roomote applies them itself when it launches delegated work',
     );
   });
 
@@ -210,9 +206,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'For focused Bitbucket Cloud reads and supported writes',
     );
     expect(prompt).toContain(
-      'discover the available Bitbucket tool schema with `find_integration_tools`',
+      'discover the available Bitbucket tool signature with `tools.$codemode.search`',
     );
-    expect(prompt).toContain('then use `call_integration_tool`');
+    expect(prompt).toContain('then call it through `execute`');
     expect(prompt).toContain(
       'Apply the same scope-based exploration rule as other providers',
     );
@@ -355,7 +351,7 @@ describe('buildFastAgentSystemPrompt', () => {
     },
   );
 
-  it('includes a resolved release identifier before turn startup and environments', () => {
+  it('includes a resolved release identifier before turn handling and environments', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       releaseVersion: '0.40.2',
@@ -363,9 +359,9 @@ describe('buildFastAgentSystemPrompt', () => {
 
     expect(prompt).toContain('Roomote release 0.40.2');
     expect(prompt.indexOf('Roomote release 0.40.2')).toBeLessThan(
-      prompt.indexOf('## Turn Startup (Highest Priority)'),
+      prompt.indexOf('## Turn Handling'),
     );
-    expect(prompt.indexOf('## Turn Startup (Highest Priority)')).toBeLessThan(
+    expect(prompt.indexOf('## Turn Handling')).toBeLessThan(
       prompt.indexOf('## All Environments'),
     );
   });
@@ -456,6 +452,73 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('limits the own-task check to stuck work when task updates are triaged', () => {
+    const standard = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    const triaged = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      taskCommunicationTriageEnabled: true,
+    });
+
+    expect(standard).toContain(
+      'post one brief consolidated factual status for the Session',
+    );
+    expect(triaged).not.toContain(
+      'post one brief consolidated factual status for the Session',
+    );
+    expect(triaged).toContain('Never post a routine or cadence status');
+    expect(triaged).toContain(
+      'it has made no progress since the previous check',
+    );
+    // Inspection, correction, and rearming are unchanged.
+    expect(triaged).toContain('send one specific corrective instruction');
+    expect(triaged).toContain(
+      'ensure exactly one equivalent next one-shot check exists',
+    );
+  });
+
+  it('frames triaged task updates by the judgment decision', () => {
+    const untriaged = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+    });
+    const relay = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: { decision: 'relay', reason: 'needs_user' },
+    });
+    const redirect = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: { decision: 'redirect', reason: 'off_track' },
+    });
+    const uncertain = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: {
+        decision: 'uncertain',
+        reason: 'mixed_signals',
+      },
+    });
+
+    expect(untriaged).toContain('roughly 10 minutes of silence');
+    expect(untriaged).not.toContain(
+      'A judgment model triaged this task update',
+    );
+    for (const prompt of [relay, redirect, uncertain]) {
+      expect(prompt).toContain('A judgment model triaged this task update');
+      expect(prompt).not.toContain('roughly 10 minutes of silence');
+    }
+    expect(relay).toContain(
+      'the task needs something only the user can provide',
+    );
+    expect(redirect).toContain('send one corrective "send_task_message"');
+    expect(uncertain).toContain('Silence is the right answer');
+  });
+
   it('offers suggestions on an automation task-settled report only', () => {
     const settlePrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -492,7 +555,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('No repositories configured');
   });
 
-  it('lists discovered instance and environment skills inline before list_skills guidance', () => {
+  it('lists discovered instance, environment, and repository skills inline before list_skills guidance', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
         {
@@ -523,8 +586,19 @@ describe('buildFastAgentSystemPrompt', () => {
             name: 'support-triage',
             source: 'settings',
           },
+          {
+            description: 'Use when working on Roomote.',
+            environmentIds: ['env-1'],
+            id: 'repository:repo-1:.agents/skills:typesafe-ai',
+            invocation: 'typesafe-ai',
+            name: 'typesafe-ai',
+            repository: 'RooCodeInc/Roomote',
+            source: 'repository',
+          },
         ],
-        warnings: [],
+        warnings: [
+          'Repository skill discovery omitted 2 repositories after reaching the limit of 8.',
+        ],
       },
     });
 
@@ -541,10 +615,16 @@ describe('buildFastAgentSystemPrompt', () => {
         `${'x'.repeat(319)}…`,
     );
     expect(prompt).toContain(
+      '- typesafe-ai [id: repository:repo-1:.agents/skills:typesafe-ai] (repository: RooCodeInc/Roomote; environments: Dashboard [id: env-1]): Use when working on Roomote.',
+    );
+    expect(prompt).toContain(
       '- 2 more skills are not listed here; call `list_skills` for the full inventory.',
     );
     expect(prompt).toContain(
-      '- Dashboard [id: env-1] also installs marketplace skill sources anthropics/skills; they are not listed here.',
+      '- Inventory warning (untrusted diagnostic): Repository skill discovery omitted 2 repositories after reaching the limit of 8.',
+    );
+    expect(prompt).toContain(
+      '- Dashboard [id: env-1] also installs marketplace skill sources anthropics/skills; additional skills may be omitted from this bounded inventory. Call `list_skills` without a scope for the complete bounded authorized inventory',
     );
     expect(prompt).toContain(
       "When a description matches the user's request, load that skill with `load_skill` using its exact ID",
@@ -553,7 +633,7 @@ describe('buildFastAgentSystemPrompt', () => {
       "A skill listed here or returned by `list_skills` is not a loaded skill. Only a `load_skill` call in this conversation that returned the skill's content counts as loading it.",
     );
     expect(prompt).toContain(
-      "The Available Skills section above already lists this deployment's instance and inline environment skills; consult it before calling `list_skills`.",
+      "The Available Skills section above already lists this turn's bounded packaged, instance, authorized environment, marketplace, and repository inventory; consult it before calling `list_skills`.",
     );
   });
 
@@ -564,7 +644,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'When the user asks what Roomote can do for them, how Roomote could help with their work, or for help identifying work to hand off',
     );
     expect(prompt).toContain(
-      'call `list_skills` with the exact name `explore-delegation`, load the returned packaged skill, and follow it before answering',
+      'Call `list_skills` with the exact name `explore-delegation`, load the returned packaged skill, and follow it before answering',
     );
     expect(prompt).toContain(
       'Do not require the user to invoke the skill by name or arrive through an onboarding offer.',
@@ -583,7 +663,7 @@ describe('buildFastAgentSystemPrompt', () => {
         },
       }),
     ).toContain(
-      '- No instance or inline environment skills are configured. Packaged skills remain available through `list_skills`.',
+      '- No authorized instance, environment, or repository skills are configured. Packaged skills remain available through `list_skills`.',
     );
     expect(
       buildFastAgentSystemPrompt({
@@ -591,7 +671,7 @@ describe('buildFastAgentSystemPrompt', () => {
         availableSkills: null,
       }),
     ).toContain(
-      '- The skill inventory could not be loaded for this turn. Call `list_skills` to discover instance and environment skills.',
+      '- The skill inventory could not be loaded for this turn. Call `list_skills` to discover packaged, instance, authorized environment, and repository skills.',
     );
   });
 
@@ -633,42 +713,34 @@ describe('buildFastAgentSystemPrompt', () => {
       `Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox with no repositories checked out; the task can still check out any active repository on demand.`,
     );
     expect(prompt).toContain('conversational orchestrator');
-    const turnStartupIndex = prompt.indexOf(
-      '## Turn Startup (Highest Priority)',
-    );
-    expect(turnStartupIndex).toBeGreaterThanOrEqual(0);
+    const turnHandlingIndex = prompt.indexOf('## Turn Handling');
+    expect(turnHandlingIndex).toBeGreaterThanOrEqual(0);
     for (const laterSection of [
       '## All Environments',
       '## Deployment MCP Servers',
       '## Native Fast Tools',
       '## Evidence-Driven Workflow',
     ]) {
-      expect(turnStartupIndex).toBeLessThan(prompt.indexOf(laterSection));
+      expect(turnHandlingIndex).toBeLessThan(prompt.indexOf(laterSection));
     }
     expect(prompt).toContain(
-      'the first model-selected action must communicate with the user before substantive model-invoked work',
+      'Tools may run before the first user-visible reply',
     );
     expect(prompt).toContain(
-      'use `send_chat_reply` with purpose `ack` before calling `launch_task`',
+      'Do not send an opening acknowledgement merely to unlock work',
     );
     expect(prompt).toContain(
-      'A reaction never satisfies this startup requirement, including an "eyes" reaction',
+      'Every response-required human turn must still deliver at least one user-visible reply before it settles',
     );
     expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');
     expect(prompt).toContain(
-      'A direct closeout or clarification that fully handles the turn without bypassing required Brain recall or other investigation is already the first communication',
+      'A direct closeout or clarification needs no separate acknowledgement',
     );
     expect(prompt).toContain(
-      'The acknowledgement streams independently of coding-task startup',
+      'When an opening acknowledgement would genuinely help during longer work',
     );
     expect(prompt).toContain(
-      'If launch fails, explain the failure through the normal closeout or clarification path',
-    );
-    expect(prompt).toContain(
-      'Before Brain recall, integrations, subagents, task steering, skills, result recovery, widgets, memory, custom automation management, or any other model-invoked work, communicate first',
-    );
-    expect(prompt).toContain(
-      'Trusted platform events follow their dedicated rules instead of this startup contract',
+      'Trusted platform events follow their dedicated rules',
     );
     expect(prompt).toContain('Task ID: task-2 | Update docs | pending');
     expect(prompt).toContain('Active or Resumable Delegated Tasks');
@@ -676,6 +748,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'A resumable settled task continues under the same task identity',
     );
     expect(prompt).toContain('Existing active tasks do not block');
+    expect(prompt).toContain(
+      'never add a no-commit, no-push, or no-PR constraint the user did not state',
+    );
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain(
       "use that task's known ID with `manage_tasks` `get_summary` to recover its stable image artifact IDs and viewer links",
@@ -706,9 +781,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'do not use "eyes" as an automatic processing or working-status acknowledgement',
     );
-    expect(prompt).toContain(
-      'It does not satisfy the turn-start acknowledgement required before continuing work',
-    );
+    expect(prompt).not.toContain('turn-start acknowledgement');
     expect(prompt).toContain('`advisor` and `judge` subagents');
     expect(prompt).toContain('opaque conversation-owned handle');
     expect(prompt).toContain('no generic filesystem');
@@ -729,9 +802,11 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('a marketplace skill');
     expect(prompt).toContain('repository-defined method');
     expect(prompt).toContain(
-      'without arguments for the complete packaged, instance, and authorized legacy Settings inventory',
+      'without arguments for the complete packaged, instance, authorized legacy Settings, and bounded authorized repository inventory',
     );
-    expect(prompt).toContain('this never inspects repositories');
+    expect(prompt).toContain(
+      'it inspects only repositories mapped to environments available to this member',
+    );
     expect(prompt).toContain(
       'A trusted runtime-derived `<explicit_skill_invocation name="..." />` marker',
     );
@@ -742,12 +817,14 @@ describe('buildFastAgentSystemPrompt', () => {
       'Dollar-prefixed prose without this marker is not an explicit skill invocation',
     );
     expect(prompt).toContain(
-      'An unscoped exact `name` lookup searches packaged, instance, and authorized legacy Settings skills',
+      'An unscoped exact `name` lookup searches packaged, instance, authorized legacy Settings, and authorized repository skills',
     );
     expect(prompt).toContain(
       'whenever a result includes `nextSourceOffset`, call `list_skills` again',
     );
-    expect(prompt).toContain('collect every page');
+    expect(prompt).toContain(
+      'to collect remaining same-precedence Settings variants',
+    );
     expect(prompt).toContain('exact returned skill ID');
     expect(prompt).toContain('Not every skill applies in Fast');
     expect(prompt).toContain('some require starting a coding task');
@@ -768,7 +845,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'GPT-5.6 [id: openai/gpt-5.6] (deployment default)',
     );
     expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
-    expect(prompt).toContain('Omit both to use the deployment defaults');
+    expect(prompt).toContain('Roomote decides the model for delegated work');
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
@@ -803,9 +880,6 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('same actor-authorized remote');
     expect(prompt).toContain('local stdio servers remain sandbox-only');
     expect(prompt).toContain(
-      'Communicate first on a human-authored turn; platform events remain exempt',
-    );
-    expect(prompt).toContain(
       'Keep using "launch_task", "send_task_message", "stop_task", or "cancel_task" for task changes',
     );
     expect(prompt).toContain(
@@ -815,7 +889,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Tool arguments, results, and reasoning are retained natively',
     );
-    expect(prompt).toContain('native JSON schema');
+    expect(prompt).toContain('code-mode runner');
     for (const name of ['prepare_integration_key', 'list_integration_keys']) {
       expect(prompt).not.toContain(name);
     }
@@ -823,7 +897,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Integration-key setup is unavailable on this turn',
     );
     expect(prompt).toContain(
-      'The runtime rejects those actions until a visible text reply has been delivered',
+      'Native, integration, subagent, skill, memory, artifact, and task tools may run before the first reply',
     );
 
     const enabledPrompt = buildFastAgentSystemPrompt({
@@ -904,9 +978,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).not.toContain(
       'Integration-key setup is unavailable on this turn',
     );
-    expect(prompt).toContain(
-      'On a human-authored turn, acknowledge first, then send the instruction immediately',
-    );
+    expect(prompt).toContain('Send the instruction immediately');
     expect(prompt).toContain(
       'A successful call means the task accepted the instruction, not that it has responded or completed it',
     );
@@ -935,13 +1007,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'supported attachments from the active conversation turn are relevant to that instruction',
     );
     expect(prompt).toContain(
-      'Before "launch_task", acknowledge with `send_chat_reply` so the response can stream before task startup',
-    );
-    expect(prompt).toContain(
-      'Do not restate that acknowledgement after launch',
-    );
-    expect(prompt).toContain(
-      'The task card or a separate task link keeps the started work associated with this conversation',
+      'The task card or a separate task link keeps started work associated with this conversation',
     );
     expect(prompt).not.toContain('explaining what is being delegated');
     expect(prompt).toContain('proactively launch multiple tasks in one turn');
@@ -1192,7 +1258,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('lists on-demand servers by name with their tool names instead of mounting them', () => {
+  it('lists every connected server as code-mode mounted', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       availableIntegrations: [
@@ -1211,19 +1277,15 @@ describe('buildFastAgentSystemPrompt', () => {
       ],
     });
 
-    expect(prompt).toContain('Roomote [tool prefix: roomote_]');
-    expect(prompt).toContain('### On-demand servers');
-    expect(prompt).toContain('#### GitHub [id: github]');
+    expect(prompt).toContain('Roomote [server: roomote]');
+    expect(prompt).toContain('### GitHub [server: github]');
     expect(prompt).toContain('Tools: search_code, list_issues');
     expect(prompt).not.toContain('GitHub [tool prefix: github_]');
-    expect(prompt).toContain('`find_integration_tools`');
-    expect(prompt).toContain('`call_integration_tool`');
   });
 
-  it('describes every server as code-mode mounted when the experiment is on', () => {
+  it('describes every server as code-mode mounted', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      codeModeIntegrationsEnabled: true,
       availableIntegrations: [
         {
           id: 'roomote',
@@ -1245,9 +1307,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('### GitHub [server: github]');
     expect(prompt).toContain('### Roomote [server: roomote]');
     expect(prompt).toContain('Tools: search_code, list_issues');
-    expect(prompt).toContain(
-      '`call_integration_tool` is unavailable in this conversation',
-    );
+    expect(prompt).not.toContain('call_integration_tool');
     expect(prompt).toContain('`find_integration_tools` remains read-only');
     // Hyphenated and otherwise non-identifier server names must get bracket
     // notation; `tools.smoke-one.read_item(...)` would be invalid JavaScript.
@@ -1259,24 +1319,6 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('tools["my-server"]["my-tool"](input)');
     expect(prompt).not.toContain('### On-demand servers');
     expect(prompt).not.toContain('GitHub [tool prefix: github_]');
-  });
-
-  it('keeps the dispatcher description when the experiment is off', () => {
-    const prompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-      codeModeIntegrationsEnabled: false,
-      availableIntegrations: [
-        {
-          id: 'github',
-          name: 'GitHub',
-          description: 'Repository access',
-          tools: [{ name: 'search_code' }],
-        },
-      ],
-    });
-
-    expect(prompt).toContain('### On-demand servers');
-    expect(prompt).not.toContain('reached only through the `execute` tool');
   });
 
   it('prefers discovered provider APIs without bypassing task and structured review delegation', () => {
@@ -1315,9 +1357,9 @@ describe('buildFastAgentSystemPrompt', () => {
       ],
     });
 
-    expect(prompt).toContain('Brain [tool prefix: gbrain_]');
-    expect(prompt.indexOf('## Turn Startup (Highest Priority)')).toBeLessThan(
-      prompt.indexOf('Brain [tool prefix: gbrain_]'),
+    expect(prompt).toContain('Brain [server: gbrain]');
+    expect(prompt.indexOf('## Turn Handling')).toBeLessThan(
+      prompt.indexOf('Brain [server: gbrain]'),
     );
     expect(prompt).toContain('before any other context or work tool call');
     expect(prompt).toContain('remain visible in the session');
@@ -1413,20 +1455,18 @@ describe('buildFastAgentSystemPrompt', () => {
       'would this still be useful if the user did not know delegation existed?',
     );
     expect(prompt).toContain(
-      'The opening acknowledgement is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
+      'An opening acknowledgement, when sent, needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
     );
-    expect(prompt).toContain(
-      'Never expose Roomote-internal Fast terminology such as "Fast session" or "Roomote Fast mode"',
-    );
+    expect(prompt).toContain('Never expose Roomote-internal mode terminology');
     expect(prompt).toContain(
       'Preserve official names and capitalization for external or provider features, including ChatGPT Fast mode',
     );
   });
 
-  it('provides repository-focused coding task acknowledgement guidance', () => {
+  it('provides repository-focused coding task update guidance', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
-    expect(prompt).toContain('## Coding Task Acknowledgements');
+    expect(prompt).toContain('## Coding Task Updates');
     expect(prompt).toContain(
       'For repository work, describe the work underway and name the target repository when known',
     );
@@ -1888,20 +1928,61 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('My read: ship it today.');
   });
 
-  it('adapts native chat tool guidance for Discord', () => {
+  it('scopes rich Markdown guidance to non-Discord Fast surfaces', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       surface: 'discord',
     });
+    const modernMarkdownTableGuidance =
+      'Use modern Markdown when it improves scanability. Supported formatting includes headings, horizontal rules, blockquotes, fenced code blocks, tables, bold, italic, strikethrough, inline code, and Markdown links.';
 
     expect(prompt).toContain('fast mode on Discord');
     expect(prompt).toContain('Emoji reactions are unavailable on this surface');
+    expect(prompt).toContain('<discord_table_formatting>');
+    expect(prompt).toContain('padded ASCII table');
+    expect(prompt).toContain('under 2,000 characters');
     expect(prompt).not.toContain('<slack_modern_markdown>');
+    expect(prompt).not.toContain(modernMarkdownTableGuidance);
+    expect(prompt).not.toContain('Markdown tables');
     expect(prompt).not.toContain(
       'attributes on the current `<slack_message>` identify its sender',
     );
     expect(prompt).toContain(
       '`sender_name` and `sender_github` fields identify the human sender',
+    );
+
+    const slackPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'slack',
+    });
+    expect(slackPrompt).toContain('<slack_modern_markdown>');
+    expect(slackPrompt).toContain(modernMarkdownTableGuidance);
+    expect(slackPrompt).not.toContain('<discord_table_formatting>');
+
+    const webPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'web',
+    });
+    expect(webPrompt).toContain(modernMarkdownTableGuidance);
+    expect(webPrompt).not.toContain('<slack_modern_markdown>');
+    expect(webPrompt).not.toContain('<discord_table_formatting>');
+  });
+
+  it('tells an addressed turn to answer without re-deciding directedness', () => {
+    const addressedPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      allowSilentAmbientReply: true,
+      addressedToRoomote: true,
+    });
+
+    expect(addressedPrompt).toContain(
+      'already judged this unmentioned message, in the context of the recent thread, to be addressed to Roomote',
+    );
+    expect(addressedPrompt).toContain(
+      'only when the message asks Roomote not to reply, or only thanks, acknowledges, or signs off',
+    );
+    expect(addressedPrompt).not.toContain(
+      'decide from the current message and recent thread whether it is specifically directed at Roomote',
     );
   });
 
@@ -1944,7 +2025,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'A first-time participant is not ambient when the context shows they are addressing Roomote',
     );
     expect(ambientPrompt).toContain(
-      'An eligible ambient message or optional human reaction may use `ignore_event` under its narrow rule below',
+      'An eligible ambient message or optional human reaction may instead use `ignore_event` under its narrow rule below',
     );
     expect(peerDirectedPrompt).toContain(
       'The communication surface classified this turn as a colleague-to-colleague conversation',
@@ -1956,12 +2037,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'Respond only if the current message mentions Roomote or explicitly asks Roomote to act',
     );
     expect(peerDirectedPrompt).toContain(
-      'Except for a turn classified above as peer-directed or another eligible ambient message',
+      'Tools may run before the first user-visible reply',
     );
     expect(peerDirectedPrompt).not.toContain('contextually clear follow-ups');
-    expect(
-      peerDirectedPrompt.indexOf('## Turn Startup (Highest Priority)'),
-    ).toBeLessThan(
+    expect(peerDirectedPrompt.indexOf('## Turn Handling')).toBeLessThan(
       peerDirectedPrompt.indexOf(
         'The communication surface classified this turn',
       ),
@@ -1989,11 +2068,11 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'produce exactly one user-visible terminal response',
     );
-    expect(prompt.indexOf('## Turn Startup (Highest Priority)')).toBeLessThan(
+    expect(prompt.indexOf('## Turn Handling')).toBeLessThan(
       prompt.indexOf('## Delegated Task Platform Event'),
     );
     expect(prompt).toContain(
-      'Trusted platform events follow their dedicated rules instead of this startup contract',
+      'Trusted platform events follow their dedicated rules',
     );
     expect(prompt).toContain('ignore_event');
     expect(prompt).toContain('retry_task_start');
@@ -2147,7 +2226,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not call `send_chat_reaction` or `retry_task_start`',
     );
     expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');
-    expect(prompt).toContain('use `send_chat_reply` with purpose `ack`');
+    expect(prompt).toContain(
+      'Tools may run before the first user-visible reply',
+    );
     expect(prompt).not.toContain('External Platform Input');
     expect(prompt).not.toContain(
       'a platform event has no incoming chat message',
@@ -2266,7 +2347,7 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'Preserve returned authorization and Settings links exactly',
+      'Preserve returned `authorizeUrl` and `settingsUrl` links exactly',
     );
     expect(prompt).toContain(
       'The conversation resumes automatically after OAuth',
@@ -2366,6 +2447,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'call `connect_integration` with the exact returned id',
     );
+    expect(prompt).toContain(
+      'keyless enablement, OAuth, or the secure form on the Integrations page',
+    );
+    expect(prompt).not.toMatch(/Settings\s*(→|>)\s*Integrations/);
     expect(prompt).toContain('never bypassed with another route');
     expect(prompt).not.toContain('pick one route in this order');
     expect(prompt).not.toContain(
@@ -2429,9 +2514,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'The parent remains responsible for making exactly the requested delivery',
     );
-    expect(prompt).toContain('Roomote [tool prefix: roomote_]');
-    expect(prompt).toContain('New Relic [id: new-relic]');
-    expect(prompt).toContain('Linear [id: linear]');
+    expect(prompt).toContain('Roomote [server: roomote]');
+    expect(prompt).toContain('New Relic [server: new-relic]');
+    expect(prompt).toContain('Linear [server: linear]');
   });
 
   it('does not bypass an applicable or indeterminate remote MCP with an integration key', () => {

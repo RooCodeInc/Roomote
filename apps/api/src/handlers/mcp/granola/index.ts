@@ -7,6 +7,10 @@ import { isMcpConnectionGranolaConfig } from '@roomote/types';
 import type { Variables } from '../../../types';
 
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
+import {
+  readNativeMcpRequestBody,
+  resolveNativeToolApprovalGuard,
+} from '../native-tool-approvals';
 import { McpProxyError } from '../proxy-utils';
 import { registerGranolaTools } from './tools';
 
@@ -62,12 +66,26 @@ granolaMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
   });
 
   try {
-    await resolveDeploymentMcpAuth(c.get('authContext'), 'Granola');
+    const auth = await resolveDeploymentMcpAuth(
+      c.get('authContext'),
+      'Granola',
+    );
+    const guard = await resolveNativeToolApprovalGuard({
+      auth,
+      integrationId: 'granola',
+      requestHeaders: c.req.raw.headers,
+    });
+    const body = await readNativeMcpRequestBody(c.req.raw);
+    const refusal = await guard.checkCall(body);
+    if (refusal) return refusal;
     const connectionConfig = await resolveGranolaConnection();
     const server = createGranolaMcpServer(connectionConfig);
 
     await server.connect(transport);
-    return await transport.handleRequest(c.req.raw);
+    return guard.filterToolsList(
+      body,
+      await transport.handleRequest(c.req.raw),
+    );
   } catch (error) {
     if (error instanceof McpProxyError) {
       return Response.json(

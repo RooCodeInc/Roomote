@@ -34,7 +34,11 @@ import {
   type SessionGoal,
 } from '@roomote/types';
 
-import type { FastSessionMessage } from '@/lib/server/fast-sessions';
+import type {
+  FastSessionMessage,
+  FastSessionMessageCursor,
+  FastSessionQueuedMessage,
+} from '@/lib/server/fast-sessions';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 import {
   Conversation,
@@ -50,6 +54,12 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Button,
+} from '@/components/system';
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
@@ -60,7 +70,15 @@ import {
   type SessionModelSelection,
   type SessionPromptSubmission,
 } from './SessionPromptInput';
+import {
+  SessionQueuedMessageList,
+  type SessionQueuedMessage,
+  type SessionQueuedMessageDeleteOutcome,
+} from './SessionQueuedMessageList';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
+import { describeValidationError } from '@/lib/validation-error';
+import { isComposerValidationError } from '@/lib/validation-error';
+import { ComposerErrorDialog } from '@/components/tasks/ComposerErrorDialog';
 import {
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
@@ -85,10 +103,15 @@ import {
 import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
 import { SetupIntegrationsCard } from './setup/SetupIntegrationsCard';
 import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
+import { EditableSessionTitle } from './EditableSessionTitle';
 import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
+import { PendingIntegrationToolApprovals } from '@/components/sessions/PendingIntegrationToolApprovals';
+import { useSessionIntegrationToolApprovals } from '@/hooks/useSessionIntegrationToolApprovals';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
+import { useSessionTitlePropagation } from './use-session-title-propagation';
+import { MemorySavedMessage } from '@/components/ai-elements/MemorySavedMessage';
 
 import {
   AcpMessageItem,
@@ -233,6 +256,15 @@ function getUserMessageIdentity(message: TranscriptMessage) {
     getTextFromContentBlocks(message.contentBlocks)?.trim() ?? '',
     getImageUrisFromContentBlocks(message.contentBlocks),
   ]);
+}
+
+function getTranscriptMessageClientMessageId(
+  message: TranscriptMessage,
+): string | null {
+  const clientMessageId = message.metadata?.clientMessageId;
+  return typeof clientMessageId === 'string' && clientMessageId.length > 0
+    ? clientMessageId
+    : null;
 }
 
 function buildOptimisticContentBlocks(text: string, images: string[] = []) {
@@ -429,10 +461,156 @@ function SessionScrollRestoration({ sessionId }: { sessionId: string }) {
   return null;
 }
 
+function TranscriptHistoryControls({
+  hasOlderMessages,
+  oldestMessageId,
+  onLoadOlder,
+  restoreScrollTop,
+}: {
+  hasOlderMessages: boolean;
+  oldestMessageId: string | undefined;
+  onLoadOlder: () => Promise<boolean>;
+  restoreScrollTop?: number;
+}) {
+  const { scrollRef, stopScroll } = useStickToBottomContext();
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const pendingScrollAdjustmentRef = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
+  const restoreScrollTopRef = useRef<number | null>(restoreScrollTop ?? null);
+  const automaticLoadArmedRef = useRef(true);
+  const loadInFlightRef = useRef(false);
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollAdjustmentRef.current;
+    const scrollElement = scrollRef.current;
+    if (!pending || !scrollElement) return;
+
+    scrollElement.scrollTop =
+      pending.scrollTop + (scrollElement.scrollHeight - pending.scrollHeight);
+    pendingScrollAdjustmentRef.current = null;
+  }, [oldestMessageId, scrollRef]);
+
+  const loadOlder = useCallback(async () => {
+    if (!hasOlderMessages || loadInFlightRef.current) return;
+
+    automaticLoadArmedRef.current = false;
+    loadInFlightRef.current = true;
+    setIsLoading(true);
+    setHasError(false);
+    const scrollElement = scrollRef.current;
+    if (scrollElement) {
+      stopScroll();
+      pendingScrollAdjustmentRef.current = {
+        scrollHeight: scrollElement.scrollHeight,
+        scrollTop: scrollElement.scrollTop,
+      };
+    }
+
+    try {
+      const loaded = await onLoadOlder();
+      if (!loaded) pendingScrollAdjustmentRef.current = null;
+    } catch {
+      pendingScrollAdjustmentRef.current = null;
+      setHasError(true);
+    } finally {
+      loadInFlightRef.current = false;
+      setIsLoading(false);
+    }
+  }, [hasOlderMessages, onLoadOlder, scrollRef, stopScroll]);
+
+  useLayoutEffect(() => {
+    const target = restoreScrollTopRef.current;
+    const scrollElement = scrollRef.current;
+    if (target === null || !scrollElement || isLoading || hasError) return;
+
+    const maxScrollTop =
+      scrollElement.scrollHeight - scrollElement.clientHeight;
+    if (maxScrollTop >= target) {
+      stopScroll();
+      scrollElement.scrollTop = target;
+      restoreScrollTopRef.current = null;
+      return;
+    }
+
+    if (hasOlderMessages) {
+      void loadOlder();
+    } else {
+      restoreScrollTopRef.current = null;
+    }
+  }, [
+    hasError,
+    hasOlderMessages,
+    isLoading,
+    loadOlder,
+    oldestMessageId,
+    scrollRef,
+    stopScroll,
+  ]);
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) return;
+
+    const handleScroll = () => {
+      if (scrollElement.scrollTop > 800) {
+        automaticLoadArmedRef.current = true;
+        return;
+      }
+
+      if (
+        automaticLoadArmedRef.current &&
+        hasOlderMessages &&
+        !isLoading &&
+        !hasError
+      ) {
+        void loadOlder();
+      }
+    };
+
+    scrollElement.addEventListener('scroll', handleScroll, { passive: true });
+    return () => scrollElement.removeEventListener('scroll', handleScroll);
+  }, [hasError, hasOlderMessages, isLoading, loadOlder, scrollRef]);
+
+  if (hasError) {
+    return (
+      <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
+        <span>Older messages could not be loaded.</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isLoading}
+          onClick={() => void loadOlder()}
+        >
+          {isLoading ? 'Retrying...' : 'Retry loading older messages'}
+        </Button>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <p
+        className="mb-4 text-center text-xs text-muted-foreground"
+        role="status"
+      >
+        Loading older messages...
+      </p>
+    );
+  }
+
+  return null;
+}
+
 export function FastSessionTranscript({
   sessionId,
   initialMessages,
-  hasOlderMessages,
+  initialQueuedMessages = [],
+  initialMessagesCursor = null,
+  initialStreamCursor = null,
   canReply,
   initialTitle = null,
   fallbackTitle = 'New session',
@@ -444,13 +622,17 @@ export function FastSessionTranscript({
   headerExtras,
   privateSession = false,
   headerActions,
+  canRenameTitle = false,
+  titleSessionId = sessionId,
   secretSessionId,
   sessionGoal,
   autoStartVoice = false,
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
-  hasOlderMessages?: boolean;
+  initialQueuedMessages?: FastSessionQueuedMessage[];
+  initialMessagesCursor?: FastSessionMessageCursor | null;
+  initialStreamCursor?: number | null;
   canReply?: boolean;
   initialTitle?: string | null;
   fallbackTitle?: string;
@@ -462,6 +644,8 @@ export function FastSessionTranscript({
   headerExtras?: ReactNode;
   privateSession?: boolean;
   headerActions?: ReactNode;
+  canRenameTitle?: boolean;
+  titleSessionId?: string;
   secretSessionId?: string;
   sessionGoal?: SessionGoal | null;
   /**
@@ -507,8 +691,8 @@ export function FastSessionTranscript({
     [authenticatedUser],
   );
   const navigationState = useSessionNavigationState();
-  const hasSavedScrollPosition =
-    navigationState?.getScrollPosition(sessionId) !== undefined;
+  const savedScrollPosition = navigationState?.getScrollPosition(sessionId);
+  const hasSavedScrollPosition = savedScrollPosition !== undefined;
   const openTaskPanel = useOpenSessionTaskPanel();
   const openTasksPanel = useOpenSessionTasksPanel();
   const runningTaskCount = useSessionRunningTaskCount();
@@ -526,6 +710,20 @@ export function FastSessionTranscript({
     () => new Map(initialMessages.map((message) => [message.eventId, message])),
   );
   const serverMessagesRef = useRef(serverMessages);
+  const olderMessageEventIdsRef = useRef(new Set<string>());
+  const [messagesCursor, setMessagesCursor] =
+    useState<FastSessionMessageCursor | null>(initialMessagesCursor);
+  const [serverQueuedMessages, setServerQueuedMessages] = useState<
+    FastSessionQueuedMessage[]
+  >(initialQueuedMessages);
+  const [localQueuedMessages, setLocalQueuedMessages] = useState<
+    FastSessionQueuedMessage[]
+  >([]);
+  // Withdrawn follow-ups never return, so a queue snapshot polled before the
+  // withdrawal cannot bring one back.
+  const [withdrawnClientMessageIds, setWithdrawnClientMessageIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const hasReceivedInitialSessionStateRef = useRef(false);
   const pendingTaskReportTimingsRef = useRef(
     new Map<string, { admittedAtMs: number; serverReceivedAtMs: number }>(),
@@ -561,7 +759,9 @@ export function FastSessionTranscript({
       ),
   );
   const [replyError, setReplyError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<unknown>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
+  useSessionTitlePropagation(title, initialTitle);
   const [goal, setGoal] = useState<SessionGoal | null>(sessionGoal ?? null);
   const [conversationResponding, setConversationResponding] = useState<
     boolean | null
@@ -584,9 +784,33 @@ export function FastSessionTranscript({
     replaceStreamMessages([]);
   }, [getStreamService, replaceStreamMessages]);
 
+  const loadOlderMessages = useCallback(async () => {
+    if (!messagesCursor) return false;
+    const page = await trpcClient.fastSessions.olderMessages.query({
+      sessionId,
+      cursor: messagesCursor,
+    });
+    const next = new Map(serverMessagesRef.current);
+    for (const message of page.messages as TranscriptMessage[]) {
+      if (!next.has(message.eventId)) {
+        olderMessageEventIdsRef.current.add(message.eventId);
+        next.set(message.eventId, message);
+      }
+    }
+    serverMessagesRef.current = next;
+    setServerMessages(next);
+    setMessagesCursor(page.nextCursor);
+    return true;
+  }, [messagesCursor, sessionId, trpcClient]);
+
   useEffect(() => {
     hasReceivedInitialSessionStateRef.current = false;
-    const source = new EventSource(`/api/sessions/${sessionId}/stream`);
+    const streamUrl = `/api/sessions/${sessionId}/stream${
+      initialStreamCursor === null
+        ? ''
+        : `?since=${encodeURIComponent(String(initialStreamCursor))}`
+    }`;
+    const source = new EventSource(streamUrl);
     const onOpen = () => {
       hasReceivedInitialSessionStateRef.current = false;
       // Chunks missed while disconnected cannot be recovered; the persisted
@@ -623,10 +847,15 @@ export function FastSessionTranscript({
           const existing = previous.get(message.eventId);
           let renderId = existing?.id;
           if (!renderId && message.role === 'user') {
+            const messageClientMessageId =
+              getTranscriptMessageClientMessageId(message);
             const optimisticIndex = pendingOptimistic.findIndex(
               (optimistic) =>
+                (messageClientMessageId !== null &&
+                  getTranscriptMessageClientMessageId(optimistic) ===
+                    messageClientMessageId) ||
                 getUserMessageIdentity(optimistic) ===
-                getUserMessageIdentity(message),
+                  getUserMessageIdentity(message),
             );
             if (optimisticIndex >= 0) {
               renderId = pendingOptimistic[optimisticIndex]?.id;
@@ -706,6 +935,25 @@ export function FastSessionTranscript({
         }
       } catch {
         // Ignore malformed frames; the next poll re-sends current state.
+      }
+    };
+    const onQueue = (event: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(event.data) as {
+          queuedMessages?: FastSessionQueuedMessage[];
+        };
+        if (!Array.isArray(parsed.queuedMessages)) return;
+        setServerQueuedMessages(
+          parsed.queuedMessages.filter(
+            (message) =>
+              typeof message?.id === 'string' &&
+              typeof message.clientMessageId === 'string' &&
+              typeof message.text === 'string' &&
+              typeof message.timestamp === 'number',
+          ),
+        );
+      } catch {
+        // Ignore malformed frames; the next poll sends the current snapshot.
       }
     };
     const onSession = (event: MessageEvent) => {
@@ -818,12 +1066,14 @@ export function FastSessionTranscript({
     };
     source.addEventListener('open', onOpen);
     source.addEventListener('messages', onMessages);
+    source.addEventListener('queue', onQueue);
     source.addEventListener('session', onSession);
     source.addEventListener('chunk', onChunk);
     source.addEventListener('task-report', onTaskReport);
     return () => {
       source.removeEventListener('open', onOpen);
       source.removeEventListener('messages', onMessages);
+      source.removeEventListener('queue', onQueue);
       source.removeEventListener('session', onSession);
       source.removeEventListener('chunk', onChunk);
       source.removeEventListener('task-report', onTaskReport);
@@ -831,10 +1081,47 @@ export function FastSessionTranscript({
     };
   }, [
     sessionId,
+    initialStreamCursor,
     clearStreamMessages,
     getStreamService,
     replaceOptimisticMessages,
     replaceStreamMessages,
+  ]);
+
+  const deliveredClientMessageIds = useMemo(
+    () =>
+      new Set(
+        [...serverMessages.values()]
+          .map(getTranscriptMessageClientMessageId)
+          .filter((clientMessageId): clientMessageId is string =>
+            Boolean(clientMessageId),
+          ),
+      ),
+    [serverMessages],
+  );
+  const queuedMessages = useMemo(() => {
+    const seenClientMessageIds = new Set<string>();
+
+    return [...serverQueuedMessages, ...localQueuedMessages].filter(
+      (message) => {
+        if (
+          deliveredClientMessageIds.has(message.clientMessageId) ||
+          withdrawnClientMessageIds.has(message.clientMessageId)
+        ) {
+          return false;
+        }
+        if (seenClientMessageIds.has(message.clientMessageId)) {
+          return false;
+        }
+        seenClientMessageIds.add(message.clientMessageId);
+        return true;
+      },
+    );
+  }, [
+    deliveredClientMessageIds,
+    localQueuedMessages,
+    serverQueuedMessages,
+    withdrawnClientMessageIds,
   ]);
 
   const messages = useMemo(() => {
@@ -850,6 +1137,7 @@ export function FastSessionTranscript({
     let messageCount = 0;
     let assistantCount = 0;
     for (const message of serverMessages.values()) {
+      if (olderMessageEventIdsRef.current.has(message.eventId)) continue;
       const isAssistant =
         message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage;
       if (
@@ -929,6 +1217,9 @@ export function FastSessionTranscript({
   );
   const renderCapabilityOfferMessage = useCallback(
     (message: AcpUiMessage) => {
+      if (message.updateType === ACP_ENVELOPE_EVENT_TYPES.MemorySaved) {
+        return <MemorySavedMessage message={message} />;
+      }
       const offer = capabilityOffersByMessageId.get(message.id);
       if (!offer) return undefined;
       const introMessage: AcpUiMessage = {
@@ -1298,19 +1589,23 @@ export function FastSessionTranscript({
       setIsSending(true);
       setReplyError(null);
       let optimisticId: string | null = null;
-      let clientMessageId: string | undefined;
+      let clientMessageId = '';
+      let optimisticTranscriptAdded = false;
       try {
-        const prepared = await preparePromptAttachments({
-          text: message.text.trim(),
-          attachments: message.files,
-        });
+        const prepared = await preparePromptAttachments(
+          {
+            text: message.text.trim(),
+            attachments: message.files,
+          },
+          { enforceAttachmentTextLimit: true },
+        );
         const images = prepared.images ?? [];
         if (!prepared.text && images.length === 0) {
           return false;
         }
 
+        clientMessageId = crypto.randomUUID();
         if (options?.voiceDelegationId !== undefined) {
-          clientMessageId = crypto.randomUUID();
           voiceDelegationByTurnIdRef.current.set(
             clientMessageId,
             options.voiceDelegationId,
@@ -1319,8 +1614,8 @@ export function FastSessionTranscript({
         optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
         const optimistic: TranscriptMessage = {
           id: optimisticId,
-          eventId: optimisticId,
-          turnId: 'optimistic',
+          eventId: `${clientMessageId}:user`,
+          turnId: clientMessageId,
           turnSeq: 0,
           ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -1328,6 +1623,7 @@ export function FastSessionTranscript({
           contentBlocks: buildOptimisticContentBlocks(prepared.text, images),
           metadata: {
             visibleInTranscript: true,
+            clientMessageId,
             ...(currentUser ? { userId: currentUser.userId } : {}),
           },
           payload: {},
@@ -1339,14 +1635,9 @@ export function FastSessionTranscript({
           userImageUrl: currentUser?.imageUrl ?? null,
           createdAt: new Date(),
         };
-        replaceOptimisticMessages([
-          ...optimisticMessagesRef.current,
-          optimistic,
-        ]);
-        dispatchPendingResponse({ type: 'optimistic', message: optimistic });
-        await trpcClient.fastSessions.reply.mutate({
+        const result = await trpcClient.fastSessions.reply.mutate({
           sessionId,
-          ...(clientMessageId ? { clientMessageId } : {}),
+          clientMessageId,
           ...(options?.voiceDelegationId !== undefined
             ? { voiceMode: true }
             : {}),
@@ -1358,16 +1649,58 @@ export function FastSessionTranscript({
           model: message.model ?? null,
           reasoningEffort: message.reasoningEffort ?? null,
         });
-        dispatchPendingResponse({
-          type: 'commitOptimistic',
-          optimisticId,
-        });
+
+        if (result?.admission === 'queued') {
+          setLocalQueuedMessages((current) => {
+            if (
+              current.some(
+                (queued) => queued.clientMessageId === clientMessageId,
+              )
+            ) {
+              return current;
+            }
+            return [
+              ...current,
+              {
+                id: clientMessageId,
+                clientMessageId,
+                ...(currentUser ? { userId: currentUser.userId } : {}),
+                text: prepared.text,
+                ...(images.length > 0 ? { images } : {}),
+                timestamp: Date.now(),
+                optimistic: true,
+              },
+            ];
+          });
+        } else {
+          const alreadyDelivered = [...serverMessagesRef.current.values()].some(
+            (serverMessage) =>
+              getTranscriptMessageClientMessageId(serverMessage) ===
+                clientMessageId ||
+              serverMessage.eventId === `${clientMessageId}:user`,
+          );
+          if (!alreadyDelivered) {
+            replaceOptimisticMessages([
+              ...optimisticMessagesRef.current,
+              optimistic,
+            ]);
+            optimisticTranscriptAdded = true;
+            dispatchPendingResponse({
+              type: 'optimistic',
+              message: optimistic,
+            });
+            dispatchPendingResponse({
+              type: 'commitOptimistic',
+              optimisticId,
+            });
+          }
+        }
         return true;
       } catch (error) {
         if (clientMessageId) {
           voiceDelegationByTurnIdRef.current.delete(clientMessageId);
         }
-        if (optimisticId) {
+        if (optimisticId && optimisticTranscriptAdded) {
           const failedId = optimisticId;
           replaceOptimisticMessages(
             optimisticMessagesRef.current.filter(
@@ -1375,9 +1708,13 @@ export function FastSessionTranscript({
             ),
           );
         }
-        setReplyError(
-          error instanceof Error ? error.message : 'Failed to send message',
-        );
+        if (isComposerValidationError(error)) {
+          setValidationError(error);
+        } else {
+          setReplyError(
+            describeValidationError(error, 'Failed to send message'),
+          );
+        }
         if (optimisticId) {
           dispatchPendingResponse({
             type: 'rollbackOptimistic',
@@ -1390,6 +1727,33 @@ export function FastSessionTranscript({
       }
     },
     [currentUser, isSending, replaceOptimisticMessages, sessionId, trpcClient],
+  );
+
+  const deleteQueuedMessage = useCallback(
+    async (
+      message: SessionQueuedMessage,
+    ): Promise<SessionQueuedMessageDeleteOutcome> => {
+      const { outcome } =
+        await trpcClient.fastSessions.deleteQueuedMessage.mutate({
+          sessionId,
+          clientMessageId: message.clientMessageId,
+        });
+      // Either way the server no longer holds it as waiting, so this tab's
+      // optimistic copy stops standing in for it; the server snapshot and
+      // the transcript show whatever is left.
+      setLocalQueuedMessages((current) =>
+        current.filter(
+          (queued) => queued.clientMessageId !== message.clientMessageId,
+        ),
+      );
+      if (outcome === 'withdrawn') {
+        setWithdrawnClientMessageIds((current) =>
+          new Set(current).add(message.clientMessageId),
+        );
+      }
+      return outcome;
+    },
+    [sessionId, trpcClient],
   );
 
   const handleReviewAction = useCallback(
@@ -1783,6 +2147,8 @@ export function FastSessionTranscript({
     }
   }, [openIntegrationKeyRequestId, secretSessionId]);
 
+  const toolApprovals = useSessionIntegrationToolApprovals(secretSessionId);
+
   useEffect(() => {
     if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
       stopLiveVoiceRef.current();
@@ -1810,12 +2176,13 @@ export function FastSessionTranscript({
           }
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <h1
-              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+            <EditableSessionTitle
+              sessionId={titleSessionId}
               title={title ?? fallbackTitle}
-            >
-              {title ?? fallbackTitle}
-            </h1>
+              canRename={canRenameTitle}
+              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+              onTitleChange={setTitle}
+            />
             {(privateSession || effectiveSessionModel || headerExtras) && (
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
                 {privateSession ? (
@@ -1855,11 +2222,12 @@ export function FastSessionTranscript({
           initial={hasSavedScrollPosition ? false : 'instant'}
         >
           <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">
-            {hasOlderMessages ? (
-              <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
-                Older messages in this session are not shown.
-              </p>
-            ) : null}
+            <TranscriptHistoryControls
+              hasOlderMessages={messagesCursor !== null}
+              oldestMessageId={messages[0]?.eventId}
+              onLoadOlder={loadOlderMessages}
+              restoreScrollTop={savedScrollPosition}
+            />
             <AcpTranscriptBlockList
               blocks={renderBlocksBeforeInput}
               showInternalMessages={false}
@@ -1871,6 +2239,7 @@ export function FastSessionTranscript({
               <div className="mt-3">
                 {pendingInputRequest.preset === 'setup_starter_tasks' ? (
                   <SetupStarterTasksCard
+                    key={pendingInputRequest.requestId}
                     sessionId={sessionId}
                     request={pendingInputRequest}
                   />
@@ -1882,6 +2251,7 @@ export function FastSessionTranscript({
                   />
                 ) : (
                   <SessionUserInputCard
+                    key={pendingInputRequest.requestId}
                     sessionId={sessionId}
                     request={pendingInputRequest}
                   />
@@ -1932,6 +2302,12 @@ export function FastSessionTranscript({
                 openRequest={openIntegrationKeyRequest}
               />
             ) : null}
+            {secretSessionId ? (
+              <PendingIntegrationToolApprovals
+                sessionId={secretSessionId}
+                pending={toolApprovals.data?.pending ?? []}
+              />
+            ) : null}
           </ConversationContent>
           <SessionScrollRestoration sessionId={sessionId} />
           <ConversationScrollButton />
@@ -1946,6 +2322,9 @@ export function FastSessionTranscript({
               assistantMessageCount={suggestionHistory.assistantCount}
               taskStateRevision={taskStateRevision}
               agentWorking={agentWorking}
+              queuedMessages={queuedMessages}
+              currentUserId={currentUser?.userId ?? null}
+              onDeleteQueuedMessage={deleteQueuedMessage}
               initialModel={sessionModel}
               initialReasoningEffort={sessionReasoningEffort}
               defaultModelId={defaultModelId}
@@ -1976,8 +2355,30 @@ export function FastSessionTranscript({
               }}
             />
             {replyError ? (
-              <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
+              <Alert
+                variant="destructive"
+                className="mx-4 mb-2 [&>svg]:size-4"
+                role="alert"
+              >
+                <AlertTitle>Message not sent</AlertTitle>
+                <AlertDescription>
+                  <p className="whitespace-pre-line">{replyError}</p>
+                </AlertDescription>
+              </Alert>
             ) : null}
+            <ComposerErrorDialog
+              error={validationError}
+              onClose={() => setValidationError(null)}
+            />
+          </div>
+        ) : queuedMessages.length > 0 ? (
+          <div className="mx-auto w-full max-w-4xl shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card @[56rem]:rounded-t-lg">
+            <SessionQueuedMessageList
+              queuedMessages={queuedMessages}
+              currentUserId={currentUser?.userId ?? null}
+              onDelete={canReply ? deleteQueuedMessage : undefined}
+              className="border-b-0"
+            />
           </div>
         ) : null}
       </SlackMentionProvider>

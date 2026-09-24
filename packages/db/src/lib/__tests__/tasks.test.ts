@@ -248,13 +248,17 @@ describe('isVisibleTask', () => {
     }
   });
 
-  it('excludes soft-deleted tasks from visible reads', async () => {
+  it('excludes archived and soft-deleted tasks from visible reads', async () => {
     const visibleTask = await taskFactory.create({ visibility: 'visible' });
+    const archivedTask = await taskFactory.create({
+      visibility: 'visible',
+      archivedAt: new Date(),
+    });
     const deletedTask = await taskFactory.create({
       visibility: 'visible',
       deletedAt: new Date(),
     });
-    createdTaskIds.push(visibleTask.id, deletedTask.id);
+    createdTaskIds.push(visibleTask.id, archivedTask.id, deletedTask.id);
 
     const [foundVisible] = await db
       .select({ id: tasks.id })
@@ -264,8 +268,13 @@ describe('isVisibleTask', () => {
       .select({ id: tasks.id })
       .from(tasks)
       .where(and(eq(tasks.id, deletedTask.id), isVisibleTask()));
+    const [foundArchived] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.id, archivedTask.id), isVisibleTask()));
 
     expect(foundVisible?.id).toBe(visibleTask.id);
+    expect(foundArchived).toBeUndefined();
     expect(foundDeleted).toBeUndefined();
   });
 });

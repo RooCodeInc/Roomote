@@ -12,6 +12,8 @@ let hasEnabledAutomations = true;
 let environments: unknown[] = [{}];
 let environmentsPending = false;
 let environmentsSuccess = true;
+let automationOnboardingStatusQueryEnabled: boolean | undefined;
+const launcherErrorState: { error: unknown } = { error: null };
 
 const {
   mockPush,
@@ -52,6 +54,10 @@ vi.mock('@/hooks/task-runs', () => ({
   useFastSessionLauncher: () => ({
     isPending: false,
     startFastSession: mockStartDelegationSession,
+    error: launcherErrorState.error,
+    clearError: () => {
+      launcherErrorState.error = null;
+    },
   }),
 }));
 
@@ -108,13 +114,18 @@ vi.mock('@/trpc/client', () => ({
       status: { queryOptions: () => ({ queryKey: ['onboarding'] }) },
     },
     automations: {
-      onboardingStatus: { queryOptions: () => ({ queryKey: ['automations'] }) },
+      onboardingStatus: {
+        queryOptions: (_input: undefined, options?: { enabled?: boolean }) => {
+          automationOnboardingStatusQueryEnabled = options?.enabled;
+          return { queryKey: ['automations'], enabled: options?.enabled };
+        },
+      },
     },
   }),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: (options: { queryKey: string[] }) =>
+  useQuery: (options: { queryKey: string[]; enabled?: boolean }) =>
     options.queryKey[0] === 'onboarding'
       ? {
           data: {
@@ -124,7 +135,9 @@ vi.mock('@tanstack/react-query', () => ({
           },
           isPending: false,
         }
-      : { data: { hasEnabledAutomations }, isPending: false },
+      : options.enabled === false
+        ? { data: undefined, isPending: true }
+        : { data: { hasEnabledAutomations }, isPending: false },
 }));
 
 vi.mock('motion/react', async () => {
@@ -188,7 +201,9 @@ beforeEach(() => {
   environments = [{}];
   environmentsPending = false;
   environmentsSuccess = true;
+  automationOnboardingStatusQueryEnabled = undefined;
   localStorage.clear();
+  launcherErrorState.error = null;
   vi.clearAllMocks();
 });
 
@@ -206,6 +221,46 @@ it('prioritizes delegation discovery and starts its interview directly', () => {
   expect(mockStartDelegationSession).toHaveBeenCalledWith({
     text: '$explore-delegation Find something to take off my plate.',
   });
+});
+
+it('keeps the validation dialog visible after the onboarding card is dismissed', () => {
+  environments = [];
+  hasEnabledAutomations = false;
+
+  const { rerender } = render(<OnboardingCard />);
+
+  // Dismiss every card so the component hits the no-active-card branch.
+  while (screen.queryAllByRole('button', { name: 'Dismiss' }).length > 0) {
+    dismissCard();
+  }
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByText(/Find something/)).not.toBeInTheDocument();
+
+  launcherErrorState.error = new Error(
+    JSON.stringify([
+      {
+        code: 'custom',
+        message:
+          'Extracted attachment text exceeds the 200,000 character limit',
+        path: ['attachmentTexts'],
+      },
+    ]),
+  );
+  rerender(<OnboardingCard />);
+
+  const dialog = screen.getByRole('dialog');
+  expect(dialog).toHaveTextContent('Attachment too large');
+  expect(dialog).toHaveTextContent(
+    'attachmentTexts: Extracted attachment text exceeds the 200,000 character limit',
+  );
+  expect(dialog).toHaveTextContent(
+    'Try a different file, or provide a URL and Roomote will download it.',
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+  // Re-render the card; the dialog only renders again if clearError failed.
+  rerender(<OnboardingCard />);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
 it('prioritizes environment setup and persists its dismissal', () => {
@@ -283,6 +338,19 @@ it('prioritizes automations and opens the automations page', () => {
 
   fireEvent.click(screen.getByRole('button', { name: 'Go' }));
   expect(mockPush).toHaveBeenCalledWith('/automations');
+});
+
+it('skips the admin-only automation onboarding query and card for members', () => {
+  isAdmin = false;
+  hasEnabledAutomations = false;
+
+  render(<OnboardingCard />);
+  dismissCard();
+
+  expect(automationOnboardingStatusQueryEnabled).toBe(false);
+  expect(
+    screen.queryByText("Put your team's work on autopilot with automations"),
+  ).not.toBeInTheDocument();
 });
 
 it('prioritizes communication accounts before source-control accounts', () => {
