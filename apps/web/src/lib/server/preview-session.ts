@@ -7,7 +7,9 @@ import {
 } from '@roomote/db/server';
 
 import { getSignedInAuthContext } from '@/lib/server';
+import { canAccessTask } from './custom-automation-task-access';
 import { Env } from './env';
+import { isTaskSharedDesktopHost } from './shared-desktop-host';
 
 interface PreviewSession {
   enableHiDpi: boolean;
@@ -15,6 +17,14 @@ interface PreviewSession {
   resizeMode: 'remote';
   viewOnly: boolean;
   wsUrl: string;
+}
+
+interface DesktopStreamSession {
+  configUrl: string;
+  controlUrl: string;
+  metricsUrl: string;
+  streamUrl: string;
+  telemetryUrl: string;
 }
 
 export class PreviewSessionError extends Error {
@@ -81,10 +91,24 @@ function buildPreviewWebSocketUrl(previewUrl: URL, token: string): string {
   return wsUrl.toString();
 }
 
-export async function createPreviewSession(params: {
+function buildPreviewResourceUrl(
+  previewUrl: URL,
+  path: string,
+  token: string,
+  websocket = false,
+): string {
+  const resourceUrl = new URL(path, previewUrl);
+  if (websocket) {
+    resourceUrl.protocol = previewUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  }
+  resourceUrl.searchParams.set('__preview_token', token);
+  return resourceUrl.toString();
+}
+
+async function authorizePreviewSession(params: {
   runId: string;
   previewUrl: string;
-}): Promise<PreviewSession> {
+}): Promise<{ previewUrl: URL; token: string; taskId: string }> {
   const previewUrl = parsePreviewUrl(params.previewUrl);
   const runId = validateRunId(params.runId);
 
@@ -100,7 +124,13 @@ export async function createPreviewSession(params: {
     where: eq(taskRuns.id, runId),
   });
 
-  if (!taskRun) {
+  if (
+    !taskRun ||
+    !(await canAccessTask(
+      { userId: authResult.userId, isAdmin: authResult.isAdmin },
+      taskRun.taskId,
+    ))
+  ) {
     throw new PreviewSessionError(404, 'Task run not found or access denied');
   }
 
@@ -108,6 +138,15 @@ export async function createPreviewSession(params: {
     userId: authResult.userId,
     timeoutSeconds: Env.PREVIEW_TOKEN_TTL_SECONDS,
   });
+
+  return { previewUrl, token, taskId: taskRun.taskId };
+}
+
+export async function createPreviewSession(params: {
+  runId: string;
+  previewUrl: string;
+}): Promise<PreviewSession> {
+  const { previewUrl, token } = await authorizePreviewSession(params);
 
   return {
     enableHiDpi: previewUrl.searchParams.get('enable_hidpi') === 'true',
@@ -119,5 +158,27 @@ export async function createPreviewSession(params: {
     resizeMode: 'remote',
     viewOnly: previewUrl.searchParams.get('view_only') === 'true',
     wsUrl: buildPreviewWebSocketUrl(previewUrl, token),
+  };
+}
+
+export async function createDesktopStreamSession(params: {
+  runId: string;
+  previewUrl: string;
+}): Promise<DesktopStreamSession> {
+  const { previewUrl, token, taskId } = await authorizePreviewSession(params);
+
+  if (!isTaskSharedDesktopHost(previewUrl, taskId)) {
+    throw new PreviewSessionError(
+      400,
+      "Preview URL is not this task run's Shared Desktop",
+    );
+  }
+
+  return {
+    configUrl: buildPreviewResourceUrl(previewUrl, '/config', token),
+    controlUrl: buildPreviewResourceUrl(previewUrl, '/control', token, true),
+    metricsUrl: buildPreviewResourceUrl(previewUrl, '/metrics', token),
+    streamUrl: buildPreviewResourceUrl(previewUrl, '/stream.mp4', token),
+    telemetryUrl: buildPreviewResourceUrl(previewUrl, '/telemetry', token),
   };
 }

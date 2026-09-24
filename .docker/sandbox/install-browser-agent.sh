@@ -244,6 +244,15 @@ AGENT_BROWSER_SUBCOMMAND=""
 AGENT_BROWSER_PREFIX_ARGS=()
 AGENT_BROWSER_EXEC_ARGS=()
 AGENT_BROWSER_FORWARD_ARGS=()
+AGENT_BROWSER_SHARED_ARGS=()
+LOCAL_PREVIEW_RESOLVER_ARG=""
+USE_SHARED_BROWSER=false
+SHARED_BROWSER_CDP_PORT="${ROOMOTE_SHARED_BROWSER_CDP_PORT:-19222}"
+SHARED_BROWSER_STATE_DIR="${ROOMOTE_SHARED_BROWSER_STATE_DIR:-${HOME}/.roomote/shared-browser}"
+SHARED_BROWSER_X11_SOCKET_DIR="${ROOMOTE_SHARED_BROWSER_X11_SOCKET_DIR:-/tmp/.X11-unix}"
+SHARED_BROWSER_LAUNCH_WAIT_SECONDS="${ROOMOTE_SHARED_BROWSER_LAUNCH_WAIT_SECONDS:-20}"
+# How long a page action waits for a person driving the Shared Desktop.
+SHARED_BROWSER_HUMAN_WAIT_SECONDS="${ROOMOTE_SHARED_BROWSER_HUMAN_WAIT_SECONDS:-30}"
 
 resolve_cli_paths() {
   if [ -n "$AGENT_BROWSER_BIN" ]; then
@@ -479,7 +488,7 @@ configure_local_preview_host_resolution() {
   # therefore its Host header, cookies, and TLS name) while routing it through
   # Docker's host gateway. There is one deployment-wide preview base domain,
   # so the first matching URL provides the shared suffix for every named port.
-  local preview_url preview_host preview_suffix resolver_arg
+  local preview_url preview_host preview_suffix
   preview_url="$(collect_preview_urls | grep -E '^https?://[^/]+\.localhost([:/]|$)' | head -n 1 || true)"
   if [ -z "$preview_url" ]; then
     return 0
@@ -493,15 +502,24 @@ configure_local_preview_host_resolution() {
     return 0
   fi
 
+  LOCAL_PREVIEW_RESOLVER_ARG="--host-resolver-rules=MAP *.${preview_suffix} host.docker.internal"
+}
+
+# Launch arguments only reach a browser this invocation starts, so the shared
+# browser takes the resolver rule on its own launch line instead.
+apply_local_preview_host_resolution_to_private_browser() {
+  if [ -z "$LOCAL_PREVIEW_RESOLVER_ARG" ]; then
+    return 0
+  fi
+
   if [[ "${AGENT_BROWSER_ARGS:-}" == *"--host-resolver-rules="* ]]; then
     return 0
   fi
 
-  resolver_arg="--host-resolver-rules=MAP *.${preview_suffix} host.docker.internal"
   if [ -n "${AGENT_BROWSER_ARGS:-}" ]; then
-    export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS}"$'\n'"${resolver_arg}"
+    export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS}"$'\n'"${LOCAL_PREVIEW_RESOLVER_ARG}"
   else
-    export AGENT_BROWSER_ARGS="${resolver_arg}"
+    export AGENT_BROWSER_ARGS="${LOCAL_PREVIEW_RESOLVER_ARG}"
   fi
 }
 
@@ -513,7 +531,11 @@ clear_seed_cache() {
 }
 
 seed_preview_cookies() {
-  mapfile -t preview_urls < <(collect_preview_urls | awk '!seen[$0]++')
+  local -a preview_urls=()
+  local preview_url_line
+  while IFS= read -r preview_url_line; do
+    preview_urls+=("$preview_url_line")
+  done < <(collect_preview_urls | awk '!seen[$0]++')
 
   if [ "${#preview_urls[@]}" -eq 0 ]; then
     return 0
@@ -545,13 +567,399 @@ seed_preview_cookies() {
     esac
 
     if [ -n "$bypass_value" ]; then
-      AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$header_name" "$bypass_value" --url "$url" "${cookie_security_args[@]}" --sameSite Lax >/dev/null
+      AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" ${AGENT_BROWSER_SHARED_ARGS[@]+"${AGENT_BROWSER_SHARED_ARGS[@]}"} "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$header_name" "$bypass_value" --url "$url" "${cookie_security_args[@]}" --sameSite Lax >/dev/null
     fi
 
-    AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$HIDE_PREVIEW_WIDGET_COOKIE" "1" --url "$url" "${cookie_security_args[@]}" --sameSite Lax >/dev/null
+    AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" ${AGENT_BROWSER_SHARED_ARGS[@]+"${AGENT_BROWSER_SHARED_ARGS[@]}"} "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$HIDE_PREVIEW_WIDGET_COOKIE" "1" --url "$url" "${cookie_security_args[@]}" --sameSite Lax >/dev/null
   done
 
   : > "$cache_file"
+}
+
+# --- Shared browser -------------------------------------------------------
+#
+# When the sandbox runs the Shared Desktop, the agent and the people watching
+# use one Chrome window on that display: this wrapper starts it on first use
+# and attaches agent-browser to it over a loopback CDP port. The window, its
+# tabs, and its logins outlive any single agent-browser session, and `close`
+# only detaches. Without the Shared Desktop, or when an invocation asks for a
+# browser of its own, agent-browser keeps launching a private headless one.
+
+is_browserless_command() {
+  case "$AGENT_BROWSER_COMMAND" in
+    ""|help|skills|install|upgrade|doctor|dashboard|session|connect|chat|mcp|plugin|profiles)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+# Options that choose or configure the browser process itself cannot apply to
+# a browser that is already running.
+requests_private_browser() {
+  if [ "${ROOMOTE_SHARED_BROWSER:-1}" = "0" ]; then
+    return 0
+  fi
+
+  if [ -n "${AGENT_BROWSER_ARGS:-}${AGENT_BROWSER_PROVIDER:-}${AGENT_BROWSER_PROFILE:-}${AGENT_BROWSER_AUTO_CONNECT:-}${AGENT_BROWSER_ENGINE:-}${AGENT_BROWSER_PROXY:-}${AGENT_BROWSER_ALLOWED_DOMAINS:-}${AGENT_BROWSER_EXTENSIONS:-}" ]; then
+    return 0
+  fi
+
+  local arg
+  for arg in ${AGENT_BROWSER_FORWARD_ARGS[@]+"${AGENT_BROWSER_FORWARD_ARGS[@]}"}; do
+    case "$arg" in
+      --args|--args=*|--cdp|--cdp=*|--auto-connect|--auto-connect=*|--provider|--provider=*|-p|--engine|--engine=*|--profile|--profile=*|--extension|--extension=*|--executable-path|--executable-path=*|--proxy|--proxy=*|--proxy-bypass|--proxy-bypass=*|--allowed-domains|--allowed-domains=*)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+shared_desktop_is_running() {
+  if [ -z "${ROOMOTE_DESKTOP_STREAM_PORT:-}" ] || [ -z "${DISPLAY:-}" ]; then
+    return 1
+  fi
+
+  local display_number="${DISPLAY#*:}"
+  display_number="${display_number%%.*}"
+  [ -S "${SHARED_BROWSER_X11_SOCKET_DIR}/X${display_number}" ]
+}
+
+should_use_shared_browser() {
+  if is_informational_invocation || is_browserless_command || requests_private_browser; then
+    return 1
+  fi
+
+  shared_desktop_is_running
+}
+
+port_is_open() {
+  (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+read_desktop_service() {
+  command -v curl >/dev/null 2>&1 || return 0
+  curl -fsS --max-time 2 "http://127.0.0.1:${ROOMOTE_DESKTOP_STREAM_PORT}$1" 2>/dev/null || true
+}
+
+read_json_number() {
+  printf '%s' "$1" | sed -n "s/.*\"$2\":\([0-9][0-9]*\).*/\1/p"
+}
+
+# The desktop has no window manager, so a second browser window would cover
+# the first with no way to switch back. This extension keeps the shared
+# browser to one window: a page's pop-up opens as a tab (still linked to its
+# opener, so sign-in flows that report back keep working), and any other new
+# window is folded into the first one as tabs.
+write_shared_browser_extension() {
+  local extension_dir="$1"
+  mkdir -p "$extension_dir"
+
+  cat > "${extension_dir}/manifest.json" <<'EOF_EXTENSION_MANIFEST'
+{
+  "manifest_version": 3,
+  "name": "Single window",
+  "version": "1.0",
+  "description": "Keeps the shared browser in one window: pop-ups and new windows open as tabs.",
+  "permissions": ["tabs"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["open-in-tab.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
+      "world": "MAIN"
+    }
+  ]
+}
+EOF_EXTENSION_MANIFEST
+
+  cat > "${extension_dir}/open-in-tab.js" <<'EOF_EXTENSION_OPEN'
+// Chrome opens a separate pop-up window when window.open() is given window
+// features (popup, width, height, ...). Dropping them opens a tab instead.
+// The features that change the security relationship are kept.
+(() => {
+  const nativeOpen = window.open;
+  const kept = new Set(['noopener', 'noreferrer']);
+  window.open = function open(url, target, features) {
+    const remaining = String(features ?? '')
+      .split(',')
+      .map((feature) => feature.trim())
+      .filter((feature) => kept.has(feature.split('=')[0].trim().toLowerCase()));
+    if (remaining.length > 0) {
+      return nativeOpen.call(window, url, target, remaining.join(','));
+    }
+    if (arguments.length === 0) {
+      return nativeOpen.call(window);
+    }
+    return arguments.length === 1
+      ? nativeOpen.call(window, url)
+      : nativeOpen.call(window, url, target);
+  };
+})();
+EOF_EXTENSION_OPEN
+
+  cat > "${extension_dir}/background.js" <<'EOF_EXTENSION_BACKGROUND'
+// Fold any additional normal window (Ctrl+N, "open link in new window", a
+// window opened over CDP) into the first one as tabs.
+async function foldIntoMainWindow(createdId, attempt = 0) {
+  const windows = await chrome.windows.getAll({ windowTypes: ['normal'] });
+  const main = windows
+    .filter((candidate) => candidate.id !== createdId)
+    .sort((a, b) => a.id - b.id)[0];
+  if (!main) {
+    return;
+  }
+  const tabs = await chrome.tabs.query({ windowId: createdId });
+  if (tabs.length === 0) {
+    // The window exists before its first tab is attached.
+    if (attempt < 10) {
+      setTimeout(() => foldIntoMainWindow(createdId, attempt + 1), 100);
+    }
+    return;
+  }
+  const tabIds = tabs.map((tab) => tab.id);
+  await chrome.tabs.move(tabIds, { windowId: main.id, index: -1 });
+  await chrome.tabs.update(tabIds[tabIds.length - 1], { active: true });
+}
+
+chrome.windows.onCreated.addListener((created) => {
+  if (created.type === 'normal') {
+    foldIntoMainWindow(created.id).catch(() => {});
+  }
+});
+EOF_EXTENSION_BACKGROUND
+}
+
+launch_shared_browser() {
+  local profile_dir="${SHARED_BROWSER_STATE_DIR}/profile"
+  mkdir -p "$profile_dir"
+
+  # A restored snapshot or a killed browser leaves profile locks that name a
+  # process which no longer exists. Nothing owns the profile here: the launch
+  # lock is held and the CDP port is closed.
+  rm -f "$profile_dir"/Singleton* 2>/dev/null || true
+
+  local extension_dir="${SHARED_BROWSER_STATE_DIR}/extension"
+  write_shared_browser_extension "$extension_dir"
+
+  # The DevTools endpoint listens on loopback only, is a reserved environment
+  # port (it can never be published through the preview proxy), and keeps
+  # Chrome's default origin check because --remote-allow-origins is not passed,
+  # so a web page cannot connect to it. Processes inside the sandbox can: they
+  # run as the same user as the agent that drives this browser and can read
+  # its profile directory anyway. The sandbox is the trust boundary for
+  # anything a person signs in to here.
+  local -a chrome_args=(
+    "--remote-debugging-port=${SHARED_BROWSER_CDP_PORT}"
+    "--user-data-dir=${profile_dir}"
+    --no-first-run
+    --no-default-browser-check
+    --disable-dev-shm-usage
+    --hide-crash-restore-bubble
+    # The sandbox is the isolation boundary and offers no user namespaces for
+    # Chrome's own sandbox. --test-type hides the warning bar that flag adds,
+    # and its "gpu" value also hides the "Chrome for Testing is only for
+    # automated testing" bar that the bundled build shows on every tab.
+    --no-sandbox
+    --test-type=gpu
+    --window-position=0,0
+    "--load-extension=${extension_dir}"
+    # Chrome-branded builds ignore --load-extension unless this is set; the
+    # bundled Chrome for Testing and Chromium builds accept it either way.
+    --disable-features=DisableLoadExtensionCommandLineSwitch
+  )
+
+  # The display has no window manager, so the window is sized to the screen
+  # here; the desktop service refits it whenever the screen is resized.
+  local desktop_config width height
+  desktop_config="$(read_desktop_service /config)"
+  width="$(read_json_number "$desktop_config" width)"
+  height="$(read_json_number "$desktop_config" height)"
+  if [ -n "$width" ] && [ -n "$height" ]; then
+    chrome_args+=("--window-size=${width},${height}")
+  else
+    chrome_args+=(--start-maximized)
+  fi
+
+  if [ -n "$LOCAL_PREVIEW_RESOLVER_ARG" ]; then
+    chrome_args+=("$LOCAL_PREVIEW_RESOLVER_ARG")
+  fi
+
+  local -a launcher=(nohup)
+  if command -v setsid >/dev/null 2>&1; then
+    launcher=(setsid nohup)
+  fi
+
+  # The browser must not inherit the launch lock (fd 9) or this invocation's
+  # pipes, or it would hold them for as long as it runs.
+  "${launcher[@]}" "$AGENT_BROWSER_EXECUTABLE_PATH" "${chrome_args[@]}" about:blank \
+    </dev/null >>"${SHARED_BROWSER_STATE_DIR}/chrome.log" 2>&1 9>&- &
+
+  local waited=0
+  local limit=$(( SHARED_BROWSER_LAUNCH_WAIT_SECONDS * 4 ))
+  while [ "$waited" -lt "$limit" ]; do
+    if port_is_open "$SHARED_BROWSER_CDP_PORT"; then
+      return 0
+    fi
+    sleep 0.25
+    waited=$((waited + 1))
+  done
+
+  return 1
+}
+
+ensure_shared_browser() {
+  if port_is_open "$SHARED_BROWSER_CDP_PORT"; then
+    return 0
+  fi
+
+  mkdir -p "$SHARED_BROWSER_STATE_DIR"
+
+  # Concurrent first invocations (parallel subagents) must start one browser.
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"${SHARED_BROWSER_STATE_DIR}/launch.lock"
+    flock -w 60 9 || true
+  fi
+
+  local status=0
+  if ! port_is_open "$SHARED_BROWSER_CDP_PORT"; then
+    launch_shared_browser || status=1
+  fi
+
+  exec 9>&-
+  return "$status"
+}
+
+# agent-browser remembers each session's tab by CDP target id, and the pin
+# makes that binding strict, so every command fails with `tab_gone` once the
+# tab is closed. That happens whenever the shared browser restarts (every
+# sandbox wake-up starts a new one) and when a person closes the agent's tab.
+# A command that loads a page of its own does not depend on the lost one, so
+# it gets a fresh tab first. This runs before cookie seeding, which would hit
+# the same error. Other commands, including a recording of the current page,
+# keep failing with agent-browser's own recovery hint, because the page they
+# expected is gone either way.
+loads_its_own_page() {
+  case "$AGENT_BROWSER_COMMAND" in
+    open|goto|navigate)
+      return 0
+      ;;
+    record)
+      case "$AGENT_BROWSER_SUBCOMMAND" in
+        start|restart)
+          local arg
+          for arg in "${AGENT_BROWSER_EXEC_ARGS[@]}"; do
+            case "$arg" in
+              http://*|https://*)
+                return 0
+                ;;
+            esac
+          done
+          ;;
+      esac
+      ;;
+  esac
+
+  return 1
+}
+
+ensure_session_tab() {
+  resolve_cli_paths
+
+  local probe
+  probe="$(AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_SHARED_ARGS[@]}" ${AGENT_BROWSER_PREFIX_ARGS[@]+"${AGENT_BROWSER_PREFIX_ARGS[@]}"} get url 2>&1 || true)"
+
+  case "$probe" in
+    *tab_gone*)
+      AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_SHARED_ARGS[@]}" ${AGENT_BROWSER_PREFIX_ARGS[@]+"${AGENT_BROWSER_PREFIX_ARGS[@]}"} tab new >/dev/null 2>&1 || true
+      ;;
+  esac
+}
+
+has_command_word() {
+  local arg
+  for arg in ${AGENT_BROWSER_EXEC_ARGS[@]+"${AGENT_BROWSER_EXEC_ARGS[@]}"}; do
+    if [ "$arg" = "$1" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+# Commands that only observe the page stay available while a person drives.
+# Anything that acts on the page or changes the state the person's session
+# depends on (cookies, storage, request routing, a loaded state file) waits.
+is_input_command() {
+  case "$AGENT_BROWSER_COMMAND" in
+    snapshot|screenshot|get|is|console|errors|wait|diff|read|vitals|pdf|inspect|highlight|stream|record|trace|profiler|close|quit|exit)
+      return 1
+      ;;
+    tab)
+      case "$AGENT_BROWSER_SUBCOMMAND" in
+        ""|list)
+          return 1
+          ;;
+      esac
+      ;;
+    cookies)
+      case "$AGENT_BROWSER_SUBCOMMAND" in
+        ""|get)
+          return 1
+          ;;
+      esac
+      ;;
+    storage)
+      if ! has_command_word set && ! has_command_word clear; then
+        return 1
+      fi
+      ;;
+    network)
+      if [ "$AGENT_BROWSER_SUBCOMMAND" = "requests" ] && ! has_command_word --clear; then
+        return 1
+      fi
+      ;;
+    state)
+      case "$AGENT_BROWSER_SUBCOMMAND" in
+        save|list|show)
+          return 1
+          ;;
+      esac
+      ;;
+  esac
+
+  return 0
+}
+
+# CDP input bypasses the Shared Desktop's control channel, so the agent could
+# type into a page a person is using. The desktop service decides whether a
+# person is driving (they clicked, scrolled, or typed recently and have not
+# handed back; watching alone does not count) and shows them the same answer.
+human_is_driving() {
+  case "$(read_desktop_service /metrics)" in
+    *'"human_driving":true'*) return 0 ;;
+  esac
+
+  return 1
+}
+
+yield_to_human() {
+  local waited=0
+  while human_is_driving; do
+    if [ "$waited" -ge "$SHARED_BROWSER_HUMAN_WAIT_SECONDS" ]; then
+      echo "agent-browser: a person is using the shared browser through the Shared Desktop, so this command was not run. Read-only commands (snapshot, screenshot, get) still work. Retry once they pause, or tell them you are waiting." >&2
+      exit 75
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
 }
 
 export AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH:-/opt/agent-browser/chrome}"
@@ -559,6 +967,29 @@ export AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH:-/opt/agen
 collect_cli_browser_args "$@"
 parse_cli_context "${AGENT_BROWSER_EXEC_ARGS[@]}"
 configure_local_preview_host_resolution
+
+if should_use_shared_browser; then
+  if ensure_shared_browser; then
+    USE_SHARED_BROWSER=true
+    AGENT_BROWSER_SHARED_ARGS=(--cdp "$SHARED_BROWSER_CDP_PORT")
+    # Each session keeps to its own tab instead of adopting whichever tab a
+    # person or another session has in front.
+    export AGENT_BROWSER_PIN_TAB="${AGENT_BROWSER_PIN_TAB:-1}"
+  else
+    echo "agent-browser wrapper: the shared browser did not start (see ${SHARED_BROWSER_STATE_DIR}/chrome.log); using a private headless browser" >&2
+  fi
+fi
+
+if [ "$USE_SHARED_BROWSER" = true ]; then
+  if is_input_command; then
+    yield_to_human
+  fi
+  if loads_its_own_page; then
+    ensure_session_tab
+  fi
+else
+  apply_local_preview_host_resolution_to_private_browser
+fi
 
 if ! is_informational_invocation && should_seed_preview_cookies; then
   seed_preview_cookies
@@ -570,7 +1001,8 @@ fi
 
 resolve_cli_paths
 export AGENT_BROWSER_HEADED=false
-exec "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_FORWARD_ARGS[@]}"
+
+exec "$AGENT_BROWSER_BIN" ${AGENT_BROWSER_SHARED_ARGS[@]+"${AGENT_BROWSER_SHARED_ARGS[@]}"} "${AGENT_BROWSER_FORWARD_ARGS[@]}"
 EOF_WRAPPER
 }
 

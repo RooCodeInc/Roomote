@@ -1111,8 +1111,13 @@ describe('ModalClient', () => {
     expect(installBrowserAgentScript).not.toContain(
       'AGENT_BROWSER_WANT_HEADED',
     );
+    // The visible browser is the shared Chrome the wrapper attaches to over
+    // CDP on the Shared Desktop, never a headed agent-browser launch.
     expect(installBrowserAgentScript).toContain(
-      'exec "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_FORWARD_ARGS[@]}"',
+      'AGENT_BROWSER_SHARED_ARGS=(--cdp "$SHARED_BROWSER_CDP_PORT")',
+    );
+    expect(installBrowserAgentScript).toContain(
+      'exec "$AGENT_BROWSER_BIN" ${AGENT_BROWSER_SHARED_ARGS[@]+"${AGENT_BROWSER_SHARED_ARGS[@]}"} "${AGENT_BROWSER_FORWARD_ARGS[@]}"',
     );
     expect(dockerfile).not.toContain(
       '--window-size=${DEFAULT_BROWSER_WIDTH},${DEFAULT_BROWSER_HEIGHT}',
@@ -1227,6 +1232,23 @@ describe('ModalClient', () => {
     expect(dockerfile).not.toContain('xfce4-session \\');
     expect(dockerfile).not.toContain('thunar \\');
     expect(dockerfile).not.toContain('sudo dpkg -i "/tmp/${KASM_DEB}"');
+  });
+
+  it('builds the optional Rust desktop streaming service with capture dependencies', () => {
+    const dockerfile = fs.readFileSync(
+      new URL('../../../../apps/worker/Dockerfile', import.meta.url),
+      'utf8',
+    );
+
+    expect(dockerfile).toContain('apps/desktop-stream');
+    expect(dockerfile).toContain('/usr/local/bin/roomote-desktop-stream');
+    expect(dockerfile).toContain('    ffmpeg \\');
+    // Xvnc supports RandR screen resizes, which Xvfb does not.
+    expect(dockerfile).toContain('    tigervnc-standalone-server \\');
+    // Shared Desktop copy and paste goes through the X clipboard.
+    expect(dockerfile).toContain('    xclip \\');
+    // Audio is not streamed: a silent track would stall the browser clock.
+    expect(dockerfile).not.toContain('pulseaudio');
   });
 
   it('bakes shared runtime tooling and the OpenCode entrypoint into the worker image', () => {

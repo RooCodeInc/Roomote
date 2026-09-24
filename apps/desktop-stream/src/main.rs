@@ -1,0 +1,2742 @@
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+    process::Stdio,
+    str::FromStr,
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
+};
+
+use async_stream::stream as async_stream;
+use axum::{
+    Json, Router,
+    body::Body,
+    extract::{
+        State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
+    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
+    response::{Html, IntoResponse, Response},
+    routing::{get, post},
+};
+use bytes::{Bytes, BytesMut};
+use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    net::TcpListener,
+    process::Command,
+    sync::{mpsc, watch},
+};
+use tokio_util::io::ReaderStream;
+use x11rb::{
+    connection::Connection,
+    protocol::{
+        randr::{self, ConnectionExt as RandrConnectionExt},
+        xproto::{
+            AtomEnum, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConfigureWindowAux,
+            ConnectionExt as XprotoConnectionExt, KEY_PRESS_EVENT, KEY_RELEASE_EVENT,
+            MOTION_NOTIFY_EVENT, MapState, Window,
+        },
+        xtest::ConnectionExt as XtestConnectionExt,
+    },
+    rust_connection::RustConnection,
+};
+
+const PLAYER_HTML: &str = include_str!("player.html");
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum CaptureMode {
+    X11,
+    Test,
+}
+
+impl FromStr for CaptureMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "x11" => Ok(Self::X11),
+            "test" => Ok(Self::Test),
+            _ => Err(format!("unsupported capture mode: {value}")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum AudioMode {
+    Disabled,
+    Pulse,
+    Test,
+}
+
+impl FromStr for AudioMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "disabled" => Ok(Self::Disabled),
+            "pulse" => Ok(Self::Pulse),
+            "test" => Ok(Self::Test),
+            _ => Err(format!("unsupported audio mode: {value}")),
+        }
+    }
+}
+
+/// Current X screen dimensions. The initial size comes from configuration;
+/// viewers may resize the screen through the control channel so the desktop
+/// matches their viewport instead of being letterboxed.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+struct ScreenSize {
+    width: u16,
+    height: u16,
+}
+
+const MIN_SCREEN_DIMENSION: u16 = 320;
+const MAX_SCREEN_DIMENSION: u16 = 4_096;
+/// Upper bound on total screen pixels a viewer may request. It matches the
+/// web client's budget (1080p worth of pixels with a little slack) so a raw
+/// control client cannot demand a 16 MP capture at 60 FPS.
+const MAX_SCREEN_PIXELS: u32 = 1_920 * 1_200;
+
+impl ScreenSize {
+    /// Validates a viewer-requested size: both dimensions must land within the
+    /// supported range and are rounded down to even numbers because the
+    /// encoder's 4:2:0 output needs even dimensions.
+    fn from_request(width: u16, height: u16) -> Result<Self, String> {
+        let width = width & !1;
+        let height = height & !1;
+        if !(MIN_SCREEN_DIMENSION..=MAX_SCREEN_DIMENSION).contains(&width)
+            || !(MIN_SCREEN_DIMENSION..=MAX_SCREEN_DIMENSION).contains(&height)
+        {
+            return Err(format!(
+                "screen size must be {MIN_SCREEN_DIMENSION}-{MAX_SCREEN_DIMENSION} pixels in each dimension"
+            ));
+        }
+        if u32::from(width) * u32::from(height) > MAX_SCREEN_PIXELS {
+            return Err(format!(
+                "screen size must not exceed {MAX_SCREEN_PIXELS} pixels in total"
+            ));
+        }
+        Ok(Self { width, height })
+    }
+
+    /// Physical size reported to X11 for a nominal 96 DPI screen.
+    fn millimeters(self) -> (u32, u32) {
+        let to_mm = |pixels: u16| (f64::from(pixels) * 25.4 / 96.0).round() as u32;
+        (to_mm(self.width), to_mm(self.height))
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Config {
+    address: SocketAddr,
+    ffmpeg: PathBuf,
+    capture_mode: CaptureMode,
+    audio_mode: AudioMode,
+    display: String,
+    pulse_source: String,
+    allowed_control_origin: Option<String>,
+    width: u16,
+    height: u16,
+    fps: u16,
+    video_bitrate_kbps: u32,
+    audio_bitrate_kbps: u16,
+    max_clients: usize,
+    /// How long after a viewer's last click, scroll, or key press they still
+    /// count as driving the desktop.
+    human_idle: Duration,
+}
+
+impl Config {
+    fn from_env() -> Result<Self, String> {
+        let host = env::var("ROOMOTE_DESKTOP_STREAM_HOST").unwrap_or_else(|_| "0.0.0.0".into());
+        let port = parse_env("ROOMOTE_DESKTOP_STREAM_PORT", 6080_u16)?;
+        let address = SocketAddr::new(
+            host.parse::<IpAddr>()
+                .map_err(|error| format!("invalid ROOMOTE_DESKTOP_STREAM_HOST: {error}"))?,
+            port,
+        );
+        let width = parse_env("ROOMOTE_DESKTOP_STREAM_WIDTH", 1920_u16)?;
+        let height = parse_env("ROOMOTE_DESKTOP_STREAM_HEIGHT", 1080_u16)?;
+        let fps = parse_env("ROOMOTE_DESKTOP_STREAM_FPS", 60_u16)?;
+        let video_bitrate_kbps = parse_env("ROOMOTE_DESKTOP_STREAM_VIDEO_BITRATE_KBPS", 6_000_u32)?;
+        let audio_bitrate_kbps = parse_env("ROOMOTE_DESKTOP_STREAM_AUDIO_BITRATE_KBPS", 128_u16)?;
+        // 0 means unlimited: viewers share one encoder, so each extra viewer
+        // costs bandwidth, not CPU.
+        let max_clients = parse_env("ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS", 0_usize)?;
+        let human_idle = Duration::from_millis(parse_env(
+            "ROOMOTE_DESKTOP_STREAM_HUMAN_IDLE_MS",
+            10_000_u64,
+        )?);
+
+        if width == 0
+            || height == 0
+            || width > 8_192
+            || height > 8_192
+            || fps == 0
+            || fps > 120
+            || video_bitrate_kbps == 0
+        {
+            return Err(
+                "width/height must be 1-8192, fps must be 1-120, and video bitrate must be positive".into(),
+            );
+        }
+
+        Ok(Self {
+            address,
+            ffmpeg: env::var_os("ROOMOTE_DESKTOP_STREAM_FFMPEG")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/usr/bin/ffmpeg")),
+            capture_mode: env::var("ROOMOTE_DESKTOP_STREAM_CAPTURE_MODE")
+                .unwrap_or_else(|_| "x11".into())
+                .parse()?,
+            audio_mode: env::var("ROOMOTE_DESKTOP_STREAM_AUDIO_MODE")
+                .unwrap_or_else(|_| "disabled".into())
+                .parse()?,
+            display: env::var("ROOMOTE_DESKTOP_STREAM_DISPLAY")
+                .or_else(|_| env::var("DISPLAY"))
+                .unwrap_or_else(|_| ":99.0".into()),
+            pulse_source: env::var("ROOMOTE_DESKTOP_STREAM_PULSE_SOURCE")
+                .unwrap_or_else(|_| "@DEFAULT_MONITOR@".into()),
+            allowed_control_origin: env::var("ROOMOTE_DESKTOP_STREAM_ALLOWED_CONTROL_ORIGIN")
+                .ok()
+                .map(|value| value.trim_end_matches('/').to_ascii_lowercase()),
+            width,
+            height,
+            fps,
+            video_bitrate_kbps,
+            audio_bitrate_kbps,
+            max_clients,
+            human_idle,
+        })
+    }
+
+    fn initial_screen(&self) -> ScreenSize {
+        ScreenSize {
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    fn ffmpeg_args(&self, screen: ScreenSize) -> Vec<String> {
+        let mut args = vec![
+            "-hide_banner".into(),
+            "-loglevel".into(),
+            "error".into(),
+            "-nostdin".into(),
+        ];
+
+        match self.capture_mode {
+            CaptureMode::X11 => args.extend([
+                "-thread_queue_size".into(),
+                "8".into(),
+                "-f".into(),
+                "x11grab".into(),
+                // The viewer's own cursor is shown locally, so do not paint the
+                // sandbox cursor into the video where it would trail behind.
+                "-draw_mouse".into(),
+                "0".into(),
+                "-framerate".into(),
+                self.fps.to_string(),
+                "-video_size".into(),
+                format!("{}x{}", screen.width, screen.height),
+                "-i".into(),
+                self.display.clone(),
+            ]),
+            CaptureMode::Test => args.extend([
+                "-re".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                format!(
+                    "testsrc2=size={}x{}:rate={}",
+                    screen.width, screen.height, self.fps
+                ),
+            ]),
+        }
+
+        match self.audio_mode {
+            AudioMode::Disabled => {}
+            AudioMode::Pulse => args.extend([
+                "-thread_queue_size".into(),
+                "512".into(),
+                "-f".into(),
+                "pulse".into(),
+                "-i".into(),
+                self.pulse_source.clone(),
+            ]),
+            AudioMode::Test => args.extend([
+                "-re".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "sine=frequency=880:sample_rate=48000".into(),
+            ]),
+        }
+
+        args.extend([
+            "-map".into(),
+            "0:v:0".into(),
+            "-c:v".into(),
+            "libx264".into(),
+            "-preset".into(),
+            "ultrafast".into(),
+            "-threads".into(),
+            "1".into(),
+            "-tune".into(),
+            "zerolatency".into(),
+            "-profile:v".into(),
+            "baseline".into(),
+            "-pix_fmt".into(),
+            "yuv420p".into(),
+            "-x264-params".into(),
+            format!("keyint={}:min-keyint={}:scenecut=0", self.fps, self.fps),
+            "-b:v".into(),
+            format!("{}k", self.video_bitrate_kbps),
+            "-maxrate".into(),
+            format!("{}k", self.video_bitrate_kbps),
+            "-bufsize".into(),
+            format!("{}k", self.video_bitrate_kbps / 2),
+        ]);
+
+        if self.audio_mode != AudioMode::Disabled {
+            args.extend([
+                "-map".into(),
+                "1:a:0".into(),
+                "-c:a".into(),
+                "aac".into(),
+                "-b:a".into(),
+                format!("{}k", self.audio_bitrate_kbps),
+                "-ar".into(),
+                "48000".into(),
+                "-ac".into(),
+                "2".into(),
+                "-af".into(),
+                "aresample=async=1:first_pts=0".into(),
+            ]);
+        }
+
+        args.extend([
+            "-f".into(),
+            "mp4".into(),
+            "-movflags".into(),
+            "empty_moov+default_base_moof+frag_keyframe".into(),
+            "-frag_duration".into(),
+            "100000".into(),
+            "-flush_packets".into(),
+            "1".into(),
+            "-progress".into(),
+            "pipe:2".into(),
+            "pipe:1".into(),
+        ]);
+        args
+    }
+}
+
+fn parse_env<T>(name: &str, default: T) -> Result<T, String>
+where
+    T: FromStr,
+    T::Err: std::fmt::Display,
+{
+    match env::var(name) {
+        Ok(value) => value
+            .parse()
+            .map_err(|error| format!("invalid {name}: {error}")),
+        Err(_) => Ok(default),
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct EncoderProgress {
+    frame: u64,
+    fps: f64,
+    bitrate_kbps: f64,
+    output_time_ms: u64,
+    speed: f64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct BrowserTelemetry {
+    rendered_fps: Option<f64>,
+    startup_ms: Option<f64>,
+    decoded_bytes: Option<u64>,
+    dropped_frames: Option<u64>,
+}
+
+#[derive(Default)]
+struct Metrics {
+    total_clients: AtomicU64,
+    bytes_served: AtomicU64,
+    progress: Mutex<EncoderProgress>,
+    browser: Mutex<BrowserTelemetry>,
+    input_latency: Mutex<InputLatency>,
+    /// Last pointer position applied through XTest, in screen pixels.
+    last_motion: Mutex<Option<(i16, i16)>>,
+    /// When a viewer last clicked, scrolled, or typed. Pointer moves are
+    /// excluded: they happen while merely watching.
+    last_deliberate_input: Mutex<Option<Instant>>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct InputLatency {
+    samples: u64,
+    last_ms: f64,
+    average_ms: f64,
+    max_ms: f64,
+}
+
+impl InputLatency {
+    fn record(&mut self, latency_ms: f64) {
+        self.average_ms =
+            ((self.average_ms * self.samples as f64) + latency_ms) / (self.samples + 1) as f64;
+        self.samples += 1;
+        self.last_ms = latency_ms;
+        self.max_ms = self.max_ms.max(latency_ms);
+    }
+}
+
+/// Encoder-to-viewer fan-out. One FFmpeg process encodes the screen; every
+/// viewer receives the same fragmented-MP4 bytes: the init segment first,
+/// then fragments starting at the next keyframe. Extra viewers therefore
+/// cost bandwidth rather than another encoder.
+struct Broadcaster {
+    inner: Mutex<BroadcastState>,
+    next_viewer_id: AtomicU64,
+}
+
+#[derive(Default)]
+struct BroadcastState {
+    encoder: Option<RunningEncoder>,
+    /// `ftyp` + `moov`, required before any fragment can be decoded.
+    init_segment: Option<Bytes>,
+    viewers: Vec<Viewer>,
+    /// When the last viewer left; the encoder stops after a grace period.
+    idle_since: Option<Instant>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RunningEncoder {
+    generation: u64,
+    pid: Option<u32>,
+}
+
+struct Viewer {
+    id: u64,
+    sender: mpsc::Sender<Bytes>,
+    /// Set once the init segment was handed over.
+    has_init: bool,
+    /// Set once a keyframe fragment was handed over; fragments before that
+    /// would not decode.
+    streaming: bool,
+}
+
+/// Chunks a viewer may fall behind by before it is dropped. A viewer that
+/// stops reading (a hidden tab, a dead connection) must never stall the
+/// shared encoder, so a full queue ends that viewer's stream instead.
+const VIEWER_QUEUE_CAPACITY: usize = 512;
+/// How long the encoder keeps running with no viewers, so a reload during a
+/// resize or a brief disconnect does not pay the startup cost again.
+const ENCODER_IDLE_GRACE: Duration = Duration::from_secs(3);
+
+impl Broadcaster {
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(BroadcastState::default()),
+            next_viewer_id: AtomicU64::new(1),
+        }
+    }
+
+    fn viewer_count(&self) -> usize {
+        let mut inner = self.inner.lock().unwrap();
+        inner.viewers.retain(|viewer| !viewer.sender.is_closed());
+        inner.viewers.len()
+    }
+
+    /// Adds a viewer. Returns its receiver and whether an encoder must be
+    /// started for it, or `None` when a configured viewer limit is reached.
+    /// The limit is checked under the lock so concurrent connects cannot
+    /// exceed it, and viewers whose connection has already gone away are
+    /// pruned first so they never count against it.
+    fn subscribe(&self, limit: usize) -> Option<(mpsc::Receiver<Bytes>, bool)> {
+        let (sender, receiver) = mpsc::channel(VIEWER_QUEUE_CAPACITY);
+        let mut inner = self.inner.lock().unwrap();
+        if limit > 0 {
+            inner.viewers.retain(|viewer| !viewer.sender.is_closed());
+            if inner.viewers.len() >= limit {
+                return None;
+            }
+        }
+        let mut viewer = Viewer {
+            id: self.next_viewer_id.fetch_add(1, Ordering::Relaxed),
+            sender,
+            has_init: false,
+            streaming: false,
+        };
+        if let Some(init) = &inner.init_segment
+            && viewer.sender.try_send(init.clone()).is_ok()
+        {
+            viewer.has_init = true;
+        }
+        inner.viewers.push(viewer);
+        inner.idle_since = None;
+        let needs_encoder = inner.encoder.is_none();
+        if needs_encoder {
+            inner.encoder = Some(RunningEncoder {
+                generation: 0,
+                pid: None,
+            });
+        }
+        Some((receiver, needs_encoder))
+    }
+
+    /// Claims the encoder slot for a starting encoder task.
+    fn begin_encoder(&self, generation: u64) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.encoder = Some(RunningEncoder {
+            generation,
+            pid: None,
+        });
+        inner.init_segment = None;
+    }
+
+    fn set_encoder_pid(&self, generation: u64, pid: u32) {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(encoder) = &mut inner.encoder
+            && encoder.generation == generation
+        {
+            encoder.pid = Some(pid);
+        }
+    }
+
+    fn deliver_init(&self, init: Bytes) {
+        let mut inner = self.inner.lock().unwrap();
+        for viewer in &mut inner.viewers {
+            if !viewer.has_init && viewer.sender.try_send(init.clone()).is_ok() {
+                viewer.has_init = true;
+            }
+        }
+        inner.init_segment = Some(init);
+    }
+
+    /// Fans a fragment out. Viewers still waiting for a keyframe skip
+    /// non-keyframe fragments; viewers that cannot keep up are dropped.
+    /// Returns the number of viewers left.
+    fn deliver_fragment(&self, fragment: Bytes, keyframe: bool, bytes_served: &AtomicU64) -> usize {
+        let mut inner = self.inner.lock().unwrap();
+        // Viewers that left before receiving anything (no init segment yet,
+        // or still waiting for a keyframe) never hit a send error, so prune
+        // by connection state or they would keep the encoder alive forever.
+        inner.viewers.retain(|viewer| !viewer.sender.is_closed());
+        let mut dropped = Vec::new();
+        for viewer in &mut inner.viewers {
+            if !viewer.has_init {
+                continue;
+            }
+            if !viewer.streaming {
+                if !keyframe {
+                    continue;
+                }
+                viewer.streaming = true;
+            }
+            match viewer.sender.try_send(fragment.clone()) {
+                Ok(()) => {
+                    bytes_served.fetch_add(fragment.len() as u64, Ordering::Relaxed);
+                }
+                Err(_) => dropped.push(viewer.id),
+            }
+        }
+        if !dropped.is_empty() {
+            inner.viewers.retain(|viewer| !dropped.contains(&viewer.id));
+        }
+        if inner.viewers.is_empty() && inner.idle_since.is_none() {
+            inner.idle_since = Some(Instant::now());
+        }
+        inner.viewers.len()
+    }
+
+    /// Whether the encoder has been without viewers for longer than the
+    /// grace period.
+    fn idle_expired(&self) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        inner.viewers.retain(|viewer| !viewer.sender.is_closed());
+        if inner.viewers.is_empty() && inner.idle_since.is_none() {
+            inner.idle_since = Some(Instant::now());
+        }
+        inner.viewers.is_empty()
+            && inner
+                .idle_since
+                .is_some_and(|since| since.elapsed() > ENCODER_IDLE_GRACE)
+    }
+
+    /// Marks the encoder gone and ends every viewer's stream. Viewers
+    /// reconnect on their own and start a fresh encoder.
+    fn end_encoder(&self, generation: u64) {
+        let mut inner = self.inner.lock().unwrap();
+        if inner
+            .encoder
+            .is_some_and(|encoder| encoder.generation != generation)
+        {
+            return;
+        }
+        inner.encoder = None;
+        inner.init_segment = None;
+        inner.viewers.clear();
+        inner.idle_since = None;
+    }
+
+    /// Kills the running encoder, for example after a screen resize. The
+    /// encoder task notices the exit and ends the viewers' streams.
+    fn stop_encoder(&self) {
+        let pid = {
+            let inner = self.inner.lock().unwrap();
+            inner.encoder.and_then(|encoder| encoder.pid)
+        };
+        if let Some(pid) = pid {
+            tokio::spawn(async move {
+                let _ = Command::new("kill")
+                    .args(["-KILL", &pid.to_string()])
+                    .status()
+                    .await;
+            });
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AppState {
+    config: Arc<Config>,
+    metrics: Arc<Metrics>,
+    control_connected: Arc<AtomicBool>,
+    started_at: Instant,
+    /// Current screen size, updated by viewer resize requests.
+    screen: Arc<RwLock<ScreenSize>>,
+    broadcaster: Arc<Broadcaster>,
+    next_encoder_generation: Arc<AtomicU64>,
+    /// Bumped when a new control client connects so the previous one is
+    /// released: the newest viewer always wins control.
+    control_generation: Arc<watch::Sender<u64>>,
+}
+
+impl AppState {
+    fn screen(&self) -> ScreenSize {
+        *self.screen.read().unwrap()
+    }
+
+    fn active_clients(&self) -> usize {
+        self.broadcaster.viewer_count()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum ControlEvent {
+    PointerMove {
+        x: f64,
+        y: f64,
+    },
+    PointerButton {
+        button: u8,
+        down: bool,
+    },
+    Wheel {
+        delta_x: f64,
+        delta_y: f64,
+    },
+    Key {
+        code: String,
+        down: bool,
+    },
+    ReleaseAll,
+    /// Resize the X screen to match the viewer's viewport.
+    Resize {
+        width: u16,
+        height: u16,
+    },
+    /// The viewer is done driving: sandbox automation may act again at once
+    /// instead of waiting out the idle window.
+    HandBack,
+    /// Put the viewer's clipboard text on the X clipboard and paste it.
+    Paste {
+        text: String,
+    },
+    /// Send the X clipboard text back, after the viewer copied or cut.
+    ClipboardRead,
+}
+
+/// Largest clipboard text accepted from or returned to a viewer.
+const MAX_CLIPBOARD_BYTES: usize = 128 * 1024;
+
+impl ControlEvent {
+    /// Whether the event shows a person actively driving the desktop, as
+    /// opposed to watching it with the pointer over the video.
+    fn is_deliberate_input(&self) -> bool {
+        matches!(
+            self,
+            Self::PointerButton { .. } | Self::Wheel { .. } | Self::Key { .. } | Self::Paste { .. }
+        )
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ControlEnvelope {
+    sent_at_ms: Option<u64>,
+    #[serde(flatten)]
+    event: ControlEvent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InputAction {
+    Motion { x: i16, y: i16 },
+    Key { keycode: u8, down: bool },
+    Button { button: u8, down: bool },
+}
+
+/// A mapped top-level window as the resize sees it.
+#[derive(Clone, Copy, Debug)]
+struct TopLevelWindow {
+    window: Window,
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+    /// A dialog or helper window rather than an application's main window.
+    secondary: bool,
+}
+
+impl TopLevelWindow {
+    /// Whether the window covered (nearly) the whole screen before a resize.
+    fn filled(&self, screen: ScreenSize) -> bool {
+        self.x <= 0
+            && self.y <= 0
+            && u32::from(self.width) * 10 >= u32::from(screen.width) * 9
+            && u32::from(self.height) * 10 >= u32::from(screen.height) * 9
+    }
+}
+
+/// Which windows follow the screen to its new size. The windows that filled
+/// the old screen do, so a browser keeps filling the viewer's panel while a
+/// pop-up or dialog on top of it keeps its own size instead of covering it.
+/// When nothing filled the old screen, every main window is fitted, which
+/// maximizes an application that started at its own default size.
+fn windows_to_refit(windows: &[TopLevelWindow], previous: ScreenSize) -> Vec<Window> {
+    let main = windows.iter().filter(|window| !window.secondary);
+    let filling = main
+        .clone()
+        .filter(|window| window.filled(previous))
+        .map(|window| window.window)
+        .collect::<Vec<_>>();
+    if filling.is_empty() {
+        main.map(|window| window.window).collect()
+    } else {
+        filling
+    }
+}
+
+#[derive(Default)]
+struct HeldInputs {
+    keys: HashSet<u8>,
+    buttons: HashSet<u8>,
+}
+
+impl HeldInputs {
+    fn drain_release_actions(&mut self) -> Vec<InputAction> {
+        let mut actions = self
+            .keys
+            .drain()
+            .map(|keycode| InputAction::Key {
+                keycode,
+                down: false,
+            })
+            .collect::<Vec<_>>();
+        actions.extend(self.buttons.drain().map(|button| InputAction::Button {
+            button,
+            down: false,
+        }));
+        actions
+    }
+}
+
+struct X11Controller {
+    connection: RustConnection,
+    root: Window,
+    keycodes: HashMap<u32, u8>,
+    held: HeldInputs,
+    width: u16,
+    height: u16,
+    metrics: Option<Arc<Metrics>>,
+}
+
+impl X11Controller {
+    fn connect(display: &str, width: u16, height: u16) -> Result<Self, String> {
+        let (connection, screen_number) = x11rb::connect(Some(display))
+            .map_err(|error| format!("failed to connect to X11 display {display}: {error}"))?;
+        let setup = connection.setup();
+        let root = setup
+            .roots
+            .get(screen_number)
+            .ok_or_else(|| format!("X11 display {display} has no screen {screen_number}"))?
+            .root;
+        let min_keycode = setup.min_keycode;
+        let count = setup.max_keycode - min_keycode + 1;
+        let mapping = connection
+            .get_keyboard_mapping(min_keycode, count)
+            .map_err(|error| format!("failed to request X11 keyboard mapping: {error}"))?
+            .reply()
+            .map_err(|error| format!("failed to read X11 keyboard mapping: {error}"))?;
+        let keysyms_per_keycode = usize::from(mapping.keysyms_per_keycode);
+        let mut keycodes = HashMap::new();
+        for (offset, symbols) in mapping.keysyms.chunks(keysyms_per_keycode).enumerate() {
+            let keycode = min_keycode.saturating_add(offset as u8);
+            for &keysym in symbols {
+                if keysym != 0 {
+                    keycodes.entry(keysym).or_insert(keycode);
+                }
+            }
+        }
+
+        Ok(Self {
+            connection,
+            root,
+            keycodes,
+            held: HeldInputs::default(),
+            width,
+            height,
+            metrics: None,
+        })
+    }
+
+    /// Current pointer position on the root window.
+    fn pointer_position(&self) -> Result<(i16, i16), String> {
+        let reply = self
+            .connection
+            .query_pointer(self.root)
+            .map_err(|error| format!("failed to query X11 pointer: {error}"))?
+            .reply()
+            .map_err(|error| format!("failed to read X11 pointer: {error}"))?;
+        Ok((reply.root_x, reply.root_y))
+    }
+
+    /// Resizes the X screen through RandR. Xvfb only offers its configured
+    /// mode, so this needs an X server with dynamic screen sizes such as
+    /// TigerVNC's Xvnc.
+    /// Current root window size as reported by the X server.
+    fn screen_size(&self) -> Result<ScreenSize, String> {
+        let geometry = self
+            .connection
+            .get_geometry(self.root)
+            .map_err(|error| format!("failed to request X11 root geometry: {error}"))?
+            .reply()
+            .map_err(|error| format!("failed to read X11 root geometry: {error}"))?;
+        Ok(ScreenSize {
+            width: geometry.width,
+            height: geometry.height,
+        })
+    }
+
+    fn set_screen_size(&mut self, size: ScreenSize) -> Result<(), String> {
+        if size.width == self.width && size.height == self.height {
+            return Ok(());
+        }
+        let x11 =
+            |error: x11rb::errors::ConnectionError| format!("X11 RandR request failed: {error}");
+        let reply = |error: x11rb::errors::ReplyError| format!("X11 RandR reply failed: {error}");
+        let resources = self
+            .connection
+            .randr_get_screen_resources_current(self.root)
+            .map_err(x11)?
+            .reply()
+            .map_err(reply)?;
+
+        // Drive the first output that has a CRTC (Xvnc exposes one, VNC-0).
+        let mut target = None;
+        for &output in &resources.outputs {
+            let info = self
+                .connection
+                .randr_get_output_info(output, resources.config_timestamp)
+                .map_err(x11)?
+                .reply()
+                .map_err(reply)?;
+            let crtc = if info.crtc != 0 {
+                Some(info.crtc)
+            } else {
+                info.crtcs.first().copied()
+            };
+            if let Some(crtc) = crtc {
+                target = Some((output, crtc));
+                break;
+            }
+        }
+        let Some((output, crtc)) = target else {
+            return Err("X11 server exposes no RandR output to resize".into());
+        };
+
+        // Reuse a mode of the requested size or register a new one. Xvnc
+        // ignores the timings; they only need to be self-consistent.
+        let existing = resources
+            .modes
+            .iter()
+            .find(|mode| mode.width == size.width && mode.height == size.height)
+            .map(|mode| mode.id);
+        let mode = match existing {
+            Some(mode) => mode,
+            None => {
+                let name = format!("{}x{}_roomote", size.width, size.height);
+                let htotal = size.width + 32;
+                let vtotal = size.height + 20;
+                let mode_info = randr::ModeInfo {
+                    id: 0,
+                    width: size.width,
+                    height: size.height,
+                    dot_clock: u32::from(htotal) * u32::from(vtotal) * 60,
+                    hsync_start: size.width + 8,
+                    hsync_end: size.width + 16,
+                    htotal,
+                    hskew: 0,
+                    vsync_start: size.height + 3,
+                    vsync_end: size.height + 6,
+                    vtotal,
+                    name_len: name.len() as u16,
+                    mode_flags: randr::ModeFlag::HSYNC_POSITIVE | randr::ModeFlag::VSYNC_POSITIVE,
+                };
+                let mode = self
+                    .connection
+                    .randr_create_mode(self.root, mode_info, name.as_bytes())
+                    .map_err(x11)?
+                    .reply()
+                    .map_err(reply)?
+                    .mode;
+                self.connection
+                    .randr_add_output_mode(output, mode)
+                    .map_err(x11)?
+                    .check()
+                    .map_err(|error| format!("X11 server rejected the new screen mode: {error}"))?;
+                mode
+            }
+        };
+
+        // Same order as xrandr: park the CRTC so the framebuffer can shrink,
+        // resize the framebuffer, then bring the CRTC back at the new mode.
+        let (mm_width, mm_height) = size.millimeters();
+        self.connection
+            .randr_set_crtc_config(
+                crtc,
+                x11rb::CURRENT_TIME,
+                resources.config_timestamp,
+                0,
+                0,
+                0,
+                randr::Rotation::ROTATE0,
+                &[],
+            )
+            .map_err(x11)?
+            .reply()
+            .map_err(reply)?;
+        self.connection
+            .randr_set_screen_size(self.root, size.width, size.height, mm_width, mm_height)
+            .map_err(x11)?
+            .check()
+            .map_err(|error| format!("X11 server rejected screen resize: {error}"))?;
+        let status = self
+            .connection
+            .randr_set_crtc_config(
+                crtc,
+                x11rb::CURRENT_TIME,
+                resources.config_timestamp,
+                0,
+                0,
+                mode,
+                randr::Rotation::ROTATE0,
+                &[output],
+            )
+            .map_err(x11)?
+            .reply()
+            .map_err(reply)?;
+        if status.status != randr::SetConfig::SUCCESS {
+            return Err(format!(
+                "X11 server rejected the resized output configuration: {:?}",
+                status.status
+            ));
+        }
+        let previous = ScreenSize {
+            width: self.width,
+            height: self.height,
+        };
+        self.width = size.width;
+        self.height = size.height;
+        self.fit_windows_to_screen(previous, size);
+        Ok(())
+    }
+
+    /// There is no window manager on the sandbox display, so top-level
+    /// windows keep whatever size they were created with. Resize the main
+    /// ones to fill the new screen, the way a maximizing window manager
+    /// would, so the application follows the viewer's panel; dialogs and
+    /// smaller secondary windows keep their size (see `windows_to_refit`).
+    /// Failures are logged and ignored: the screen resize itself already
+    /// succeeded.
+    fn fit_windows_to_screen(&self, previous: ScreenSize, size: ScreenSize) {
+        let tree = match self
+            .connection
+            .query_tree(self.root)
+            .map(|cookie| cookie.reply())
+        {
+            Ok(Ok(tree)) => tree,
+            Ok(Err(error)) => {
+                eprintln!("failed to list X11 windows after resize: {error}");
+                return;
+            }
+            Err(error) => {
+                eprintln!("failed to list X11 windows after resize: {error}");
+                return;
+            }
+        };
+        let window_type = self.intern_atom("_NET_WM_WINDOW_TYPE");
+        let normal_type = self.intern_atom("_NET_WM_WINDOW_TYPE_NORMAL");
+        let mut candidates = Vec::new();
+        for window in tree.children {
+            let attributes = match self
+                .connection
+                .get_window_attributes(window)
+                .map(|cookie| cookie.reply())
+            {
+                Ok(Ok(attributes)) => attributes,
+                _ => continue,
+            };
+            if attributes.override_redirect || attributes.map_state != MapState::VIEWABLE {
+                continue;
+            }
+            let Ok(Ok(geometry)) = self
+                .connection
+                .get_geometry(window)
+                .map(|cookie| cookie.reply())
+            else {
+                continue;
+            };
+            candidates.push(TopLevelWindow {
+                window,
+                x: geometry.x,
+                y: geometry.y,
+                width: geometry.width,
+                height: geometry.height,
+                secondary: self.is_secondary_window(window, window_type, normal_type),
+            });
+        }
+        for window in windows_to_refit(&candidates, previous) {
+            let values = ConfigureWindowAux::new()
+                .x(0)
+                .y(0)
+                .width(u32::from(size.width))
+                .height(u32::from(size.height));
+            match self
+                .connection
+                .configure_window(window, &values)
+                .map(|cookie| cookie.check())
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    eprintln!("failed to fit X11 window {window} to the screen: {error}");
+                }
+                Err(error) => {
+                    eprintln!("failed to fit X11 window {window} to the screen: {error}");
+                }
+            }
+        }
+        let _ = self.connection.flush();
+    }
+
+    fn intern_atom(&self, name: &str) -> Option<u32> {
+        self.connection
+            .intern_atom(false, name.as_bytes())
+            .ok()?
+            .reply()
+            .ok()
+            .map(|reply| reply.atom)
+    }
+
+    /// A dialog or other helper window: it is transient for another window,
+    /// or declares a window type other than a normal application window.
+    fn is_secondary_window(
+        &self,
+        window: Window,
+        window_type: Option<u32>,
+        normal_type: Option<u32>,
+    ) -> bool {
+        let property = |property: u32, kind: AtomEnum| {
+            self.connection
+                .get_property(false, window, property, kind, 0, 16)
+                .ok()
+                .and_then(|cookie| cookie.reply().ok())
+        };
+        let transient = property(AtomEnum::WM_TRANSIENT_FOR.into(), AtomEnum::WINDOW)
+            .is_some_and(|reply| reply.value_len > 0);
+        if transient {
+            return true;
+        }
+        let (Some(window_type), Some(normal_type)) = (window_type, normal_type) else {
+            return false;
+        };
+        property(window_type, AtomEnum::ATOM)
+            .and_then(|reply| reply.value32().map(|types| types.collect::<Vec<_>>()))
+            .is_some_and(|types| !types.is_empty() && !types.contains(&normal_type))
+    }
+
+    fn apply(&mut self, event: ControlEvent) -> Result<(), String> {
+        let actions = validate_control_event(event, self.width, self.height, |keysym| {
+            self.keycodes.get(&keysym).copied()
+        })?;
+        for action in actions {
+            self.apply_action(action)?;
+        }
+        self.connection
+            .flush()
+            .map_err(|error| format!("failed to flush X11 input: {error}"))
+    }
+
+    /// Presses Ctrl+V. Control stays down when the viewer is already holding
+    /// it, so their own key release still ends it.
+    fn press_paste_shortcut(&mut self) -> Result<(), String> {
+        const CONTROL_L: u32 = 0xffe3;
+        let control = self.keycodes.get(&CONTROL_L).copied();
+        let v = self.keycodes.get(&u32::from(b'v')).copied();
+        let (Some(control), Some(v)) = (control, v) else {
+            return Err("the paste shortcut is unavailable on this X11 layout".into());
+        };
+        let control_was_held = self.held.keys.contains(&control);
+        let mut actions = vec![
+            InputAction::Key {
+                keycode: control,
+                down: true,
+            },
+            InputAction::Key {
+                keycode: v,
+                down: true,
+            },
+            InputAction::Key {
+                keycode: v,
+                down: false,
+            },
+        ];
+        if !control_was_held {
+            actions.push(InputAction::Key {
+                keycode: control,
+                down: false,
+            });
+        }
+        for action in actions {
+            self.apply_action(action)?;
+        }
+        self.connection
+            .flush()
+            .map_err(|error| format!("failed to flush X11 input: {error}"))
+    }
+
+    fn release_all(&mut self) {
+        for action in self.held.drain_release_actions() {
+            let _ = self.inject(action);
+        }
+        let _ = self.connection.flush();
+    }
+
+    fn apply_action(&mut self, action: InputAction) -> Result<(), String> {
+        match action {
+            InputAction::Key { keycode, down } => {
+                if down && !self.held.keys.insert(keycode) {
+                    return Ok(());
+                }
+                if !down && !self.held.keys.remove(&keycode) {
+                    return Ok(());
+                }
+            }
+            InputAction::Button { button, down } => {
+                if down && !self.held.buttons.insert(button) {
+                    return Ok(());
+                }
+                if !down && !self.held.buttons.remove(&button) {
+                    return Ok(());
+                }
+            }
+            InputAction::Motion { x, y } => {
+                if let Some(metrics) = &self.metrics {
+                    *metrics.last_motion.lock().unwrap() = Some((x, y));
+                }
+            }
+        }
+        self.inject(action)
+    }
+
+    fn inject(&self, action: InputAction) -> Result<(), String> {
+        let (event_type, detail, x, y) = match action {
+            InputAction::Motion { x, y } => (MOTION_NOTIFY_EVENT, 0, x, y),
+            InputAction::Key { keycode, down } => (
+                if down {
+                    KEY_PRESS_EVENT
+                } else {
+                    KEY_RELEASE_EVENT
+                },
+                keycode,
+                0,
+                0,
+            ),
+            InputAction::Button { button, down } => (
+                if down {
+                    BUTTON_PRESS_EVENT
+                } else {
+                    BUTTON_RELEASE_EVENT
+                },
+                button,
+                0,
+                0,
+            ),
+        };
+        self.connection
+            .xtest_fake_input(event_type, detail, 0, self.root, x, y, 0)
+            .map_err(|error| format!("failed to inject X11 input: {error}"))?;
+        Ok(())
+    }
+}
+
+impl Drop for X11Controller {
+    fn drop(&mut self) {
+        self.release_all();
+    }
+}
+
+fn validate_control_event<F>(
+    event: ControlEvent,
+    width: u16,
+    height: u16,
+    resolve_keycode: F,
+) -> Result<Vec<InputAction>, String>
+where
+    F: Fn(u32) -> Option<u8>,
+{
+    match event {
+        ControlEvent::PointerMove { x, y } => {
+            if !x.is_finite()
+                || !y.is_finite()
+                || !(0.0..=1.0).contains(&x)
+                || !(0.0..=1.0).contains(&y)
+            {
+                return Err("pointer coordinates must be finite values from 0 to 1".into());
+            }
+            Ok(vec![InputAction::Motion {
+                x: (x * f64::from(width.saturating_sub(1))).round() as i16,
+                y: (y * f64::from(height.saturating_sub(1))).round() as i16,
+            }])
+        }
+        ControlEvent::PointerButton { button, down } => {
+            let button = match button {
+                0 => 1,
+                1 => 2,
+                2 => 3,
+                3 => 8,
+                4 => 9,
+                _ => return Err("unsupported pointer button".into()),
+            };
+            Ok(vec![InputAction::Button { button, down }])
+        }
+        ControlEvent::Wheel { delta_x, delta_y } => {
+            if !delta_x.is_finite() || !delta_y.is_finite() {
+                return Err("wheel deltas must be finite".into());
+            }
+            let mut actions = Vec::new();
+            append_wheel_actions(&mut actions, delta_y, 4, 5);
+            append_wheel_actions(&mut actions, delta_x, 6, 7);
+            Ok(actions)
+        }
+        ControlEvent::Resize { .. } => Err("resize must be handled by the control session".into()),
+        ControlEvent::Key { code, down } => {
+            if code.len() > 32 || !code.is_ascii() {
+                return Err("invalid keyboard code".into());
+            }
+            let keysym = keysym_for_code(&code)
+                .ok_or_else(|| format!("unsupported keyboard code: {code}"))?;
+            let keycode = resolve_keycode(keysym).ok_or_else(|| {
+                format!("keyboard code is unavailable on this X11 layout: {code}")
+            })?;
+            Ok(vec![InputAction::Key { keycode, down }])
+        }
+        ControlEvent::ReleaseAll => Ok(Vec::new()),
+        ControlEvent::HandBack | ControlEvent::Paste { .. } | ControlEvent::ClipboardRead => {
+            Err("this event must be handled by the control session".into())
+        }
+    }
+}
+
+fn append_wheel_actions(actions: &mut Vec<InputAction>, delta: f64, negative: u8, positive: u8) {
+    let ticks = (delta.abs() / 100.0).ceil().clamp(0.0, 10.0) as usize;
+    let button = if delta < 0.0 { negative } else { positive };
+    for _ in 0..ticks {
+        actions.push(InputAction::Button { button, down: true });
+        actions.push(InputAction::Button {
+            button,
+            down: false,
+        });
+    }
+}
+
+fn keysym_for_code(code: &str) -> Option<u32> {
+    if let Some(letter) = code.strip_prefix("Key").filter(|value| value.len() == 1) {
+        return Some(u32::from(letter.as_bytes()[0].to_ascii_lowercase()));
+    }
+    if let Some(digit) = code.strip_prefix("Digit").filter(|value| value.len() == 1) {
+        return Some(u32::from(digit.as_bytes()[0]));
+    }
+    if let Some(function) = code
+        .strip_prefix('F')
+        .and_then(|value| value.parse::<u32>().ok())
+        && (1..=12).contains(&function)
+    {
+        return Some(0xffbd + function);
+    }
+
+    Some(match code {
+        "Backquote" => b'`'.into(),
+        "Minus" => b'-'.into(),
+        "Equal" => b'='.into(),
+        "BracketLeft" => b'['.into(),
+        "BracketRight" => b']'.into(),
+        "Backslash" => b'\\'.into(),
+        "Semicolon" => b';'.into(),
+        "Quote" => b'\''.into(),
+        "Comma" => b','.into(),
+        "Period" => b'.'.into(),
+        "Slash" => b'/'.into(),
+        "Space" => 0x20,
+        "Backspace" => 0xff08,
+        "Tab" => 0xff09,
+        "Enter" => 0xff0d,
+        "Escape" => 0xff1b,
+        "Home" => 0xff50,
+        "ArrowLeft" => 0xff51,
+        "ArrowUp" => 0xff52,
+        "ArrowRight" => 0xff53,
+        "ArrowDown" => 0xff54,
+        "PageUp" => 0xff55,
+        "PageDown" => 0xff56,
+        "End" => 0xff57,
+        "Insert" => 0xff63,
+        "Delete" => 0xffff,
+        "ShiftLeft" => 0xffe1,
+        "ShiftRight" => 0xffe2,
+        "ControlLeft" => 0xffe3,
+        "ControlRight" => 0xffe4,
+        "CapsLock" => 0xffe5,
+        "MetaLeft" => 0xffe7,
+        "MetaRight" => 0xffe8,
+        "AltLeft" => 0xffe9,
+        "AltRight" => 0xffea,
+        "Numpad0" => 0xffb0,
+        "Numpad1" => 0xffb1,
+        "Numpad2" => 0xffb2,
+        "Numpad3" => 0xffb3,
+        "Numpad4" => 0xffb4,
+        "Numpad5" => 0xffb5,
+        "Numpad6" => 0xffb6,
+        "Numpad7" => 0xffb7,
+        "Numpad8" => 0xffb8,
+        "Numpad9" => 0xffb9,
+        "NumpadMultiply" => 0xffaa,
+        "NumpadAdd" => 0xffab,
+        "NumpadSubtract" => 0xffad,
+        "NumpadDecimal" => 0xffae,
+        "NumpadDivide" => 0xffaf,
+        "NumpadEnter" => 0xff8d,
+        _ => return None,
+    })
+}
+
+#[derive(Serialize)]
+struct PublicConfig {
+    capture_mode: CaptureMode,
+    audio_mode: AudioMode,
+    audio_enabled: bool,
+    width: u16,
+    height: u16,
+    target_fps: u16,
+    target_video_bitrate_kbps: u32,
+    max_clients: usize,
+}
+
+impl PublicConfig {
+    fn new(config: &Config, screen: ScreenSize) -> Self {
+        Self {
+            capture_mode: config.capture_mode,
+            audio_mode: config.audio_mode,
+            audio_enabled: config.audio_mode != AudioMode::Disabled,
+            width: screen.width,
+            height: screen.height,
+            target_fps: config.fps,
+            target_video_bitrate_kbps: config.video_bitrate_kbps,
+            max_clients: config.max_clients,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct MetricsResponse {
+    uptime_seconds: u64,
+    active_clients: usize,
+    total_clients: u64,
+    bytes_served: u64,
+    control_connected: bool,
+    /// Milliseconds since a viewer last clicked, scrolled, or typed; absent
+    /// until someone has. Sandbox automation reads this to yield to a person
+    /// who is driving the desktop.
+    control_idle_ms: Option<u64>,
+    /// Whether a viewer holds control and used it within the idle window.
+    /// This is the single answer the viewer's status and the sandbox's
+    /// `agent-browser` wrapper both read.
+    human_driving: bool,
+    encoder: EncoderProgress,
+    browser: BrowserTelemetry,
+    browser_to_x_input_latency: InputLatency,
+    /// Last pointer position the control channel injected.
+    last_injected_pointer: Option<(i16, i16)>,
+    /// Pointer position the X server currently reports, when reachable.
+    x_pointer: Option<(i16, i16)>,
+}
+
+/// Clears the control flag when the session that currently owns control
+/// ends; a superseded session must not clear its successor's flag.
+struct ControlConnectionGuard {
+    connected: Arc<AtomicBool>,
+    generation: u64,
+    current: watch::Receiver<u64>,
+}
+
+impl Drop for ControlConnectionGuard {
+    fn drop(&mut self) {
+        if *self.current.borrow() == self.generation {
+            self.connected.store(false, Ordering::Release);
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    if env::args_os()
+        .skip(1)
+        .any(|argument| argument == "--help" || argument == "-h")
+    {
+        println!(
+            "roomote-desktop-stream\n\nConfiguration is supplied through ROOMOTE_DESKTOP_STREAM_* environment variables."
+        );
+        return;
+    }
+
+    let config = Config::from_env().unwrap_or_else(|error| {
+        eprintln!("desktop stream configuration error: {error}");
+        std::process::exit(2);
+    });
+    let address = config.address;
+    // A previous service instance may have resized the X screen; capture the
+    // real size so encoders and pointer mapping match what is on screen.
+    let mut screen = config.initial_screen();
+    if config.capture_mode == CaptureMode::X11
+        && let Ok(controller) = X11Controller::connect(&config.display, screen.width, screen.height)
+        && let Ok(actual) = controller.screen_size()
+    {
+        screen = actual;
+    }
+    let state = AppState {
+        config: Arc::new(config),
+        metrics: Arc::new(Metrics::default()),
+        control_connected: Arc::new(AtomicBool::new(false)),
+        started_at: Instant::now(),
+        screen: Arc::new(RwLock::new(screen)),
+        broadcaster: Arc::new(Broadcaster::new()),
+        next_encoder_generation: Arc::new(AtomicU64::new(1)),
+        control_generation: Arc::new(watch::Sender::new(0)),
+    };
+    let app = Router::new()
+        .route("/", get(player))
+        .route("/config", get(public_config))
+        .route("/healthz", get(health))
+        .route("/metrics", get(metrics))
+        .route("/stream.mp4", get(stream))
+        .route("/control", get(control))
+        .route("/presence", get(presence))
+        .route("/telemetry", post(telemetry))
+        .with_state(state);
+
+    let listener = TcpListener::bind(address).await.unwrap_or_else(|error| {
+        eprintln!("failed to bind desktop stream on {address}: {error}");
+        std::process::exit(1);
+    });
+    eprintln!("roomote-desktop-stream listening on http://{address}");
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("desktop stream server failed: {error}");
+            std::process::exit(1);
+        });
+}
+
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+async fn player() -> impl IntoResponse {
+    (
+        [
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(
+                    "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; media-src 'self'; connect-src 'self'",
+                ),
+            ),
+            (
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ),
+        ],
+        Html(PLAYER_HTML),
+    )
+}
+
+async fn public_config(State(state): State<AppState>) -> Json<PublicConfig> {
+    Json(PublicConfig::new(state.config.as_ref(), state.screen()))
+}
+
+async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    if !state.config.ffmpeg.is_file() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("ffmpeg is unavailable at {}", state.config.ffmpeg.display()),
+        );
+    }
+    let screen = state.screen();
+    if state.config.capture_mode == CaptureMode::X11
+        && let Err(error) =
+            X11Controller::connect(&state.config.display, screen.width, screen.height)
+    {
+        return (StatusCode::SERVICE_UNAVAILABLE, error);
+    }
+    (StatusCode::OK, "ok".into())
+}
+
+async fn metrics(State(state): State<AppState>) -> Json<MetricsResponse> {
+    let control_connected = state.control_connected.load(Ordering::Relaxed);
+    let control_idle = state
+        .metrics
+        .last_deliberate_input
+        .lock()
+        .unwrap()
+        .map(|at| at.elapsed());
+    Json(MetricsResponse {
+        uptime_seconds: state.started_at.elapsed().as_secs(),
+        active_clients: state.active_clients(),
+        total_clients: state.metrics.total_clients.load(Ordering::Relaxed),
+        bytes_served: state.metrics.bytes_served.load(Ordering::Relaxed),
+        control_connected,
+        control_idle_ms: control_idle.map(|idle| idle.as_millis() as u64),
+        human_driving: is_human_driving(control_connected, control_idle, state.config.human_idle),
+        encoder: state.metrics.progress.lock().unwrap().clone(),
+        browser: state.metrics.browser.lock().unwrap().clone(),
+        browser_to_x_input_latency: state.metrics.input_latency.lock().unwrap().clone(),
+        last_injected_pointer: *state.metrics.last_motion.lock().unwrap(),
+        x_pointer: query_x_pointer(&state.config),
+    })
+}
+
+fn is_human_driving(
+    control_connected: bool,
+    control_idle: Option<Duration>,
+    human_idle: Duration,
+) -> bool {
+    control_connected && control_idle.is_some_and(|idle| idle < human_idle)
+}
+
+async fn telemetry(
+    State(state): State<AppState>,
+    Json(telemetry): Json<BrowserTelemetry>,
+) -> StatusCode {
+    *state.metrics.browser.lock().unwrap() = telemetry;
+    StatusCode::NO_CONTENT
+}
+
+async fn control(
+    websocket: WebSocketUpgrade,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    if !has_allowed_origin(&headers, state.config.allowed_control_origin.as_deref()) {
+        return (
+            StatusCode::FORBIDDEN,
+            "control websocket requires a same-origin request",
+        )
+            .into_response();
+    }
+    // Control is claimed only once the upgrade completes (see
+    // `control_socket`). Claiming it here would let a handshake that is
+    // aborted midway (a page reload, a quick reconnect) supersede the real
+    // controller and leave the desktop marked as held with nobody holding it.
+    websocket
+        // Large enough for a pasted clipboard; every other event is tiny.
+        .max_message_size(MAX_CLIPBOARD_BYTES + 4 * 1024)
+        .on_upgrade(move |socket| control_socket(socket, state))
+}
+
+/// Answers whether a viewer holds control, without taking it. Connecting to
+/// `/control` supersedes the current controller, so a viewer that only wants
+/// to watch asks here first. It is a WebSocket because the viewer's page is
+/// on another origin and the preview proxy's sign-in redirect cannot carry
+/// CORS headers, which rules out a plain fetch.
+async fn presence(
+    websocket: WebSocketUpgrade,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    if !has_allowed_origin(&headers, state.config.allowed_control_origin.as_deref()) {
+        return (
+            StatusCode::FORBIDDEN,
+            "presence websocket requires a same-origin request",
+        )
+            .into_response();
+    }
+    websocket
+        .max_message_size(1024)
+        .on_upgrade(move |mut socket| async move {
+            let payload = presence_payload(state.control_connected.load(Ordering::Relaxed));
+            let _ = socket.send(Message::Text(payload.into())).await;
+            let _ = socket.send(Message::Close(None)).await;
+        })
+}
+
+fn claim_control_generation(generations: &watch::Sender<u64>) -> u64 {
+    let mut generation = 0;
+    generations.send_modify(|current| {
+        *current += 1;
+        generation = *current;
+    });
+    generation
+}
+
+fn presence_payload(control_held: bool) -> String {
+    serde_json::json!({ "control_held": control_held }).to_string()
+}
+
+async fn control_socket(mut socket: WebSocket, state: AppState) {
+    // The newest viewer wins: bump the generation so any previous control
+    // session releases its held input and closes. Subscribe before
+    // publishing our generation so a newer client is never missed.
+    let mut superseded = state.control_generation.subscribe();
+    let generation = claim_control_generation(&state.control_generation);
+    // Consume our own generation bump; anything newer means a later client
+    // already took control in the meantime.
+    if *superseded.borrow_and_update() != generation {
+        let _ = socket
+            .send(Message::Text(
+                "{\"error\":\"another viewer took control of the desktop\"}".into(),
+            ))
+            .await;
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
+    state.control_connected.store(true, Ordering::Release);
+    let _connection_guard = ControlConnectionGuard {
+        connected: state.control_connected.clone(),
+        generation,
+        current: state.control_generation.subscribe(),
+    };
+    let screen = state.screen();
+    let mut controller =
+        match X11Controller::connect(&state.config.display, screen.width, screen.height) {
+            Ok(mut controller) => {
+                controller.metrics = Some(state.metrics.clone());
+                controller
+            }
+            Err(error) => {
+                let payload = serde_json::json!({ "error": error }).to_string();
+                let _ = socket.send(Message::Text(payload.into())).await;
+                return;
+            }
+        };
+    let _ = socket.send(Message::Text("{\"ready\":true}".into())).await;
+
+    // A new controller starts out watching, whatever the previous one did.
+    *state.metrics.last_deliberate_input.lock().unwrap() = None;
+    // When this viewer stops counting as driving; they are told on each change
+    // so their status matches what sandbox automation sees in /metrics.
+    let mut driving_until: Option<tokio::time::Instant> = None;
+
+    loop {
+        let message = tokio::select! {
+            message = socket.next() => match message {
+                Some(message) => message,
+                None => break,
+            },
+            _ = async { tokio::time::sleep_until(driving_until.unwrap()).await }, if driving_until.is_some() => {
+                driving_until = None;
+                let _ = socket.send(Message::Text("{\"driving\":false}".into())).await;
+                continue;
+            }
+            _ = superseded.changed() => {
+                controller.release_all();
+                let _ = socket
+                    .send(Message::Text(
+                        "{\"error\":\"another viewer took control of the desktop\"}".into(),
+                    ))
+                    .await;
+                let _ = socket.send(Message::Close(None)).await;
+                return;
+            }
+        };
+        match message {
+            Ok(Message::Text(payload)) => {
+                match serde_json::from_str::<ControlEnvelope>(&payload) {
+                    Ok(ControlEnvelope {
+                        event: ControlEvent::ReleaseAll,
+                        sent_at_ms,
+                    }) => {
+                        controller.release_all();
+                        record_input_latency(&state.metrics, sent_at_ms);
+                    }
+                    Ok(ControlEnvelope {
+                        event: ControlEvent::Resize { width, height },
+                        ..
+                    }) => {
+                        let payload = if *superseded.borrow() != generation {
+                            serde_json::json!({ "error": "another viewer took control of the desktop" }).to_string()
+                        } else {
+                            match resize_screen(&state, &mut controller, width, height) {
+                                Ok(size) => serde_json::json!({ "resized": size }).to_string(),
+                                Err(error) => serde_json::json!({ "error": error }).to_string(),
+                            }
+                        };
+                        let _ = socket.send(Message::Text(payload.into())).await;
+                    }
+                    Ok(ControlEnvelope {
+                        event: ControlEvent::HandBack,
+                        ..
+                    }) => {
+                        *state.metrics.last_deliberate_input.lock().unwrap() = None;
+                        if driving_until.take().is_some() {
+                            let _ = socket
+                                .send(Message::Text("{\"driving\":false}".into()))
+                                .await;
+                        }
+                    }
+                    Ok(ControlEnvelope {
+                        event: ControlEvent::ClipboardRead,
+                        ..
+                    }) => {
+                        let payload = match read_clipboard(&state.config.display).await {
+                            Ok(text) => serde_json::json!({ "clipboard": text }).to_string(),
+                            Err(error) => serde_json::json!({ "error": error }).to_string(),
+                        };
+                        let _ = socket.send(Message::Text(payload.into())).await;
+                    }
+                    Ok(ControlEnvelope { event, sent_at_ms }) => {
+                        let deliberate = event.is_deliberate_input();
+                        let result = match event {
+                            ControlEvent::Paste { text } => {
+                                match write_clipboard(&state.config.display, &text).await {
+                                    Ok(()) => controller.press_paste_shortcut(),
+                                    Err(error) => Err(error),
+                                }
+                            }
+                            event => controller.apply(event),
+                        };
+                        if let Err(error) = result {
+                            let payload = serde_json::json!({ "error": error }).to_string();
+                            let _ = socket.send(Message::Text(payload.into())).await;
+                        } else {
+                            record_input_latency(&state.metrics, sent_at_ms);
+                            if deliberate {
+                                *state.metrics.last_deliberate_input.lock().unwrap() =
+                                    Some(Instant::now());
+                                if driving_until.is_none() {
+                                    let _ = socket
+                                        .send(Message::Text("{\"driving\":true}".into()))
+                                        .await;
+                                }
+                                driving_until =
+                                    Some(tokio::time::Instant::now() + state.config.human_idle);
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        let payload = serde_json::json!({ "error": format!("invalid control event: {error}") }).to_string();
+                        let _ = socket.send(Message::Text(payload.into())).await;
+                    }
+                }
+            }
+            Ok(Message::Close(_)) | Err(_) => break,
+            Ok(Message::Binary(_)) => {
+                let _ = socket
+                    .send(Message::Text(
+                        "{\"error\":\"binary control messages are unsupported\"}".into(),
+                    ))
+                    .await;
+            }
+            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
+        }
+    }
+
+    controller.release_all();
+}
+
+/// Puts text on the X clipboard. `xclip` forks a holder that owns the
+/// selection until something replaces it, so its output must not be piped or
+/// waiting on it would never end.
+async fn write_clipboard(display: &str, text: &str) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+
+    if text.len() > MAX_CLIPBOARD_BYTES {
+        return Err("the pasted text is too large for the remote clipboard".into());
+    }
+    let mut child = Command::new("xclip")
+        .args(["-selection", "clipboard", "-in"])
+        .env("DISPLAY", display)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("clipboard support is unavailable in this sandbox: {error}"))?;
+    let mut stdin = child.stdin.take().expect("xclip stdin is piped");
+    stdin
+        .write_all(text.as_bytes())
+        .await
+        .map_err(|error| format!("failed to write the remote clipboard: {error}"))?;
+    drop(stdin);
+    match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+        Ok(Ok(status)) if status.success() => Ok(()),
+        Ok(Ok(status)) => Err(format!(
+            "failed to write the remote clipboard: xclip {status}"
+        )),
+        Ok(Err(error)) => Err(format!("failed to write the remote clipboard: {error}")),
+        Err(_) => Err("timed out writing the remote clipboard".into()),
+    }
+}
+
+/// Reads the X clipboard as text. An empty or non-text clipboard is an empty
+/// string, not an error.
+async fn read_clipboard(display: &str) -> Result<String, String> {
+    let output = Command::new("xclip")
+        .args(["-selection", "clipboard", "-out"])
+        .env("DISPLAY", display)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let output = match tokio::time::timeout(Duration::from_secs(2), output).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            return Err(format!(
+                "clipboard support is unavailable in this sandbox: {error}"
+            ));
+        }
+        Err(_) => return Err("timed out reading the remote clipboard".into()),
+    };
+    if !output.status.success() {
+        return Ok(String::new());
+    }
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    if text.len() > MAX_CLIPBOARD_BYTES {
+        let mut end = MAX_CLIPBOARD_BYTES;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    Ok(text)
+}
+
+/// Applies a viewer resize: validates the size, resizes the X screen, records
+/// the new size for future encoders and control sessions, and ends running
+/// encoders so the viewer reconnects at the new size.
+fn resize_screen(
+    state: &AppState,
+    controller: &mut X11Controller,
+    width: u16,
+    height: u16,
+) -> Result<ScreenSize, String> {
+    let size = ScreenSize::from_request(width, height)?;
+    if size == state.screen() {
+        return Ok(size);
+    }
+    controller.set_screen_size(size)?;
+    *state.screen.write().unwrap() = size;
+    // The encoder captures at the old size: stop it so viewers reconnect.
+    state.broadcaster.stop_encoder();
+    Ok(size)
+}
+
+/// Reads the X pointer through a short-lived connection for diagnostics.
+fn query_x_pointer(config: &Config) -> Option<(i16, i16)> {
+    if config.capture_mode != CaptureMode::X11 {
+        return None;
+    }
+    let screen = ScreenSize {
+        width: config.width,
+        height: config.height,
+    };
+    X11Controller::connect(&config.display, screen.width, screen.height)
+        .ok()
+        .and_then(|controller| controller.pointer_position().ok())
+}
+
+fn record_input_latency(metrics: &Metrics, sent_at_ms: Option<u64>) {
+    let Some(sent_at_ms) = sent_at_ms else {
+        return;
+    };
+    let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
+        return;
+    };
+    let latency_ms = now.as_secs_f64() * 1_000.0 - sent_at_ms as f64;
+    if (0.0..=10_000.0).contains(&latency_ms) {
+        metrics.input_latency.lock().unwrap().record(latency_ms);
+    }
+}
+
+#[cfg(test)]
+fn has_same_origin(headers: &HeaderMap) -> bool {
+    has_allowed_origin(headers, None)
+}
+
+fn has_allowed_origin(headers: &HeaderMap, explicitly_allowed: Option<&str>) -> bool {
+    // The authenticated preview proxy adds this marker only after validating
+    // the task-scoped preview token. The browser Origin is the Roomote app,
+    // not the separate preview host, so strict host equality cannot apply on
+    // this path. The sandbox auth proxy strips the marker on WebSocket
+    // upgrades, so the worker also passes the Roomote app origin as the
+    // explicitly allowed control origin below.
+    if headers.contains_key("x-roomote-forwarded-host") {
+        return true;
+    }
+
+    let Some(origin) = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<Uri>().ok())
+        .and_then(|uri| {
+            uri.authority()
+                .map(|authority| authority.as_str().to_ascii_lowercase())
+        })
+    else {
+        return false;
+    };
+
+    if explicitly_allowed.is_some_and(|allowed| {
+        allowed
+            .strip_prefix("https://")
+            .or_else(|| allowed.strip_prefix("http://"))
+            .is_some_and(|authority| authority.eq_ignore_ascii_case(&origin))
+    }) {
+        return true;
+    }
+
+    [
+        header::HOST.as_str(),
+        "x-forwarded-host",
+        "x-roomote-public-host",
+    ]
+    .into_iter()
+    .filter_map(|name| headers.get(name))
+    .filter_map(|value| value.to_str().ok())
+    .flat_map(|value| value.split(','))
+    .any(|value| value.trim().eq_ignore_ascii_case(&origin))
+}
+
+async fn stream(State(state): State<AppState>) -> Response {
+    let Some((mut receiver, needs_encoder)) = state.broadcaster.subscribe(state.config.max_clients)
+    else {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            "desktop stream is already being watched by the maximum number of viewers",
+        )
+            .into_response();
+    };
+    state.metrics.total_clients.fetch_add(1, Ordering::Relaxed);
+
+    if needs_encoder {
+        let generation = state
+            .next_encoder_generation
+            .fetch_add(1, Ordering::Relaxed);
+        state.broadcaster.begin_encoder(generation);
+        let encoder_state = state.clone();
+        tokio::spawn(async move {
+            run_encoder(encoder_state, generation).await;
+        });
+    }
+
+    let body_stream = async_stream! {
+        while let Some(chunk) = receiver.recv().await {
+            yield Ok::<_, std::io::Error>(chunk);
+        }
+    };
+
+    let mut response = Response::new(Body::from_stream(body_stream));
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static("video/mp4"));
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store, no-transform"),
+    );
+    response.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+}
+
+/// Runs one shared encoder until it exits, is stopped, or has had no
+/// viewers for the grace period, splitting its output into an init segment
+/// and keyframe-aligned fragments for the broadcaster.
+async fn run_encoder(state: AppState, generation: u64) {
+    let mut command = Command::new(&state.config.ffmpeg);
+    command
+        .args(state.config.ffmpeg_args(state.screen()))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            eprintln!("failed to start ffmpeg: {error}");
+            state.broadcaster.end_encoder(generation);
+            return;
+        }
+    };
+    if let Some(pid) = child.id() {
+        state.broadcaster.set_encoder_pid(generation, pid);
+    }
+
+    let stdout = child.stdout.take().expect("ffmpeg stdout is piped");
+    let stderr = child.stderr.take().expect("ffmpeg stderr is piped");
+    let progress_metrics = state.metrics.clone();
+    tokio::spawn(async move {
+        parse_progress(BufReader::new(stderr), progress_metrics).await;
+    });
+
+    let mut chunks = ReaderStream::new(stdout);
+    let mut parser = FragmentParser::default();
+    while let Some(Ok(chunk)) = chunks.next().await {
+        for event in parser.push(&chunk) {
+            match event {
+                FragmentEvent::Init(init) => state.broadcaster.deliver_init(init),
+                FragmentEvent::Fragment { data, keyframe } => {
+                    state
+                        .broadcaster
+                        .deliver_fragment(data, keyframe, &state.metrics.bytes_served);
+                }
+            }
+        }
+        if state.broadcaster.idle_expired() {
+            break;
+        }
+    }
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    state.broadcaster.end_encoder(generation);
+}
+
+enum FragmentEvent {
+    Init(Bytes),
+    Fragment { data: Bytes, keyframe: bool },
+}
+
+/// Splits a fragmented-MP4 byte stream into the init segment (everything up
+/// to and including `moov`) and `moof`+`mdat` fragments.
+#[derive(Default)]
+struct FragmentParser {
+    buffer: BytesMut,
+    init: Vec<u8>,
+    init_done: bool,
+    pending_moof: Option<Bytes>,
+}
+
+impl FragmentParser {
+    fn push(&mut self, chunk: &[u8]) -> Vec<FragmentEvent> {
+        self.buffer.extend_from_slice(chunk);
+        let mut events = Vec::new();
+        loop {
+            let Some((box_type, size)) = peek_box(&self.buffer) else {
+                break;
+            };
+            if self.buffer.len() < size {
+                break;
+            }
+            let data = self.buffer.split_to(size).freeze();
+            match &box_type {
+                b"moof" => self.pending_moof = Some(data),
+                b"mdat" => {
+                    if let Some(moof) = self.pending_moof.take() {
+                        let keyframe = moof_starts_with_keyframe(&moof);
+                        let mut fragment = BytesMut::with_capacity(moof.len() + data.len());
+                        fragment.extend_from_slice(&moof);
+                        fragment.extend_from_slice(&data);
+                        events.push(FragmentEvent::Fragment {
+                            data: fragment.freeze(),
+                            keyframe,
+                        });
+                    }
+                }
+                _ if !self.init_done => {
+                    self.init.extend_from_slice(&data);
+                    if &box_type == b"moov" {
+                        self.init_done = true;
+                        events.push(FragmentEvent::Init(Bytes::from(std::mem::take(
+                            &mut self.init,
+                        ))));
+                    }
+                }
+                _ => {}
+            }
+        }
+        events
+    }
+}
+
+/// Reads an MP4 box header: (type, total size). Handles 64-bit sizes.
+fn peek_box(buffer: &[u8]) -> Option<([u8; 4], usize)> {
+    if buffer.len() < 8 {
+        return None;
+    }
+    let size32 = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
+    let box_type = [buffer[4], buffer[5], buffer[6], buffer[7]];
+    let size = match size32 {
+        1 => {
+            if buffer.len() < 16 {
+                return None;
+            }
+            u64::from_be_bytes([
+                buffer[8], buffer[9], buffer[10], buffer[11], buffer[12], buffer[13], buffer[14],
+                buffer[15],
+            ]) as usize
+        }
+        // Size 0 means "to end of file", which a live stream never produces.
+        0 => return None,
+        size => size as usize,
+    };
+    if size < 8 {
+        return None;
+    }
+    Some((box_type, size))
+}
+
+/// Iterates the child boxes of a container box body.
+fn child_boxes(body: &[u8]) -> impl Iterator<Item = ([u8; 4], &[u8])> {
+    let mut offset = 0;
+    std::iter::from_fn(move || {
+        let (box_type, size) = peek_box(&body[offset..])?;
+        if offset + size > body.len() {
+            return None;
+        }
+        let header = if body[offset..offset + 4] == [0, 0, 0, 1] {
+            16
+        } else {
+            8
+        };
+        let child = &body[offset + header..offset + size];
+        offset += size;
+        Some((box_type, child))
+    })
+}
+
+const SAMPLE_IS_NON_SYNC: u32 = 0x0001_0000;
+
+/// Whether the first sample of a `moof` is a sync sample, from the `trun`
+/// first-sample or per-sample flags, else the `tfhd` default flags.
+fn moof_starts_with_keyframe(moof: &[u8]) -> bool {
+    // `moof` is a container: its body follows the 8-byte header.
+    let Some(body) = moof.get(8..) else {
+        return false;
+    };
+    for (box_type, traf) in child_boxes(body) {
+        if &box_type != b"traf" {
+            continue;
+        }
+        let mut default_flags = None;
+        let mut first_flags = None;
+        for (child_type, child) in child_boxes(traf) {
+            match &child_type {
+                b"tfhd" if child.len() >= 8 => {
+                    let flags = u32::from_be_bytes([0, child[1], child[2], child[3]]);
+                    let mut offset = 8;
+                    if flags & 0x1 != 0 {
+                        offset += 8;
+                    }
+                    if flags & 0x2 != 0 {
+                        offset += 4;
+                    }
+                    if flags & 0x8 != 0 {
+                        offset += 4;
+                    }
+                    if flags & 0x10 != 0 {
+                        offset += 4;
+                    }
+                    if flags & 0x20 != 0 && child.len() >= offset + 4 {
+                        default_flags = Some(u32::from_be_bytes([
+                            child[offset],
+                            child[offset + 1],
+                            child[offset + 2],
+                            child[offset + 3],
+                        ]));
+                    }
+                }
+                b"trun" if child.len() >= 8 => {
+                    let flags = u32::from_be_bytes([0, child[1], child[2], child[3]]);
+                    let sample_count = u32::from_be_bytes([child[4], child[5], child[6], child[7]]);
+                    let mut offset = 8;
+                    if flags & 0x1 != 0 {
+                        offset += 4;
+                    }
+                    if flags & 0x4 != 0 && child.len() >= offset + 4 {
+                        first_flags = Some(u32::from_be_bytes([
+                            child[offset],
+                            child[offset + 1],
+                            child[offset + 2],
+                            child[offset + 3],
+                        ]));
+                        offset += 4;
+                    }
+                    if first_flags.is_none() && flags & 0x400 != 0 && sample_count > 0 {
+                        // Per-sample fields: duration, size, flags, cts.
+                        if flags & 0x100 != 0 {
+                            offset += 4;
+                        }
+                        if flags & 0x200 != 0 {
+                            offset += 4;
+                        }
+                        if child.len() >= offset + 4 {
+                            first_flags = Some(u32::from_be_bytes([
+                                child[offset],
+                                child[offset + 1],
+                                child[offset + 2],
+                                child[offset + 3],
+                            ]));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let flags = first_flags.or(default_flags);
+        return flags.is_some_and(|flags| flags & SAMPLE_IS_NON_SYNC == 0);
+    }
+    false
+}
+
+async fn parse_progress<R>(reader: BufReader<R>, metrics: Arc<Metrics>)
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut lines = reader.lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let mut progress = metrics.progress.lock().unwrap();
+        match key {
+            "frame" => progress.frame = value.parse().unwrap_or(progress.frame),
+            "fps" => progress.fps = value.parse().unwrap_or(progress.fps),
+            "bitrate" => {
+                progress.bitrate_kbps = value
+                    .strip_suffix("kbits/s")
+                    .and_then(|value| value.trim().parse().ok())
+                    .unwrap_or(progress.bitrate_kbps)
+            }
+            "out_time_us" => {
+                progress.output_time_ms = value
+                    .parse::<u64>()
+                    .map(|value| value / 1_000)
+                    .unwrap_or(progress.output_time_ms)
+            }
+            "speed" => {
+                progress.speed = value
+                    .strip_suffix('x')
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(progress.speed)
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> Config {
+        Config {
+            address: SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 6080),
+            ffmpeg: "/usr/bin/ffmpeg".into(),
+            capture_mode: CaptureMode::X11,
+            audio_mode: AudioMode::Disabled,
+            display: ":99.0".into(),
+            pulse_source: "roomote_stream.monitor".into(),
+            allowed_control_origin: None,
+            width: 1920,
+            height: 1080,
+            fps: 60,
+            video_bitrate_kbps: 6_000,
+            audio_bitrate_kbps: 128,
+            max_clients: 1,
+            human_idle: Duration::from_secs(10),
+        }
+    }
+
+    #[test]
+    fn builds_low_latency_x11_video_arguments() {
+        let args = test_config().ffmpeg_args(test_config().initial_screen());
+        assert!(args.windows(2).any(|pair| pair == ["-f", "x11grab"]));
+        assert!(args.windows(2).any(|pair| pair == ["-preset", "ultrafast"]));
+        assert!(args.windows(2).any(|pair| pair == ["-threads", "1"]));
+        assert!(args.windows(2).any(|pair| pair == ["-tune", "zerolatency"]));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["-frag_duration", "100000"])
+        );
+        assert!(!args.iter().any(|argument| argument == "-c:a"));
+    }
+
+    #[test]
+    fn adds_pulse_audio_to_the_same_fragmented_mp4() {
+        let mut config = test_config();
+        config.audio_mode = AudioMode::Pulse;
+        let args = config.ffmpeg_args(config.initial_screen());
+        assert!(
+            args.windows(3)
+                .any(|values| values == ["-f", "pulse", "-i"])
+        );
+        assert!(args.windows(2).any(|pair| pair == ["-c:a", "aac"]));
+        assert!(args.windows(2).any(|pair| pair == ["-map", "1:a:0"]));
+    }
+
+    #[test]
+    fn synthetic_mode_is_deterministic_for_benchmarks() {
+        let mut config = test_config();
+        config.capture_mode = CaptureMode::Test;
+        config.audio_mode = AudioMode::Test;
+        let args = config.ffmpeg_args(config.initial_screen());
+        assert!(
+            args.iter()
+                .any(|argument| argument == "testsrc2=size=1920x1080:rate=60")
+        );
+        assert!(
+            args.iter()
+                .any(|argument| argument == "sine=frequency=880:sample_rate=48000")
+        );
+    }
+
+    #[test]
+    fn maps_pointer_buttons_coordinates_and_wheel_with_bounds() {
+        let motion = validate_control_event(
+            ControlEvent::PointerMove { x: 0.5, y: 1.0 },
+            1920,
+            1080,
+            |_| None,
+        )
+        .unwrap();
+        assert_eq!(motion, vec![InputAction::Motion { x: 960, y: 1079 }]);
+
+        let button = validate_control_event(
+            ControlEvent::PointerButton {
+                button: 2,
+                down: true,
+            },
+            1920,
+            1080,
+            |_| None,
+        )
+        .unwrap();
+        assert_eq!(
+            button,
+            vec![InputAction::Button {
+                button: 3,
+                down: true
+            }]
+        );
+
+        let wheel = validate_control_event(
+            ControlEvent::Wheel {
+                delta_x: 0.0,
+                delta_y: -250.0,
+            },
+            1920,
+            1080,
+            |_| None,
+        )
+        .unwrap();
+        assert_eq!(wheel.len(), 6);
+        assert_eq!(
+            wheel[0],
+            InputAction::Button {
+                button: 4,
+                down: true
+            }
+        );
+
+        assert!(
+            validate_control_event(
+                ControlEvent::PointerMove { x: -0.1, y: 0.5 },
+                1920,
+                1080,
+                |_| None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn maps_browser_keyboard_codes_through_the_active_x11_layout() {
+        let actions = validate_control_event(
+            ControlEvent::Key {
+                code: "KeyA".into(),
+                down: true,
+            },
+            1280,
+            720,
+            |keysym| (keysym == u32::from(b'a')).then_some(38),
+        )
+        .unwrap();
+        assert_eq!(
+            actions,
+            vec![InputAction::Key {
+                keycode: 38,
+                down: true
+            }]
+        );
+        assert!(
+            validate_control_event(
+                ControlEvent::Key {
+                    code: "LaunchCalculator".into(),
+                    down: true,
+                },
+                1280,
+                720,
+                |_| None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn disconnect_cleanup_releases_every_held_input_once() {
+        let mut held = HeldInputs::default();
+        held.keys.extend([37, 38]);
+        held.buttons.extend([1, 3]);
+        let actions = held.drain_release_actions();
+        assert_eq!(actions.len(), 4);
+        assert!(actions.contains(&InputAction::Key {
+            keycode: 37,
+            down: false
+        }));
+        assert!(actions.contains(&InputAction::Button {
+            button: 1,
+            down: false
+        }));
+        assert!(held.drain_release_actions().is_empty());
+    }
+
+    #[test]
+    fn control_websocket_requires_matching_browser_origin() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ORIGIN,
+            "https://desktop.preview.test".parse().unwrap(),
+        );
+        headers.insert(header::HOST, "desktop.preview.test".parse().unwrap());
+        assert!(has_same_origin(&headers));
+
+        headers.insert(header::ORIGIN, "https://attacker.test".parse().unwrap());
+        assert!(!has_same_origin(&headers));
+        headers.remove(header::ORIGIN);
+        assert!(!has_same_origin(&headers));
+
+        headers.insert(header::ORIGIN, "http://127.0.0.1:6006".parse().unwrap());
+        assert!(has_allowed_origin(&headers, Some("http://127.0.0.1:6006")));
+
+        headers.insert(
+            "x-roomote-forwarded-host",
+            "task-shared-desktop.preview.test".parse().unwrap(),
+        );
+        headers.insert(header::ORIGIN, "https://app.roomote.test".parse().unwrap());
+        assert!(has_allowed_origin(&headers, None));
+    }
+
+    fn mp4_box(box_type: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut out = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(box_type);
+        out.extend_from_slice(body);
+        out
+    }
+
+    /// A `moof` whose `trun` carries first-sample flags.
+    fn moof_with_first_sample_flags(flags: u32) -> Vec<u8> {
+        let mut trun = vec![0, 0, 0, 0x05]; // version 0, data-offset + first-sample-flags
+        trun.extend_from_slice(&1_u32.to_be_bytes()); // sample_count
+        trun.extend_from_slice(&0_u32.to_be_bytes()); // data_offset
+        trun.extend_from_slice(&flags.to_be_bytes());
+        let tfhd = [0, 0, 0, 0, 0, 0, 0, 1]; // version 0, no optional fields, track 1
+        let traf = [mp4_box(b"tfhd", &tfhd), mp4_box(b"trun", &trun)].concat();
+        let mfhd = [0, 0, 0, 0, 0, 0, 0, 1];
+        mp4_box(
+            b"moof",
+            &[mp4_box(b"mfhd", &mfhd), mp4_box(b"traf", &traf)].concat(),
+        )
+    }
+
+    #[test]
+    fn fragment_parser_splits_init_segment_and_keyframe_aligned_fragments() {
+        let ftyp = mp4_box(b"ftyp", b"isom");
+        let moov = mp4_box(b"moov", b"xx");
+        let key_moof = moof_with_first_sample_flags(0x0200_0000);
+        let delta_moof = moof_with_first_sample_flags(0x0101_0000);
+        let mdat = mp4_box(b"mdat", b"payload");
+        let stream = [
+            ftyp.clone(),
+            moov.clone(),
+            key_moof.clone(),
+            mdat.clone(),
+            delta_moof.clone(),
+            mdat.clone(),
+        ]
+        .concat();
+
+        // Feed in awkward chunk sizes to exercise buffering across boundaries.
+        let mut parser = FragmentParser::default();
+        let mut events = Vec::new();
+        for chunk in stream.chunks(7) {
+            events.extend(parser.push(chunk));
+        }
+
+        assert_eq!(events.len(), 3);
+        match &events[0] {
+            FragmentEvent::Init(init) => assert_eq!(&init[..], [ftyp, moov].concat()),
+            FragmentEvent::Fragment { .. } => panic!("init expected first"),
+        }
+        match &events[1] {
+            FragmentEvent::Fragment { data, keyframe } => {
+                assert!(keyframe);
+                assert_eq!(&data[..], [key_moof, mdat.clone()].concat());
+            }
+            FragmentEvent::Init(_) => panic!("fragment expected"),
+        }
+        match &events[2] {
+            FragmentEvent::Fragment { keyframe, .. } => assert!(!keyframe),
+            FragmentEvent::Init(_) => panic!("fragment expected"),
+        }
+    }
+
+    #[test]
+    fn viewer_limit_is_enforced_under_the_lock_and_ignores_gone_viewers() {
+        let broadcaster = Broadcaster::new();
+        let first = broadcaster.subscribe(1).expect("first viewer admitted");
+        assert!(first.1, "first viewer starts the encoder");
+        assert!(broadcaster.subscribe(1).is_none(), "limit reached");
+        // Once the first viewer's connection is gone, its slot frees up
+        // immediately rather than after its queue fills.
+        drop(first);
+        let second = broadcaster.subscribe(1).expect("slot reclaimed");
+        assert!(!second.1, "the encoder slot is still claimed");
+        assert_eq!(broadcaster.viewer_count(), 1);
+    }
+
+    #[test]
+    fn viewers_that_leave_before_any_data_do_not_keep_the_encoder_alive() {
+        let broadcaster = Broadcaster::new();
+        let (receiver, _) = broadcaster.subscribe(0).expect("admitted");
+        // Leave before the init segment or a keyframe ever arrives.
+        drop(receiver);
+        let served = AtomicU64::new(0);
+        assert_eq!(
+            broadcaster.deliver_fragment(Bytes::from_static(b"frag"), false, &served),
+            0
+        );
+        assert_eq!(broadcaster.viewer_count(), 0);
+        assert!(broadcaster.inner.lock().unwrap().idle_since.is_some());
+    }
+
+    #[test]
+    fn keyframe_detection_falls_back_to_tfhd_default_flags() {
+        let tfhd = [
+            [0, 0, 0, 0x20].as_slice(), // default-sample-flags present
+            &1_u32.to_be_bytes(),
+            &0x0101_0000_u32.to_be_bytes(), // non-sync
+        ]
+        .concat();
+        let mut trun = vec![0, 0, 0, 0]; // no optional fields
+        trun.extend_from_slice(&1_u32.to_be_bytes());
+        let traf = [mp4_box(b"tfhd", &tfhd), mp4_box(b"trun", &trun)].concat();
+        let moof = mp4_box(b"moof", &mp4_box(b"traf", &traf));
+        assert!(!moof_starts_with_keyframe(&moof));
+    }
+
+    #[test]
+    fn screen_size_requests_are_validated_and_snapped_to_even_dimensions() {
+        assert_eq!(
+            ScreenSize::from_request(1281, 721).unwrap(),
+            ScreenSize {
+                width: 1280,
+                height: 720
+            }
+        );
+        assert!(ScreenSize::from_request(200, 720).is_err());
+        assert!(ScreenSize::from_request(1280, 5_000).is_err());
+        // Each dimension is in range but the total exceeds the pixel budget.
+        assert!(ScreenSize::from_request(4_096, 4_096).is_err());
+        assert!(ScreenSize::from_request(1_920, 1_200).is_ok());
+        assert_eq!(
+            ScreenSize {
+                width: 1920,
+                height: 1080
+            }
+            .millimeters(),
+            (508, 286)
+        );
+        let resize: ControlEnvelope =
+            serde_json::from_str(r#"{"type":"resize","width":1280,"height":720}"#).unwrap();
+        assert!(matches!(
+            resize.event,
+            ControlEvent::Resize {
+                width: 1280,
+                height: 720
+            }
+        ));
+    }
+
+    #[test]
+    fn control_envelope_accepts_client_timing_without_weakening_event_validation() {
+        let envelope: ControlEnvelope =
+            serde_json::from_str(r#"{"type":"key","code":"KeyA","down":true,"sent_at_ms":123}"#)
+                .unwrap();
+        assert_eq!(envelope.sent_at_ms, Some(123));
+        assert!(matches!(
+            envelope.event,
+            ControlEvent::Key {
+                code,
+                down: true
+            } if code == "KeyA"
+        ));
+        assert!(
+            serde_json::from_str::<ControlEnvelope>(
+                r#"{"type":"key","code":"KeyA","down":true,"unexpected":1}"#
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn only_clicks_scrolls_and_keys_count_as_deliberate_input() {
+        let event = |payload: &str| {
+            serde_json::from_str::<ControlEnvelope>(payload)
+                .unwrap()
+                .event
+        };
+        assert!(event(r#"{"type":"pointer_button","button":0,"down":true}"#).is_deliberate_input());
+        assert!(event(r#"{"type":"wheel","delta_x":0,"delta_y":120}"#).is_deliberate_input());
+        assert!(event(r#"{"type":"key","code":"KeyA","down":true}"#).is_deliberate_input());
+        assert!(!event(r#"{"type":"pointer_move","x":0.5,"y":0.5}"#).is_deliberate_input());
+        assert!(!event(r#"{"type":"release_all"}"#).is_deliberate_input());
+        assert!(!event(r#"{"type":"resize","width":1280,"height":800}"#).is_deliberate_input());
+        assert!(event(r#"{"type":"paste","text":"hello"}"#).is_deliberate_input());
+        assert!(!event(r#"{"type":"hand_back"}"#).is_deliberate_input());
+        assert!(!event(r#"{"type":"clipboard_read"}"#).is_deliberate_input());
+    }
+
+    #[test]
+    fn a_viewer_drives_only_while_connected_and_recently_active() {
+        let window = Duration::from_secs(10);
+        assert!(is_human_driving(true, Some(Duration::from_secs(2)), window));
+        assert!(!is_human_driving(
+            true,
+            Some(Duration::from_secs(10)),
+            window
+        ));
+        // Watching without ever clicking or typing is not driving.
+        assert!(!is_human_driving(true, None, window));
+        // Input from a viewer who has since left does not hold automation back.
+        assert!(!is_human_driving(
+            false,
+            Some(Duration::from_secs(2)),
+            window
+        ));
+    }
+
+    #[test]
+    fn only_windows_that_filled_the_screen_follow_a_resize() {
+        let previous = ScreenSize {
+            width: 1280,
+            height: 800,
+        };
+        let window = |window, x, y, width, height, secondary| TopLevelWindow {
+            window,
+            x,
+            y,
+            width,
+            height,
+            secondary,
+        };
+        let browser = window(1, 0, 0, 1280, 800, false);
+        let popup = window(2, 200, 100, 500, 600, false);
+        let file_dialog = window(3, 0, 0, 1280, 800, true);
+        assert_eq!(
+            windows_to_refit(&[browser, popup, file_dialog], previous),
+            vec![1]
+        );
+        // Nothing filled the screen: an application at its default size is
+        // still maximized, but its dialog is not.
+        let app = window(4, 10, 10, 800, 600, false);
+        let dialog = window(5, 50, 50, 300, 200, true);
+        assert_eq!(windows_to_refit(&[app, dialog], previous), vec![4]);
+    }
+
+    #[test]
+    fn only_the_current_controller_clears_the_held_flag() {
+        let generations = watch::Sender::new(0);
+        let connected = Arc::new(AtomicBool::new(false));
+        let claim = |connected: &Arc<AtomicBool>| {
+            let generation = claim_control_generation(&generations);
+            connected.store(true, Ordering::Release);
+            ControlConnectionGuard {
+                connected: connected.clone(),
+                generation,
+                current: generations.subscribe(),
+            }
+        };
+        let first = claim(&connected);
+        let second = claim(&connected);
+        // The superseded controller leaving must not mark the desktop free.
+        drop(first);
+        assert!(connected.load(Ordering::Relaxed));
+        drop(second);
+        assert!(!connected.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn presence_reports_whether_control_is_held() {
+        assert_eq!(presence_payload(true), r#"{"control_held":true}"#);
+        assert_eq!(presence_payload(false), r#"{"control_held":false}"#);
+    }
+
+    #[test]
+    fn session_events_never_reach_input_validation() {
+        for payload in [
+            r#"{"type":"hand_back"}"#,
+            r#"{"type":"paste","text":"hello"}"#,
+            r#"{"type":"clipboard_read"}"#,
+        ] {
+            let event = serde_json::from_str::<ControlEnvelope>(payload)
+                .unwrap()
+                .event;
+            assert!(validate_control_event(event, 1920, 1080, |_| Some(1)).is_err());
+        }
+    }
+}

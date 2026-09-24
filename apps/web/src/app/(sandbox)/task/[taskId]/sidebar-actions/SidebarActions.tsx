@@ -9,6 +9,7 @@ import { SandboxSideActions } from '../../../SandboxWorkspacePanels';
 
 import { DiffButton } from './DiffButton';
 import { LivePreviewButton } from './LivePreviewButton';
+import { SharedDesktopButton } from './SharedDesktopButton';
 import { ArtifactsButton } from './ArtifactsButton';
 import { LogsButton } from './LogsButton';
 import { TaskInfoButton } from './TaskInfoButton';
@@ -51,6 +52,13 @@ function SidebarActionsBase({
     >
       {taskRun && (
         <LivePreviewButton
+          taskId={taskId}
+          taskRun={taskRun}
+          disabled={disableSandboxActions}
+        />
+      )}
+      {taskRun && (
+        <SharedDesktopButton
           taskId={taskId}
           taskRun={taskRun}
           disabled={disableSandboxActions}

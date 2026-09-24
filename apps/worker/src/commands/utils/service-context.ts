@@ -1,5 +1,6 @@
 import type { TaskRun } from '@roomote/sdk/client';
 import {
+  SHARED_DESKTOP_NAMED_PORT,
   assertNoReservedEnvironmentPorts,
   getPrimaryPortFromConfig,
 } from '@roomote/types';
@@ -88,6 +89,18 @@ export function buildWorkspacePortMappings(
   };
 }
 
+function resolveAppOrigin(appUrl: string | undefined): string | undefined {
+  if (!appUrl) {
+    return undefined;
+  }
+
+  try {
+    return new URL(appUrl).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildServiceContextForPreviewProxy(
   taskRun: TaskRun,
   workspace: WorkspaceConfig,
@@ -98,13 +111,25 @@ export function buildServiceContextForPreviewProxy(
   }
 
   const {
-    appPorts,
+    appPorts: workspaceAppPorts,
     unauthenticatedPorts,
     subdomains,
     primaryPortName,
     wildcardPrefixPorts,
     authBypassPaths,
   } = buildWorkspacePortMappings(workspace);
+
+  // The controller reserves the Roomote-managed Shared Desktop port for
+  // environment-backed runs by adding it to the run's proxy ports. It never
+  // appears in the environment config, so register its in-sandbox port here
+  // or the multiplex proxy has nothing to route it to.
+  const appPorts =
+    workspaceAppPorts && taskRun.proxyPorts?.[SHARED_DESKTOP_NAMED_PORT.name]
+      ? {
+          ...workspaceAppPorts,
+          [SHARED_DESKTOP_NAMED_PORT.name]: SHARED_DESKTOP_NAMED_PORT.port,
+        }
+      : workspaceAppPorts;
 
   const authBypassHeaderValue = taskRun.authBypassValue ?? undefined;
 
@@ -116,6 +141,7 @@ export function buildServiceContextForPreviewProxy(
     publicKey: workerEnv.previewAuthPublicKey,
     proxyPorts: taskRun.proxyPorts ?? undefined,
     appPorts,
+    appOrigin: resolveAppOrigin(workerEnv.roomoteAppUrl),
     unauthenticatedPorts,
     subdomains,
     primaryPortName,
