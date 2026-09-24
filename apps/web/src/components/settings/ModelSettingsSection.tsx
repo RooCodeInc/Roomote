@@ -71,6 +71,7 @@ import { type EditableRuntimeModelOption } from './TaskModelSelect';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
+  REASONING_EFFORT_VALUES,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
   XAI_SUBSCRIPTION_PROVIDER_ID,
@@ -616,6 +617,49 @@ function getRecommendedRoleReasoningEfforts(
     explore: recommended.roomoteExploreModelReasoningEffort,
     planning: recommended.roomotePlanningModelReasoningEffort,
   };
+}
+
+function normalizeReasoningEffortForModel(
+  reasoningEffort: ReasoningEffort | null,
+  metadata: TaskModelMetadata | null | undefined,
+): ReasoningEffort | null {
+  if (metadata?.supportsReasoning === false) {
+    return null;
+  }
+
+  const supportedEfforts = metadata?.supportedReasoningEfforts;
+  if (!supportedEfforts) {
+    return reasoningEffort;
+  }
+
+  if (reasoningEffort === null || supportedEfforts.length === 0) {
+    return null;
+  }
+
+  if (supportedEfforts.includes(reasoningEffort)) {
+    return reasoningEffort;
+  }
+
+  const requestedIndex = REASONING_EFFORT_VALUES.indexOf(reasoningEffort);
+  return (
+    supportedEfforts.reduce<ReasoningEffort | undefined>(
+      (closest, candidate) => {
+        if (!closest) {
+          return candidate;
+        }
+
+        const candidateDistance = Math.abs(
+          REASONING_EFFORT_VALUES.indexOf(candidate) - requestedIndex,
+        );
+        const closestDistance = Math.abs(
+          REASONING_EFFORT_VALUES.indexOf(closest) - requestedIndex,
+        );
+
+        return candidateDistance < closestDistance ? candidate : closest;
+      },
+      undefined,
+    ) ?? null
+  );
 }
 
 type PendingLookupState =
@@ -1966,9 +2010,10 @@ export function ModelSettingsSection({
         modelId,
         reasoningEffort: status?.reasoningManagedByEnv
           ? roleDrafts[role].reasoningEffort
-          : option.metadata?.supportsReasoning === false
-            ? null
-            : roleMapping.reasoningEffort,
+          : normalizeReasoningEffortForModel(
+              roleMapping.reasoningEffort,
+              option.metadata,
+            ),
       };
     }
 

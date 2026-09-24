@@ -1855,6 +1855,59 @@ describe('ModelSettingsSection', () => {
     );
   });
 
+  it('normalizes saved reasoning efforts against each model’s current metadata', async () => {
+    const data = buildSettingsData();
+    const codingMetadata = data.models[0]!.metadata as TaskModelMetadata;
+    codingMetadata.supportsReasoning = false;
+    const helperMetadata = data.models[1]!.metadata as TaskModelMetadata;
+    helperMetadata.supportsReasoning = true;
+    helperMetadata.supportedReasoningEfforts = ['low', 'high', 'max'];
+    settingsData.current = data;
+    customPresetsData.current = [
+      {
+        id: 'reasoning-preset',
+        name: 'Reasoning changed upstream',
+        roles: buildUserModelMapping(
+          {
+            helper: 'openrouter/z-ai/glm-5.2',
+            codeReview: 'openrouter/z-ai/glm-5.2',
+          },
+          {
+            coding: 'high',
+            helper: 'xhigh',
+            codeReview: 'medium',
+          },
+        ),
+      },
+    ];
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Custom preset: Reasoning changed upstream',
+      }),
+    );
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Apply',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codingModelReasoningEffort: null,
+        helperModelReasoningEffort: 'high',
+        codeReviewModelReasoningEffort: 'low',
+      }),
+    );
+  });
+
   it('keeps stale custom presets visible but prevents applying them', async () => {
     settingsData.current = buildSettingsData();
     customPresetsData.current = [
