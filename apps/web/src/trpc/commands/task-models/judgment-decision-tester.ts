@@ -74,9 +74,7 @@ export const judgmentDecisionTestSchema = z
     `The state and questions must stay under ${MAX_REQUEST_CHARS.toLocaleString()} characters.`,
   );
 
-type JudgmentDecisionTestInput = z.infer<
-  typeof judgmentDecisionTestSchema
->;
+type JudgmentDecisionTestInput = z.infer<typeof judgmentDecisionTestSchema>;
 
 // Per process, per admin: enough for hand testing, not for scripting load.
 const recentTests = new Map<string, number[]>();
