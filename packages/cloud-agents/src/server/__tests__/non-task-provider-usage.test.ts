@@ -62,7 +62,7 @@ import {
   resolveOpenCodeSmallModel,
 } from '../non-task-provider-usage';
 
-const DEFAULT_OPENCODE_CLI_VERSION = '1.18.30';
+const DEFAULT_OPENCODE_CLI_VERSION = '1.18.32';
 
 type SpawnedServer = EventEmitter & {
   stdout: EventEmitter;
@@ -4005,6 +4005,16 @@ describe('non-task OpenCode image packaging', () => {
     const workerDockerfile = fs.readFileSync(
       new URL('../../../../../apps/worker/Dockerfile', import.meta.url),
       'utf8',
+    );
+    const cloudAgentsPackage = JSON.parse(
+      fs.readFileSync(
+        new URL('../../../package.json', import.meta.url),
+        'utf8',
+      ),
+    ) as { dependencies: { '@opencode-ai/sdk': string } };
+
+    expect(cloudAgentsPackage.dependencies['@opencode-ai/sdk']).toBe(
+      DEFAULT_OPENCODE_CLI_VERSION,
     );
 
     expect(getOpenCodeCliVersionArg(workerDockerfile)).toBe(
