@@ -3,22 +3,20 @@
 Serves the decision contract Roomote's `roomote` judgment backend calls
 (`POST /v1/decisions` with `{state, questions}`, answered with `{answers}`),
 backed by a GLiNER 2.5 classifier, so a deployment without a Jev key or a GPU
-endpoint can still run skill and tool reranks, the Memory check, and the other
+endpoint can still run the Memory check, reply addressing, and Roomote's other
 typed decisions. Point Roomote at it with `R_JUDGMENT_UPSTREAM_URL`.
 
 Each question becomes one GLiNER classification task: the first sentence of
 its instructions is the task name, the full instructions are the task's
 instruction, and its options are labels with descriptions (yes/no for `noul`,
 the criteria for `choice`, `level N` for `score`). Questions over the same
-state share one forward pass. A rerank question names its candidate by
-reference (`candidates.k12`, `tools.t3`), which an encoder cannot follow into
-a shared catalog, so each one is scored over a state holding only its
-candidate, and a whole rerank runs as one batch.
+state share one forward pass.
 
 Environment:
-  JUDGMENT_MODEL      GLiNER 2.5 checkpoint: a Hugging Face id or a local path.
-                      Required; a zero-shot base checkpoint is close to chance
-                      on Roomote's questions, so use a fine-tuned one.
+  JUDGMENT_MODEL      GLiNER 2.5 checkpoint: a Hugging Face id or a local path
+                      (default: roomote/roomote-judgment-gliner, fine-tuned on
+                      Roomote's decisions; a general-purpose checkpoint answers
+                      them close to chance).
   HF_TOKEN            For a private Hugging Face checkpoint.
   JUDGMENT_API_KEY    Bearer token callers must send; unset for a private
                       network where only Roomote can reach the sidecar.
@@ -38,9 +36,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from gliner2.classification import ClassificationSchema, Classifier
 
-MODEL = os.environ.get("JUDGMENT_MODEL", "").strip()
-if not MODEL:
-    raise SystemExit("JUDGMENT_MODEL is required: a fine-tuned GLiNER 2.5 checkpoint (Hugging Face id or path)")
+MODEL = os.environ.get("JUDGMENT_MODEL", "").strip() or "roomote/roomote-judgment-gliner"
 API_KEY = os.environ.get("JUDGMENT_API_KEY", "").strip()
 SERVED_MODEL = "roomote-judgment"
 
@@ -50,7 +46,6 @@ MAX_BODY_BYTES = 4 * 1024 * 1024
 # About the 2k-token state budget the model is trained with; longer states are
 # cut rather than slowing every request down.
 MAX_TEXT_CHARS = 8_000
-REFERENCE = re.compile(r"`(candidates|tools)\.([A-Za-z0-9_-]+)`")
 FIRST_SENTENCE = re.compile(r"(?<=[?.])\s")
 # GLiNER splices label and instruction strings into its own prompt; these
 # tokens would corrupt its alignment, so they are replaced wherever they appear.
@@ -132,57 +127,17 @@ def answer(question: dict, probabilities: dict[str, float]) -> dict:
             "confidence": round(max(levels), 4)}
 
 
-def rerank_row(state, question: dict):
-    """(instructions naming candidate `k0`, a state holding only that
-    candidate) for a rerank question, or None. Every candidate of a rerank is
-    renamed to the same key so the whole rerank shares one schema and runs as
-    one batch."""
-    match = REFERENCE.search(question["instructions"])
-    if not match or not isinstance(state, dict):
-        return None
-    field, key = match.groups()
-    pool = state.get(field)
-    if not isinstance(pool, dict) or key not in pool:
-        return None
-    instructions = question["instructions"].replace(match.group(0), f"`{field}.k0`")
-    return instructions, {**state, field: {"k0": pool[key]}}
-
-
 def decide(state, questions: dict) -> dict:
-    answers: dict = {}
-    shared: dict = {}
-    batches: dict[str, list] = {}
+    schema, names = ClassificationSchema(), {}
     for qid, question in questions.items():
-        row = rerank_row(state, question)
-        if row is None:
-            shared[qid] = question
-            continue
-        instructions, narrowed = row
-        normalized = {**question, "instructions": instructions}
-        group = json.dumps([normalized["type"], instructions, normalized.get("criteria")], sort_keys=True)
-        batches.setdefault(group, []).append((qid, normalized, narrowed))
-
+        name, labels, instruction = task(question)
+        while name in names.values():
+            name += " ."
+        names[qid] = name
+        schema = schema.single(name, labels, instruction=instruction)
     with torch.inference_mode():
-        for rows in batches.values():
-            name, labels, instruction = task(rows[0][1])
-            schema = ClassificationSchema().single(name, labels, instruction=instruction)
-            # GLiNER's default batch size: larger batches measured no faster on
-            # CPU (the cores are already busy) and doubled peak memory.
-            results = classifier.batch_classify([text_of(narrowed) for _, _, narrowed in rows], schema)
-            for (qid, question, _), result in zip(rows, results):
-                answers[qid] = answer(question, result.to_dict()[name]["probabilities"])
-        if shared:
-            schema, names = ClassificationSchema(), {}
-            for qid, question in shared.items():
-                name, labels, instruction = task(question)
-                while name in names.values():
-                    name += " ."
-                names[qid] = name
-                schema = schema.single(name, labels, instruction=instruction)
-            result = classifier.classify(text_of(state), schema).to_dict()
-            for qid, question in shared.items():
-                answers[qid] = answer(question, result[names[qid]]["probabilities"])
-    return answers
+        result = classifier.classify(text_of(state), schema).to_dict()
+    return {qid: answer(question, result[names[qid]]["probabilities"]) for qid, question in questions.items()}
 
 
 @app.post("/v1/decisions")

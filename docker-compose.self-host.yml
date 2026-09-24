@@ -322,12 +322,13 @@ services:
     volumes:
       - gbrain_data:/data
 
-  # Optional CPU decision model (judgment sidecar): skill and tool reranks,
-  # the Memory check, and the other typed decisions without a Jev key or a
-  # GPU. Enable with COMPOSE_PROFILES=judgment, set JUDGMENT_MODEL to a
-  # fine-tuned GLiNER 2.5 checkpoint, and point Roomote at it with
-  # R_JUDGMENT_UPSTREAM_URL=http://judgment:8080. The memory and CPU caps
-  # bound what inference can take from the host.
+  # Optional CPU decision model (judgment sidecar): the Memory check, reply
+  # addressing, and Roomote's other typed decisions without a Jev key or a
+  # GPU. Enable with COMPOSE_PROFILES=judgment and point Roomote at it with
+  # R_JUDGMENT_UPSTREAM_URL=http://judgment:8080. It serves
+  # roomote/roomote-judgment-gliner unless JUDGMENT_MODEL names another
+  # GLiNER 2.5 checkpoint. The memory and CPU caps bound what inference can
+  # take from the host.
   judgment:
     profiles: [judgment]
     container_name: roomote-judgment
@@ -335,7 +336,7 @@ services:
     restart: unless-stopped
     networks: [default]
     environment:
-      JUDGMENT_MODEL: ${JUDGMENT_MODEL:-}
+      JUDGMENT_MODEL: ${JUDGMENT_MODEL:-roomote/roomote-judgment-gliner}
       HF_TOKEN: ${JUDGMENT_HF_TOKEN:-}
       JUDGMENT_API_KEY: ${R_JUDGMENT_UPSTREAM_API_KEY:-}
       JUDGMENT_THREADS: ${JUDGMENT_CPUS:-4}
