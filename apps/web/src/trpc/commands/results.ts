@@ -47,6 +47,13 @@ export type ResultAction =
       initialPrompt: string;
     };
 
+export type ResultPullRequest = {
+  url: string;
+  title: string | null;
+  repository: string | null;
+  number: number | null;
+};
+
 export type ResultInboxItem = {
   id: string;
   kind: 'report' | 'suggestion';
@@ -59,6 +66,7 @@ export type ResultInboxItem = {
   automationKey: BackgroundAutomationKey | null;
   preparationStatus: AutomationResultPreparationStatus | 'not_required';
   actions: ResultAction[];
+  pullRequests: ResultPullRequest[];
 };
 
 const visibleReport = () =>
@@ -134,6 +142,7 @@ export async function listResultsCommand(
     db
       .select({
         id: workItems.id,
+        sourceTaskId: tasks.id,
         automationKey: workItems.automationKey,
         automationName: workItems.resultAutomationName,
         headline: workItems.title,
@@ -143,6 +152,14 @@ export async function listResultsCommand(
         status: workItems.status,
       })
       .from(workItems)
+      .leftJoin(
+        tasks,
+        and(
+          eq(tasks.id, workItems.sourceTaskId),
+          isNull(tasks.deletedAt),
+          privateTaskAccess(auth),
+        ),
+      )
       .where(
         and(
           visibleSuggestion(),
@@ -157,9 +174,17 @@ export async function listResultsCommand(
       .limit(100),
   ]);
 
-  const taskIds = reports
+  const reportTaskIds = reports
     .map((report) => report.sourceTaskId)
     .filter((taskId): taskId is string => Boolean(taskId));
+  const taskIds = [
+    ...new Set(
+      [
+        ...reportTaskIds,
+        ...suggestions.map((suggestion) => suggestion.sourceTaskId),
+      ].filter((taskId): taskId is string => Boolean(taskId)),
+    ),
+  ];
   const pullRequests =
     taskIds.length === 0
       ? []
@@ -168,13 +193,18 @@ export async function listResultsCommand(
             taskId: taskPullRequests.taskId,
             url: taskPullRequests.prUrl,
             title: taskPullRequests.prTitle,
+            repository: taskPullRequests.repository,
+            number: taskPullRequests.prNumber,
             createdByRoomote: taskPullRequests.createdByRoomote,
           })
           .from(taskPullRequests)
           .where(inArray(taskPullRequests.taskId, taskIds))
-          .orderBy(desc(taskPullRequests.createdByRoomote));
+          .orderBy(
+            desc(taskPullRequests.createdByRoomote),
+            desc(taskPullRequests.detectedAt),
+          );
   const artifacts =
-    taskIds.length === 0
+    reportTaskIds.length === 0
       ? []
       : await db
           .select({
@@ -185,16 +215,23 @@ export async function listResultsCommand(
           .from(taskArtifacts)
           .where(
             and(
-              inArray(taskArtifacts.taskId, taskIds),
+              inArray(taskArtifacts.taskId, reportTaskIds),
               eq(taskArtifacts.uploaded, true),
             ),
           )
           .orderBy(desc(taskArtifacts.createdAt));
-  const pullRequestByTaskId = new Map<string, (typeof pullRequests)[number]>();
+  const pullRequestsByTaskId = new Map<string, ResultPullRequest[]>();
   for (const pullRequest of pullRequests) {
-    if (!pullRequestByTaskId.has(pullRequest.taskId)) {
-      pullRequestByTaskId.set(pullRequest.taskId, pullRequest);
-    }
+    const url = safeExternalUrl(pullRequest.url);
+    if (!url) continue;
+    const associated = pullRequestsByTaskId.get(pullRequest.taskId) ?? [];
+    associated.push({
+      url,
+      title: pullRequest.title,
+      repository: pullRequest.repository,
+      number: pullRequest.number,
+    });
+    pullRequestsByTaskId.set(pullRequest.taskId, associated);
   }
   const artifactByTaskId = new Map<string, (typeof artifacts)[number]>();
   for (const artifact of artifacts) {
@@ -229,16 +266,16 @@ export async function listResultsCommand(
           external: false,
         });
       }
-      const pullRequest = report.sourceTaskId
-        ? pullRequestByTaskId.get(report.sourceTaskId)
-        : null;
-      const pullRequestUrl = safeExternalUrl(pullRequest?.url ?? null);
-      if (pullRequestUrl) {
+      const resultPullRequests = report.sourceTaskId
+        ? (pullRequestsByTaskId.get(report.sourceTaskId) ?? [])
+        : [];
+      const pullRequest = resultPullRequests[0];
+      if (pullRequest) {
         actions.push({
           kind: 'navigate',
           action: 'open_pr',
           label: pullRequest?.title ? 'Open pull request' : 'Open PR',
-          href: pullRequestUrl,
+          href: pullRequest.url,
           external: true,
         });
       }
@@ -269,6 +306,7 @@ export async function listResultsCommand(
         preparationStatus: report.preparationStatus,
         createdAt: report.createdAt,
         actions,
+        pullRequests: resultPullRequests,
       };
     }),
     ...suggestions.map(
@@ -283,6 +321,9 @@ export async function listResultsCommand(
         priority: suggestion.priority ?? 'normal',
         preparationStatus: 'not_required',
         createdAt: suggestion.createdAt,
+        pullRequests: suggestion.sourceTaskId
+          ? (pullRequestsByTaskId.get(suggestion.sourceTaskId) ?? [])
+          : [],
         actions:
           suggestion.status === 'open'
             ? [

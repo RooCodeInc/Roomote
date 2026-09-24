@@ -1,6 +1,13 @@
 'use client';
 
-import { startTransition, useEffect, useRef, useState, type Ref } from 'react';
+import {
+  Fragment,
+  startTransition,
+  useEffect,
+  useRef,
+  useState,
+  type Ref,
+} from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -26,6 +33,7 @@ import {
   X,
 } from '@/components/system';
 import { MessageResponse } from '@/components/ai-elements';
+import { PullRequestBadge } from '@/components/sandbox';
 import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
@@ -340,7 +348,7 @@ export function ResultsPage() {
       if (editable) return;
 
       const ordinaryControl = element?.closest(
-        'a, button:not([role="option"]), [role="button"]',
+        'a, button:not([data-result-select]), [role="button"]',
       );
       if (ordinaryControl) return;
 
@@ -451,7 +459,7 @@ export function ResultsPage() {
                 <div className="relative h-full min-h-0 overflow-hidden bg-background">
                   <div
                     ref={resultListRef}
-                    role="listbox"
+                    role="list"
                     aria-label="Pending automation results"
                     className="scroll-thin h-full overflow-y-auto divide-y divide-card bg-background"
                     onScroll={updateResultScrollBoundaries}
@@ -460,64 +468,95 @@ export function ResultsPage() {
                       const key = resultKey(result);
                       const isSelected = selectedKey === key;
                       return (
-                        <button
+                        <div
                           key={key}
-                          ref={(node) => {
-                            if (node) rowRefs.current.set(key, node);
-                            else rowRefs.current.delete(key);
-                          }}
-                          type="button"
-                          role="option"
-                          aria-selected={isSelected}
+                          role="listitem"
                           className={cn(
-                            'group flex w-full cursor-pointer items-start gap-3 py-4 pr-3 pl-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                            'transition-colors',
                             isSelected
                               ? 'bg-accent-foreground text-black'
                               : 'hover:bg-accent-foreground/10',
                           )}
-                          onClick={() => selectResult(result)}
                         >
-                          <AutomationAvatar result={result} />
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-start gap-2">
-                              <span className="line-clamp-2 flex-1 text-base font-medium leading-snug">
-                                {result.headline}
+                          <button
+                            ref={(node) => {
+                              if (node) rowRefs.current.set(key, node);
+                              else rowRefs.current.delete(key);
+                            }}
+                            type="button"
+                            aria-current={isSelected ? 'true' : undefined}
+                            data-result-select
+                            className={cn(
+                              'flex w-full cursor-pointer items-start gap-3 pt-4 pr-3 pb-0 pl-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                              isSelected ? 'text-black' : 'text-foreground',
+                            )}
+                            onClick={() => selectResult(result)}
+                          >
+                            <AutomationAvatar result={result} />
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-start gap-2">
+                                <span className="line-clamp-2 flex-1 text-base font-medium leading-snug">
+                                  {result.headline}
+                                </span>
+                                <PriorityMarker
+                                  result={result}
+                                  selected={isSelected}
+                                />
                               </span>
-                              <PriorityMarker
-                                result={result}
-                                selected={isSelected}
-                              />
-                            </span>
-                            <span
-                              className={cn(
-                                'mt-1 line-clamp-3 block text-sm leading-snug',
-                                isSelected
-                                  ? 'text-black/80'
-                                  : 'text-muted-foreground',
-                              )}
-                            >
-                              {result.decisionContext}
-                            </span>
-                            <span
-                              className={cn(
-                                'mt-2 flex items-center gap-1.5 text-xs',
-                                isSelected
-                                  ? 'text-black/75'
-                                  : 'text-muted-foreground',
-                              )}
-                            >
-                              <span className="truncate">
-                                {result.automationName}
-                              </span>
-                              <span aria-hidden="true">·</span>
-                              <span className="shrink-0">
-                                {formatDistanceToNowCompact(result.createdAt, {
-                                  addSuffix: true,
-                                })}
+                              <span
+                                className={cn(
+                                  'mt-1 line-clamp-3 block text-sm leading-snug',
+                                  isSelected
+                                    ? 'text-black/80'
+                                    : 'text-muted-foreground',
+                                )}
+                              >
+                                {result.decisionContext}
                               </span>
                             </span>
-                          </span>
-                        </button>
+                          </button>
+                          <div
+                            className={cn(
+                              'mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 pr-3 pb-4 pl-[2.875rem] text-xs',
+                              isSelected
+                                ? 'text-black/75'
+                                : 'text-muted-foreground',
+                            )}
+                          >
+                            <span className="max-w-[55%] truncate">
+                              {result.automationName}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className="shrink-0">
+                              {formatDistanceToNowCompact(result.createdAt, {
+                                addSuffix: true,
+                              })}
+                            </span>
+                            {result.pullRequests.length > 0 ? (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                {result.pullRequests.map(
+                                  (pullRequest, index) => (
+                                    <Fragment key={pullRequest.url}>
+                                      {index > 0 ? (
+                                        <span aria-hidden="true">·</span>
+                                      ) : null}
+                                      <PullRequestBadge
+                                        repo={pullRequest.repository}
+                                        prNumber={pullRequest.number}
+                                        url={pullRequest.url}
+                                        title={pullRequest.title}
+                                        size="xs"
+                                        className="max-w-[12rem] min-w-0 text-inherit"
+                                        iconClassName="text-inherit"
+                                      />
+                                    </Fragment>
+                                  ),
+                                )}
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
                       );
                     })}
                   </div>

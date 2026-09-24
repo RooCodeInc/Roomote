@@ -35,6 +35,20 @@ const results: ResultInboxItem[] = [
     priority: 'critical',
     preparationStatus: 'ready',
     createdAt: new Date('2026-09-11T10:00:00Z'),
+    pullRequests: [
+      {
+        url: 'https://github.com/RooCodeInc/Roomote/pull/1',
+        title: 'Add result links',
+        repository: 'RooCodeInc/Roomote',
+        number: 1,
+      },
+      {
+        url: 'https://gitlab.com/RooCodeInc/Docs/-/merge_requests/12',
+        title: 'Update docs',
+        repository: 'RooCodeInc/Docs',
+        number: 12,
+      },
+    ],
     actions: [
       {
         kind: 'navigate',
@@ -63,6 +77,7 @@ const results: ResultInboxItem[] = [
     priority: 'high',
     preparationStatus: 'not_required',
     createdAt: new Date('2026-09-11T09:00:00Z'),
+    pullRequests: [],
     actions: [
       {
         kind: 'start_suggestion',
@@ -201,10 +216,10 @@ describe('ResultsPage', () => {
 
   it('starts collapsed and opens the selected report on desktop', async () => {
     renderPage();
-    const first = await screen.findByRole('option', {
+    const first = await screen.findByRole('button', {
       name: /Three dependency risks need review/,
     });
-    expect(first).toHaveAttribute('aria-selected', 'false');
+    expect(first).not.toHaveAttribute('aria-current');
     expect(
       screen.queryByRole('heading', {
         name: 'Three dependency risks need review',
@@ -243,6 +258,35 @@ describe('ResultsPage', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('shows all associated PRs with the shared badge format in the result footer', async () => {
+    renderPage();
+    const first = await screen.findByRole('button', {
+      name: /Three dependency risks need review/,
+    });
+    const githubPr = screen.getByRole('link', {
+      name: 'Roomote#1',
+    });
+    const gitlabPr = screen.getByRole('link', {
+      name: 'Docs#12',
+    });
+
+    expect(githubPr).toHaveAttribute(
+      'href',
+      'https://github.com/RooCodeInc/Roomote/pull/1',
+    );
+    expect(githubPr).toHaveAttribute('target', '_blank');
+    expect(githubPr).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(githubPr.querySelector('svg')).toBeInTheDocument();
+    expect(gitlabPr).toHaveAttribute(
+      'href',
+      'https://gitlab.com/RooCodeInc/Docs/-/merge_requests/12',
+    );
+    expect(first).not.toContainElement(githubPr);
+
+    const suggestionRow = screen.getAllByRole('listitem')[1]!;
+    expect(within(suggestionRow).queryByRole('link')).not.toBeInTheDocument();
+  });
+
   it('opens an explicitly selected result from the URL', async () => {
     mocks.searchParams = new URLSearchParams({
       result: `report:${results[0]!.id}`,
@@ -255,15 +299,15 @@ describe('ResultsPage', () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('option', {
+      screen.getByRole('button', {
         name: /Three dependency risks need review/,
       }),
-    ).toHaveAttribute('aria-selected', 'true');
+    ).toHaveAttribute('aria-current', 'true');
   });
 
   it('closes the selected detail panel without selecting another result', async () => {
     renderPage();
-    const first = await screen.findByRole('option', {
+    const first = await screen.findByRole('button', {
       name: /Three dependency risks need review/,
     });
     fireEvent.click(first);
@@ -282,13 +326,13 @@ describe('ResultsPage', () => {
         }),
       ).not.toBeInTheDocument(),
     );
-    expect(first).toHaveAttribute('aria-selected', 'false');
+    expect(first).not.toHaveAttribute('aria-current');
   });
 
   it('opens mobile detail explicitly and returns to the mounted list', async () => {
     mocks.isDesktop = false;
     renderPage();
-    const row = await screen.findByRole('option', {
+    const row = await screen.findByRole('button', {
       name: /Three dependency risks need review/,
     });
     expect(
@@ -311,7 +355,7 @@ describe('ResultsPage', () => {
   it('clears the selected result without treating selection as disposition', async () => {
     renderPage();
     fireEvent.click(
-      await screen.findByRole('option', {
+      await screen.findByRole('button', {
         name: /Three dependency risks need review/,
       }),
     );
@@ -330,7 +374,7 @@ describe('ResultsPage', () => {
   it('does not duplicate suggestion context when the result has no body', async () => {
     renderPage();
     fireEvent.click(
-      await screen.findByRole('option', { name: /Simplify the worker/ }),
+      await screen.findByRole('button', { name: /Simplify the worker/ }),
     );
 
     await screen.findByRole('heading', { name: 'Simplify the worker' });
@@ -342,7 +386,7 @@ describe('ResultsPage', () => {
   it('starts work only from a persisted suggestion and accepts after launch', async () => {
     renderPage();
     fireEvent.click(
-      await screen.findByRole('option', { name: /Simplify the worker/ }),
+      await screen.findByRole('button', { name: /Simplify the worker/ }),
     );
     fireEvent.click(
       await screen.findByRole('button', { name: 'Start investigation' }),
@@ -388,14 +432,14 @@ describe('ResultsPage', () => {
     );
     renderPage();
     fireEvent.click(
-      await screen.findByRole('option', {
+      await screen.findByRole('button', {
         name: /Three dependency risks need review/,
       }),
     );
     await screen.findByText('Full report');
 
     fireEvent.click(
-      screen.getByRole('option', { name: /Simplify the worker/ }),
+      screen.getByRole('button', { name: /Simplify the worker/ }),
     );
     expect(screen.getByText('Full report')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open task' })).toBeNull();
@@ -429,16 +473,16 @@ describe('ResultsPage', () => {
     );
     renderPage();
     fireEvent.click(
-      await screen.findByRole('option', {
+      await screen.findByRole('button', {
         name: /Three dependency risks need review/,
       }),
     );
     await screen.findByText('Full report');
     fireEvent.click(
-      screen.getByRole('option', { name: /Simplify the worker/ }),
+      screen.getByRole('button', { name: /Simplify the worker/ }),
     );
     fireEvent.click(
-      screen.getByRole('option', {
+      screen.getByRole('button', {
         name: /Three dependency risks need review/,
       }),
     );
@@ -464,13 +508,13 @@ describe('ResultsPage', () => {
     );
     renderPage();
     fireEvent.click(
-      await screen.findByRole('option', {
+      await screen.findByRole('button', {
         name: /Three dependency risks need review/,
       }),
     );
     await screen.findByText('Full report');
     fireEvent.click(
-      screen.getByRole('option', { name: /Simplify the worker/ }),
+      screen.getByRole('button', { name: /Simplify the worker/ }),
     );
 
     expect(
@@ -486,7 +530,7 @@ describe('ResultsPage', () => {
 
   it('navigates rows with arrows and activates the current main action with Enter', async () => {
     renderPage();
-    const first = await screen.findByRole('option', {
+    const first = await screen.findByRole('button', {
       name: /Three dependency risks need review/,
     });
     fireEvent.keyDown(document.body, { key: 'ArrowDown' });
@@ -494,9 +538,9 @@ describe('ResultsPage', () => {
     first.focus();
     fireEvent.keyDown(first, { key: 'ArrowDown' });
 
-    const second = screen.getByRole('option', { name: /Simplify the worker/ });
+    const second = screen.getByRole('button', { name: /Simplify the worker/ });
     await waitFor(() => expect(second).toHaveFocus());
-    expect(second).toHaveAttribute('aria-selected', 'true');
+    expect(second).toHaveAttribute('aria-current', 'true');
     await screen.findByRole('button', { name: 'Start investigation' });
 
     fireEvent.keyDown(document.body, { key: 'Enter' });
@@ -511,7 +555,7 @@ describe('ResultsPage', () => {
   it('clears the current result with Delete without double activation', async () => {
     renderPage();
     fireEvent.click(
-      await screen.findByRole('option', {
+      await screen.findByRole('button', {
         name: /Three dependency risks need review/,
       }),
     );
