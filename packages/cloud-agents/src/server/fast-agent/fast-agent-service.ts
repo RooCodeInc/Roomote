@@ -268,7 +268,6 @@ import {
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
-import { resolveFastAgentRoutingHint } from './fast-agent-routing-hint';
 import { resolveFastAgentLaunchModel } from './fast-agent-launch-model';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
@@ -1666,7 +1665,6 @@ function buildFastAgentMessages({
   resumedAfterInferenceRetry = false,
   previousAttempt,
   voiceMode = false,
-  routingHint,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -1688,8 +1686,6 @@ function buildFastAgentMessages({
   /** What an earlier attempt at this same turn already did, when resuming. */
   previousAttempt?: FastAgentTurnAttemptSummary | null;
   voiceMode?: boolean;
-  /** Advisory environment pick for the first request of a new Session. */
-  routingHint?: string;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -1728,9 +1724,6 @@ function buildFastAgentMessages({
   const currentUserMessageText = [
     voiceMode ? '<voice_mode active="true" />' : undefined,
     explicitSkillInvocationContext,
-    routingHint
-      ? `<routing_hint>\n${escapeFastAgentEnvelopeText(routingHint)}\n</routing_hint>`
-      : undefined,
     wrappedCurrentUserMessageText,
   ]
     .filter((entry): entry is string => Boolean(entry))
@@ -3559,30 +3552,12 @@ export async function answerFastAgentQuestion({
         return [];
       }),
     ]);
-    // The judgment model's environment pick is only useful before the Session
-    // has chosen where its work runs, so it is requested for what looks like
-    // the first human request and used only once persistence confirms it.
     const priorAssistant = session.compatibilityMessages
       .filter((message) => message.role === 'assistant')
       .at(-1);
     priorAssistantMessage = priorAssistant
       ? extractModelMessageText(priorAssistant).join('\n')
       : undefined;
-    const routingHintRequest =
-      substantiveHumanInput &&
-      !setupSession &&
-      !resumedAfterInterruption &&
-      !resumedAfterInferenceRetry &&
-      !session.openCodeSessionId &&
-      session.compatibilityMessages.length === 0
-        ? resolveFastAgentRoutingHint({
-            request: normalizeThreadText(question),
-            threadContext,
-            environments: availableEnvironments,
-            routingRules:
-              agentBehaviorSettings?.workspaceRoutingSettings?.rules,
-          })
-        : undefined;
     const [personalizationContext, availableSkills] = await Promise.all([
       platformEvent
         ? null
@@ -3857,9 +3832,6 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
-    const routingHint = userMessageResult?.initialHumanTurn
-      ? await routingHintRequest
-      : undefined;
     const collectUserMessageTexts = (): string[] => [
       ...new Set([
         ...threadContext
@@ -3891,7 +3863,6 @@ export async function answerFastAgentQuestion({
       resumedAfterInferenceRetry,
       previousAttempt,
       voiceMode,
-      routingHint: routingHint?.context,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,

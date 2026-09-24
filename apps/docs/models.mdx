@@ -304,7 +304,7 @@ model shown on the delegated task.
 
 The judgment model is optional. Many routing and triage steps are bounded
 decisions rather than text: whether a channel message should start work, which
-environment fits a request, or whether a thread reply is meant for Roomote.
+model a delegated task needs, or whether a thread reply is meant for Roomote.
 A judgment model answers these as typed questions with probabilities in one
 fast call. Roomote supports a judgment model it runs itself and TypeSafe's Jev
 through these routes:
@@ -343,8 +343,6 @@ When a judgment model is on, Roomote asks it first for:
 - whether an unmentioned reply in a Slack, Discord, or Teams thread is meant
   for Roomote after someone else spoke; it routes the reply only when
   confident, and otherwise Roomote still needs a mention
-- the environment that best fits the first request in a new session, as
-  an advisory hint the session still verifies
 - dropping inbound [email](/providers/communications/agentmail) that is
   clearly an automatic reply, such as an out-of-office or bounce notice
 - whether a settled session or task turn holds something worth saving to

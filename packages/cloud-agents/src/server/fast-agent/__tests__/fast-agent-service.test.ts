@@ -1154,44 +1154,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('adds a judgment-model routing hint to the first request of a new Session only', async () => {
-    mocks.getEnvironments.mockResolvedValue([
-      { id: 'env-1', name: 'App', repositoryNames: ['acme/app'] },
-      { id: 'env-2', name: 'Infra', repositoryNames: ['acme/infra'] },
-    ]);
-    mocks.evaluateJudgments.mockResolvedValue({
-      environment: {
-        type: 'choice',
-        choice: 'env_2',
-        confidence: 0.82,
-        probabilities: { env_2: 0.82 },
-      },
-    });
-
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-    mocks.getSession.mockResolvedValue({
-      id: 'conversation-1',
-      compatibilityMessages: [],
-      openCodeSessionId: 'opencode-session-1',
-    });
-    mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: false });
-    await answerFastAgentQuestion({
-      ...baseParams,
-      question: 'And the staging cluster too?',
-      currentMessageId: '100.3',
-      adapter: callbacks(),
-    });
-
-    const firstTurn = mocks.generateText.mock.calls[0]?.[0];
-    const followUp = mocks.generateText.mock.calls[1]?.[0];
-    expect(firstTurn?.prompt).toContain(
-      '<routing_hint>\nRouting hint: Infra [id: env-2] looks like the best environment (judgment model confidence 0.82). Verify against the configured routing rules before delegating, and ask when the request is still ambiguous.',
-    );
-    expect(followUp?.prompt).not.toContain('<routing_hint>');
-    expect(followUp?.system).toBe(firstTurn?.system);
-    expect(mocks.evaluateJudgments).toHaveBeenCalledTimes(1);
-  });
-
   it('keeps the system prompt stable when voice mode changes', async () => {
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
     await answerFastAgentQuestion({
