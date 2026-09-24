@@ -63,14 +63,14 @@ describe('getTaskRunPromptText', () => {
 });
 
 describe('getTaskRunVisiblePrompt', () => {
-  it('keeps human-authored shortcut prompts visible in task detail', () => {
+  it('keeps an explicitly visible human shortcut prompt in task detail', () => {
     expect(
       getTaskRunVisiblePrompt(
         buildTaskRun({
           repo: 'Roomote/example-app',
           description: '$review-code Check this change',
+          visibleInTranscript: true,
         } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
-        { initiatorKind: 'user' },
       ),
     ).toEqual({
       text: '$review-code Check this change',
@@ -87,8 +87,8 @@ describe('getTaskRunVisiblePrompt', () => {
           user: 'U123',
           ts: '123.000',
           repo: 'Roomote/example-app',
+          visibleInTranscript: true,
         } satisfies TaskPayload<typeof TaskPayloadKind.SlackAppMention>),
-        { initiatorKind: 'user' },
       ),
     ).toEqual({
       text: '$review-code Check this change',
@@ -104,12 +104,11 @@ describe('getTaskRunVisiblePrompt', () => {
           description: '$environment-setup Set up the environment',
           visibleInTranscript: false,
         } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
-        { initiatorKind: 'user' },
       ),
     ).toMatchObject({ visibleInTranscript: false });
   });
 
-  it('keeps Roomote execution wrappers hidden for human-created tasks', () => {
+  it('keeps Roomote execution wrappers hidden', () => {
     expect(
       getTaskRunVisiblePrompt(
         buildTaskRun({
@@ -117,7 +116,17 @@ describe('getTaskRunVisiblePrompt', () => {
           description:
             '<workflow>Internal execution instructions</workflow>\n/request',
         } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
-        { initiatorKind: 'user' },
+      ),
+    ).toMatchObject({ visibleInTranscript: false });
+  });
+
+  it('keeps unflagged legacy command envelopes hidden', () => {
+    expect(
+      getTaskRunVisiblePrompt(
+        buildTaskRun({
+          repo: 'Roomote/example-app',
+          description: '$environment-setup Generated setup instructions',
+        } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
       ),
     ).toMatchObject({ visibleInTranscript: false });
   });

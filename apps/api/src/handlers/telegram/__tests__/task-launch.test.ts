@@ -109,6 +109,7 @@ describe('Telegram task topic launch', () => {
           payload: expect.objectContaining({
             reportConsumer: 'orchestrator',
             fastAgentSessionId: '66666666-6666-4666-8666-666666666666',
+            visibleInTranscript: true,
             fastAgentParent: expect.objectContaining({
               sessionId: '66666666-6666-4666-8666-666666666666',
             }),

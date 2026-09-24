@@ -1527,6 +1527,7 @@ async function launchTeamsTask(input: {
         ...(input.fastAgentParent
           ? buildFastAgentChildTaskMetadata(input.fastAgentParent)
           : {}),
+        visibleInTranscript: true,
       },
     };
   const launchResult = await enqueueTask(

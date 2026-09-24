@@ -183,6 +183,7 @@ describe('launchDiscordTask', () => {
             communicationThreadId: 'thread-41',
             communicationMessageId: 'thread-message-1',
             communicationSourceEventId: 'message-1',
+            visibleInTranscript: true,
             discordTaskThread: true,
           }),
         },

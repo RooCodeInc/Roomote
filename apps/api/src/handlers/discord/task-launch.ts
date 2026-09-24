@@ -473,6 +473,7 @@ export async function launchDiscordTask(input: {
                 : {}),
             }
           : {}),
+        visibleInTranscript: true,
       },
     };
 

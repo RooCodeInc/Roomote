@@ -754,6 +754,7 @@ describe('Teams webhook handler', () => {
           payload: expect.objectContaining({
             repo: 'acme/app',
             description: 'Fix the flaky test',
+            visibleInTranscript: true,
             reportConsumer: 'orchestrator',
             fastAgentSessionId: 'fast-1',
           }),

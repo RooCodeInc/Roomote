@@ -275,7 +275,7 @@ export async function launchTask(
         ? body.visibleInTranscript
         : body.hidden === true
           ? false
-          : taskTypePayload.visibleInTranscript;
+          : (taskTypePayload.visibleInTranscript ?? true);
 
     const workspacePayload =
       body.repo === NO_REPOSITORIES

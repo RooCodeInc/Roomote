@@ -2,7 +2,6 @@ import {
   isSystemInjectedAcpPromptText,
   normalizeTranscriptUserText,
   ACP_ENVELOPE_EVENT_TYPES,
-  type TaskInitiatorKind,
 } from '@roomote/types';
 
 import type { TaskRunDetail } from '@/lib/server';
@@ -80,7 +79,6 @@ export function getTaskRunPromptText(
 function getTaskRunPromptVisibility(
   taskRun: Pick<TaskRunDetail, 'payload'> | null | undefined,
   text?: string,
-  initiatorKind?: TaskInitiatorKind,
 ): boolean {
   if (!taskRun) {
     return true;
@@ -109,14 +107,9 @@ function getTaskRunPromptVisibility(
     !explicitSnapshotResumePrompt &&
     ('description' in taskRun.payload || 'text' in taskRun.payload);
 
-  const isCommandStylePrompt =
-    usesCommandStylePromptField &&
-    /^(?:\/|\$)[a-z0-9-]+(?:\s|$)/i.test(trimmed);
-
-  // A slash- or dollar-prefixed message can be a user's literal request (for
-  // example, an explicit skill invocation). Only infer that an unflagged
-  // command-style prompt is an execution envelope for non-human launches.
-  return !isCommandStylePrompt || initiatorKind === 'user';
+  return !(
+    usesCommandStylePromptField && /^(?:\/|\$)[a-z0-9-]+(?:\s|$)/i.test(trimmed)
+  );
 }
 
 function getTaskRunPromptImages(
@@ -135,13 +128,11 @@ function getTaskRunPromptImages(
 
 /**
  * Builds a session prompt from the task run's launch payload. Explicit
- * visibility remains authoritative, Roomote-injected wrappers stay hidden, and
- * a human initiator prevents literal slash/dollar-prefixed requests from being
- * mistaken for legacy hidden commands.
+ * visibility remains authoritative. Do not infer prompt authorship from the
+ * task initiator: internally generated task prompts can also be user-triggered.
  */
 export function getTaskRunVisiblePrompt(
   taskRun: Pick<TaskRunDetail, 'payload'> | null | undefined,
-  options: { initiatorKind?: TaskInitiatorKind } = {},
 ): TaskRunVisiblePrompt | null {
   const text = getTaskRunPromptText(taskRun);
 
@@ -159,10 +150,6 @@ export function getTaskRunVisiblePrompt(
   return {
     ...(visibleText ? { text: visibleText } : {}),
     ...(images && images.length > 0 ? { images } : {}),
-    visibleInTranscript: getTaskRunPromptVisibility(
-      taskRun,
-      text,
-      options.initiatorKind,
-    ),
+    visibleInTranscript: getTaskRunPromptVisibility(taskRun, text),
   };
 }

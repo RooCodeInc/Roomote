@@ -140,6 +140,7 @@ export async function launchTelegramTask(input: {
         ...(input.fastAgentParent
           ? buildFastAgentChildTaskMetadata(input.fastAgentParent)
           : {}),
+        visibleInTranscript: true,
       },
     };
   const launchResult = await enqueueTask(
