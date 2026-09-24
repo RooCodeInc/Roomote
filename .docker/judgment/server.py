@@ -21,7 +21,8 @@ Environment:
   JUDGMENT_API_KEY    Bearer token callers must send; unset for a private
                       network where only Roomote can reach the sidecar.
   JUDGMENT_THREADS    CPU threads for inference (default: all cores).
-  JUDGMENT_DEVICE     `cpu` (default) or `cuda` on a host with an NVIDIA GPU.
+  JUDGMENT_DEVICE     `cpu` (default), or `cuda` in an image built with CUDA
+                      torch (the published image is CPU-only).
   JUDGMENT_PRELOAD    `false` loads the model on the first decision instead of at
                       startup, so a sidecar deployed but not yet switched on
                       idles without it (default: `true`).

@@ -197,6 +197,9 @@ services:
         value: 'false'
       - key: JUDGMENT_THREADS
         value: '1'
+      # Bearer the app services present; mirrored onto them below.
+      - key: JUDGMENT_API_KEY
+        generateValue: true
 
   - type: web
     name: roomote-api
@@ -257,6 +260,11 @@ services:
           type: pserv
           name: roomote-gbrain
           envVarKey: GBRAIN_ADMIN_BOOTSTRAP_TOKEN
+      - key: R_JUDGMENT_UPSTREAM_API_KEY
+        fromService:
+          type: pserv
+          name: roomote-judgment
+          envVarKey: JUDGMENT_API_KEY
       # The Brain's on switch. Leave blank and the gbrain service idles
       # unused: no ingestion, no delivery to agents. Fill in either key (the
       # same value as your task provider key works, or a separate one to
@@ -354,6 +362,11 @@ services:
           type: pserv
           name: roomote-gbrain
           envVarKey: GBRAIN_ADMIN_BOOTSTRAP_TOKEN
+      - key: R_JUDGMENT_UPSTREAM_API_KEY
+        fromService:
+          type: pserv
+          name: roomote-judgment
+          envVarKey: JUDGMENT_API_KEY
       - key: R_BRAIN_OPENROUTER_API_KEY
         value: ''
       - key: R_BRAIN_OPENAI_API_KEY
@@ -418,10 +431,11 @@ envVarGroups:
         value: roomote
       - key: S3_REGION
         value: us-east-1
-      # The CPU decision model's on switch. Leave blank and roomote-judgment
+      # The CPU decision model's address. Leave blank and roomote-judgment
       # idles unused. Set it to http://<roomote-judgment internal address>
-      # (shown on that service's page, port 8080) to use it for routing and
-      # triage decisions; a TypeSafe key in Settings still selects Jev.
+      # (shown on that service's page, port 8080), then choose the Roomote
+      # judgment model in Settings > Models, to use it for routing and triage
+      # decisions.
       - key: R_JUDGMENT_UPSTREAM_URL
         value: ''
       - key: S3_BUCKET_ARTIFACTS

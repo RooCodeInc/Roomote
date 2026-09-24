@@ -55,7 +55,7 @@
 #   agents reach it only through the api proxy with their run token, and
 #   Railway private networking is IPv6-only, hence GBRAIN_BIND=::.
 # - The CPU decision model (judgment service) is optional and inert until
-#   R_JUDGMENT_UPSTREAM_URL on api points at it. Until then it idles without
+#   R_JUDGMENT_UPSTREAM_URL on api points at it and Settings selects it. Until then it idles without
 #   loading its model (JUDGMENT_PRELOAD=false), and it binds :: for the same
 #   IPv6-only private network.
 # - R_APP_URL on api is the single canonical-origin knob; the other
@@ -178,13 +178,16 @@ services:
       # Inference threads. Railway reports the host's cores, not a limit, so
       # this is set explicitly; raise it with the service's vCPU allowance.
       JUDGMENT_THREADS: '4'
+      # Bearer the app services present; generated on api.
+      JUDGMENT_API_KEY: ${{api.R_JUDGMENT_UPSTREAM_API_KEY}}
     notes: >
       Optional CPU decision model for routing and triage decisions (the Memory
       check, reply addressing, task updates, delegated-task model choice). It
       serves roomote/roomote-judgment-gliner, a public GLiNER 2.5 model
       fine-tuned on Roomote's decisions, and stays unused until
-      R_JUDGMENT_UPSTREAM_URL on api points at it (see "Enabling the decision
-      model" in README.md). Idle it uses about 250 MB; once switched on, about
+      R_JUDGMENT_UPSTREAM_URL on api points at it and the Roomote judgment
+      model is chosen in Settings > Models (see "Enabling the decision model"
+      in README.md). Idle it uses about 250 MB; once switched on, about
       1.5 GB. Tool-call auto-approval still requires Jev. Delete this service
       if the deployment should not run one.
 
@@ -249,11 +252,14 @@ services:
       # service as its bootstrap token; gbrain requires >= 32 characters of
       # [A-Za-z0-9_-], so keep the generated form.
       R_GBRAIN_ADMIN_TOKEN: ${{secret(48)}}
-      # The CPU decision model's on switch. Leave empty and the judgment
+      # The CPU decision model's address. Leave empty and the judgment
       # service idles unused. Set it to
-      # http://${{judgment.RAILWAY_PRIVATE_DOMAIN}}:8080 to use it for routing
-      # and triage decisions; a TypeSafe key in Settings still selects Jev.
+      # http://${{judgment.RAILWAY_PRIVATE_DOMAIN}}:8080, then choose the
+      # Roomote judgment model in Settings > Models, to use it for routing and
+      # triage decisions.
       R_JUDGMENT_UPSTREAM_URL: ''
+      # Bearer for the judgment service, shared with it by reference.
+      R_JUDGMENT_UPSTREAM_API_KEY: ${{secret(48)}}
       R_PING_BASE_URL: https://ping.roomote.dev # anonymous-analytics / version-check pings
       R_INSTANCE_ID: '' # optional deterministic Ping instance identity
       DEFAULT_COMPUTE_PROVIDER: modal
@@ -296,6 +302,7 @@ services:
       R_GBRAIN_URL: ${{api.R_GBRAIN_URL}}
       R_GBRAIN_ADMIN_TOKEN: ${{api.R_GBRAIN_ADMIN_TOKEN}}
       R_JUDGMENT_UPSTREAM_URL: ${{api.R_JUDGMENT_UPSTREAM_URL}}
+      R_JUDGMENT_UPSTREAM_API_KEY: ${{api.R_JUDGMENT_UPSTREAM_API_KEY}}
       R_APP_ENV: ${{api.R_APP_ENV}}
       ROOMOTE_DOCKER_LOAD_ENV_FILE: ${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
       R_AUTO_GENERATE_KEYS: ${{api.R_AUTO_GENERATE_KEYS}}

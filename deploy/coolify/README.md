@@ -296,9 +296,12 @@ TypeSafe key in **Settings → Models**, Jev answers them. Without one, the
 `judgment` service can: it runs `roomote/roomote-judgment-gliner`, a public
 GLiNER 2.5 model fine-tuned on Roomote's decisions, on CPU on your server.
 
-It is part of the resource and idles without loading its model. Set
-`R_JUDGMENT_UPSTREAM_URL=http://judgment:8080` in the resource's environment
-variables and redeploy to switch it on. The first decisions load the model
+It is part of the resource and idles without loading its model. To switch it
+on, set `R_JUDGMENT_UPSTREAM_URL=http://judgment:8080` in the resource's
+environment variables and redeploy, then choose **Roomote judgment model**
+under **Judgment model** in **Settings → Models** (or also set
+`R_JUDGMENT_MODEL=roomote`). Coolify generates a shared bearer key
+(`SERVICE_PASSWORD_64_JUDGMENT`) for the service and the app. The first decisions load the model
 (about 15 seconds, during which they fall back to Roomote's behavior without
 a decision model); after that it uses about 1.5 GB, capped by
 `JUDGMENT_MEMORY_LIMIT` (default `4g`) and `JUDGMENT_CPUS` (default `4`).

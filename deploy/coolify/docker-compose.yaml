@@ -88,11 +88,12 @@ x-roomote-shared-env: &roomote-shared-env
   # alphanumeric value, which satisfies gbrain's >= 32 characters of
   # [A-Za-z0-9_-]; SERVICE_BASE64_* would not.
   R_GBRAIN_ADMIN_TOKEN: ${SERVICE_PASSWORD_64_GBRAINADMIN}
-  # The CPU decision model's on switch. Leave it empty and the judgment
-  # service below idles unused; set it to http://judgment:8080 to use it for
-  # routing and triage decisions. A TypeSafe key in Settings still selects
-  # Jev. See "Enabling the decision model" in README.md.
+  # The CPU decision model's address. Leave it empty and the judgment
+  # service below idles unused; set it to http://judgment:8080, then choose
+  # the Roomote judgment model in Settings > Models, to use it for routing and
+  # triage decisions. See "Enabling the decision model" in README.md.
   R_JUDGMENT_UPSTREAM_URL: ${R_JUDGMENT_UPSTREAM_URL:-}
+  R_JUDGMENT_UPSTREAM_API_KEY: ${SERVICE_PASSWORD_64_JUDGMENT}
 
 services:
   postgres:
@@ -204,6 +205,7 @@ services:
     environment:
       JUDGMENT_PRELOAD: 'false'
       JUDGMENT_THREADS: ${JUDGMENT_CPUS:-4}
+      JUDGMENT_API_KEY: ${SERVICE_PASSWORD_64_JUDGMENT}
     mem_limit: ${JUDGMENT_MEMORY_LIMIT:-4g}
     cpus: ${JUDGMENT_CPUS:-4}
 

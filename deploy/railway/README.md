@@ -450,15 +450,21 @@ TypeSafe key in **Settings → Models**, Jev answers them. Without one, the
 `judgment` service can: it runs `roomote/roomote-judgment-gliner`, a public
 GLiNER 2.5 model fine-tuned on Roomote's decisions, on CPU inside the project.
 
-The service is part of the template and idles without loading its model. One
-variable on **api** turns it on:
+The service is part of the template and idles without loading its model. To
+switch it on:
 
-```
-R_JUDGMENT_UPSTREAM_URL=http://${{judgment.RAILWAY_PRIVATE_DOMAIN}}:8080
-```
+1. Set this variable on **api**; the other app services reference api's
+   value, so they pick it up on their next deploy:
 
-The other app services reference api's value, so they pick it up on their
-next deploy. The first decisions after that load the model (about 15 seconds,
+   ```
+   R_JUDGMENT_UPSTREAM_URL=http://${{judgment.RAILWAY_PRIVATE_DOMAIN}}:8080
+   ```
+
+2. In **Settings → Models**, choose **Roomote judgment model** under
+   **Judgment model** (or set `R_JUDGMENT_MODEL=roomote` on api).
+
+The template generates `R_JUDGMENT_UPSTREAM_API_KEY` on api and shares it with
+the service, so it only answers Roomote's own app services. The first decisions after that load the model (about 15 seconds,
 during which those decisions fall back to Roomote's behavior without a
 decision model); after that the service uses about 1.5 GB. It is reachable
 only over Railway's private network. Tool-call auto-approval still requires

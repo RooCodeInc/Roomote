@@ -428,9 +428,13 @@ loaded. To switch it on:
    the plan's CPU count.
 2. In the `roomote-shared` environment group, set `R_JUDGMENT_UPSTREAM_URL`
    to `http://<internal address>` using the internal address on the
-   `roomote-judgment` service page (port 8080).
+   `roomote-judgment` service page (port 8080). The app services pick it up
+   on their next deploy.
+3. In **Settings → Models**, choose **Roomote judgment model** under
+   **Judgment model** (or set `R_JUDGMENT_MODEL=roomote` in the group).
 
-The app services pick it up on their next deploy. The first decisions load
+The service generates its own bearer key (`JUDGMENT_API_KEY`), which the app
+services receive as `R_JUDGMENT_UPSTREAM_API_KEY`. The first decisions load
 the model (about 15 seconds, during which they fall back to Roomote's
 behavior without a decision model). Decisions run one at a time, so more
 CPUs make each one faster. Tool-call auto-approval still requires Jev.
