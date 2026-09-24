@@ -325,21 +325,19 @@ through these routes:
 
 Choose it under **Judgment model** in **Settings > Models**, or set
 `R_JUDGMENT_MODEL` to `roomote`, `typesafe`, `openrouter`, `vercel`, or `off`.
-A TypeSafe key alone turns on **Jev via TypeSafe**. The Roomote judgment
-model, OpenRouter, and Vercel AI Gateway answer decisions only when you select
-them. The one exception is `R_JUDGMENT_SHADOW=on`, which also sends every Jev
-decision to the Roomote judgment model to compare answers, without changing the
-answer Roomote acts on.
-Many deployments already have OpenRouter or Vercel AI Gateway keys for task
-inference, and choosing them sends decision text to a third party.
+A TypeSafe key selects **Jev via TypeSafe** when Settings has no saved route.
+Choose the Roomote judgment model, OpenRouter, or Vercel AI Gateway to route
+decisions through those providers. To compare Jev with the Roomote judgment
+model, select Jev and set `R_JUDGMENT_SHADOW=on`; the Roomote model scores the
+same decisions for calibration while Jev remains the selected route. Many
+deployments already have OpenRouter or Vercel AI Gateway keys for task
+inference, and selecting those routes sends decision text to that provider.
 
 The **Roomote judgment model** is an open-weight model served on
-Roomote-operated infrastructure. The text a decision needs never leaves that
-infrastructure. It answers
-the same typed questions as Jev; Roomote acts on it under the same confidence
-rules and falls back to the helper model in the same cases. Self-hosted
-deployments can point `R_JUDGMENT_UPSTREAM_URL` at any server that speaks the
-same typed decisions request.
+Roomote-operated infrastructure, where its decision text is processed. It
+answers the same typed questions as Jev and follows the same confidence rules.
+Self-hosted deployments can point `R_JUDGMENT_UPSTREAM_URL` at any server that
+speaks the same typed decisions request.
 
 When a judgment model is on, Roomote asks it first for:
 
@@ -355,21 +353,16 @@ When a judgment model is on, Roomote asks it first for:
 - whether a settled session or task turn holds something worth saving to
   [Memory](/memory) that the agent did not record itself
 
-Roomote acts on the judgment model only when it is confident. When it is
-unsure, unavailable, or returns an error, Roomote keeps the behavior it has
-without a judgment model, usually through the deployment's helper model. The
-helper model is resolved from the **Helper model** role and does not require a
-separate decision-model connection. The text a decision needs is sent to the
-selected judgment model, so choosing Jev sends it to TypeSafe or the gateway
-you picked; keys stay on the control plane and are never sent to task
-sandboxes.
+Roomote applies a judgment when its confidence meets the configured threshold.
+When a decision needs more context, Roomote uses the configured **Helper model**
+role. The text a decision needs is sent to the selected judgment model, so
+choosing Jev sends it to TypeSafe or the gateway you picked; keys stay on the
+control plane and are never sent to task sandboxes.
 
 Some decisions run in bulk, such as the Memory check after every session and
-task turn. Roomote only runs those high-volume workloads
-through a configured judgment model (Jev or the Roomote judgment model). A
-helper model never opts into these batches, so deployments without a judgment
-model keep the existing conservative behavior and do not incur new
-high-volume language-model calls.
+task turn. Roomote evaluates those high-volume workloads with a configured
+judgment model (Jev or the Roomote judgment model), using one typed evaluation
+for each check.
 
 ## Reasoning settings
 
