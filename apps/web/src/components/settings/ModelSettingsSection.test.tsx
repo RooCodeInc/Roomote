@@ -166,6 +166,8 @@ function buildSettingsData(
     orchestrationPersistedModelId?: string | null;
     helperEffectiveModelId?: string | null;
     visionEffectiveModelId?: string | null;
+    audioVideoEffectiveModelId?: string | null;
+    audioVideoPersistedModelId?: string | null;
     codeReviewEffectiveModelId?: string | null;
     exploreEffectiveModelId?: string | null;
     planningEffectiveModelId?: string | null;
@@ -177,14 +179,11 @@ function buildSettingsData(
       reasoningEffort: ReasoningEffort | null;
       condition: string;
     }>;
-    visionModelAudioVideoEnabled?: boolean;
   } = {},
 ) {
   return {
     suggestions: [],
     defaultModelId: 'openrouter/openai/gpt-5.4',
-    visionModelAudioVideoEnabled:
-      overrides.visionModelAudioVideoEnabled ?? false,
     models: [
       {
         id: 'openrouter/openai/gpt-5.4',
@@ -210,6 +209,20 @@ function buildSettingsData(
           inputPricePerToken: 0.00000093,
           outputPricePerToken: 0.000003,
           inputTypes: ['text'],
+          lastRefreshedAt: null,
+        },
+        enabled: true,
+        isDefault: false,
+      },
+      {
+        id: 'openrouter/google/gemini-3.8-flash',
+        displayName: 'Gemini 3.8 Flash',
+        family: 'Gemini',
+        metadata: {
+          contextWindow: 1_048_576,
+          inputPricePerToken: 0.00000093,
+          outputPricePerToken: 0.000003,
+          inputTypes: ['text', 'image', 'sound', 'video'],
           lastRefreshedAt: null,
         },
         enabled: true,
@@ -250,6 +263,14 @@ function buildSettingsData(
         managedByEnv: overrides.visionManagedByEnv ?? false,
         reasoningEffort: null as ReasoningEffort | null,
         reasoningManagedByEnv: overrides.visionReasoningManagedByEnv ?? false,
+      },
+      audioVideoModel: {
+        effectiveModelId: overrides.audioVideoEffectiveModelId ?? null,
+        persistedModelId: overrides.audioVideoPersistedModelId ?? null,
+        source: 'same-as-coding',
+        managedByEnv: false,
+        reasoningEffort: null as ReasoningEffort | null,
+        reasoningManagedByEnv: false,
       },
       codeReviewModel: {
         effectiveModelId: overrides.codeReviewEffectiveModelId ?? null,
@@ -299,6 +320,18 @@ function buildSettingsData(
           inputPricePerToken: 0.00000093,
           outputPricePerToken: 0.000003,
           inputTypes: ['text'],
+          lastRefreshedAt: null,
+        },
+      },
+      {
+        id: 'openrouter/google/gemini-3.8-flash',
+        displayName: 'Gemini 3.8 Flash',
+        family: 'Gemini',
+        metadata: {
+          contextWindow: 1_048_576,
+          inputPricePerToken: 0.00000093,
+          outputPricePerToken: 0.000003,
+          inputTypes: ['text', 'image', 'sound', 'video'],
           lastRefreshedAt: null,
         },
       },
@@ -443,12 +476,6 @@ describe('ModelSettingsSection', () => {
     renderModelSettingsSection();
 
     expect(screen.getByText('Vision model')).toBeInTheDocument();
-    expect(screen.getByText('Audio/video')).toBeInTheDocument();
-    const audioVideoSwitch = screen.getByRole('switch', {
-      name: 'Also use for audio and video',
-    });
-    expect(audioVideoSwitch).not.toBeChecked();
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Vision model and reasoning' }),
@@ -469,7 +496,9 @@ describe('ModelSettingsSection', () => {
     settingsData.current = data;
     renderModelSettingsSection();
 
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/doesn't support audio or video/u),
+    ).not.toBeInTheDocument();
   });
 
   it('recognizes sound as audio support in catalog metadata', () => {
@@ -478,36 +507,37 @@ describe('ModelSettingsSection', () => {
     settingsData.current = data;
     renderModelSettingsSection();
 
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/doesn't support audio or video/u),
+    ).not.toBeInTheDocument();
   });
 
-  it('warns for missing audio and video support only when the opt-in is on', async () => {
-    const data = buildSettingsData();
-    data.models[0]!.metadata.inputTypes = ['text', 'image'];
-    settingsData.current = data;
+  it('warns for an unsupported inherited media model and accepts a supported one', async () => {
+    settingsData.current = buildSettingsData();
     renderModelSettingsSection();
 
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "GPT 5.4 doesn't support audio or video. Select a model that supports audio or video in Settings > Models > Audio and video model.",
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole('switch', { name: 'Also use for audio and video' }),
+      screen.getByRole('button', {
+        name: 'Audio and video model and reasoning',
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Gemini 3.8 Flash' }),
     );
 
     expect(
-      screen.getByText("GPT 5.4 can't take audio or video."),
-    ).toBeInTheDocument();
+      screen.queryByText(/doesn't support audio or video/u),
+    ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(updateMutateAsyncMock).toHaveBeenCalledWith(
-        expect.objectContaining({ visionModelAudioVideoEnabled: true }),
-      );
-    });
-
-    fireEvent.click(
-      screen.getByRole('switch', { name: 'Also use for audio and video' }),
-    );
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    await waitFor(() => {
-      expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
-        expect.objectContaining({ visionModelAudioVideoEnabled: false }),
+        expect.objectContaining({
+          audioVideoModelId: 'openrouter/google/gemini-3.8-flash',
+        }),
       );
     });
   });
@@ -537,7 +567,7 @@ describe('ModelSettingsSection', () => {
         '[data-slot="model-reasoning-picker-trigger"]',
       ),
     );
-    expect(pickerTriggers).toHaveLength(7);
+    expect(pickerTriggers).toHaveLength(8);
     // The combined picker stays available because reasoning is not env-managed.
     for (const trigger of pickerTriggers) expect(trigger).not.toBeDisabled();
 
@@ -566,7 +596,7 @@ describe('ModelSettingsSection', () => {
       ),
     );
 
-    expect(triggers).toHaveLength(7);
+    expect(triggers).toHaveLength(8);
     expect(triggers[0]).not.toBeDisabled();
     expect(triggers[6]).not.toBeDisabled();
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
@@ -644,7 +674,7 @@ describe('ModelSettingsSection', () => {
     const triggers = container.querySelectorAll(
       '[data-slot="model-reasoning-picker-trigger"]',
     );
-    expect(triggers).toHaveLength(7);
+    expect(triggers).toHaveLength(8);
     for (const trigger of Array.from(triggers)) {
       expect(trigger).not.toBeDisabled();
     }
@@ -663,9 +693,9 @@ describe('ModelSettingsSection', () => {
     renderModelSettingsSection();
 
     const modelMappingSection = screen.getByTestId('section-Model mapping');
-    // coding: Medium; orchestration + helper + vision + explore: Low; code review + planning: High.
+    // Coding: Medium; orchestration, helper, vision, audio/video, and explore: Low; code review + planning: High.
     expect(within(modelMappingSection).getByText('Medium')).toBeInTheDocument();
-    expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
+    expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(5);
     expect(within(modelMappingSection).getAllByText('High')).toHaveLength(2);
   });
 
@@ -680,8 +710,8 @@ describe('ModelSettingsSection', () => {
     const modelMappingSection = screen.getByTestId('section-Model mapping');
     expect(within(modelMappingSection).getAllByText('High')).toHaveLength(2);
     expect(within(modelMappingSection).getByText('X-High')).toBeInTheDocument();
-    // Orchestration, helper, vision, and explore fall back to Low.
-    expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
+    // Orchestration, helper, vision, audio/video, and explore fall back to Low.
+    expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(5);
   });
 
   it('adds, saves, edits, and removes coding-model routing rules', async () => {
@@ -1544,7 +1574,7 @@ describe('ModelSettingsSection', () => {
     );
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getAllByText('GLM 5.2')).toHaveLength(7);
+    expect(within(dialog).getAllByText('GLM 5.2')).toHaveLength(8);
   });
 
   it('previews inherited roles with the selected coding preset when it is not env-managed', async () => {
@@ -1564,7 +1594,7 @@ describe('ModelSettingsSection', () => {
     );
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getAllByText('default-model')).toHaveLength(7);
+    expect(within(dialog).getAllByText('default-model')).toHaveLength(8);
   });
 
   it('matches preset display metadata to the resolved preview model', async () => {
@@ -1606,7 +1636,7 @@ describe('ModelSettingsSection', () => {
     );
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getAllByText('Claude Sonnet 6')).toHaveLength(6);
+    expect(within(dialog).getAllByText('Claude Sonnet 6')).toHaveLength(7);
     expect(within(dialog).getByText('env-model')).toBeInTheDocument();
     expect(
       within(dialog).queryByText('Claude Haiku 6'),

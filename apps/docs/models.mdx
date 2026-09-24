@@ -270,7 +270,8 @@ where you want more speed, quality, or cost control.
 | Default coding model | Normal Roomote tasks: code changes, debugging, tests, repo investigation, and follow-ups | Strong tool use, coding quality, long-context reliability, and good instruction following |
 | Orchestration model  | Session answers and coordination of delegated task launches                              | Low latency, conversational quality, and reliable tool routing                             |
 | Helper model         | Lightweight routing, titles, summaries, and quick internal decisions                     | Low latency, low cost, and enough accuracy for short judgments                            |
-| Vision model         | Image inspection; optional audio transcription and video descriptions                   | Image input support; audio and video input only when enabled                              |
+| Vision model         | Image inspection                                                                           | Image input support                                                                         |
+| Audio and video model | Audio transcription and video descriptions                                                | Audio/sound and video input support                                                         |
 | Code review model    | Initial PR or MR review tasks and review-sync work                                       | Careful reasoning, bug finding, security awareness, and willingness to cite evidence      |
 | Explore model        | Repository search and focused codebase exploration                                      | Fast tool use, low latency, and reliable source-grounded investigation                    |
 | Advisor model        | Planning turns and advisor consultations inside longer coding tasks                      | Deliberate reasoning, decomposition, and ability to keep constraints in mind              |
@@ -281,13 +282,14 @@ strong default model, then split out a faster orchestration or helper model, or
 a stronger review model, after they can see real usage.
 
 The **Vision model** handles image attachments when the active model cannot
-inspect them. Audio transcription and video descriptions are off by default.
-Turn on the **Audio/video** switch next to **Vision model** in **Settings > Models**
-and choose a model that supports both. When enabled, audio and video use only the
-Vision model; Roomote does not try the helper or coding model instead.
+inspect them. The separate **Audio and video model** handles audio transcription
+and video descriptions. Both roles default to **Same as coding model**, and
+either can be configured independently in **Settings > Models**. Roomote warns
+when catalog metadata shows that the selected media model does not support
+audio or video; it does not silently switch to the Vision or coding model.
 
-After upgrading, audio and video remain off until an admin enables this setting.
-This avoids sending attachments to a model that cannot process them.
+The task model switcher also includes an Audio and video role override. Changes
+to a task's role selections apply from its next message.
 
 ### Coding model routing rules
 

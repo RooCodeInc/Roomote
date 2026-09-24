@@ -806,13 +806,6 @@
       "when": 1790045030792,
       "tag": "0114_broad_penance",
       "breakpoints": true
-    },
-    {
-      "idx": 115,
-      "version": "7",
-      "when": 1790194803965,
-      "tag": "0115_romantic_killraven",
-      "breakpoints": true
     }
   ]
 }

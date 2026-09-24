@@ -218,6 +218,35 @@ describe('mergeOpenAiCompatibleProviderConfig', () => {
     });
   });
 
+  it('marks only the configured Audio and video model as audio and video capable', () => {
+    expect(
+      mergeOpenAiCompatibleProviderConfig(
+        {},
+        {
+          LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+          LITELLM_API_KEY: 'secret',
+        },
+        ['litellm/text-model', 'litellm/vision-model', 'litellm/media-model'],
+        'litellm/vision-model',
+        {},
+        {},
+        { audioVideoModel: 'litellm/media-model' },
+      ),
+    ).toMatchObject({
+      litellm: {
+        models: {
+          'vision-model': {
+            modalities: { input: ['text', 'image', 'video'] },
+          },
+          'media-model': {
+            attachment: true,
+            modalities: { input: ['text', 'audio', 'video'] },
+          },
+        },
+      },
+    });
+  });
+
   it('can optimistically mark every configured custom model as image capable', () => {
     expect(
       mergeOpenAiCompatibleProviderConfig(

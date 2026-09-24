@@ -1814,6 +1814,12 @@ describe('enqueueTask snapshot resume', () => {
         model: null,
         reasoningEffort: 'low',
       }),
+      applyTaskModelSelectionToRun({
+        runId: freshRun.id,
+        role: 'audioVideo',
+        model: 'openrouter/google/gemini-3.8-flash',
+        reasoningEffort: 'high',
+      }),
     ]);
 
     const run = await db.query.taskRuns.findFirst({
@@ -1827,6 +1833,10 @@ describe('enqueueTask snapshot resume', () => {
     expect(payload.modelRoleOverrides).toEqual({
       helper: { reasoningEffort: 'high' },
       vision: { reasoningEffort: 'low' },
+      audioVideo: {
+        model: 'openrouter/google/gemini-3.8-flash',
+        reasoningEffort: 'high',
+      },
     });
   });
 

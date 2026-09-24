@@ -73,11 +73,11 @@ that model in charge and has the configured Vision model (or, failing that,
 the helper or coding model) describe the image on request, the same way a
 coding task delegates visual inspection to a hidden subagent.
 
-Audio transcription and video descriptions are opt-in. In **Settings > Models**,
-turn on the **Audio/video** switch next to **Vision model** and choose a
-model that supports both. When off, Roomote does not send them to a model; when
-on, they use only the Vision model. Existing deployments must enable this
-setting after upgrading to restore audio and video processing.
+Audio transcription and video descriptions use a separate **Audio and video
+model** in **Settings > Models**, defaulting to **Same as coding model**. Choose
+a model that supports the input you use. Roomote warns when its model catalog
+shows that audio or video input is unsupported, and does not silently switch to
+the Vision or coding model if media processing fails.
 
 That means you can ask things like:
 

@@ -20,6 +20,7 @@ import {
   CommandGroup,
   CommandItem,
   CommandList,
+  AudioLines,
   Code2,
   Dialog,
   DialogContent,
@@ -111,7 +112,6 @@ type ModelSettingsSectionDraft = {
   models: EditableTaskModel[];
   enabledModelIds: string[];
   roles: TaskModelRoleDrafts;
-  visionModelAudioVideoEnabled: boolean;
   codingModelRoutingRules: CodingModelRoutingRulesDraft;
 };
 
@@ -191,6 +191,14 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     reasoningAriaLabel: 'Vision model reasoning level',
   },
   {
+    role: 'audioVideo',
+    label: 'Audio and video model',
+    description: 'Used to transcribe audio and describe videos.',
+    icon: AudioLines,
+    placeholder: 'Select an audio and video model',
+    reasoningAriaLabel: 'Audio and video model reasoning level',
+  },
+  {
     role: 'codeReview',
     label: 'Code review model',
     description:
@@ -249,8 +257,6 @@ function TaskModelRoleEditor({
   reasoningEffort,
   onModelChange,
   onReasoningChange,
-  visionModelAudioVideoEnabled = false,
-  onVisionModelAudioVideoEnabledChange,
   children,
 }: {
   config: TaskModelRoleConfig;
@@ -266,8 +272,6 @@ function TaskModelRoleEditor({
   reasoningEffort: ReasoningEffort | null;
   onModelChange: (value: string) => void;
   onReasoningChange: (value: ReasoningEffort | null) => void;
-  visionModelAudioVideoEnabled?: boolean;
-  onVisionModelAudioVideoEnabledChange?: (enabled: boolean) => void;
   children?: ReactNode;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -303,22 +307,26 @@ function TaskModelRoleEditor({
     : models;
   const selectedModel = pickerModels.find(({ id }) => id === selectValue);
   const mediaInputTypes =
-    config.role === 'vision'
+    config.role === 'vision' || config.role === 'audioVideo'
       ? selectValue === SAME_AS_CODING_MODEL_VALUE
         ? codingModelMetadata?.inputTypes
         : selectedModel?.metadata?.inputTypes
       : null;
+  const requestedMediaInputs =
+    config.role === 'vision'
+      ? (['image'] as const)
+      : config.role === 'audioVideo'
+        ? (['sound', 'video'] as const)
+        : [];
   const unsupportedMediaInputs = mediaInputTypes?.length
-    ? (visionModelAudioVideoEnabled
-        ? (['image', 'sound', 'video'] as const)
-        : (['image'] as const)
-      ).filter((type) => !mediaInputTypes.includes(type))
+    ? requestedMediaInputs.filter((type) => !mediaInputTypes.includes(type))
     : [];
   const unsupportedMediaInputNames = formatUnsupportedMediaInputs(
     unsupportedMediaInputs,
   );
   const warningModelName =
-    config.role === 'vision' && selectValue === SAME_AS_CODING_MODEL_VALUE
+    (config.role === 'vision' || config.role === 'audioVideo') &&
+    selectValue === SAME_AS_CODING_MODEL_VALUE
       ? (codingModelName ?? 'The coding model')
       : (selectedModel?.displayName ?? 'This model');
   const selectedReasoningEffort =
@@ -343,19 +351,6 @@ function TaskModelRoleEditor({
                 </BasicTooltip>
               )}
             </div>
-            {config.role === 'vision' &&
-            onVisionModelAudioVideoEnabledChange ? (
-              <div className="flex shrink-0 items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">
-                  Audio/video
-                </span>
-                <Switch
-                  aria-label="Also use for audio and video"
-                  checked={visionModelAudioVideoEnabled}
-                  onCheckedChange={onVisionModelAudioVideoEnabledChange}
-                />
-              </div>
-            ) : null}
           </div>
           {config.description ? (
             <p className="text-xs text-muted-foreground">
@@ -393,7 +388,9 @@ function TaskModelRoleEditor({
         />
         {unsupportedMediaInputs.length > 0 && (
           <p className="text-xs text-muted-foreground" role="status">
-            {warningModelName} can&apos;t take {unsupportedMediaInputNames}.
+            {config.role === 'audioVideo'
+              ? `${warningModelName} doesn't support ${unsupportedMediaInputNames}. Select a model that supports ${unsupportedMediaInputNames} in Settings > Models > Audio and video model.`
+              : `${warningModelName} can't take ${unsupportedMediaInputNames}.`}
           </p>
         )}
         {children}
@@ -510,6 +507,7 @@ function getRecommendedRoleModelIds(
     orchestration: recommended.roomoteOrchestrationModel,
     helper: recommended.roomoteSmallModel,
     vision: recommended.roomoteVisionModel,
+    audioVideo: recommended.roomoteAudioVideoModel,
     codeReview: recommended.roomoteCodeReviewModel,
     explore: recommended.roomoteExploreModel,
     planning: recommended.roomotePlanningModel,
@@ -530,6 +528,7 @@ function getRecommendedRoleReasoningEfforts(
     orchestration: recommended.roomoteOrchestrationModelReasoningEffort,
     helper: recommended.roomoteSmallModelReasoningEffort,
     vision: recommended.roomoteVisionModelReasoningEffort,
+    audioVideo: recommended.roomoteAudioVideoModelReasoningEffort,
     codeReview: recommended.roomoteCodeReviewModelReasoningEffort,
     explore: recommended.roomoteExploreModelReasoningEffort,
     planning: recommended.roomotePlanningModelReasoningEffort,
@@ -579,6 +578,10 @@ function createEmptyTaskModelRoleDrafts(): TaskModelRoleDrafts {
       reasoningEffort: null,
     },
     vision: {
+      modelId: null,
+      reasoningEffort: null,
+    },
+    audioVideo: {
       modelId: null,
       reasoningEffort: null,
     },
@@ -636,7 +639,6 @@ function cloneDraft(
     })),
     enabledModelIds: [...draft.enabledModelIds],
     roles: cloneTaskModelRoleDrafts(draft.roles),
-    visionModelAudioVideoEnabled: draft.visionModelAudioVideoEnabled,
     codingModelRoutingRules: cloneCodingModelRoutingRules(
       draft.codingModelRoutingRules,
     ),
@@ -653,8 +655,7 @@ function draftsEqual(
 
   if (
     left.enabledModelIds.length !== right.enabledModelIds.length ||
-    left.models.length !== right.models.length ||
-    left.visionModelAudioVideoEnabled !== right.visionModelAudioVideoEnabled
+    left.models.length !== right.models.length
   ) {
     return false;
   }
@@ -825,7 +826,6 @@ export function ModelSettingsSection({
     models: [],
     enabledModelIds: [],
     roles: createEmptyTaskModelRoleDrafts(),
-    visionModelAudioVideoEnabled: false,
     codingModelRoutingRules: [],
   });
   const [models, setModels] = useState<EditableTaskModel[]>([]);
@@ -835,8 +835,6 @@ export function ModelSettingsSection({
   );
   const [codingModelRoutingRules, setCodingModelRoutingRules] =
     useState<CodingModelRoutingRulesDraft>([]);
-  const [visionModelAudioVideoEnabled, setVisionModelAudioVideoEnabled] =
-    useState(false);
   const [newModelId, setNewModelId] = useState('');
   const [newModelProvider, setNewModelProvider] =
     useState<SetupModelProviderId>('openrouter');
@@ -1003,16 +1001,9 @@ export function ModelSettingsSection({
       models,
       enabledModelIds,
       roles: roleDrafts,
-      visionModelAudioVideoEnabled,
       codingModelRoutingRules,
     };
-  }, [
-    codingModelRoutingRules,
-    enabledModelIds,
-    models,
-    roleDrafts,
-    visionModelAudioVideoEnabled,
-  ]);
+  }, [codingModelRoutingRules, enabledModelIds, models, roleDrafts]);
 
   useEffect(() => {
     return () => {
@@ -1061,6 +1052,11 @@ export function ModelSettingsSection({
           reasoningEffort:
             settingsData.runtimeModels.visionModel.reasoningEffort,
         },
+        audioVideo: {
+          modelId: settingsData.runtimeModels.audioVideoModel.persistedModelId,
+          reasoningEffort:
+            settingsData.runtimeModels.audioVideoModel.reasoningEffort,
+        },
         codeReview: {
           modelId: settingsData.runtimeModels.codeReviewModel.persistedModelId,
           reasoningEffort:
@@ -1078,8 +1074,6 @@ export function ModelSettingsSection({
         },
       },
       codingModelRoutingRules: settingsData.codingModelRoutingRules ?? [],
-      visionModelAudioVideoEnabled:
-        settingsData.visionModelAudioVideoEnabled ?? false,
     } satisfies ModelSettingsSectionDraft;
 
     const isLocallyClean = draftsEqual(
@@ -1096,7 +1090,6 @@ export function ModelSettingsSection({
     setModels(nextDraft.models);
     setEnabledModelIds(nextDraft.enabledModelIds);
     setRoleDrafts(nextDraft.roles);
-    setVisionModelAudioVideoEnabled(nextDraft.visionModelAudioVideoEnabled);
     setCodingModelRoutingRules(nextDraft.codingModelRoutingRules);
   }, [settingsData]);
 
@@ -1213,6 +1206,7 @@ export function ModelSettingsSection({
     orchestration: helperModelGroups,
     helper: helperModelGroups,
     vision: helperModelGroups,
+    audioVideo: helperModelGroups,
     codeReview: helperModelGroups,
     explore: helperModelGroups,
     planning: helperModelGroups,
@@ -1281,6 +1275,7 @@ export function ModelSettingsSection({
       orchestration: null,
       helper: null,
       vision: null,
+      audioVideo: null,
       codeReview: null,
       explore: null,
       planning: null,
@@ -1397,7 +1392,6 @@ export function ModelSettingsSection({
     setModels(clonedDraft.models);
     setEnabledModelIds(clonedDraft.enabledModelIds);
     setRoleDrafts(clonedDraft.roles);
-    setVisionModelAudioVideoEnabled(clonedDraft.visionModelAudioVideoEnabled);
     setCodingModelRoutingRules(clonedDraft.codingModelRoutingRules);
   };
 
@@ -1409,8 +1403,6 @@ export function ModelSettingsSection({
       models: updates.models ?? models,
       enabledModelIds: updates.enabledModelIds ?? enabledModelIds,
       roles: updates.roles ?? roleDrafts,
-      visionModelAudioVideoEnabled:
-        updates.visionModelAudioVideoEnabled ?? visionModelAudioVideoEnabled,
       codingModelRoutingRules:
         updates.codingModelRoutingRules ?? codingModelRoutingRules,
     });
@@ -1521,6 +1513,7 @@ export function ModelSettingsSection({
         codeReviewModelId: draft.roles.codeReview.modelId,
         exploreModelId: draft.roles.explore.modelId,
         planningModelId: draft.roles.planning.modelId,
+        audioVideoModelId: draft.roles.audioVideo.modelId,
         codingModelReasoningEffort: draft.roles.coding.reasoningEffort,
         orchestrationModelReasoningEffort:
           draft.roles.orchestration.reasoningEffort,
@@ -1529,7 +1522,7 @@ export function ModelSettingsSection({
         codeReviewModelReasoningEffort: draft.roles.codeReview.reasoningEffort,
         exploreModelReasoningEffort: draft.roles.explore.reasoningEffort,
         planningModelReasoningEffort: draft.roles.planning.reasoningEffort,
-        visionModelAudioVideoEnabled: draft.visionModelAudioVideoEnabled,
+        audioVideoModelReasoningEffort: draft.roles.audioVideo.reasoningEffort,
         codingModelRoutingRules: prepareCodingModelRoutingRulesForSave(
           draft.codingModelRoutingRules,
         ),
@@ -1549,6 +1542,7 @@ export function ModelSettingsSection({
             result.fieldErrors.allowedModelIds ??
             result.fieldErrors.helperModelId ??
             result.fieldErrors.visionModelId ??
+            result.fieldErrors.audioVideoModelId ??
             result.fieldErrors.codeReviewModelId ??
             result.fieldErrors.exploreModelId ??
             result.fieldErrors.planningModelId ??
@@ -1922,7 +1916,6 @@ export function ModelSettingsSection({
                 optionGroups={roleOptionGroups[config.role]}
                 codingModelMetadata={effectiveCodingModelMetadata}
                 codingModelName={effectiveCodingModelName}
-                visionModelAudioVideoEnabled={visionModelAudioVideoEnabled}
                 supportsReasoning={roleSupportsReasoning[config.role]}
                 reasoningEffort={roleDrafts[config.role].reasoningEffort}
                 onModelChange={(value) =>
@@ -1936,15 +1929,6 @@ export function ModelSettingsSection({
                 }
                 onReasoningChange={(value) =>
                   updateRoleReasoningEffort(config.role, value)
-                }
-                onVisionModelAudioVideoEnabledChange={
-                  config.role === 'vision'
-                    ? (enabled) =>
-                        applyDraftUpdates(
-                          { visionModelAudioVideoEnabled: enabled },
-                          0,
-                        )
-                    : undefined
                 }
               >
                 {config.role === 'coding' ? (

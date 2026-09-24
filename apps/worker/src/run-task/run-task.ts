@@ -819,6 +819,7 @@ export const runTask = async ({
       'R_MODEL',
       'R_SMALL_MODEL',
       'R_VISION_MODEL',
+      'R_AUDIO_VIDEO_MODEL',
       'R_CODE_REVIEW_MODEL',
       'R_EXPLORE_MODEL',
       'R_PLANNING_MODEL',

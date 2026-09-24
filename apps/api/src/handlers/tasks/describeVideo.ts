@@ -5,7 +5,6 @@ import {
   VIDEO_AGENT_MAX_VIDEO_SIZE_BYTES,
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, tasks } from '@roomote/db/server';
-
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import { logHandlerError } from '../utils';
@@ -241,6 +240,9 @@ export async function describeVideo(
     const description = await describeVideoAttachment({
       userId: auth.userId,
       taskId,
+      ...(auth.authContext.tokenType === 'run'
+        ? { taskRunId: auth.authContext.runId }
+        : {}),
       videoBytes,
       mimeType: body.mimeType,
       ...(body.userTextContext?.trim()

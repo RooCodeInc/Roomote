@@ -2690,6 +2690,7 @@ export const appRouter = createRouter({
           orchestrationModelId: z.string().trim().min(1).nullable().optional(),
           helperModelId: z.string().trim().min(1).nullable(),
           visionModelId: z.string().trim().min(1).nullable(),
+          audioVideoModelId: z.string().trim().min(1).nullable().optional(),
           codeReviewModelId: z.string().trim().min(1).nullable(),
           exploreModelId: z.string().trim().min(1).nullable().optional(),
           planningModelId: z.string().trim().min(1).nullable(),
@@ -2706,6 +2707,10 @@ export const appRouter = createRouter({
           visionModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
+          audioVideoModelReasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .nullable()
+            .optional(),
           codeReviewModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
@@ -2716,7 +2721,6 @@ export const appRouter = createRouter({
           planningModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
-          visionModelAudioVideoEnabled: z.boolean().optional(),
           codingModelRoutingRules: z.array(codingModelRoutingRuleSchema),
         }),
       )

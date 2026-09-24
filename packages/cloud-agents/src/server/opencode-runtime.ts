@@ -99,6 +99,14 @@ function buildModelBackedOpenCodeConfigContent(
           toBedrockMantleRuntimeModelId(rawVisionModel),
         )
       : undefined;
+  const rawAudioVideoModel = env.R_AUDIO_VIDEO_MODEL?.trim();
+  const audioVideoModel =
+    rawAudioVideoModel && !isTaskModelIdDisabled(rawAudioVideoModel)
+      ? collectOpenRouterVariantModelAlias(
+          variantAliases,
+          toBedrockMantleRuntimeModelId(rawAudioVideoModel),
+        )
+      : undefined;
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
     env.R_MODEL_REASONING_EFFORT?.trim(),
   );
@@ -107,6 +115,9 @@ function buildModelBackedOpenCodeConfigContent(
   );
   const visionModelReasoningEffort = normalizeOptionalReasoningEffort(
     env.R_VISION_MODEL_REASONING_EFFORT?.trim(),
+  );
+  const audioVideoModelReasoningEffort = normalizeOptionalReasoningEffort(
+    env.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT?.trim(),
   );
 
   // Reasoning levels are configured per default-model role, so they are only
@@ -143,6 +154,20 @@ function buildModelBackedOpenCodeConfigContent(
     );
   }
 
+  if (
+    audioVideoModel &&
+    audioVideoModelReasoningEffort &&
+    audioVideoModel !== model &&
+    audioVideoModel !== smallModel &&
+    audioVideoModel !== visionModel
+  ) {
+    providerReasoningConfig = mergeOpenCodeModelReasoningOptions(
+      providerReasoningConfig,
+      audioVideoModel,
+      audioVideoModelReasoningEffort,
+    );
+  }
+
   if (options.reasoningOverride) {
     const overrideModel = collectOpenRouterVariantModelAlias(
       variantAliases,
@@ -162,9 +187,10 @@ function buildModelBackedOpenCodeConfigContent(
           model,
           smallModel,
           visionModel,
+          audioVideoModel,
         ])
       : providerReasoningConfig;
-  const configuredModelIds = [model, smallModel, visionModel];
+  const configuredModelIds = [model, smallModel, visionModel, audioVideoModel];
   // Same Bedrock provider registrations the task worker applies: OpenCode's
   // catalog knows neither Mantle endpoint, and the native provider does not
   // read the deployment's bearer token on its own.
@@ -192,7 +218,10 @@ function buildModelBackedOpenCodeConfigContent(
           visionModel,
           {},
           {},
-          { assumeImageSupport: options.promptOnlySubagents },
+          {
+            assumeImageSupport: options.promptOnlySubagents,
+            audioVideoModel,
+          },
         ),
         env,
         configuredModelIds,
@@ -422,7 +451,12 @@ function mergeBedrockRegistrationsIntoConfigContent(
   env: NodeJS.ProcessEnv,
 ): string {
   const roleModelIds = (
-    [env.R_MODEL, env.R_SMALL_MODEL, env.R_VISION_MODEL] as const
+    [
+      env.R_MODEL,
+      env.R_SMALL_MODEL,
+      env.R_VISION_MODEL,
+      env.R_AUDIO_VIDEO_MODEL,
+    ] as const
   )
     .map((modelId) => modelId?.trim())
     .filter(
@@ -493,6 +527,10 @@ function mergeReasoningIntoConfigContent(
     [env.R_MODEL?.trim(), env.R_MODEL_REASONING_EFFORT?.trim()],
     [env.R_SMALL_MODEL?.trim(), env.R_SMALL_MODEL_REASONING_EFFORT?.trim()],
     [env.R_VISION_MODEL?.trim(), env.R_VISION_MODEL_REASONING_EFFORT?.trim()],
+    [
+      env.R_AUDIO_VIDEO_MODEL?.trim(),
+      env.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT?.trim(),
+    ],
   ] as const;
   if (
     !reasoningOverride &&
@@ -595,6 +633,7 @@ export function buildOpenCodeCliEnv(
     'R_MODEL',
     'R_SMALL_MODEL',
     'R_VISION_MODEL',
+    'R_AUDIO_VIDEO_MODEL',
   ] as const) {
     const modelId = env[modelEnvVarName]?.trim();
 

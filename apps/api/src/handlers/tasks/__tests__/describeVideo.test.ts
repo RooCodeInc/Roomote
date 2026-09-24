@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AuthTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
@@ -72,7 +72,7 @@ function createBodyStream(
   });
 }
 
-function createApp(authContext?: AuthTokenContext) {
+function createApp(authContext?: AuthTokenContext | RunTokenContext) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.use('*', async (c, next) => {
@@ -143,6 +143,33 @@ describe('describeVideo', () => {
     });
     expect(andMock).toHaveBeenCalled();
     expect(andMock.mock.calls[0]).toContain(visibleTaskHistoryCondition);
+  });
+
+  it('passes the authenticated task run to audio/video model resolution', async () => {
+    const runAuthContext: RunTokenContext = {
+      runId: 42,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    };
+    const response = await createApp(runAuthContext).request(
+      new Request('http://localhost/tasks/task-1/describe_video', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          videoBytes: Buffer.from('video-data').toString('base64'),
+          mimeType: 'video/mp4',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(describeVideoAttachmentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskRunId: 42,
+      }),
+    );
   });
 
   it('accepts multipart form payloads', async () => {
@@ -293,9 +320,9 @@ describe('describeVideo', () => {
     });
   });
 
-  it('returns the disabled-support guidance to the task video tool', async () => {
+  it('returns selected-media-model guidance to the task video tool', async () => {
     const message =
-      'Audio and video are off. Turn them on in Settings > Models > Vision model, and pick a model that supports them, like Gemini.';
+      "The Audio and video model (GPT 5.6 Terra) doesn't support video. Select a model that supports video in Settings > Models > Audio and video model.";
     describeVideoAttachmentMock.mockResolvedValueOnce(message);
 
     const response = await createApp(authContext).request(

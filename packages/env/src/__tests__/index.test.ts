@@ -140,6 +140,7 @@ describe('Env', () => {
       'R_ORCHESTRATION_MODEL',
       'R_SMALL_MODEL',
       'R_VISION_MODEL',
+      'R_AUDIO_VIDEO_MODEL',
       'R_CODE_REVIEW_MODEL',
       'R_EXPLORE_MODEL',
       'R_PLANNING_MODEL',
@@ -147,6 +148,7 @@ describe('Env', () => {
       'R_ORCHESTRATION_MODEL_REASONING_EFFORT',
       'R_SMALL_MODEL_REASONING_EFFORT',
       'R_VISION_MODEL_REASONING_EFFORT',
+      'R_AUDIO_VIDEO_MODEL_REASONING_EFFORT',
       'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
       'R_EXPLORE_MODEL_REASONING_EFFORT',
       'R_PLANNING_MODEL_REASONING_EFFORT',
@@ -192,6 +194,7 @@ describe('Env', () => {
       expect(env.R_ORCHESTRATION_MODEL).toBeUndefined();
       expect(env.R_SMALL_MODEL).toBeUndefined();
       expect(env.R_VISION_MODEL).toBeUndefined();
+      expect(env.R_AUDIO_VIDEO_MODEL).toBeUndefined();
       expect(env.R_CODE_REVIEW_MODEL).toBeUndefined();
       expect(env.R_EXPLORE_MODEL).toBeUndefined();
       expect(env.R_PLANNING_MODEL).toBeUndefined();
@@ -199,6 +202,7 @@ describe('Env', () => {
       expect(env.R_ORCHESTRATION_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_SMALL_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_VISION_MODEL_REASONING_EFFORT).toBeUndefined();
+      expect(env.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_EXPLORE_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_PLANNING_MODEL_REASONING_EFFORT).toBeUndefined();
@@ -452,6 +456,7 @@ describe('Env', () => {
       R_ORCHESTRATION_MODEL: 'openrouter/anthropic/claude-sonnet-4',
       R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
       R_VISION_MODEL: 'openrouter/openai/gpt-5.5',
+      R_AUDIO_VIDEO_MODEL: 'openrouter/google/gemini-3.8-flash',
       R_CODE_REVIEW_MODEL: 'openrouter/openai/gpt-5.5',
       R_EXPLORE_MODEL: 'openrouter/openai/gpt-5.4-mini',
       R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
@@ -459,6 +464,7 @@ describe('Env', () => {
       R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
       R_SMALL_MODEL_REASONING_EFFORT: 'low',
       R_VISION_MODEL_REASONING_EFFORT: 'low',
+      R_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'medium',
       R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
       R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
       R_PLANNING_MODEL_REASONING_EFFORT: 'high',
@@ -471,6 +477,7 @@ describe('Env', () => {
     );
     expect(env.R_SMALL_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
     expect(env.R_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
+    expect(env.R_AUDIO_VIDEO_MODEL).toBe('openrouter/google/gemini-3.8-flash');
     expect(env.R_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
     expect(env.R_EXPLORE_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
     expect(env.R_PLANNING_MODEL).toBe('openrouter/anthropic/claude-opus-4.7');
@@ -478,6 +485,7 @@ describe('Env', () => {
     expect(env.R_ORCHESTRATION_MODEL_REASONING_EFFORT).toBe('high');
     expect(env.R_SMALL_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_VISION_MODEL_REASONING_EFFORT).toBe('low');
+    expect(env.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT).toBe('medium');
     expect(env.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBe('high');
     expect(env.R_EXPLORE_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_PLANNING_MODEL_REASONING_EFFORT).toBe('high');

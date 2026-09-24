@@ -62,7 +62,6 @@ vi.mock('@roomote/db/server', () => ({
     setupNewState: 'setupNewState',
     taskModelSettings: 'taskModelSettings',
     runtimeModelConfig: 'runtimeModelConfig',
-    visionModelAudioVideoEnabled: 'visionModelAudioVideoEnabled',
   },
   environmentVariables: {
     name: 'env.name',
@@ -233,7 +232,6 @@ describe('lookupTaskModelCommand', () => {
       const row: Record<string, unknown> = {
         taskModelSettings: null,
         runtimeModelConfig: null,
-        visionModelAudioVideoEnabled: false,
       };
       if (columns && !columns.taskModelSettings) {
         delete row.taskModelSettings;
@@ -241,16 +239,12 @@ describe('lookupTaskModelCommand', () => {
       if (columns && !columns.runtimeModelConfig) {
         delete row.runtimeModelConfig;
       }
-      if (columns && !columns.visionModelAudioVideoEnabled) {
-        delete row.visionModelAudioVideoEnabled;
-      }
       return row;
     });
     mockUpdateDeploymentSettings.mockImplementation(async ({ set }) => {
       mockFindDeploymentSettings.mockResolvedValue({
         taskModelSettings: set.taskModelSettings ?? null,
         runtimeModelConfig: set.runtimeModelConfig ?? null,
-        visionModelAudioVideoEnabled: set.visionModelAudioVideoEnabled ?? false,
       });
     });
     mockInsertDeploymentSettings.mockReturnValue({
@@ -1053,6 +1047,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModel: null,
             roomoteSmallModel: 'openrouter/z-ai/glm-5.2',
             roomoteVisionModel: null,
+            roomoteAudioVideoModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
@@ -1060,6 +1055,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
+            roomoteAudioVideoModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
             roomoteExploreModelReasoningEffort: null,
             roomotePlanningModelReasoningEffort: null,
@@ -1171,23 +1167,21 @@ describe('lookupTaskModelCommand', () => {
       visionModelReasoningEffort: null,
       codeReviewModelReasoningEffort: null,
       planningModelReasoningEffort: null,
-      visionModelAudioVideoEnabled: true,
     });
 
     expect(result).toMatchObject({ success: true });
     if (!result.success) {
       throw new Error('Expected model settings to save successfully.');
     }
-    expect(result.settings.visionModelAudioVideoEnabled).toBe(true);
     expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         set: expect.objectContaining({
-          visionModelAudioVideoEnabled: true,
           runtimeModelConfig: {
             roomoteModel: 'openrouter/openai/gpt-5.6',
             roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: 'openrouter/z-ai/glm-5.2',
+            roomoteAudioVideoModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
@@ -1195,6 +1189,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
+            roomoteAudioVideoModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
             roomoteExploreModelReasoningEffort: null,
             roomotePlanningModelReasoningEffort: null,
@@ -1254,6 +1249,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: null,
+            roomoteAudioVideoModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
@@ -1261,6 +1257,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
+            roomoteAudioVideoModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
             roomoteExploreModelReasoningEffort: null,
             roomotePlanningModelReasoningEffort: null,
@@ -1320,6 +1317,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModel: null,
             roomoteSmallModel: 'openrouter/anthropic/claude-haiku-4',
             roomoteVisionModel: null,
+            roomoteAudioVideoModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
@@ -1327,6 +1325,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
+            roomoteAudioVideoModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
             roomoteExploreModelReasoningEffort: null,
             roomotePlanningModelReasoningEffort: null,
@@ -1386,6 +1385,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: 'openrouter/anthropic/claude-sonnet-4',
+            roomoteAudioVideoModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
@@ -1393,6 +1393,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
+            roomoteAudioVideoModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
             roomoteExploreModelReasoningEffort: null,
             roomotePlanningModelReasoningEffort: null,
@@ -1484,6 +1485,7 @@ describe('lookupTaskModelCommand', () => {
       orchestrationModelId: selectedModelId,
       helperModelId: selectedModelId,
       visionModelId: selectedModelId,
+      audioVideoModelId: selectedModelId,
       codeReviewModelId: selectedModelId,
       exploreModelId: selectedModelId,
       planningModelId: selectedModelId,
@@ -1491,6 +1493,7 @@ describe('lookupTaskModelCommand', () => {
       orchestrationModelReasoningEffort: 'high',
       helperModelReasoningEffort: 'high',
       visionModelReasoningEffort: 'high',
+      audioVideoModelReasoningEffort: 'high',
       codeReviewModelReasoningEffort: 'high',
       exploreModelReasoningEffort: 'high',
       planningModelReasoningEffort: 'high',

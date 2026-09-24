@@ -197,7 +197,8 @@ manifest changes.
 | `R_MODEL`                              | Optional     | Env-level default coding model. Overrides the default selected in **Settings > Models** for new task starts.                            |
 | `R_ORCHESTRATION_MODEL`                | Optional     | Model for session answers and coordination of delegated task launches. Defaults to `R_MODEL`.                                           |
 | `R_SMALL_MODEL`                        | Optional     | Helper model for routing, titles, summaries, and lightweight model calls.                                                               |
-| `R_VISION_MODEL`                       | Optional     | Vision model for images; when **Audio/video** is on in **Settings > Models**, it also handles audio and video. |
+| `R_VISION_MODEL`                       | Optional     | Model for image inspection.                                                                                                          |
+| `R_AUDIO_VIDEO_MODEL`                  | Optional     | Model for audio transcription and video descriptions. Defaults to the coding model.                                                   |
 | `R_CODE_REVIEW_MODEL`                  | Optional     | Model for initial PR/MR review and review-sync tasks.                                                                                   |
 | `R_EXPLORE_MODEL`                      | Optional     | Exploration/helper model for investigation-oriented subtasks.                                                                           |
 | `R_PLANNING_MODEL`                     | Optional     | Advisor model used for planning turns and advisor consultations inside coding tasks.                                                    |
@@ -205,6 +206,7 @@ manifest changes.
 | `R_ORCHESTRATION_MODEL_REASONING_EFFORT` | Optional   | Reasoning level for the orchestration model.                                                                                            |
 | `R_SMALL_MODEL_REASONING_EFFORT`       | Optional     | Reasoning level for the helper model.                                                                                                   |
 | `R_VISION_MODEL_REASONING_EFFORT`      | Optional     | Reasoning level for the Vision model.                                                                                                    |
+| `R_AUDIO_VIDEO_MODEL_REASONING_EFFORT` | Optional     | Reasoning level for the Audio and video model.                                                                                           |
 | `R_CODE_REVIEW_MODEL_REASONING_EFFORT` | Optional     | Reasoning level for the code review model.                                                                                              |
 | `R_EXPLORE_MODEL_REASONING_EFFORT`     | Optional     | Reasoning level for the exploration model.                                                                                              |
 | `R_PLANNING_MODEL_REASONING_EFFORT`    | Optional     | Reasoning level for the advisor model.                                                                                                  |

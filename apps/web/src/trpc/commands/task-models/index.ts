@@ -61,7 +61,6 @@ import type {
 import {
   getDeploymentRuntimeModelConfig,
   getDeploymentTaskModelSettings,
-  getDeploymentVisionModelAudioVideoEnabled,
 } from '@/lib/server/task-models';
 import {
   getPersistedEnvironmentVariableValues,
@@ -140,7 +139,6 @@ type TaskModelSettingsResult = {
     family: string;
   }>;
   codingModelRoutingRules: CodingModelRoutingRule[];
-  visionModelAudioVideoEnabled: boolean;
 };
 
 type TaskModelSuggestionResult = {
@@ -228,7 +226,6 @@ export async function getTaskModelSettingsCommand(
   const [
     settings,
     persistedRuntimeModelConfig,
-    visionModelAudioVideoEnabled,
     persistedEnvVarNames,
     chatgptConnected,
     githubCopilotConnected,
@@ -237,7 +234,6 @@ export async function getTaskModelSettingsCommand(
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
-    getDeploymentVisionModelAudioVideoEnabled(),
     getPersistedEnvironmentVariableNames(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
@@ -326,7 +322,6 @@ export async function getTaskModelSettingsCommand(
       family,
     })),
     codingModelRoutingRules: settings.codingModelRoutingRules ?? [],
-    visionModelAudioVideoEnabled,
   };
 }
 
@@ -1246,6 +1241,7 @@ export async function updateTaskModelSettingsCommand(
     orchestrationModelId?: string | null;
     helperModelId: string | null;
     visionModelId: string | null;
+    audioVideoModelId?: string | null;
     codeReviewModelId: string | null;
     exploreModelId?: string | null;
     planningModelId: string | null;
@@ -1253,10 +1249,10 @@ export async function updateTaskModelSettingsCommand(
     orchestrationModelReasoningEffort?: ReasoningEffort | null;
     helperModelReasoningEffort: ReasoningEffort | null;
     visionModelReasoningEffort: ReasoningEffort | null;
+    audioVideoModelReasoningEffort?: ReasoningEffort | null;
     codeReviewModelReasoningEffort: ReasoningEffort | null;
     exploreModelReasoningEffort?: ReasoningEffort | null;
     planningModelReasoningEffort: ReasoningEffort | null;
-    visionModelAudioVideoEnabled?: boolean;
     codingModelRoutingRules?: CodingModelRoutingRule[];
   },
 ): Promise<
@@ -1273,6 +1269,7 @@ export async function updateTaskModelSettingsCommand(
         orchestrationModelId?: string;
         helperModelId?: string;
         visionModelId?: string;
+        audioVideoModelId?: string;
         codeReviewModelId?: string;
         exploreModelId?: string;
         planningModelId?: string;
@@ -1289,6 +1286,7 @@ export async function updateTaskModelSettingsCommand(
     orchestrationModelId?: string;
     helperModelId?: string;
     visionModelId?: string;
+    audioVideoModelId?: string;
     codeReviewModelId?: string;
     exploreModelId?: string;
     planningModelId?: string;
@@ -1461,8 +1459,6 @@ export async function updateTaskModelSettingsCommand(
     const [persisted] = await tx
       .select({
         taskModelSettings: deploymentSettings.taskModelSettings,
-        visionModelAudioVideoEnabled:
-          deploymentSettings.visionModelAudioVideoEnabled,
       })
       .from(deploymentSettings)
       .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
@@ -1480,18 +1476,12 @@ export async function updateTaskModelSettingsCommand(
         persisted?.taskModelSettings ?? null,
       ).catalogSyncedModelIds,
     });
-    const nextVisionModelAudioVideoEnabled =
-      input.visionModelAudioVideoEnabled ??
-      persisted?.visionModelAudioVideoEnabled ??
-      false;
-
     await tx
       .insert(deploymentSettings)
       .values({
         id: DEFAULT_DEPLOYMENT_ID,
         taskModelSettings,
         runtimeModelConfig: nextRuntimeModelConfig,
-        visionModelAudioVideoEnabled: nextVisionModelAudioVideoEnabled,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -1499,7 +1489,6 @@ export async function updateTaskModelSettingsCommand(
         set: {
           taskModelSettings,
           runtimeModelConfig: nextRuntimeModelConfig,
-          visionModelAudioVideoEnabled: nextVisionModelAudioVideoEnabled,
           updatedAt: new Date(),
         },
       });

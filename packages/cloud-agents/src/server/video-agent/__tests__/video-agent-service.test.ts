@@ -11,11 +11,7 @@ import {
   describeVideoAttachment,
   VIDEO_AGENT_MAX_VIDEO_SIZE_BYTES,
 } from '../..';
-import {
-  NonTaskAudioVideoSupportDisabledError,
-  NonTaskInputModalityUnsupportedError,
-  VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE,
-} from '../../non-task-provider-usage';
+import { NonTaskInputModalityUnsupportedError } from '../../non-task-provider-usage';
 
 describe('video-agent-service', () => {
   beforeEach(() => {
@@ -62,9 +58,9 @@ describe('video-agent-service', () => {
     );
   });
 
-  it('returns Vision model guidance when configured models do not support video', async () => {
+  it('returns Audio and video model guidance when the selected model does not support video', async () => {
     generateTrackedNonTaskTextMock.mockRejectedValue(
-      new NonTaskInputModalityUnsupportedError('video'),
+      new NonTaskInputModalityUnsupportedError('video', 'Gemini 3.6 Flash'),
     );
 
     const description = await describeVideoAttachment({
@@ -72,23 +68,11 @@ describe('video-agent-service', () => {
       mimeType: 'video/mp4',
     });
 
-    expect(description).toContain("Vision model can't take video");
+    expect(description).toContain('Gemini 3.6 Flash');
+    expect(description).toContain("doesn't support video");
     expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Settings > Models > Vision model'),
+      expect.stringContaining('Settings > Models > Audio and video model'),
     );
-  });
-
-  it('returns the opt-in guidance when video support is off', async () => {
-    generateTrackedNonTaskTextMock.mockRejectedValue(
-      new NonTaskAudioVideoSupportDisabledError('video'),
-    );
-
-    await expect(
-      describeVideoAttachment({
-        videoBytes: Buffer.from('video-bytes'),
-        mimeType: 'video/mp4',
-      }),
-    ).resolves.toBe(VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE);
   });
 
   it('returns null when video inference fails', async () => {
@@ -107,7 +91,7 @@ describe('video-agent-service', () => {
     );
   });
 
-  it('points runtime video capability errors back to the Vision model setting', async () => {
+  it('leaves raw provider failures distinct from normalized capability errors', async () => {
     generateTrackedNonTaskTextMock.mockRejectedValue(
       new Error('The model cannot process video input.'),
     );
@@ -117,9 +101,9 @@ describe('video-agent-service', () => {
       mimeType: 'video/mp4',
     });
 
-    expect(description).toContain('Settings > Models > Vision model');
-    expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining("Vision model can't take video"),
+    expect(description).toBeNull();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('The model cannot process video input.'),
     );
   });
 

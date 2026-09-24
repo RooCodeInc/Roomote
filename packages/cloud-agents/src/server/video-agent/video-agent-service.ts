@@ -1,12 +1,9 @@
-import { formatErrorForLog } from '@roomote/types';
+import { formatErrorForLog, type ReasoningEffort } from '@roomote/types';
 
 import {
   generateTrackedNonTaskText,
-  isNonTaskAudioVideoCapabilityError,
-  NonTaskAudioVideoSupportDisabledError,
   NonTaskInputModalityUnsupportedError,
   NON_TASK_INFERENCE_SURFACES,
-  VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE,
 } from '../non-task-provider-usage';
 import {
   isVideoAgentSupportedMimeType,
@@ -20,8 +17,11 @@ import {
 export async function describeVideoAttachment(input: {
   userId?: string | null;
   taskId?: string | null;
+  taskRunId?: number;
   videoBytes: Buffer;
   mimeType: string;
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
   userTextContext?: string;
 }): Promise<string | null> {
   const startedAt = Date.now();
@@ -45,6 +45,11 @@ export async function describeVideoAttachment(input: {
       surface: NON_TASK_INFERENCE_SURFACES.chatVideoDescription,
       userId: input.userId,
       taskId: input.taskId,
+      ...(input.taskRunId ? { taskRunId: input.taskRunId } : {}),
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.reasoningEffort
+        ? { reasoningEffort: input.reasoningEffort }
+        : {}),
       requiredInputModality: 'video',
       system: VIDEO_AGENT_SYSTEM_PROMPT,
       prompt: buildVideoAgentUserPrompt({
@@ -63,17 +68,11 @@ export async function describeVideoAttachment(input: {
     );
     return description;
   } catch (error) {
-    if (error instanceof NonTaskAudioVideoSupportDisabledError) {
-      return VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE;
-    }
-    if (
-      error instanceof NonTaskInputModalityUnsupportedError ||
-      isNonTaskAudioVideoCapabilityError(error, 'video')
-    ) {
+    if (error instanceof NonTaskInputModalityUnsupportedError) {
       console.warn(
-        `[Video Agent] Skipping video description: the Vision model can't take video. Pick one that supports it in Settings > Models > Vision model (${Date.now() - startedAt}ms)`,
+        `[Video Agent] Skipping video description: ${error.message} (${Date.now() - startedAt}ms)`,
       );
-      return "The Vision model can't take video. Pick one that supports it in Settings > Models > Vision model.";
+      return error.message;
     }
 
     console.error(

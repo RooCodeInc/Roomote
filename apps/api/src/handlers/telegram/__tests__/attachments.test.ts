@@ -92,6 +92,8 @@ describe('attachTelegramMediaToQueuedMessage audio', () => {
     });
     transcribeAudioAttachmentMock.mockResolvedValue({
       status: 'unsupported_model',
+      message:
+        "The Audio and video model (GPT 5.6 Terra) doesn't support audio. Select a model that supports audio in Settings > Models > Audio and video model.",
     });
 
     const result = await attachTelegramMediaToQueuedMessage({
@@ -109,35 +111,7 @@ describe('attachTelegramMediaToQueuedMessage audio', () => {
       botToken: 'secret-token',
     });
 
-    expect(result.text).toContain('Settings > Models > Vision model');
-  });
-
-  it('adds the opt-in guidance to the incoming chat message when audio is off', async () => {
-    downloadFileMock.mockResolvedValue({
-      bytes: Uint8Array.from([1]),
-      filePath: 'voice.oga',
-      contentType: 'audio/ogg',
-    });
-    transcribeAudioAttachmentMock.mockResolvedValue({
-      status: 'audio_video_disabled',
-    });
-
-    const result = await attachTelegramMediaToQueuedMessage({
-      message: {
-        message_id: 2,
-        chat: { id: 3, type: 'private' },
-        voice: {
-          file_id: 'voice-file',
-          file_unique_id: 'voice-unique',
-          duration: 3,
-          mime_type: 'audio/ogg',
-        },
-      },
-      queuedMessage,
-      botToken: 'secret-token',
-    });
-
-    expect(result.text).toContain('Audio and video are off.');
-    expect(result.text).toContain('Settings > Models > Vision model');
+    expect(result.text).toContain('GPT 5.6 Terra');
+    expect(result.text).toContain('Settings > Models > Audio and video model');
   });
 });

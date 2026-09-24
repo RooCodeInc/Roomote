@@ -2,11 +2,8 @@ import { formatErrorForLog } from '@roomote/types';
 
 import {
   generateTrackedNonTaskText,
-  isNonTaskAudioVideoCapabilityError,
-  NonTaskAudioVideoSupportDisabledError,
   NonTaskInputModalityUnsupportedError,
   NON_TASK_INFERENCE_SURFACES,
-  VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE,
 } from './non-task-provider-usage';
 
 export const AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES = 20 * 1024 * 1024;
@@ -23,8 +20,7 @@ const AUDIO_TRANSCRIPTION_SUPPORTED_MIME_TYPES = new Set([
 
 export type AudioTranscriptionResult =
   | { status: 'transcribed'; transcript: string }
-  | { status: 'audio_video_disabled' }
-  | { status: 'unsupported_model' }
+  | { status: 'unsupported_model'; message: string }
   | { status: 'oversized' }
   | { status: 'failed' };
 
@@ -88,13 +84,10 @@ export function formatAudioTranscriptionResult(
   if (result.status === 'transcribed') {
     return formatAudioAttachmentTranscript(filename, result.transcript);
   }
-  if (result.status === 'audio_video_disabled') {
-    return `[Audio attachment "${filename}" could not be transcribed. ${VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE}]`;
-  }
   if (result.status === 'unsupported_model') {
     return formatAudioAttachmentWarning(
       filename,
-      "could not be transcribed: The Vision model can't take audio. Pick one that supports it in Settings > Models > Vision model",
+      `could not be transcribed: ${result.message}`,
     );
   }
   if (result.status === 'oversized') {
@@ -133,7 +126,6 @@ export async function transcribeAudioAttachment(input: {
       userId: input.userId,
       taskId: input.taskId,
       requiredInputModality: 'audio',
-      reasoningEffort: 'low',
       maxOutputTokens: 8_000,
       system:
         'Transcribe the attached audio faithfully in its original language. Preserve technical terms. Mark unintelligible portions instead of guessing. Return only the transcript.',
@@ -151,14 +143,8 @@ export async function transcribeAudioAttachment(input: {
 
     return { status: 'transcribed', transcript };
   } catch (error) {
-    if (error instanceof NonTaskAudioVideoSupportDisabledError) {
-      return { status: 'audio_video_disabled' };
-    }
-    if (
-      error instanceof NonTaskInputModalityUnsupportedError ||
-      isNonTaskAudioVideoCapabilityError(error, 'audio')
-    ) {
-      return { status: 'unsupported_model' };
+    if (error instanceof NonTaskInputModalityUnsupportedError) {
+      return { status: 'unsupported_model', message: error.message };
     }
 
     console.error(

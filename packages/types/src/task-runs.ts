@@ -354,6 +354,7 @@ const openCodeModelOverrideSchema = z
 export const TASK_MODEL_OVERRIDE_ROLES = [
   'helper',
   'vision',
+  'audioVideo',
   'codeReview',
   'explore',
   'planning',
@@ -373,6 +374,7 @@ export type TaskModelRoleOverride = z.infer<typeof taskModelRoleOverrideSchema>;
 export const taskModelRoleOverridesSchema = z.object({
   helper: taskModelRoleOverrideSchema.optional(),
   vision: taskModelRoleOverrideSchema.optional(),
+  audioVideo: taskModelRoleOverrideSchema.optional(),
   codeReview: taskModelRoleOverrideSchema.optional(),
   explore: taskModelRoleOverrideSchema.optional(),
   planning: taskModelRoleOverrideSchema.optional(),

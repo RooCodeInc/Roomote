@@ -1,1 +1,0 @@
-ALTER TABLE "deployment_settings" ADD COLUMN "vision_model_audio_video_enabled" boolean DEFAULT false NOT NULL;
