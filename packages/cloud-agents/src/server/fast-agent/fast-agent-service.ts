@@ -76,6 +76,7 @@ import {
   claimSessionGoalContinuation,
   getSessionGoalForConversation,
   getDeploymentTaskModelOptions,
+  isDeploymentExperimentEnabled,
   getSessionForFastConversation,
   getSessionForTask,
   getActiveRecipeVerificationTaskId,
@@ -2084,10 +2085,34 @@ export async function answerFastAgentQuestion({
     userId,
   });
   const platformEvent = turnSource === 'platform_event';
+  const automationLaunchCriteriaExperimentEnabled =
+    await isDeploymentExperimentEnabled('automationLaunchCriteria').catch(
+      (error: unknown) => {
+        console.warn(
+          `[Fast Agent] Could not read custom automation launch-criteria experiment: ${formatErrorForLog(error)}`,
+        );
+        return false;
+      },
+    );
   const automationLaunchGateRequired =
     platformEvent &&
     platformEventKind === 'automation' &&
+    automationLaunchCriteriaExperimentEnabled &&
     automationLaunchCriteriaRequired;
+  if (
+    platformEvent &&
+    platformEventKind === 'automation' &&
+    !automationLaunchCriteriaExperimentEnabled &&
+    automationLaunchRootRequired
+  ) {
+    if (!adapter.prepareAutomationLaunch) {
+      throw new Error(
+        'The deferred automation destination root cannot be prepared.',
+      );
+    }
+    const updatedConversation = await adapter.prepareAutomationLaunch();
+    if (updatedConversation) conversation = updatedConversation;
+  }
   let automationLaunchGateState: 'pending' | 'continued' | 'stopped' =
     automationLaunchGateRequired ? 'pending' : 'continued';
   let automationLaunchGateStopped = false;
@@ -3978,6 +4003,7 @@ export async function answerFastAgentQuestion({
       platformEventVisibility,
       platformEventKind,
       automationLaunchCriteriaRequired: automationLaunchGateRequired,
+      automationLaunchCriteriaExperimentEnabled,
       automationReport,
       ...(taskCommunicationTriage ? { taskCommunicationTriage } : {}),
       taskCommunicationTriageEnabled,

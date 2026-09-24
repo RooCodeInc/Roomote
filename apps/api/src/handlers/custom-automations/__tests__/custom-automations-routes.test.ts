@@ -31,6 +31,7 @@ const {
   mockListCustomAutomationConditionRuns,
   mockListCustomAutomations,
   mockGetDeploymentTaskModelOptions,
+  mockIsDeploymentExperimentEnabled,
   mockDeleteCustomAutomation,
   mockListConnectedCommunicationProviders,
   mockCanStartAgentMailConversationWithUser,
@@ -48,6 +49,7 @@ const {
   mockListCustomAutomationConditionRuns: vi.fn(),
   mockListCustomAutomations: vi.fn(),
   mockGetDeploymentTaskModelOptions: vi.fn(),
+  mockIsDeploymentExperimentEnabled: vi.fn(),
   mockDeleteCustomAutomation: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
   mockCanStartAgentMailConversationWithUser: vi.fn(),
@@ -71,6 +73,7 @@ vi.mock('@roomote/db/server', () => ({
   listCustomAutomationConditionRuns: mockListCustomAutomationConditionRuns,
   listCustomAutomations: mockListCustomAutomations,
   getDeploymentTaskModelOptions: mockGetDeploymentTaskModelOptions,
+  isDeploymentExperimentEnabled: mockIsDeploymentExperimentEnabled,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -164,7 +167,7 @@ function postCreate(
   });
 }
 
-function registerApiHostedTool(auth: McpAuth) {
+async function registerApiHostedTool(auth: McpAuth) {
   let handler:
     | ((params: ManageCustomAutomationsInput) => Promise<unknown>)
     | undefined;
@@ -178,7 +181,7 @@ function registerApiHostedTool(auth: McpAuth) {
     },
   );
 
-  registerRoomoteCustomAutomationsTool(
+  await registerRoomoteCustomAutomationsTool(
     { registerTool } as unknown as McpServer,
     auth,
   );
@@ -206,7 +209,20 @@ describe('custom-automations MCP routes', () => {
       models: ENABLED_MODELS,
       defaultModelId: 'openai/gpt-5.6-luna',
     });
+    mockIsDeploymentExperimentEnabled.mockResolvedValue(true);
     mockListCustomAutomationConditionRuns.mockResolvedValue([]);
+  });
+
+  it('returns the launch-criteria experiment state to the worker MCP server', async () => {
+    const { app } = createApp();
+    mockIsDeploymentExperimentEnabled.mockResolvedValue(true);
+
+    const response = await app.request('/custom-automations/experiment');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      launchCriteriaEnabled: true,
+    });
   });
 
   describe('API-hosted Roomote MCP tool', () => {
@@ -218,7 +234,7 @@ describe('custom-automations MCP routes', () => {
         principal: 'user',
         version: 1,
       };
-      const { handler, registerTool } = registerApiHostedTool({
+      const { handler, registerTool } = await registerApiHostedTool({
         userId: 'admin-1',
         authContext,
       });
@@ -246,13 +262,34 @@ describe('custom-automations MCP routes', () => {
       });
     });
 
+    it('omits launch-condition fields from the tool schema while disabled', async () => {
+      mockIsDeploymentExperimentEnabled.mockResolvedValue(false);
+      const { registerTool } = await registerApiHostedTool({
+        userId: 'admin-1',
+        authContext: {
+          userId: 'admin-1',
+          tokenType: 'auth',
+          version: 1,
+        },
+      });
+
+      const registeredConfig = registerTool.mock.calls[0]?.[1] as {
+        description: string;
+        inputSchema: Record<string, unknown>;
+      };
+      expect(registeredConfig.inputSchema).not.toHaveProperty('launchCriteria');
+      expect(registeredConfig.inputSchema).not.toHaveProperty('runWhen');
+      expect(registeredConfig.description).not.toContain('launchCriteria');
+      expect(registeredConfig.description).not.toContain('runWhen');
+    });
+
     it("lists the owner's Email identities when the tool scopes list_destinations to an automation", async () => {
       const authContext: AuthTokenContext = {
         userId: 'admin-1',
         tokenType: 'auth',
         version: 1,
       };
-      const { handler } = registerApiHostedTool({
+      const { handler } = await registerApiHostedTool({
         userId: 'admin-1',
         authContext,
       });
@@ -296,7 +333,7 @@ describe('custom-automations MCP routes', () => {
         tokenType: 'auth',
         version: 1,
       };
-      const { handler } = registerApiHostedTool({
+      const { handler } = await registerApiHostedTool({
         userId: 'admin-1',
         authContext,
       });
@@ -354,7 +391,7 @@ describe('custom-automations MCP routes', () => {
         tokenType: 'auth',
         version: 1,
       };
-      const { handler } = registerApiHostedTool({
+      const { handler } = await registerApiHostedTool({
         userId: 'admin-1',
         authContext,
       });
@@ -390,7 +427,7 @@ describe('custom-automations MCP routes', () => {
         tokenType: 'auth',
         version: 1,
       };
-      const { handler } = registerApiHostedTool({
+      const { handler } = await registerApiHostedTool({
         userId: 'admin-1',
         authContext,
       });
@@ -432,7 +469,7 @@ describe('custom-automations MCP routes', () => {
         tokenType: 'auth',
         version: 1,
       };
-      const { handler } = registerApiHostedTool({
+      const { handler } = await registerApiHostedTool({
         userId: 'admin-1',
         authContext,
       });
@@ -456,7 +493,7 @@ describe('custom-automations MCP routes', () => {
         tokenType: 'auth',
         version: 1,
       };
-      const { handler } = registerApiHostedTool({
+      const { handler } = await registerApiHostedTool({
         userId: 'member-1',
         authContext,
       });
@@ -722,6 +759,29 @@ describe('custom-automations MCP routes', () => {
   });
 
   describe('POST / (create)', () => {
+    it.each(['launchCriteria', 'runWhen'] as const)(
+      'rejects %s while the experiment is disabled',
+      async (field) => {
+        mockIsDeploymentExperimentEnabled.mockResolvedValue(false);
+        const { app } = createApp();
+        const response = await postCreate(
+          app,
+          createBody({
+            [field]:
+              field === 'launchCriteria'
+                ? 'Only investigate new regressions.'
+                : { all: [] },
+          }),
+        );
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+          error: 'Custom automation launch criteria are not enabled.',
+        });
+        expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
+      },
+    );
+
     it('accepts and persists declarative runWhen conditions', async () => {
       const { app } = createApp();
       const runWhen = {
@@ -1301,6 +1361,31 @@ describe('custom-automations MCP routes', () => {
         expect.objectContaining({ runWhen }),
       );
     });
+
+    it.each(['launchCriteria', 'runWhen'] as const)(
+      'rejects %s updates while the experiment is disabled',
+      async (field) => {
+        mockIsDeploymentExperimentEnabled.mockResolvedValue(false);
+        const { app } = createApp();
+        const response = await app.request('/custom-automations/automation-1', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            [field]:
+              field === 'launchCriteria'
+                ? 'Only investigate new regressions.'
+                : { all: [] },
+          }),
+        });
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+          error: 'Custom automation launch criteria are not enabled.',
+        });
+        expect(mockGetCustomAutomationById).not.toHaveBeenCalled();
+        expect(mockUpdateCustomAutomation).not.toHaveBeenCalled();
+      },
+    );
 
     it('accepts a prompt at the shared 16,000-character limit', async () => {
       const { app } = createApp();

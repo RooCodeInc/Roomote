@@ -10,6 +10,7 @@ import {
   eq,
   getDeploymentTaskModelOptions,
   getCustomAutomationById,
+  isDeploymentExperimentEnabled,
   listCustomAutomationConditionRuns,
   isNull,
   listCustomAutomations,
@@ -123,6 +124,15 @@ const UNIQUE_VIOLATION_CODE = '23505';
 const NAME_UNIQUE_INDEX = 'custom_automations_name_unique_idx';
 export const DUPLICATE_AUTOMATION_NAME_ERROR =
   'A custom automation with this name already exists.';
+
+function hasLaunchCriteriaFields(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    ('launchCriteria' in value || 'runWhen' in value)
+  );
+}
 
 /**
  * Whether the error (or anything in its cause chain — drizzle wraps the
@@ -414,6 +424,14 @@ customAutomationsRouter.get('/', async (c) =>
   }),
 );
 
+customAutomationsRouter.get('/experiment', async (c) =>
+  c.json({
+    launchCriteriaEnabled: await isDeploymentExperimentEnabled(
+      'automationLaunchCriteria',
+    ),
+  }),
+);
+
 customAutomationsRouter.get('/models', async (c) =>
   c.json(await getDeploymentTaskModelOptions()),
 );
@@ -506,7 +524,17 @@ customAutomationsRouter.post('/resolve-schedule', async (c) => {
 });
 
 customAutomationsRouter.post('/', async (c) => {
-  const parsed = writeSchema.safeParse(await c.req.json());
+  const body: unknown = await c.req.json();
+  if (
+    hasLaunchCriteriaFields(body) &&
+    !(await isDeploymentExperimentEnabled('automationLaunchCriteria'))
+  ) {
+    return c.json(
+      { error: 'Custom automation launch criteria are not enabled.' },
+      400,
+    );
+  }
+  const parsed = writeSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   try {
     await assertEnabledModel(parsed.data.model, parsed.data.reasoningEffort);
@@ -569,7 +597,17 @@ customAutomationsRouter.post('/', async (c) => {
 });
 
 customAutomationsRouter.patch('/:id', async (c) => {
-  const parsed = updateSchema.safeParse(await c.req.json());
+  const body: unknown = await c.req.json();
+  if (
+    hasLaunchCriteriaFields(body) &&
+    !(await isDeploymentExperimentEnabled('automationLaunchCriteria'))
+  ) {
+    return c.json(
+      { error: 'Custom automation launch criteria are not enabled.' },
+      400,
+    );
+  }
+  const parsed = updateSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   const existing = await getCustomAutomationById(c.req.param('id'));
   if (!existing || !canManage(c, existing)) {

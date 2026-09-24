@@ -35,13 +35,22 @@ describe('metadata descriptions', () => {
     expect(
       getBooleanMetadataDescriptorByKey('anonymous_analytics_enabled').kind,
     ).toBe('deployment-control');
+    expect(
+      getBooleanMetadataDescriptorByKey(
+        'automation_launch_criteria_experiment_enabled',
+      ).kind,
+    ).toBe('deployment-control');
   });
 
   it('enables deployment experiments only from explicit true metadata', () => {
     expect(
+      getDeploymentExperimentValues(undefined).automationLaunchCriteria,
+    ).toBe(false);
+    expect(
       getDeploymentExperimentValues({
         results_page_enabled: true,
         private_sessions_experiment_enabled: true,
+        automation_launch_criteria_experiment_enabled: true,
         integration_keys_enabled: 'true',
       }),
     ).toEqual({
@@ -49,6 +58,7 @@ describe('metadata descriptions', () => {
       browserNotifications: false,
       integrationToolAutoApprovals: false,
       sessionTaskCommunicationTriage: false,
+      automationLaunchCriteria: true,
     });
   });
 });

@@ -384,6 +384,21 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('provide a copy-pasteable draft');
   });
 
+  it('gates custom launch-condition authoring guidance on the deployment experiment', () => {
+    const disabledPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+    const enabledPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      automationLaunchCriteriaExperimentEnabled: true,
+    });
+
+    expect(disabledPrompt).not.toContain('launchCriteria');
+    expect(disabledPrompt).not.toContain('runWhen');
+    expect(enabledPrompt).toContain('launchCriteria');
+    expect(enabledPrompt).toContain('runWhen');
+  });
+
   it('suppresses implicit offers for automation events and the deployment kill switch', () => {
     const eventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -695,6 +710,7 @@ describe('buildFastAgentSystemPrompt', () => {
         },
       ],
       defaultTaskModelId: 'openai/gpt-5.6',
+      automationLaunchCriteriaExperimentEnabled: true,
       activeTasks: [
         { taskId: 'task-1', title: 'Fix API', status: RunStatus.Running },
         { taskId: 'task-2', title: 'Update docs', status: RunStatus.Pending },
@@ -2187,6 +2203,7 @@ describe('buildFastAgentSystemPrompt', () => {
       platformEventKind: 'automation',
       platformEventVisibility: 'required',
       automationLaunchCriteriaRequired: true,
+      automationLaunchCriteriaExperimentEnabled: true,
     });
 
     expect(prompt).toContain(

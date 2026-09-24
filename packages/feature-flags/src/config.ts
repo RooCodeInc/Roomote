@@ -5,6 +5,7 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
   'browserNotifications',
   'integrationToolAutoApprovals',
   'sessionTaskCommunicationTriage',
+  'automationLaunchCriteria',
 ] as const;
 
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
@@ -16,6 +17,7 @@ export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
     'integration_tool_auto_approvals_experiment_enabled',
   sessionTaskCommunicationTriage:
     'session_task_communication_triage_experiment_enabled',
+  automationLaunchCriteria: 'automation_launch_criteria_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
 
 export type DeploymentExperimentValues = Record<
@@ -66,5 +68,11 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     group: null,
     description:
       'Stream delegated task activity to its Session and let the judgment model decide whether to tell the user, redirect the task, or stay quiet. Disabled by default; absent means disabled.',
+  },
+  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.automationLaunchCriteria]: {
+    kind: 'deployment-control',
+    group: null,
+    description:
+      'Allow custom automations to use plain-language and typed checks before a run starts. Disabled by default; absent means disabled.',
   },
 };

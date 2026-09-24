@@ -18,6 +18,7 @@ import {
   workspaceRoutingSettingsSchema,
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   customAutomationRunWhenSchema,
   isTriggerableBackgroundAutomationKey,
@@ -989,6 +990,12 @@ const automationsRouter = createRouter({
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
+        launchCriteria: z
+          .string()
+          .trim()
+          .max(CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH)
+          .nullable()
+          .optional(),
         runWhen: customAutomationRunWhenSchema.nullable().optional(),
       }),
     )
@@ -1037,6 +1044,12 @@ const automationsRouter = createRouter({
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
+        launchCriteria: z
+          .string()
+          .trim()
+          .max(CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH)
+          .nullable()
+          .optional(),
         runWhen: customAutomationRunWhenSchema.nullable().optional(),
       }),
     )

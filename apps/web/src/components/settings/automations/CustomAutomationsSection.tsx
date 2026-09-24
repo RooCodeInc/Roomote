@@ -61,6 +61,7 @@ import {
 import { ModelSelect } from '@/components/tasks/ModelSelect';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
+import { useAutomationLaunchCriteriaExperiment } from '@/hooks/useAutomationLaunchCriteriaExperiment';
 import { useAuthorizedUser } from '@/hooks/useUser';
 
 import {
@@ -425,6 +426,8 @@ export function CustomAutomationsSection({
   children?: ReactNode;
 } = {}) {
   const { isAdmin } = useAuthorizedUser();
+  const { enabled: automationLaunchCriteriaEnabled } =
+    useAutomationLaunchCriteriaExperiment();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const listQuery = useQuery(
@@ -907,7 +910,9 @@ export function CustomAutomationsSection({
     const payload = {
       name: form.name,
       prompt: form.prompt,
-      launchCriteria: form.launchCriteria.trim() || null,
+      ...(automationLaunchCriteriaEnabled
+        ? { launchCriteria: form.launchCriteria.trim() || null }
+        : {}),
       enabled: form.enabled,
       resultPriority: form.resultPriority,
       scheduleMode: form.scheduleMode,
@@ -1014,28 +1019,31 @@ export function CustomAutomationsSection({
           ) : null}
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="custom-automation-launch-criteria">
-            Launch criteria (optional)
-          </Label>
-          <Textarea
-            id="custom-automation-launch-criteria"
-            value={form.launchCriteria}
-            maxLength={CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH}
-            disabled={busy}
-            rows={3}
-            onChange={(event) => {
-              const launchCriteria = event.target.value;
-              setForm((current) => ({ ...current, launchCriteria }));
-            }}
-            placeholder="Only investigate newly regressed issues affecting active users."
-          />
-          <p className="text-sm text-muted-foreground">
-            Before work starts, the session checks these criteria against fresh
-            findings and recent runs. When the evidence does not meet them, the
-            run ends quietly without a destination reply or delegated task.
-          </p>
-        </div>
+        {automationLaunchCriteriaEnabled ? (
+          <div className="space-y-2">
+            <Label htmlFor="custom-automation-launch-criteria">
+              Launch criteria (optional)
+            </Label>
+            <Textarea
+              id="custom-automation-launch-criteria"
+              value={form.launchCriteria}
+              maxLength={CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH}
+              disabled={busy}
+              rows={3}
+              onChange={(event) => {
+                const launchCriteria = event.target.value;
+                setForm((current) => ({ ...current, launchCriteria }));
+              }}
+              placeholder="Only investigate newly regressed issues affecting active users."
+            />
+            <p className="text-sm text-muted-foreground">
+              Before work starts, the session checks these criteria against
+              fresh findings and recent runs. When the evidence does not meet
+              them, the run ends quietly without a destination reply or
+              delegated task.
+            </p>
+          </div>
+        ) : null}
 
         <div className="space-y-2">
           <Label htmlFor="custom-automation-schedule">Schedule</Label>

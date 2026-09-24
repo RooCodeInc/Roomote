@@ -10,6 +10,7 @@ import {
   getCustomAutomationById,
   getCustomAutomationFrequency,
   CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS,
+  isDeploymentExperimentEnabled,
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
   tryClaimCustomAutomationLaunch,
@@ -532,9 +533,19 @@ async function runFastCustomAutomation(params: {
   const target = isConfiguredAutomationTarget(params.automation.target)
     ? params.automation.target
     : null;
-  const launchCriteriaRequired = Boolean(
-    params.automation.launchCriteria?.trim() || params.automation.runWhen,
-  );
+  const launchCriteriaEnabled = await isDeploymentExperimentEnabled(
+    'automationLaunchCriteria',
+  ).catch((error: unknown) => {
+    console.warn(
+      `${LOG_PREFIX} Could not read custom automation launch-criteria experiment; running without launch criteria: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  });
+  const launchCriteriaRequired =
+    launchCriteriaEnabled &&
+    Boolean(
+      params.automation.launchCriteria?.trim() || params.automation.runWhen,
+    );
   const { conversation, rootMessageId } = await buildFastAutomationConversation(
     {
       automation: params.automation,
@@ -565,10 +576,10 @@ async function runFastCustomAutomation(params: {
       automationName: params.automation.name,
       launchClaimedAt: params.launchClaimedAt.toISOString(),
       prompt: params.automation.prompt,
-      ...(params.automation.launchCriteria?.trim()
+      ...(launchCriteriaEnabled && params.automation.launchCriteria?.trim()
         ? { launchCriteria: params.automation.launchCriteria }
         : {}),
-      ...(params.automation.runWhen
+      ...(launchCriteriaEnabled && params.automation.runWhen
         ? { runWhen: params.automation.runWhen }
         : {}),
       ...(launchCriteriaRequired && target

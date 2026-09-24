@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fastMocks = vi.hoisted(() => ({
   getSession: vi.fn(),
+  deploymentExperimentEnabled: vi.fn(),
   enqueueParentEvent: vi.fn(),
   slackPostMessage: vi.fn(),
   slackUpdateMessage: vi.fn(),
@@ -107,6 +108,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   getCustomAutomationById: vi.fn(),
   getCustomAutomationFrequency: vi.fn(),
+  isDeploymentExperimentEnabled: fastMocks.deploymentExperimentEnabled,
   listEnabledCustomAutomations: vi.fn(),
   recordCustomAutomationRunOutcome: vi.fn(),
   slackInstallationChannels: { channelId: 'slack_channels.channel_id' },
@@ -164,6 +166,7 @@ import {
   db,
   getCustomAutomationById,
   getCustomAutomationFrequency,
+  isDeploymentExperimentEnabled,
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
   tryClaimCustomAutomationLaunch,
@@ -214,6 +217,7 @@ describe('customAutomationsJob', () => {
       automation as never,
     ]);
     vi.mocked(getCustomAutomationFrequency).mockReturnValue('daily');
+    vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(true);
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(new Date());
     vi.mocked(recordCustomAutomationRunOutcome).mockResolvedValue(true);
     vi.mocked(isRunDue).mockReturnValue(true);
@@ -717,6 +721,40 @@ describe('customAutomationsJob', () => {
         }),
       }),
     );
+  });
+
+  it('ignores saved custom launch criteria and starts the destination root while disabled', async () => {
+    vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(false);
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        launchCriteria: 'Only investigate new regressions.',
+        runWhen: { all: [] },
+        target: {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'discord-channel-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'discord',
+    ]);
+
+    await customAutomationsJob();
+
+    expect(fastMocks.createDiscordThread).toHaveBeenCalledWith({
+      channelId: 'discord-channel-1',
+      name: 'Flaky tests',
+      initialText: 'Flaky tests is running.',
+    });
+    const event = fastMocks.enqueueParentEvent.mock.calls[0]?.[0]?.event;
+    expect(event).not.toHaveProperty('launchCriteria');
+    expect(event).not.toHaveProperty('runWhen');
+    expect(event).not.toHaveProperty('targetKind');
   });
 
   it('fails closed when a configured Discord channel is unavailable', async () => {
@@ -1677,6 +1715,7 @@ describe('customAutomationsJob', () => {
 describe('runCustomAutomationNow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(true);
     vi.mocked(getCustomAutomationById).mockResolvedValue(automation as never);
     vi.mocked(getCustomAutomationFrequency).mockReturnValue('daily');
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(new Date());

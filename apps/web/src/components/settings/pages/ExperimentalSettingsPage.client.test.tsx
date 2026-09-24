@@ -55,6 +55,15 @@ vi.mock(
   }),
 );
 
+vi.mock(
+  '@/components/settings/AutomationLaunchCriteriaExperimentalSetting',
+  () => ({
+    AutomationLaunchCriteriaExperimentalSetting: () => (
+      <div>Custom automation launch criteria setting</div>
+    ),
+  }),
+);
+
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
 describe('ExperimentalSettingsPage', () => {
@@ -81,6 +90,9 @@ describe('ExperimentalSettingsPage', () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByText('Task communication triage setting'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Custom automation launch criteria setting'),
     ).toBeInTheDocument();
     expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
   });

@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
     ) => void;
   } | null,
   isAdmin: true,
+  automationLaunchCriteriaEnabled: false,
   catalogQueryOptions: [] as Array<{ enabled?: boolean }>,
   queriedKeys: [] as unknown[],
   customAutomationsPending: false,
@@ -521,6 +522,15 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({ isAdmin: state.isAdmin }),
 }));
 
+vi.mock('@/hooks/useAutomationLaunchCriteriaExperiment', () => ({
+  useAutomationLaunchCriteriaExperiment: () => ({
+    enabled: state.automationLaunchCriteriaEnabled,
+    isLoading: false,
+    isUpdating: false,
+    setEnabled: vi.fn(),
+  }),
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     automations: {
@@ -685,6 +695,7 @@ it('opens the standalone custom editor without querying admin settings', () => {
 });
 
 it('saves optional launch criteria when creating a custom automation', () => {
+  state.automationLaunchCriteriaEnabled = true;
   render(<CustomAutomationsSection />);
   fireEvent.click(screen.getByRole('button', { name: 'New' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
@@ -715,6 +726,7 @@ it('saves optional launch criteria when creating a custom automation', () => {
 });
 
 it('prefills and updates launch criteria when editing a custom automation', async () => {
+  state.automationLaunchCriteriaEnabled = true;
   setRunnableCustomAutomation('Only investigate new checkout regressions.');
   render(<AutomationsSettings />);
   fireEvent.click(
@@ -737,6 +749,52 @@ it('prefills and updates launch criteria when editing a custom automation', asyn
       launchCriteria: 'Only investigate regressions affecting active users.',
     }),
   );
+});
+
+it('hides and omits custom automation launch criteria while the experiment is off', () => {
+  state.automationLaunchCriteriaEnabled = false;
+  render(<CustomAutomationsSection />);
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+
+  expect(
+    screen.queryByRole('textbox', { name: 'Launch criteria (optional)' }),
+  ).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+    target: { value: 'Unconditional report' },
+  });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+    target: { value: 'Summarize current production issues.' },
+  });
+  fireEvent.click(
+    screen.getByRole('combobox', { name: 'Preferred environment' }),
+  );
+  fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+  mutations.updateSettings.mockClear();
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+  expect(mutations.updateSettings).toHaveBeenCalledOnce();
+  expect(mutations.updateSettings.mock.calls[0]?.[0]).not.toHaveProperty(
+    'launchCriteria',
+  );
+});
+
+it('keeps channel auto-start launch criteria editable with the custom experiment off', async () => {
+  state.automationLaunchCriteriaEnabled = false;
+  render(<AutomationsSettings />);
+  fireEvent.click(
+    await screen.findByRole('button', {
+      name: /(?:Set up|Configure) Auto-respond to channels/,
+    }),
+  );
+
+  const criteria = await screen.findByRole('textbox', {
+    name: 'Launch criteria (optional)',
+  });
+  fireEvent.change(criteria, {
+    target: { value: 'Only start for new incidents.' },
+  });
+
+  expect(criteria).toHaveValue('Only start for new incidents.');
 });
 
 it('validates required custom automation fields before creating', () => {
@@ -881,6 +939,7 @@ describe('AutomationsSettings', () => {
     vi.clearAllMocks();
     state.nextUpdateSettingsResult = null;
     state.customAutomationRunPendingId = null;
+    state.automationLaunchCriteriaEnabled = false;
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
     mutations.latestCustomTriggerOptions = null;

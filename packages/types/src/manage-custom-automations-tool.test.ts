@@ -10,6 +10,7 @@ import {
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   buildManageCustomAutomationsRequest,
   compactManageCustomAutomationsResult,
+  getManageCustomAutomationsTool,
   manageCustomAutomationsInputSchema,
 } from './manage-custom-automations-tool';
 
@@ -138,6 +139,15 @@ describe('manage custom automations tool contract', () => {
     );
   });
 
+  it('omits launch-condition fields and authoring guidance while the experiment is off', () => {
+    const tool = getManageCustomAutomationsTool(false);
+
+    expect(tool.description).not.toContain('launchCriteria');
+    expect(tool.description).not.toContain('runWhen');
+    expect(tool.inputSchema).not.toHaveProperty('launchCriteria');
+    expect(tool.inputSchema).not.toHaveProperty('runWhen');
+  });
+
   it('compacts list records to operational fields', () => {
     expect(
       compactManageCustomAutomationsResult('list', {
@@ -262,6 +272,31 @@ describe('manage custom automations tool contract', () => {
           answers: { new_regression: { type: 'noul', noul: 0.1 } },
         },
       ],
+    });
+  });
+
+  it('omits saved launch conditions and their runs from disabled-tool results', () => {
+    expect(
+      compactManageCustomAutomationsResult(
+        'inspect',
+        {
+          automation: {
+            id: 'automation-1',
+            name: 'Daily report',
+            prompt: 'Inspect this stored prompt.',
+            launchCriteria: 'Only investigate new regressions.',
+            runWhen: { all: [] },
+          },
+          conditionRuns: [{ outcome: 'skipped' }],
+        },
+        { includeLaunchCriteria: false },
+      ),
+    ).toEqual({
+      automation: {
+        id: 'automation-1',
+        name: 'Daily report',
+        prompt: 'Inspect this stored prompt.',
+      },
     });
   });
 

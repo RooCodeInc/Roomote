@@ -231,8 +231,10 @@ function compactScheduleResolution(value: unknown): Record<string, unknown> {
 export function compactManageCustomAutomationsResult(
   action: ManageCustomAutomationsInput['action'],
   payload: unknown,
+  options: { includeLaunchCriteria?: boolean } = {},
 ): Record<string, unknown> {
   const result = asRecord(payload) ?? {};
+  const includeLaunchCriteria = options.includeLaunchCriteria ?? true;
 
   if (
     result.status === 'ambiguous' &&
@@ -267,13 +269,16 @@ export function compactManageCustomAutomationsResult(
               'id',
               'name',
               'prompt',
-              'launchCriteria',
-              'runWhen',
+              ...(includeLaunchCriteria ? ['launchCriteria', 'runWhen'] : []),
             ])
           : {},
-        conditionRuns: Array.isArray(result.conditionRuns)
-          ? result.conditionRuns
-          : [],
+        ...(includeLaunchCriteria
+          ? {
+              conditionRuns: Array.isArray(result.conditionRuns)
+                ? result.conditionRuns
+                : [],
+            }
+          : {}),
       };
     }
     case 'list_models':
@@ -313,7 +318,7 @@ export function compactManageCustomAutomationsResult(
     case 'update':
       return {
         automation: compactAutomation(result.automation, {
-          includeLaunchCriteria: true,
+          includeLaunchCriteria,
         }),
         ...(result.resolution
           ? { resolution: compactScheduleResolution(result.resolution) }
@@ -478,7 +483,35 @@ const BASE_MANAGE_CUSTOM_AUTOMATIONS_TOOL = {
   },
 } as const;
 
-export const MANAGE_CUSTOM_AUTOMATIONS_TOOL = {
-  ...BASE_MANAGE_CUSTOM_AUTOMATIONS_TOOL,
-  description: `${BASE_MANAGE_CUSTOM_AUTOMATIONS_TOOL.description}\n\nlaunchCriteria is optional plain-language gating before work starts; runWhen adds optional typed checks at that same point. Inspect shows recent decisions.`,
-} as const;
+const {
+  launchCriteria: _launchCriteria,
+  runWhen: _runWhen,
+  ...baseFieldSchemas
+} = manageCustomAutomationsFieldSchemas;
+
+type ManageCustomAutomationsToolDescriptor<Enabled extends boolean> = Omit<
+  typeof BASE_MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  'description' | 'inputSchema'
+> & {
+  description: string;
+  inputSchema: Enabled extends true
+    ? typeof manageCustomAutomationsFieldSchemas
+    : typeof baseFieldSchemas;
+};
+
+export function getManageCustomAutomationsTool<Enabled extends boolean>(
+  automationLaunchCriteriaEnabled: Enabled,
+): ManageCustomAutomationsToolDescriptor<Enabled> {
+  return {
+    ...BASE_MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+    description: automationLaunchCriteriaEnabled
+      ? `${BASE_MANAGE_CUSTOM_AUTOMATIONS_TOOL.description}\n\nlaunchCriteria is optional plain-language gating before work starts; runWhen adds optional typed checks at that same point. Inspect shows recent decisions.`
+      : BASE_MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
+    inputSchema: automationLaunchCriteriaEnabled
+      ? manageCustomAutomationsFieldSchemas
+      : baseFieldSchemas,
+  } as ManageCustomAutomationsToolDescriptor<Enabled>;
+}
+
+export const MANAGE_CUSTOM_AUTOMATIONS_TOOL =
+  getManageCustomAutomationsTool(true);

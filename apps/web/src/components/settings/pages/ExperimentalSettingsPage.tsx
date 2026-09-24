@@ -4,6 +4,7 @@ import { SettingsShell } from '@/components/settings/SettingsShell';
 import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
 import { BrowserNotificationsExperimentalSetting } from '@/components/settings/BrowserNotificationsExperimentalSetting';
 import { SessionTaskCommunicationTriageExperimentalSetting } from '@/components/settings/SessionTaskCommunicationTriageExperimentalSetting';
+import { AutomationLaunchCriteriaExperimentalSetting } from '@/components/settings/AutomationLaunchCriteriaExperimentalSetting';
 import { RetryableLoadError } from '@/components/system';
 import { useDeploymentExperiments } from '@/hooks/useDeploymentExperiments';
 
@@ -25,6 +26,7 @@ export function ExperimentalSettingsPage() {
           <PrivateSessionsExperimentalSetting />
           <SessionTaskCommunicationTriageExperimentalSetting />
           <BrowserNotificationsExperimentalSetting />
+          <AutomationLaunchCriteriaExperimentalSetting />
         </>
       )}
     </SettingsShell>

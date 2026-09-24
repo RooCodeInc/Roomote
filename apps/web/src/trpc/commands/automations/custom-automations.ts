@@ -8,6 +8,7 @@ import {
   fastAgentConversations,
   getDeploymentTaskModelOptions,
   getBackgroundAgentSettingsForDeployment,
+  isDeploymentExperimentEnabled,
   getCustomAutomationById,
   listCustomAutomations,
   inArray,
@@ -318,6 +319,18 @@ function assertLaunchCriteria(value?: string | null): void {
   }
 }
 
+async function assertLaunchCriteriaExperimentEnabled(input: {
+  launchCriteria?: string | null;
+  runWhen?: CustomAutomationRunWhen | null;
+}): Promise<void> {
+  if (input.launchCriteria === undefined && input.runWhen === undefined) {
+    return;
+  }
+  if (!(await isDeploymentExperimentEnabled('automationLaunchCriteria'))) {
+    throw new Error('Custom automation launch criteria are not enabled.');
+  }
+}
+
 export async function listCustomAutomationsCommand(
   auth: UserAuthSuccess,
 ): Promise<CustomAutomationListItem[]> {
@@ -406,6 +419,7 @@ export async function createCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: CustomAutomationWriteInput,
 ): Promise<CustomAutomationListItem> {
+  await assertLaunchCriteriaExperimentEnabled(input);
   assertScheduleMode(input.scheduleMode);
   const scheduleContext = await resolveDeploymentTimeZone();
   const cronExpression =
@@ -456,6 +470,7 @@ export async function updateCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: CustomAutomationWriteInput & { id: string },
 ): Promise<CustomAutomationListItem> {
+  await assertLaunchCriteriaExperimentEnabled(input);
   const existing = await getOwnedAutomation(auth, input.id);
   assertScheduleMode(input.scheduleMode);
   const scheduleContext = await resolveDeploymentTimeZone();

@@ -11326,6 +11326,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
+    mocks.deploymentExperimentEnabled.mockResolvedValue(true);
     await answerFastAgentQuestion({
       ...baseParams,
       adapter,
@@ -11392,6 +11393,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
+    mocks.deploymentExperimentEnabled.mockResolvedValue(true);
     await answerFastAgentQuestion({
       ...baseParams,
       adapter,
@@ -11448,6 +11450,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
+    mocks.deploymentExperimentEnabled.mockResolvedValue(true);
     await expect(
       answerFastAgentQuestion({
         ...baseParams,
@@ -11485,6 +11488,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
+    mocks.deploymentExperimentEnabled.mockResolvedValue(true);
     await expect(
       answerFastAgentQuestion({
         ...baseParams,
@@ -11507,6 +11511,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(prepareAutomationLaunch).toHaveBeenCalledOnce();
     expect(launchTask).not.toHaveBeenCalled();
     expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
+  it('disables a queued custom automation gate after the experiment is turned off', async () => {
+    const evaluateAutomationLaunchCriteria = vi.fn(async () => ({
+      decision: 'continue' as const,
+    }));
+    const prepareAutomationLaunch = vi.fn(async () => undefined);
+    const adapter = callbacks({
+      evaluateAutomationLaunchCriteria,
+      prepareAutomationLaunch,
+    });
+    mocks.deploymentExperimentEnabled.mockResolvedValue(false);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.evaluateAutomationLaunchCriteria, {
+            findingsReport: 'Saved criteria should not be evaluated.',
+          }),
+        ).resolves.toMatchObject({
+          success: false,
+          error: 'This automation has no saved launch criteria to evaluate.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+      automationLaunchCriteriaRequired: true,
+      automationLaunchRootRequired: true,
+    });
+
+    expect(evaluateAutomationLaunchCriteria).not.toHaveBeenCalled();
+    expect(prepareAutomationLaunch).toHaveBeenCalledOnce();
+    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.any(Array),
+      expect.objectContaining({ automationLaunchCriteriaEnabled: false }),
+    );
   });
 
   it('keeps an automation clarification eligible after delegated work starts', async () => {

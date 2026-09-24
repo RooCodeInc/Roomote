@@ -1,4 +1,7 @@
-import { handleManageCustomAutomations } from '../custom-automations.js';
+import {
+  handleManageCustomAutomations,
+  resolveCustomAutomationLaunchCriteriaEnabled,
+} from '../custom-automations.js';
 import type { RoomoteConfig } from '../types.js';
 
 const config: RoomoteConfig = {
@@ -112,6 +115,64 @@ describe('handleManageCustomAutomations', () => {
       },
       conditionRuns: [],
     });
+  });
+
+  it('omits saved launch conditions from inspect results when disabled', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          automation: {
+            id: 'automation-1',
+            name: 'Daily report',
+            prompt: 'Inspect this stored prompt.',
+            launchCriteria: 'Only investigate regressions.',
+            runWhen: { all: [] },
+          },
+          conditionRuns: [{ outcome: 'skipped' }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await handleManageCustomAutomations(
+      { action: 'inspect', automationId: 'automation-1' },
+      config,
+      false,
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toEqual({
+      automation: {
+        id: 'automation-1',
+        name: 'Daily report',
+        prompt: 'Inspect this stored prompt.',
+      },
+    });
+  });
+
+  it('fails closed when loading the deployment experiment state', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ launchCriteriaEnabled: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(
+      resolveCustomAutomationLaunchCriteriaEnabled(config),
+    ).resolves.toBe(true);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://api.example.com/api/mcp/custom-automations/experiment',
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ launchCriteriaEnabled: 'true' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(
+      resolveCustomAutomationLaunchCriteriaEnabled(config),
+    ).resolves.toBe(false);
   });
 
   it('preserves structured schedule clarification on an ambiguous write', async () => {
