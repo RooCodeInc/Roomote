@@ -4,6 +4,7 @@ import {
   type CommunicationMessageButton,
   type DiscordCommunicationProvider,
 } from '@roomote/communication';
+import { DISCORD_MAX_EMBEDS_PER_MESSAGE } from '@roomote/communication/discord-provider';
 
 import type { DiscordChannelContext } from './task-launch.js';
 
@@ -27,13 +28,20 @@ export async function replyToDiscordEvent(input: {
   replyToMessageId?: string;
 }) {
   if (input.interaction?.interactionDeferred) {
+    let interactionResponse:
+      | Awaited<ReturnType<typeof input.provider.editInteractionResponse>>
+      | undefined;
     try {
-      return await input.provider.editInteractionResponse({
+      interactionResponse = await input.provider.editInteractionResponse({
         applicationId: input.applicationId,
         interactionToken: input.interaction.interaction.token,
         text: input.text,
         ...(input.buttons ? { buttons: input.buttons } : {}),
-        ...(input.images?.length ? { images: input.images } : {}),
+        ...(input.images?.length
+          ? {
+              images: input.images.slice(0, DISCORD_MAX_EMBEDS_PER_MESSAGE),
+            }
+          : {}),
       });
     } catch (error) {
       // An ambiguous Gateway ACK is represented as deferred so a successful
@@ -44,6 +52,24 @@ export async function replyToDiscordEvent(input: {
       if (!(error instanceof DiscordApiError) || error.status !== 404) {
         throw error;
       }
+    }
+
+    if (interactionResponse) {
+      const remainingImages =
+        input.images?.slice(DISCORD_MAX_EMBEDS_PER_MESSAGE) ?? [];
+      if (remainingImages.length > 0) {
+        await input.provider.postMessage({
+          channelId: input.channel.parentChannelId ?? input.channel.channelId,
+          ...(input.channel.parentChannelId
+            ? { threadId: input.channel.channelId }
+            : {}),
+          ...(input.replyToMessageId
+            ? { replyToMessageId: input.replyToMessageId }
+            : {}),
+          images: remainingImages,
+        });
+      }
+      return interactionResponse;
     }
   }
   return input.provider.postMessage({

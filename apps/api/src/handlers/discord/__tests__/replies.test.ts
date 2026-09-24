@@ -84,6 +84,47 @@ describe('replyToDiscordEvent', () => {
     });
   });
 
+  it('posts image batches beyond the deferred interaction embed limit', async () => {
+    const images = Array.from({ length: 11 }, (_, index) => ({
+      url: `https://roomote.example.com/artifacts/image-${index}.png`,
+      altText: `proof-${index}.png`,
+      contentType: 'image/png',
+    }));
+    const editInteractionResponse = vi.fn(async () => ({
+      provider: 'discord' as const,
+      channelId: 'thread-1',
+      messageId: 'response-1',
+    }));
+    const postMessage = vi.fn(async () => ({
+      provider: 'discord' as const,
+      channelId: 'channel-1',
+      messageId: 'overflow-1',
+    }));
+
+    await expect(
+      replyToDiscordEvent({
+        provider: { editInteractionResponse, postMessage } as never,
+        applicationId: 'app-1',
+        channel: channelContext(),
+        interaction: interactionContext(),
+        text: 'All screenshots are attached.',
+        images,
+      }),
+    ).resolves.toMatchObject({ messageId: 'response-1' });
+
+    expect(editInteractionResponse).toHaveBeenCalledWith({
+      applicationId: 'app-1',
+      interactionToken: 'interaction-token',
+      text: 'All screenshots are attached.',
+      images: images.slice(0, 10),
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      images: images.slice(10),
+    });
+  });
+
   it('falls back to the channel when an ambiguous ACK has no original response', async () => {
     const editInteractionResponse = vi.fn().mockRejectedValue(
       new DiscordApiError({
