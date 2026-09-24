@@ -295,7 +295,7 @@ describe('describeVideo', () => {
 
   it('returns the disabled-support guidance to the task video tool', async () => {
     const message =
-      'Audio and video support is off. To enable it, turn on "Also use for audio and video" under "Vision model" in Settings > Models and pick a model that supports audio and video input (for example Gemini).';
+      'Audio and video are off. Turn them on in Settings > Models > Vision model, and pick a model that supports them, like Gemini.';
     describeVideoAttachmentMock.mockResolvedValueOnce(message);
 
     const response = await createApp(authContext).request(

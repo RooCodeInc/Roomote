@@ -71,9 +71,9 @@ export async function describeVideoAttachment(input: {
       isNonTaskAudioVideoCapabilityError(error, 'video')
     ) {
       console.warn(
-        `[Video Agent] Skipping video description: the Vision model does not support video input. Choose a video-capable model under Settings > Models > Vision model (${Date.now() - startedAt}ms)`,
+        `[Video Agent] Skipping video description: the Vision model can't take video. Pick one that supports it in Settings > Models > Vision model (${Date.now() - startedAt}ms)`,
       );
-      return 'The Vision model does not support video input. Choose a video-capable model under Settings > Models > Vision model.';
+      return "The Vision model can't take video. Pick one that supports it in Settings > Models > Vision model.";
     }
 
     console.error(

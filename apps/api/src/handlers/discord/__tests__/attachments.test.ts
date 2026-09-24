@@ -146,7 +146,7 @@ describe('processDiscordAttachments', () => {
     );
 
     expect(unsupported.attachmentTexts[0]).toContain(
-      'Choose an audio-capable model under Settings > Models > Vision model',
+      'Settings > Models > Vision model',
     );
     expect(oversized.attachmentTexts[0]).toContain('20 MiB limit');
   });

@@ -443,11 +443,7 @@ describe('ModelSettingsSection', () => {
     renderModelSettingsSection();
 
     expect(screen.getByText('Vision model')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Used to inspect images attached to messages and tasks.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Audio/video')).toBeInTheDocument();
     const audioVideoSwitch = screen.getByRole('switch', {
       name: 'Also use for audio and video',
     });
@@ -459,9 +455,7 @@ describe('ModelSettingsSection', () => {
     );
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
 
-    expect(screen.getByText(/This model is not listed/)).toHaveTextContent(
-      'not listed as supporting image input',
-    );
+    expect(screen.getByText("GLM 5.2 can't take images.")).toBeInTheDocument();
     await waitFor(() => {
       expect(updateMutateAsyncMock).toHaveBeenCalledWith(
         expect.objectContaining({ visionModelId: 'openrouter/z-ai/glm-5.2' }),
@@ -498,9 +492,9 @@ describe('ModelSettingsSection', () => {
       screen.getByRole('switch', { name: 'Also use for audio and video' }),
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'not listed as supporting audio or video input',
-    );
+    expect(
+      screen.getByText("GPT 5.4 can't take audio or video."),
+    ).toBeInTheDocument();
     await waitFor(() => {
       expect(updateMutateAsyncMock).toHaveBeenCalledWith(
         expect.objectContaining({ visionModelAudioVideoEnabled: true }),

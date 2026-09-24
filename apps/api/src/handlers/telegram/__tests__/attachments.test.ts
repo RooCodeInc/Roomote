@@ -109,9 +109,7 @@ describe('attachTelegramMediaToQueuedMessage audio', () => {
       botToken: 'secret-token',
     });
 
-    expect(result.text).toContain(
-      'Choose an audio-capable model under Settings > Models > Vision model',
-    );
+    expect(result.text).toContain('Settings > Models > Vision model');
   });
 
   it('adds the opt-in guidance to the incoming chat message when audio is off', async () => {
@@ -139,8 +137,7 @@ describe('attachTelegramMediaToQueuedMessage audio', () => {
       botToken: 'secret-token',
     });
 
-    expect(result.text).toContain('Audio and video support is off.');
-    expect(result.text).toContain('Also use for audio and video');
-    expect(result.text).toContain('Settings > Models');
+    expect(result.text).toContain('Audio and video are off.');
+    expect(result.text).toContain('Settings > Models > Vision model');
   });
 });

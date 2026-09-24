@@ -282,10 +282,9 @@ a stronger review model, after they can see real usage.
 
 The **Vision model** handles image attachments when the active model cannot
 inspect them. Audio transcription and video descriptions are off by default.
-To enable them, turn on **Also use for audio and video** under **Vision model**
-in **Settings > Models**, then choose a model that supports both inputs. When
-enabled, audio and video use only the Vision model; Roomote does not fall back
-to the helper or coding model for those attachments.
+Turn on the **Audio/video** switch next to **Vision model** in **Settings > Models**
+and choose a model that supports both. When enabled, audio and video use only the
+Vision model; Roomote does not try the helper or coding model instead.
 
 After upgrading, audio and video remain off until an admin enables this setting.
 This avoids sending attachments to a model that cannot process them.

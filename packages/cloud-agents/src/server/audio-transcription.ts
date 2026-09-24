@@ -94,7 +94,7 @@ export function formatAudioTranscriptionResult(
   if (result.status === 'unsupported_model') {
     return formatAudioAttachmentWarning(
       filename,
-      'could not be transcribed because the Vision model does not support audio input. Choose an audio-capable model under Settings > Models > Vision model',
+      "could not be transcribed: The Vision model can't take audio. Pick one that supports it in Settings > Models > Vision model",
     );
   }
   if (result.status === 'oversized') {

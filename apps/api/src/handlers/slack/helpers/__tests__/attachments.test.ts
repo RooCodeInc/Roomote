@@ -32,9 +32,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       result.status === 'transcribed'
         ? `Audio attachment transcript ("${filename}"):\n${result.transcript}`
         : result.status === 'unsupported_model'
-          ? `[Audio attachment "${filename}" could not be transcribed because the Vision model does not support audio input. Choose an audio-capable model under Settings > Models > Vision model.]`
+          ? `[Audio attachment "${filename}" could not be transcribed: The Vision model can't take audio. Pick one that supports it in Settings > Models > Vision model.]`
           : result.status === 'audio_video_disabled'
-            ? `[Audio attachment "${filename}" could not be transcribed. Audio and video support is off. To enable it, turn on "Also use for audio and video" under "Vision model" in Settings > Models and pick a model that supports audio and video input (for example Gemini).]`
+            ? `[Audio attachment "${filename}" could not be transcribed. Audio and video are off. Turn them on in Settings > Models > Vision model, and pick a model that supports them, like Gemini.]`
             : result.status === 'oversized'
               ? `[Audio attachment "${filename}" could not be transcribed because it exceeds the 20 MiB limit.]`
               : `[Audio attachment "${filename}" could not be transcribed.]`,
@@ -124,7 +124,7 @@ describe('processSlackAttachments audio', () => {
     });
 
     expect(result.attachmentTexts).toEqual([
-      '[Audio attachment "Audio Clip.m4a" could not be transcribed because the Vision model does not support audio input. Choose an audio-capable model under Settings > Models > Vision model.]',
+      '[Audio attachment "Audio Clip.m4a" could not be transcribed: The Vision model can\'t take audio. Pick one that supports it in Settings > Models > Vision model.]',
     ]);
   });
 
@@ -150,11 +150,10 @@ describe('processSlackAttachments audio', () => {
       ],
     });
 
+    expect(result.attachmentTexts[0]).toContain('Audio and video are off.');
     expect(result.attachmentTexts[0]).toContain(
-      'Audio and video support is off.',
+      'Settings > Models > Vision model',
     );
-    expect(result.attachmentTexts[0]).toContain('Also use for audio and video');
-    expect(result.attachmentTexts[0]).toContain('Settings > Models');
   });
 
   it('warns without downloading oversized audio', async () => {

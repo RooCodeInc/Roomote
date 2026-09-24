@@ -72,11 +72,9 @@ describe('video-agent-service', () => {
       mimeType: 'video/mp4',
     });
 
-    expect(description).toContain('Vision model does not support video input');
+    expect(description).toContain("Vision model can't take video");
     expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'Choose a video-capable model under Settings > Models > Vision model',
-      ),
+      expect.stringContaining('Settings > Models > Vision model'),
     );
   });
 
@@ -121,7 +119,7 @@ describe('video-agent-service', () => {
 
     expect(description).toContain('Settings > Models > Vision model');
     expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Vision model does not support video input'),
+      expect.stringContaining("Vision model can't take video"),
     );
   });
 

@@ -141,8 +141,6 @@ describe('audio transcription', () => {
       formatAudioTranscriptionResult('voice.ogg', {
         status: 'unsupported_model',
       }),
-    ).toContain(
-      'Choose an audio-capable model under Settings > Models > Vision model',
-    );
+    ).toContain('Settings > Models > Vision model');
   });
 });

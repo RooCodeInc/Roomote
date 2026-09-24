@@ -214,16 +214,18 @@ export type NonTaskPromptFile = {
 export class NonTaskInputModalityUnsupportedError extends Error {
   constructor(public readonly modality: NonTaskInputModality) {
     super(
-      modality === 'audio' || modality === 'video'
-        ? `The Vision model does not support ${modality} input and text output.`
-        : `No configured model supports ${modality} input and text output.`,
+      modality === 'audio'
+        ? "The Vision model can't take audio."
+        : modality === 'video'
+          ? "The Vision model can't take video."
+          : `No configured model supports ${modality} input and text output.`,
     );
     this.name = 'NonTaskInputModalityUnsupportedError';
   }
 }
 
 export const VISION_MODEL_AUDIO_VIDEO_DISABLED_MESSAGE =
-  'Audio and video support is off. To enable it, turn on "Also use for audio and video" under "Vision model" in Settings > Models and pick a model that supports audio and video input (for example Gemini).';
+  'Audio and video are off. Turn them on in Settings > Models > Vision model, and pick a model that supports them, like Gemini.';
 
 export class NonTaskAudioVideoSupportDisabledError extends Error {
   constructor(public readonly modality: 'audio' | 'video') {
