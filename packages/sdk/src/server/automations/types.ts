@@ -3,6 +3,8 @@ import type { ResolvedAutomationDestination } from './destination';
 export type AutomationRunOpts = {
   manualTrigger?: boolean;
   trigger?: 'manual' | 'webhook';
+  /** Canonical JSON from an authenticated webhook body; never persisted as the saved prompt. */
+  webhookInputJson?: string;
   /** Destination selected by the caller for a one-off run. */
   destination?: ResolvedAutomationDestination;
 };

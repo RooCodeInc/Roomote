@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, lt, or } from 'drizzle-orm';
 
 import {
   ALL_REPOSITORIES,
@@ -261,6 +261,7 @@ export async function ensureCustomAutomationWebhookToken(
     .where(
       and(
         eq(customAutomations.id, id),
+        eq(customAutomations.enabled, true),
         isNull(customAutomations.webhookSecret),
       ),
     )
@@ -268,7 +269,32 @@ export async function ensureCustomAutomationWebhookToken(
   if (inserted[0]?.webhookSecret) {
     return decryptText(inserted[0].webhookSecret);
   }
-  return getCustomAutomationWebhookToken(id, client);
+  const current = await getCustomAutomationWebhookState(id, client);
+  return current?.enabled ? current.token : null;
+}
+
+/**
+ * Atomically replaces an enabled automation's active webhook token. Returning
+ * null means the webhook was disabled, the automation was disabled, or it was
+ * deleted before the rotation acquired its row lock.
+ */
+export async function rotateCustomAutomationWebhookToken(
+  id: string,
+  token: string,
+  client: DatabaseOrTransaction = db,
+): Promise<string | null> {
+  const [rotated] = await client
+    .update(customAutomations)
+    .set({ webhookSecret: token, updatedAt: new Date() })
+    .where(
+      and(
+        eq(customAutomations.id, id),
+        eq(customAutomations.enabled, true),
+        isNotNull(customAutomations.webhookSecret),
+      ),
+    )
+    .returning({ webhookSecret: customAutomations.webhookSecret });
+  return rotated?.webhookSecret ? decryptText(rotated.webhookSecret) : null;
 }
 
 export async function createCustomAutomation(

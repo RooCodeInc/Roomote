@@ -9,9 +9,9 @@ import {
 const mocks = vi.hoisted(() => ({
   getCustomAutomationById: vi.fn(),
   getWebhookState: vi.fn(),
-  getWebhookToken: vi.fn(),
   ensureWebhookToken: vi.fn(),
   setWebhookToken: vi.fn(),
+  rotateWebhookToken: vi.fn(),
   findOwner: vi.fn(),
 }));
 
@@ -28,8 +28,8 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     },
     getCustomAutomationById: mocks.getCustomAutomationById,
     getCustomAutomationWebhookState: mocks.getWebhookState,
-    getCustomAutomationWebhookToken: mocks.getWebhookToken,
     ensureCustomAutomationWebhookToken: mocks.ensureWebhookToken,
+    rotateCustomAutomationWebhookToken: mocks.rotateWebhookToken,
     setCustomAutomationWebhookToken: mocks.setWebhookToken,
   };
 });
@@ -79,7 +79,6 @@ describe('custom automation webhook settings', () => {
       createdByUserId: automation.createdByUserId,
       token: activeToken,
     }));
-    mocks.getWebhookToken.mockImplementation(async () => activeToken);
     mocks.ensureWebhookToken.mockImplementation(
       async (_id: string, token: string) => {
         activeToken ??= token;
@@ -90,6 +89,13 @@ describe('custom automation webhook settings', () => {
       async (_id: string, token: string | null) => {
         activeToken = token;
         return true;
+      },
+    );
+    mocks.rotateWebhookToken.mockImplementation(
+      async (_id: string, token: string) => {
+        if (!activeToken) return null;
+        activeToken = token;
+        return token;
       },
     );
   });
@@ -145,5 +151,15 @@ describe('custom automation webhook settings', () => {
         enabled: true,
       }),
     ).rejects.toThrow('Automation owner is not configured.');
+  });
+
+  it('does not return a new URL if disable wins the concurrent rotation race', async () => {
+    activeToken = null;
+
+    await expect(
+      rotateCustomAutomationWebhookCommand(adminAuth, { id: automation.id }),
+    ).rejects.toThrow(
+      'Webhook is no longer enabled. Refresh settings and try again.',
+    );
   });
 });

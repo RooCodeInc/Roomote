@@ -13,10 +13,10 @@ import {
   getBackgroundAgentSettingsForDeployment,
   getCustomAutomationById,
   getCustomAutomationWebhookState,
-  getCustomAutomationWebhookToken,
   isNull,
   listCustomAutomations,
   inArray,
+  rotateCustomAutomationWebhookToken,
   setCustomAutomationWebhookToken,
   updateCustomAutomation,
   users,
@@ -601,17 +601,16 @@ export async function rotateCustomAutomationWebhookCommand(
 ): Promise<{ enabled: true; url: string }> {
   const automation = await getOwnedAutomation(auth, input.id);
   await assertWebhookAutomationEligible(automation);
-  if (!(await getCustomAutomationWebhookToken(input.id))) {
-    throw new Error('Enable webhooks before rotating the URL.');
-  }
-
   const token = randomBytes(32).toString('base64url');
-  if (!(await setCustomAutomationWebhookToken(input.id, token))) {
-    throw new Error('Custom automation was not found.');
+  const rotated = await rotateCustomAutomationWebhookToken(input.id, token);
+  if (!rotated) {
+    throw new Error(
+      'Webhook is no longer enabled. Refresh settings and try again.',
+    );
   }
   return {
     enabled: true,
-    url: buildCustomAutomationWebhookUrl(input.id, token),
+    url: buildCustomAutomationWebhookUrl(input.id, rotated),
   };
 }
 

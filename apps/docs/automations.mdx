@@ -187,11 +187,16 @@ repositories without provisioning another environment's services.
 
 On-demand automations can still be started with **Run now**. While editing an
 automation, enable webhooks to get a private URL that starts the same configured
-run when it receives an HTTP `POST`. The request body is ignored; the automation
-uses its saved prompt. Keep the URL private like a password. Disabling webhooks,
-rotating the URL, or disabling the automation revokes it. Webhook runs require
-an enabled automation with an active owner and use the same launch limits as
-manual runs.
+run when it receives an HTTP `POST`. An empty body triggers the saved prompt
+unchanged. A `text/plain` or JSON body up to 64 KiB is appended as an untrusted
+one-run instruction; it never changes the saved prompt. Invalid JSON and
+unsupported content types are rejected. Roomote uses this input only within the
+configured prompt and existing system, authorization, and safety rules. Keep the
+URL private like a password. Disabling webhooks, rotating the URL, or disabling
+the automation revokes it. Webhook runs require an enabled automation with an
+active owner and use the same launch eligibility as manual runs. Each accepted
+POST starts an independent run; per-URL and per-client rate limits guard against
+floods and return HTTP `429` when exceeded.
 
 When creating an automation through Roomote chat, ask for **suggested tasks** or
 **launchable follow-ups** if qualifying findings should become tasks that

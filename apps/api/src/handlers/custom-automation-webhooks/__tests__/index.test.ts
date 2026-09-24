@@ -45,19 +45,86 @@ describe('custom automation webhook trigger', () => {
     mocks.runAutomation.mockResolvedValue({ outcome: 'queued' });
   });
 
-  it('accepts only the active URL credential and invokes the webhook execution path', async () => {
+  it('forwards bounded JSON as per-run webhook input', async () => {
+    const body = { issue: 'Review the failing workflow.' };
     const response = await createApp().request(webhookUrl(), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ untrusted: 'event data is ignored' }),
+      body: JSON.stringify(body),
     });
 
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ accepted: true });
     expect(response.headers.get('cache-control')).toBe('no-store, private');
     expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(mocks.runAutomation).toHaveBeenCalledWith(
+      AUTOMATION_ID,
+      'webhook',
+      JSON.stringify(body),
+    );
+  });
+
+  it('keeps an empty POST body as a trigger-only run', async () => {
+    const response = await createApp().request(webhookUrl(), {
+      method: 'POST',
+    });
+
+    expect(response.status).toBe(202);
     expect(mocks.runAutomation).toHaveBeenCalledWith(AUTOMATION_ID, 'webhook');
   });
+
+  it('accepts text/plain bodies as a one-run instruction', async () => {
+    const response = await createApp().request(webhookUrl(), {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+      body: 'Review issue #42 and summarize the failure.',
+    });
+
+    expect(response.status).toBe(202);
+    expect(mocks.runAutomation).toHaveBeenCalledWith(
+      AUTOMATION_ID,
+      'webhook',
+      JSON.stringify('Review issue #42 and summarize the failure.'),
+    );
+  });
+
+  it.each([
+    {
+      contentType: 'application/json',
+      body: '{invalid json',
+      status: 400,
+      error: 'invalid_json',
+    },
+    {
+      contentType: 'text/html',
+      body: '<p>Not accepted</p>',
+      status: 415,
+      error: 'unsupported_media_type',
+    },
+    {
+      contentType: 'application/json',
+      contentEncoding: 'gzip',
+      body: '{"issue":"compressed"}',
+      status: 415,
+      error: 'unsupported_media_type',
+    },
+  ])(
+    'rejects invalid or unsupported bodies without starting a run',
+    async ({ contentType, contentEncoding, body, status, error }) => {
+      const response = await createApp().request(webhookUrl(), {
+        method: 'POST',
+        headers: {
+          'content-type': contentType,
+          ...(contentEncoding ? { 'content-encoding': contentEncoding } : {}),
+        },
+        body,
+      });
+
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual({ error });
+      expect(mocks.runAutomation).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects an incorrect token without attempting a run', async () => {
     const response = await createApp().request(webhookUrl('B'.repeat(43)), {
@@ -97,6 +164,13 @@ describe('custom automation webhook trigger', () => {
       body: 'oversized',
     });
     expect(response.status).toBe(413);
+
+    const chunkedResponse = await app.request(webhookUrl(), {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: 'x'.repeat(64 * 1024 + 1),
+    });
+    expect(chunkedResponse.status).toBe(413);
     expect(mocks.runAutomation).not.toHaveBeenCalled();
   });
 });

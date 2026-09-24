@@ -45,14 +45,14 @@ export type RoutePolicyClass =
  * - `state-token`: SHA-256 of the `state` string field in the JSON request
  *   body. Legitimate callers use a fresh single-use token per flow, so they
  *   never share a bucket; repeated hammering of one token is throttled.
- * - `automation-webhook`: custom automation UUID from the path, never its
- *   bearer token, so one automation's deliveries share a workload bucket.
+ * - `webhook-credential`: SHA-256 of the URL bearer token, never the token
+ *   itself, so each credential has a bounded delivery bucket.
  */
 export type RouteRateLimitKeySource =
   | 'client'
   | 'principal'
   | 'state-token'
-  | 'automation-webhook';
+  | 'webhook-credential';
 
 export type RouteRateLimit = {
   keySource: RouteRateLimitKeySource;
@@ -257,7 +257,7 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'webhook',
     rateLimits: [
       { keySource: 'client', limit: 60, windowSeconds: 60 },
-      { keySource: 'automation-webhook', limit: 15, windowSeconds: 60 },
+      { keySource: 'webhook-credential', limit: 15, windowSeconds: 60 },
     ],
   },
   {

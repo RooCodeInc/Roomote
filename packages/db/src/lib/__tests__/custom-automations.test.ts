@@ -15,6 +15,7 @@ import {
   listCustomAutomations,
   recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
+  rotateCustomAutomationWebhookToken,
   setCustomAutomationWebhookToken,
   tryClaimCustomAutomationLaunch,
   updateCustomAutomation,
@@ -58,9 +59,16 @@ describe('custom automations helpers', () => {
       expect(await getCustomAutomationWebhookToken(created.id)).toBe(
         replacementToken,
       );
+      const rotatedToken = 'D'.repeat(43);
+      expect(
+        await rotateCustomAutomationWebhookToken(created.id, rotatedToken),
+      ).toBe(rotatedToken);
       expect(
         await ensureCustomAutomationWebhookToken(created.id, 'C'.repeat(43)),
-      ).toBe(replacementToken);
+      ).toBe(rotatedToken);
+      expect(await getCustomAutomationWebhookToken(created.id)).toBe(
+        rotatedToken,
+      );
 
       await setCustomAutomationWebhookToken(created.id, null);
       expect(await getCustomAutomationWebhookToken(created.id)).toBeNull();
@@ -68,6 +76,9 @@ describe('custom automations helpers', () => {
         enabled: true,
         token: null,
       });
+      expect(
+        await rotateCustomAutomationWebhookToken(created.id, 'E'.repeat(43)),
+      ).toBeNull();
 
       await setCustomAutomationWebhookToken(created.id, 'C'.repeat(43));
       await updateCustomAutomation(created.id, {
@@ -79,6 +90,12 @@ describe('custom automations helpers', () => {
         target: {},
       });
       expect(await getCustomAutomationWebhookToken(created.id)).toBeNull();
+      expect(
+        await rotateCustomAutomationWebhookToken(created.id, 'G'.repeat(43)),
+      ).toBeNull();
+      expect(
+        await ensureCustomAutomationWebhookToken(created.id, 'F'.repeat(43)),
+      ).toBeNull();
     } finally {
       await deleteCustomAutomation(created.id);
     }
