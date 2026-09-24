@@ -23,8 +23,12 @@ ARG PM2_VERSION=7.0.1
 # compositions (Chrome 143 removed old-headless).
 ARG REMOTION_VERSION=4.0.507
 
-RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+# Ubuntu's security archive can publish an index before all package files reach
+# its mirrors. Refresh the index and retry this install to tolerate that lag.
+RUN set -eux; \
+  for attempt in 1 2 3; do \
+    if apt-get update \
+      && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
     bubblewrap \
     curl \
@@ -69,8 +73,14 @@ RUN apt-get update \
     libxdamage1 \
     libxkbcommon0 \
     libxrandr2 \
-    libxss1 \
-  && ln -sf "$(command -v python3)" /usr/local/bin/python \
+    libxss1; then \
+      break; \
+    fi; \
+    if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+    rm -rf /var/lib/apt/lists/*; \
+    sleep 20; \
+  done; \
+  ln -sf "$(command -v python3)" /usr/local/bin/python \
   && docker compose version \
   && rm -rf /var/lib/apt/lists/*
 
