@@ -24,6 +24,7 @@ type PageNavigationShellItem<T extends string = string> = {
 type PageNavigationShellProps<T extends string = string> = {
   items: PageNavigationShellItem<T>[];
   activeItemId: T;
+  hideNavigation?: boolean;
   title: string;
   description?: string;
   mobileLabel: string;
@@ -37,6 +38,7 @@ type PageNavigationShellProps<T extends string = string> = {
 export function PageNavigationShell<T extends string = string>({
   items,
   activeItemId,
+  hideNavigation = false,
   title,
   description,
   mobileLabel,
@@ -49,82 +51,91 @@ export function PageNavigationShell<T extends string = string>({
   return (
     <div
       className={cn(
-        'flex h-full min-h-0 w-full flex-1 flex-col gap-6 overflow-x-hidden overflow-y-auto px-4 py-6 md:py-8 lg:flex-row lg:items-start',
+        'relative flex h-full min-h-0 w-full flex-1 flex-col gap-6 overflow-x-hidden overflow-y-auto px-4 py-6 md:py-8 lg:flex-row lg:items-start',
         boundedContentOnDesktop && 'md:overflow-y-hidden',
       )}
     >
-      <aside className="hidden lg:block lg:w-60 lg:shrink-0 lg:absolute">
-        <nav className="space-y-1 pl-3">
-          {items.map((item) => {
-            const Icon = item.icon;
-            const isActive = item.id === activeItemId;
-            const itemClassName = cn(
-              'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-base transition-colors cursor-pointer',
-              item.newGroup && 'mt-6',
-              isActive
-                ? 'bg-foreground font-medium text-accent-bright-foreground dark:bg-accent-foreground dark:text-card'
-                : 'text-foreground hover:text-accent-foreground',
-            );
+      {!hideNavigation && (
+        <aside className="hidden lg:absolute lg:inset-y-0 lg:left-0 lg:block lg:w-60 lg:shrink-0 lg:overflow-y-auto">
+          <nav className="space-y-1 pl-3">
+            {items.map((item) => {
+              const Icon = item.icon;
+              const isActive = item.id === activeItemId;
+              const itemClassName = cn(
+                'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-base transition-colors cursor-pointer',
+                item.newGroup && 'mt-6',
+                isActive
+                  ? 'bg-foreground font-medium text-accent-bright-foreground dark:bg-accent-foreground dark:text-card'
+                  : 'text-foreground hover:text-accent-foreground',
+              );
 
-            if (item.href) {
+              if (item.href) {
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.href}
+                    className={itemClassName}
+                  >
+                    <Icon className="size-4" />
+                    {item.label}
+                  </Link>
+                );
+              }
+
               return (
-                <Link key={item.id} href={item.href} className={itemClassName}>
+                <button
+                  key={item.id}
+                  type="button"
+                  className={itemClassName}
+                  onClick={() => onItemSelect(item.id)}
+                >
                   <Icon className="size-4" />
                   {item.label}
-                </Link>
+                </button>
               );
-            }
-
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={itemClassName}
-                onClick={() => onItemSelect(item.id)}
-              >
-                <Icon className="size-4" />
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
-      </aside>
+            })}
+          </nav>
+        </aside>
+      )}
 
       <div
         className={cn(
-          'min-w-0 flex-1 space-y-6 lg:ml-68 max-w-6xl',
+          'min-w-0 flex-1 space-y-6 max-w-6xl',
+          !hideNavigation && 'lg:ml-68',
           boundedContentOnDesktop &&
             'md:flex md:h-full md:min-h-0 md:flex-col md:gap-6 md:space-y-0',
         )}
       >
-        <div className="space-y-4 lg:hidden">
-          <Select
-            value={activeItemId}
-            onValueChange={(value) => onItemSelect(value as T)}
-          >
-            <SelectTrigger
-              id={`${mobileLabel.toLowerCase().replace(/\s+/g, '-')}-switcher`}
-              aria-label={mobileLabel}
-              className="w-full text-lg py-6 px-4"
+        {!hideNavigation && (
+          <div className="space-y-4 lg:hidden">
+            <Select
+              value={activeItemId}
+              onValueChange={(value) => onItemSelect(value as T)}
             >
-              <SelectValue
-                placeholder={`Choose ${mobileLabel.toLowerCase()}`}
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {items.map((item) => {
-                const Icon = item.icon;
+              <SelectTrigger
+                id={`${mobileLabel.toLowerCase().replace(/\s+/g, '-')}-switcher`}
+                aria-label={mobileLabel}
+                className="w-full text-lg py-6 px-4"
+              >
+                <SelectValue
+                  placeholder={`Choose ${mobileLabel.toLowerCase()}`}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {items.map((item) => {
+                  const Icon = item.icon;
 
-                return (
-                  <SelectItem key={item.id} value={item.id} className="py-3">
-                    <Icon className="size-5" />
-                    {item.label}
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-        </div>
+                  return (
+                    <SelectItem key={item.id} value={item.id} className="py-3">
+                      <Icon className="size-5" />
+                      {item.label}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         <header
           className={cn(

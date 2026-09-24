@@ -66,6 +66,7 @@ export * from './sandbox-preview-inference';
 export * from './inference-provider-retry';
 export * from './inference-credits-exhaustion';
 export * from './model-provider-config';
+export * from './user-model-mapping-presets';
 export * from './openai-compatible-providers';
 export * from './recommended-task-models';
 export * from './opencode-openrouter-variants';

@@ -61,7 +61,6 @@ import {
 import { ModelSelect } from '@/components/tasks/ModelSelect';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
-import { useAutomationLaunchCriteriaExperiment } from '@/hooks/useAutomationLaunchCriteriaExperiment';
 import { useAuthorizedUser } from '@/hooks/useUser';
 
 import {
@@ -431,8 +430,6 @@ export function CustomAutomationsSection({
   children?: ReactNode;
 } = {}) {
   const { isAdmin } = useAuthorizedUser();
-  const { enabled: automationLaunchCriteriaEnabled } =
-    useAutomationLaunchCriteriaExperiment();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const listQuery = useQuery(
@@ -466,6 +463,8 @@ export function CustomAutomationsSection({
   const optionsQuery = useQuery(
     trpc.automations.getCustomAutomationOptions.queryOptions(),
   );
+  const automationLaunchCriteriaEnabled =
+    optionsQuery.data?.launchCriteriaEnabled === true;
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);

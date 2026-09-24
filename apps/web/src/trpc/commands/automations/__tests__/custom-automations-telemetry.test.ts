@@ -349,6 +349,7 @@ describe('custom automation ownership', () => {
     mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
     mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
     mocks.resolveDefaultAutomationTarget.mockResolvedValue(null);
+    mocks.isDeploymentExperimentEnabled.mockResolvedValue(true);
   });
 
   it('returns only member-safe connection flags and timezone without reading admin settings', async () => {
@@ -362,6 +363,7 @@ describe('custom automation ownership', () => {
     await expect(
       getCustomAutomationOptionsCommand(memberAuth),
     ).resolves.toEqual({
+      launchCriteriaEnabled: true,
       capabilities: {
         slackConnected: true,
         discordConnected: false,
@@ -423,6 +425,7 @@ describe('custom automation ownership', () => {
     await expect(
       getCustomAutomationOptionsCommand(memberAuth),
     ).resolves.toEqual({
+      launchCriteriaEnabled: true,
       capabilities: {
         slackConnected: false,
         discordConnected: false,
@@ -444,6 +447,14 @@ describe('custom automation ownership', () => {
     });
   });
 
+  it('reports launch criteria disabled when the nightly deployment opt-in is off', async () => {
+    mocks.isDeploymentExperimentEnabled.mockResolvedValue(false);
+
+    await expect(
+      getCustomAutomationOptionsCommand(memberAuth),
+    ).resolves.toMatchObject({ launchCriteriaEnabled: false });
+  });
+
   it('allows admin channel defaults without returning other settings', async () => {
     mocks.listConnectedCommunicationProviders.mockResolvedValue([
       'discord',
@@ -457,6 +468,7 @@ describe('custom automation ownership', () => {
     });
     await expect(getCustomAutomationOptionsCommand(adminAuth)).resolves.toEqual(
       {
+        launchCriteriaEnabled: true,
         capabilities: {
           slackConnected: false,
           discordConnected: true,

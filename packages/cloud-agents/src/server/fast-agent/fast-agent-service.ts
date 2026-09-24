@@ -64,6 +64,7 @@ import {
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
   LIST_REPOSITORIES_MAX_LIMIT,
+  matchIntegrationTools,
 } from '@roomote/types';
 import {
   and,
@@ -193,11 +194,7 @@ import {
   loadFastAgentPromptSkillCatalog,
 } from './fast-agent-prompt-skill-catalog';
 import { RemoteFastAgentInstanceSkillSource } from './fast-agent-instance-skill-source';
-import {
-  buildFastAgentExplicitSkillInvocationContext,
-  parseFastAgentExplicitSkillInvocation,
-} from './fast-agent-skill-invocation';
-import { buildFastAgentSkillRelevanceContext } from './fast-agent-skill-relevance';
+import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
@@ -250,7 +247,6 @@ import {
 } from './fast-agent-integration-broker';
 import { McpToolCallError } from '../mcp-tool-client';
 import { describeUnknownIntegrationArguments } from './fast-agent-integration-args';
-import { matchIntegrationToolsWithRanking } from './fast-agent-integration-tool-ranking';
 import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
@@ -274,7 +270,6 @@ import {
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
-import { resolveFastAgentRoutingHint } from './fast-agent-routing-hint';
 import { resolveFastAgentLaunchModel } from './fast-agent-launch-model';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
@@ -620,18 +615,17 @@ const callIntegrationToolArgsSchema = z.object(
 
 /**
  * Resolve on-demand integration tools for `find_integration_tools` from the
- * in-memory catalog; keyword matching is shared with task sandboxes, and the
- * optional judgment model can re-rank free-text queries here.
+ * in-memory catalog; keyword matching is shared with task sandboxes.
  */
-async function findFastAgentIntegrationTools(
+function findFastAgentIntegrationTools(
   integrations: FastAgentIntegration[],
   args: z.infer<typeof findIntegrationToolsArgsSchema>,
-): Promise<{
+): {
   tools: IntegrationToolCandidate[];
   truncated: boolean;
   availableToolCount: number;
   unknownIntegration: boolean;
-}> {
+} {
   if (
     args.integrationId &&
     !integrations.some((integration) => integration.id === args.integrationId)
@@ -654,7 +648,7 @@ async function findFastAgentIntegrationTools(
     })),
   );
   return {
-    ...(await matchIntegrationToolsWithRanking(candidates, args)),
+    ...matchIntegrationTools(candidates, args),
     unknownIntegration: false,
   };
 }
@@ -1678,8 +1672,6 @@ function buildFastAgentMessages({
   resumedAfterInferenceRetry = false,
   previousAttempt,
   voiceMode = false,
-  routingHint,
-  skillRelevanceContext,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -1701,11 +1693,6 @@ function buildFastAgentMessages({
   /** What an earlier attempt at this same turn already did, when resuming. */
   previousAttempt?: FastAgentTurnAttemptSummary | null;
   voiceMode?: boolean;
-  /** Advisory environment pick for the first request of a new Session. */
-  routingHint?: string;
-  /** Per-turn `<skill_relevance>` hint; kept out of the system prompt so the
-   * prompt stays cacheable across turns. */
-  skillRelevanceContext?: string;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -1744,10 +1731,6 @@ function buildFastAgentMessages({
   const currentUserMessageText = [
     voiceMode ? '<voice_mode active="true" />' : undefined,
     explicitSkillInvocationContext,
-    routingHint
-      ? `<routing_hint>\n${escapeFastAgentEnvelopeText(routingHint)}\n</routing_hint>`
-      : undefined,
-    skillRelevanceContext,
     wrappedCurrentUserMessageText,
   ]
     .filter((entry): entry is string => Boolean(entry))
@@ -3619,30 +3602,12 @@ export async function answerFastAgentQuestion({
         return [];
       }),
     ]);
-    // The judgment model's environment pick is only useful before the Session
-    // has chosen where its work runs, so it is requested for what looks like
-    // the first human request and used only once persistence confirms it.
     const priorAssistant = session.compatibilityMessages
       .filter((message) => message.role === 'assistant')
       .at(-1);
     priorAssistantMessage = priorAssistant
       ? extractModelMessageText(priorAssistant).join('\n')
       : undefined;
-    const routingHintRequest =
-      substantiveHumanInput &&
-      !setupSession &&
-      !resumedAfterInterruption &&
-      !resumedAfterInferenceRetry &&
-      !session.openCodeSessionId &&
-      session.compatibilityMessages.length === 0
-        ? resolveFastAgentRoutingHint({
-            request: normalizeThreadText(question),
-            threadContext,
-            environments: availableEnvironments,
-            routingRules:
-              agentBehaviorSettings?.workspaceRoutingSettings?.rules,
-          })
-        : undefined;
     const [personalizationContext, availableSkills] = await Promise.all([
       platformEvent
         ? null
@@ -3680,22 +3645,6 @@ export async function answerFastAgentQuestion({
           return null;
         }),
     ]);
-    // The optional judgment model's skill hint for this request. Started now
-    // so it runs alongside the session bookkeeping below; it never rejects.
-    // A request that already names a skill with `$name` needs no hint.
-    const skillRelevanceContextPromise =
-      substantiveHumanInput &&
-      availableSkills &&
-      !parseFastAgentExplicitSkillInvocation(
-        question,
-        conversation.surface,
-        slackRoomoteUserId,
-      )
-        ? buildFastAgentSkillRelevanceContext({
-            catalog: availableSkills,
-            request: question,
-          })
-        : undefined;
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
@@ -3933,9 +3882,6 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
-    const routingHint = userMessageResult?.initialHumanTurn
-      ? await routingHintRequest
-      : undefined;
     const collectUserMessageTexts = (): string[] => [
       ...new Set([
         ...threadContext
@@ -3967,8 +3913,6 @@ export async function answerFastAgentQuestion({
       resumedAfterInferenceRetry,
       previousAttempt,
       voiceMode,
-      routingHint: routingHint?.context,
-      skillRelevanceContext: await skillRelevanceContextPromise,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
@@ -4765,10 +4709,7 @@ export async function answerFastAgentQuestion({
       ) {
         return nativeIntegrationError(args.integrationId);
       }
-      const found = await findFastAgentIntegrationTools(
-        onDemandIntegrations,
-        args,
-      );
+      const found = findFastAgentIntegrationTools(onDemandIntegrations, args);
       const normalizedQuery = args.query?.trim().toLowerCase();
       const catalogIntegrations = nativeIntegrationCatalog.filter(
         (integration) => {

@@ -384,21 +384,29 @@ export async function getCustomAutomationOptionsCommand(
     ? await getOwnedAutomation(auth, input.automationId)
     : null;
   const ownerUserId = automation?.createdByUserId ?? auth.userId;
-  const [providers, emailIdentities, { timeZone }, settings, defaultTarget] =
-    await Promise.all([
-      listConnectedCommunicationProviders(),
-      listAvailableAgentMailOutboundIdentities(ownerUserId),
-      resolveDeploymentTimeZone(),
-      auth.isAdmin ? getBackgroundAgentSettingsForDeployment() : null,
-      resolveDefaultAutomationTarget({
-        ownerUserId,
-        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
-        existingTarget: automation?.target,
-        includeSharedChannels: auth.isAdmin,
-      }),
-    ]);
+  const [
+    providers,
+    emailIdentities,
+    { timeZone },
+    settings,
+    defaultTarget,
+    launchCriteriaEnabled,
+  ] = await Promise.all([
+    listConnectedCommunicationProviders(),
+    listAvailableAgentMailOutboundIdentities(ownerUserId),
+    resolveDeploymentTimeZone(),
+    auth.isAdmin ? getBackgroundAgentSettingsForDeployment() : null,
+    resolveDefaultAutomationTarget({
+      ownerUserId,
+      capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+      existingTarget: automation?.target,
+      includeSharedChannels: auth.isAdmin,
+    }),
+    isDeploymentExperimentEnabled('automationLaunchCriteria'),
+  ]);
 
   return {
+    launchCriteriaEnabled,
     capabilities: {
       slackConnected: providers.includes('slack'),
       discordConnected: providers.includes('discord'),

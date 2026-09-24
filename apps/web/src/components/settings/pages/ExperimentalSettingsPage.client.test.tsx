@@ -74,7 +74,7 @@ describe('ExperimentalSettingsPage', () => {
     state.isFetching = false;
   });
 
-  it('keeps experimental settings admin-only and hides Auto tool approvals', () => {
+  it('keeps customer-preview settings admin-only and omits internal experiments', () => {
     render(<ExperimentalSettingsPage />);
 
     expect(screen.getByTestId('experimental-settings')).toHaveAttribute(
@@ -92,8 +92,8 @@ describe('ExperimentalSettingsPage', () => {
       screen.getByText('Task communication triage setting'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('Custom automation launch criteria setting'),
-    ).toBeInTheDocument();
+      screen.queryByText('Custom automation launch criteria setting'),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
   });
 

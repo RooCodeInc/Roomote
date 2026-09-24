@@ -34,6 +34,7 @@ const {
   state: {
     pathname: '/tasks',
     user: { isAdmin: true },
+    dizzyEnabled: false,
     isSideNavExpanded: false,
     pinnedTaskIds: ['task-3', 'task-1'],
     tasks: [
@@ -111,8 +112,14 @@ vi.mock('@/components/system', () => ({
 }));
 
 vi.mock('@/components/layout', () => ({
-  RoomoteWordmark: ({ 'aria-label': ariaLabel }: { 'aria-label'?: string }) => (
-    <div role="img" aria-label={ariaLabel}>
+  RoomoteWordmark: ({
+    'aria-label': ariaLabel,
+    className,
+  }: {
+    'aria-label'?: string;
+    className?: string;
+  }) => (
+    <div role="img" aria-label={ariaLabel} className={className}>
       wordmark
     </div>
   ),
@@ -156,6 +163,10 @@ vi.mock('@/hooks/useLayoutOptions', () => ({
 
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
+}));
+
+vi.mock('@/hooks/useDizzyExperiment', () => ({
+  useDizzyExperiment: () => state.dizzyEnabled,
 }));
 
 vi.mock('@/hooks/tasks', () => ({
@@ -293,6 +304,7 @@ describe('SideNav recent sessions', () => {
     vi.clearAllMocks();
     state.pathname = '/tasks';
     state.user.isAdmin = true;
+    state.dizzyEnabled = false;
     state.isSideNavExpanded = false;
     state.pinnedTaskIds = ['task-3', 'task-1'];
     state.tasks = [
@@ -629,5 +641,24 @@ describe('SideNav recent sessions', () => {
     expect(
       screen.getByRole('img', { name: 'Roomote' }).closest('a'),
     ).toHaveAttribute('href', '/');
+  });
+
+  it('spins the collapsed sidebar logo only when Dizzy is enabled', () => {
+    state.isSideNavExpanded = false;
+    const view = render(<SideNav />);
+    const sidebarLogo = screen.getByRole('navigation').querySelector('img');
+
+    expect(sidebarLogo).not.toHaveClass('motion-safe:animate-spin');
+
+    state.dizzyEnabled = true;
+    view.rerender(<SideNav />);
+
+    expect(sidebarLogo).toHaveClass('motion-safe:animate-spin');
+
+    state.isSideNavExpanded = true;
+    view.rerender(<SideNav />);
+    const wordmark = screen.getByRole('img', { name: 'Roomote' });
+
+    expect(wordmark).not.toHaveClass('motion-safe:animate-spin');
   });
 });

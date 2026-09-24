@@ -1,7 +1,9 @@
 import {
+  DEPLOYMENT_EXPERIMENT_AUDIENCE,
   DEPLOYMENT_EXPERIMENT_IDS,
   DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
   DEPLOYMENT_METADATA_BOOLEAN_CONFIG,
+  type DeploymentExperimentAudience,
   type DeploymentExperimentValues,
 } from './config';
 import { normalizeMetadataRecord } from './deployment-previews';
@@ -13,9 +15,12 @@ export type {
   MetadataRecord,
 } from './types';
 export {
+  DEPLOYMENT_EXPERIMENT_AUDIENCE,
+  DEPLOYMENT_EXPERIMENT_AUDIENCES,
   DEPLOYMENT_EXPERIMENT_IDS,
   DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
   DEPLOYMENT_METADATA_BOOLEAN_CONFIG,
+  type DeploymentExperimentAudience,
   type DeploymentExperimentId,
   type DeploymentExperimentValues,
 } from './config';
@@ -51,6 +56,41 @@ export function getDeploymentExperimentValues(
       normalizedMetadata[DEPLOYMENT_EXPERIMENT_METADATA_KEYS[id]] === true,
     ]),
   ) as DeploymentExperimentValues;
+}
+
+export function getDeploymentExperimentAudience(
+  id: string,
+): DeploymentExperimentAudience | undefined {
+  if (!Object.hasOwn(DEPLOYMENT_EXPERIMENT_AUDIENCE, id)) return undefined;
+
+  return DEPLOYMENT_EXPERIMENT_AUDIENCE[
+    id as keyof typeof DEPLOYMENT_EXPERIMENT_AUDIENCE
+  ];
+}
+
+export function getDeploymentExperimentIdsForAudience(
+  audience: DeploymentExperimentAudience,
+) {
+  return DEPLOYMENT_EXPERIMENT_IDS.filter(
+    (id) => getDeploymentExperimentAudience(id) === audience,
+  );
+}
+
+export function selectDeploymentExperimentValuesForAudiences(
+  values: DeploymentExperimentValues,
+  audiences: readonly DeploymentExperimentAudience[],
+): Partial<DeploymentExperimentValues> {
+  const allowedAudiences = new Set(audiences);
+  const selected: Partial<DeploymentExperimentValues> = {};
+
+  for (const id of DEPLOYMENT_EXPERIMENT_IDS) {
+    const audience = getDeploymentExperimentAudience(id);
+    if (audience && allowedAudiences.has(audience)) {
+      selected[id] = values[id];
+    }
+  }
+
+  return selected;
 }
 
 export const ANONYMOUS_ANALYTICS_METADATA_KEY =

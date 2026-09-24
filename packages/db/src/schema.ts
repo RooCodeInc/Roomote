@@ -79,6 +79,7 @@ import type {
   CredentialEgressPhase,
   CredentialEgressRevocationKind,
   TaskModelSettings,
+  UserTaskModelMapping,
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
   UserRole,
@@ -183,6 +184,32 @@ export const userPersonalizations = pgTable('user_personalizations', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+/** Private, per-user saved mappings for the task model roles. */
+export const userTaskModelMappingPresets = pgTable(
+  'user_task_model_mapping_presets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    nameKey: text('name_key').notNull(),
+    roles: jsonb('roles').$type<UserTaskModelMapping>().notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('user_task_model_mapping_presets_owner_name_unique_idx').on(
+      table.userId,
+      table.nameKey,
+    ),
+    index('user_task_model_mapping_presets_owner_created_idx').on(
+      table.userId,
+      table.createdAt,
+    ),
+  ],
+);
 
 export const instanceSkills = pgTable(
   'instance_skills',

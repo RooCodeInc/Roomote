@@ -169,26 +169,11 @@ Create arbitrary scheduled agent runs with:
   Delegated coding tasks use their own model selection or deployment coding default
 - an optional **effort** override (`low`, `medium`, `high`, `extra high`, or
   `max`) when the selected model supports configurable reasoning
-- optional **launch criteria** in plain language, such as “only investigate a
-  new regression affecting active users.” This is an off-by-default experiment:
-  a deployment admin can enable **Custom automation launch criteria** under
-  **Settings → Experimental**. The session then gathers current evidence with
-  its normal read-only integrations, and Jev checks the findings, recent
-  automation results, and bounded tool results against the criteria
 - an optional **report destination**: a direct message to the automation owner,
   or a channel, through Slack, Discord, Teams, or Telegram; **Email** is also
   available as a private destination when AgentMail is configured and the owner
   has an account email. Verification is required to reply or initiate work by
   email, not to receive automation reports
-
-When the experiment is enabled, launch criteria are checked before delegated
-work or a destination reply starts. A confident decision that the criteria are
-not met ends that occurrence quietly; no task or destination root is created.
-Uncertain or unavailable judgments continue the run. More detailed typed checks
-can be supplied through the automation management API or MCP tool; their
-`onUncertain` setting can explicitly skip an ambiguous run. This experiment
-applies only to custom automations; channel auto-start launch criteria remain
-available independently.
 
 Each custom automation row summarizes its cadence, workspace target, report
 destination, creator, and most recent run. Its runs also appear as sessions in

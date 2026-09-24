@@ -383,6 +383,24 @@ describe('evaluateIntegrationToolAutoDecision', () => {
 });
 
 describe('resolveIntegrationToolAutoState', () => {
+  it('only counts Jev as a model for Auto, not the model Roomote trains', async () => {
+    await resolveIntegrationToolAutoState();
+    expect(mocks.resolveModel).toHaveBeenCalledWith({
+      excludeRoomoteModel: true,
+    });
+
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    await evaluateIntegrationToolAutoDecision({
+      integrationId: 'linear',
+      toolName: 'list_issues',
+      args: {},
+      userId: 'u1',
+    });
+    expect(mocks.evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({ excludeRoomoteModel: true }),
+    );
+  });
+
   it('is on with the experiment and the setting, even when no judgment model is left', async () => {
     mocks.settings.mockResolvedValue({ mode: 'on', policy: 'Reads are fine.' });
     await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({

@@ -71,6 +71,7 @@ const {
   liveVoiceState,
   authenticatedUserState,
   invalidateQueries,
+  fetchOlderMessages,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
   deleteQueuedMessageMutate: vi.fn(),
@@ -100,6 +101,7 @@ const {
     },
   },
   invalidateQueries: vi.fn(),
+  fetchOlderMessages: vi.fn(),
   liveVoiceState: {
     active: false,
     status: 'idle' as
@@ -192,6 +194,7 @@ vi.mock('@/trpc/client', () => ({
       startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
+      olderMessages: { query: fetchOlderMessages },
     },
     voice: {
       status: { query: voiceStatusQuery },
@@ -435,6 +438,7 @@ beforeEach(() => {
   openTasksPanel.mockReset();
   invalidateQueries.mockReset();
   invalidateQueries.mockResolvedValue(undefined);
+  fetchOlderMessages.mockReset();
   voiceStatusQuery.mockReset();
   voiceStatusQuery.mockResolvedValue({ enabled: false });
   recordVoiceTurnMutate.mockReset();
@@ -841,6 +845,134 @@ describe('FastSessionTranscript', () => {
     userEmail,
     userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  it('records synthetic long-transcript render and event-loop timing', async () => {
+    const datasetMessages = 1_200;
+    const initialMessages = Array.from(
+      { length: datasetMessages },
+      (_, index) =>
+        textMessage({
+          id: `synthetic-${index}`,
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          text: `${index} ${'synthetic transcript paragraph '.repeat(16)}`,
+          ts: index + 1,
+        }),
+    );
+    const renderWindow = initialMessages.slice(-50);
+    const payloadBytes = new TextEncoder().encode(
+      JSON.stringify(renderWindow),
+    ).byteLength;
+    const startedAt = performance.now();
+    // In jsdom this timer can only run after synchronous React render returns;
+    // it is a main-thread proxy, not browser paint or animation evidence.
+    const nextEventLoopTurn = new Promise<number>((resolve) => {
+      setTimeout(() => resolve(performance.now() - startedAt), 0);
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="synthetic-long-transcript"
+        initialMessages={renderWindow}
+        initialMessagesCursor={{
+          createdAt: '2026-01-01 00:00:00.123456+00',
+          ts: 1_000,
+          turnSeq: 1,
+          id: '00000000-0000-4000-8000-000000000050',
+        }}
+      />,
+    );
+    const renderMs = performance.now() - startedAt;
+    const eventLoopDelayMs = await nextEventLoopTurn;
+
+    console.info(
+      '[synthetic-long-transcript-page]',
+      JSON.stringify({
+        datasetMessages,
+        initialMessages: renderWindow.length,
+        payloadBytes,
+        renderMs: Number(renderMs.toFixed(2)),
+        eventLoopDelayMs: Number(eventLoopDelayMs.toFixed(2)),
+      }),
+    );
+
+    expect(initialMessages).toHaveLength(datasetMessages);
+    expect(renderWindow).toHaveLength(50);
+  });
+
+  it('loads older messages near the top, preserves their order, and offers retry after failure', async () => {
+    const initialStreamCursor = 1_780_000_000_000.125;
+    const cursor = {
+      createdAt: '2026-01-01 00:00:00.123456+00',
+      ts: 2,
+      turnSeq: 1,
+      id: '00000000-0000-4000-8000-000000000002',
+    };
+    const olderMessages = [
+      textMessage({
+        id: 'older-user',
+        role: 'user',
+        text: 'An older user request',
+        ts: 1,
+      }),
+      textMessage({
+        id: 'older-assistant',
+        role: 'assistant',
+        text: 'An older assistant reply',
+        ts: 2,
+      }),
+    ];
+    fetchOlderMessages
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce({ messages: olderMessages, nextCursor: null });
+
+    const { container } = render(
+      <FastSessionTranscript
+        sessionId="synthetic-long-transcript"
+        initialMessagesCursor={cursor}
+        initialStreamCursor={initialStreamCursor}
+        initialMessages={[
+          textMessage({
+            id: 'current-user',
+            role: 'user',
+            text: 'Current user request',
+            ts: 3,
+          }),
+          textMessage({
+            id: 'current-assistant',
+            role: 'assistant',
+            text: 'Current assistant reply',
+            ts: 4,
+          }),
+        ]}
+      />,
+    );
+    expect(FakeEventSource.instances[0]?.url).toBe(
+      `/api/sessions/synthetic-long-transcript/stream?since=${initialStreamCursor}`,
+    );
+    const scrollElement = screen.getByRole('log')
+      .firstElementChild as HTMLElement;
+    scrollElement.scrollTop = 0;
+    fireEvent.scroll(scrollElement);
+
+    const retryButton = await screen.findByRole('button', {
+      name: 'Retry loading older messages',
+    });
+    expect(fetchOlderMessages).toHaveBeenCalledWith({
+      sessionId: 'synthetic-long-transcript',
+      cursor,
+    });
+
+    fireEvent.click(retryButton);
+    await screen.findByText('An older assistant reply');
+    const transcriptText = container.textContent ?? '';
+    expect(transcriptText.indexOf('An older user request')).toBeLessThan(
+      transcriptText.indexOf('An older assistant reply'),
+    );
+    expect(transcriptText.indexOf('An older assistant reply')).toBeLessThan(
+      transcriptText.indexOf('Current user request'),
+    );
+    expect(fetchOlderMessages).toHaveBeenCalledTimes(2);
   });
 
   it('shows automatic memory saves and expands their distilled facts', () => {

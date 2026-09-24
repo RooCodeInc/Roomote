@@ -1,5 +1,5 @@
 {
-  "id": "1d75f7c6-277e-41ec-9041-9edc8d0d63dd",
+  "id": "a3de4d55-7491-4800-afa1-e5e880f9cea2",
   "prevId": "712f08d5-a1aa-4903-a565-887b1455854c",
   "version": "7",
   "dialect": "postgresql",
@@ -1296,24 +1296,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "launch_criteria_snapshot": {
-          "name": "launch_criteria_snapshot",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "launch_criteria_answers": {
-          "name": "launch_criteria_answers",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "launch_criteria_outcome": {
-          "name": "launch_criteria_outcome",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         },
         "result_kind": {
           "name": "result_kind",
@@ -2960,18 +2942,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "launch_criteria": {
-          "name": "launch_criteria",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "run_when": {
-          "name": "run_when",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         },
         "result_priority": {
           "name": "result_priority",
@@ -18517,6 +18487,117 @@
         "user_personalizations_user_id_users_id_fk": {
           "name": "user_personalizations_user_id_users_id_fk",
           "tableFrom": "user_personalizations",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.user_task_model_mapping_presets": {
+      "name": "user_task_model_mapping_presets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "roles": {
+          "name": "roles",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "user_task_model_mapping_presets_owner_name_unique_idx": {
+          "name": "user_task_model_mapping_presets_owner_name_unique_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "name_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "user_task_model_mapping_presets_owner_created_idx": {
+          "name": "user_task_model_mapping_presets_owner_created_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "user_task_model_mapping_presets_user_id_users_id_fk": {
+          "name": "user_task_model_mapping_presets_user_id_users_id_fk",
+          "tableFrom": "user_task_model_mapping_presets",
           "tableTo": "users",
           "columnsFrom": ["user_id"],
           "columnsTo": ["id"],

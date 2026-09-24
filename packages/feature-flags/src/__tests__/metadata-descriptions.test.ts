@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEPLOYMENT_EXPERIMENT_AUDIENCE,
+  DEPLOYMENT_EXPERIMENT_AUDIENCES,
+  DEPLOYMENT_EXPERIMENT_IDS,
   getBooleanMetadataDescriptorByKey,
+  getDeploymentExperimentAudience,
+  getDeploymentExperimentIdsForAudience,
   getDeploymentExperimentValues,
 } from '../index';
 
@@ -59,6 +64,28 @@ describe('metadata descriptions', () => {
       integrationToolAutoApprovals: false,
       sessionTaskCommunicationTriage: false,
       automationLaunchCriteria: true,
+      dizzy: false,
     });
+  });
+
+  it('requires an explicit supported audience for every experiment', () => {
+    expect(Object.keys(DEPLOYMENT_EXPERIMENT_AUDIENCE).sort()).toEqual(
+      [...DEPLOYMENT_EXPERIMENT_IDS].sort(),
+    );
+    expect(
+      Object.values(DEPLOYMENT_EXPERIMENT_AUDIENCE).every((audience) =>
+        DEPLOYMENT_EXPERIMENT_AUDIENCES.includes(audience),
+      ),
+    ).toBe(true);
+    expect(getDeploymentExperimentAudience('unclassifiedFeature')).toBe(
+      undefined,
+    );
+    expect(getDeploymentExperimentAudience('automationLaunchCriteria')).toBe(
+      'internal-nightly',
+    );
+    expect(getDeploymentExperimentIdsForAudience('internal-nightly')).toEqual([
+      'dizzy',
+      'automationLaunchCriteria',
+    ]);
   });
 });

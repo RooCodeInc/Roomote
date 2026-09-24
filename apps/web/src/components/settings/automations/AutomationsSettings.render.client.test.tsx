@@ -378,6 +378,7 @@ vi.mock('@tanstack/react-query', () => ({
       return {
         isPending: state.settingsQuery.isPending,
         data: {
+          launchCriteriaEnabled: state.automationLaunchCriteriaEnabled,
           capabilities: state.settingsQuery.data.capabilities,
           managerSlackChannelId,
           managerDiscordChannelId,
@@ -520,15 +521,6 @@ vi.mock('@/hooks/slack', () => ({
 
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({ isAdmin: state.isAdmin }),
-}));
-
-vi.mock('@/hooks/useAutomationLaunchCriteriaExperiment', () => ({
-  useAutomationLaunchCriteriaExperiment: () => ({
-    enabled: state.automationLaunchCriteriaEnabled,
-    isLoading: false,
-    isUpdating: false,
-    setEnabled: vi.fn(),
-  }),
 }));
 
 vi.mock('@/trpc/client', () => ({
