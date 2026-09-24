@@ -45,6 +45,7 @@ import {
 import {
   deleteFastSessionQueuedMessageCommand,
   getFastSessionMessagesCommand,
+  getFastSessionOlderMessagesCommand,
   getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
@@ -3263,6 +3264,21 @@ export const appRouter = createRouter({
       .input(z.object({ sessionId: z.string().uuid() }))
       .query(({ ctx: { auth }, input }) =>
         getFastSessionMessagesCommand(auth, input.sessionId),
+      ),
+    olderMessages: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          cursor: z.object({
+            createdAt: z.string().min(1).max(64),
+            ts: z.number().int(),
+            turnSeq: z.number().int(),
+            id: z.string().uuid(),
+          }),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionOlderMessagesCommand(auth, input),
       ),
     submitUserInput: protectedProcedure
       .input(

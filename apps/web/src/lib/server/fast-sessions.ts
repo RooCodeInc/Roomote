@@ -330,7 +330,17 @@ export async function getFastSessionPrReviewOfferStatus(
   return parsePrReviewActionOffer(message?.payload)?.status ?? null;
 }
 
-const FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT = 1000;
+export const FAST_SESSION_TRANSCRIPT_PAGE_SIZE = 200;
+export const FAST_SESSION_TRANSCRIPT_INITIAL_LIMIT = 50;
+
+export type FastSessionMessageCursor = {
+  createdAt: string;
+  ts: number;
+  turnSeq: number;
+  id: string;
+};
+
+const FAST_SESSION_TRANSCRIPT_DEFAULT_LIMIT = 1000;
 
 const fastSessionSelection = {
   id: fastAgentConversations.id,
@@ -1005,6 +1015,7 @@ export async function getFastSessionSuggestableMessages(
 export async function getFastSessionById(
   auth: FastSessionAuth,
   sessionId: string,
+  options: { transcriptLimit?: number } = {},
 ) {
   if (!auth.userId) return null;
   const [session] = await db
@@ -1023,66 +1034,11 @@ export async function getFastSessionById(
     return null;
   }
 
-  const rows: FastSessionMessage[] = [];
-  let before: ReturnType<typeof sql> | undefined;
-  // Hidden platform events can fail projection; count only validated rows
-  // toward the window, without loading an unbounded backlog into memory.
-  while (rows.length <= FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) {
-    const batch = await db
-      .select({
-        ...fastSessionMessageSelection,
-        // Preserve Postgres microseconds for keyset ties instead of a JS Date.
-        cursorCreatedAt: sql<string>`${fastAgentMessages.createdAt}::text`,
-      })
-      .from(fastAgentMessages)
-      .leftJoin(users, fastSessionMessageUserJoin)
-      .where(
-        and(
-          eq(fastAgentMessages.conversationId, session.id),
-          fastSessionTranscriptVisibilityWhere,
-          before,
-        ),
-      )
-      .orderBy(
-        desc(fastAgentMessages.ts),
-        desc(fastAgentMessages.turnSeq),
-        desc(fastAgentMessages.createdAt),
-        desc(fastAgentMessages.id),
-      )
-      .limit(FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT + 1);
-
-    for (const { cursorCreatedAt: _cursorCreatedAt, ...row } of batch) {
-      const prepared = prepareFastSessionMessageRow(row);
-      if (prepared) rows.push(prepared);
-      if (rows.length > FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) break;
-    }
-    if (batch.length <= FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) break;
-    const last = batch[batch.length - 1]!;
-    before = sql`(${fastAgentMessages.ts}, ${fastAgentMessages.turnSeq}, ${fastAgentMessages.createdAt}, ${fastAgentMessages.id})
-      < (${last.ts}, ${last.turnSeq}, ${last.cursorCreatedAt}::timestamp, ${last.id}::uuid)`;
-  }
-
-  const hasOlderMessages = rows.length > FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT;
-  let windowed = rows.slice(0, FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT);
-  if (hasOlderMessages) {
-    // The window boundary can land mid-turn; drop the partial turn at the old
-    // end so the transcript starts on a turn boundary. If a single turn fills
-    // the whole window, keep it partial rather than rendering nothing — the
-    // truncation notice already tells the reader the transcript is incomplete.
-    const boundaryTurnId = rows[FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT]!.turnId;
-    let end = windowed.length;
-    while (end > 0 && windowed[end - 1]!.turnId === boundaryTurnId) {
-      end -= 1;
-    }
-    if (end > 0) {
-      windowed = windowed.slice(0, end);
-    }
-  }
-
-  const messages = await attachFastSessionReplyImages(
+  const transcriptPage = await getFastSessionTranscriptPageForConversation(
     session.id,
-    await attachFastSessionTaskTitles(windowed.reverse()),
+    options.transcriptLimit ?? FAST_SESSION_TRANSCRIPT_DEFAULT_LIMIT,
   );
+  const messages = transcriptPage.messages;
   const queuedMessages = await getFastSessionQueuedMessages(session.id);
 
   // Fast usage events carry the OpenCode session id; a conversation can span
@@ -1113,10 +1069,112 @@ export async function getFastSessionById(
     ...session,
     messages,
     queuedMessages,
-    hasOlderMessages,
+    hasOlderMessages: transcriptPage.nextCursor !== null,
+    messagesCursor: transcriptPage.nextCursor,
     directInferenceCostMicroUsd,
     inferenceCostMicroUsd: directInferenceCostMicroUsd,
   };
+}
+
+export async function getFastSessionTranscriptPage(
+  auth: FastSessionAuth,
+  sessionId: string,
+  cursor: FastSessionMessageCursor,
+) {
+  const session = await findReadableFastSession(auth, sessionId);
+  if (!session) return null;
+
+  return getFastSessionTranscriptPageForConversation(
+    session.id,
+    FAST_SESSION_TRANSCRIPT_PAGE_SIZE,
+    cursor,
+  );
+}
+
+async function getFastSessionTranscriptPageForConversation(
+  sessionId: string,
+  limit: number,
+  cursor?: FastSessionMessageCursor,
+) {
+  const rows: Array<FastSessionMessage & { cursorCreatedAt: string }> = [];
+  let before: ReturnType<typeof sql> | undefined = cursor
+    ? sql`(${fastAgentMessages.ts}, ${fastAgentMessages.turnSeq}, ${fastAgentMessages.createdAt}, ${fastAgentMessages.id})
+        < (${cursor.ts}, ${cursor.turnSeq}, ${cursor.createdAt}::timestamp, ${cursor.id}::uuid)`
+    : undefined;
+
+  // Hidden platform events can fail projection; count only validated rows
+  // toward the page without reading an unbounded backlog into memory.
+  while (rows.length <= limit) {
+    const batch = await db
+      .select({
+        ...fastSessionMessageSelection,
+        // Preserve Postgres microseconds for keyset ties instead of a JS Date.
+        cursorCreatedAt: sql<string>`${fastAgentMessages.createdAt}::text`,
+      })
+      .from(fastAgentMessages)
+      .leftJoin(users, fastSessionMessageUserJoin)
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, sessionId),
+          fastSessionTranscriptVisibilityWhere,
+          before,
+        ),
+      )
+      .orderBy(
+        desc(fastAgentMessages.ts),
+        desc(fastAgentMessages.turnSeq),
+        desc(fastAgentMessages.createdAt),
+        desc(fastAgentMessages.id),
+      )
+      .limit(limit + 1);
+
+    for (const row of batch) {
+      const { cursorCreatedAt, ...message } = row;
+      const prepared = prepareFastSessionMessageRow(message);
+      if (prepared) rows.push({ ...prepared, cursorCreatedAt });
+      if (rows.length > limit) break;
+    }
+    if (rows.length > limit || batch.length <= limit) break;
+    const last = batch.at(-1);
+    if (!last) break;
+    before = sql`(${fastAgentMessages.ts}, ${fastAgentMessages.turnSeq}, ${fastAgentMessages.createdAt}, ${fastAgentMessages.id})
+      < (${last.ts}, ${last.turnSeq}, ${last.cursorCreatedAt}::timestamp, ${last.id}::uuid)`;
+  }
+
+  const hasOlderMessages = rows.length > limit;
+  let windowed = rows.slice(0, limit);
+  if (hasOlderMessages) {
+    // Keep the visible page aligned to a turn boundary when possible. Its
+    // cursor points to the last retained row, so the next page includes any
+    // older part of the split turn rather than dropping transcript history.
+    const boundaryTurnId = rows[limit]!.turnId;
+    let end = windowed.length;
+    while (end > 0 && windowed[end - 1]!.turnId === boundaryTurnId) {
+      end -= 1;
+    }
+    if (end > 0) windowed = windowed.slice(0, end);
+  }
+
+  const oldest = windowed.at(-1);
+  const nextCursor: FastSessionMessageCursor | null =
+    hasOlderMessages && oldest
+      ? {
+          createdAt: oldest.cursorCreatedAt,
+          ts: oldest.ts,
+          turnSeq: oldest.turnSeq,
+          id: oldest.id,
+        }
+      : null;
+  const messages = await attachFastSessionReplyImages(
+    sessionId,
+    await attachFastSessionTaskTitles(
+      windowed
+        .toReversed()
+        .map(({ cursorCreatedAt: _cursorCreatedAt, ...message }) => message),
+    ),
+  );
+
+  return { messages, nextCursor };
 }
 
 function visibleSuggestableText(text: string | null): string | null {

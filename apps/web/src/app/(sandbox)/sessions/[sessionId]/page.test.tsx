@@ -55,6 +55,7 @@ vi.mock('next/navigation', () => ({
   },
 }));
 vi.mock('@/lib/server/fast-sessions', () => ({
+  FAST_SESSION_TRANSCRIPT_INITIAL_LIMIT: 50,
   getFastSessionById: getFastSessionByIdMock,
   getFastSessionTasks: getFastSessionTasksMock,
 }));
@@ -431,6 +432,7 @@ describe('Session detail page', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       messages: [],
       hasOlderMessages: false,
+      messagesCursor: null,
     });
 
     const html = renderToStaticMarkup(
@@ -448,6 +450,7 @@ describe('Session detail page', () => {
     expect(getFastSessionByIdMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       '6a1f8f1e-0000-4000-8000-000000000005',
+      { transcriptLimit: 50 },
     );
     expect(getFastSessionTasksMock).not.toHaveBeenCalled();
     expect(html).toContain('data-testid="session-viewers"');
@@ -593,6 +596,7 @@ describe('Session detail page', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       messages: [],
       hasOlderMessages: false,
+      messagesCursor: null,
     });
     getFastSessionTasksMock.mockResolvedValue([
       {
@@ -639,6 +643,7 @@ describe('Session detail page', () => {
     expect(getFastSessionByIdMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       '6a1f8f1e-0000-4000-8000-000000000005',
+      { transcriptLimit: 50 },
     );
     expect(getFastSessionTasksMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
