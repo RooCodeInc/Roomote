@@ -53,6 +53,78 @@ describe('replyToDiscordEvent', () => {
     expect(postMessage).not.toHaveBeenCalled();
   });
 
+  it('includes selected images when editing a deferred interaction response', async () => {
+    const images = [
+      {
+        url: 'https://roomote.example.com/artifacts/image-1.png',
+        altText: 'proof.png',
+        contentType: 'image/png',
+      },
+    ];
+    const editInteractionResponse = vi.fn(async () => ({
+      provider: 'discord' as const,
+      channelId: 'thread-1',
+      messageId: 'response-1',
+    }));
+
+    await replyToDiscordEvent({
+      provider: { editInteractionResponse } as never,
+      applicationId: 'app-1',
+      channel: channelContext(),
+      interaction: interactionContext(),
+      text: 'The screenshot is attached.',
+      images,
+    });
+
+    expect(editInteractionResponse).toHaveBeenCalledWith({
+      applicationId: 'app-1',
+      interactionToken: 'interaction-token',
+      text: 'The screenshot is attached.',
+      images,
+    });
+  });
+
+  it('posts image batches beyond the deferred interaction embed limit', async () => {
+    const images = Array.from({ length: 11 }, (_, index) => ({
+      url: `https://roomote.example.com/artifacts/image-${index}.png`,
+      altText: `proof-${index}.png`,
+      contentType: 'image/png',
+    }));
+    const editInteractionResponse = vi.fn(async () => ({
+      provider: 'discord' as const,
+      channelId: 'thread-1',
+      messageId: 'response-1',
+    }));
+    const postMessage = vi.fn(async () => ({
+      provider: 'discord' as const,
+      channelId: 'channel-1',
+      messageId: 'overflow-1',
+    }));
+
+    await expect(
+      replyToDiscordEvent({
+        provider: { editInteractionResponse, postMessage } as never,
+        applicationId: 'app-1',
+        channel: channelContext(),
+        interaction: interactionContext(),
+        text: 'All screenshots are attached.',
+        images,
+      }),
+    ).resolves.toMatchObject({ messageId: 'response-1' });
+
+    expect(editInteractionResponse).toHaveBeenCalledWith({
+      applicationId: 'app-1',
+      interactionToken: 'interaction-token',
+      text: 'All screenshots are attached.',
+      images: images.slice(0, 10),
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      images: images.slice(10),
+    });
+  });
+
   it('falls back to the channel when an ambiguous ACK has no original response', async () => {
     const editInteractionResponse = vi.fn().mockRejectedValue(
       new DiscordApiError({
@@ -69,6 +141,13 @@ describe('replyToDiscordEvent', () => {
       messageId: 'fallback-1',
     }));
     const buttons = [[{ text: 'Follow', url: 'https://example.com' }]];
+    const images = [
+      {
+        url: 'https://roomote.example.com/artifacts/image-1.png',
+        altText: 'proof.png',
+        contentType: 'image/png',
+      },
+    ];
 
     await expect(
       replyToDiscordEvent({
@@ -78,6 +157,7 @@ describe('replyToDiscordEvent', () => {
         interaction: interactionContext(),
         text: 'Done',
         buttons,
+        images,
       }),
     ).resolves.toMatchObject({ messageId: 'fallback-1' });
 
@@ -86,6 +166,7 @@ describe('replyToDiscordEvent', () => {
       threadId: 'thread-1',
       text: 'Done',
       buttons,
+      images,
     });
   });
 

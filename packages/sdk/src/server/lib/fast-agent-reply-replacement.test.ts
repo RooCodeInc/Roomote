@@ -81,6 +81,7 @@ describe('replacement writes obey footer lease ownership', () => {
         threadId: 'T',
         sessionId: 'session',
         footerContext,
+        resolveImages: vi.fn(async () => []),
         postReplacement: vi.fn(),
       });
       await replace(
@@ -145,5 +146,101 @@ describe('replacement writes obey footer lease ownership', () => {
       ts: 'old',
       message: { blocks: [body] },
     });
+  });
+
+  it('replaces a Discord retry reply with its selected image artifacts', async () => {
+    const images = [
+      {
+        url: 'https://roomote.example.com/artifacts/image-1.png',
+        altText: 'proof.png',
+        contentType: 'image/png',
+      },
+    ];
+    const editMessage = vi.fn().mockResolvedValue(undefined);
+    const resolveImages = vi.fn(async () => images);
+    const replace = createDiscordFastReplyReplacer({
+      provider: { editMessage } as unknown as DiscordCommunicationProvider,
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild',
+        conversationId: 'C',
+        replyTarget: { channelId: 'C', threadId: 'T' },
+      },
+      channelId: 'C',
+      threadId: 'T',
+      sessionId: 'session',
+      footerContext,
+      resolveImages,
+      postReplacement: vi.fn(),
+    });
+
+    await replace(
+      { messageId: 'retry' },
+      {
+        purpose: 'closeout',
+        message: 'The screenshot is attached.',
+        imageArtifactIds: ['image-1'],
+      },
+    );
+
+    expect(resolveImages).toHaveBeenCalledWith(['image-1']);
+    expect(editMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'T',
+        messageId: 'retry',
+        images,
+      }),
+    );
+  });
+
+  it('posts all selected images when a Discord replacement exceeds embed limits', async () => {
+    const artifactIds = Array.from(
+      { length: 11 },
+      (_, index) => `image-${index}`,
+    );
+    const images = artifactIds.map((artifactId) => ({
+      url: `https://roomote.example.com/artifacts/${artifactId}.png`,
+      altText: `${artifactId}.png`,
+      contentType: 'image/png',
+    }));
+    const editMessage = vi.fn().mockResolvedValue(undefined);
+    const resolveImages = vi.fn(async () => images);
+    const postReplacement = vi
+      .fn()
+      .mockResolvedValue({ messageId: 'replacement' });
+    const replace = createDiscordFastReplyReplacer({
+      provider: { editMessage } as unknown as DiscordCommunicationProvider,
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild',
+        conversationId: 'C',
+        replyTarget: { channelId: 'C', threadId: 'T' },
+      },
+      channelId: 'C',
+      threadId: 'T',
+      sessionId: 'session',
+      footerContext,
+      resolveImages,
+      postReplacement,
+    });
+
+    await expect(
+      replace(
+        { messageId: 'retry' },
+        {
+          purpose: 'closeout',
+          message: 'Updated reply',
+          imageArtifactIds: artifactIds,
+        },
+      ),
+    ).resolves.toEqual({ messageId: 'replacement' });
+
+    expect(postReplacement).toHaveBeenCalledWith('Updated reply', artifactIds);
+    expect(editMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'retry',
+        text: 'Reconnected to the inference provider.',
+      }),
+    );
   });
 });

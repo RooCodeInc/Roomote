@@ -4,6 +4,7 @@ import {
   type CommunicationMessageButton,
   type DiscordCommunicationProvider,
 } from '@roomote/communication';
+import { DISCORD_MAX_EMBEDS_PER_MESSAGE } from '@roomote/communication/discord-provider';
 
 import type { DiscordChannelContext } from './task-launch.js';
 
@@ -20,18 +21,27 @@ export async function replyToDiscordEvent(input: {
   interaction?: DiscordInteractionReplyContext;
   text: string;
   buttons?: CommunicationMessageButton[][];
+  images?: Array<{ url: string; altText: string; contentType?: string }>;
   /** Must match the Gateway's initial defer choice; it cannot be changed later. */
   ephemeral?: boolean;
   /** When posting a non-interaction channel message, nest under this message. */
   replyToMessageId?: string;
 }) {
   if (input.interaction?.interactionDeferred) {
+    let interactionResponse:
+      | Awaited<ReturnType<typeof input.provider.editInteractionResponse>>
+      | undefined;
     try {
-      return await input.provider.editInteractionResponse({
+      interactionResponse = await input.provider.editInteractionResponse({
         applicationId: input.applicationId,
         interactionToken: input.interaction.interaction.token,
         text: input.text,
         ...(input.buttons ? { buttons: input.buttons } : {}),
+        ...(input.images?.length
+          ? {
+              images: input.images.slice(0, DISCORD_MAX_EMBEDS_PER_MESSAGE),
+            }
+          : {}),
       });
     } catch (error) {
       // An ambiguous Gateway ACK is represented as deferred so a successful
@@ -43,6 +53,24 @@ export async function replyToDiscordEvent(input: {
         throw error;
       }
     }
+
+    if (interactionResponse) {
+      const remainingImages =
+        input.images?.slice(DISCORD_MAX_EMBEDS_PER_MESSAGE) ?? [];
+      if (remainingImages.length > 0) {
+        await input.provider.postMessage({
+          channelId: input.channel.parentChannelId ?? input.channel.channelId,
+          ...(input.channel.parentChannelId
+            ? { threadId: input.channel.channelId }
+            : {}),
+          ...(input.replyToMessageId
+            ? { replyToMessageId: input.replyToMessageId }
+            : {}),
+          images: remainingImages,
+        });
+      }
+      return interactionResponse;
+    }
   }
   return input.provider.postMessage({
     channelId: input.channel.parentChannelId ?? input.channel.channelId,
@@ -51,6 +79,7 @@ export async function replyToDiscordEvent(input: {
       : {}),
     text: input.text,
     ...(input.buttons ? { buttons: input.buttons } : {}),
+    ...(input.images?.length ? { images: input.images } : {}),
     ...(input.replyToMessageId
       ? { replyToMessageId: input.replyToMessageId }
       : {}),
