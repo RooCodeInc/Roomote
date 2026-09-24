@@ -3,6 +3,7 @@ import {
   isDeploymentExperimentEnabled,
   recordIntegrationToolShadowEvaluation,
 } from '@roomote/db/server';
+import { Env, isEnvFlagEnabled } from '@roomote/env';
 import type {
   IntegrationToolAutoEvaluation,
   IntegrationToolAutoSettings,
@@ -367,19 +368,19 @@ export type IntegrationToolAutoState = {
 };
 
 export async function resolveIntegrationToolAutoState(): Promise<IntegrationToolAutoState> {
-  const [enabled, settings, model] = await Promise.all([
+  const [enabled, settings] = await Promise.all([
     isDeploymentExperimentEnabled('integrationToolAutoApprovals'),
     getIntegrationToolAutoSettings(),
-    resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(() => null),
   ]);
+  if (!isEnvFlagEnabled(Env.R_NIGHTLY_EXPERIMENTS_ENABLED) || !enabled) {
+    return { mode: 'off', settings, model: null };
+  }
+
+  const model = await resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(
+    () => null,
+  );
   const hosted = model?.kind === 'judgment';
-  const mode = !enabled
-    ? 'off'
-    : settings.mode === 'on'
-      ? 'on'
-      : hosted
-        ? 'shadow'
-        : 'off';
+  const mode = settings.mode === 'on' ? 'on' : hosted ? 'shadow' : 'off';
   return { mode, settings, model: model?.kind ?? null };
 }
 
