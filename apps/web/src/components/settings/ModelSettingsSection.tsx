@@ -20,6 +20,7 @@ import {
   CommandGroup,
   CommandItem,
   CommandList,
+  CommandSeparator,
   Code2,
   Dialog,
   DialogContent,
@@ -32,6 +33,7 @@ import {
   HandHelping,
   Input,
   Lightbulb,
+  Label,
   Lock,
   Plus,
   Popover,
@@ -86,6 +88,9 @@ import type {
   RecommendedModelPreset,
   TaskModelMetadata,
   TaskModelRole,
+  UserTaskModelMapping,
+  UserTaskModelMappingPreset,
+  UserTaskModelMappingRole,
 } from '@roomote/types';
 
 type EditableTaskModel = {
@@ -127,6 +132,21 @@ type TaskModelRoleConfig = {
   placeholder: string;
   reasoningAriaLabel: string;
 };
+
+type MappingPresetModelOption = EditableRuntimeModelOption & {
+  providerLabel: string;
+};
+
+type MappingDialogState =
+  | {
+      kind: 'provider';
+      provider: SetupModelProviderStatus;
+      preset: RecommendedModelPreset;
+    }
+  | { kind: 'custom'; preset: UserTaskModelMappingPreset }
+  | { kind: 'create' }
+  | { kind: 'delete'; preset: UserTaskModelMappingPreset }
+  | null;
 
 const SAME_AS_CODING_MODEL_VALUE = '__same_as_coding_model__';
 const EMPTY_SUGGESTION_STATE: SuggestionState = {
@@ -335,24 +355,108 @@ function TaskModelRoleEditor({
   );
 }
 
+function ModelRoleMappingRow({
+  config,
+  children,
+}: {
+  config: TaskModelRoleConfig;
+  children: ReactNode;
+}) {
+  const Icon = config.icon;
+
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3">
+      <Icon className="size-4 text-muted-foreground" />
+      <span className="font-medium">{config.label}</span>
+      <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function CustomModelMappingRolePicker({
+  config,
+  models,
+  value,
+  onChange,
+}: {
+  config: TaskModelRoleConfig;
+  models: MappingPresetModelOption[];
+  value: UserTaskModelMappingRole;
+  onChange: (value: UserTaskModelMappingRole) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedModel = models.find((model) => model.id === value.modelId);
+  const supportsReasoning =
+    selectedModel?.metadata?.supportsReasoning !== false;
+  const defaultReasoningEffort =
+    DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role];
+
+  return (
+    <ModelRoleMappingRow config={config}>
+      <ModelReasoningPicker
+        open={open}
+        onOpenChange={setOpen}
+        trigger={
+          <ModelReasoningPickerTrigger
+            label={
+              selectedModel?.displayName ??
+              (value.modelId
+                ? `Unavailable — ${value.modelId}`
+                : config.placeholder)
+            }
+            reasoningEffort={
+              supportsReasoning
+                ? (value.reasoningEffort ?? defaultReasoningEffort)
+                : null
+            }
+            disabled={models.length === 0}
+            appearance="select"
+            ariaLabel={`${config.label} and reasoning`}
+          />
+        }
+        models={models}
+        model={value.modelId}
+        onModelChange={(modelId) => onChange({ ...value, modelId })}
+        onModelSelectionChange={(selection) =>
+          onChange({
+            modelId: selection.model,
+            reasoningEffort: selection.reasoningEffort,
+          })
+        }
+        reasoningEffort={value.reasoningEffort}
+        defaultReasoningEffort={defaultReasoningEffort}
+        onReasoningEffortChange={(reasoningEffort) =>
+          onChange({ ...value, reasoningEffort })
+        }
+      />
+    </ModelRoleMappingRow>
+  );
+}
+
 /**
  * Opens the preset picker for the model mapping section.
  */
 function UseRecommendedDefaultsAction({
   providers,
-  onSelect,
+  customPresets,
+  getUnavailableRoles,
+  onSelectProvider,
+  onSelectCustom,
+  onAddCustom,
 }: {
   providers: SetupModelProviderStatus[];
-  onSelect: (
+  customPresets: UserTaskModelMappingPreset[];
+  getUnavailableRoles: (preset: UserTaskModelMappingPreset) => TaskModelRole[];
+  onSelectProvider: (
     provider: SetupModelProviderStatus,
     preset: RecommendedModelPreset,
   ) => void;
+  onSelectCustom: (preset: UserTaskModelMappingPreset) => void;
+  onAddCustom: () => void;
 }) {
   const [open, setOpen] = useState(false);
-
-  if (providers.length === 0) {
-    return null;
-  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -364,7 +468,41 @@ function UseRecommendedDefaultsAction({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-0">
         <Command>
+          {customPresets.length > 0 && (
+            <div className="p-1">
+              <div className="px-2 py-2.5 text-xs font-medium text-muted-foreground">
+                Custom presets
+              </div>
+              {customPresets.map((preset) => {
+                const unavailableRoles = getUnavailableRoles(preset);
+
+                return (
+                  <div key={preset.id} className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="min-w-0 flex-1 justify-start px-2"
+                      aria-label={`Custom preset: ${preset.name}${unavailableRoles.length > 0 ? ' (unavailable models)' : ''}`}
+                      onClick={() => {
+                        setOpen(false);
+                        onSelectCustom(preset);
+                      }}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {preset.name}
+                      </span>
+                      {unavailableRoles.length > 0 && (
+                        <Badge variant="warning">Unavailable</Badge>
+                      )}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <CommandList>
+            {customPresets.length > 0 && <CommandSeparator />}
             {providers.map((provider) => (
               <CommandGroup key={provider.id} heading={provider.label}>
                 {getRecommendedModelPresets(provider).map((preset) => (
@@ -374,7 +512,7 @@ function UseRecommendedDefaultsAction({
                     aria-label={`${provider.label}: ${preset.label}${preset.default ? ' (default)' : ''}`}
                     onSelect={() => {
                       setOpen(false);
-                      onSelect(provider, preset);
+                      onSelectProvider(provider, preset);
                     }}
                   >
                     {preset.label}
@@ -383,6 +521,17 @@ function UseRecommendedDefaultsAction({
                 ))}
               </CommandGroup>
             ))}
+            <CommandSeparator />
+            <CommandItem
+              value="Add your own"
+              onSelect={() => {
+                setOpen(false);
+                onAddCustom();
+              }}
+            >
+              <Plus />
+              Add your own
+            </CommandItem>
           </CommandList>
         </Command>
       </PopoverContent>
@@ -734,8 +883,17 @@ export function ModelSettingsSection({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(trpc.taskModels.get.queryOptions());
+  const customPresetsQuery = useQuery(
+    trpc.taskModels.customPresets.list.queryOptions(),
+  );
   const lookupMutation = useMutation(trpc.taskModels.lookup.mutationOptions());
   const updateMutation = useMutation(trpc.taskModels.update.mutationOptions());
+  const createCustomPresetMutation = useMutation(
+    trpc.taskModels.customPresets.create.mutationOptions(),
+  );
+  const deleteCustomPresetMutation = useMutation(
+    trpc.taskModels.customPresets.delete.mutationOptions(),
+  );
   const inputRef = useRef<HTMLInputElement | null>(null);
   const refreshMetadataMutation = useMutation(
     trpc.taskModels.refreshMetadata.mutationOptions(),
@@ -771,10 +929,10 @@ export function ModelSettingsSection({
   const [deleteConfirmModelId, setDeleteConfirmModelId] = useState<
     string | null
   >(null);
-  const [selectedPreset, setSelectedPreset] = useState<{
-    provider: SetupModelProviderStatus;
-    preset: RecommendedModelPreset;
-  } | null>(null);
+  const [mappingDialog, setMappingDialog] = useState<MappingDialogState>(null);
+  const [newPresetName, setNewPresetName] = useState('');
+  const [newPresetRoles, setNewPresetRoles] =
+    useState<UserTaskModelMapping | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingLookup, setPendingLookup] =
     useState<PendingLookupState>(IDLE_PENDING_LOOKUP);
@@ -1135,6 +1293,33 @@ export function ModelSettingsSection({
     explore: helperModelGroups,
     planning: helperModelGroups,
   };
+  const mappingModelOptionsByRole = Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => [
+      role,
+      roleOptionGroups[role].flatMap((group) =>
+        group.items.map((item) => ({ ...item, providerLabel: group.label })),
+      ),
+    ]),
+  ) as Record<TaskModelRole, MappingPresetModelOption[]>;
+  const customPresets = customPresetsQuery.data ?? [];
+  const getUnavailableCustomPresetRoles = (
+    preset: UserTaskModelMappingPreset,
+  ): TaskModelRole[] =>
+    TASK_MODEL_ROLES.filter((role) => {
+      const status =
+        settingsData?.runtimeModels[
+          TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey
+        ];
+
+      // The Apply macro deliberately leaves env-managed roles untouched.
+      if (status?.managedByEnv) {
+        return false;
+      }
+
+      return !mappingModelOptionsByRole[role].some(
+        (model) => model.id === preset.roles[role].modelId,
+      );
+    });
   const roleSelectValues = TASK_MODEL_ROLE_ORDER.reduce(
     (values, role) => {
       const status =
@@ -1727,12 +1912,174 @@ export function ModelSettingsSection({
     toast.success(`Applied the ${provider.label} ${preset.label} preset.`);
   };
 
-  const selectedPresetMappings = selectedPreset
-    ? (() => {
-        const recommendedRoleModelIds = getRecommendedRoleModelIds(
-          selectedPreset.provider,
-          selectedPreset.preset,
+  const applyCustomPreset = (preset: UserTaskModelMappingPreset) => {
+    if (getUnavailableCustomPresetRoles(preset).length > 0) {
+      toast.error('Choose current models for every role before applying.');
+      return;
+    }
+
+    const nextModels = [...models];
+    const nextEnabledModelIds = [...enabledModelIds];
+    const nextRoles = cloneTaskModelRoleDrafts(roleDrafts);
+
+    for (const role of TASK_MODEL_ROLE_ORDER) {
+      const status =
+        settingsData?.runtimeModels[
+          TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey
+        ];
+      const roleMapping = preset.roles[role];
+      const modelId = roleMapping.modelId;
+      const option = mappingModelOptionsByRole[role].find(
+        (model) => model.id === modelId,
+      );
+
+      // Match the provider preset macro: add and enable preset models even
+      // when the environment currently owns that role, while leaving its
+      // runtime selection untouched.
+      if (status?.managedByEnv && !option) {
+        continue;
+      }
+
+      if (!option) {
+        toast.error('Choose current models for every role before applying.');
+        return;
+      }
+
+      if (!nextModels.some((model) => model.id === modelId)) {
+        nextModels.push({
+          id: option.id,
+          displayName: option.displayName,
+          family: option.family,
+          metadata: option.metadata ?? null,
+        });
+      }
+
+      if (!nextEnabledModelIds.includes(modelId)) {
+        nextEnabledModelIds.push(modelId);
+      }
+
+      if (status?.managedByEnv) {
+        continue;
+      }
+
+      nextRoles[role] = {
+        modelId,
+        reasoningEffort: status?.reasoningManagedByEnv
+          ? roleDrafts[role].reasoningEffort
+          : option.metadata?.supportsReasoning === false
+            ? null
+            : roleMapping.reasoningEffort,
+      };
+    }
+
+    suppressNextSaveSuccessToast();
+    applyDraftUpdates(
+      {
+        models: nextModels,
+        enabledModelIds: nextEnabledModelIds,
+        roles: nextRoles,
+      },
+      0,
+    );
+    toast.success(`Applied the ${preset.name} preset.`);
+  };
+
+  const openCreatePresetDialog = () => {
+    const currentRoles = draftStateRef.current.roles;
+    const currentMapping = Object.fromEntries(
+      TASK_MODEL_ROLES.map((role) => {
+        const status =
+          settingsData?.runtimeModels[
+            TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey
+          ];
+        const modelId = status?.managedByEnv
+          ? status.effectiveModelId
+          : role === 'coding'
+            ? currentRoles.coding.modelId
+            : (currentRoles[role].modelId ?? currentRoles.coding.modelId);
+        const model = mappingModelOptionsByRole[role].find(
+          (option) => option.id === modelId,
         );
+        const reasoningEffort =
+          model?.metadata?.supportsReasoning === false
+            ? null
+            : (currentRoles[role].reasoningEffort ??
+              status?.reasoningEffort ??
+              DEFAULT_MODEL_ROLE_REASONING_EFFORTS[role]);
+
+        return [role, { modelId: modelId ?? '', reasoningEffort }];
+      }),
+    ) as UserTaskModelMapping;
+
+    setNewPresetName('');
+    setNewPresetRoles(currentMapping);
+    setMappingDialog({ kind: 'create' });
+  };
+
+  const handleCreateCustomPreset = async () => {
+    if (!newPresetRoles) {
+      return;
+    }
+
+    const name = newPresetName.trim();
+
+    try {
+      await createCustomPresetMutation.mutateAsync({
+        name,
+        roles: newPresetRoles,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: trpc.taskModels.customPresets.list.queryKey(),
+      });
+      setMappingDialog(null);
+      setNewPresetName('');
+      toast.success(`Saved the ${name} preset.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not save the preset.',
+      );
+    }
+  };
+
+  const handleDeleteCustomPreset = async () => {
+    if (mappingDialog?.kind !== 'delete') {
+      return;
+    }
+
+    const preset = mappingDialog.preset;
+
+    try {
+      await deleteCustomPresetMutation.mutateAsync({ id: preset.id });
+      await queryClient.invalidateQueries({
+        queryKey: trpc.taskModels.customPresets.list.queryKey(),
+      });
+      setMappingDialog(null);
+      toast.success(`Deleted the ${preset.name} preset.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not delete the preset.',
+      );
+    }
+  };
+
+  const applyDialog =
+    mappingDialog?.kind === 'provider' || mappingDialog?.kind === 'custom'
+      ? mappingDialog
+      : null;
+  const selectedPresetMappings = applyDialog
+    ? (() => {
+        const presetRoleModelIds: Record<TaskModelRole, string | null> =
+          applyDialog.kind === 'provider'
+            ? getRecommendedRoleModelIds(
+                applyDialog.provider,
+                applyDialog.preset,
+              )
+            : (Object.fromEntries(
+                TASK_MODEL_ROLES.map((role) => [
+                  role,
+                  applyDialog.preset.roles[role].modelId,
+                ]),
+              ) as Record<TaskModelRole, string>);
 
         return TASK_MODEL_ROLE_CONFIGS.map((config) => {
           const status =
@@ -1743,27 +2090,64 @@ export function ModelSettingsSection({
           const codingModelId = settingsData?.runtimeModels.codingModel
             .managedByEnv
             ? settingsData.runtimeModels.codingModel.effectiveModelId
-            : recommendedRoleModelIds.coding;
+            : presetRoleModelIds.coding;
           const modelId = managedByEnv
             ? status?.effectiveModelId
-            : (recommendedRoleModelIds[config.role] ?? codingModelId);
-          const presetModel = Object.values(selectedPreset.preset.roles).find(
-            (roleModel) => roleModel?.modelId === modelId,
-          );
-          const displayName = modelId
-            ? (models.find((model) => model.id === modelId)?.displayName ??
-              presetModel?.displayName ??
-              selectedPreset.provider.suggestedTaskModels.find(
+            : (presetRoleModelIds[config.role] ?? codingModelId);
+          const presetModel =
+            applyDialog.kind === 'provider'
+              ? Object.values(applyDialog.preset.roles).find(
+                  (roleModel) => roleModel?.modelId === modelId,
+                )
+              : undefined;
+          const customModelOption = modelId
+            ? mappingModelOptionsByRole[config.role].find(
                 (model) => model.id === modelId,
-              )?.displayName ??
-              modelId.split('/').at(-1) ??
-              modelId)
+              )
+            : undefined;
+          const isUnavailable =
+            applyDialog.kind === 'custom' &&
+            !managedByEnv &&
+            !customModelOption;
+          const displayName = modelId
+            ? isUnavailable
+              ? `${modelId} (unavailable)`
+              : (models.find((model) => model.id === modelId)?.displayName ??
+                presetModel?.displayName ??
+                (applyDialog.kind === 'provider'
+                  ? applyDialog.provider.suggestedTaskModels.find(
+                      (model) => model.id === modelId,
+                    )?.displayName
+                  : undefined) ??
+                (applyDialog.kind === 'custom'
+                  ? customModelOption?.displayName
+                  : undefined) ??
+                modelId.split('/').at(-1) ??
+                modelId)
             : 'Not set';
 
-          return { config, displayName, managedByEnv };
+          return { config, displayName, managedByEnv, isUnavailable };
         });
       })()
     : [];
+  const unavailableCustomPresetRoles =
+    mappingDialog?.kind === 'custom'
+      ? getUnavailableCustomPresetRoles(mappingDialog.preset)
+      : [];
+  const newPresetRolesAreAvailable =
+    newPresetRoles !== null &&
+    TASK_MODEL_ROLES.every(
+      (role) =>
+        newPresetRoles[role].modelId !== '' &&
+        mappingModelOptionsByRole[role].some(
+          (model) => model.id === newPresetRoles[role].modelId,
+        ),
+    );
+  const canCreateCustomPreset =
+    newPresetName.trim().length > 0 &&
+    newPresetName.trim().length <= 64 &&
+    newPresetRolesAreAvailable &&
+    !createCustomPresetMutation.isPending;
 
   const handleRefreshMetadata = async () => {
     const result = await refreshMetadataMutation.mutateAsync();
@@ -1810,9 +2194,15 @@ export function ModelSettingsSection({
         action={
           <UseRecommendedDefaultsAction
             providers={sortedConnectedProviders}
-            onSelect={(provider, preset) =>
-              setSelectedPreset({ provider, preset })
+            customPresets={customPresets}
+            getUnavailableRoles={getUnavailableCustomPresetRoles}
+            onSelectProvider={(provider, preset) =>
+              setMappingDialog({ kind: 'provider', provider, preset })
             }
+            onSelectCustom={(preset) =>
+              setMappingDialog({ kind: 'custom', preset })
+            }
+            onAddCustom={openCreatePresetDialog}
           />
         }
       >
@@ -1867,68 +2257,212 @@ export function ModelSettingsSection({
       </Section>
 
       <Dialog
-        open={selectedPreset !== null}
+        open={applyDialog !== null}
         onOpenChange={(open) => {
-          if (!open) {
-            setSelectedPreset(null);
+          if (
+            !open &&
+            (mappingDialog?.kind === 'provider' ||
+              mappingDialog?.kind === 'custom')
+          ) {
+            setMappingDialog(null);
           }
         }}
       >
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>
-              Apply {selectedPreset?.provider.label}{' '}
-              {selectedPreset?.preset.label} preset
+              {applyDialog?.kind === 'provider'
+                ? `Apply ${applyDialog.provider.label} ${applyDialog.preset.label} preset`
+                : `Apply ${applyDialog?.kind === 'custom' ? applyDialog.preset.name : ''} preset`}
             </DialogTitle>
             <DialogDescription>Set this model mapping</DialogDescription>
           </DialogHeader>
+          {unavailableCustomPresetRoles.length > 0 && (
+            <p className="text-sm text-destructive">
+              This preset includes unavailable models for{' '}
+              {unavailableCustomPresetRoles
+                .map(
+                  (role) =>
+                    TASK_MODEL_ROLE_CONFIGS.find(
+                      (config) => config.role === role,
+                    )?.label ?? role,
+                )
+                .join(', ')}
+              . Choose current models in a new preset before applying it.
+            </p>
+          )}
           <div className="grid gap-y-3 text-sm">
             {selectedPresetMappings.map(
               ({ config, displayName, managedByEnv }) => {
-                const Icon = config.icon;
-
                 return (
-                  <div
-                    key={config.role}
-                    className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3"
-                  >
-                    <Icon className="size-4 text-muted-foreground" />
-                    <span className="font-medium">{config.label}</span>
-                    <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                      <span className="truncate">{displayName}</span>
-                      {managedByEnv && (
-                        <BasicTooltip
-                          content={`Managed by ${TASK_MODEL_ROLE_DESCRIPTORS[config.role].modelEnvVar}; this preset will leave it unchanged.`}
-                        >
-                          <Lock
-                            aria-label={`${config.label} is managed by ${TASK_MODEL_ROLE_DESCRIPTORS[config.role].modelEnvVar}`}
-                            className="size-3.5 shrink-0"
-                          />
-                        </BasicTooltip>
-                      )}
+                  <ModelRoleMappingRow key={config.role} config={config}>
+                    <span className="truncate" title={displayName}>
+                      {displayName}
                     </span>
-                  </div>
+                    {managedByEnv && (
+                      <BasicTooltip
+                        content={`Managed by ${TASK_MODEL_ROLE_DESCRIPTORS[config.role].modelEnvVar}; this preset will leave it unchanged.`}
+                      >
+                        <Lock
+                          aria-label={`${config.label} is managed by ${TASK_MODEL_ROLE_DESCRIPTORS[config.role].modelEnvVar}`}
+                          className="size-3.5 shrink-0"
+                        />
+                      </BasicTooltip>
+                    )}
+                  </ModelRoleMappingRow>
                 );
               },
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedPreset(null)}>
+            <Button variant="outline" onClick={() => setMappingDialog(null)}>
               Cancel
             </Button>
+            {applyDialog?.kind === 'custom' && (
+              <Button
+                variant="destructive-outline"
+                aria-label={`Delete ${applyDialog.preset.name}`}
+                onClick={() =>
+                  setMappingDialog({
+                    kind: 'delete',
+                    preset: applyDialog.preset,
+                  })
+                }
+              >
+                <Trash2 />
+                Delete
+              </Button>
+            )}
             <Button
+              disabled={unavailableCustomPresetRoles.length > 0}
               onClick={() => {
-                if (selectedPreset) {
+                if (applyDialog?.kind === 'provider') {
                   applyRecommendedDefaults(
-                    selectedPreset.provider,
-                    selectedPreset.preset,
+                    applyDialog.provider,
+                    applyDialog.preset,
                   );
-                  setSelectedPreset(null);
+                  setMappingDialog(null);
+                } else if (applyDialog?.kind === 'custom') {
+                  applyCustomPreset(applyDialog.preset);
+                  setMappingDialog(null);
                 }
               }}
             >
               <Check />
               Apply
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={mappingDialog?.kind === 'create'}
+        onOpenChange={(open) => {
+          if (!open && mappingDialog?.kind === 'create') {
+            setMappingDialog(null);
+          }
+        }}
+      >
+        <DialogContent size="xl">
+          <DialogHeader>
+            <DialogTitle>Create model mapping preset</DialogTitle>
+            <DialogDescription>
+              Define your own, it&apos;s OK to mix providers
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="custom-model-mapping-preset-name">Name</Label>
+              <Input
+                id="custom-model-mapping-preset-name"
+                placeholder="Something easy to recognize"
+                maxLength={64}
+                value={newPresetName}
+                onChange={(event) => setNewPresetName(event.target.value)}
+              />
+            </div>
+            <div className="grid gap-y-3 text-sm">
+              {TASK_MODEL_ROLE_CONFIGS.map((config) => (
+                <CustomModelMappingRolePicker
+                  key={config.role}
+                  config={config}
+                  models={mappingModelOptionsByRole[config.role]}
+                  value={
+                    newPresetRoles?.[config.role] ?? {
+                      modelId: '',
+                      reasoningEffort: null,
+                    }
+                  }
+                  onChange={(selection) =>
+                    setNewPresetRoles((current) =>
+                      current
+                        ? { ...current, [config.role]: selection }
+                        : current,
+                    )
+                  }
+                />
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setMappingDialog(null)}
+              disabled={createCustomPresetMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleCreateCustomPreset()}
+              disabled={!canCreateCustomPreset}
+            >
+              {createCustomPresetMutation.isPending ? <Spinner /> : <Plus />}
+              Create preset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={mappingDialog?.kind === 'delete'}
+        onOpenChange={(open) => {
+          if (!open && mappingDialog?.kind === 'delete') {
+            setMappingDialog(null);
+          }
+        }}
+      >
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>
+              Delete{' '}
+              {mappingDialog?.kind === 'delete'
+                ? mappingDialog.preset.name
+                : ''}{' '}
+              preset?
+            </DialogTitle>
+            <DialogDescription>
+              This removes the saved preset. Your current model mapping will not
+              change.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setMappingDialog(null)}
+              disabled={deleteCustomPresetMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDeleteCustomPreset()}
+              disabled={
+                mappingDialog?.kind !== 'delete' ||
+                deleteCustomPresetMutation.isPending
+              }
+            >
+              {deleteCustomPresetMutation.isPending ? <Spinner /> : <Trash2 />}
+              Delete preset
             </Button>
           </DialogFooter>
         </DialogContent>

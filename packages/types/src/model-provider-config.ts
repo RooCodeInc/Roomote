@@ -253,6 +253,17 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
 
 export type TaskModelRole = keyof typeof TASK_MODEL_ROLE_DESCRIPTORS;
 
+export type UserTaskModelMappingRole = {
+  modelId: string;
+  reasoningEffort: ReasoningEffort | null;
+};
+
+/** A user's saved model and reasoning selection for every task model role. */
+export type UserTaskModelMapping = Record<
+  TaskModelRole,
+  UserTaskModelMappingRole
+>;
+
 export const TASK_MODEL_ROLES = Object.freeze(
   Object.keys(TASK_MODEL_ROLE_DESCRIPTORS) as TaskModelRole[],
 );
