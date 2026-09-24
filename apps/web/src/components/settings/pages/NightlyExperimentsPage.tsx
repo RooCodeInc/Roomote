@@ -5,6 +5,7 @@ import {
   ExperimentSettingsControls,
   getExperimentSettingIds,
 } from '@/components/settings/experiment-settings-controls';
+import { IntegrationToolAutoApprovalsNightlySetting } from '@/components/settings/IntegrationToolAutoApprovalsNightlySetting';
 import { EmptyState, Moon, RetryableLoadError } from '@/components/system';
 import { useDeploymentExperiments } from '@/hooks/useDeploymentExperiments';
 
@@ -38,7 +39,11 @@ export function NightlyExperimentsPage() {
           description="There are no internal nightly controls available on this deployment."
         />
       ) : (
-        <ExperimentSettingsControls audience="internal-nightly" />
+        <>
+          {/* Auto's runtime-aware switch belongs only on this gated page. */}
+          <IntegrationToolAutoApprovalsNightlySetting />
+          <ExperimentSettingsControls audience="internal-nightly" />
+        </>
       )}
     </SettingsShell>
   );

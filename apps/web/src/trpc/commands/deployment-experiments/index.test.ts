@@ -6,7 +6,6 @@ import {
   getDeploymentExperimentsCommand,
   getDizzyExperimentEnabledCommand,
   getNightlyExperimentsCommand,
-  getIntegrationToolAutoApprovalsEnabledCommand,
   setDeploymentExperimentCommand,
   setNightlyExperimentCommand,
 } from './index';
@@ -45,7 +44,6 @@ describe('deployment experiment commands', () => {
 
     expect(firstValues).toEqual(secondValues);
     expect(firstValues).not.toHaveProperty('results');
-    expect(firstValues).not.toHaveProperty('integrationToolAutoApprovals');
   });
 
   it('allows only admins to update shared values and leaves user metadata dormant', async () => {
@@ -70,12 +68,6 @@ describe('deployment experiment commands', () => {
         enabled: true,
       }),
     ).resolves.toMatchObject({ privateSessions: true });
-    await expect(
-      setDeploymentExperimentCommand(auth(admin.id, true), {
-        id: 'integrationToolAutoApprovals',
-        enabled: true,
-      }),
-    ).rejects.toThrow('Unauthorized');
     await expect(
       getDeploymentExperimentsCommand(auth(member.id, false)),
     ).resolves.toMatchObject({ privateSessions: true });
@@ -147,17 +139,7 @@ describe('deployment experiment commands', () => {
       getDizzyExperimentEnabledCommand(auth(member.id, false, false)),
     ).rejects.toThrow('Unauthorized');
     await expect(
-      getIntegrationToolAutoApprovalsEnabledCommand(
-        auth(member.id, false, false),
-      ),
-    ).rejects.toThrow('Unauthorized');
-    await expect(
       getDizzyExperimentEnabledCommand(auth(member.id, false, true)),
-    ).resolves.toBe(false);
-    await expect(
-      getIntegrationToolAutoApprovalsEnabledCommand(
-        auth(member.id, false, true),
-      ),
     ).resolves.toBe(false);
 
     await setNightlyExperimentCommand(auth(admin.id, true, true), {
@@ -167,15 +149,6 @@ describe('deployment experiment commands', () => {
 
     await expect(
       getDizzyExperimentEnabledCommand(auth(member.id, false, true)),
-    ).resolves.toBe(true);
-    await setNightlyExperimentCommand(auth(admin.id, true, true), {
-      id: 'integrationToolAutoApprovals',
-      enabled: true,
-    });
-    await expect(
-      getIntegrationToolAutoApprovalsEnabledCommand(
-        auth(member.id, false, true),
-      ),
     ).resolves.toBe(true);
     await expect(
       getNightlyExperimentsCommand(auth(member.id, false, true)),
