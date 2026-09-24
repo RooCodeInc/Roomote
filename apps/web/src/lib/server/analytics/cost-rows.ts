@@ -202,6 +202,7 @@ export async function getCostAnalyticsRows(
       : await db
           .select({
             nativeSessionId: fastAgentMessages.nativeSessionId,
+            sessionId: fastAgentConversations.id,
             privacy: fastAgentConversations.privacy,
             privateOwnerUserId: fastAgentConversations.privateOwnerUserId,
           })
@@ -217,6 +218,7 @@ export async function getCostAnalyticsRows(
       : await db
           .select({
             nativeSessionId: fastAgentConversations.openCodeSessionId,
+            sessionId: fastAgentConversations.id,
             privacy: fastAgentConversations.privacy,
             privateOwnerUserId: fastAgentConversations.privateOwnerUserId,
           })
@@ -230,13 +232,16 @@ export async function getCostAnalyticsRows(
   ];
   const inaccessiblePrivateNativeSessionIds = new Set(
     fastNativeRows
-      .filter(
-        (row) =>
-          row.privacy === 'private' && row.privateOwnerUserId !== auth.userId,
-      )
+      .filter((row) => !canViewPrivateAnalyticsDetails(auth, row))
       .map((row) => row.nativeSessionId)
       .filter((id): id is string => Boolean(id)),
   );
+  const fastSessionIdByNativeSessionId = new Map<string, string>();
+  for (const row of fastNativeRows) {
+    if (row.nativeSessionId && canViewPrivateAnalyticsDetails(auth, row)) {
+      fastSessionIdByNativeSessionId.set(row.nativeSessionId, row.sessionId);
+    }
+  }
   const fastNativeSessionIds = new Set(
     fastNativeRows
       .map((row) => row.nativeSessionId)
@@ -308,6 +313,10 @@ export async function getCostAnalyticsRows(
       !isTask &&
       !isMemory &&
       fastNativeSessionIds.has(row.harnessSessionId ?? '');
+    const accessibleSessionId =
+      isSession && !isPrivate
+        ? fastSessionIdByNativeSessionId.get(row.harnessSessionId ?? '')
+        : undefined;
     const taskType = isDeletedTask
       ? createLabelBackedDimensionValue('Deleted task')
       : isTask
@@ -419,7 +428,9 @@ export async function getCostAnalyticsRows(
         links:
           row.taskId && !isDeletedTask
             ? { task: `/task/${row.taskId}` }
-            : undefined,
+            : accessibleSessionId
+              ? { taskTitle: `/sessions/${accessibleSessionId}` }
+              : undefined,
       },
       meta: {
         canonicalTaskId: row.taskId,

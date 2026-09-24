@@ -18,6 +18,42 @@ const BASE_PROPS = {
 };
 
 describe('AnalyticsDetailsDialog', () => {
+  it('links accessible sessions and leaves private session labels unlinked', () => {
+    render(
+      <AnalyticsDetailsDialog
+        {...BASE_PROPS}
+        object="costs"
+        data={{
+          object: 'costs',
+          bucketKey: '2026-03-10',
+          seriesKey: 'openai',
+          columns: [{ key: 'taskTitle', label: 'Task' }],
+          rows: [
+            {
+              id: 'session-row',
+              values: { taskTitle: 'Session' },
+              links: { taskTitle: '/sessions/session-id' },
+            },
+            {
+              id: 'private-session-row',
+              values: { taskTitle: 'Private session' },
+            },
+          ],
+          total: 2,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Session' })).toHaveAttribute(
+      'href',
+      '/sessions/session-id',
+    );
+    expect(screen.getByText('Private session')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Private session' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('truncates long task titles for tasks in the UI', () => {
     const longTaskTitle = 'A'.repeat(120);
     const expectedTruncated = `${longTaskTitle.slice(0, 89)}…`;

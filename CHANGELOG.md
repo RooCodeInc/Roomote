@@ -4,13 +4,13 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.13.0 (2026-09-23)
 
-Roomote 1.13 opens automation Results to everyone, lets you decide which integration tools agents can use, adds GPT-6, Claude Opus 5.5, and Grok 4.7, and makes Sessions easier to manage.
+Roomote 1.13 brings automation Results to everyone, lets you control integration access, adds reusable personal model mappings, and makes Sessions easier to manage.
 
 ### Highlights
 
 - Automation Results is out of Experimental. Every member gets an inbox of automation reports with short summaries, links to the related work, and suggested next steps.
 - Choose which integration tools agents can use freely, must ask about, or can't use at all, and approve pending calls right from Slack, Discord, or Telegram.
-- GPT-6 Sol and Luna, Claude Opus 5.5, and Grok 4.7 are now available.
+- Choose from GPT-6 Sol and Luna, Claude Opus 5.5, and Grok 4.7, then save private model mappings for your roles.
 - Rename, stop, and archive Sessions, and delete a queued message before Roomote picks it up.
 
 ### Minor changes
@@ -25,7 +25,7 @@ Roomote 1.13 opens automation Results to everyone, lets you decide which integra
 - With a judgment model configured, Roomote saves lasting preferences, decisions, and corrections to Memory on its own when the agent didn't. A note in the transcript shows what was saved. Private, sensitive, and duplicate content is skipped.
 - Attach an R analysis request and Roomote can set up a reusable analysis environment for it, with pinned CRAN and Bioconductor packages, so later tasks start from the same setup.
 - Agents can open a text file that another task or Session produced by naming the task and the file path, instead of guessing an artifact ID.
-- Self-hosted deployments can run judgments against their own model endpoint by setting `R_JUDGMENT_UPSTREAM_URL`. It appears in Settings > Models as "Roomote judgment model".
+- Save private model mapping presets in Settings > Models to reuse a model and reasoning level for each role.
 
 ### Patch changes
 
@@ -38,7 +38,6 @@ Roomote 1.13 opens automation Results to everyone, lets you decide which integra
 - When you ask for a specific model for a delegated task, or an admin routing rule applies, Roomote uses it. Model names that only appear in pasted text are no longer treated as a request.
 - Starting and retrying work is more reliable. Retry works for tasks launched from a Session (it used to fail with "Failed query"), retrying after a canceled retry starts a fresh attempt, manual task reconnection works again, slow startups get more time, and tasks whose branch was deleted finish cleanly instead of hanging. Start failures now show as a small row with a Retry button, and startup errors about integration keys say what actually went wrong. Thanks to @parland for contributing the startup fix.
 - Tasks no longer fail to start when your GitHub repositories span more than one GitHub App installation, and GitLab-only environments and Blank slates aren't blocked by it either. Thanks to @pridemusvaire for contributing this fix.
-- If you use Auto tool approvals, risky calls now ask the Session owner and are blocked when nobody can answer. Auto also takes your latest request into account when deciding.
 - When an integration's sign-in is revoked, Roomote shows a Reconnect prompt and stops retrying the rejected credentials. A late, failed refresh no longer overwrites newer credentials.
 - Voice messages and audio attachments work with newly released models and custom OpenAI-compatible providers, instead of failing with "no configured model supports audio input".
 - Oversized attachments are caught before you send, with a message naming the file and the limit. Your prompt and attachments stay in place.
@@ -50,6 +49,9 @@ Roomote 1.13 opens automation Results to everyone, lets you decide which integra
 - Code reviews look harder at removed behavior, callers, and alternate paths, and check each finding against a concrete failure before posting it.
 - Task activity shows command exit codes and missing file names, and pull request comment reads include brand-new inline review comments.
 - Operators can set `R_JUDGMENT_CAPTURE=on` to save answered judgment decisions, with credentials and personal data scrubbed, to their own artifact bucket for building a training set. It's off by default.
+- Long Fast sessions now open with the newest messages and load older history as you scroll, keeping large transcripts responsive.
+- Session environment selection uses the configured environments, their repositories, and routing rules.
+- The optional judgment model supports validated routing and triage decisions, including channel launch criteria, request classification, thread replies, automatic-reply filtering, and Memory-save review.
 
 ## 1.12.4 (2026-09-20)
 

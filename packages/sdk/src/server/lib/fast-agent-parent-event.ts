@@ -1900,8 +1900,14 @@ async function createDiscordFastAgentParentTurn(
     threadId: conversation.replyTarget.threadId,
     sessionId: session.id,
     footerContext: params.footerContext,
-    postReplacement: (text) =>
-      adapter.postReply({ purpose: 'closeout', message: text }),
+    resolveImages: (artifactIds) =>
+      resolveFastAgentSessionImages({ artifactIds, sessionId: session.id }),
+    postReplacement: (text, artifactIds) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: text,
+        ...(artifactIds?.length ? { imageArtifactIds: artifactIds } : {}),
+      }),
   });
   adapter.replaceReply = async (handle, reply) => {
     const result = await replaceReply(handle, reply);

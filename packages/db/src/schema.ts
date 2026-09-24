@@ -1747,6 +1747,20 @@ export const taskRuns = pgTable(
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure')`,
       ),
+    // Finished runs whose sandbox sleep check has not yet examined (see
+    // destroySandboxesOfFinishedRuns). Keyed on the settlement time the sweep
+    // ranges over, one index per branch of its OR, so it reads only the
+    // lookback window instead of all unclaimed run history.
+    index('task_runs_sleep_check_finished_completed_idx')
+      .using('btree', table.completedAt)
+      .where(
+        sql`${table.status} IN ('failed', 'canceled', 'completed') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure') AND ${table.completedAt} IS NOT NULL`,
+      ),
+    index('task_runs_sleep_check_finished_canceled_idx')
+      .using('btree', table.canceledAt)
+      .where(
+        sql`${table.status} IN ('failed', 'canceled', 'completed') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure') AND ${table.completedAt} IS NULL AND ${table.canceledAt} IS NOT NULL`,
+      ),
     index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
     index('task_runs_source_run_id_idx').on(table.sourceRunId),
     uniqueIndex('task_runs_discord_source_event_unique')

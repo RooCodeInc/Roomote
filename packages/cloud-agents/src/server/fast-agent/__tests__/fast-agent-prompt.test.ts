@@ -86,6 +86,23 @@ describe('buildFastAgentSystemPrompt', () => {
     ).not.toContain('## Private Session');
   });
 
+  it('requires delegated image IDs to be selected for successful reply delivery', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'When a user asks to see images from an earlier delegated task, use its task ID with `manage_tasks` `get_summary` to retrieve the stable image artifact IDs (even if a viewer link is already available), then pass the requested IDs in `send_chat_reply.imageArtifactIds` in the reply.',
+    );
+    expect(prompt).toContain(
+      'Prose or a viewer link alone is not an attachment.',
+    );
+    expect(prompt).toContain(
+      'only after a successful `send_chat_reply` that included the matching ID in `imageArtifactIds`',
+    );
+    expect(prompt).toContain(
+      'If no usable ID is available or attachment delivery fails, accurately say it could not be attached and provide an accessible artifact viewer link when available.',
+    );
+  });
+
   it('includes matching workspace guidance as supplemental routing rules', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
@@ -768,15 +785,6 @@ describe('buildFastAgentSystemPrompt', () => {
       'never add a no-commit, no-push, or no-PR constraint the user did not state',
     );
     expect(prompt).toContain('send_chat_reply');
-    expect(prompt).toContain(
-      "use that task's known ID with `manage_tasks` `get_summary` to recover its stable image artifact IDs and viewer links",
-    );
-    expect(prompt).toContain(
-      'Never say an image or screenshot is attached, shown, included, above, or below unless the same reply actually supplies its stable ID in "imageArtifactIds"',
-    );
-    expect(prompt).toContain(
-      'provide an accessible artifact viewer link when available and accurately say that the image could not be attached',
-    );
     expect(prompt).toContain(
       'Its returned `viewUrl` opens the artifact in its Session, while `standaloneViewUrl` opens the document, image, or file on its own page with a direct shareable link; share whichever returned URL fits the context, unchanged, rather than constructing an artifact URL.',
     );
