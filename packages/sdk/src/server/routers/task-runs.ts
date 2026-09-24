@@ -23,6 +23,7 @@ import {
 import {
   getCommunicationMessages,
   peekTaskFollowUps,
+  prependCommunicationMessages,
   queueCommunicationMessage,
   removeTaskFollowUp,
 } from '@roomote/communication/messages';
@@ -568,6 +569,18 @@ export const taskRunsRouter = router({
     'runId',
   ).mutation(async ({ input }) =>
     queueCommunicationMessage(input.provider, input.runId, input.message),
+  ),
+  // Sandboxed workers have no Redis access, so requeued communication
+  // messages go through the same run-token-scoped API boundary.
+  prependCommunicationMessages: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      provider: communicationProviderSchema,
+      messages: z.array(queuedCommunicationMessageSchema),
+    }),
+    'runId',
+  ).mutation(async ({ input }) =>
+    prependCommunicationMessages(input.provider, input.runId, input.messages),
   ),
   // Sandboxed workers have no Redis access, so they drain API-queued task
   // follow-ups through these procedures instead of reading the list directly.
