@@ -407,7 +407,7 @@ export async function updateCustomAutomation(
       executionMode,
       target: input.target,
       // Disabling the automation also revokes its external trigger URL.
-      webhookSecret: input.enabled ? existing.webhookSecret : null,
+      ...(!input.enabled ? { webhookSecret: null } : {}),
       updatedAt: new Date(),
     })
     .where(eq(customAutomations.id, id))

@@ -2050,6 +2050,11 @@ describe('AutomationsSettings', () => {
     const webhookSwitch = screen.getByRole('switch', {
       name: 'Enable webhooks',
     });
+    expect(
+      screen.getByText(
+        /text\/plain or JSON bodies provide untrusted input for this run only/,
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(webhookSwitch);
     expect(mutations.setCustomAutomationWebhookEnabled).toHaveBeenCalledWith({
       id: 'automation-ondemand',

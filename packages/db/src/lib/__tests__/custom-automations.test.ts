@@ -53,6 +53,17 @@ describe('custom automations helpers', () => {
       expect(await getCustomAutomationWebhookToken(created.id)).toBe(
         firstToken,
       );
+      await updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: true,
+        scheduleMode: 'on_demand',
+        environmentId: FAST_EXECUTION,
+        target: {},
+      });
+      expect(await getCustomAutomationWebhookToken(created.id)).toBe(
+        firstToken,
+      );
 
       const replacementToken = 'B'.repeat(43);
       await setCustomAutomationWebhookToken(created.id, replacementToken);
@@ -76,6 +87,15 @@ describe('custom automations helpers', () => {
         enabled: true,
         token: null,
       });
+      await updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: true,
+        scheduleMode: 'on_demand',
+        environmentId: FAST_EXECUTION,
+        target: {},
+      });
+      expect(await getCustomAutomationWebhookToken(created.id)).toBeNull();
       expect(
         await rotateCustomAutomationWebhookToken(created.id, 'E'.repeat(43)),
       ).toBeNull();

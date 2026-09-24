@@ -1365,7 +1365,7 @@ export function CustomAutomationsSection({
                     ? 'Save this automation as enabled before configuring its webhook.'
                     : !form.enabled
                       ? 'Save this automation as disabled to revoke its webhook URL.'
-                      : 'POST to this private URL to start the configured automation. Request bodies are ignored. Disabling or rotating the URL revokes the previous one.'}
+                      : 'POST to this private URL to start the configured automation. Empty bodies use the saved prompt; text/plain or JSON bodies provide untrusted input for this run only. Disabling or rotating the URL revokes the previous one.'}
                 </p>
               </div>
             </div>
