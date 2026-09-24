@@ -350,6 +350,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
         agentContext: 'Treat each message as a bug report.',
         senderUserId: 'roomote-user-1',
         directedAtRoomote: true,
+        visibleInTranscript: true,
       }),
     );
     expect(mocks.addReaction).not.toHaveBeenCalled();
@@ -446,6 +447,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
               displayName: payload.author.username,
             },
           },
+          visibleInTranscript: false,
         }),
       );
     },
@@ -475,6 +477,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
           key: 'slack_channel_auto_start',
           actor: { externalId: 'alert-bot', displayName: 'alerts' },
         },
+        visibleInTranscript: false,
       }),
     );
     expect(mocks.processFast).not.toHaveBeenCalled();

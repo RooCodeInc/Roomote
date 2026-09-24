@@ -377,6 +377,7 @@ async function launchClaimedDiscordSuggestion(input: {
               input.triggerId,
             ),
             createAnchoredThread: false,
+            visibleInTranscript: false,
           });
           return fastStart.accepted
             ? {

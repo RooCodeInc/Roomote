@@ -243,6 +243,7 @@ describe('processDiscordFastAgentMessage', () => {
           interaction: { id: 'new-interaction', token: 'token' } as never,
           interactionDeferred: true,
         },
+        visibleInTranscript: false,
         onAccepted,
       }),
     ).resolves.toBe(true);
@@ -302,6 +303,7 @@ describe('processDiscordFastAgentMessage', () => {
           threadTs: 'report-thread',
           userId: 'acting-user',
         }),
+        visibleInTranscript: false,
         fastAgentParent: { sessionId: 'fast-session-1', conversation },
       }),
     );
