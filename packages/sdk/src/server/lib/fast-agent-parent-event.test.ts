@@ -814,32 +814,22 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('keeps a text reply when a recovered image is outside the session', async () => {
+  it('rejects a recovered image from a task outside the session', async () => {
     mocks.findTaskRuns.mockResolvedValueOnce([]);
 
-    await deliverFastAgentParentEvent({
-      parent,
-      event: {
-        type: 'human_follow_up',
-        eventId: '100.005',
-        currentMessageId: '100.005',
-        userId: 'user-2',
-        question: 'Show me the screenshot.',
-      },
-    });
-
-    expect(mocks.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.stringContaining('The proof is ready.'),
+    await expect(
+      deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.005',
+          currentMessageId: '100.005',
+          userId: 'user-2',
+          question: 'Show me the screenshot.',
+        },
       }),
-    );
-    expect(mocks.postMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        blocks: expect.arrayContaining([
-          expect.objectContaining({ type: 'image' }),
-        ]),
-      }),
-    );
+    ).rejects.toThrow('Invalid Fast parent image artifact: artifact-1');
+    expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 
   it('posts a recovered child image on a later Discord human turn', async () => {

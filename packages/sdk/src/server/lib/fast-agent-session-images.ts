@@ -56,7 +56,7 @@ export async function resolveFastAgentSessionImages(params: {
 
   const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
   const ts = currentEpochSeconds();
-  return artifactIds.flatMap((id) => {
+  return artifactIds.map((id) => {
     const artifact = byId.get(id);
     if (
       !artifact ||
@@ -65,19 +65,17 @@ export async function resolveFastAgentSessionImages(params: {
       artifact.taskId !== sessionRunTaskById.get(artifact.runId) ||
       !artifact.contentType.startsWith('image/')
     ) {
-      return [];
+      throw new Error(`Invalid Fast parent image artifact: ${id}`);
     }
-    return [
-      {
-        url: buildSignedArtifactRawUrl({
-          artifactId: artifact.id,
-          ts,
-          apiBaseUrl: Env.R_APP_URL,
-          signingKey: getArtifactSigningKey(),
-        }),
-        altText: basename(artifact.path) || 'Task artifact',
-        contentType: artifact.contentType,
-      },
-    ];
+    return {
+      url: buildSignedArtifactRawUrl({
+        artifactId: artifact.id,
+        ts,
+        apiBaseUrl: Env.R_APP_URL,
+        signingKey: getArtifactSigningKey(),
+      }),
+      altText: basename(artifact.path) || 'Task artifact',
+      contentType: artifact.contentType,
+    };
   });
 }
