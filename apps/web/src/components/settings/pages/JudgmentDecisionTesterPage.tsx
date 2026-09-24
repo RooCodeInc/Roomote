@@ -7,7 +7,6 @@ import { SettingsShell } from '@/components/settings/SettingsShell';
 import {
   Badge,
   Button,
-  Checkbox,
   Label,
   Select,
   SelectContent,
@@ -20,6 +19,12 @@ import {
 import { useTRPC } from '@/trpc/client';
 
 type Target = 'configured' | 'roomote';
+type ModelChoice = Target | 'both';
+
+function targetsFor(choice: ModelChoice | undefined): Target[] {
+  if (!choice) return [];
+  return choice === 'both' ? ['configured', 'roomote'] : [choice];
+}
 type Question = {
   type: 'noul' | 'choice' | 'score';
   instructions: string;
@@ -169,7 +174,7 @@ export function JudgmentDecisionTesterPage() {
   const [decisionId, setDecisionId] = useState<string>();
   const [stateText, setStateText] = useState('');
   const [questionsText, setQuestionsText] = useState('');
-  const [targets, setTargets] = useState<Target[]>(['configured']);
+  const [modelChoice, setModelChoice] = useState<ModelChoice>();
   const [inputError, setInputError] = useState<string>();
   const [asked, setAsked] = useState<Record<string, Question>>({});
 
@@ -194,6 +199,20 @@ export function JudgmentDecisionTesterPage() {
     Object.keys(catalog?.targets ?? {}) as Target[]
   ).filter((target) => catalog?.targets[target].available);
 
+  const modelOptions: Array<{ value: ModelChoice; label: string }> = [
+    ...availableTargets.map((target) => ({
+      value: target as ModelChoice,
+      label: catalog!.targets[target].label,
+    })),
+    ...(availableTargets.length === 2
+      ? [{ value: 'both' as const, label: 'Both, side by side' }]
+      : []),
+  ];
+  const selectedChoice =
+    modelChoice && modelOptions.some((o) => o.value === modelChoice)
+      ? modelChoice
+      : modelOptions[0]?.value;
+
   const run = () => {
     let state: unknown;
     let questions: Record<string, Question>;
@@ -211,9 +230,7 @@ export function JudgmentDecisionTesterPage() {
       );
       return;
     }
-    const chosen = targets.filter((target) =>
-      availableTargets.includes(target),
-    );
+    const chosen = targetsFor(selectedChoice);
     if (!chosen.length) {
       setInputError('Choose a model to ask.');
       return;
@@ -287,29 +304,27 @@ export function JudgmentDecisionTesterPage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                {(['configured', 'roomote'] as Target[]).map((target) => {
-                  const info = catalog.targets[target];
-                  if (target === 'roomote' && !info.available) return null;
-                  return (
-                    <label
-                      key={target}
-                      className="flex items-center gap-2 text-sm"
-                    >
-                      <Checkbox
-                        checked={targets.includes(target) && info.available}
-                        disabled={!info.available}
-                        onCheckedChange={(checked) =>
-                          setTargets((current) =>
-                            checked
-                              ? [...new Set([...current, target])]
-                              : current.filter((t) => t !== target),
-                          )
-                        }
-                      />
-                      {info.label}
-                    </label>
-                  );
-                })}
+                <Select
+                  value={selectedChoice}
+                  onValueChange={(value) =>
+                    setModelChoice(value as ModelChoice)
+                  }
+                  disabled={modelOptions.length === 0}
+                >
+                  <SelectTrigger
+                    aria-label="Model"
+                    className="w-full sm:w-auto sm:min-w-56"
+                  >
+                    <SelectValue placeholder="No judgment model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {modelOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button
                   onClick={run}
                   disabled={test.isPending || availableTargets.length === 0}

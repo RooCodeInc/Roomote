@@ -53,6 +53,21 @@ vi.mock('@/components/settings/SettingsShell', () => ({
 
 import { JudgmentDecisionTesterPage } from './JudgmentDecisionTesterPage';
 
+beforeAll(() => {
+  // Radix Select opens on pointer events jsdom does not implement.
+  class MockPointerEvent extends MouseEvent {
+    pointerType: string;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerType = init.pointerType ?? '';
+    }
+  }
+  window.PointerEvent = MockPointerEvent as typeof PointerEvent;
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  HTMLElement.prototype.hasPointerCapture = () => false;
+  HTMLElement.prototype.releasePointerCapture = () => {};
+});
+
 describe('JudgmentDecisionTesterPage', () => {
   beforeEach(() => {
     state.mutate.mockClear();
@@ -65,9 +80,11 @@ describe('JudgmentDecisionTesterPage', () => {
       (screen.getByLabelText('State (JSON)') as HTMLTextAreaElement).value,
     ).toContain('Out of office');
 
-    fireEvent.click(
-      screen.getByRole('checkbox', { name: 'Roomote judgment model' }),
-    );
+    fireEvent.pointerDown(screen.getByRole('combobox', { name: 'Model' }), {
+      button: 0,
+      pointerType: 'mouse',
+    });
+    fireEvent.click(screen.getByRole('option', { name: 'Both, side by side' }));
     fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
 
     expect(state.mutate).toHaveBeenCalledWith(
