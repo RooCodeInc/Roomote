@@ -233,12 +233,12 @@ import {
 } from './fast-agent-tool-policy';
 import {
   createFastAgentToolApprovalBridge,
-  isFastAgentApprovalChatSurface,
   resolveFastAgentToolApprovalSession,
   integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
   shouldDisposeInstanceForToolApprovalRules,
 } from './fast-agent-tool-approvals';
+import { isAutoApprovalChatSurface } from '../integration-tool-auto-approval-presence';
 import { resolveFastAgentToolApprovalUserRequest } from './fast-agent-tool-approval-context';
 import {
   callFastAgentIntegration,
@@ -6418,10 +6418,11 @@ export async function answerFastAgentQuestion({
                 inferenceAttemptNumber += 1;
                 resolvedInferenceModel = undefined;
                 captureInferenceContext('prompt_submission');
-                const approvalNotificationSurface =
-                  isFastAgentApprovalChatSurface(conversation.surface)
-                    ? conversation.surface
-                    : undefined;
+                const approvalNotificationSurface = isAutoApprovalChatSurface(
+                  conversation.surface,
+                )
+                  ? conversation.surface
+                  : undefined;
                 // Native per-tool approval bridge for gated code-mode
                 // integration calls. Web conversations surface the pending
                 // card in the Session transcript; chat-originated
