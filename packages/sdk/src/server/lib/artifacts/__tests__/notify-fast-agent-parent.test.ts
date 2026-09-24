@@ -79,6 +79,7 @@ function artifact(
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     taskId: 'child-task',
     runId: 200,
+    artifactType: 'general' as const,
     path: 'proof/result.png',
     version: 1,
     contentType: 'image/png',
@@ -132,6 +133,17 @@ describe('notifyFastAgentParentOnArtifact', () => {
         }),
       }),
     );
+  });
+
+  it('does not automatically notify the Fast parent about visual-proof uploads', async () => {
+    await expect(
+      notifyFastAgentParentOnArtifact(
+        artifact({ artifactType: 'visual-proof' }),
+      ),
+    ).resolves.toBe('not_applicable');
+
+    expect(mocks.findRun).not.toHaveBeenCalled();
+    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
   });
 
   it('deduplicates an event already claimed by another delivery', async () => {
