@@ -50,8 +50,8 @@ Roomote 1.13 brings automation Results to everyone, lets you control integration
 - Task activity shows command exit codes and missing file names, and pull request comment reads include brand-new inline review comments.
 - Operators can set `R_JUDGMENT_CAPTURE=on` to save answered judgment decisions, with credentials and personal data scrubbed, to their own artifact bucket for building a training set. It's off by default.
 - Long Fast sessions now open with the newest messages and load older history as you scroll, keeping large transcripts responsive.
-- Sessions no longer ask the judgment model for an environment routing hint on their first request. The session agent already chooses the environment from the configured environments, their repositories, and the routing rules, as it does on deployments without a judgment model.
-- The optional judgment model no longer changes skill selection, Memory query ordering, integration-tool search, Telegram task-title icons, Discord forum tags, or PR review triage; those surfaces use their normal or helper-model behavior instead.
+- Session environment selection uses the configured environments, their repositories, and routing rules.
+- The optional judgment model supports validated routing and triage decisions, including channel launch criteria, request classification, thread replies, automatic-reply filtering, and Memory-save review.
 
 ## 1.12.4 (2026-09-20)
 
