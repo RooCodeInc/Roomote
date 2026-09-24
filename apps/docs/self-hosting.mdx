@@ -147,6 +147,36 @@ Restore verifies the encrypted bundle and checksums before replacing any
 state, restores the original `.env` (including `ENCRYPTION_KEY`), repopulates
 empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
 
+## Decision model on CPU (optional)
+
+Roomote asks a decision model small typed questions: which skills and tools
+fit a request, whether a turn is worth remembering, whether a tool call can be
+auto-approved, who a thread reply is for. With a TypeSafe key, Jev answers
+them. Without one, the `judgment` profile runs a CPU decision model beside
+the stack, so these features work with no external decision API and no GPU.
+
+Add these to `.env`:
+
+```sh
+COMPOSE_PROFILES=judgment                          # or append to an existing list
+JUDGMENT_MODEL=<GLiNER 2.5 checkpoint, Hugging Face id or path>
+R_JUDGMENT_UPSTREAM_URL=http://judgment:8080
+```
+
+`JUDGMENT_MODEL` must be a checkpoint fine-tuned for Roomote's decisions; a
+general-purpose GLiNER 2.5 checkpoint answers them close to chance. Set
+`JUDGMENT_HF_TOKEN` if the checkpoint is private. The sidecar is reachable
+only on the stack's internal network; set `R_JUDGMENT_UPSTREAM_API_KEY` as
+well to require a bearer token.
+
+Sizing: the container is capped at `JUDGMENT_MEMORY_LIMIT` (default `4g`) and
+`JUDGMENT_CPUS` (default `4`). With a small (74M-parameter) checkpoint it uses
+about 1 GB, and on 4 cores a typical decision takes 100 to 200 ms and a skill
+rerank about 40 ms per skill; a base (194M) checkpoint is about 2.5 times
+slower. Roomote gives a skill rerank one second, so large skill catalogs need
+more cores or the small checkpoint. A rerank that runs out of time is skipped
+(no skill hint for that turn), never guessed.
+
 ## Upgrades and rollback
 
 `roomote upgrade` is designed so a bad release cannot strand your deployment:

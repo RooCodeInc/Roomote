@@ -52,6 +52,13 @@ x-roomote-env: &roomote-env
   R_ALLOWED_EMAILS: ${R_ALLOWED_EMAILS:-}
   R_LICENSE_KEY: ${R_LICENSE_KEY:-}
   R_MODEL: ${R_MODEL:-}
+  # Decision model. Unset, a deployment uses Jev when a TypeSafe key is
+  # configured and otherwise none. R_JUDGMENT_UPSTREAM_URL points at any
+  # server that speaks the decision contract, such as the `judgment` profile's
+  # sidecar below (http://judgment:8080).
+  R_JUDGMENT_MODEL: ${R_JUDGMENT_MODEL:-}
+  R_JUDGMENT_UPSTREAM_URL: ${R_JUDGMENT_UPSTREAM_URL:-}
+  R_JUDGMENT_UPSTREAM_API_KEY: ${R_JUDGMENT_UPSTREAM_API_KEY:-}
   R_SMALL_MODEL: ${R_SMALL_MODEL:-}
   R_CODE_REVIEW_MODEL: ${R_CODE_REVIEW_MODEL:-}
   R_EXPLORE_MODEL: ${R_EXPLORE_MODEL:-}
@@ -315,6 +322,28 @@ services:
     volumes:
       - gbrain_data:/data
 
+  # Optional CPU decision model (judgment sidecar): skill and tool reranks,
+  # the Memory check, and the other typed decisions without a Jev key or a
+  # GPU. Enable with COMPOSE_PROFILES=judgment, set JUDGMENT_MODEL to a
+  # fine-tuned GLiNER 2.5 checkpoint, and point Roomote at it with
+  # R_JUDGMENT_UPSTREAM_URL=http://judgment:8080. The memory and CPU caps
+  # bound what inference can take from the host.
+  judgment:
+    profiles: [judgment]
+    container_name: roomote-judgment
+    build: .docker/judgment
+    restart: unless-stopped
+    networks: [default]
+    environment:
+      JUDGMENT_MODEL: ${JUDGMENT_MODEL:-}
+      HF_TOKEN: ${JUDGMENT_HF_TOKEN:-}
+      JUDGMENT_API_KEY: ${R_JUDGMENT_UPSTREAM_API_KEY:-}
+      JUDGMENT_THREADS: ${JUDGMENT_CPUS:-4}
+    mem_limit: ${JUDGMENT_MEMORY_LIMIT:-4g}
+    cpus: ${JUDGMENT_CPUS:-4}
+    volumes:
+      - judgment_models:/models
+
 networks:
   # The controller uses this network to discover the API and optional preview
   # proxy. Each task gets a separate bridge network; only the API and an
@@ -328,3 +357,5 @@ networks:
 volumes:
   gbrain_data:
     name: roomote_gbrain_data
+  judgment_models:
+    name: roomote_judgment_models
