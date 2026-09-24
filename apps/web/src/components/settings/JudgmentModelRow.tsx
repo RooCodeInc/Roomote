@@ -29,7 +29,7 @@ const JUDGMENT_MODEL_LABEL = 'Judgment model';
 const JUDGMENT_DECISIONS_PATH = `${SETTINGS_PATHS.models}/decisions`;
 
 const JUDGMENT_MODEL_DESCRIPTION =
-  'Makes quick routing and triage decisions (which channel messages start work, whether a reply is for Roomote, what is worth remembering). Anything it is unsure about falls back to the helper model.';
+  'Answers the quick yes/no and multiple-choice questions Roomote asks, such as whether a reply is meant for it.';
 
 const MISSING_PROVIDER_HINTS: Record<
   Exclude<JudgmentModelSelection, 'off'>,
@@ -136,7 +136,13 @@ export function JudgmentModelRow() {
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            {JUDGMENT_MODEL_DESCRIPTION}
+            {JUDGMENT_MODEL_DESCRIPTION}{' '}
+            <Link
+              href={JUDGMENT_DECISIONS_PATH}
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              Test decisions
+            </Link>
           </p>
         </div>
 
@@ -182,15 +188,6 @@ export function JudgmentModelRow() {
             </Select>
             {unusableMessage ? (
               <p className="text-xs text-destructive">{unusableMessage}</p>
-            ) : null}
-            {settings.effectiveSelection !== 'off' &&
-            settings.effectiveSelectionUsable ? (
-              <Link
-                href={JUDGMENT_DECISIONS_PATH}
-                className="inline-block text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-              >
-                Test decisions
-              </Link>
             ) : null}
           </>
         )}

@@ -61,9 +61,12 @@ describe('JudgmentModelRow', () => {
     expect(screen.getByText('Judgment model')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Makes quick routing and triage decisions (which channel messages start work, whether a reply is for Roomote, what is worth remembering). Anything it is unsure about falls back to the helper model.',
+        /Answers the quick yes\/no and multiple-choice questions Roomote asks, such as whether a reply is meant for it\./,
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Test decisions' }),
+    ).toHaveAttribute('href', '/settings/models/decisions');
     expect(
       screen.getByRole('combobox', { name: 'Judgment model' }),
     ).toHaveTextContent('Off');
