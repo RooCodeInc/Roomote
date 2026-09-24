@@ -20,6 +20,7 @@ export async function replyToDiscordEvent(input: {
   interaction?: DiscordInteractionReplyContext;
   text: string;
   buttons?: CommunicationMessageButton[][];
+  images?: Array<{ url: string; altText: string; contentType?: string }>;
   /** Must match the Gateway's initial defer choice; it cannot be changed later. */
   ephemeral?: boolean;
   /** When posting a non-interaction channel message, nest under this message. */
@@ -32,6 +33,7 @@ export async function replyToDiscordEvent(input: {
         interactionToken: input.interaction.interaction.token,
         text: input.text,
         ...(input.buttons ? { buttons: input.buttons } : {}),
+        ...(input.images?.length ? { images: input.images } : {}),
       });
     } catch (error) {
       // An ambiguous Gateway ACK is represented as deferred so a successful
@@ -51,6 +53,7 @@ export async function replyToDiscordEvent(input: {
       : {}),
     text: input.text,
     ...(input.buttons ? { buttons: input.buttons } : {}),
+    ...(input.images?.length ? { images: input.images } : {}),
     ...(input.replyToMessageId
       ? { replyToMessageId: input.replyToMessageId }
       : {}),
