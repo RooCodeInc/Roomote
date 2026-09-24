@@ -79,8 +79,8 @@ RUN set -eux; \
     if [ "$attempt" -eq 3 ]; then exit 1; fi; \
     rm -rf /var/lib/apt/lists/*; \
     sleep 20; \
-  done; \
-  ln -sf "$(command -v python3)" /usr/local/bin/python \
+  done \
+  && ln -sf "$(command -v python3)" /usr/local/bin/python \
   && docker compose version \
   && rm -rf /var/lib/apt/lists/*
 
