@@ -52,7 +52,6 @@ Roomote 1.13 brings automation Results to everyone, lets you control integration
 - Long Fast sessions now open with the newest messages and load older history as you scroll, keeping large transcripts responsive.
 - Sessions no longer ask the judgment model for an environment routing hint on their first request. The session agent already chooses the environment from the configured environments, their repositories, and the routing rules, as it does on deployments without a judgment model.
 - The optional judgment model no longer changes skill selection, Memory query ordering, integration-tool search, Telegram task-title icons, Discord forum tags, or PR review triage; those surfaces use their normal or helper-model behavior instead.
-- For deployments where Auto tool approvals were already enabled, Jev is now required for Auto decisions. Without Jev—when a deployment uses the Roomote-run model or no judgment model—tool calls that need approval continue to ask, as before. Jev answers are still shadowed to the Roomote-run model and captured where those options are enabled.
 
 ## 1.12.4 (2026-09-20)
 
