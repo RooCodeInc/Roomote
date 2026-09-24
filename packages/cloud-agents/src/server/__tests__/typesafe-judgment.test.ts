@@ -627,8 +627,81 @@ describe('evaluateTypeSafeJudgments', () => {
     await expect(resolveDecisionModel()).resolves.toEqual({
       kind: 'judgment',
       supportsHighVolumeDecisions: true,
+      roomoteModel: false,
     });
     expect(mockResolveNonTaskHelperModel).not.toHaveBeenCalled();
+  });
+
+  describe('excludeRoomoteModel', () => {
+    it('lets Jev answer', async () => {
+      mockFetchResponse({ answers: directAnswers });
+
+      await expect(
+        evaluateDecisionModel({
+          state: 'hi',
+          questions,
+          excludeRoomoteModel: true,
+        }),
+      ).resolves.toEqual(directAnswers);
+    });
+
+    it('skips the decision on the Roomote-run model, even when cached', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await expect(resolveDecisionModel()).resolves.toMatchObject({
+        kind: 'judgment',
+        roomoteModel: true,
+      });
+      await expect(
+        resolveDecisionModel({ excludeRoomoteModel: true }),
+      ).resolves.toBeNull();
+      await expect(
+        evaluateDecisionModel({
+          state: 'hi',
+          questions,
+          excludeRoomoteModel: true,
+        }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('still shadows and captures the Jev answer, as training data for the Roomote-run model', async () => {
+      mockIsJudgmentCaptureEnabled.mockReturnValue(true);
+      mockEnv.R_JUDGMENT_SHADOW = 'on';
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+      const answers = { urgent: { type: 'noul', noul: 0.92 } };
+      const fetchMock = vi.fn(
+        async () => new Response(JSON.stringify({ answers })),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(
+        evaluateDecisionModel({
+          state: 'hi',
+          questions: { urgent: questions.urgent },
+          excludeRoomoteModel: true,
+        }),
+      ).resolves.toEqual(answers);
+      expect(mockCaptureJudgment).toHaveBeenCalled();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    });
+
+    it('does not fall back to the helper model', async () => {
+      mockKeys({});
+      mockGetJudgmentSelection.mockResolvedValue('off');
+
+      await expect(
+        evaluateDecisionModel({
+          state: 'hi',
+          questions,
+          excludeRoomoteModel: true,
+        }),
+      ).resolves.toBeNull();
+      expect(mockResolveNonTaskHelperModel).not.toHaveBeenCalled();
+      expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+    });
   });
 
   it('uses the resolved helper model for ordinary decision fallback', async () => {
