@@ -5,6 +5,7 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
   'browserNotifications',
   'integrationToolAutoApprovals',
   'sessionTaskCommunicationTriage',
+  'dizzy',
 ] as const;
 
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
@@ -27,6 +28,7 @@ export const DEPLOYMENT_EXPERIMENT_AUDIENCE = {
   sessionTaskCommunicationTriage: 'customer-preview',
   browserNotifications: 'customer-preview',
   integrationToolAutoApprovals: 'customer-preview',
+  dizzy: 'internal-nightly',
 } as const satisfies Record<
   DeploymentExperimentId,
   DeploymentExperimentAudience
@@ -39,6 +41,7 @@ export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
     'integration_tool_auto_approvals_experiment_enabled',
   sessionTaskCommunicationTriage:
     'session_task_communication_triage_experiment_enabled',
+  dizzy: 'dizzy_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
 
 export type DeploymentExperimentValues = Record<

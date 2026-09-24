@@ -50,6 +50,21 @@ export async function getNightlyExperimentsCommand(auth: UserAuthSuccess) {
   );
 }
 
+/**
+ * The logo animation is a deployment-wide runtime effect, so every signed-in
+ * user on an explicitly opted-in internal deployment can read this one bit.
+ * Management reads and writes remain admin-only above.
+ */
+export async function getDizzyExperimentEnabledCommand(
+  auth: UserAuthSuccess,
+): Promise<boolean> {
+  if (auth.nightlyExperimentsEnabled !== true) {
+    throw new Error('Unauthorized');
+  }
+
+  return (await getDeploymentExperiments()).dizzy;
+}
+
 export async function setNightlyExperimentCommand(
   auth: UserAuthSuccess,
   input: { id: DeploymentExperimentId; enabled: boolean },

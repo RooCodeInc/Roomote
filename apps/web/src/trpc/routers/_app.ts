@@ -226,6 +226,7 @@ import {
   updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
+  getDizzyExperimentEnabledCommand,
   getDeploymentExperimentsCommand,
   getNightlyExperimentsCommand,
   setDeploymentExperimentCommand,
@@ -3637,6 +3638,9 @@ export const appRouter = createRouter({
   }),
 
   nightlyExperiments: createRouter({
+    dizzyEnabled: protectedProcedure.query(({ ctx: { auth } }) =>
+      getDizzyExperimentEnabledCommand(auth),
+    ),
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getNightlyExperimentsCommand(auth),
     ),

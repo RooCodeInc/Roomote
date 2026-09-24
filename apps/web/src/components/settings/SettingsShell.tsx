@@ -16,6 +16,9 @@ import { PageNavigationShell } from './PageNavigationShell';
 
 type SettingsShellProps = {
   pageId: SettingsPageId;
+  standalone?: boolean;
+  titleOverride?: string;
+  descriptionOverride?: string;
   adminOnly?: boolean;
   headerAction?: ReactNode;
   showHeaderActionOnMobile?: boolean;
@@ -25,6 +28,9 @@ type SettingsShellProps = {
 
 export function SettingsShell({
   pageId,
+  standalone = false,
+  titleOverride,
+  descriptionOverride,
   adminOnly = false,
   headerAction,
   showHeaderActionOnMobile,
@@ -32,22 +38,20 @@ export function SettingsShell({
   children,
 }: SettingsShellProps) {
   const router = useRouter();
-  const { isAdmin, cloudEnabled, brainConfigured, nightlyExperimentsEnabled } =
-    useAuthorizedUser();
+  const { isAdmin, cloudEnabled, brainConfigured } = useAuthorizedUser();
 
   const navigationItem = getSettingsNavigationItem(pageId);
   const accessibleItems = getAccessibleSettingsNavigation({
     isAdmin,
     cloudEnabled,
     brainConfigured,
-    nightlyExperimentsEnabled,
   });
   const activeItemId =
     (accessibleItems.some((item) => item.id === pageId)
       ? pageId
       : accessibleItems[0]?.id) ?? 'personal';
 
-  if (!navigationItem) {
+  if (!navigationItem && !standalone) {
     throw new Error(`Unknown settings page: ${pageId}`);
   }
 
@@ -55,8 +59,9 @@ export function SettingsShell({
     <PageNavigationShell
       items={accessibleItems}
       activeItemId={activeItemId}
-      title={navigationItem.title}
-      description={navigationItem.description}
+      hideNavigation={standalone}
+      title={titleOverride ?? navigationItem?.title ?? ''}
+      description={descriptionOverride ?? navigationItem?.description}
       mobileLabel="Settings page"
       headerAction={headerAction}
       showHeaderActionOnMobile={showHeaderActionOnMobile}

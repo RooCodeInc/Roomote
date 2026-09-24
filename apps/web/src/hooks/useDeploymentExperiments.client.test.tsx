@@ -62,6 +62,9 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['nightly-experiments'],
         queryOptions: () => ({}),
       },
+      dizzyEnabled: {
+        queryKey: () => ['dizzy-enabled'],
+      },
       set: {
         mutationOptions: (options: unknown) => {
           mocks.mutationRoute = 'internal-nightly';
@@ -122,6 +125,27 @@ describe('useDeploymentExperiments', () => {
     );
 
     expect(mocks.mutationRoute).toBe('internal-nightly');
+  });
+
+  it('refreshes the runtime logo flag after changing Dizzy', async () => {
+    renderHook(() =>
+      useDeploymentExperiments('Save failed', 'internal-nightly'),
+    );
+
+    await mutationOptions.onSettled!(
+      undefined as never,
+      undefined as never,
+      { id: 'dizzy', enabled: true } as never,
+      undefined as never,
+      undefined as never,
+    );
+
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['nightly-experiments'],
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['dizzy-enabled'],
+    });
   });
 
   it('optimistically updates and rolls back only the changed deployment flag', async () => {

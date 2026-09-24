@@ -5,7 +5,6 @@ const state = vi.hoisted(() => ({
   isAdmin: true,
   cloudEnabled: false,
   brainConfigured: true,
-  nightlyExperimentsEnabled: false,
   pushMock: vi.fn(),
 }));
 
@@ -37,7 +36,6 @@ vi.mock('@/hooks/useUser', () => ({
     isAdmin: state.isAdmin,
     cloudEnabled: state.cloudEnabled,
     brainConfigured: state.brainConfigured,
-    nightlyExperimentsEnabled: state.nightlyExperimentsEnabled,
   }),
 }));
 
@@ -81,7 +79,6 @@ describe('SettingsShell', () => {
     state.isAdmin = true;
     state.cloudEnabled = false;
     state.brainConfigured = true;
-    state.nightlyExperimentsEnabled = false;
     state.pushMock.mockReset();
   });
 
@@ -114,18 +111,29 @@ describe('SettingsShell', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows Nightly Experiments when the server enables it for admins', () => {
-    state.nightlyExperimentsEnabled = true;
-
+  it('renders the standalone Nightly page without settings navigation', () => {
     render(
-      <SettingsShell pageId="personal">
+      <SettingsShell
+        pageId="nightly-experiments"
+        standalone
+        titleOverride="Nightly Experiments"
+        descriptionOverride="Internal experiment switches. You really shouldn't mess with these."
+        adminOnly={true}
+      >
         <div>content</div>
       </SettingsShell>,
     );
 
     expect(
-      screen.getByRole('link', { name: /🌙 Nightly Experiments/i }),
-    ).toHaveAttribute('href', '/settings/nightly-experiments');
+      screen.getByRole('heading', { name: 'Nightly Experiments' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Internal experiment switches. You really shouldn't mess with these.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
 
   it('hides sandboxes from the settings rail when cloud mode is enabled', () => {
@@ -197,8 +205,6 @@ describe('SettingsShell', () => {
 
   it('limits non-admin tokens to personal settings and blocks admin-only content without redirecting', () => {
     state.isAdmin = false;
-    state.nightlyExperimentsEnabled = true;
-
     render(
       <SettingsShell pageId="personal" adminOnly={true}>
         <div>content</div>

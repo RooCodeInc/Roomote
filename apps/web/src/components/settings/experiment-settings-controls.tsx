@@ -9,6 +9,7 @@ import type {
 import { getDeploymentExperimentAudience } from '@roomote/feature-flags';
 
 import { BrowserNotificationsExperimentalSetting } from './BrowserNotificationsExperimentalSetting';
+import { DizzyExperimentalSetting } from './DizzyExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from './PrivateSessionsExperimentalSetting';
 import { SessionTaskCommunicationTriageExperimentalSetting } from './SessionTaskCommunicationTriageExperimentalSetting';
 
@@ -22,6 +23,7 @@ const DEPLOYMENT_EXPERIMENT_SETTINGS: Record<
   browserNotifications: BrowserNotificationsExperimentalSetting,
   // The Auto tool approvals control was deliberately removed in PR #3180.
   integrationToolAutoApprovals: null,
+  dizzy: DizzyExperimentalSetting,
 };
 
 export function getExperimentSettingIds(

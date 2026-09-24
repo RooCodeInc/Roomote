@@ -4,4 +4,4 @@
 
 <!-- audience: internal-nightly -->
 
-Add a server-gated internal nightly settings surface and keep internal summaries out of public release notes.
+Add the server-gated Dizzy experiment for spinning Roomote logos, and keep internal nightly summaries out of public release notes.

@@ -89,8 +89,17 @@ export function useDeploymentExperiments(
       );
       if (errorMessage) toast.error(errorMessage);
     },
-    onSettled: () => {
+    onSettled: (
+      _data: unknown,
+      _error: unknown,
+      variables: { id: DeploymentExperimentId },
+    ) => {
       void queryClient.invalidateQueries({ queryKey });
+      if (isNightly && variables.id === 'dizzy') {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.nightlyExperiments.dizzyEnabled.queryKey(),
+        });
+      }
     },
   };
 

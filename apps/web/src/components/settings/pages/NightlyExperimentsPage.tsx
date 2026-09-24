@@ -17,7 +17,13 @@ export function NightlyExperimentsPage() {
   const settingIds = getExperimentSettingIds('internal-nightly');
 
   return (
-    <SettingsShell pageId="nightly-experiments" adminOnly={true}>
+    <SettingsShell
+      pageId="nightly-experiments"
+      standalone
+      titleOverride="Nightly Experiments"
+      descriptionOverride="Internal experiment switches. You really shouldn't mess with these."
+      adminOnly={true}
+    >
       {error && !hasLoadedExperiments ? (
         <RetryableLoadError
           className="border"

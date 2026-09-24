@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getAccessibleSettingsNavigation,
   getSettingsNavigationItem,
+  getSettingsTitleForPath,
 } from './settings-navigation';
 
 describe('settings navigation', () => {
@@ -22,34 +23,15 @@ describe('settings navigation', () => {
     expect(items.map((item) => item.id)).not.toContain('models');
   });
 
-  it('shows Nightly Experiments only to admins on enabled deployments', () => {
-    const enabledForAdmin = getAccessibleSettingsNavigation({
+  it('keeps the Nightly page out of settings navigation but gives its hidden route a plain title', () => {
+    const items = getAccessibleSettingsNavigation({
       isAdmin: true,
       cloudEnabled: false,
-      nightlyExperimentsEnabled: true,
     });
-    expect(
-      enabledForAdmin.find((item) => item.id === 'nightly-experiments'),
-    ).toMatchObject({
-      label: '🌙 Nightly Experiments',
-      href: '/settings/nightly-experiments',
-    });
-
-    const disabledForAdmin = getAccessibleSettingsNavigation({
-      isAdmin: true,
-      cloudEnabled: false,
-      nightlyExperimentsEnabled: false,
-    });
-    const enabledForMember = getAccessibleSettingsNavigation({
-      isAdmin: false,
-      cloudEnabled: false,
-      nightlyExperimentsEnabled: true,
-    });
-    expect(disabledForAdmin.map((item) => item.id)).not.toContain(
-      'nightly-experiments',
-    );
-    expect(enabledForMember.map((item) => item.id)).not.toContain(
-      'nightly-experiments',
+    expect(items.map((item) => item.id)).not.toContain('nightly-experiments');
+    expect(getSettingsNavigationItem('nightly-experiments')).toBeUndefined();
+    expect(getSettingsTitleForPath('/settings/nightly-experiments')).toBe(
+      'Nightly Experiments',
     );
   });
 });

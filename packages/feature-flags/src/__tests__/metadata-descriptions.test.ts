@@ -54,6 +54,7 @@ describe('metadata descriptions', () => {
       browserNotifications: false,
       integrationToolAutoApprovals: false,
       sessionTaskCommunicationTriage: false,
+      dizzy: false,
     });
   });
 
@@ -69,8 +70,8 @@ describe('metadata descriptions', () => {
     expect(getDeploymentExperimentAudience('unclassifiedFeature')).toBe(
       undefined,
     );
-    expect(getDeploymentExperimentIdsForAudience('internal-nightly')).toEqual(
-      [],
-    );
+    expect(getDeploymentExperimentIdsForAudience('internal-nightly')).toEqual([
+      'dizzy',
+    ]);
   });
 });
