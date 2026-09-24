@@ -620,6 +620,28 @@ describe('ModelSettingsSection', () => {
     });
   });
 
+  it('uses option metadata for an explicitly selected Audio and video model', async () => {
+    const data = buildSettingsData();
+    // The role option retains its catalog metadata even when the editable
+    // model list has not populated that model's metadata yet.
+    data.models[1]!.metadata = null as never;
+    settingsData.current = data;
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Audio and video model and reasoning',
+      }),
+    );
+    fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
+
+    expect(
+      screen.getByText(
+        "GLM 5.2 doesn't support audio or video. Select a model that supports audio or video in Settings > Models > Audio and video model.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('disables the runtime model selects when env-managed and omits the per-row Make default button', () => {
     settingsData.current = buildSettingsData({
       codingManagedByEnv: true,

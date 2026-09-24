@@ -137,6 +137,7 @@ type TaskModelSettingsResult = {
     id: string;
     displayName: string;
     family: string;
+    metadata: TaskModelMetadata | null;
   }>;
   codingModelRoutingRules: CodingModelRoutingRule[];
 };
@@ -316,11 +317,14 @@ export async function getTaskModelSettingsCommand(
       settingsDefaultModelId: settings.defaultModelId,
       persisted: persistedRuntimeModelConfig,
     }),
-    helperModelOptions: catalog.map(({ id, displayName, family }) => ({
-      id,
-      displayName,
-      family,
-    })),
+    helperModelOptions: catalog.map(
+      ({ id, displayName, family, metadata }) => ({
+        id,
+        displayName,
+        family,
+        metadata: metadata ?? null,
+      }),
+    ),
     codingModelRoutingRules: settings.codingModelRoutingRules ?? [],
   };
 }

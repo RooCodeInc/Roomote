@@ -1350,7 +1350,7 @@ export function ModelSettingsSection({
       id: option.id,
       displayName: option.displayName,
       family: option.family,
-      metadata: metadataById.get(option.id) ?? null,
+      metadata: metadataById.get(option.id) ?? option.metadata ?? null,
     }));
     const appendEffectiveModel = (
       effectiveModelId: string | null | undefined,
@@ -1362,6 +1362,7 @@ export function ModelSettingsSection({
         options.push({
           id: effectiveModelId,
           displayName: effectiveModelId,
+          metadata: metadataById.get(effectiveModelId) ?? null,
         });
       }
     };

@@ -1814,6 +1814,49 @@ describe('task model provider commands', () => {
     );
   });
 
+  it('preserves capability metadata in Audio and video model options', async () => {
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OPENROUTER_API_KEY',
+    ]);
+    mockFindDeploymentSettings.mockResolvedValue({
+      taskModelSettings: {
+        models: [
+          {
+            id: 'openrouter/google/gemini-media',
+            displayName: 'Gemini media',
+            family: 'Gemini',
+            metadata: {
+              contextWindow: 1_000_000,
+              inputTypes: ['text', 'image', 'sound', 'video'],
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+            },
+          },
+        ],
+        allowedModelIds: ['openrouter/google/gemini-media'],
+        defaultModelId: 'openrouter/google/gemini-media',
+      },
+      runtimeModelConfig: null,
+    });
+
+    const result = await getTaskModelSettingsCommand(buildMockAuth());
+    const model = result.models.find(
+      ({ id }) => id === 'openrouter/google/gemini-media',
+    );
+    const option = result.helperModelOptions.find(
+      ({ id }) => id === 'openrouter/google/gemini-media',
+    );
+
+    expect(model?.metadata?.inputTypes).toEqual([
+      'text',
+      'image',
+      'sound',
+      'video',
+    ]);
+    expect(option?.metadata).toEqual(model?.metadata);
+  });
+
   it('lists env-only coding overrides in the settings catalog', async () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'OPENROUTER_API_KEY',
