@@ -1,6 +1,15 @@
 import type { ModelMessage } from 'ai';
+import { boundIntegrationToolReadContent } from '@roomote/types';
 
-import type { FastAgentTurnSource } from './fast-agent-conversation';
+import {
+  FAST_AGENT_REACTION_INPUT_TYPE,
+  type FastAgentTurnSource,
+} from './fast-agent-conversation';
+
+const MAX_HISTORY_MESSAGES_TO_SCAN = 80;
+const MAX_SESSION_USER_MESSAGES = 8;
+const MAX_SESSION_USER_MESSAGE_LENGTH = 1_500;
+const MAX_SESSION_USER_CONTEXT_LENGTH = 6_000;
 
 function substantiveHumanMessageText(
   message: ModelMessage,
@@ -10,7 +19,9 @@ function substantiveHumanMessageText(
   if (
     !metadata ||
     typeof metadata !== 'object' ||
-    (metadata as Record<string, unknown>).turnSource !== 'human'
+    (metadata as Record<string, unknown>).turnSource !== 'human' ||
+    (metadata as Record<string, unknown>).inputKind ===
+      FAST_AGENT_REACTION_INPUT_TYPE
   ) {
     return undefined;
   }
@@ -23,6 +34,51 @@ function substantiveHumanMessageText(
           .join('\n');
   const trimmed = text.trim();
   return trimmed || undefined;
+}
+
+/**
+ * Bounded human-authored context for one Session's Auto judgment. Assistant,
+ * tool, platform-event, and reaction messages are not user consent and are
+ * omitted. Newest messages win when either cap is reached.
+ */
+export function resolveFastAgentToolApprovalSessionUserMessages(input: {
+  turnSource: FastAgentTurnSource;
+  substantiveHumanInput: boolean;
+  question: string;
+  compatibilityMessages: ModelMessage[];
+  steeredHumanRequests: string[];
+}): string[] {
+  const history = input.compatibilityMessages
+    .slice(-MAX_HISTORY_MESSAGES_TO_SCAN)
+    .flatMap((message) => {
+      const text = substantiveHumanMessageText(message);
+      return text ? [text] : [];
+    });
+  const currentUserMessages = [
+    ...(input.turnSource !== 'platform_event' && input.substantiveHumanInput
+      ? [input.question]
+      : []),
+    ...input.steeredHumanRequests,
+  ];
+
+  let remaining = MAX_SESSION_USER_CONTEXT_LENGTH;
+  const selected: string[] = [];
+  for (const rawText of [...history, ...currentUserMessages].reverse()) {
+    if (selected.length >= MAX_SESSION_USER_MESSAGES || remaining <= 0) {
+      break;
+    }
+    // User text can still contain pasted credentials. Use the same bounded
+    // secret masking as tool-result context before sending it to the judge.
+    const text = boundIntegrationToolReadContent(rawText)
+      .trim()
+      .slice(0, MAX_SESSION_USER_MESSAGE_LENGTH);
+    if (!text) continue;
+    const bounded = text.slice(0, remaining);
+    if (!bounded) break;
+    selected.push(bounded);
+    remaining -= bounded.length;
+  }
+  return selected.reverse();
 }
 
 /** Select human-only request context for integration-tool judgments. */

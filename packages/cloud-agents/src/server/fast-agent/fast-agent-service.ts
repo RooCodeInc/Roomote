@@ -239,7 +239,10 @@ import {
   resolveFastAgentToolApprovalRules,
   shouldDisposeInstanceForToolApprovalRules,
 } from './fast-agent-tool-approvals';
-import { resolveFastAgentToolApprovalUserRequest } from './fast-agent-tool-approval-context';
+import {
+  resolveFastAgentToolApprovalSessionUserMessages,
+  resolveFastAgentToolApprovalUserRequest,
+} from './fast-agent-tool-approval-context';
 import {
   callFastAgentIntegration,
   clearFastAgentIntegrationToolCache,
@@ -6440,6 +6443,14 @@ export async function answerFastAgentQuestion({
                       autoToolKeys: toolApprovalRules.autoToolKeys,
                       resolveUserRequest: () =>
                         resolveFastAgentToolApprovalUserRequest({
+                          turnSource,
+                          substantiveHumanInput,
+                          question,
+                          compatibilityMessages: session.compatibilityMessages,
+                          steeredHumanRequests,
+                        }),
+                      resolveSessionUserMessages: () =>
+                        resolveFastAgentToolApprovalSessionUserMessages({
                           turnSource,
                           substantiveHumanInput,
                           question,

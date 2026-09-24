@@ -146,6 +146,68 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     ]);
   });
 
+  it('uses bounded same-session human context without treating an approval as reusable consent', async () => {
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({ ...routine, matchesRequest: 0.3 }),
+    );
+    const recentUserMessages = Array.from(
+      { length: 10 },
+      (_, index) => `Human request ${index} ${'x'.repeat(1_000)}`,
+    );
+    const result = await evaluateIntegrationToolAutoDecision({
+      ...call,
+      userRequest: undefined,
+      sessionContext: {
+        recentUserMessages,
+        explicitApprovalOutcomes: Array.from({ length: 8 }, (_, index) => ({
+          integrationId: 'linear',
+          toolName: `create_issue_${index}`,
+          outcome: 'approved' as const,
+        })),
+      },
+    });
+
+    expect(result.recommendation).toBe('ask');
+    const { state, questions } = mocks.evaluate.mock.calls[0]![0];
+    expect(state.sessionContext.recentUserMessages.length).toBeLessThanOrEqual(
+      8,
+    );
+    expect(
+      state.sessionContext.recentUserMessages.reduce(
+        (size: number, message: string) => size + message.length,
+        0,
+      ),
+    ).toBeLessThanOrEqual(6_000);
+    expect(state.sessionContext.recentUserMessages.at(-1)).toContain(
+      'Human request 9',
+    );
+    expect(state.sessionContext.explicitApprovalOutcomes).toHaveLength(6);
+    expect(state.sessionContext.explicitApprovalOutcomes[0]).toEqual({
+      integrationId: 'linear',
+      toolName: 'create_issue_0',
+      outcome: 'approved',
+    });
+    expect(questions.matchesRequest.instructions).toContain(
+      'never authorize this call or any later call',
+    );
+    expect(questions.risk.instructions).toContain(
+      'A prior approval is never authority for this call',
+    );
+  });
+
+  it('does not carry parent Session context into a task evaluation', async () => {
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    await evaluateIntegrationToolAutoDecision({
+      ...call,
+      taskId: 'task-1',
+      userRequest: 'Inspect the deployment logs.',
+    });
+
+    const { state } = mocks.evaluate.mock.calls[0]![0];
+    expect(state.userRequest).toBe('Inspect the deployment logs.');
+    expect(state).not.toHaveProperty('sessionContext');
+  });
+
   it('skips request matching only for in-scope internal task reads', async () => {
     const taskId = '0abc123def456';
     mocks.evaluate.mockResolvedValue(

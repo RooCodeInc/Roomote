@@ -14,6 +14,7 @@ import {
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
   listIntegrationToolPolicies,
+  listRecentIntegrationToolApprovalOutcomes,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
@@ -36,6 +37,7 @@ import {
   describeIntegrationToolAutoDeny,
   resolveIntegrationToolAutoDecision,
   resolveIntegrationToolAutoState,
+  type IntegrationToolAutoSessionContext,
 } from '../integration-tool-auto-evaluation';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
@@ -409,6 +411,8 @@ export function createFastAgentToolApprovalBridge(input: {
   autoToolKeys?: Set<string>;
   /** Resolve the latest human request for each Auto assessment; steers can arrive mid-turn. */
   resolveUserRequest?: () => string | undefined;
+  /** Human-authored request history from this Session, never a parent task. */
+  resolveSessionUserMessages?: () => string[];
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   signal?: AbortSignal;
@@ -562,6 +566,20 @@ export function createFastAgentToolApprovalBridge(input: {
         input.autoToolKeys?.has(
           integrationToolPolicyKey(tool.integrationId, tool.toolName),
         ) === true;
+      const sessionContext: IntegrationToolAutoSessionContext | undefined =
+        autoAssessed
+          ? {
+              recentUserMessages: input.resolveSessionUserMessages?.() ?? [],
+              // This query is keyed to this Session and owner, and excludes
+              // task approvals and model decisions. A lookup failure removes
+              // historical context; it cannot authorize a call by itself.
+              explicitApprovalOutcomes:
+                await listRecentIntegrationToolApprovalOutcomes({
+                  sessionId: input.sessionId,
+                  userId: input.userId,
+                }).catch(() => []),
+            }
+          : undefined;
       const auto = autoAssessed
         ? await resolveIntegrationToolAutoDecision({
             integrationId: tool.integrationId,
@@ -569,6 +587,7 @@ export function createFastAgentToolApprovalBridge(input: {
             toolDescription: tool.description,
             args,
             userRequest: input.resolveUserRequest?.(),
+            sessionContext,
             readContent: recovered?.readContent,
             isSessionLaunchedTask: (taskId) =>
               isFastAgentLaunchedTask(input.sessionId, taskId),

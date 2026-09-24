@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { and, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 
 import type {
   IntegrationToolApprovalMetadata,
@@ -393,6 +393,51 @@ export async function listPendingIntegrationToolApprovals(context: {
     )
     .orderBy(integrationToolApprovalRequests.createdAt);
   return rows.map(approvalMetadata);
+}
+
+/**
+ * Recent decisions made by the Session owner on that Session's own calls.
+ * Task calls and model-generated Auto outcomes are deliberately excluded: a
+ * human's decision about one paused call is context, never authorization for
+ * another call.
+ */
+export async function listRecentIntegrationToolApprovalOutcomes(context: {
+  sessionId: string;
+  userId: string;
+}): Promise<
+  Array<{
+    integrationId: string;
+    toolName: string;
+    outcome: 'approved' | 'rejected';
+  }>
+> {
+  const rows = await db
+    .select({
+      integrationId: integrationToolApprovalRequests.integrationId,
+      toolName: integrationToolApprovalRequests.toolName,
+      status: integrationToolApprovalRequests.status,
+    })
+    .from(integrationToolApprovalRequests)
+    .where(
+      and(
+        eq(integrationToolApprovalRequests.sessionId, context.sessionId),
+        eq(integrationToolApprovalRequests.requesterUserId, context.userId),
+        eq(integrationToolApprovalRequests.decidedByUserId, context.userId),
+        isNull(integrationToolApprovalRequests.taskId),
+        inArray(integrationToolApprovalRequests.status, [
+          'consumed',
+          'rejected',
+        ]),
+      ),
+    )
+    .orderBy(desc(integrationToolApprovalRequests.decidedAt))
+    .limit(6);
+
+  return rows.map((row) => ({
+    integrationId: row.integrationId,
+    toolName: row.toolName,
+    outcome: row.status === 'rejected' ? 'rejected' : 'approved',
+  }));
 }
 
 /** Executor-side read while waiting for the requester's decision. */

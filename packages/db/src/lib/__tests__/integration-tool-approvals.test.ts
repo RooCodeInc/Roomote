@@ -21,6 +21,7 @@ import {
   IntegrationToolApprovalUnavailableError,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
+  listRecentIntegrationToolApprovalOutcomes,
   listPendingIntegrationToolApprovals,
   markIntegrationToolApprovalConsumed,
   recordIntegrationToolAutoEvaluation,
@@ -698,6 +699,93 @@ describe('listPendingIntegrationToolApprovals', () => {
     expect(
       await listPendingIntegrationToolApprovals({ sessionId, userId }),
     ).toHaveLength(1);
+  });
+});
+
+describe('listRecentIntegrationToolApprovalOutcomes', () => {
+  it('returns only recent explicit decisions on calls in the same Session', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+
+    const approved = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: approved.approvalId,
+      decision: 'approved',
+    });
+    await markIntegrationToolApprovalConsumed({
+      approvalId: approved.approvalId,
+      requesterUserId: userId,
+    });
+
+    const rejected = await insertPending(context, {
+      channel: 'C999',
+      text: 'not this call',
+    });
+    await decideIntegrationToolApproval(context, {
+      approvalId: rejected.approvalId,
+      decision: 'rejected',
+    });
+
+    const task = await taskFactory.create();
+    const taskApproval = await insertIntegrationToolApproval(context, {
+      ...call,
+      taskId: task.id,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: call.args,
+    });
+    await decideIntegrationToolApproval(context, {
+      approvalId: taskApproval.approvalId,
+      decision: 'approved',
+    });
+    await markIntegrationToolApprovalConsumed({
+      approvalId: taskApproval.approvalId,
+      requesterUserId: userId,
+    });
+
+    const automatic = await insertAutoApprovedIntegrationToolApproval(context, {
+      ...call,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: call.args,
+      decidedBy: 'model',
+    });
+    await claimAutoApprovedIntegrationToolApproval({
+      approvalId: automatic.approvalId,
+      requesterUserId: userId,
+    });
+
+    const otherSessionId = await ownedSession(userId);
+    const otherSessionApproval = await insertPending({
+      sessionId: otherSessionId,
+      userId,
+    });
+    await decideIntegrationToolApproval(
+      { sessionId: otherSessionId, userId },
+      { approvalId: otherSessionApproval.approvalId, decision: 'approved' },
+    );
+    await markIntegrationToolApprovalConsumed({
+      approvalId: otherSessionApproval.approvalId,
+      requesterUserId: userId,
+    });
+
+    const outcomes = await listRecentIntegrationToolApprovalOutcomes(context);
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes).toEqual(
+      expect.arrayContaining([
+        {
+          integrationId: call.integrationId,
+          toolName: call.toolName,
+          outcome: 'approved',
+        },
+        {
+          integrationId: call.integrationId,
+          toolName: call.toolName,
+          outcome: 'rejected',
+        },
+      ]),
+    );
   });
 });
 
