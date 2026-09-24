@@ -125,6 +125,7 @@ export {
   users,
   userPersonalizations,
   userPersonalizationRelations,
+  userTaskModelMappingPresets,
   instanceSkills,
   userRelations,
   deploymentSettings,

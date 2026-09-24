@@ -39,6 +39,7 @@ import {
   integrationToolPolicyUpsertSchema,
   integrationToolPoliciesUpsertSchema,
   taskModelMetadataSchema,
+  userTaskModelMappingPresetCreateSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
 
@@ -496,6 +497,11 @@ import {
   suggestTaskModelsCommand,
   updateTaskModelSettingsCommand,
 } from '../commands/task-models';
+import {
+  createUserTaskModelMappingPresetCommand,
+  deleteUserTaskModelMappingPresetCommand,
+  listUserTaskModelMappingPresetsCommand,
+} from '../commands/task-models/user-mapping-presets';
 import { LOCAL_TASK_MODEL_PROVIDER_IDS } from '../commands/task-models/local-provider-discovery';
 import {
   deleteJudgmentTypeSafeKeyCommand,
@@ -2523,6 +2529,24 @@ export const appRouter = createRouter({
   }),
 
   taskModels: createRouter({
+    customPresets: createRouter({
+      list: protectedProcedure.query(({ ctx: { auth } }) =>
+        listUserTaskModelMappingPresetsCommand(auth),
+      ),
+
+      create: protectedProcedure
+        .input(userTaskModelMappingPresetCreateSchema)
+        .mutation(({ ctx: { auth }, input }) =>
+          createUserTaskModelMappingPresetCommand(auth, input),
+        ),
+
+      delete: protectedProcedure
+        .input(z.object({ id: z.string().uuid() }))
+        .mutation(({ ctx: { auth }, input }) =>
+          deleteUserTaskModelMappingPresetCommand(auth, input),
+        ),
+    }),
+
     launchOptions: protectedProcedure.query(({ ctx: { auth } }) =>
       getLaunchTaskModelsCommand(auth),
     ),
