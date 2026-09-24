@@ -240,6 +240,7 @@ import {
   resolveFastAgentToolApprovalRules,
   shouldDisposeInstanceForToolApprovalRules,
 } from './fast-agent-tool-approvals';
+import { resolveFastAgentToolApprovalUserRequest } from './fast-agent-tool-approval-context';
 import {
   callFastAgentIntegration,
   clearFastAgentIntegrationToolCache,
@@ -6702,7 +6703,14 @@ export async function answerFastAgentQuestion({
                       surface: conversation.surface as FastAgentSurface,
                       integrations: availableIntegrations,
                       autoToolKeys: toolApprovalRules.autoToolKeys,
-                      userRequest: question,
+                      resolveUserRequest: () =>
+                        resolveFastAgentToolApprovalUserRequest({
+                          turnSource,
+                          substantiveHumanInput,
+                          question,
+                          compatibilityMessages: session.compatibilityMessages,
+                          steeredHumanRequests,
+                        }),
                       signal: promptSignal,
                       ...(approvalNotificationSurface
                         ? {

@@ -12,6 +12,23 @@ import {
   type TypeSafeNoulQuestion,
 } from '@roomote/cloud-agents/server/typesafe-judgment';
 
+/**
+ * One mention in a message's text, resolved by the provider so the judgment
+ * state can name who it is for without a raw provider id.
+ */
+export type UnmentionedThreadMention = {
+  /**
+   * The mention exactly as it appears in the text: Slack `<@U123>` or
+   * `<@U123|name>`, Discord `<@123>` or `<@!123>`, or the Teams display name or
+   * `<at>…</at>` tag.
+   */
+  token: string;
+  /** Provider id of the mentioned user or application, when known. */
+  userId?: string | null;
+  /** True when the mention names Roomote. */
+  isBot: boolean;
+};
+
 export type UnmentionedThreadHistoryMessage = {
   /** Provider message id (Slack ts, Discord snowflake, Teams activity id). */
   id: string;
@@ -24,6 +41,8 @@ export type UnmentionedThreadHistoryMessage = {
   mentionsSomebodyElse: boolean;
   /** Message text, used only by the optional judgment model. */
   text?: string;
+  /** Mentions in `text`, rewritten to role labels for the judgment model. */
+  mentions?: UnmentionedThreadMention[];
 };
 
 type UnmentionedThreadReplyEvaluation = {
@@ -245,10 +264,37 @@ function truncateForJudgment(text: string, maxLength: number): string {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
+/**
+ * Raw user, role, and group mention syntax left after provider mentions are
+ * rewritten (a mention the provider did not resolve): Slack `<@U123>`,
+ * `<@W123|name>`, `<!subteam^S123|@team>`; Discord `<@123>`, `<@!123>`,
+ * `<@&123>`. Replaced so no provider id reaches the judgment state.
+ */
+const UNRESOLVED_MENTION_PATTERN =
+  /<@[!&]?[A-Z0-9]+(?:\|[^>]*)?>|<!subteam\^[^>]+>/giu;
+
+function rewriteMentions(
+  text: string,
+  mentions: UnmentionedThreadMention[] | undefined,
+  labelFor: (mention: UnmentionedThreadMention) => string,
+): string {
+  let rewritten = text;
+  // Longest first, so a display name that contains another is replaced whole.
+  const ordered = [...(mentions ?? [])]
+    .filter((mention) => mention.token.length > 0)
+    .sort((left, right) => right.token.length - left.token.length);
+  for (const mention of ordered) {
+    rewritten = rewritten.split(mention.token).join(labelFor(mention));
+  }
+  return rewritten.replace(UNRESOLVED_MENTION_PATTERN, '@someone else');
+}
+
 function buildReplyAddresseeState(params: {
   eventMessageId: string;
   senderUserId: string;
   eventText: string;
+  eventMentions?: UnmentionedThreadMention[];
+  eventMentionsSomebodyElse?: boolean;
   threadMessages: UnmentionedThreadHistoryMessage[];
   compareMessageIds: CompareMessageIds;
 }) {
@@ -261,26 +307,47 @@ function buildReplyAddresseeState(params: {
     .slice(-JUDGMENT_MAX_THREAD_MESSAGES);
 
   // Provider user ids are replaced with stable role labels so the model sees
-  // who is who without raw identifiers.
+  // who is who without raw identifiers. Mentions use the same labels as
+  // authors, so "@participant 1" in a message is the person who wrote as
+  // "participant 1".
   const participantLabels = new Map<string, string>();
+  const participantLabel = (userId: string): string => {
+    let label = participantLabels.get(userId);
+    if (!label) {
+      label = `participant ${participantLabels.size + 1}`;
+      participantLabels.set(userId, label);
+    }
+    return label;
+  };
   const authorLabel = (message: UnmentionedThreadHistoryMessage): string => {
     if (message.isBot) return 'Roomote';
     if (!message.authorUserId) return 'other app';
     if (message.authorUserId === params.senderUserId) return 'reply author';
-    let label = participantLabels.get(message.authorUserId);
-    if (!label) {
-      label = `participant ${participantLabels.size + 1}`;
-      participantLabels.set(message.authorUserId, label);
-    }
-    return label;
+    return participantLabel(message.authorUserId);
   };
+  const mentionLabel = (mention: UnmentionedThreadMention): string => {
+    if (mention.isBot) return '@Roomote';
+    if (!mention.userId) return '@someone else';
+    if (mention.userId === params.senderUserId) return '@reply author';
+    return `@${participantLabel(mention.userId)}`;
+  };
+
+  // Authors are labelled in thread order before any mention is, so a
+  // participant's label does not depend on who mentioned them first.
+  const authors = earlierMessages.map(authorLabel);
+  const eventMentions = params.eventMentions ?? [];
 
   return {
     thread: {
-      messages: earlierMessages.map((message) => ({
-        author: authorLabel(message),
+      messages: earlierMessages.map((message, index) => ({
+        author: authors[index]!,
+        // Rewritten before truncation so a cut never leaves half a raw token.
         text: truncateForJudgment(
-          message.text?.trim() ?? '',
+          rewriteMentions(
+            message.text?.trim() ?? '',
+            message.mentions,
+            mentionLabel,
+          ),
           JUDGMENT_MAX_MESSAGE_LENGTH,
         ),
         mentionsRoomote: message.mentionsBot,
@@ -290,9 +357,15 @@ function buildReplyAddresseeState(params: {
     reply: {
       author: 'reply author',
       text: truncateForJudgment(
-        params.eventText.trim(),
+        rewriteMentions(params.eventText.trim(), eventMentions, mentionLabel),
         JUDGMENT_MAX_REPLY_LENGTH,
       ),
+      mentionsRoomote: eventMentions.some((mention) => mention.isBot),
+      mentionsSomebodyElse:
+        params.eventMentionsSomebodyElse ??
+        eventMentions.some(
+          (mention) => !mention.isBot && mention.userId !== params.senderUserId,
+        ),
     },
   };
 }
@@ -403,13 +476,9 @@ function likeliestAddressee(
  * uncertainty failures fail closed so human-to-human messages do not start an
  * assistant activity by accident.
  */
-async function judgeUnmentionedReplyAddressee(params: {
-  eventMessageId: string;
-  senderUserId: string;
-  eventText: string;
-  threadMessages: UnmentionedThreadHistoryMessage[];
-  compareMessageIds: CompareMessageIds;
-}): Promise<UnmentionedReplyJudgment> {
+async function judgeUnmentionedReplyAddressee(
+  params: Parameters<typeof buildReplyAddresseeState>[0],
+): Promise<UnmentionedReplyJudgment> {
   try {
     const answers = await evaluateTypeSafeJudgments({
       state: buildReplyAddresseeState(params),
@@ -495,6 +564,8 @@ export async function resolveUnmentionedThreadReplyRouting(
   input: Parameters<typeof evaluateUnmentionedThreadReplyRouting>[0] & {
     /** Text of the reply being routed. */
     eventText: string;
+    /** Mentions in `eventText`, rewritten to role labels for the judgment model. */
+    eventMentions?: UnmentionedThreadMention[];
     /** True when the reply itself mentions a human other than the sender. */
     eventMentionsSomebodyElse?: boolean;
     /**
@@ -507,6 +578,7 @@ export async function resolveUnmentionedThreadReplyRouting(
 ): Promise<UnmentionedThreadReplyEvaluation> {
   const {
     eventText,
+    eventMentions,
     eventMentionsSomebodyElse,
     conservativePeerConversationFallback = false,
     ...routingInput
@@ -533,6 +605,8 @@ export async function resolveUnmentionedThreadReplyRouting(
     eventMessageId: routingInput.eventMessageId,
     senderUserId: routingInput.senderUserId,
     eventText,
+    eventMentions,
+    eventMentionsSomebodyElse,
     threadMessages: routingInput.threadMessages,
     compareMessageIds: routingInput.compareMessageIds,
   });

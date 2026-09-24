@@ -170,12 +170,6 @@ vi.mock('@roomote/cloud-agents', () => ({
   resolveRoomoteReleaseVersion: vi.fn(() => '0.40.2'),
 }));
 
-vi.mock('@roomote/communication/messages', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@roomote/communication/messages')>()),
-  peekTaskFollowUps: peekTaskFollowUpsMock,
-  removeTaskFollowUp: removeTaskFollowUpMock,
-}));
-
 vi.mock('@roomote/sdk/client', () => ({
   instanceSkills: { listForRuntime: listInstanceSkillsMock },
   sdk: {
@@ -183,7 +177,9 @@ vi.mock('@roomote/sdk/client', () => ({
       activateSlackReplyTarget: taskRunsActivateSlackReplyTargetMock,
       clearActiveSlackReplyTarget: taskRunsClearActiveSlackReplyTargetMock,
       done: taskRunsDoneMock,
+      peekTaskFollowUps: peekTaskFollowUpsMock,
       recordEvent: taskRunsRecordEventMock,
+      removeTaskFollowUp: removeTaskFollowUpMock,
       stampMilestone: taskRunsStampMilestoneMock,
       setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
       syncActingUserId: taskRunsSyncActingUserIdMock,
@@ -3306,10 +3302,10 @@ describe('runTask', () => {
       clientMessageId: 'client-empty-session',
     });
     expect(harnessManager?.sendFollowUpPrompt).not.toHaveBeenCalled();
-    expect(removeTaskFollowUpMock).toHaveBeenCalledWith(
-      152,
-      'raw-empty-session',
-    );
+    expect(removeTaskFollowUpMock).toHaveBeenCalledWith({
+      runId: 152,
+      raw: 'raw-empty-session',
+    });
   });
 
   it('preserves startup steer semantics across an actor transition', async () => {
@@ -3354,10 +3350,10 @@ describe('runTask', () => {
     expect(getMcpServerConfigsMock.mock.calls.length).toBeGreaterThan(
       mcpRefreshCallsBefore,
     );
-    expect(removeTaskFollowUpMock).toHaveBeenCalledWith(
-      153,
-      'raw-startup-steer',
-    );
+    expect(removeTaskFollowUpMock).toHaveBeenCalledWith({
+      runId: 153,
+      raw: 'raw-startup-steer',
+    });
   });
 
   it('retries only the removal when it fails after the runtime accepted the prompt', async () => {
@@ -3389,10 +3385,10 @@ describe('runTask', () => {
 
     expect(harnessManager.sendFollowUpPrompt).toHaveBeenCalledTimes(1);
     expect(removeTaskFollowUpMock).toHaveBeenCalledTimes(2);
-    expect(removeTaskFollowUpMock).toHaveBeenLastCalledWith(
-      155,
-      'raw-accepted',
-    );
+    expect(removeTaskFollowUpMock).toHaveBeenLastCalledWith({
+      runId: 155,
+      raw: 'raw-accepted',
+    });
   });
 
   it('leaves a queued follow-up in place when the runtime rejects it', async () => {

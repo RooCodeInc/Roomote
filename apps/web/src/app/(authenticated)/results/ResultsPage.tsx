@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
   Empty,
+  EmptyDescription,
   EmptyHeader,
   EmptyTitle,
   RetryableLoadError,
@@ -29,7 +30,6 @@ import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
-import { useResultsPage } from '@/hooks/useResultsPage';
 import { useTelemetry } from '@/hooks/useTelemetry';
 import { useTRPC } from '@/trpc/client';
 import type { ResultInboxItem } from '@/trpc/commands/results';
@@ -126,7 +126,6 @@ export function ResultsPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { capture } = useTelemetry();
-  const { enabled, isLoading: isFlagLoading } = useResultsPage();
   const isDesktop = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
   });
@@ -153,9 +152,7 @@ export function ResultsPage() {
     startTransition(() => router.replace(href));
   };
   const listQueryKey = trpc.results.list.queryKey();
-  const listQuery = useQuery(
-    trpc.results.list.queryOptions(undefined, { enabled }),
-  );
+  const listQuery = useQuery(trpc.results.list.queryOptions(undefined));
 
   const invalidate = async () => {
     await Promise.all([
@@ -212,10 +209,6 @@ export function ResultsPage() {
   );
 
   useEffect(() => {
-    if (!isFlagLoading && !enabled) router.replace('/');
-  }, [enabled, isFlagLoading, router]);
-
-  useEffect(() => {
     if (previousResultParamRef.current === requestedResultKey) return;
     previousResultParamRef.current = requestedResultKey;
     setSelectedKey(requestedResultKey);
@@ -239,7 +232,7 @@ export function ResultsPage() {
         id: selectedSummary?.id ?? EMPTY_RESULT_ID,
         kind: selectedSummary?.kind ?? 'report',
       },
-      { enabled: enabled && selectedSummary !== null },
+      { enabled: selectedSummary !== null },
     ),
   );
   const displayedKey = displayedResult ? resultKey(displayedResult) : '';
@@ -395,7 +388,7 @@ export function ResultsPage() {
   const primaryAction = actionableResult?.actions[0] ?? null;
   const secondaryActions = actionableResult?.actions.slice(1) ?? [];
 
-  if (isFlagLoading || !enabled || listQuery.isPending) {
+  if (listQuery.isPending) {
     return (
       <div className="min-h-full w-full overflow-auto bg-background px-4 py-8 md:px-8">
         <div className="mx-auto w-full max-w-6xl space-y-6">
@@ -413,7 +406,7 @@ export function ResultsPage() {
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Results</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Outcomes and decisions from your automations.
+              Review automation reports and suggested follow-ups.
             </p>
           </div>
           {results.length > 0 ? (
@@ -438,8 +431,12 @@ export function ResultsPage() {
         ) : results.length === 0 ? (
           <Empty>
             <EmptyHeader>
-              <EmptyTitle>No pending results</EmptyTitle>
+              <EmptyTitle>You&apos;re all caught up</EmptyTitle>
             </EmptyHeader>
+            <EmptyDescription>
+              New automation reports and suggested follow-ups will appear here
+              when they are ready.
+            </EmptyDescription>
           </Empty>
         ) : (
           <div className="flex min-h-0 flex-1 overflow-hidden bg-background">

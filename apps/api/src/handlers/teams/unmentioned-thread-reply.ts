@@ -1,6 +1,7 @@
 import {
   type TeamsActivity,
   type TeamsActivityCommunicationMetadata,
+  getTeamsActivityMentions,
   isTeamsBotMentioned,
   isTeamsMessageActivity,
   isTeamsPersonalConversation,
@@ -86,6 +87,15 @@ function toSharedHistoryMessages(
               mention.userId !== message.authorUserId)),
       ),
       text: message.text,
+      // teamsGraphHtmlToText renders a mention's `<at>Name</at>` tag as
+      // `@Name`, so that is the token to replace.
+      mentions: message.mentions
+        .filter((mention) => Boolean(mention.name))
+        .map((mention) => ({
+          token: `@${mention.name!}`,
+          userId: mention.userId ?? mention.applicationId ?? null,
+          isBot: isBotGraphMention(mention, normalizedBotAppId),
+        })),
     };
   });
 }
@@ -187,6 +197,11 @@ export async function shouldRouteUnmentionedTeamsThreadReplyToAgent(params: {
   const decision = await resolveUnmentionedThreadReplyRouting({
     eventMessageId: messageId,
     eventText: activity.text ?? '',
+    eventMentions: getTeamsActivityMentions(activity).map((mention) => ({
+      token: mention.text,
+      userId: mention.mentionedId ?? null,
+      isBot: mention.isRecipient,
+    })),
     senderUserId: senderAadObjectId,
     isThreadTaskOwner:
       Boolean(taskBackedThreadRun.userId) &&

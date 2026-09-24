@@ -184,7 +184,6 @@ async function resolveJudgmentBackendUncached(): Promise<
     envSelection: Env.R_JUDGMENT_MODEL,
     storedSelection,
     hasTypeSafeKey: Boolean(typeSafeKey),
-    hasRoomoteUpstream: Boolean(roomoteUpstream),
   });
 
   if (selection === 'roomote') {

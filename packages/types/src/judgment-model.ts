@@ -74,18 +74,17 @@ export const TYPESAFE_PROVIDER = {
 
 /**
  * Which backend a deployment uses when no explicit selection exists: a
- * TypeSafe key alone opts in to Jev via TypeSafe, and otherwise a configured
- * Roomote-run upstream is used, because it sends decision text to nowhere
- * the deployment does not already trust. AI Gateway and OpenRouter are never
- * chosen implicitly, because their keys exist on many deployments for task
- * inference and choosing them would send decision text to a third party
- * nobody asked for.
+ * TypeSafe key alone opts in to Jev via TypeSafe, and otherwise none. The
+ * Roomote-run upstream is used only when selected, so configuring it (for
+ * shadow scoring, for example) never changes which model answers. AI Gateway
+ * and OpenRouter are never chosen implicitly either, because their keys exist
+ * on many deployments for task inference and choosing them would send
+ * decision text to a third party nobody asked for.
  */
 export function resolveEffectiveJudgmentModelSelection(params: {
   envSelection?: string | null;
   storedSelection?: JudgmentModelSelection | null;
   hasTypeSafeKey: boolean;
-  hasRoomoteUpstream?: boolean;
 }): JudgmentModelSelection {
   if (isJudgmentModelSelection(params.envSelection)) {
     return params.envSelection;
@@ -95,9 +94,5 @@ export function resolveEffectiveJudgmentModelSelection(params: {
     return params.storedSelection;
   }
 
-  if (params.hasTypeSafeKey) {
-    return 'typesafe';
-  }
-
-  return params.hasRoomoteUpstream ? 'roomote' : 'off';
+  return params.hasTypeSafeKey ? 'typesafe' : 'off';
 }

@@ -301,13 +301,16 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
       humanGraphMessage({
         id: THREAD_ROOT_ID,
         userId: 'aad-user-1',
+        // Graph text as teamsGraphHtmlToText renders it.
+        text: '@Roomote please fix the bug',
         mentions: [botMention()],
       }),
       botGraphMessage('1700000000100'),
       humanGraphMessage({
         id: '1700000000200',
         userId: 'aad-user-2',
-        text: 'interesting thread',
+        text: 'interesting thread, @Ada Lovelace',
+        mentions: [{ userId: 'aad-user-1', name: 'Ada Lovelace' }],
       }),
     ]);
 
@@ -316,12 +319,22 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         threadReplyActivity({ text: 'can you also add a unit test?' }),
       ),
     ).resolves.toBe(true);
+    const { state } = evaluateTypeSafeJudgmentsMock.mock.calls[0]![0];
+    expect(
+      state.thread.messages.map((message: { text: string }) => message.text),
+    ).toEqual([
+      '@Roomote please fix the bug',
+      'bot reply',
+      'interesting thread, @reply author',
+    ]);
     expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         state: expect.objectContaining({
           reply: {
             author: 'reply author',
             text: 'can you also add a unit test?',
+            mentionsRoomote: false,
+            mentionsSomebodyElse: false,
           },
         }),
       }),

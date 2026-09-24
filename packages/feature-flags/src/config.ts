@@ -1,7 +1,6 @@
 import type { MetadataBooleanDescriptor } from './types';
 
 export const DEPLOYMENT_EXPERIMENT_IDS = [
-  'results',
   'privateSessions',
   'browserNotifications',
   'integrationToolAutoApprovals',
@@ -11,7 +10,6 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
 
 export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
-  results: 'results_page_enabled',
   privateSessions: 'private_sessions_experiment_enabled',
   browserNotifications: 'browser_notifications_experiment_enabled',
   integrationToolAutoApprovals:
@@ -44,11 +42,6 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     group: null,
     description:
       'Share anonymous usage analytics (instance and user activity identified only by random IDs) with the Roomote team. Enabled by default; absent means enabled.',
-  },
-  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.results]: {
-    kind: 'deployment-control',
-    group: null,
-    description: 'Show the Results inbox to every member',
   },
   [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.privateSessions]: {
     kind: 'deployment-control',

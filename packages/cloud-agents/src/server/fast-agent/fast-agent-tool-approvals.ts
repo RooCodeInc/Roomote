@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto';
 
 import type { PermissionRuleset } from '@opencode-ai/sdk/v2/client';
 import {
+  and,
   claimAutoApprovedIntegrationToolApproval,
   db,
+  eq,
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
   getIntegrationToolApproval,
@@ -15,6 +17,7 @@ import {
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
+  sessionTasks,
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
 import {
@@ -22,6 +25,7 @@ import {
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
+  redactIntegrationToolArgs,
   type FastAgentSurface,
   type IntegrationToolApprovalMetadata,
   type IntegrationToolPolicyMetadata,
@@ -58,6 +62,24 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
  */
 const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
+
+async function isFastAgentLaunchedTask(
+  sessionId: string,
+  taskId: string,
+): Promise<boolean> {
+  const [association] = await db
+    .select({ taskId: sessionTasks.taskId })
+    .from(sessionTasks)
+    .where(
+      and(
+        eq(sessionTasks.sessionId, sessionId),
+        eq(sessionTasks.taskId, taskId),
+        eq(sessionTasks.origin, 'fast_delegation'),
+      ),
+    )
+    .limit(1);
+  return association !== undefined;
+}
 
 type FastAgentApprovalChatSurface = Extract<
   FastAgentSurface,
@@ -250,6 +272,7 @@ type FastAgentToolApprovalHelpers = {
     | {
         input?: unknown;
         toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        readContent?: string;
       }
     | undefined
   >;
@@ -384,8 +407,8 @@ export function createFastAgentToolApprovalBridge(input: {
    * by the decision model; every other ask is a person's own choice.
    */
   autoToolKeys?: Set<string>;
-  /** What the user last asked; Auto mode checks each call against it. */
-  userRequest?: string;
+  /** Resolve the latest human request for each Auto assessment; steers can arrive mid-turn. */
+  resolveUserRequest?: () => string | undefined;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   signal?: AbortSignal;
@@ -510,6 +533,7 @@ export function createFastAgentToolApprovalBridge(input: {
         return;
       }
       const { tool, args } = resolution;
+      const argsSummary = redactIntegrationToolArgs(args ?? null);
       const argsFingerprint = fingerprintIntegrationToolCall({
         integrationId: tool.integrationId,
         toolName: tool.toolName,
@@ -544,7 +568,10 @@ export function createFastAgentToolApprovalBridge(input: {
             toolName: tool.toolName,
             toolDescription: tool.description,
             args,
-            userRequest: input.userRequest,
+            userRequest: input.resolveUserRequest?.(),
+            readContent: recovered?.readContent,
+            isSessionLaunchedTask: (taskId) =>
+              isFastAgentLaunchedTask(input.sessionId, taskId),
             userId: input.userId,
           }).catch(() => ({
             action: 'ask' as const,
@@ -574,7 +601,7 @@ export function createFastAgentToolApprovalBridge(input: {
             toolName: tool.toolName,
             nativeRequestId: ask.requestId,
             argsFingerprint,
-            argsSummary: args ?? null,
+            argsSummary,
             autoEvaluation: auto.evaluation,
           },
         );
@@ -605,7 +632,7 @@ export function createFastAgentToolApprovalBridge(input: {
             toolName: tool.toolName,
             nativeRequestId: ask.requestId,
             argsFingerprint,
-            argsSummary: args ?? null,
+            argsSummary,
             ...(auto?.action === 'approve'
               ? { decidedBy: 'model' as const, autoEvaluation: auto.evaluation }
               : {}),
@@ -635,7 +662,7 @@ export function createFastAgentToolApprovalBridge(input: {
           toolName: tool.toolName,
           nativeRequestId: ask.requestId,
           argsFingerprint,
-          argsSummary: args ?? null,
+          argsSummary,
           ...(auto?.action === 'ask'
             ? { autoEvaluation: auto.evaluation }
             : {}),

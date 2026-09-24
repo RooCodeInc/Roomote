@@ -61,6 +61,9 @@ vi.mock('@tanstack/react-query', () => ({
     if (queryOptions?.queryKind === 'sessionsList') {
       return { data: { sessions: state.sessions, nextCursor: null } };
     }
+    if (queryOptions?.queryKind === 'resultsPendingCount') {
+      return { data: 2 };
+    }
 
     return { data: state.tasks };
   },
@@ -155,10 +158,6 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
 }));
 
-vi.mock('@/hooks/useResultsPage', () => ({
-  useResultsPage: () => ({ enabled: false, isLoading: false }),
-}));
-
 vi.mock('@/hooks/tasks', () => ({
   useLiveTaskStatus: (taskId: string | null) => useLiveTaskStatusMock(taskId),
   useTaskPins: () => ({
@@ -177,7 +176,9 @@ vi.mock('@/trpc/client', () => ({
       search: { queryOptions: queryOptionsMock },
     },
     results: {
-      pendingCount: { queryOptions: () => ({ queryKey: ['results'] }) },
+      pendingCount: {
+        queryOptions: () => ({ queryKind: 'resultsPendingCount' }),
+      },
       unreadCount: { queryOptions: () => ({ queryKey: ['results'] }) },
     },
   }),
@@ -193,6 +194,7 @@ vi.mock('./SideNavItem', () => ({
     disabled,
     description,
     'aria-label': ariaLabel,
+    badgeCount,
   }: {
     href?: string;
     onClick?: () => void;
@@ -202,6 +204,7 @@ vi.mock('./SideNavItem', () => ({
     disabled?: boolean;
     description?: ReactNode;
     'aria-label'?: string;
+    badgeCount?: number;
   }) =>
     href ? (
       <a
@@ -212,6 +215,7 @@ vi.mock('./SideNavItem', () => ({
         data-disabled={String(disabled ?? false)}
         data-description={typeof description === 'string' ? description : ''}
         data-tooltip={typeof tooltip === 'string' ? tooltip : ''}
+        data-badge-count={badgeCount ?? 0}
       />
     ) : (
       <button
@@ -543,7 +547,7 @@ describe('SideNav recent sessions', () => {
 
     expect(getNavGroupLabels()).toEqual([
       ['Home', 'New Session', 'Sessions'],
-      ['Automations', 'Integrations', 'Settings'],
+      ['Automations', 'Results', 'Integrations', 'Settings'],
       ['Analytics'],
       ['Search', 'Expand sidebar'],
     ]);
@@ -590,60 +594,40 @@ describe('SideNav recent sessions', () => {
     );
   });
 
-  it('shows settings and automations to members without an empty analytics group', () => {
+  it('shows Results to members without an empty analytics group', () => {
     state.user.isAdmin = false;
 
     render(<SideNav />);
 
     expect(getNavGroupLabels()).toEqual([
       ['Home', 'New Session', 'Sessions'],
-      ['Automations', 'Integrations', 'Settings'],
+      ['Automations', 'Results', 'Integrations', 'Settings'],
       ['Search', 'Expand sidebar'],
     ]);
   });
 
-  it('disables inaccessible destinations during setup while keeping Settings enabled', () => {
-    render(<SideNav setupIncomplete />);
+  it('keeps dashboard destinations enabled', () => {
+    render(<SideNav />);
 
-    expect(screen.getByTestId('nav-/')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    expect(screen.getByTestId('nav-/automations')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    expect(screen.getByTestId('nav-/analytics')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    for (const href of ['/', '/automations', '/analytics']) {
+    for (const href of ['/', '/automations', '/results', '/analytics']) {
       expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
-        'data-tooltip',
-        'Available when setup is completed.',
-      );
-      expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
-        'data-description',
-        '',
+        'data-disabled',
+        'false',
       );
     }
-    expect(screen.getByTestId('nav-/sessions')).toHaveAttribute(
-      'data-disabled',
-      'false',
-    );
-    expect(screen.getByTestId('nav-/settings')).toHaveAttribute(
-      'data-disabled',
-      'false',
+    expect(screen.getByTestId('nav-/results')).toHaveAttribute(
+      'data-badge-count',
+      '2',
     );
   });
 
-  it('removes the expanded wordmark Home link during setup', () => {
+  it('keeps the expanded wordmark linked to Home', () => {
     state.isSideNavExpanded = true;
 
-    render(<SideNav setupIncomplete />);
+    render(<SideNav />);
 
     expect(
       screen.getByRole('img', { name: 'Roomote' }).closest('a'),
-    ).toBeNull();
+    ).toHaveAttribute('href', '/');
   });
 });

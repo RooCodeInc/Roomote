@@ -1,10 +1,8 @@
 'use client';
 
 import { SettingsShell } from '@/components/settings/SettingsShell';
-import { ResultsExperimentalSetting } from '@/components/settings/ResultsExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
 import { BrowserNotificationsExperimentalSetting } from '@/components/settings/BrowserNotificationsExperimentalSetting';
-import { IntegrationToolAutoApprovalsExperimentalSetting } from '@/components/settings/IntegrationToolAutoApprovalsExperimentalSetting';
 import { SessionTaskCommunicationTriageExperimentalSetting } from '@/components/settings/SessionTaskCommunicationTriageExperimentalSetting';
 import { RetryableLoadError } from '@/components/system';
 import { useDeploymentExperiments } from '@/hooks/useDeploymentExperiments';
@@ -25,10 +23,8 @@ export function ExperimentalSettingsPage() {
       ) : (
         <>
           <PrivateSessionsExperimentalSetting />
-          <IntegrationToolAutoApprovalsExperimentalSetting />
           <SessionTaskCommunicationTriageExperimentalSetting />
           <BrowserNotificationsExperimentalSetting />
-          <ResultsExperimentalSetting />
         </>
       )}
     </SettingsShell>

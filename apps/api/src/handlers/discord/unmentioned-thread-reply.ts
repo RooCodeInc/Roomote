@@ -10,6 +10,7 @@ import {
   compareBigIntMessageIds,
   resolveUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
+  type UnmentionedThreadMention,
 } from '../shared/unmentioned-thread-reply.js';
 import type { DiscordThreadHistoryMessage } from './thread-context.js';
 
@@ -19,6 +20,20 @@ function getMentionedDiscordUserIds(text: string): string[] {
   return Array.from(text.matchAll(DISCORD_USER_MENTION_PATTERN))
     .map((match) => match[1])
     .filter((userId): userId is string => Boolean(userId));
+}
+
+/** Every user mention in `text`, as the judgment state's mention list. */
+function getDiscordMentionsForJudgment(
+  text: string,
+  botUserId: string | undefined,
+): UnmentionedThreadMention[] {
+  return Array.from(text.matchAll(DISCORD_USER_MENTION_PATTERN)).map(
+    (match) => ({
+      token: match[0],
+      userId: match[1] ?? null,
+      isBot: Boolean(botUserId) && match[1] === botUserId,
+    }),
+  );
 }
 
 function mentionsDiscordBotInText(
@@ -81,6 +96,7 @@ function toSharedHistoryMessages(
         message.user,
       ),
       text: message.text,
+      mentions: getDiscordMentionsForJudgment(message.text, botUserId),
     };
   });
 }
@@ -181,6 +197,10 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   const decision = await resolveUnmentionedThreadReplyRouting({
     eventMessageId: message.id,
     eventText: getDiscordMessageContent(message),
+    eventMentions: getDiscordMentionsForJudgment(
+      getDiscordMessageContent(message),
+      botUserId,
+    ),
     senderUserId: senderDiscordUserId,
     isThreadTaskOwner:
       Boolean(params.ownedThreadUserId) &&

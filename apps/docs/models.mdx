@@ -239,7 +239,7 @@ limits, or Grok included-usage windows.
 These numbers come from unofficial provider endpoints, so the usage line is
 hidden whenever the provider does not return usable data.
 
-Under **Settings > Automations > Inference Provider Usage Alerts**, admins can
+Under **Automations > Inference Provider Usage Alerts**, admins can
 configure hourly checks for queryable limits from ChatGPT subscription, GitHub
 Copilot, xAI Grok subscription, OpenRouter, Kimi for Coding, OpenCode Go, Z.AI,
 and Z.AI Coding Plan. Roomote posts one warning when a credential crosses its
@@ -311,21 +311,24 @@ through these routes:
 
 | Judgment model | Requires |
 | --- | --- |
-| **Roomote judgment model** | `R_JUDGMENT_UPSTREAM_URL` (set automatically on Roomote Cloud) |
+| **Roomote judgment model** | `R_JUDGMENT_UPSTREAM_URL` |
 | **Jev via TypeSafe** | a [TypeSafe](/providers/inference/typesafe) API key |
 | **Jev via OpenRouter** | an [OpenRouter](/providers/inference/openrouter) API key |
 | **Jev via Vercel AI Gateway** | a [Vercel AI Gateway](/providers/inference/vercel-ai-gateway) key |
 
 Choose it under **Judgment model** in **Settings > Models**, or set
 `R_JUDGMENT_MODEL` to `roomote`, `typesafe`, `openrouter`, `vercel`, or `off`.
-A TypeSafe key alone turns on **Jev via TypeSafe**; otherwise a configured
-Roomote judgment model is used. OpenRouter and Vercel AI Gateway are used only
-when you select them, because many deployments already have those keys for
-task inference, and choosing them sends decision text to a third party.
+A TypeSafe key alone turns on **Jev via TypeSafe**. The Roomote judgment
+model, OpenRouter, and Vercel AI Gateway answer decisions only when you select
+them. The one exception is `R_JUDGMENT_SHADOW=on`, which also sends every Jev
+decision to the Roomote judgment model to compare answers, without changing the
+answer Roomote acts on.
+Many deployments already have OpenRouter or Vercel AI Gateway keys for task
+inference, and choosing them sends decision text to a third party.
 
 The **Roomote judgment model** is an open-weight model served on
 Roomote-operated infrastructure. The text a decision needs never leaves that
-infrastructure, which is why it is the default on Roomote Cloud. It answers
+infrastructure. It answers
 the same typed questions as Jev; Roomote acts on it under the same confidence
 rules and falls back to the helper model in the same cases. Self-hosted
 deployments can point `R_JUDGMENT_UPSTREAM_URL` at any server that speaks the
@@ -356,9 +359,6 @@ When a judgment model is on, Roomote asks it first for:
 - choosing the forum tag when Roomote opens a thread in a Discord forum channel
 - whether a settled session or task turn holds something worth saving to
   [Memory](/memory) that the agent did not record itself
-- an advisory ranking of a task's own changed hunks by defect risk during its
-  self-review, before it pushes or opens a pull request (the same pre-screen
-  pull request reviews use), so the agent can re-read the riskiest hunks
 
 Roomote acts on the judgment model only when it is confident. When it is
 unsure, unavailable, or returns an error, Roomote keeps the behavior it has

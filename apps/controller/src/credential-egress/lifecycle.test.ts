@@ -277,6 +277,33 @@ describe('controller-owned Credential egress lifecycle', () => {
     expect(deps.client!.register).not.toHaveBeenCalled();
   });
 
+  it('reports a failed eligibility lookup at registration as a failure, not a changed run', async () => {
+    const deps = dependencies();
+    const lifecycle = new CredentialEgressLifecycle(deps);
+    vi.mocked(deps.findCandidate).mockRejectedValue(new Error('db down'));
+
+    await expect(
+      lifecycle.register({
+        taskRun: { id: 1, taskId: 'task1' },
+        provider: 'modal',
+        resume: false,
+      }),
+    ).resolves.toEqual({
+      status: 'failed',
+      error: 'Eligibility lookup failed',
+    });
+    expect(deps.client!.register).not.toHaveBeenCalled();
+
+    vi.mocked(deps.findCandidate).mockResolvedValue(null);
+    await expect(
+      lifecycle.register({
+        taskRun: { id: 1, taskId: 'task1' },
+        provider: 'modal',
+        resume: false,
+      }),
+    ).resolves.toEqual({ status: 'skipped', reason: 'run_not_eligible' });
+  });
+
   it('keeps API-proxy admission closed without a proxy base URL', async () => {
     const deps = { ...dependencies(), admitApiProxy: vi.fn() };
     delete deps.apiProxyBaseUrl;

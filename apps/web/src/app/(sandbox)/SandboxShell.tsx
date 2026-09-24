@@ -123,7 +123,7 @@ export function SandboxShell({
           className={`md:hidden top-0 ${zIndex('NAV_HEADER')} w-full shrink-0 bg-card`}
         >
           {isSignedIn ? (
-            <NavbarHeader setupIncomplete={needsAdminSetup} />
+            <NavbarHeader />
           ) : (
             <div className="h-(--header-height) mx-auto px-3 flex items-center">
               <Link href="/" className="shrink-0">
@@ -135,7 +135,7 @@ export function SandboxShell({
 
         {/* Main layout with side nav on desktop */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          {isSignedIn && <SideNav setupIncomplete={needsAdminSetup} />}
+          {isSignedIn && <SideNav />}
           <SandboxLayoutContext.Provider value={sandboxLayoutValue}>
             <div className="flex flex-1 min-h-0 min-w-0 md:rounded-l-sm md:shadow-md">
               <div className="flex flex-col min-h-0 min-w-0 flex-1">

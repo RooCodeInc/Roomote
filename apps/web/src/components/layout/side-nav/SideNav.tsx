@@ -33,11 +33,9 @@ import { useLiveTaskStatus, useTaskPins } from '@/hooks/tasks';
 import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
-import { useResultsPage } from '@/hooks/useResultsPage';
 
 import {
   getVisibleSideNavSections,
-  SETUP_INCOMPLETE_NAV_TOOLTIP,
   type PrimaryNavItem,
 } from '../navigation-items';
 import { SideNavItem } from './SideNavItem';
@@ -55,11 +53,7 @@ function SideNavGroup({ children }: { children: ReactNode }) {
   return <div className="flex flex-col gap-1">{children}</div>;
 }
 
-export const SideNav = ({
-  setupIncomplete = false,
-}: {
-  setupIncomplete?: boolean;
-}) => {
+export const SideNav = () => {
   useHydrateLayoutStore();
 
   const pathname = usePathname();
@@ -74,11 +68,8 @@ export const SideNav = ({
   );
   const isSideNavExpanded = hasHydrated && persistedIsSideNavExpanded;
   const trpc = useTRPC();
-  const { enabled: resultsEnabled } = useResultsPage();
   const { data: unreadResultCount = 0 } = useQuery(
-    trpc.results.pendingCount.queryOptions(undefined, {
-      enabled: resultsEnabled,
-    }),
+    trpc.results.pendingCount.queryOptions(undefined),
   );
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   const { pinnedTaskIds, setTaskPinned, isTaskPinMutationPending } =
@@ -114,8 +105,8 @@ export const SideNav = ({
     [pinnedTaskIds],
   );
   const visibleNavSections = useMemo(
-    () => getVisibleSideNavSections({ isAdmin, resultsEnabled }),
-    [isAdmin, resultsEnabled],
+    () => getVisibleSideNavSections({ isAdmin }),
+    [isAdmin],
   );
 
   useEffect(() => {
@@ -156,7 +147,6 @@ export const SideNav = ({
     description,
     matchExact,
     matchPaths,
-    requiresSetup,
   }: PrimaryNavItem) => (
     <SideNavItem
       key={href}
@@ -164,12 +154,8 @@ export const SideNav = ({
       href={href}
       label={label}
       aria-label={label}
-      tooltip={
-        setupIncomplete && requiresSetup ? SETUP_INCOMPLETE_NAV_TOOLTIP : label
-      }
-      description={setupIncomplete && requiresSetup ? undefined : description}
-      disabled={setupIncomplete && requiresSetup}
-      focusableWhenDisabled={setupIncomplete && requiresSetup}
+      tooltip={label}
+      description={description}
       expanded={isSideNavExpanded}
       active={
         matchExact
@@ -193,18 +179,12 @@ export const SideNav = ({
       {/* Logo */}
       {isSideNavExpanded ? (
         <div className="flex w-full items-center justify-between gap-3 px-2 py-1 shrink-0">
-          {setupIncomplete ? (
-            <div className="min-w-0 flex-1 opacity-50">
-              <RoomoteWordmark className="h-7" aria-label="Roomote" />
-            </div>
-          ) : (
-            <Link href="/" className="min-w-0 flex-1">
-              <RoomoteWordmark
-                className="h-7 transition-all duration-300 hover:opacity-80"
-                aria-label="Roomote"
-              />
-            </Link>
-          )}
+          <Link href="/" className="min-w-0 flex-1">
+            <RoomoteWordmark
+              className="h-7 transition-all duration-300 hover:opacity-80"
+              aria-label="Roomote"
+            />
+          </Link>
 
           <Button
             type="button"

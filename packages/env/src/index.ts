@@ -154,7 +154,7 @@ const serverSchema = {
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
-  // Operator policy for the curated Settings > Integrations catalog. Enabled
+  // Operator policy for the curated Integrations page catalog. Enabled
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.
   R_CURATED_INTEGRATIONS_DISABLED: optInBoolean(),

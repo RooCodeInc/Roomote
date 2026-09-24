@@ -25,12 +25,7 @@ export interface PrimaryNavItem {
   matchPaths: string[];
   sideNavSection: SideNavSection;
   adminOnly?: boolean;
-  requiresSetup?: boolean;
-  resultsExperiment?: boolean;
 }
-
-export const SETUP_INCOMPLETE_NAV_TOOLTIP =
-  'Available when setup is completed.';
 
 const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
   {
@@ -41,7 +36,6 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchExact: true,
     matchPaths: ['/'],
     sideNavSection: 'home',
-    requiresSetup: true,
   },
   {
     icon: MessagesSquare,
@@ -60,18 +54,15 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchExact: false,
     matchPaths: ['/automations'],
     sideNavSection: 'manage',
-    requiresSetup: true,
   },
   {
     icon: NotepadText,
     href: '/results',
     label: 'Results',
-    description: 'Review automation results',
+    description: 'Review automation reports and suggested follow-ups',
     matchExact: false,
     matchPaths: ['/results'],
     sideNavSection: 'manage',
-    requiresSetup: true,
-    resultsExperiment: true,
   },
   {
     icon: Plug,
@@ -91,24 +82,17 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchPaths: ['/analytics'],
     sideNavSection: 'insights',
     adminOnly: true,
-    requiresSetup: true,
   },
 ];
 
 export function getVisiblePrimaryNavItems(opts: {
   isAdmin: boolean;
-  resultsEnabled?: boolean;
 }): PrimaryNavItem[] {
-  return PRIMARY_NAV_ITEMS.filter(
-    (item) =>
-      (!item.adminOnly || opts.isAdmin) &&
-      (!item.resultsExperiment || opts.resultsEnabled),
-  );
+  return PRIMARY_NAV_ITEMS.filter((item) => !item.adminOnly || opts.isAdmin);
 }
 
 export function getVisibleSideNavSections(opts: {
   isAdmin: boolean;
-  resultsEnabled?: boolean;
 }): Record<SideNavSection, PrimaryNavItem[]> {
   const sections: Record<SideNavSection, PrimaryNavItem[]> = {
     home: [],

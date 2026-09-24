@@ -12,7 +12,7 @@ function auth(userId: string, isAdmin: boolean): UserAuthSuccess {
 }
 
 describe('deployment experiment commands', () => {
-  it('returns one fail-closed value set for users with conflicting legacy preferences', async () => {
+  it('ignores legacy per-user Results metadata when reading shared experiments', async () => {
     const [first, second] = await Promise.all([
       userFactory.create({
         metadata: {
@@ -36,6 +36,7 @@ describe('deployment experiment commands', () => {
     );
 
     expect(firstValues).toEqual(secondValues);
+    expect(firstValues).not.toHaveProperty('results');
   });
 
   it('allows only admins to update shared values and leaves user metadata dormant', async () => {
@@ -49,20 +50,20 @@ describe('deployment experiment commands', () => {
 
     await expect(
       setDeploymentExperimentCommand(auth(member.id, false), {
-        id: 'results',
+        id: 'privateSessions',
         enabled: true,
       }),
     ).rejects.toThrow('Unauthorized');
 
     await expect(
       setDeploymentExperimentCommand(auth(admin.id, true), {
-        id: 'results',
+        id: 'privateSessions',
         enabled: true,
       }),
-    ).resolves.toMatchObject({ results: true });
+    ).resolves.toMatchObject({ privateSessions: true });
     await expect(
       getDeploymentExperimentsCommand(auth(member.id, false)),
-    ).resolves.toMatchObject({ results: true });
+    ).resolves.toMatchObject({ privateSessions: true });
 
     await expect(
       db.query.users.findFirst({

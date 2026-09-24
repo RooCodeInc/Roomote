@@ -47,15 +47,6 @@ vi.mock(
 );
 
 vi.mock(
-  '@/components/settings/IntegrationToolAutoApprovalsExperimentalSetting',
-  () => ({
-    IntegrationToolAutoApprovalsExperimentalSetting: () => (
-      <div>Integration tool approvals setting</div>
-    ),
-  }),
-);
-
-vi.mock(
   '@/components/settings/SessionTaskCommunicationTriageExperimentalSetting',
   () => ({
     SessionTaskCommunicationTriageExperimentalSetting: () => (
@@ -63,10 +54,6 @@ vi.mock(
     ),
   }),
 );
-
-vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
-  ResultsExperimentalSetting: () => <div>Results setting</div>,
-}));
 
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
@@ -78,7 +65,7 @@ describe('ExperimentalSettingsPage', () => {
     state.isFetching = false;
   });
 
-  it('marks every experimental setting as admin-only', () => {
+  it('keeps experimental settings admin-only and hides Auto tool approvals', () => {
     render(<ExperimentalSettingsPage />);
 
     expect(screen.getByTestId('experimental-settings')).toHaveAttribute(
@@ -90,11 +77,12 @@ describe('ExperimentalSettingsPage', () => {
       screen.getByText('Browser notifications setting'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('Integration tool approvals setting'),
-    ).toBeInTheDocument();
+      screen.queryByRole('switch', { name: 'Toggle Auto tool approvals' }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByText('Task communication triage setting'),
     ).toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
   });
 
   it('shows one retryable error instead of default-valued settings after an initial load failure', () => {
@@ -122,7 +110,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Results setting')).toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();
@@ -151,7 +139,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Results setting')).toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();

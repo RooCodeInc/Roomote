@@ -119,5 +119,6 @@ export * from './worker-runtime-version';
 export * from './workspace-routing';
 export * from './service-credentials';
 export * from './integration-tool-approvals';
+export * from './integration-tool-args';
 export * from './credential-egress';
 export * from './public-url-fetch';

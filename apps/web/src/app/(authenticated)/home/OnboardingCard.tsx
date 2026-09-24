@@ -148,7 +148,11 @@ export function OnboardingCard() {
   const userMcpConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
   const { data: automationOnboardingStatus, isPending: automationsPending } =
-    useQuery(trpc.automations.onboardingStatus.queryOptions());
+    useQuery(
+      trpc.automations.onboardingStatus.queryOptions(undefined, {
+        enabled: isAdmin,
+      }),
+    );
 
   const authenticateSlackAccount = useAuthenticateSlackAccount();
   const authenticateGitHubAccount = useAuthenticateGitHubAccount();
@@ -457,6 +461,7 @@ export function OnboardingCard() {
       buttonLabel: 'Go',
       onClick: () => router.push('/automations'),
       visible:
+        isAdmin &&
         !automationsPending &&
         Boolean(automationOnboardingStatus) &&
         !automationOnboardingStatus?.hasEnabledAutomations,

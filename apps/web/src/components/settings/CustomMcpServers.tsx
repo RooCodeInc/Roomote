@@ -814,8 +814,8 @@ function CustomToolManagementDialog({
  * section of its own.
  */
 /**
- * `deployment` (the default) lists the servers everyone shares, for Settings
- * → Integrations; `owner` lists the viewer's own private servers, for
+ * `deployment` (the default) lists the servers everyone shares, for the
+ * Integrations page; `owner` lists the viewer's own private servers, for
  * Personal settings. Members see shared servers they did not add read-only.
  */
 export function useCustomMcpServers(

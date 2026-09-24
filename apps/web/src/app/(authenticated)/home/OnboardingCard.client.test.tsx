@@ -12,6 +12,7 @@ let hasEnabledAutomations = true;
 let environments: unknown[] = [{}];
 let environmentsPending = false;
 let environmentsSuccess = true;
+let automationOnboardingStatusQueryEnabled: boolean | undefined;
 const launcherErrorState: { error: unknown } = { error: null };
 
 const {
@@ -113,13 +114,18 @@ vi.mock('@/trpc/client', () => ({
       status: { queryOptions: () => ({ queryKey: ['onboarding'] }) },
     },
     automations: {
-      onboardingStatus: { queryOptions: () => ({ queryKey: ['automations'] }) },
+      onboardingStatus: {
+        queryOptions: (_input: undefined, options?: { enabled?: boolean }) => {
+          automationOnboardingStatusQueryEnabled = options?.enabled;
+          return { queryKey: ['automations'], enabled: options?.enabled };
+        },
+      },
     },
   }),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: (options: { queryKey: string[] }) =>
+  useQuery: (options: { queryKey: string[]; enabled?: boolean }) =>
     options.queryKey[0] === 'onboarding'
       ? {
           data: {
@@ -129,7 +135,9 @@ vi.mock('@tanstack/react-query', () => ({
           },
           isPending: false,
         }
-      : { data: { hasEnabledAutomations }, isPending: false },
+      : options.enabled === false
+        ? { data: undefined, isPending: true }
+        : { data: { hasEnabledAutomations }, isPending: false },
 }));
 
 vi.mock('motion/react', async () => {
@@ -193,6 +201,7 @@ beforeEach(() => {
   environments = [{}];
   environmentsPending = false;
   environmentsSuccess = true;
+  automationOnboardingStatusQueryEnabled = undefined;
   localStorage.clear();
   launcherErrorState.error = null;
   vi.clearAllMocks();
@@ -329,6 +338,19 @@ it('prioritizes automations and opens the automations page', () => {
 
   fireEvent.click(screen.getByRole('button', { name: 'Go' }));
   expect(mockPush).toHaveBeenCalledWith('/automations');
+});
+
+it('skips the admin-only automation onboarding query and card for members', () => {
+  isAdmin = false;
+  hasEnabledAutomations = false;
+
+  render(<OnboardingCard />);
+  dismissCard();
+
+  expect(automationOnboardingStatusQueryEnabled).toBe(false);
+  expect(
+    screen.queryByText("Put your team's work on autopilot with automations"),
+  ).not.toBeInTheDocument();
 });
 
 it('prioritizes communication accounts before source-control accounts', () => {

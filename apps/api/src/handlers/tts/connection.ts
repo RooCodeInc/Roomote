@@ -18,7 +18,7 @@ type ElevenLabsCredentials = {
 /**
  * Resolves narration TTS credentials for the deployment.
  *
- * The admin-configured ElevenLabs integration (Settings → Integrations) is
+ * The admin-configured ElevenLabs integration (on the Integrations page) is
  * the primary source; the `R_ELEVENLABS_*` environment variables remain an
  * operator fallback. Returns undefined when neither is configured — the
  * feature is off and the endpoint 404s.

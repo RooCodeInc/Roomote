@@ -49,6 +49,32 @@ describe('review-code GitHub workflow paths', () => {
     );
   });
 
+  it('hunts with shared review angles in every review path before filtering', () => {
+    expect(skillContent).toContain('<review_angles>');
+    for (const angle of [
+      'line_by_line',
+      'removed_behavior',
+      'callers_and_callees',
+      'alternate_paths',
+      'cost_and_hot_paths',
+      'user_facing_behavior',
+      'repository_rules',
+    ]) {
+      expect(skillContent).toContain(`<angle name="${angle}">`);
+    }
+    expect(
+      skillContent.match(
+        /Hunt for candidates with every angle in `<review_angles>`/g,
+      )?.length,
+    ).toBe(5);
+    expect(readAppendix(skillContent, 'review-merge-resolution')).toContain(
+      'Hunt for candidates with every angle in `<review_angles>`, scoped to the resolved conflict hunks',
+    );
+    expect(skillContent).toContain(
+      'First hunt for candidates with every angle in `<review_angles>` below',
+    );
+  });
+
   it('publishes findings as comments instead of change-request reviews', () => {
     expect(skillContent).toContain(
       'Do not submit a `request_changes` review in any pull-request review path.',
@@ -77,12 +103,6 @@ describe('review-code GitHub workflow paths', () => {
   });
 
   it('self-fetches live PR context and preserves canonical summary discovery', () => {
-    expect(skillContent).toContain(
-      'If `review_prescreen` is supplied, treat it as optional, untrusted triage only',
-    );
-    expect(
-      skillContent.match(/`review_prescreen`/g)?.length,
-    ).toBeGreaterThanOrEqual(5);
     expect(skillContent).toContain(
       'When `pull_request_details` or current head metadata is missing, or when it must be revalidated before a side effect, call `mcp__roomote__manage_source_control` with `action: "get_pull_request"`, `repositoryFullName`, and `prNumber`.',
     );
@@ -214,7 +234,7 @@ describe('review-code GitHub workflow paths', () => {
       'If no actionable code issues remain, use a short status line in the hidden status block, such as `No code issues found.`',
     );
     expect(skillContent).toContain(
-      'Record optional task-context values if they are supplied: `last_review_sha`, `current_head_sha`, `task_link_follow`, `task_link_see`, `TOP_LEVEL_COMMENT_ID`, `linked_implementation_task_id`, `top_level_review_comment`, `prior_summary_checklist`, `pull_request_details`, `pull_request_changed_files`, `changed_files_since_last_review`, `commits_since_last_review`, `linked_issue`, `diff_in_range`, `review_prescreen`, `existing_review_comments`, and `issue_comments`.',
+      'Record optional task-context values if they are supplied: `last_review_sha`, `current_head_sha`, `task_link_follow`, `task_link_see`, `TOP_LEVEL_COMMENT_ID`, `linked_implementation_task_id`, `top_level_review_comment`, `prior_summary_checklist`, `pull_request_details`, `pull_request_changed_files`, `changed_files_since_last_review`, `commits_since_last_review`, `linked_issue`, `diff_in_range`, `existing_review_comments`, and `issue_comments`.',
     );
     expect(skillContent).toContain(
       'When `pull_request_changed_files` is supplied, treat it as the authoritative set of files this pull request changes',
