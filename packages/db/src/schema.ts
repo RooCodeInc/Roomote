@@ -1743,6 +1743,13 @@ export const taskRuns = pgTable(
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure')`,
       ),
+    // Finished runs whose sandbox sleep check has not yet examined (see
+    // destroySandboxesOfFinishedRuns). Claimed rows leave the index.
+    index('task_runs_sleep_check_finished_idx')
+      .using('btree', table.createdAt)
+      .where(
+        sql`${table.status} IN ('failed', 'canceled', 'completed') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure')`,
+      ),
     index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
     index('task_runs_source_run_id_idx').on(table.sourceRunId),
     uniqueIndex('task_runs_discord_source_event_unique')
