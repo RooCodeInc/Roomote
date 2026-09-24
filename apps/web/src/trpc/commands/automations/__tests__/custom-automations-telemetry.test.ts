@@ -166,6 +166,42 @@ describe('custom automation activation telemetry', () => {
     expect(mocks.updateCustomAutomation).not.toHaveBeenCalled();
   });
 
+  it('allows disabling an automation with saved criteria while the experiment is off', async () => {
+    mocks.isDeploymentExperimentEnabled.mockResolvedValue(false);
+    mocks.resolveDeploymentTimeZone.mockResolvedValue({
+      timeZone: 'UTC',
+      source: 'utc_fallback',
+      updatedAt: null,
+    });
+    mocks.getCustomAutomationById.mockResolvedValue({
+      ...customAutomation(),
+      createdByUserId: 'user-admin',
+      launchCriteria: 'Only investigate new regressions.',
+      runWhen: null,
+    } as never);
+    mocks.updateCustomAutomation.mockResolvedValue(customAutomation());
+
+    await updateCustomAutomationCommand(adminAuth, {
+      id: 'automation-id',
+      name: 'Nightly report',
+      prompt: 'Summarize yesterday.',
+      enabled: false,
+      scheduleMode: 'daily',
+      environmentId: 'environment-id',
+    });
+
+    expect(mocks.updateCustomAutomation).toHaveBeenCalledOnce();
+    expect(mocks.updateCustomAutomation.mock.calls[0]?.[1]).toMatchObject({
+      enabled: false,
+    });
+    expect(mocks.updateCustomAutomation.mock.calls[0]?.[1]).not.toHaveProperty(
+      'launchCriteria',
+    );
+    expect(mocks.updateCustomAutomation.mock.calls[0]?.[1]).not.toHaveProperty(
+      'runWhen',
+    );
+  });
+
   it.each([
     ['slack', 'slack_user'],
     ['discord', 'discord_user'],

@@ -778,6 +778,27 @@ it('hides and omits custom automation launch criteria while the experiment is of
   );
 });
 
+it('lets users toggle an automation with saved criteria while the experiment is off', async () => {
+  state.automationLaunchCriteriaEnabled = false;
+  setRunnableCustomAutomation('Only investigate new checkout regressions.');
+  render(<AutomationsSettings />);
+
+  const toggle = await screen.findByRole('switch', {
+    name: 'Toggle Daily scan',
+  });
+  mutations.updateSettings.mockClear();
+  fireEvent.click(toggle);
+
+  expect(mutations.updateSettings).toHaveBeenCalledOnce();
+  expect(mutations.updateSettings.mock.calls[0]?.[0]).toMatchObject({
+    id: 'automation-1',
+    enabled: false,
+  });
+  expect(mutations.updateSettings.mock.calls[0]?.[0]).not.toHaveProperty(
+    'launchCriteria',
+  );
+});
+
 it('keeps channel auto-start launch criteria editable with the custom experiment off', async () => {
   state.automationLaunchCriteriaEnabled = false;
   render(<AutomationsSettings />);

@@ -330,13 +330,18 @@ function formFromRow(
   };
 }
 
-function writeInputFromRow(row: CustomAutomationListItem) {
+function writeInputFromRow(
+  row: CustomAutomationListItem,
+  includeLaunchCriteria: boolean,
+) {
   const target = targetFromRow(row);
 
   return {
     name: row.name,
     prompt: row.prompt,
-    launchCriteria: row.launchCriteria ?? '',
+    ...(includeLaunchCriteria
+      ? { launchCriteria: row.launchCriteria ?? '' }
+      : {}),
     enabled: row.enabled,
     resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
@@ -1509,7 +1514,10 @@ export function CustomAutomationsSection({
 
                             toggleMutation.mutate({
                               id: row.id,
-                              ...writeInputFromRow(row),
+                              ...writeInputFromRow(
+                                row,
+                                automationLaunchCriteriaEnabled,
+                              ),
                               enabled,
                             });
                           }}

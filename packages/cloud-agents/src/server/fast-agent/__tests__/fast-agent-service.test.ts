@@ -11513,49 +11513,68 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
-  it('disables a queued custom automation gate after the experiment is turned off', async () => {
-    const evaluateAutomationLaunchCriteria = vi.fn(async () => ({
-      decision: 'continue' as const,
-    }));
-    const prepareAutomationLaunch = vi.fn(async () => undefined);
-    const adapter = callbacks({
-      evaluateAutomationLaunchCriteria,
-      prepareAutomationLaunch,
-    });
-    mocks.deploymentExperimentEnabled.mockResolvedValue(false);
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await expect(
-          invokeTool(nativeToolNames.evaluateAutomationLaunchCriteria, {
-            findingsReport: 'Saved criteria should not be evaluated.',
-          }),
-        ).resolves.toMatchObject({
-          success: false,
-          error: 'This automation has no saved launch criteria to evaluate.',
-        });
-        return '';
+  it.each([
+    {
+      surface: 'discord' as const,
+      workspaceId: 'guild-1',
+      conversationId: 'automation-discord',
+      replyTarget: { channelId: 'discord-channel-1' },
+    },
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      conversationId: 'automation-teams',
+      replyTarget: {
+        channelId: 'teams-channel-1',
+        serviceUrl: 'https://smba.trafficmanager.net/amer/',
       },
-    );
+    },
+  ])(
+    'restores the deferred $surface root when its queued custom automation gate is disabled',
+    async (conversation) => {
+      const evaluateAutomationLaunchCriteria = vi.fn(async () => ({
+        decision: 'continue' as const,
+      }));
+      const prepareAutomationLaunch = vi.fn(async () => undefined);
+      const adapter = callbacks({
+        evaluateAutomationLaunchCriteria,
+        prepareAutomationLaunch,
+      });
+      mocks.deploymentExperimentEnabled.mockResolvedValue(false);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await expect(
+            invokeTool(nativeToolNames.evaluateAutomationLaunchCriteria, {
+              findingsReport: 'Saved criteria should not be evaluated.',
+            }),
+          ).resolves.toMatchObject({
+            success: false,
+            error: 'This automation has no saved launch criteria to evaluate.',
+          });
+          return '';
+        },
+      );
 
-    await answerFastAgentQuestion({
-      ...baseParams,
-      adapter,
-      turnSource: 'platform_event',
-      platformEventKind: 'automation',
-      platformEventVisibility: 'required',
-      automationLaunchCriteriaRequired: true,
-      automationLaunchRootRequired: true,
-    });
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: conversation as never,
+        adapter,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'required',
+        automationLaunchCriteriaRequired: true,
+      });
 
-    expect(evaluateAutomationLaunchCriteria).not.toHaveBeenCalled();
-    expect(prepareAutomationLaunch).toHaveBeenCalledOnce();
-    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
-      'conversation-1',
-      expect.any(Array),
-      expect.objectContaining({ automationLaunchCriteriaEnabled: false }),
-    );
-  });
+      expect(evaluateAutomationLaunchCriteria).not.toHaveBeenCalled();
+      expect(prepareAutomationLaunch).toHaveBeenCalledOnce();
+      expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        expect.objectContaining({ automationLaunchCriteriaEnabled: false }),
+      );
+    },
+  );
 
   it('keeps an automation clarification eligible after delegated work starts', async () => {
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
