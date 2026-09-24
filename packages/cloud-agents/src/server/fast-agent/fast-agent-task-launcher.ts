@@ -225,6 +225,7 @@ export function createFastAgentSlackTaskLauncher(
           params.repoForPayload,
         ),
         description: prompt,
+        visibleInTranscript: true,
         ...(params.customAutomationId
           ? { customAutomationId: params.customAutomationId }
           : {}),

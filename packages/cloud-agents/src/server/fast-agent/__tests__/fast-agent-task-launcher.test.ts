@@ -106,7 +106,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
 
     await expect(
       launchTask({
-        prompt: 'Add a regression test',
+        prompt: '$review-code Add a regression test',
         environmentId: 'env-1',
         branch: 'feature/source-branch',
         launchIdempotencyKey: 'artifact-build:launch-1',
@@ -126,7 +126,8 @@ describe('createFastAgentSlackTaskLauncher', () => {
           type: TaskPayloadKind.StandardTask,
           payload: {
             repo: ALL_REPOSITORIES,
-            description: 'Add a regression test',
+            description: '$review-code Add a regression test',
+            visibleInTranscript: true,
             communicationProvider: 'slack',
             communicationTeamId: 'T123',
             communicationTeamDomain: 'acme',
