@@ -20,14 +20,12 @@ import {
 } from '@/lib/server/fast-sessions';
 import { subscribeFastSessionReplyStream } from '@/lib/server/fast-session-reply-stream';
 import { createFastSessionPollWake } from '@/lib/server/fast-session-poll-wake';
+import { resolveFastSessionStreamCursor } from '@/lib/server/fast-session-stream-cursor';
 
 export const runtime = 'nodejs';
 
 const STREAM_MAX_MS = 60 * 60 * 1_000;
 const POLL_INTERVAL_MS = 1_000;
-/** Bound the replay used when no page watermark is available or a connection
- * resumes much later. Initial session pages normally provide a fresher cursor. */
-const INITIAL_CURSOR_OVERLAP_MS = 60_000;
 
 export async function GET(
   request: NextRequest,
@@ -56,15 +54,15 @@ export async function GET(
     return NextResponse.json({ error: 'Not Found' }, { status: 404 });
   }
 
-  const sinceParam = z.coerce
-    .number()
-    .finite()
-    .nonnegative()
-    .safeParse(request.nextUrl.searchParams.get('since') ?? undefined);
-  const fallbackCursor = Date.now() - INITIAL_CURSOR_OVERLAP_MS;
-  let cursor = sinceParam.success
-    ? Math.max(sinceParam.data, fallbackCursor)
-    : fallbackCursor;
+  let cursor = resolveFastSessionStreamCursor({
+    lastEventId: request.headers.get('last-event-id'),
+    since: request.nextUrl.searchParams.get('since'),
+    nowMs: Date.now(),
+  });
+  // Every event carries the cursor as its id; the browser echoes the last one
+  // as Last-Event-ID when it reconnects. Pushing without an id would replace
+  // it with a random UUID.
+  const eventId = () => String(cursor);
   let lastTitle = session.title;
   let lastConversationResponding: boolean | null | undefined;
   let lastGoalSignature: string | undefined;
@@ -86,9 +84,10 @@ export async function GET(
             void sseSession.push(
               { ...event, serverReceivedAtMs: Date.now() },
               'task-report',
+              eventId(),
             );
           } else {
-            void sseSession.push({ event }, 'chunk');
+            void sseSession.push({ event }, 'chunk', eventId());
           }
         } catch {
           // The poll loop notices the disconnect.
@@ -150,12 +149,13 @@ export async function GET(
             await sseSession.push(
               { messages, conversationResponding },
               'messages',
+              eventId(),
             );
           }
           const queuedMessagesSignature = JSON.stringify(queuedMessages);
           if (queuedMessagesSignature !== lastQueuedMessagesSignature) {
             lastQueuedMessagesSignature = queuedMessagesSignature;
-            await sseSession.push({ queuedMessages }, 'queue');
+            await sseSession.push({ queuedMessages }, 'queue', eventId());
           }
           const sessionUpdate: {
             title?: string;
@@ -176,7 +176,7 @@ export async function GET(
             sessionUpdate.goal = goal;
           }
           if (Object.keys(sessionUpdate).length > 0) {
-            await sseSession.push(sessionUpdate, 'session');
+            await sseSession.push(sessionUpdate, 'session', eventId());
           }
         } catch {
           break;
@@ -191,7 +191,7 @@ export async function GET(
 
     if (sseSession.isConnected) {
       try {
-        await sseSession.push(null, 'disconnect');
+        await sseSession.push(null, 'disconnect', eventId());
       } catch {
         // Client already disconnected, ignore.
       }
