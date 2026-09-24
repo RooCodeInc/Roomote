@@ -54,6 +54,8 @@ describe('metadata descriptions', () => {
       browserNotifications: false,
       integrationToolAutoApprovals: false,
       sessionTaskCommunicationTriage: false,
+      sessionStatusJudgment: false,
+      sessionsBoard: false,
       dizzy: false,
     });
   });

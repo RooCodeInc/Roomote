@@ -67,6 +67,8 @@ const mocks = vi.hoisted(() => ({
   findActiveRetryNotice: vi.fn(),
   loadTurnAttempt: vi.fn(),
   getUnifiedSession: vi.fn(),
+  createSessionStatusJudgmentRequest: vi.fn(),
+  settleSessionStatusJudgmentTurn: vi.fn(),
   prepareServiceCredential: vi.fn(),
   listServiceCredentialApprovals: vi.fn(),
   addRemoteMcp: vi.fn(),
@@ -270,6 +272,8 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   getSessionForFastConversation: mocks.getUnifiedSession,
+  createSessionStatusJudgmentRequest: mocks.createSessionStatusJudgmentRequest,
+  settleSessionStatusJudgmentTurn: mocks.settleSessionStatusJudgmentTurn,
   getSessionForTask: mocks.getSessionForTask,
   touchSessionActivity: mocks.touchSessionActivity,
   getActiveRecipeVerificationTaskId: mocks.getActiveRecipeVerificationTaskId,
@@ -833,6 +837,35 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
       'Reply in pirate style.',
+    );
+  });
+
+  it('invalidates and settles a semantic status request around the visible Fast turn', async () => {
+    mocks.deploymentExperimentEnabled.mockImplementation(
+      async (experimentId: string) => experimentId === 'sessionStatusJudgment',
+    );
+    mocks.getUnifiedSession.mockResolvedValue({
+      id: 'unified-session-1',
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.createSessionStatusJudgmentRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        sessionId: 'unified-session-1',
+        sourceEventId: '100.2',
+        sourceKind: 'fast_turn',
+        state: 'awaiting_settlement',
+      },
+    );
+    expect(mocks.settleSessionStatusJudgmentTurn).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        sessionId: 'unified-session-1',
+        sourceEventId: '100.2',
+        visible: true,
+      },
     );
   });
 

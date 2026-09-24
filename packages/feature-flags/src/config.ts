@@ -5,6 +5,8 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
   'browserNotifications',
   'integrationToolAutoApprovals',
   'sessionTaskCommunicationTriage',
+  'sessionStatusJudgment',
+  'sessionsBoard',
   'dizzy',
 ] as const;
 
@@ -28,6 +30,8 @@ export const DEPLOYMENT_EXPERIMENT_AUDIENCE = {
   sessionTaskCommunicationTriage: 'customer-preview',
   browserNotifications: 'customer-preview',
   integrationToolAutoApprovals: 'customer-preview',
+  sessionStatusJudgment: 'customer-preview',
+  sessionsBoard: 'customer-preview',
   dizzy: 'internal-nightly',
 } as const satisfies Record<
   DeploymentExperimentId,
@@ -41,6 +45,8 @@ export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
     'integration_tool_auto_approvals_experiment_enabled',
   sessionTaskCommunicationTriage:
     'session_task_communication_triage_experiment_enabled',
+  sessionStatusJudgment: 'session_status_judgment_experiment_enabled',
+  sessionsBoard: 'sessions_board_experiment_enabled',
   dizzy: 'dizzy_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
 
@@ -92,5 +98,17 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     group: null,
     description:
       'Stream delegated task activity to its Session and let the judgment model decide whether to tell the user, redirect the task, or stay quiet. Disabled by default; absent means disabled.',
+  },
+  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.sessionStatusJudgment]: {
+    kind: 'deployment-control',
+    group: null,
+    description:
+      'Use the configured judgment model to classify settled Session outcomes. Disabled by default; absent means disabled.',
+  },
+  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.sessionsBoard]: {
+    kind: 'deployment-control',
+    group: null,
+    description:
+      'Show the Sessions board to deployment members while preserving their existing Session access. Disabled by default; absent means disabled.',
   },
 };

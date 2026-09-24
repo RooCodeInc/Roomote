@@ -12,6 +12,8 @@ import { BrowserNotificationsExperimentalSetting } from './BrowserNotificationsE
 import { DizzyExperimentalSetting } from './DizzyExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from './PrivateSessionsExperimentalSetting';
 import { SessionTaskCommunicationTriageExperimentalSetting } from './SessionTaskCommunicationTriageExperimentalSetting';
+import { SessionStatusJudgmentExperimentalSetting } from './SessionStatusJudgmentExperimentalSetting';
+import { SessionsBoardExperimentalSetting } from './SessionsBoardExperimentalSetting';
 
 const DEPLOYMENT_EXPERIMENT_SETTINGS: Record<
   DeploymentExperimentId,
@@ -20,6 +22,8 @@ const DEPLOYMENT_EXPERIMENT_SETTINGS: Record<
   privateSessions: PrivateSessionsExperimentalSetting,
   sessionTaskCommunicationTriage:
     SessionTaskCommunicationTriageExperimentalSetting,
+  sessionStatusJudgment: SessionStatusJudgmentExperimentalSetting,
+  sessionsBoard: SessionsBoardExperimentalSetting,
   browserNotifications: BrowserNotificationsExperimentalSetting,
   // The Auto tool approvals control was deliberately removed in PR #3180.
   integrationToolAutoApprovals: null,

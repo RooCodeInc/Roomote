@@ -31,6 +31,7 @@ import type {
   RunKind,
   RunStatus,
   TaskPayload,
+  SessionStatusJudgmentOutcome,
   RequestedWorkKind,
   RequestedWorkKindSource,
   ComputeProvider,
@@ -4414,6 +4415,15 @@ export type SessionBackfillPhase =
   | 'fast_tasks'
   | 'tasks'
   | 'participants';
+export type SessionStatusJudgmentSourceKind = 'fast_turn' | 'task_terminal';
+export type SessionStatusJudgmentState =
+  | 'awaiting_settlement'
+  | 'pending'
+  | 'processing'
+  | 'applied'
+  | 'ignored'
+  | 'failed'
+  | 'stale';
 
 /**
  * sessions
@@ -4946,6 +4956,81 @@ export const sessionGoals = pgTable(
   ],
 );
 
+/**
+ * Durable status-judgment requests and their bounded, transcript-free results.
+ * Rows are both the recovery outbox and the ordered history used by the
+ * experimental board. They never replace deterministic Session lifecycle.
+ */
+export const sessionStatusJudgments = pgTable(
+  'session_status_judgments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    sourceEventId: text('source_event_id').notNull(),
+    generation: integer('generation').notNull(),
+    sourceKind: text('source_kind')
+      .notNull()
+      .$type<SessionStatusJudgmentSourceKind>(),
+    state: text('state')
+      .notNull()
+      .default('pending')
+      .$type<SessionStatusJudgmentState>(),
+    outcome: text('outcome').$type<SessionStatusJudgmentOutcome>(),
+    confidence: real('confidence'),
+    probabilities: jsonb('probabilities').$type<Partial<
+      Record<SessionStatusJudgmentOutcome, number>
+    > | null>(),
+    model: text('model'),
+    attempts: integer('attempts').notNull().default(0),
+    claimedAt: timestamp('claimed_at'),
+    settledAt: timestamp('settled_at'),
+    judgedAt: timestamp('judged_at'),
+    errorCode: text('error_code'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_status_judgments_session_event_unique').on(
+      table.sessionId,
+      table.sourceEventId,
+    ),
+    uniqueIndex('session_status_judgments_session_generation_unique').on(
+      table.sessionId,
+      table.generation,
+    ),
+    index('session_status_judgments_pending_idx').on(
+      table.state,
+      table.createdAt,
+    ),
+    index('session_status_judgments_session_generation_idx').on(
+      table.sessionId,
+      table.generation.desc(),
+    ),
+    check(
+      'session_status_judgments_source_kind_check',
+      sql`${table.sourceKind} in ('fast_turn', 'task_terminal')`,
+    ),
+    check(
+      'session_status_judgments_state_check',
+      sql`${table.state} in ('awaiting_settlement', 'pending', 'processing', 'applied', 'ignored', 'failed', 'stale')`,
+    ),
+    check(
+      'session_status_judgments_outcome_check',
+      sql`${table.outcome} IS NULL OR ${table.outcome} in ('open', 'done', 'blocked', 'needs_input', 'unclear')`,
+    ),
+    check(
+      'session_status_judgments_confidence_check',
+      sql`${table.confidence} IS NULL OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`,
+    ),
+    check(
+      'session_status_judgments_attempts_check',
+      sql`${table.attempts} >= 0`,
+    ),
+  ],
+);
+
 /** Only a keyed hash of each substitute token is ever stored. */
 export const credentialEgressSubstitutes = pgTable(
   'credential_egress_substitutes',
@@ -5146,8 +5231,19 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   tasks: many(sessionTasks),
   participants: many(sessionParticipants),
   pins: many(sessionPins),
+  statusJudgments: many(sessionStatusJudgments),
   usageEvents: many(llmUsageEvents),
 }));
+
+export const sessionStatusJudgmentsRelations = relations(
+  sessionStatusJudgments,
+  ({ one }) => ({
+    session: one(sessions, {
+      fields: [sessionStatusJudgments.sessionId],
+      references: [sessions.id],
+    }),
+  }),
+);
 
 export const sessionTasksRelations = relations(sessionTasks, ({ one }) => ({
   session: one(sessions, {
