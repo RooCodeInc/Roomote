@@ -136,7 +136,6 @@ export async function getJudgmentModelSettingsCommand(
     envSelection,
     storedSelection,
     hasTypeSafeKey: typeSafeConnected,
-    hasRoomoteUpstream: roomoteConnected,
   });
 
   return {

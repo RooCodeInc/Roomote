@@ -143,8 +143,19 @@ describe('evaluateTypeSafeJudgments', () => {
       mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = 'upstream-key';
     });
 
-    it('is used by default when no TypeSafe key is configured', async () => {
+    it('is not used unless selected', async () => {
       mockKeys({ OPENROUTER_API_KEY: 'or-key', AI_GATEWAY_API_KEY: 'gw-key' });
+      const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
+
+      await expect(
+        evaluateTypeSafeJudgments({ state: 'hi', questions }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('is used when selected', async () => {
+      mockKeys({ OPENROUTER_API_KEY: 'or-key', AI_GATEWAY_API_KEY: 'gw-key' });
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
       await expect(
@@ -171,6 +182,7 @@ describe('evaluateTypeSafeJudgments', () => {
     it('sends no Authorization header for an upstream without a key', async () => {
       mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
       mockKeys({});
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
       await evaluateTypeSafeJudgments({ state: 'hi', questions });
@@ -179,7 +191,7 @@ describe('evaluateTypeSafeJudgments', () => {
       expect(init.headers).not.toHaveProperty('Authorization');
     });
 
-    it('yields to a TypeSafe key, which is an explicit opt-in', async () => {
+    it('leaves a TypeSafe key in charge when not selected', async () => {
       const fetchMock = mockFetchResponse({ answers: directAnswers });
 
       await evaluateTypeSafeJudgments({ state: 'hi', questions });
@@ -213,6 +225,7 @@ describe('evaluateTypeSafeJudgments', () => {
 
     it('validates upstream answers like any other backend', async () => {
       mockKeys({});
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
       mockFetchResponse({
         answers: { urgent: { type: 'noul', noul: 0.5 } },
       });
@@ -352,6 +365,7 @@ describe('evaluateTypeSafeJudgments', () => {
 
     it('does not shadow the upstream against itself', async () => {
       mockKeys({});
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
       const info = vi.spyOn(console, 'info').mockImplementation(() => {});
       const fetchMock = mockFetchResponse({
         answers: {
