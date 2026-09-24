@@ -74,7 +74,7 @@ export const judgmentDecisionTestSchema = z
     `The state and questions must stay under ${MAX_REQUEST_CHARS.toLocaleString()} characters.`,
   );
 
-export type JudgmentDecisionTestInput = z.infer<
+type JudgmentDecisionTestInput = z.infer<
   typeof judgmentDecisionTestSchema
 >;
 
