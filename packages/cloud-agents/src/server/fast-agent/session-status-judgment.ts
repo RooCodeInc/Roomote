@@ -138,7 +138,7 @@ async function loadJudgmentState(sessionId: string): Promise<{
     .limit(1);
   if (!session) return null;
 
-  const [messages, taskRows] = await Promise.all([
+  const [messages, taskRows, activeTaskRows] = await Promise.all([
     session.fastConversationId
       ? db
           .select({
@@ -183,6 +183,19 @@ async function loadJudgmentState(sessionId: string): Promise<{
       )
       .orderBy(tasks.id, desc(taskRuns.id))
       .limit(MAX_TASKS),
+    db
+      .select({ id: tasks.id })
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .where(
+        and(
+          eq(sessionTasks.sessionId, sessionId),
+          isNull(tasks.deletedAt),
+          eq(tasks.visibility, 'visible'),
+          eq(tasks.state, 'active'),
+        ),
+      )
+      .limit(1),
   ]);
 
   const recentMessages = messages.reverse().flatMap((message) => {
@@ -229,7 +242,7 @@ async function loadJudgmentState(sessionId: string): Promise<{
   return {
     state,
     respondingUntil: session.respondingUntil,
-    hasActiveTask: taskRows.some((task) => task.state === 'active'),
+    hasActiveTask: activeTaskRows.length > 0,
     pendingUserInput,
   };
 }

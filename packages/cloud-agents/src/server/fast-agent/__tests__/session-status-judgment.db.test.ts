@@ -161,13 +161,26 @@ describe('processSessionStatusJudgmentBatch', () => {
   it('does not apply a done result while a linked task is active', async () => {
     await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const { session } = await createSession();
-    const task = await taskFactory.create({ state: 'active' });
-    taskIds.push(task.id);
-    await db.insert(sessionTasks).values({
-      sessionId: session.id,
-      taskId: task.id,
-      origin: 'direct_launch',
-    });
+    const childTasks = [];
+    for (let index = 0; index < 13; index += 1) {
+      const task = await taskFactory.create({ state: 'completed' });
+      childTasks.push(task);
+      taskIds.push(task.id);
+    }
+    const activeTask = [...childTasks].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    )[12]!;
+    await db
+      .update(tasks)
+      .set({ state: 'active' })
+      .where(eq(tasks.id, activeTask.id));
+    await db.insert(sessionTasks).values(
+      childTasks.map((task) => ({
+        sessionId: session.id,
+        taskId: task.id,
+        origin: 'direct_launch' as const,
+      })),
+    );
     await db.insert(sessionStatusJudgments).values({
       sessionId: session.id,
       sourceEventId: 'task-event',
