@@ -2,6 +2,55 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.13.0 (2026-09-23)
+
+Roomote 1.13 opens automation Results to everyone, lets you decide which integration tools agents can use, adds GPT-6, Claude Opus 5.5, and Grok 4.7, and makes Sessions easier to manage.
+
+### Highlights
+
+- Automation Results is out of Experimental. Every member gets an inbox of automation reports with short summaries, links to the related work, and suggested next steps.
+- Choose which integration tools agents can use freely, must ask about, or can't use at all, and approve pending calls right from Slack, Discord, or Telegram.
+- GPT-6 Sol and Luna, Claude Opus 5.5, and Grok 4.7 are now available.
+- Rename, stop, and archive Sessions, and delete a queued message before Roomote picks it up.
+
+### Minor changes
+
+- Automation Results is now available to every member, with no Experimental setting to turn on. It works like an inbox: each result has a short summary, the full report, links to related work, and suggested follow-ups. Who can see which results hasn't changed.
+- Set each integration tool to Always allow, Always ask, or Disable for the whole deployment, or set your own policy for a private MCP server. When a call needs approval, allow or deny it from the web Session or directly in Slack, Discord, or Telegram. Tasks now respect those decisions too.
+- Sessions and helper agents can use your connected integrations without extra setup, including ones you connect partway through a Session.
+- New models: GPT-6 Sol and Luna, Claude Opus 5.5, and Grok 4.7. New presets use GPT-6 Luna for coding where it's available; models you already picked stay as they are. If you've connected a ChatGPT subscription, Settings now shows how many credits you have left.
+- Ask a Session to turn on auto-merge for a GitHub pull request. GitHub still enforces your permissions, branch protections, and required checks, and Roomote only reports success after confirming auto-merge is actually on. If someone pushes to the pull request in the meantime, Roomote won't enable it.
+- Rename a Session from its header, stop all of its running tasks (you can resume them later), or archive it. Archived Sessions and their tasks stay out of lists and search until you restore them.
+- Admins can turn on Task communication triage. Delegated tasks then stop posting routine updates to the parent Session and speak up only for blockers, changed plans, important decisions, milestones, or work going off track.
+- With a judgment model configured, Roomote saves lasting preferences, decisions, and corrections to Memory on its own when the agent didn't. A note in the transcript shows what was saved. Private, sensitive, and duplicate content is skipped.
+- Attach an R analysis request and Roomote can set up a reusable analysis environment for it, with pinned CRAN and Bioconductor packages, so later tasks start from the same setup.
+- Agents can open a text file that another task or Session produced by naming the task and the file path, instead of guessing an artifact ID.
+- Self-hosted deployments can run judgments against their own model endpoint by setting `R_JUDGMENT_UPSTREAM_URL`. It appears in Settings > Models as "Roomote judgment model".
+
+### Patch changes
+
+- In Slack and Discord Session threads, people can keep talking to Roomote without @mentioning it every time. With a judgment model (Slack, Discord, and Teams), Roomote replies only when a message is meant for it and stays quiet when people are talking to each other or just saying thanks. Messages from people who haven't linked their account are never sent to the model. Without a judgment model, routing works as before.
+- When a provider says you're out of credits (a ChatGPT usage limit, OpenAI quota, Anthropic spend limit, or OpenRouter credit limit), Sessions and tasks stop and tell you, instead of retrying over and over. Ordinary rate limits still retry. You can also save a key for an account that's out of credits; you'll get a warning instead of an error.
+- Messages sent to a task while it was still starting now get through. Before, only the first one was queued and every later message was lost.
+- Session replies start faster, because Roomote no longer re-fetches every repository's skills before each turn. Sessions can also find repository and environment skills without being told where to look.
+- After you edit an environment, its snapshot rebuilds within a few minutes, so tasks launch quickly again instead of running full setup until the next day.
+- Queued messages now sit inside the composer, and you can delete one until Roomote picks it up. Messages delivered mid-turn no longer look stuck in the queue.
+- When you ask for a specific model for a delegated task, or an admin routing rule applies, Roomote uses it. Model names that only appear in pasted text are no longer treated as a request.
+- Starting and retrying work is more reliable. Retry works for tasks launched from a Session (it used to fail with "Failed query"), retrying after a canceled retry starts a fresh attempt, manual task reconnection works again, slow startups get more time, and tasks whose branch was deleted finish cleanly instead of hanging. Start failures now show as a small row with a Retry button, and startup errors about integration keys say what actually went wrong. Thanks to @parland for contributing the startup fix.
+- Tasks no longer fail to start when your GitHub repositories span more than one GitHub App installation, and GitLab-only environments and Blank slates aren't blocked by it either. Thanks to @pridemusvaire for contributing this fix.
+- If you use Auto tool approvals, risky calls now ask the Session owner and are blocked when nobody can answer. Auto also takes your latest request into account when deciding.
+- When an integration's sign-in is revoked, Roomote shows a Reconnect prompt and stops retrying the rejected credentials. A late, failed refresh no longer overwrites newer credentials.
+- Voice messages and audio attachments work with newly released models and custom OpenAI-compatible providers, instead of failing with "no configured model supports audio input".
+- Oversized attachments are caught before you send, with a message naming the file and the limit. Your prompt and attachments stay in place.
+- Automated scans no longer post progress before results are ready, and clean runs don't briefly appear in the Results inbox. Suggest Ideas and Summarize Merged PRs can have their own report destination even without a deployment-wide default.
+- Slack replies keep their task-status footer after streaming, and Discord shows Markdown tables as tables.
+- Session filters no longer block the rest of the page while open.
+- Self-hosted Docker Compose deployments now pass the DeepSeek API key through, so DeepSeek Sessions and tasks can sign in.
+- Old links to Settings > Integrations now open the Integrations page, and setup guidance points to the right Settings pages.
+- Code reviews look harder at removed behavior, callers, and alternate paths, and check each finding against a concrete failure before posting it.
+- Task activity shows command exit codes and missing file names, and pull request comment reads include brand-new inline review comments.
+- Operators can set `R_JUDGMENT_CAPTURE=on` to save answered judgment decisions, with credentials and personal data scrubbed, to their own artifact bucket for building a training set. It's off by default.
+
 ## 1.12.4 (2026-09-20)
 
 Roomote 1.12.4 adds first-class DeepSeek connectivity with recommended Flash and Pro models for every agent role.
