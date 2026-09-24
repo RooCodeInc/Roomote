@@ -61,7 +61,7 @@ describe('JudgmentModelRow', () => {
     expect(screen.getByText('Judgment model')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Makes quick routing and triage decisions (which channel messages start work, which skill or tool fits, whether a reply is for Roomote). Anything it is unsure about falls back to the helper model.',
+        'Makes quick routing and triage decisions (which channel messages start work, whether a reply is for Roomote, what is worth remembering). Anything it is unsure about falls back to the helper model.',
       ),
     ).toBeInTheDocument();
     expect(

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { toast } from 'sonner';
 import {
   isJudgmentModelSelection,
@@ -22,11 +23,13 @@ import {
 } from '@/components/system';
 import { useJudgmentModelSettings } from '@/hooks/task-models/useJudgmentModelSettings';
 import { useSetJudgmentModelSelection } from '@/hooks/task-models/useSetJudgmentModelSelection';
+import { SETTINGS_PATHS } from '@/lib/settings';
 
 const JUDGMENT_MODEL_LABEL = 'Judgment model';
+const JUDGMENT_DECISIONS_PATH = `${SETTINGS_PATHS.models}/decisions`;
 
 const JUDGMENT_MODEL_DESCRIPTION =
-  'Makes quick routing and triage decisions (which channel messages start work, which skill or tool fits, whether a reply is for Roomote). Anything it is unsure about falls back to the helper model.';
+  'Makes quick routing and triage decisions (which channel messages start work, whether a reply is for Roomote, what is worth remembering). Anything it is unsure about falls back to the helper model.';
 
 const MISSING_PROVIDER_HINTS: Record<
   Exclude<JudgmentModelSelection, 'off'>,
@@ -179,6 +182,15 @@ export function JudgmentModelRow() {
             </Select>
             {unusableMessage ? (
               <p className="text-xs text-destructive">{unusableMessage}</p>
+            ) : null}
+            {settings.effectiveSelection !== 'off' &&
+            settings.effectiveSelectionUsable ? (
+              <Link
+                href={JUDGMENT_DECISIONS_PATH}
+                className="inline-block text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              >
+                Test decisions
+              </Link>
             ) : null}
           </>
         )}

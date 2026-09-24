@@ -510,6 +510,11 @@ import {
   setJudgmentModelSelectionCommand,
 } from '../commands/task-models/judgment-model';
 import {
+  getJudgmentDecisionCatalogCommand,
+  judgmentDecisionTestSchema,
+  testJudgmentDecisionCommand,
+} from '../commands/task-models/judgment-decision-tester';
+import {
   disconnectChatGptSubscriptionCommand,
   getChatGptSubscriptionStatusCommand,
   isChatGptSubscriptionConnectedCommand,
@@ -2619,6 +2624,17 @@ export const appRouter = createRouter({
         .input(z.object({ selection: z.enum(JUDGMENT_MODEL_SELECTIONS) }))
         .mutation(({ ctx: { auth }, input }) =>
           setJudgmentModelSelectionCommand(auth, input),
+        ),
+
+      // Settings > Models > Test decisions (admin only).
+      decisionCatalog: protectedProcedure.query(({ ctx: { auth } }) =>
+        getJudgmentDecisionCatalogCommand(auth),
+      ),
+
+      testDecision: protectedProcedure
+        .input(judgmentDecisionTestSchema)
+        .mutation(({ ctx: { auth }, input }) =>
+          testJudgmentDecisionCommand(auth, input),
         ),
     }),
 
