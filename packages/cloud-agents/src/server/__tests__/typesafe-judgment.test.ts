@@ -51,7 +51,6 @@ import {
   resetDecisionModelCache,
   resolveDecisionModel,
   resetJudgmentBackendCache,
-  scoreTypeSafeRelevance,
 } from '../typesafe-judgment';
 
 const questions = {
@@ -1002,53 +1001,5 @@ describe('evaluateTypeSafeJudgments', () => {
     ).resolves.toEqual({
       severity: { type: 'score', score: 1.4, confidence: 0.7 },
     });
-  });
-
-  it('scores relevance across parallel batches keyed by candidate id', async () => {
-    const candidates = Array.from({ length: 70 }, (_, index) => ({
-      id: `tool-${index}`,
-      text: `Tool ${index}`,
-    }));
-    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(init.body as string) as {
-        state: { candidates: Record<string, string> };
-      };
-      return new Response(
-        JSON.stringify({
-          answers: Object.fromEntries(
-            Object.entries(body.state.candidates).map(([key, text]) => [
-              key,
-              { type: 'noul', noul: Number(text.split(' ')[1]) / 100 },
-            ]),
-          ),
-        }),
-      );
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const scores = await scoreTypeSafeRelevance({
-      query: 'file a bug',
-      candidateKind: 'integration tool',
-      relevanceQuestion: 'Would this tool help?',
-      candidates,
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(scores?.get('tool-0')).toBe(0);
-    expect(scores?.get('tool-69')).toBe(0.69);
-    expect(scores?.size).toBe(70);
-  });
-
-  it('returns null from relevance scoring when no judgment model is configured', async () => {
-    mockKeys({});
-
-    await expect(
-      scoreTypeSafeRelevance({
-        query: 'q',
-        candidateKind: 'skill',
-        relevanceQuestion: 'Relevant?',
-        candidates: [{ id: 'a', text: 'A' }],
-      }),
-    ).resolves.toBeNull();
   });
 });
