@@ -48,12 +48,16 @@
 # - The api service must be publicly reachable: hosted sandboxes workers and
 #   GitHub webhooks call `TRPC_URL` directly.
 # - All published images are public on GHCR: Railway pulls roomote-app and
-#   roomote-gbrain, and hosted-sandbox builders pull roomote-worker,
+#   roomote-gbrain (and roomote-judgment), and hosted-sandbox builders pull roomote-worker,
 #   anonymously, so no registry credentials are needed.
 # - The Brain (gbrain service) is optional and inert until
 #   a Brain provider key is filled in on api. It has no public domain:
 #   agents reach it only through the api proxy with their run token, and
 #   Railway private networking is IPv6-only, hence GBRAIN_BIND=::.
+# - The CPU decision model (judgment service) is optional and inert until
+#   R_JUDGMENT_UPSTREAM_URL on api points at it. Until then it idles without
+#   loading its model (JUDGMENT_PRELOAD=false), and it binds :: for the same
+#   IPv6-only private network.
 # - R_APP_URL on api is the single canonical-origin knob; the other
 #   app services reference ${{api.R_APP_URL}}. Note api's own value
 #   is itself a reference (https://${{web.RAILWAY_PUBLIC_DOMAIN}}), so this
@@ -100,6 +104,7 @@ image:
   # app: ghcr.io/roocodeinc/roomote-app:develop # develop-channel template
   worker: derived # ghcr.io/roocodeinc/roomote-worker:<baked RELEASE_VERSION>, resolved by the app
   gbrain: ghcr.io/roocodeinc/roomote-gbrain:main # the Brain; same channel as app
+  judgment: ghcr.io/roocodeinc/roomote-judgment:main # CPU decision model; same channel as app
 
 # The api service anchors every shared value. Other app services reference
 # them with `${{api.NAME}}`.
@@ -159,6 +164,29 @@ services:
       daily plus weekly Railway backups; deleting it is recoverable (task
       history and integration sources re-ingest) but not free. Delete this
       service entirely if the deployment should have no memory.
+
+  judgment:
+    image: judgment
+    public_domain: no # private network only; Roomote's app services call it
+    volume: /models # model download cache
+    env:
+      # Railway's private network is IPv6-only.
+      JUDGMENT_BIND: '::'
+      # Idle without the model until the first decision, so a deployment that
+      # never switches it on pays for a small container only.
+      JUDGMENT_PRELOAD: 'false'
+      # Inference threads. Railway reports the host's cores, not a limit, so
+      # this is set explicitly; raise it with the service's vCPU allowance.
+      JUDGMENT_THREADS: '4'
+    notes: >
+      Optional CPU decision model for routing and triage decisions (the Memory
+      check, reply addressing, task updates, delegated-task model choice). It
+      serves roomote/roomote-judgment-gliner, a public GLiNER 2.5 model
+      fine-tuned on Roomote's decisions, and stays unused until
+      R_JUDGMENT_UPSTREAM_URL on api points at it (see "Enabling the decision
+      model" in README.md). Idle it uses about 250 MB; once switched on, about
+      1.5 GB. Tool-call auto-approval still requires Jev. Delete this service
+      if the deployment should not run one.
 
   api:
     image: app
@@ -221,6 +249,11 @@ services:
       # service as its bootstrap token; gbrain requires >= 32 characters of
       # [A-Za-z0-9_-], so keep the generated form.
       R_GBRAIN_ADMIN_TOKEN: ${{secret(48)}}
+      # The CPU decision model's on switch. Leave empty and the judgment
+      # service idles unused. Set it to
+      # http://${{judgment.RAILWAY_PRIVATE_DOMAIN}}:8080 to use it for routing
+      # and triage decisions; a TypeSafe key in Settings still selects Jev.
+      R_JUDGMENT_UPSTREAM_URL: ''
       R_PING_BASE_URL: https://ping.roomote.dev # anonymous-analytics / version-check pings
       R_INSTANCE_ID: '' # optional deterministic Ping instance identity
       DEFAULT_COMPUTE_PROVIDER: modal
@@ -262,6 +295,7 @@ services:
       R_BRAIN_EMBEDDING_MODEL: ${{api.R_BRAIN_EMBEDDING_MODEL}}
       R_GBRAIN_URL: ${{api.R_GBRAIN_URL}}
       R_GBRAIN_ADMIN_TOKEN: ${{api.R_GBRAIN_ADMIN_TOKEN}}
+      R_JUDGMENT_UPSTREAM_URL: ${{api.R_JUDGMENT_UPSTREAM_URL}}
       R_APP_ENV: ${{api.R_APP_ENV}}
       ROOMOTE_DOCKER_LOAD_ENV_FILE: ${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
       R_AUTO_GENERATE_KEYS: ${{api.R_AUTO_GENERATE_KEYS}}

@@ -150,6 +150,7 @@ deliberately, ideally right after a disk backup.
 | `roomote-redis`      | Key Value | Render managed (Redis API)   | no (empty `ipAllowList`)  | managed              |
 | `roomote-minio`      | web       | `roomote-minio` + disk `/data` | yes (routed to port 9000) | `/minio/health/live` |
 | `roomote-gbrain`     | pserv     | `roomote-gbrain:main` + disk `/data` | no (private network only) | —                    |
+| `roomote-judgment`   | pserv     | `roomote-judgment:main`      | no (private network only) | —                    |
 | `roomote-api`        | web       | `roomote-app:main`           | yes                       | `/health/liveness`   |
 | `roomote-web`        | web       | `roomote-app:main`           | yes                       | `/health`            |
 | `roomote-controller` | worker    | `roomote-app:main`           | no                        | —                    |
@@ -408,6 +409,32 @@ Two operational notes:
 
 Deployments that want no memory at all can delete `roomote-gbrain` from the
 Blueprint; the app services treat the missing reference as Memory-off.
+
+## Enabling the decision model (optional)
+
+Roomote asks a decision model small typed questions: whether a turn is worth
+saving to Memory, who an unmentioned thread reply is for, when a running task
+has news for the user, which model a delegated task should use. With a
+TypeSafe key in **Settings → Models**, Jev answers them. Without one, the
+`roomote-judgment` private service can: it runs
+`roomote/roomote-judgment-gliner`, a public GLiNER 2.5 model fine-tuned on
+Roomote's decisions, on CPU inside your Render workspace.
+
+The Blueprint creates it on the starter plan, idle and without its model
+loaded. To switch it on:
+
+1. Change `roomote-judgment` to the **standard** plan or larger (it uses
+   about 1.5 GB once the model is loaded) and set its `JUDGMENT_THREADS` to
+   the plan's CPU count.
+2. In the `roomote-shared` environment group, set `R_JUDGMENT_UPSTREAM_URL`
+   to `http://<internal address>` using the internal address on the
+   `roomote-judgment` service page (port 8080).
+
+The app services pick it up on their next deploy. The first decisions load
+the model (about 15 seconds, during which they fall back to Roomote's
+behavior without a decision model). Decisions run one at a time, so more
+CPUs make each one faster. Tool-call auto-approval still requires Jev.
+Deployments that will never use it can delete the service.
 
 ## Upgrades, backups, and costs
 

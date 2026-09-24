@@ -21,6 +21,10 @@ Environment:
   JUDGMENT_API_KEY    Bearer token callers must send; unset for a private
                       network where only Roomote can reach the sidecar.
   JUDGMENT_THREADS    CPU threads for inference (default: all cores).
+  JUDGMENT_DEVICE     `cpu` (default) or `cuda` on a host with an NVIDIA GPU.
+  JUDGMENT_PRELOAD    `false` loads the model on the first decision instead of at
+                      startup, so a sidecar deployed but not yet switched on
+                      idles without it (default: `true`).
 """
 
 from __future__ import annotations
@@ -53,11 +57,22 @@ RESERVED = {"[P]": "P", "[L]": "L", "[C]": "C", "[E]": "E", "[R]": "R", "[DESCRI
             "[EXAMPLE]": "EXAMPLE", "[OUTPUT]": "OUTPUT", "(": ", ", ")": ", "}
 
 torch.set_num_threads(int(os.environ.get("JUDGMENT_THREADS") or os.cpu_count() or 1))
-classifier = Classifier.from_pretrained(MODEL, map_location="cpu")
 # Inference is CPU-bound: requests take turns rather than splitting the cores
-# (and the memory) between them.
+# (and the memory) between them. The same lock guards the first load.
 inference_lock = threading.Lock()
+_classifier: Classifier | None = None
 app = FastAPI()
+
+
+def classifier() -> Classifier:
+    global _classifier
+    if _classifier is None:
+        _classifier = Classifier.from_pretrained(MODEL, map_location=os.environ.get("JUDGMENT_DEVICE") or "cpu")
+    return _classifier
+
+
+if os.environ.get("JUDGMENT_PRELOAD", "true").strip().lower() != "false":
+    classifier()
 
 
 def clean(text: str, limit: int) -> str:
@@ -136,7 +151,7 @@ def decide(state, questions: dict) -> dict:
         names[qid] = name
         schema = schema.single(name, labels, instruction=instruction)
     with torch.inference_mode():
-        result = classifier.classify(text_of(state), schema).to_dict()
+        result = classifier().classify(text_of(state), schema).to_dict()
     return {qid: answer(question, result[names[qid]]["probabilities"]) for qid, question in questions.items()}
 
 

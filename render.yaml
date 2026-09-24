@@ -178,6 +178,26 @@ services:
       - key: GBRAIN_ADMIN_BOOTSTRAP_TOKEN
         sync: false
 
+  # Optional CPU decision model for routing and triage decisions. A private
+  # service, inert until R_JUDGMENT_UPSTREAM_URL in the roomote-shared group
+  # points at it (see deploy/render/README.md); until then it idles without
+  # loading its model. The starter plan fits the idle state only: move it to
+  # standard (2 GB) or larger, and match JUDGMENT_THREADS to the plan's CPUs,
+  # when switching it on.
+  - type: pserv
+    name: roomote-judgment
+    runtime: image
+    image:
+      url: ghcr.io/roocodeinc/roomote-judgment:main
+    plan: starter
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: JUDGMENT_PRELOAD
+        value: 'false'
+      - key: JUDGMENT_THREADS
+        value: '1'
+
   - type: web
     name: roomote-api
     runtime: image
@@ -398,6 +418,12 @@ envVarGroups:
         value: roomote
       - key: S3_REGION
         value: us-east-1
+      # The CPU decision model's on switch. Leave blank and roomote-judgment
+      # idles unused. Set it to http://<roomote-judgment internal address>
+      # (shown on that service's page, port 8080) to use it for routing and
+      # triage decisions; a TypeSafe key in Settings still selects Jev.
+      - key: R_JUDGMENT_UPSTREAM_URL
+        value: ''
       - key: S3_BUCKET_ARTIFACTS
         value: roomote-artifacts
       - key: S3_AUTO_CREATE_BUCKET

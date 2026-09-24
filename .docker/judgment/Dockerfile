@@ -23,5 +23,6 @@ COPY --chown=judgment server.py .
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=180s \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4)"
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+  CMD python -c "import os, urllib.request; host = '[::1]' if ':' in os.environ.get('JUDGMENT_BIND', '') else '127.0.0.1'; urllib.request.urlopen(f'http://{host}:8080/health', timeout=4)"
+# JUDGMENT_BIND=:: listens on IPv6 too, for IPv6-only private networks (Railway).
+CMD ["sh", "-c", "exec uvicorn server:app --host \"${JUDGMENT_BIND:-0.0.0.0}\" --port 8080 --workers 1"]

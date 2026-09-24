@@ -112,6 +112,7 @@ follow the image.
 | `Redis`         | Railway managed Redis          | —                                                  | no                         | managed            |
 | `minio`         | pinned `roomote-minio` + `/data` | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000) | —                  |
 | `gbrain`        | `roomote-gbrain:<channel>` + `/data` | image entrypoint                               | no                         | `/health`          |
+| `judgment`      | `roomote-judgment:<channel>` + `/models` | image entrypoint                           | no                         | `/health`          |
 | `web`           | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh web`           | yes (HTTP proxy port 8080) | `/health`          |
 | `api`           | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh api`           | yes (HTTP proxy port 8080) | `/health/liveness` |
 | `controller`    | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh controller`    | no                         | —                  |
@@ -439,6 +440,33 @@ Two operational notes:
   `R_BRAIN_EMBEDDING_DIMENSIONS`) before first boot or not at all. A later
   change is ignored and reported in Memory's logs rather than silently
   applied.
+
+## Enabling the decision model (optional)
+
+Roomote asks a decision model small typed questions: whether a turn is worth
+saving to Memory, who an unmentioned thread reply is for, when a running task
+has news for the user, which model a delegated task should use. With a
+TypeSafe key in **Settings → Models**, Jev answers them. Without one, the
+`judgment` service can: it runs `roomote/roomote-judgment-gliner`, a public
+GLiNER 2.5 model fine-tuned on Roomote's decisions, on CPU inside the project.
+
+The service is part of the template and idles without loading its model. One
+variable on **api** turns it on:
+
+```
+R_JUDGMENT_UPSTREAM_URL=http://${{judgment.RAILWAY_PRIVATE_DOMAIN}}:8080
+```
+
+The other app services reference api's value, so they pick it up on their
+next deploy. The first decisions after that load the model (about 15 seconds,
+during which those decisions fall back to Roomote's behavior without a
+decision model); after that the service uses about 1.5 GB. It is reachable
+only over Railway's private network. Tool-call auto-approval still requires
+Jev. Deployments that will never use it can delete the `judgment` service.
+
+`JUDGMENT_THREADS` (default `4`) sets the inference threads; raise it with
+the service's vCPU allowance for faster decisions. Decisions run one at a
+time, so bursts queue.
 
 ## Upgrades, backups, and costs
 
