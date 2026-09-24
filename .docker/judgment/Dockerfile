@@ -12,6 +12,9 @@ ENV PYTHONUNBUFFERED=1 \
 RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.8.0" \
   && pip install "gliner2[local]==2.0.0" "fastapi==0.118.0" "uvicorn==0.37.0" protobuf sentencepiece
 
+# /models holds the Hugging Face cache. Docker initializes an empty named
+# volume mounted there from this directory, ownership included, so the
+# compose volume starts out writable by this user.
 RUN useradd --create-home --uid 10001 judgment \
   && mkdir -p /models && chown judgment /models
 USER judgment
