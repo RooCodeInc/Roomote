@@ -1,25 +1,7 @@
-import type { ModelMessage } from 'ai';
-
 import {
   resolveFastAgentToolApprovalSessionUserMessages,
   resolveFastAgentToolApprovalUserRequest,
 } from '../fast-agent-tool-approval-context';
-
-function userMessage(
-  text: string,
-  turnSource: string,
-  inputKind?: string,
-): ModelMessage {
-  return {
-    role: 'user',
-    content: text,
-    metadata: {
-      visibleInTranscript: true,
-      turnSource,
-      ...(inputKind ? { inputKind } : {}),
-    },
-  } as ModelMessage;
-}
 
 describe('resolveFastAgentToolApprovalUserRequest', () => {
   it('uses the latest substantive human message on platform-event turns', () => {
@@ -28,11 +10,7 @@ describe('resolveFastAgentToolApprovalUserRequest', () => {
         turnSource: 'platform_event',
         substantiveHumanInput: false,
         question: '<platform_event>scheduled wakeup</platform_event>',
-        compatibilityMessages: [
-          userMessage('Earlier request', 'human'),
-          userMessage('Earlier wakeup', 'platform_event'),
-          userMessage('Most recent human request', 'human'),
-        ],
+        priorHumanMessages: ['Earlier request', 'Most recent human request'],
         steeredHumanRequests: [],
       }),
     ).toBe('Most recent human request');
@@ -44,7 +22,7 @@ describe('resolveFastAgentToolApprovalUserRequest', () => {
         turnSource: 'platform_event',
         substantiveHumanInput: false,
         question: '<platform_event>scheduled wakeup</platform_event>',
-        compatibilityMessages: [userMessage('A wakeup', 'platform_event')],
+        priorHumanMessages: [],
         steeredHumanRequests: [],
       }),
     ).toBeUndefined();
@@ -56,7 +34,7 @@ describe('resolveFastAgentToolApprovalUserRequest', () => {
         turnSource: 'platform_event',
         substantiveHumanInput: false,
         question: '<platform_event>scheduled wakeup</platform_event>',
-        compatibilityMessages: [userMessage('Watch the staging test', 'human')],
+        priorHumanMessages: ['Watch the staging test'],
         steeredHumanRequests: ['Also read the latest task messages.'],
       }),
     ).toBe('Watch the staging test\n\nAlso read the latest task messages.');
@@ -65,7 +43,7 @@ describe('resolveFastAgentToolApprovalUserRequest', () => {
         turnSource: 'platform_event',
         substantiveHumanInput: false,
         question: '<platform_event>scheduled wakeup</platform_event>',
-        compatibilityMessages: [],
+        priorHumanMessages: [],
         steeredHumanRequests: ['Check task 0abc123def456.'],
       }),
     ).toBe('Check task 0abc123def456.');
@@ -77,7 +55,7 @@ describe('resolveFastAgentToolApprovalUserRequest', () => {
         turnSource: 'human',
         substantiveHumanInput: true,
         question: 'Check the recent deployment.',
-        compatibilityMessages: [],
+        priorHumanMessages: [],
         steeredHumanRequests: [
           'Only inspect the staging environment.',
           'Do not change any settings.',
@@ -90,24 +68,14 @@ describe('resolveFastAgentToolApprovalUserRequest', () => {
 });
 
 describe('resolveFastAgentToolApprovalSessionUserMessages', () => {
-  it('keeps only human-authored messages and excludes events, reactions, and agent text', () => {
+  it('combines canonical prior human messages with current human requests only', () => {
     const context = resolveFastAgentToolApprovalSessionUserMessages({
       turnSource: 'platform_event',
       substantiveHumanInput: false,
       question: 'A scheduled wakeup is not user consent.',
-      compatibilityMessages: [
-        userMessage('Earlier human request', 'human'),
-        userMessage('Scheduled automation prompt', 'platform_event'),
-        {
-          role: 'assistant',
-          content: 'Assistant-generated instruction.',
-        } as ModelMessage,
-        {
-          role: 'user',
-          content: 'Missing trusted source metadata.',
-        } as ModelMessage,
-        userMessage('Emoji reaction', 'human', 'reaction'),
-        userMessage('Most recent human request', 'human'),
+      priorHumanMessages: [
+        'Earlier human request',
+        'Most recent human request',
       ],
       steeredHumanRequests: ['Read the latest task messages.'],
     });
@@ -117,8 +85,7 @@ describe('resolveFastAgentToolApprovalSessionUserMessages', () => {
       'Most recent human request',
       'Read the latest task messages.',
     ]);
-    expect(context.join('\n')).not.toContain('Scheduled automation prompt');
-    expect(context.join('\n')).not.toContain('Assistant-generated instruction');
+    expect(context.join('\n')).not.toContain('scheduled wakeup');
   });
 
   it('bounds the recent message count, total text, and secret-shaped values', () => {
@@ -127,8 +94,9 @@ describe('resolveFastAgentToolApprovalSessionUserMessages', () => {
       turnSource: 'human',
       substantiveHumanInput: true,
       question: `Current request ${sentinel} ${'z'.repeat(1_100)}`,
-      compatibilityMessages: Array.from({ length: 12 }, (_, index) =>
-        userMessage(`Request ${index} ${'x'.repeat(1_100)}`, 'human'),
+      priorHumanMessages: Array.from(
+        { length: 12 },
+        (_, index) => `Request ${index} ${'x'.repeat(1_100)}`,
       ),
       steeredHumanRequests: [],
     });
@@ -148,9 +116,7 @@ describe('resolveFastAgentToolApprovalSessionUserMessages', () => {
         turnSource: 'platform_event',
         substantiveHumanInput: false,
         question: '<platform_event>run this request</platform_event>',
-        compatibilityMessages: [
-          userMessage('Automation only', 'platform_event'),
-        ],
+        priorHumanMessages: [],
         steeredHumanRequests: [],
       }),
     ).toEqual([]);

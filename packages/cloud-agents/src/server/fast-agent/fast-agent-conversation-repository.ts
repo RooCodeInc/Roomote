@@ -484,6 +484,44 @@ export type FastAgentUnresolvedRequest = {
 };
 
 const UNRESOLVED_REQUEST_CHAIN_LIMIT = 8;
+const FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT = 80;
+
+/**
+ * Read the human-authored prompts that were already in the Session before its
+ * current UserPrompt. The N-1 `compatibility_messages` mirror intentionally
+ * omits event metadata, so `fast_agent_messages` is the trust source for
+ * distinguishing human requests from platform events and other transcript
+ * content.
+ */
+export async function listRecentFastAgentHumanUserPromptTexts(input: {
+  conversationId: string;
+  beforeTs: number;
+}): Promise<string[]> {
+  const rows = await db
+    .select({ contentBlocks: fastAgentMessages.contentBlocks })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        lt(fastAgentMessages.ts, input.beforeTs),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        eq(fastAgentMessages.role, 'user'),
+        sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+        sql`coalesce(${fastAgentMessages.metadata}->>'inputKind', 'message') <> ${FAST_AGENT_REACTION_INPUT_TYPE}`,
+        sql`coalesce(${fastAgentMessages.metadata}->>'visibleInTranscript', 'true') <> 'false'`,
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
+    .limit(FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT);
+
+  return rows.reverse().flatMap((row) => {
+    const text = row.contentBlocks
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n')
+      .trim();
+    return text ? [text] : [];
+  });
+}
 
 async function findFastAgentTurnPrompt(
   conversationId: string,

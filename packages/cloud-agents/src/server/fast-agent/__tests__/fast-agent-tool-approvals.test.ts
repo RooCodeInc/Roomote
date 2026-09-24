@@ -904,14 +904,18 @@ describe('tool approval bridge', () => {
       surface: 'slack',
       integrations: readOnlyIntegration,
       autoToolKeys: new Set([JSON.stringify(['mock-slack', 'read_channel'])]),
-      resolveUserRequest: () =>
+      resolveUserRequest: async () =>
         resolveFastAgentToolApprovalUserRequest({
           turnSource: 'human',
           substantiveHumanInput: true,
           question,
-          compatibilityMessages: [],
+          priorHumanMessages: [],
           steeredHumanRequests,
         }),
+      resolveSessionUserMessages: async () => [
+        question,
+        ...steeredHumanRequests,
+      ],
     });
 
     // This mirrors a native steer being accepted after the bridge already exists.
@@ -937,6 +941,13 @@ describe('tool approval bridge', () => {
         integrationId: 'mock-slack',
         toolName: 'read_channel',
         userRequest: `${question}\n\nRead #release-notes before answering.`,
+        sessionContext: {
+          recentUserMessages: [
+            question,
+            'Read #release-notes before answering.',
+          ],
+          explicitApprovalOutcomes: [],
+        },
       }),
     );
   });
@@ -1464,6 +1475,7 @@ describe('tool approval bridge', () => {
     }).handleAsk(ask, helperMocks);
     await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalled());
     expect(resolveIntegrationToolAutoDecision).not.toHaveBeenCalled();
+    expect(listRecentIntegrationToolApprovalOutcomes).not.toHaveBeenCalled();
     expect(insertIntegrationToolApproval).toHaveBeenCalled();
   });
 

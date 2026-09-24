@@ -1,59 +1,24 @@
-import type { ModelMessage } from 'ai';
 import { boundIntegrationToolReadContent } from '@roomote/types';
 
-import {
-  FAST_AGENT_REACTION_INPUT_TYPE,
-  type FastAgentTurnSource,
-} from './fast-agent-conversation';
+import type { FastAgentTurnSource } from './fast-agent-conversation';
 
-const MAX_HISTORY_MESSAGES_TO_SCAN = 80;
 const MAX_SESSION_USER_MESSAGES = 8;
 const MAX_SESSION_USER_MESSAGE_LENGTH = 1_500;
 const MAX_SESSION_USER_CONTEXT_LENGTH = 6_000;
 
-function substantiveHumanMessageText(
-  message: ModelMessage,
-): string | undefined {
-  if (message.role !== 'user') return undefined;
-  const metadata = (message as { metadata?: unknown }).metadata;
-  if (
-    !metadata ||
-    typeof metadata !== 'object' ||
-    (metadata as Record<string, unknown>).turnSource !== 'human' ||
-    (metadata as Record<string, unknown>).inputKind ===
-      FAST_AGENT_REACTION_INPUT_TYPE
-  ) {
-    return undefined;
-  }
-
-  const text =
-    typeof message.content === 'string'
-      ? message.content
-      : message.content
-          .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-          .join('\n');
-  const trimmed = text.trim();
-  return trimmed || undefined;
-}
-
 /**
- * Bounded human-authored context for one Session's Auto judgment. Assistant,
- * tool, platform-event, and reaction messages are not user consent and are
- * omitted. Newest messages win when either cap is reached.
+ * `priorHumanMessages` must come from canonical UserPrompt event rows filtered
+ * by their server-stamped metadata. The N-1 compatibility mirror has no such
+ * provenance and is not a valid source for approval context.
  */
 export function resolveFastAgentToolApprovalSessionUserMessages(input: {
   turnSource: FastAgentTurnSource;
   substantiveHumanInput: boolean;
   question: string;
-  compatibilityMessages: ModelMessage[];
+  priorHumanMessages: readonly string[];
   steeredHumanRequests: string[];
 }): string[] {
-  const history = input.compatibilityMessages
-    .slice(-MAX_HISTORY_MESSAGES_TO_SCAN)
-    .flatMap((message) => {
-      const text = substantiveHumanMessageText(message);
-      return text ? [text] : [];
-    });
+  const history = input.priorHumanMessages.slice(-80);
   const currentUserMessages = [
     ...(input.turnSource !== 'platform_event' && input.substantiveHumanInput
       ? [input.question]
@@ -86,23 +51,19 @@ export function resolveFastAgentToolApprovalUserRequest(input: {
   turnSource: FastAgentTurnSource;
   substantiveHumanInput: boolean;
   question: string;
-  compatibilityMessages: ModelMessage[];
+  priorHumanMessages: readonly string[];
   steeredHumanRequests: string[];
 }): string | undefined {
   if (input.turnSource === 'platform_event') {
-    // The event text is not a request; the latest human message is, plus
-    // any human follow-up steered into this turn.
-    let latestHumanRequest: string | undefined;
-    for (
-      let index = input.compatibilityMessages.length - 1;
-      index >= 0 && !latestHumanRequest;
-      index -= 1
-    ) {
-      latestHumanRequest = substantiveHumanMessageText(
-        input.compatibilityMessages[index]!,
-      );
-    }
-    return joinRequests([latestHumanRequest, ...input.steeredHumanRequests]);
+    // Platform event text is not a human request. Use the newest prior prompt
+    // selected from the canonical event log, plus any live human steers.
+    const latestHumanRequest = input.priorHumanMessages.at(-1);
+    return joinRequests([
+      latestHumanRequest
+        ? boundIntegrationToolReadContent(latestHumanRequest)
+        : undefined,
+      ...input.steeredHumanRequests,
+    ]);
   }
 
   if (!input.substantiveHumanInput) return undefined;
