@@ -3,7 +3,6 @@ import {
   isDeploymentExperimentEnabled,
   recordIntegrationToolShadowEvaluation,
 } from '@roomote/db/server';
-import { Env, isEnvFlagEnabled } from '@roomote/env';
 import type {
   IntegrationToolAutoEvaluation,
   IntegrationToolAutoSettings,
@@ -368,11 +367,16 @@ export type IntegrationToolAutoState = {
 };
 
 export async function resolveIntegrationToolAutoState(): Promise<IntegrationToolAutoState> {
-  const [enabled, settings] = await Promise.all([
+  // Some callers import this module only for the Jev requirements; defer Env
+  // initialization until the Auto state is actually resolved.
+  const [enabled, settings, nightlyExperimentsEnabled] = await Promise.all([
     isDeploymentExperimentEnabled('integrationToolAutoApprovals'),
     getIntegrationToolAutoSettings(),
+    import('@roomote/env').then(({ Env, isEnvFlagEnabled }) =>
+      isEnvFlagEnabled(Env.R_NIGHTLY_EXPERIMENTS_ENABLED),
+    ),
   ]);
-  if (!isEnvFlagEnabled(Env.R_NIGHTLY_EXPERIMENTS_ENABLED) || !enabled) {
+  if (!nightlyExperimentsEnabled || !enabled) {
     return { mode: 'off', settings, model: null };
   }
 
