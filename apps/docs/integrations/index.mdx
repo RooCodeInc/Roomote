@@ -74,6 +74,11 @@ integration's tools:
   automation started, cannot run the tool.
 - **Disable**: the tool is hidden from Roomote and refused if called directly.
 
+For approval requests sent to Slack, Discord, or Telegram, the session owner
+can allow the call once, allow that tool for the rest of the session, or deny
+the call directly from the conversation. An approval that another surface has
+already handled is no longer available.
+
 Tools are grouped into read-only and write/delete tools when the integration
 describes them, and each group can be set in one click. Choices apply to the
 whole deployment from the next session turn. In a session, the owner can also
