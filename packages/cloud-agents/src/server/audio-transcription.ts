@@ -74,7 +74,8 @@ export function formatAudioAttachmentWarning(
   filename: string,
   reason: string,
 ): string {
-  return `[Audio attachment "${filename}" ${reason}.]`;
+  const normalizedReason = reason.replace(/\.+$/u, '');
+  return `[Audio attachment "${filename}" ${normalizedReason}.]`;
 }
 
 export function formatAudioTranscriptionResult(

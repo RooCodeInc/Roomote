@@ -122,6 +122,8 @@ describe('audio transcription', () => {
         message:
           "The Audio and video model (GPT 5.6 Terra) doesn't support audio. Select a model that supports audio in Settings > Models > Audio and video model.",
       }),
-    ).toContain('Settings > Models > Audio and video model');
+    ).toBe(
+      '[Audio attachment "voice.ogg" could not be transcribed: The Audio and video model (GPT 5.6 Terra) doesn\'t support audio. Select a model that supports audio in Settings > Models > Audio and video model.]',
+    );
   });
 });
