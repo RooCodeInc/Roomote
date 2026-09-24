@@ -22,6 +22,8 @@ vi.mock('../tool-approval-enforcement', () => ({
   resolveProxyToolApprovalBlock: (approvals: Approvals, toolName: string) =>
     approvals.blocks.get(toolName) ?? approvals.defaultBlock,
   resolveProxyToolApprovalBlocks: mockResolveBlocks,
+  readFastConversationIdHeader: (headers: Headers) =>
+    headers.get('x-roomote-fast-conversation-id'),
   shadowProxyToolCall: mockShadow,
 }));
 
@@ -176,5 +178,32 @@ describe('resolveNativeToolApprovalGuard', () => {
         params: { name: 'any_tool', arguments: { q: 1 } },
       }),
     ).resolves.toBeNull();
+  });
+  it("passes the Fast conversation a Session's call names to shadow assessment", async () => {
+    mockResolveBlocks.mockResolvedValue({
+      blocks: new Map(),
+      shadowDefaultTools: true,
+    });
+    const conversationId = '0b9c1c52-5f55-4d3e-9c1f-3f1e2c4b8a11';
+    const guard = await resolveNativeToolApprovalGuard({
+      auth: { userId: 'user-1', tokenType: 'auth' },
+      integrationId: 'notion',
+      requestHeaders: new Headers({
+        'x-roomote-fast-conversation-id': conversationId,
+      }),
+    });
+
+    await guard.checkCall({
+      id: 4,
+      method: 'tools/call',
+      params: { name: 'search', arguments: {} },
+    });
+    expect(mockShadow).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'user-1',
+        fastConversationId: conversationId,
+      }),
+    );
   });
 });

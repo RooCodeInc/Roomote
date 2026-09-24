@@ -1,22 +1,47 @@
 import type { MetadataBooleanDescriptor } from './types';
 
 export const DEPLOYMENT_EXPERIMENT_IDS = [
-  'results',
   'privateSessions',
   'browserNotifications',
-  'integrationToolApprovals',
-  'fastSessionCommunicationJev',
+  'integrationToolAutoApprovals',
+  'sessionTaskCommunicationTriage',
+  'dizzy',
 ] as const;
 
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
 
+export const DEPLOYMENT_EXPERIMENT_AUDIENCES = [
+  'internal-nightly',
+  'customer-preview',
+  'generally-available',
+] as const;
+
+export type DeploymentExperimentAudience =
+  (typeof DEPLOYMENT_EXPERIMENT_AUDIENCES)[number];
+
+/**
+ * Every deployment experiment must choose its audience explicitly. Unknown
+ * experiments are never treated as customer-visible by default.
+ */
+export const DEPLOYMENT_EXPERIMENT_AUDIENCE = {
+  privateSessions: 'customer-preview',
+  sessionTaskCommunicationTriage: 'customer-preview',
+  browserNotifications: 'customer-preview',
+  integrationToolAutoApprovals: 'customer-preview',
+  dizzy: 'internal-nightly',
+} as const satisfies Record<
+  DeploymentExperimentId,
+  DeploymentExperimentAudience
+>;
+
 export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
-  results: 'results_page_enabled',
   privateSessions: 'private_sessions_experiment_enabled',
   browserNotifications: 'browser_notifications_experiment_enabled',
-  integrationToolApprovals: 'integration_tool_approvals_experiment_enabled',
-  fastSessionCommunicationJev:
-    'fast_session_communication_jev_experiment_enabled',
+  integrationToolAutoApprovals:
+    'integration_tool_auto_approvals_experiment_enabled',
+  sessionTaskCommunicationTriage:
+    'session_task_communication_triage_experiment_enabled',
+  dizzy: 'dizzy_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
 
 export type DeploymentExperimentValues = Record<
@@ -44,11 +69,6 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     description:
       'Share anonymous usage analytics (instance and user activity identified only by random IDs) with the Roomote team. Enabled by default; absent means enabled.',
   },
-  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.results]: {
-    kind: 'deployment-control',
-    group: null,
-    description: 'Show the Results inbox to every member',
-  },
   [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.privateSessions]: {
     kind: 'deployment-control',
     group: null,
@@ -61,16 +81,16 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     description:
       'Offer desktop browser notifications while the relevant session or task page remains open',
   },
-  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.integrationToolApprovals]: {
+  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.integrationToolAutoApprovals]: {
     kind: 'deployment-control',
     group: null,
     description:
-      'Configure per-integration-tool approval policies for code-mode integration calls in sessions and let the session requester allow or reject each gated call before it runs. Disabled by default; absent means disabled.',
+      'Show the Auto-approval decisions card in Settings → Agent Guidance for admins to turn on.',
   },
-  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.fastSessionCommunicationJev]: {
+  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.sessionTaskCommunicationTriage]: {
     kind: 'deployment-control',
     group: null,
     description:
-      'Use Jev for high-confidence, low-risk Fast task-report communication decisions. Disabled by default; absent means disabled.',
+      'Stream delegated task activity to its Session and let the judgment model decide whether to tell the user, redirect the task, or stay quiet. Disabled by default; absent means disabled.',
   },
 };

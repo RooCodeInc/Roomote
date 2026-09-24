@@ -18,6 +18,7 @@ vi.mock('sonner', () => ({
   toast: {
     error: vi.fn(),
     success: vi.fn(),
+    warning: vi.fn(),
   },
 }));
 
@@ -778,9 +779,47 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
 
     // The mutation's onSuccess handler calls onContinue after invalidating.
     const options = mockUseMutation.mock.calls[0]?.[0] as
-      | { onSuccess?: () => Promise<void> | void }
+      | {
+          onSuccess?: (result: {
+            validationWarning: string | null;
+          }) => Promise<void> | void;
+        }
       | undefined;
-    await options?.onSuccess?.();
+    await options?.onSuccess?.({ validationWarning: null });
+    expect(onContinue).toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('continues with a warning when the saved provider account is out of credits', async () => {
+    setupQueryMocks({ chatgptConnected: false });
+    const onContinue = vi.fn();
+
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          preselectedProvider: 'openrouter',
+          providers: [openrouterProviderStatus()],
+        })}
+        onContinue={onContinue}
+      />,
+    );
+
+    // Saving is not blocked; the operator can top the account up meanwhile.
+    const options = mockUseMutation.mock.calls[0]?.[0] as
+      | {
+          onSuccess?: (result: {
+            validationWarning: string | null;
+          }) => Promise<void> | void;
+        }
+      | undefined;
+    await options?.onSuccess?.({
+      validationWarning:
+        'The OpenRouter account seems to be out of credits or quota. Add credits before using it.',
+    });
+
+    expect(toast.warning).toHaveBeenCalledWith(
+      'The OpenRouter account seems to be out of credits or quota. Add credits before using it.',
+    );
     expect(onContinue).toHaveBeenCalled();
   });
 });

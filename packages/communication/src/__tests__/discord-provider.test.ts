@@ -221,6 +221,45 @@ describe('DiscordCommunicationProvider', () => {
     }
   });
 
+  it('preserves image embeds when editing channel and interaction replies', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+    const image = {
+      url: 'https://images.example/screenshot.png',
+      altText: 'Screenshot',
+    };
+    const sent = await provider.postMessage({ channelId, text: 'Working' });
+
+    await provider.editMessage({
+      channelId,
+      messageId: sent.messageId,
+      text: 'The screenshot is attached.',
+      images: [image],
+    });
+    await provider.editInteractionResponse({
+      applicationId: '600000000000000001',
+      interactionToken: 'token-1',
+      text: 'The screenshot is attached.',
+      images: [image],
+    });
+
+    const edits = server.state.requests.filter(
+      (request) => request.method === 'PATCH',
+    );
+    expect(edits).toHaveLength(2);
+    for (const edit of edits) {
+      expect(edit.body).toMatchObject({
+        content: 'The screenshot is attached.',
+        embeds: [
+          {
+            description: 'Screenshot',
+            image: { url: image.url },
+          },
+        ],
+      });
+    }
+  });
+
   it('retries rate limits and deduplicates retried sends with a nonce', async () => {
     const { server, provider, sleep } = createHarness();
     server.enqueueRateLimit(0.01);

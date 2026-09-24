@@ -152,7 +152,7 @@ async function assertManualTriggerIsRunnable(
       case 'sentry':
         if (!(await hasActiveSentryIntegration())) {
           throw new Error(
-            `Configure Sentry in Settings > Integrations before running ${descriptor.label}.`,
+            `Configure Sentry on the Integrations page before running ${descriptor.label}.`,
           );
         }
         break;

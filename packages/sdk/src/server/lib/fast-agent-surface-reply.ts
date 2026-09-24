@@ -1,4 +1,9 @@
-import { stripLeadingIntegrationSavedBlock } from '@roomote/types';
+import {
+  stripLeadingIntegrationSavedBlock,
+  integrationToolApprovalButtons,
+  integrationToolApprovalMessage,
+  integrationToolApprovalSlackBlocks,
+} from '@roomote/types';
 import { createHash } from 'node:crypto';
 
 import {
@@ -314,10 +319,22 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         }),
         postReply: async ({
           message,
+          toolApproval,
           imageArtifactIds = [],
           videoArtifactIds = [],
           charts = [],
         }) => {
+          if (toolApproval) {
+            const messageTs = await slack.postMessage({
+              channel: conversation.replyTarget.channelId,
+              thread_ts: threadId,
+              text: integrationToolApprovalMessage(toolApproval),
+              blocks: integrationToolApprovalSlackBlocks(toolApproval),
+            });
+            if (!messageTs)
+              throw new Error('Slack did not accept the approval request.');
+            return { messageId: messageTs };
+          }
           const quote = pendingReplyQuote.peek(buildSlackReplyQuote);
           const images = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
@@ -391,7 +408,19 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         userId: params.userId,
         conversation,
       }),
-      postReply: async ({ message }) => {
+      postReply: async ({ message, toolApproval, imageArtifactIds = [] }) => {
+        if (toolApproval) {
+          const result = await provider.postMessage({
+            ...conversation.replyTarget,
+            text: integrationToolApprovalMessage(toolApproval),
+            buttons: integrationToolApprovalButtons(toolApproval.approvalId),
+          });
+          return { messageId: result.messageId };
+        }
+        const images = await resolveFastAgentSessionImages({
+          artifactIds: imageArtifactIds,
+          sessionId: session.id,
+        });
         const quote = pendingReplyQuote.peek(buildMarkdownReplyQuote);
         const footerText = buildFastSessionReplyFooterText({
           provider: 'discord',
@@ -418,6 +447,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
               ...conversation.replyTarget,
               text: textWithFooter,
               textFormat: 'markdown',
+              ...(images.length ? { images } : {}),
             });
             activity.reassert();
             return {
@@ -426,6 +456,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                 textWithFooter,
                 footerText,
               }),
+              ...(images.length ? { images } : {}),
               refresh: { footerText, channelId: footerMessageChannelId },
             };
           },
@@ -453,8 +484,14 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       threadId: conversation.replyTarget.threadId,
       sessionId: session.id,
       footerContext,
-      postReplacement: (text) =>
-        adapter.postReply({ purpose: 'closeout', message: text }),
+      resolveImages: (artifactIds) =>
+        resolveFastAgentSessionImages({ artifactIds, sessionId: session.id }),
+      postReplacement: (text, artifactIds) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: text,
+          ...(artifactIds?.length ? { imageArtifactIds: artifactIds } : {}),
+        }),
     });
     adapter.replaceReply = async (handle, reply) => {
       const result = await replaceReply(handle, reply);
@@ -624,7 +661,16 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     });
     const postReply: FastAgentTurnAdapter['postReply'] = async ({
       message,
+      toolApproval,
     }) => {
+      if (toolApproval) {
+        const posted = await provider.postMessage({
+          ...conversation.replyTarget,
+          text: integrationToolApprovalMessage(toolApproval),
+          buttons: integrationToolApprovalButtons(toolApproval.approvalId),
+        });
+        return { messageId: posted.messageId };
+      }
       const quote = pendingReplyQuote.peek(buildMarkdownReplyQuote);
       const posted = await postTextThreadReplyWithFooter({
         provider,

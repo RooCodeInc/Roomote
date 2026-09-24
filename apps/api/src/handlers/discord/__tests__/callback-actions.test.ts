@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   finalizeWorkItem: vi.fn(),
   releaseWorkItem: vi.fn(),
   handlePrReviewAction: vi.fn(),
+  handleToolApprovalAction: vi.fn(),
   processFastAgentMessage: vi.fn(),
   launchPinned: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -99,6 +100,9 @@ vi.mock('../../tasks/current-thread-suggestion-reaction.js', () => ({
 vi.mock('../pr-review-action.js', () => ({
   handleDiscordPrReviewActionCallback: mocks.handlePrReviewAction,
 }));
+vi.mock('../tool-approval-action.js', () => ({
+  handleDiscordToolApprovalAction: mocks.handleToolApprovalAction,
+}));
 
 import {
   handleDiscordComponentInteraction,
@@ -106,6 +110,43 @@ import {
 } from '../callback-actions.js';
 
 describe('Discord component callbacks', () => {
+  it('routes a native tool approval button with the exact row and decision', async () => {
+    const interaction = {
+      id: 'interaction-approval',
+      application_id: 'app-1',
+      type: 3,
+      token: 'token-1',
+      channel_id: 'thread-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        custom_id: 'ita:3f0c8f0e-1111-4222-8333-444455556666:s',
+        component_type: 2,
+      },
+    };
+    const channel = {
+      channelId: 'thread-1',
+      channelType: 11,
+      isDirectMessage: false,
+      isThread: true,
+    };
+    await expect(
+      handleDiscordComponentInteraction({
+        provider: {} as never,
+        applicationId: 'app-1',
+        interaction,
+        interactionDeferred: true,
+        channel: channel as never,
+      }),
+    ).resolves.toBe('handled');
+    expect(mocks.handleToolApprovalAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: {
+          approvalId: '3f0c8f0e-1111-4222-8333-444455556666',
+          decision: 'approved_for_session',
+        },
+      }),
+    );
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.reply.mockResolvedValue({ messageId: 'response-1' });

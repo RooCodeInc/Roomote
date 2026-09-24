@@ -2,6 +2,7 @@ export { getFastSessionComposerSuggestionCommand } from './composer-suggestion';
 
 import { randomUUID } from 'node:crypto';
 import { after } from 'next/server';
+import { TRPCError } from '@trpc/server';
 
 import {
   acquireFastAgentTurnLock,
@@ -76,10 +77,13 @@ import {
   findReadableFastSession,
   buildFastSessionPrReviewDestinationKey,
   getFastSessionById,
+  getFastSessionTranscriptPage,
   getFastSessionPrReviewOfferStatus,
   getFastSessionTasks,
   hasFastSessionQueuedMessages,
   updateFastSessionPrReviewOfferStatus,
+  withdrawFastSessionQueuedMessage,
+  type FastSessionMessageCursor,
 } from '@/lib/server/fast-sessions';
 import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
 import {
@@ -745,6 +749,22 @@ export async function getFastSessionMessagesCommand(
   };
 }
 
+export async function getFastSessionOlderMessagesCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    cursor: FastSessionMessageCursor;
+  },
+) {
+  const page = await getFastSessionTranscriptPage(
+    auth,
+    input.sessionId,
+    input.cursor,
+  );
+  if (!page) throw new Error('Session not found');
+  return page;
+}
+
 export async function updateFastSessionModelSelectionCommand(
   auth: UserAuthSuccess,
   input: {
@@ -877,6 +897,34 @@ export async function replyToFastSessionCommand(
     admission: admission.kind === 'turn' ? 'turn' : 'queued',
     clientMessageId,
   };
+}
+
+/**
+ * Withdraw the caller's own follow-up while it still waits in the Session
+ * queue. `not_queued` means delivery already started or the message is no
+ * longer pending, so there is nothing left to withdraw.
+ */
+export async function deleteFastSessionQueuedMessageCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId: string; clientMessageId: string },
+): Promise<{ outcome: 'withdrawn' | 'not_queued' }> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) {
+    throw new Error('Session not found');
+  }
+
+  const outcome = await withdrawFastSessionQueuedMessage({
+    sessionId: session.id,
+    clientMessageId: input.clientMessageId,
+    userId: auth.userId,
+  });
+  if (outcome === 'forbidden') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Only the sender can delete a queued message',
+    });
+  }
+  return { outcome };
 }
 
 export async function startFastSessionGoalCommand(

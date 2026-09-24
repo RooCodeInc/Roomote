@@ -17,6 +17,7 @@ import {
   lte,
   or,
   pullRequestFacts,
+  recordBackgroundAutomationResult,
   recordAutomationRunOutcome,
   repositories,
   slackInstallations,
@@ -518,6 +519,14 @@ async function processDeployment(
         at: new Date(),
         lastRunAt: scanUpperBound,
       });
+      if (config.automationKey === 'code_quality_auditor') {
+        await recordBackgroundAutomationResult({
+          automationKey: config.automationKey,
+          content: 'No merged PRs to audit.',
+          dedupeKey: `${config.automationKey}:no-merged-prs:${scanUpperBound.toISOString()}`,
+          visibility: 'shared',
+        });
+      }
 
       return {
         kind: 'skipped',

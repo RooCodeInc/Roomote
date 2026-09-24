@@ -1685,8 +1685,12 @@ describe('chooseSetupTrialInferenceCommand', () => {
 
     expect(runtimeModelConfigInsert?.runtimeModelConfig).toMatchObject({
       roomoteModel: 'roomote/openai/gpt-6-luna',
-      roomoteSmallModel: 'roomote/openai/gpt-6-luna',
-      roomotePlanningModel: 'roomote/openai/gpt-6-luna',
+      roomoteOrchestrationModel: null,
+      roomoteSmallModel: null,
+      roomoteVisionModel: null,
+      roomoteCodeReviewModel: null,
+      roomoteExploreModel: null,
+      roomotePlanningModel: null,
     });
     expect(taskModelSettingsInsert?.taskModelSettings).toMatchObject({
       defaultModelId: 'roomote/openai/gpt-6-luna',

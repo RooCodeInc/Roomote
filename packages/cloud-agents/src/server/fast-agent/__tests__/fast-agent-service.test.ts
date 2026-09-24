@@ -17,12 +17,13 @@ const mocks = vi.hoisted(() => ({
   listActiveRepositories: vi.fn(),
   listCustomSkills: vi.fn(),
   getCustomSkill: vi.fn(),
-  scoreTypeSafeRelevance: vi.fn(),
   getTaskModelOptions: vi.fn(),
   getDeploymentSettings: vi.fn(),
   appendMemory: vi.fn(),
   appendLearnedPreference: vi.fn(),
   isBrainEnabled: vi.fn(),
+  isChatGptSubscriptionConnected: vi.fn(),
+  isXaiSubscriptionConnected: vi.fn(),
   deploymentExperimentEnabled: vi.fn(),
   privateSessionsEnabled: vi.fn(),
   generateText: vi.fn(),
@@ -58,6 +59,8 @@ const mocks = vi.hoisted(() => ({
   findUnresolvedRequest: vi.fn(),
   markDurableDelivered: vi.fn(),
   releaseDurableClaim: vi.fn(),
+  claimHumanFollowUpSteers: vi.fn(),
+  releaseHumanFollowUpSteerClaims: vi.fn(),
   renewDurableClaim: vi.fn(),
   revokeDurableReplay: vi.fn(),
   scheduleDurableRetry: vi.fn(),
@@ -88,6 +91,7 @@ const mocks = vi.hoisted(() => ({
   getActiveRecipeVerificationTaskId: vi.fn(),
   withEnvironmentVerificationRetryLock: vi.fn(),
   evaluateJudgments: vi.fn(),
+  evaluateDecisionModel: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -192,6 +196,9 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   findFastAgentUnresolvedRequest: mocks.findUnresolvedRequest,
   markFastAgentDurableTurnDelivered: mocks.markDurableDelivered,
   releaseFastAgentDurableTurnClaim: mocks.releaseDurableClaim,
+  claimFastAgentHumanFollowUpSteers: mocks.claimHumanFollowUpSteers,
+  releaseFastAgentHumanFollowUpSteerClaims:
+    mocks.releaseHumanFollowUpSteerClaims,
   renewFastAgentDurableTurnClaim: mocks.renewDurableClaim,
   revokeFastAgentDurableTurnReplay: mocks.revokeDurableReplay,
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
@@ -248,6 +255,8 @@ vi.mock('@roomote/db/server', () => ({
   appendLearnedUserPreference: mocks.appendLearnedPreference,
   getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
+  isChatGptSubscriptionConnected: mocks.isChatGptSubscriptionConnected,
+  isXaiSubscriptionConnected: mocks.isXaiSubscriptionConnected,
   isDeploymentExperimentEnabled: mocks.deploymentExperimentEnabled,
   isPrivateSessionsExperimentEnabled: mocks.privateSessionsEnabled,
   db: {
@@ -319,8 +328,8 @@ vi.mock('../../non-task-provider-usage', async (importOriginal) => {
 });
 
 vi.mock('../../typesafe-judgment', () => ({
+  evaluateDecisionModel: mocks.evaluateDecisionModel,
   evaluateTypeSafeJudgments: mocks.evaluateJudgments,
-  scoreTypeSafeRelevance: mocks.scoreTypeSafeRelevance,
 }));
 
 vi.mock('../fast-agent-opencode-session', () => ({
@@ -406,6 +415,14 @@ vi.mock('../fast-agent-surface-reply-stream', async (importOriginal) => {
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({ publish: mocks.publishReplyStream }),
+}));
+
+// Per-tool approvals run for every deployment now. These service tests
+// cover other behavior, so the turn compiles no approval rules, exactly as
+// for a deployment where nobody has made a choice.
+vi.mock('../fast-agent-tool-approvals', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../fast-agent-tool-approvals')>()),
+  resolveFastAgentToolApprovalRules: vi.fn(async () => undefined),
 }));
 
 vi.mock('../fast-agent-turn-lock', () => ({
@@ -565,6 +582,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.privateSessionsEnabled.mockResolvedValue(true);
+    mocks.isChatGptSubscriptionConnected.mockResolvedValue(false);
+    mocks.isXaiSubscriptionConnected.mockResolvedValue(false);
     mocks.deploymentExperimentEnabled.mockResolvedValue(false);
     mocks.getPendingHumanFollowUp.mockResolvedValue([]);
     mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
@@ -587,6 +606,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       goal: null,
     });
     mocks.updateParentEventWhere.mockResolvedValue(undefined);
+    mocks.claimHumanFollowUpSteers.mockImplementation(
+      async (ids: string[]) => new Set(ids),
+    );
+    mocks.releaseHumanFollowUpSteerClaims.mockResolvedValue(undefined);
     mocks.nativeSteer.mockResolvedValue(undefined);
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
@@ -669,7 +692,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.listCustomSkills.mockResolvedValue([]);
     mocks.getCustomSkill.mockResolvedValue(null);
-    mocks.scoreTypeSafeRelevance.mockResolvedValue(null);
     mocks.getActiveRepositories.mockResolvedValue({
       names: ['acme/app'],
       totalCount: 1,
@@ -687,6 +709,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
       ],
       defaultModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [],
+    });
+    // Fixture models: model_1 = GPT-5.6 (default), model_2 = Claude Sonnet 5.
+    // Launches ask about a user model request every time; none by default.
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'none',
+        confidence: 0.97,
+        probabilities: { none: 0.97 },
+      },
     });
     mocks.getDeploymentSettings.mockResolvedValue(undefined);
     mocks.listIntegrations.mockResolvedValue([]);
@@ -799,37 +833,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
       'Reply in pirate style.',
-    );
-  });
-
-  it('adds the judgment-model skill hint to the turn prompt, not the system prompt', async () => {
-    const skill = {
-      id: '00000000-0000-4000-8000-000000000002',
-      name: 'deploy-staging',
-      description: 'Deploy main to staging and run smoke checks.',
-      content: '# Deploy staging',
-    };
-    mocks.listCustomSkills.mockResolvedValue([skill]);
-    mocks.scoreTypeSafeRelevance.mockResolvedValueOnce(
-      new Map([[`instance:${skill.id}`, 0.92]]),
-    );
-
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-
-    expect(mocks.scoreTypeSafeRelevance).toHaveBeenCalledOnce();
-    const params = mocks.generateText.mock.calls[0]?.[0];
-    expect(params.prompt).toContain(
-      `<skill_relevance>\nRelevant to the current request: deploy-staging [id: instance:${skill.id}].`,
-    );
-    expect(params.system).not.toContain('skill_relevance');
-  });
-
-  it('skips the judgment-model skill hint when no skills are configured', async () => {
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-
-    expect(mocks.scoreTypeSafeRelevance).not.toHaveBeenCalled();
-    expect(mocks.generateText.mock.calls[0]?.[0].prompt).not.toContain(
-      'skill_relevance',
     );
   });
 
@@ -1149,44 +1152,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(systemPrompt).toContain(
       'Use App for frontend work and prefer GPT-5.6. -> App [id: env-1]',
     );
-  });
-
-  it('adds a judgment-model routing hint to the first request of a new Session only', async () => {
-    mocks.getEnvironments.mockResolvedValue([
-      { id: 'env-1', name: 'App', repositoryNames: ['acme/app'] },
-      { id: 'env-2', name: 'Infra', repositoryNames: ['acme/infra'] },
-    ]);
-    mocks.evaluateJudgments.mockResolvedValue({
-      environment: {
-        type: 'choice',
-        choice: 'env_2',
-        confidence: 0.82,
-        probabilities: { env_2: 0.82 },
-      },
-    });
-
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-    mocks.getSession.mockResolvedValue({
-      id: 'conversation-1',
-      compatibilityMessages: [],
-      openCodeSessionId: 'opencode-session-1',
-    });
-    mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: false });
-    await answerFastAgentQuestion({
-      ...baseParams,
-      question: 'And the staging cluster too?',
-      currentMessageId: '100.3',
-      adapter: callbacks(),
-    });
-
-    const firstTurn = mocks.generateText.mock.calls[0]?.[0];
-    const followUp = mocks.generateText.mock.calls[1]?.[0];
-    expect(firstTurn?.prompt).toContain(
-      '<routing_hint>\nRouting hint: Infra [id: env-2] looks like the best environment (judgment model confidence 0.82). Verify against the configured routing rules before delegating; explicit user model and effort choices take precedence, and ask when the request is still ambiguous.',
-    );
-    expect(followUp?.prompt).not.toContain('<routing_hint>');
-    expect(followUp?.system).toBe(firstTurn?.system);
-    expect(mocks.evaluateJudgments).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the system prompt stable when voice mode changes', async () => {
@@ -2758,6 +2723,156 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('records the client message id on a steered web follow-up so its queue entry can retire', async () => {
+    vi.useFakeTimers();
+    try {
+      const webFollowUp = {
+        id: '88888888-8888-4888-8888-888888888888',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'web-client-1',
+          currentMessageId: 'web-client-1',
+          userId: 'user-1',
+          question: 'Queued from the web composer.',
+          webFollowUp: true,
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([webFollowUp])
+        .mockResolvedValue([]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      // The web transcript retires a queued follow-up only when the persisted
+      // prompt carries its client id, exactly as a whole-turn delivery does.
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'conversation-1',
+          message: expect.objectContaining({
+            eventId: 'web-client-1:user',
+            turnId: 'web-client-1',
+            eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+            metadata: expect.objectContaining({
+              clientMessageId: 'web-client-1',
+              turnSource: 'human',
+              userId: 'user-1',
+              visibleInTranscript: true,
+            }),
+          }),
+        }),
+      );
+
+      finishGeneration?.('Steered web answer');
+      await expect(resultPromise).resolves.toBe('Steered web answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never persists or steers a follow-up withdrawn before the steer claims it', async () => {
+    vi.useFakeTimers();
+    try {
+      const withdrawn = {
+        id: '99999999-9999-4999-8999-999999999991',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'web-withdrawn',
+          currentMessageId: 'web-withdrawn',
+          userId: 'user-1',
+          question: 'Withdrawn before delivery.',
+          webFollowUp: true,
+        },
+      };
+      const kept = {
+        id: '99999999-9999-4999-8999-999999999992',
+        createdAt: new Date('2026-08-31T12:00:01.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'web-kept',
+          currentMessageId: 'web-kept',
+          userId: 'user-1',
+          question: 'Still wanted.',
+          webFollowUp: true,
+        },
+      };
+      // The lookup still sees both rows, but the sender withdrew the first
+      // before the steer's claim, which is the write that decides.
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([withdrawn, kept])
+        .mockResolvedValue([]);
+      mocks.claimHumanFollowUpSteers.mockImplementationOnce(
+        async () => new Set([kept.id]),
+      );
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      expect(mocks.claimHumanFollowUpSteers).toHaveBeenCalledWith([
+        withdrawn.id,
+        kept.id,
+      ]);
+      const steerText = mocks.nativeSteer.mock.calls[0]?.[0]?.text;
+      expect(steerText).toContain('Still wanted.');
+      expect(steerText).not.toContain('Withdrawn before delivery.');
+      const persistedEventIds = mocks.upsertMessage.mock.calls.map(
+        ([call]) => (call as { message: { eventId: string } }).message.eventId,
+      );
+      expect(persistedEventIds).toContain('web-kept:user');
+      expect(persistedEventIds).not.toContain('web-withdrawn:user');
+      await vi.waitFor(() =>
+        expect(mocks.inArray).toHaveBeenCalledWith('id', [kept.id]),
+      );
+      expect(mocks.inArray).not.toHaveBeenCalledWith(
+        'id',
+        expect.arrayContaining([withdrawn.id]),
+      );
+      expect(mocks.releaseHumanFollowUpSteerClaims).not.toHaveBeenCalled();
+
+      finishGeneration?.('Answered the remaining follow-up');
+      await expect(resultPromise).resolves.toBe(
+        'Answered the remaining follow-up',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('batches the pending same-user prefix into one native steer', async () => {
     vi.useFakeTimers();
     try {
@@ -3028,12 +3143,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       await vi.advanceTimersByTimeAsync(250);
       await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
-      // The rejected steer leaves the follow-up pending; the next boundary
-      // drains it again.
+      // The rejected steer hands its claim back, leaving the follow-up
+      // pending; the next boundary drains it again.
+      await vi.waitFor(() =>
+        expect(mocks.releaseHumanFollowUpSteerClaims).toHaveBeenCalledWith([
+          followUp.id,
+        ]),
+      );
       await completeAssistantBoundary?.();
       await vi.waitFor(() =>
         expect(mocks.nativeSteer).toHaveBeenCalledTimes(2),
       );
+      // The accepted retry is delivered, so its claim is not handed back.
+      expect(mocks.releaseHumanFollowUpSteerClaims).toHaveBeenCalledOnce();
 
       for (const call of mocks.nativeSteer.mock.calls) {
         expect(call[0]?.files).toEqual([]);
@@ -8150,6 +8272,79 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
 
     it.each([
+      {
+        model: 'openai/gpt-5.5',
+        chatgptConnected: true,
+        providerName: 'ChatGPT (subscription)',
+      },
+      {
+        model: 'openai/gpt-5.5',
+        chatgptConnected: false,
+        providerName: 'OpenAI',
+      },
+      {
+        model: 'openrouter/anthropic/claude-sonnet-5',
+        chatgptConnected: true,
+        providerName: 'OpenRouter',
+      },
+    ])(
+      'closes out exhausted $providerName credits for $model without retrying',
+      async ({ model, chatgptConnected, providerName }) => {
+        vi.useFakeTimers();
+        try {
+          mocks.isChatGptSubscriptionConnected.mockResolvedValue(
+            chatgptConnected,
+          );
+          mocks.classifyInferenceError.mockReturnValue({
+            message:
+              'The inference provider account does not have enough credits or quota.',
+            reason: 'insufficient_credits',
+            retryable: false,
+          });
+          mocks.generateText.mockImplementation(
+            async (_params, _session, options) => {
+              options.onModelResolved?.(model);
+              throw Object.assign(
+                new Error('APIError: The usage limit has been reached'),
+                {
+                  data: {
+                    statusCode: 429,
+                    message: 'The usage limit has been reached',
+                  },
+                },
+              );
+            },
+          );
+          const postReply = vi.fn().mockResolvedValue(undefined);
+          const closeout = `You seem to have run out of credits for ${providerName}. Choose another provider/model or reset your subscription to continue.`;
+
+          const result = answerFastAgentQuestion({
+            ...baseParams,
+            adapter: callbacks({ postReply }),
+          });
+          result.catch(() => undefined);
+          await vi.runAllTimersAsync();
+          vi.useRealTimers();
+          await expect(result).resolves.toBe(closeout);
+
+          // Neither backoff nor a fresh session can help until the account
+          // is topped up, so the first failure closes the turn.
+          expect(mocks.generateText).toHaveBeenCalledOnce();
+          expect(postReply).toHaveBeenCalledOnce();
+          expect(postReply).toHaveBeenCalledWith(
+            expect.objectContaining({ purpose: 'closeout', message: closeout }),
+          );
+          const retryNoticeWrites = mocks.upsertMessage.mock.calls
+            .map(([input]) => input.message)
+            .filter((message) => message.eventId?.includes('retry-notice'));
+          expect(retryNoticeWrites).toEqual([]);
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it.each([
       [
         { statusCode: '401', status: 429, code: 403, message: 'Rejected' },
         'Rejected',
@@ -10704,6 +10899,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('launches before the first reply and then posts the task link', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.95,
+        probabilities: { model_2: 0.95 },
+      },
+    });
     const order: string[] = [];
     const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
       await postKickoff({
@@ -10744,7 +10948,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
-      question: 'Fix checkout.',
+      question: 'Fix checkout. Use Claude Sonnet 5 for it.',
       images: [
         'data:image/png;base64,c2NyZWVuc2hvdC0x',
         'data:image/gif;base64,c2NyZWVuc2hvdC0y',
@@ -11391,6 +11595,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('allows a corrected launch after rejecting an unavailable model', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.95,
+        probabilities: { model_2: 0.95 },
+      },
+    });
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
       taskId: 'task-corrected',
@@ -11425,7 +11638,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Fix checkout on Sonnet 5.',
+      adapter,
+    });
 
     expect(launchTask).toHaveBeenCalledOnce();
     expect(launchTask).toHaveBeenCalledWith(
@@ -11501,7 +11718,286 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(launchTask).not.toHaveBeenCalled();
   });
 
+  function decisionChoice(choice: string, confidence: number) {
+    return {
+      type: 'choice',
+      choice,
+      confidence,
+      probabilities: { [choice]: confidence },
+    };
+  }
+
+  it('launches on the default model with a note when no user asked for the pick', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
+      requestedModel: decisionChoice('none', 0.97),
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Build the currency brief.',
+            model: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            kickoffMessage: 'I’m delegating the build.',
+          }),
+        ).resolves.toEqual({
+          success: true,
+          taskId: 'task-1',
+          modelNote: expect.stringContaining(
+            'Launched on the deployment default model instead of "anthropic/claude-sonnet-5"',
+          ),
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        'Build the currency brief below.\n\nCommits end with Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          work: 'Build the currency brief.',
+          latestRequest: expect.stringContaining(
+            'Co-Authored-By: Claude Sonnet 5',
+          ),
+        }),
+      }),
+    );
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: null, reasoningEffort: null }),
+    );
+  });
+
+  it('applies a matching coding-model routing rule at launch', async () => {
+    mocks.getTaskModelOptions.mockResolvedValue({
+      models: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6' },
+        { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
+      ],
+      defaultModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [
+        {
+          condition: 'Frontend UI work',
+          modelId: 'anthropic/claude-sonnet-5',
+          reasoningEffort: 'high',
+        },
+      ],
+    });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      routingRule: decisionChoice('model_rule_1', 0.92),
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Restyle the checkout page.',
+            // GPT-5.x fills optional arguments with null; still routed.
+            model: null,
+            reasoningEffort: null,
+            kickoffMessage: 'I’m delegating the checkout restyle.',
+          }),
+        ).resolves.toEqual({ success: true, taskId: 'task-1' });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Can you clean up checkout?',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({ work: 'Restyle the checkout page.' }),
+        questions: {
+          wantsNonDefaultModel: expect.anything(),
+          requestedModel: expect.anything(),
+          routingRule: expect.objectContaining({
+            criteria: expect.objectContaining({
+              model_rule_1: expect.stringContaining('"Frontend UI work"'),
+            }),
+          }),
+        },
+      }),
+    );
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+      }),
+    );
+  });
+
+  it('does not apply a routing rule whose condition does not fit the work', async () => {
+    mocks.getTaskModelOptions.mockResolvedValue({
+      models: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6' },
+        { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
+      ],
+      defaultModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [
+        {
+          condition: 'Frontend UI work',
+          modelId: 'anthropic/claude-sonnet-5',
+          reasoningEffort: null,
+        },
+      ],
+    });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
+      requestedModel: decisionChoice('none', 0.95),
+      routingRule: decisionChoice('default_model', 0.9),
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the billing migration.',
+            model: 'anthropic/claude-sonnet-5',
+            kickoffMessage: 'I’m delegating the migration fix.',
+          }),
+        ).resolves.toMatchObject({
+          success: true,
+          modelNote: expect.stringContaining('no routing rule selected it'),
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Fix the billing migration.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: null }),
+    );
+  });
+
+  it('keeps the deployment default model the agent passes', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix checkout.',
+            model: 'openai/gpt-5.6',
+            kickoffMessage: 'I’m delegating the checkout fix.',
+          }),
+        ).resolves.toEqual({ success: true, taskId: 'task-1' });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Fix checkout.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledOnce();
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'openai/gpt-5.6' }),
+    );
+  });
+
+  it('resolves review models against the code-review default', async () => {
+    mocks.getTaskModelOptions.mockResolvedValue({
+      models: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6' },
+        { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
+      ],
+      defaultModelId: 'openai/gpt-5.6',
+      codeReviewModelId: 'anthropic/claude-sonnet-5',
+      codingModelRoutingRules: [],
+    });
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.92 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_1',
+        confidence: 0.93,
+        probabilities: { model_1: 0.93 },
+      },
+    });
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.reviewPullRequest, {
+            repository: 'acme/api',
+            pullRequestNumber: 42,
+            model: 'openai/gpt-5.6',
+            kickoffMessage: 'Reviewing this now.',
+          }),
+        ).resolves.toMatchObject({ success: true });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Review acme/api#42 with GPT-5.6 instead of the usual model.',
+      adapter,
+    });
+
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          defaultModel:
+            'Claude Sonnet 5 [id: anthropic/claude-sonnet-5], the deployment default',
+        }),
+      }),
+    );
+    expect(mocks.launchPrReview).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ model: 'openai/gpt-5.6' }),
+    );
+  });
+
   it('validates and forwards pull request review model overrides', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.9 },
+      requestedModel: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.95,
+        probabilities: { model_2: 0.95 },
+      },
+    });
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -11535,7 +12031,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Review acme/api#42 with claude-sonnet-5.',
+      adapter,
+    });
 
     expect(mocks.launchPrReview).toHaveBeenCalledOnce();
     expect(mocks.launchPrReview).toHaveBeenCalledWith(
@@ -13665,6 +14165,39 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       ).resolves.toBe(closeout);
       expect(adapter.postReply).not.toHaveBeenCalled();
+    });
+
+    it('settles an out-of-credits platform event once, naming the provider', async () => {
+      mocks.classifyInferenceError.mockReturnValue({
+        message:
+          'The inference provider account does not have enough credits or quota.',
+        reason: 'insufficient_credits',
+        retryable: false,
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          options.onModelResolved?.('openrouter/anthropic/claude-sonnet-5');
+          throw new Error(
+            'APIError: This request requires more credits, or fewer max_tokens.',
+          );
+        },
+      );
+      const adapter = callbacks();
+      const creditsCloseout =
+        'You seem to have run out of credits for OpenRouter. Choose another provider/model or reset your subscription to continue.';
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          adapter,
+        }),
+      ).resolves.toBe(creditsCloseout);
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: creditsCloseout,
+      });
     });
 
     it('still rethrows a failure another attempt could recover', async () => {

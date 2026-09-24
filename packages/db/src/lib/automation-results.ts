@@ -1,5 +1,6 @@
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
+  RunStatus,
   type AutomationResultPriority,
   type AutomationResultKind,
   type AutomationResultVisibility,
@@ -12,8 +13,11 @@ import {
   customAutomations,
   sessionTasks,
   taskPullRequests,
+  taskRuns,
   tasks,
+  workItems,
 } from '../schema';
+import { isEmptyAutomationOutcome } from './empty-automation-result';
 
 function fallbackResultCopy(content: string, automationName: string) {
   const plain = content
@@ -164,6 +168,11 @@ async function recordAutomationResultForTaskWithClient(
     descriptor?.label ??
     'Automation';
   const fallback = fallbackResultCopy(params.content, automationName);
+  const autoClearedAt =
+    (params.resultKind === undefined || params.resultKind === 'outcome') &&
+    isEmptyAutomationOutcome(task.initiatorAutomation, params.content)
+      ? new Date()
+      : null;
 
   const [result] = await client
     .insert(automationResults)
@@ -178,6 +187,7 @@ async function recordAutomationResultForTaskWithClient(
       automationName,
       content: params.content,
       resultKind: params.resultKind ?? 'outcome',
+      ignoredAt: autoClearedAt,
       ...fallback,
       priority:
         customAutomation?.resultPriority ??
@@ -224,6 +234,56 @@ export async function recordAutomationResultForTask(
   }
 
   return recordAutomationResultForTaskWithClient(params, client);
+}
+
+/** Persist an already-cleared outcome for a selected automation that finished
+ * without a report or work item. Locking the task serializes this decision
+ * with report publication and makes repeated settlement idempotent. */
+export async function recordSilentAutomationResultForRun(runId: number) {
+  return db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ taskId: taskRuns.taskId, status: taskRuns.status })
+      .from(taskRuns)
+      .where(eq(taskRuns.id, runId));
+    if (!run || run.status !== RunStatus.Completed) return null;
+
+    const [task] = await tx
+      .select({
+        id: tasks.id,
+        state: tasks.state,
+        initiatorAutomation: tasks.initiatorAutomation,
+      })
+      .from(tasks)
+      .where(eq(tasks.id, run.taskId))
+      .for('update');
+    if (
+      task?.state !== 'completed' ||
+      !task.initiatorAutomation ||
+      !isEmptyAutomationOutcome(task.initiatorAutomation, 'No output.')
+    )
+      return null;
+
+    const report = await tx.query.automationResults.findFirst({
+      where: eq(automationResults.sourceTaskId, task.id),
+      columns: { id: true },
+    });
+    const workItem = await tx.query.workItems.findFirst({
+      where: eq(workItems.sourceTaskId, task.id),
+      columns: { id: true },
+    });
+    if (report || workItem) return null;
+
+    return recordAutomationResultForTaskWithClient(
+      {
+        taskId: task.id,
+        sourceRunId: runId,
+        content: 'No output.',
+        dedupeKey: `task:${task.id}:run:${runId}:no-output`,
+        visibility: 'shared',
+      },
+      tx,
+    );
+  });
 }
 
 async function recordCustomAutomationResultWithClient(
@@ -322,12 +382,19 @@ export async function recordBackgroundAutomationResult(
   );
   const automationName = descriptor?.label ?? 'Automation';
   const fallback = fallbackResultCopy(params.content, automationName);
+  const autoClearedAt = isEmptyAutomationOutcome(
+    params.automationKey,
+    params.content,
+  )
+    ? new Date()
+    : null;
   const [result] = await client
     .insert(automationResults)
     .values({
       automationKey: params.automationKey,
       automationName,
       content: params.content,
+      ignoredAt: autoClearedAt,
       ...fallback,
       priority:
         descriptor && 'resultPriority' in descriptor

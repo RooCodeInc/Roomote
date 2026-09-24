@@ -17,6 +17,7 @@ import {
   upsertIntegrationToolUserPolicies,
   upsertIntegrationToolUserPolicy,
 } from '@roomote/db/server';
+import { AUTO_DECISION_REQUIREMENTS } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
 import { resolveDecisionModel } from '@roomote/cloud-agents/server/typesafe-judgment';
 import {
   getMcpIntegration,
@@ -31,9 +32,8 @@ import type { UserAuthSuccess } from '@/types';
 import { assertAdmin } from '../setup/shared';
 
 /**
- * Experiment-gated (`integrationToolApprovals`) per-tool approval policies.
- * Deployment-scoped and admin-managed: every session on the deployment runs
- * under these modes while the experiment is enabled.
+ * Per-tool approval policies. Deployment-scoped and admin-managed: every
+ * session on the deployment runs under these modes.
  */
 export async function listIntegrationToolPoliciesCommand(
   auth: UserAuthSuccess,
@@ -68,8 +68,8 @@ export async function setIntegrationToolPoliciesCommand(
   return listIntegrationToolPolicies();
 }
 
-const toolApprovalsEnabled = () =>
-  isDeploymentExperimentEnabled('integrationToolApprovals');
+const autoApprovalsEnabled = () =>
+  isDeploymentExperimentEnabled('integrationToolAutoApprovals');
 
 /**
  * Keep pre-policy availability rows compatible while the policy surface rolls
@@ -168,13 +168,11 @@ async function syncLegacyDisabledTools(input: {
 
 /**
  * The caller's personal policies for their own Sessions. They layer on the
- * deployment policies and only ever tighten them. Inert while the experiment
- * is off.
+ * deployment policies and only ever tighten them.
  */
 export async function listPersonalIntegrationToolPoliciesCommand(
   auth: UserAuthSuccess,
 ) {
-  if (!(await toolApprovalsEnabled())) return [];
   return listIntegrationToolUserPolicies(auth.userId);
 }
 
@@ -182,12 +180,6 @@ export async function setPersonalIntegrationToolPolicyCommand(
   auth: UserAuthSuccess,
   input: IntegrationToolPolicyUpsert,
 ) {
-  if (!(await toolApprovalsEnabled())) {
-    throw new TRPCError({
-      code: 'NOT_FOUND',
-      message: 'Tool approvals are not enabled.',
-    });
-  }
   await upsertIntegrationToolUserPolicy({ ...input, userId: auth.userId });
   await syncLegacyDisabledTool({
     ...input,
@@ -201,12 +193,6 @@ export async function setPersonalIntegrationToolPoliciesCommand(
   auth: UserAuthSuccess,
   input: IntegrationToolPoliciesUpsert,
 ) {
-  if (!(await toolApprovalsEnabled())) {
-    throw new TRPCError({
-      code: 'NOT_FOUND',
-      message: 'Tool approvals are not enabled.',
-    });
-  }
   await upsertIntegrationToolUserPolicies({ ...input, userId: auth.userId });
   await syncLegacyDisabledTools({
     ...input,
@@ -218,8 +204,8 @@ export async function setPersonalIntegrationToolPoliciesCommand(
 
 /**
  * Deployment-wide Auto mode, admin only. `model` names what Auto will
- * consult, so an admin sees the cost of turning it on: the hosted judgment
- * model, or the helper model when none is configured.
+ * consult: Jev, or null when there is no Jev backend (the helper model and
+ * the model Roomote trains are not used for Auto yet).
  */
 export async function getIntegrationToolAutoSettingsCommand(
   auth: UserAuthSuccess,
@@ -227,7 +213,7 @@ export async function getIntegrationToolAutoSettingsCommand(
   assertAdmin(auth);
   const [settings, model] = await Promise.all([
     getIntegrationToolAutoSettings(),
-    resolveDecisionModel().catch(() => null),
+    resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(() => null),
   ]);
   return {
     ...settings,
@@ -245,10 +231,10 @@ export async function setIntegrationToolAutoSettingsCommand(
   input: IntegrationToolAutoSettings,
 ) {
   assertAdmin(auth);
-  if (!(await toolApprovalsEnabled())) {
+  if (!(await autoApprovalsEnabled())) {
     throw new TRPCError({
       code: 'NOT_FOUND',
-      message: 'Integration tool approvals are not enabled.',
+      message: 'Auto tool approvals are not enabled.',
     });
   }
   await setIntegrationToolAutoSettings({

@@ -86,6 +86,23 @@ describe('buildFastAgentSystemPrompt', () => {
     ).not.toContain('## Private Session');
   });
 
+  it('requires delegated image IDs to be selected for successful reply delivery', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'When a user asks to see images from an earlier delegated task, use its task ID with `manage_tasks` `get_summary` to retrieve the stable image artifact IDs (even if a viewer link is already available), then pass the requested IDs in `send_chat_reply.imageArtifactIds` in the reply.',
+    );
+    expect(prompt).toContain(
+      'Prose or a viewer link alone is not an attachment.',
+    );
+    expect(prompt).toContain(
+      'only after a successful `send_chat_reply` that included the matching ID in `imageArtifactIds`',
+    );
+    expect(prompt).toContain(
+      'If no usable ID is available or attachment delivery fails, accurately say it could not be attached and provide an accessible artifact viewer link when available.',
+    );
+  });
+
   it('includes matching workspace guidance as supplemental routing rules', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
@@ -139,14 +156,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'Complex reasoning and engineering tasks -> GPT 5.6 [id: openai/gpt-5.6] with high reasoning',
     );
     expect(prompt).toContain(
-      'Explicit user model or effort choices take precedence',
+      'Explicit user model choices take precedence over these rules',
     );
     expect(prompt).toContain(
-      'Evaluate every routing rule and use the strongest matching rule only when its condition clearly and strongly matches',
-    );
-    expect(prompt).toContain('Do not use a weak best-available match');
-    expect(prompt).toContain(
-      'If no rule is a strong match, omit both fields to use the deployment defaults',
+      'Roomote applies them itself when it launches delegated work',
     );
   });
 
@@ -456,6 +469,73 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('limits the own-task check to stuck work when task updates are triaged', () => {
+    const standard = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    const triaged = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      taskCommunicationTriageEnabled: true,
+    });
+
+    expect(standard).toContain(
+      'post one brief consolidated factual status for the Session',
+    );
+    expect(triaged).not.toContain(
+      'post one brief consolidated factual status for the Session',
+    );
+    expect(triaged).toContain('Never post a routine or cadence status');
+    expect(triaged).toContain(
+      'it has made no progress since the previous check',
+    );
+    // Inspection, correction, and rearming are unchanged.
+    expect(triaged).toContain('send one specific corrective instruction');
+    expect(triaged).toContain(
+      'ensure exactly one equivalent next one-shot check exists',
+    );
+  });
+
+  it('frames triaged task updates by the judgment decision', () => {
+    const untriaged = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+    });
+    const relay = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: { decision: 'relay', reason: 'needs_user' },
+    });
+    const redirect = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: { decision: 'redirect', reason: 'off_track' },
+    });
+    const uncertain = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      taskCommunicationTriage: {
+        decision: 'uncertain',
+        reason: 'mixed_signals',
+      },
+    });
+
+    expect(untriaged).toContain('roughly 10 minutes of silence');
+    expect(untriaged).not.toContain(
+      'A judgment model triaged this task update',
+    );
+    for (const prompt of [relay, redirect, uncertain]) {
+      expect(prompt).toContain('A judgment model triaged this task update');
+      expect(prompt).not.toContain('roughly 10 minutes of silence');
+    }
+    expect(relay).toContain(
+      'the task needs something only the user can provide',
+    );
+    expect(redirect).toContain('send one corrective "send_task_message"');
+    expect(uncertain).toContain('Silence is the right answer');
+  });
+
   it('offers suggestions on an automation task-settled report only', () => {
     const settlePrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -690,15 +770,6 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain(
-      "use that task's known ID with `manage_tasks` `get_summary` to recover its stable image artifact IDs and viewer links",
-    );
-    expect(prompt).toContain(
-      'Never say an image or screenshot is attached, shown, included, above, or below unless the same reply actually supplies its stable ID in "imageArtifactIds"',
-    );
-    expect(prompt).toContain(
-      'provide an accessible artifact viewer link when available and accurately say that the image could not be attached',
-    );
-    expect(prompt).toContain(
       'Its returned `viewUrl` opens the artifact in its Session, while `standaloneViewUrl` opens the document, image, or file on its own page with a direct shareable link; share whichever returned URL fits the context, unchanged, rather than constructing an artifact URL.',
     );
     expect(prompt).toContain('send_chat_reaction');
@@ -782,7 +853,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'GPT-5.6 [id: openai/gpt-5.6] (deployment default)',
     );
     expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
-    expect(prompt).toContain('Omit both to use the deployment defaults');
+    expect(prompt).toContain('Roomote decides the model for delegated work');
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
@@ -2284,7 +2355,7 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'Preserve returned authorization and Settings links exactly',
+      'Preserve returned `authorizeUrl` and `settingsUrl` links exactly',
     );
     expect(prompt).toContain(
       'The conversation resumes automatically after OAuth',
@@ -2384,6 +2455,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'call `connect_integration` with the exact returned id',
     );
+    expect(prompt).toContain(
+      'keyless enablement, OAuth, or the secure form on the Integrations page',
+    );
+    expect(prompt).not.toMatch(/Settings\s*(→|>)\s*Integrations/);
     expect(prompt).toContain('never bypassed with another route');
     expect(prompt).not.toContain('pick one route in this order');
     expect(prompt).not.toContain(

@@ -1,14 +1,16 @@
 import {
   claimTaskIntegrationToolCall,
   db,
+  findLatestFastConversationUserRequest,
+  findLatestTaskUserRequest,
   fingerprintIntegrationToolCall,
   getSessionForTask,
-  isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
 } from '@roomote/db/server';
 import {
+  INTEGRATION_TOOL_FAST_CONVERSATION_HEADER,
   integrationToolModeIsAutoAssessed,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
@@ -35,8 +37,7 @@ export type ProxyToolApprovals = {
 };
 
 /**
- * Experiment-gated (`integrationToolApprovals`) enforcement of per-tool
- * approval policies at the integration proxy, the one boundary every caller
+ * Enforcement of per-tool approval policies at the integration proxy, the one boundary every caller
  * crosses. A Session enforces `ask` natively before the call ever gets here,
  * but a task's agent has a shell next to its MCP configuration, so nothing
  * inside the sandbox can be the boundary for a task.
@@ -52,7 +53,7 @@ export type ProxyToolApprovals = {
  * a session `ask` gates a tool the policies leave alone.
  *
  * The stricter of the deployment policy and the acting user's personal
- * policy applies, within the layers that govern the integration. Returns no blocks while the experiment is off.
+ * policy applies, within the layers that govern the integration.
  */
 export async function resolveProxyToolApprovalBlocks(input: {
   integrationId: string;
@@ -63,16 +64,12 @@ export async function resolveProxyToolApprovalBlocks(input: {
    */
   policyScope?: 'deployment' | 'personal';
   tokenType: 'run' | 'auth';
-  /** Looked up only while the experiment is on. */
   resolveActingUserId: () => Promise<string | null>;
   /** The run token's task, for its Session's overrides. */
   resolveTaskId?: () => Promise<string | null>;
 }): Promise<ProxyToolApprovals> {
   const blocks = new Map<string, ProxyToolApprovalBlock>();
   const result: ProxyToolApprovals = { blocks, shadowDefaultTools: false };
-  if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-    return result;
-  }
   const autoState = await resolveIntegrationToolAutoState();
   result.shadowDefaultTools = autoState.mode === 'shadow';
   if (autoState.mode === 'on' && input.tokenType === 'run') {
@@ -146,7 +143,20 @@ export function resolveProxyToolApprovalBlock(
   return approvals.blocks.get(toolName) ?? approvals.defaultBlock;
 }
 
-/** Shadow-assess a call to a default tool; never awaited. */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The Fast conversation a Session's integration call names, if any. */
+export function readFastConversationIdHeader(headers: Headers): string | null {
+  const value = headers.get(INTEGRATION_TOOL_FAST_CONVERSATION_HEADER)?.trim();
+  return value && UUID_PATTERN.test(value) ? value : null;
+}
+
+/**
+ * Shadow-assess a call to a default tool; never awaited. A call is assessed
+ * against what its user last asked: the task's latest prompt for a task, or
+ * the caller's own latest prompt in the Fast conversation it names.
+ */
 export function shadowProxyToolCall(
   approvals: ProxyToolApprovals,
   input: {
@@ -155,12 +165,27 @@ export function shadowProxyToolCall(
     args: unknown;
     userId: string | null;
     taskId: string | null;
+    fastConversationId?: string | null;
   },
 ): void {
   if (!approvals.shadowDefaultTools || approvals.blocks.has(input.toolName)) {
     return;
   }
-  recordIntegrationToolShadowEvaluationInBackground(input);
+  const { fastConversationId, ...call } = input;
+  const { taskId, userId } = call;
+  const resolveUserRequest = taskId
+    ? () => findLatestTaskUserRequest(taskId)
+    : fastConversationId && userId
+      ? () =>
+          findLatestFastConversationUserRequest({
+            conversationId: fastConversationId,
+            userId,
+          })
+      : undefined;
+  recordIntegrationToolShadowEvaluationInBackground({
+    ...call,
+    ...(resolveUserRequest ? { resolveUserRequest } : {}),
+  });
 }
 
 /**

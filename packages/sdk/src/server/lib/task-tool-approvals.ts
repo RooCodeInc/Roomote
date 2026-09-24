@@ -5,15 +5,16 @@ import {
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
   getIntegrationToolApproval,
+  findLatestTaskUserRequest,
   getSessionForTask,
   insertAutoApprovedIntegrationToolApproval,
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
-  isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
   taskRuns,
+  trackedMessages,
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
 import {
@@ -26,10 +27,85 @@ import {
   integrationToolModeIsAutoAssessed,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
+  toIntegrationToolUserRequest,
+  getCommunicationChannelFromTaskPayload,
+  getCommunicationProviderFromTaskPayload,
+  getCommunicationThreadIdFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
+  getFastAgentParentFromPayload,
+  integrationToolApprovalMessage,
+  integrationToolApprovalButtons,
+  integrationToolApprovalSlackBlocks,
+  type IntegrationToolApprovalMetadata,
   type IntegrationToolApprovalStatus,
   type IntegrationToolPolicyScope,
   type TaskIntegrationToolApprovals,
 } from '@roomote/types';
+import { getCommunicationProviderAdapter } from './communication-providers';
+
+async function publishTaskToolApproval(input: {
+  payload: unknown;
+  approval: IntegrationToolApprovalMetadata;
+}) {
+  const parent = getFastAgentParentFromPayload(input.payload);
+  const parentConversation =
+    parent?.conversation && 'replyTarget' in parent.conversation
+      ? parent.conversation
+      : undefined;
+  const surface =
+    getCommunicationProviderFromTaskPayload(input.payload) ??
+    parentConversation?.surface;
+  if (surface !== 'slack' && surface !== 'discord' && surface !== 'telegram')
+    return;
+  const channelId =
+    getCommunicationChannelFromTaskPayload(input.payload) ??
+    parentConversation?.replyTarget.channelId;
+  const threadId =
+    getCommunicationThreadIdFromTaskPayload(input.payload) ??
+    parentConversation?.replyTarget.threadId;
+  if (!channelId) return;
+  const slackTeamId =
+    surface === 'slack'
+      ? (getCommunicationTeamIdFromTaskPayload(input.payload) ??
+        parentConversation?.workspaceId)
+      : undefined;
+  if (surface === 'slack' && !slackTeamId) return;
+  const provider = await getCommunicationProviderAdapter(surface, {
+    slackTeamId,
+  });
+  if (!provider) return;
+  const approval = input.approval;
+  const text = integrationToolApprovalMessage(approval);
+  const [claim] = await db
+    .insert(trackedMessages)
+    .values({
+      surface,
+      kind: 'tool_approval',
+      dedupeKey: approval.approvalId,
+      channelId,
+      threadTs: threadId ?? null,
+    })
+    .onConflictDoNothing()
+    .returning({ id: trackedMessages.id });
+  if (!claim) return;
+  try {
+    const posted = await provider.postMessage({
+      channelId,
+      ...(threadId ? { threadId } : {}),
+      text,
+      ...(surface === 'slack'
+        ? { blocks: integrationToolApprovalSlackBlocks(approval) }
+        : { buttons: integrationToolApprovalButtons(approval.approvalId) }),
+    });
+    await db
+      .update(trackedMessages)
+      .set({ messageTs: posted.messageId })
+      .where(eq(trackedMessages.id, claim.id));
+  } catch (error) {
+    await db.delete(trackedMessages).where(eq(trackedMessages.id, claim.id));
+    throw error;
+  }
+}
 
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
 
@@ -74,7 +150,7 @@ async function isTaskSessionOwnerPresent(input: {
 }
 
 /**
- * Experiment-gated (`integrationToolApprovals`) approvals for a task's agent.
+ * Per-tool approvals for a task's agent.
  * A task belongs to one Session, so its asks are recorded on that Session,
  * decided by the Session owner on the same card, and honor the same session
  * overrides. The worker relays the agent's native ask here; the integration
@@ -82,7 +158,7 @@ async function isTaskSessionOwnerPresent(input: {
  */
 async function resolveTaskApprovalSession(runId: number) {
   const run = await db.query.taskRuns.findFirst({
-    columns: { taskId: true },
+    columns: { taskId: true, payload: true },
     where: eq(taskRuns.id, runId),
   });
   if (!run) return null;
@@ -94,6 +170,7 @@ async function resolveTaskApprovalSession(runId: number) {
     ownerUserId:
       session.ownerKind === 'user' ? (session.ownerUserId ?? null) : null,
     sourceSurface: session.sourceSurface,
+    payload: run.payload,
   };
 }
 
@@ -134,12 +211,8 @@ async function resolveTaskGoverningPolicies(input: {
 export async function resolveTaskIntegrationToolApprovals(input: {
   runId: number;
   actingUserId: string | undefined;
-  /** Resolved only while the experiment is on. */
   resolveServers: ResolveTaskServers;
 }): Promise<TaskIntegrationToolApprovals | undefined> {
-  if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-    return undefined;
-  }
   const session = await resolveTaskApprovalSession(input.runId);
   const [{ servers, policies, sessionOverrides }, autoState] =
     await Promise.all([
@@ -176,15 +249,15 @@ export async function requestTaskToolApproval(input: {
   toolName: string;
   nativeRequestId: string;
   args?: unknown;
-  /** What the user last asked for; Auto mode checks the call against it. */
+  /**
+   * What the user last asked for; Auto mode checks the call against it.
+   * Without one, the task's latest recorded prompt stands in.
+   */
   userRequest?: string;
   /** Whose personal policies apply, and what the run mounts: they decide who answers. */
   actingUserId?: string;
   resolveServers?: ResolveTaskServers;
 }): Promise<TaskToolApprovalRequestResult> {
-  if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-    return { outcome: 'not_required' };
-  }
   const session = await resolveTaskApprovalSession(input.runId);
   if (!session?.ownerUserId) return { outcome: 'unavailable' };
   const context = { sessionId: session.sessionId, userId: session.ownerUserId };
@@ -229,7 +302,11 @@ export async function requestTaskToolApproval(input: {
         integrationId: input.integrationId,
         toolName: input.toolName,
         args: input.args,
-        userRequest: input.userRequest,
+        userRequest:
+          toIntegrationToolUserRequest(input.userRequest) ??
+          (await findLatestTaskUserRequest(session.taskId).catch(
+            () => undefined,
+          )),
         userId: session.ownerUserId,
         taskId: session.taskId,
       }).catch(() => ({
@@ -289,6 +366,13 @@ export async function requestTaskToolApproval(input: {
     ...call,
     ...(auto?.action === 'ask' ? { autoEvaluation: auto.evaluation } : {}),
   });
+  await publishTaskToolApproval({ payload: session.payload, approval }).catch(
+    (error) => {
+      console.warn(
+        `[Task tool approvals] Could not post approval notification: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+  );
   return { outcome: 'pending', approvalId: approval.approvalId };
 }
 

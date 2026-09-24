@@ -40,6 +40,19 @@ const {
   };
 });
 
+// No approval policies in these auth tests: the native approval guard stays
+// inert, exactly as for a deployment where nobody has made a choice.
+vi.mock('../tool-approval-enforcement', () => ({
+  claimProxyTaskToolCall: vi.fn(async () => false),
+  describeProxyToolApprovalBlock: vi.fn(() => ''),
+  resolveProxyToolApprovalBlock: vi.fn(() => undefined),
+  resolveProxyToolApprovalBlocks: vi.fn(async () => ({
+    blocks: new Map(),
+    shadowDefaultTools: false,
+  })),
+  shadowProxyToolCall: vi.fn(),
+}));
+
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
@@ -57,8 +70,6 @@ vi.mock('@roomote/db/server', () => ({
   eq: mockEq,
   and: mockAnd,
   isNull: mockIsNull,
-  // The approval-policy experiment stays off in these auth tests.
-  isDeploymentExperimentEnabled: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({

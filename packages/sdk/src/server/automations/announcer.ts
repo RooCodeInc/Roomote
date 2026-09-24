@@ -6,6 +6,7 @@ import {
 import {
   db,
   getAutomationRuntime,
+  recordBackgroundAutomationResult,
   recordAutomationRunOutcome,
   slackInstallations,
   taskPullRequests,
@@ -411,6 +412,12 @@ export async function announcerJob(
           key: 'announcer',
           status: 'skipped',
           at: new Date(),
+        });
+        await recordBackgroundAutomationResult({
+          automationKey: 'announcer',
+          content: 'No merged PRs to summarize.',
+          dedupeKey: `announcer:no-merged-prs:${now.toISOString()}:${deployment.slackTeamId ?? 'deployment'}`,
+          visibility: 'shared',
         });
 
         result.skippedReason = 'No merged pull requests in the window.';

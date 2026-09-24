@@ -8,6 +8,7 @@ import {
   type DiscordUser,
 } from '@roomote/communication/discord-event';
 import {
+  DISCORD_MAX_EMBEDS_PER_MESSAGE,
   DISCORD_MAX_MESSAGE_LENGTH,
   type DiscordCommunicationProvider,
 } from '@roomote/communication/discord-provider';
@@ -36,12 +37,15 @@ import {
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   wakeFastAgentParentEventsOnTurnRelease,
+  resolveFastAgentSessionImages,
   type FastAgentDurableTurn,
 } from '@roomote/sdk/server';
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
+  integrationToolApprovalButtons,
+  integrationToolApprovalMessage,
   type FastAgentConversation,
   type TaskInitiator,
 } from '@roomote/types';
@@ -336,7 +340,10 @@ export async function processDiscordFastAgentMessage(
         new Error('Fast suggestion launch settlement failed.'),
       ),
     );
-    const postFastReplyWithFooter = async (text: string) => {
+    const postFastReplyWithFooter = async (
+      text: string,
+      images: Awaited<ReturnType<typeof resolveFastAgentSessionImages>> = [],
+    ) => {
       const footerText = buildFastSessionReplyFooterText({
         provider: 'discord',
         sessionId: session.id,
@@ -368,6 +375,7 @@ export async function processDiscordFastAgentMessage(
               ? { replyToMessageId: anchorMessageId }
               : {}),
             text: textWithFooter,
+            ...(images.length ? { images } : {}),
           });
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
@@ -380,6 +388,7 @@ export async function processDiscordFastAgentMessage(
               textWithFooter,
               footerText,
             }),
+            ...(images.length ? { images } : {}),
             refresh: { footerText, channelId: footerMessageChannelId },
           };
         },
@@ -541,12 +550,35 @@ export async function processDiscordFastAgentMessage(
             kickoffDelivered: true,
           };
         },
-        postReply: async ({ message: text }) => {
-          const posted = await postFastReplyWithFooter(text);
+        postReply: async ({
+          message: text,
+          toolApproval,
+          imageArtifactIds = [],
+        }) => {
+          if (toolApproval) {
+            const posted = await input.provider.postMessage({
+              ...conversation.replyTarget,
+              text: integrationToolApprovalMessage(toolApproval),
+              buttons: integrationToolApprovalButtons(toolApproval.approvalId),
+            });
+            return { messageId: posted.messageId };
+          }
+          const images = await resolveFastAgentSessionImages({
+            artifactIds: imageArtifactIds,
+            sessionId: session.id,
+          });
+          const posted = await postFastReplyWithFooter(text, images);
           didSendVisibleResponse = true;
           return { messageId: posted.messageId };
         },
-        replaceReply: async ({ messageId }, { message: text }) => {
+        replaceReply: async ({ messageId }, reply) => {
+          const { message: text, imageArtifactIds = [] } = reply;
+          const replyImages = imageArtifactIds.length
+            ? await resolveFastAgentSessionImages({
+                artifactIds: imageArtifactIds,
+                sessionId: session.id,
+              })
+            : [];
           const footerText = buildFastSessionReplyFooterText({
             provider: 'discord',
             sessionId: session.id,
@@ -573,7 +605,10 @@ export async function processDiscordFastAgentMessage(
                 : text;
               await assertLock();
 
-              if (replacementText.length > DISCORD_MAX_MESSAGE_LENGTH) {
+              if (
+                replacementText.length > DISCORD_MAX_MESSAGE_LENGTH ||
+                replyImages.length > DISCORD_MAX_EMBEDS_PER_MESSAGE
+              ) {
                 const placeholder = 'Reconnected to the inference provider.';
                 await input.provider.editMessage({
                   channelId: channel.channelId,
@@ -614,6 +649,7 @@ export async function processDiscordFastAgentMessage(
                 channelId: channel.channelId,
                 messageId,
                 text: replacementText,
+                ...(replyImages.length ? { images: replyImages } : {}),
               });
               if (isFooterCarrier) {
                 await rememberThreadReplyFooterAfterEdit({
@@ -644,7 +680,7 @@ export async function processDiscordFastAgentMessage(
           if (!replaced) {
             // The oversized replacement posts as a new message; the sticky
             // post takes the lock itself, so it runs outside ours.
-            const posted = await postFastReplyWithFooter(text);
+            const posted = await postFastReplyWithFooter(text, replyImages);
             didSendVisibleResponse = true;
             return { messageId: posted.messageId };
           }

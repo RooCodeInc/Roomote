@@ -51,7 +51,6 @@ import {
   resetDecisionModelCache,
   resolveDecisionModel,
   resetJudgmentBackendCache,
-  scoreTypeSafeRelevance,
 } from '../typesafe-judgment';
 
 const questions = {
@@ -143,8 +142,19 @@ describe('evaluateTypeSafeJudgments', () => {
       mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = 'upstream-key';
     });
 
-    it('is used by default when no TypeSafe key is configured', async () => {
+    it('is not used unless selected', async () => {
       mockKeys({ OPENROUTER_API_KEY: 'or-key', AI_GATEWAY_API_KEY: 'gw-key' });
+      const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
+
+      await expect(
+        evaluateTypeSafeJudgments({ state: 'hi', questions }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('is used when selected', async () => {
+      mockKeys({ OPENROUTER_API_KEY: 'or-key', AI_GATEWAY_API_KEY: 'gw-key' });
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
       await expect(
@@ -171,6 +181,7 @@ describe('evaluateTypeSafeJudgments', () => {
     it('sends no Authorization header for an upstream without a key', async () => {
       mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
       mockKeys({});
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
       await evaluateTypeSafeJudgments({ state: 'hi', questions });
@@ -179,7 +190,7 @@ describe('evaluateTypeSafeJudgments', () => {
       expect(init.headers).not.toHaveProperty('Authorization');
     });
 
-    it('yields to a TypeSafe key, which is an explicit opt-in', async () => {
+    it('leaves a TypeSafe key in charge when not selected', async () => {
       const fetchMock = mockFetchResponse({ answers: directAnswers });
 
       await evaluateTypeSafeJudgments({ state: 'hi', questions });
@@ -213,6 +224,7 @@ describe('evaluateTypeSafeJudgments', () => {
 
     it('validates upstream answers like any other backend', async () => {
       mockKeys({});
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
       mockFetchResponse({
         answers: { urgent: { type: 'noul', noul: 0.5 } },
       });
@@ -352,6 +364,7 @@ describe('evaluateTypeSafeJudgments', () => {
 
     it('does not shadow the upstream against itself', async () => {
       mockKeys({});
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
       const info = vi.spyOn(console, 'info').mockImplementation(() => {});
       const fetchMock = mockFetchResponse({
         answers: {
@@ -614,8 +627,81 @@ describe('evaluateTypeSafeJudgments', () => {
     await expect(resolveDecisionModel()).resolves.toEqual({
       kind: 'judgment',
       supportsHighVolumeDecisions: true,
+      roomoteModel: false,
     });
     expect(mockResolveNonTaskHelperModel).not.toHaveBeenCalled();
+  });
+
+  describe('excludeRoomoteModel', () => {
+    it('lets Jev answer', async () => {
+      mockFetchResponse({ answers: directAnswers });
+
+      await expect(
+        evaluateDecisionModel({
+          state: 'hi',
+          questions,
+          excludeRoomoteModel: true,
+        }),
+      ).resolves.toEqual(directAnswers);
+    });
+
+    it('skips the decision on the Roomote-run model, even when cached', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await expect(resolveDecisionModel()).resolves.toMatchObject({
+        kind: 'judgment',
+        roomoteModel: true,
+      });
+      await expect(
+        resolveDecisionModel({ excludeRoomoteModel: true }),
+      ).resolves.toBeNull();
+      await expect(
+        evaluateDecisionModel({
+          state: 'hi',
+          questions,
+          excludeRoomoteModel: true,
+        }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('still shadows and captures the Jev answer, as training data for the Roomote-run model', async () => {
+      mockIsJudgmentCaptureEnabled.mockReturnValue(true);
+      mockEnv.R_JUDGMENT_SHADOW = 'on';
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+      const answers = { urgent: { type: 'noul', noul: 0.92 } };
+      const fetchMock = vi.fn(
+        async () => new Response(JSON.stringify({ answers })),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(
+        evaluateDecisionModel({
+          state: 'hi',
+          questions: { urgent: questions.urgent },
+          excludeRoomoteModel: true,
+        }),
+      ).resolves.toEqual(answers);
+      expect(mockCaptureJudgment).toHaveBeenCalled();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    });
+
+    it('does not fall back to the helper model', async () => {
+      mockKeys({});
+      mockGetJudgmentSelection.mockResolvedValue('off');
+
+      await expect(
+        evaluateDecisionModel({
+          state: 'hi',
+          questions,
+          excludeRoomoteModel: true,
+        }),
+      ).resolves.toBeNull();
+      expect(mockResolveNonTaskHelperModel).not.toHaveBeenCalled();
+      expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+    });
   });
 
   it('uses the resolved helper model for ordinary decision fallback', async () => {
@@ -723,10 +809,7 @@ describe('evaluateTypeSafeJudgments', () => {
 
     await expect(
       evaluateTypeSafeJudgments({ state: 'hi', questions }),
-    ).resolves.toEqual({
-      ...directAnswers,
-      team: { ...directAnswers.team, confidence: 0.82 },
-    });
+    ).resolves.toEqual(directAnswers);
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://ai-gateway.vercel.sh/v4/ai/evaluation-model');
@@ -774,27 +857,6 @@ describe('evaluateTypeSafeJudgments', () => {
       model: 'typesafe/jev-1.13',
       questions,
     });
-  });
-
-  it('uses an explicit experiment backend selection without changing Settings', async () => {
-    mockEnv.R_JUDGMENT_MODEL = 'off';
-    mockGetJudgmentSelection.mockResolvedValue('off');
-    mockKeys({ OPENROUTER_API_KEY: 'or-key' });
-    const fetchMock = mockFetchResponse({ answers: directAnswers });
-
-    await expect(
-      evaluateTypeSafeJudgments({
-        state: 'experiment',
-        questions,
-        selectionOverride: 'openrouter',
-      }),
-    ).resolves.toEqual(directAnswers);
-
-    expect(mockEnv.R_JUDGMENT_MODEL).toBe('off');
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://openrouter.ai/api/alpha/decisions',
-      expect.any(Object),
-    );
   });
 
   it('does not replace malformed OpenRouter confidence', async () => {
@@ -1012,53 +1074,5 @@ describe('evaluateTypeSafeJudgments', () => {
     ).resolves.toEqual({
       severity: { type: 'score', score: 1.4, confidence: 0.7 },
     });
-  });
-
-  it('scores relevance across parallel batches keyed by candidate id', async () => {
-    const candidates = Array.from({ length: 70 }, (_, index) => ({
-      id: `tool-${index}`,
-      text: `Tool ${index}`,
-    }));
-    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(init.body as string) as {
-        state: { candidates: Record<string, string> };
-      };
-      return new Response(
-        JSON.stringify({
-          answers: Object.fromEntries(
-            Object.entries(body.state.candidates).map(([key, text]) => [
-              key,
-              { type: 'noul', noul: Number(text.split(' ')[1]) / 100 },
-            ]),
-          ),
-        }),
-      );
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const scores = await scoreTypeSafeRelevance({
-      query: 'file a bug',
-      candidateKind: 'integration tool',
-      relevanceQuestion: 'Would this tool help?',
-      candidates,
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(scores?.get('tool-0')).toBe(0);
-    expect(scores?.get('tool-69')).toBe(0.69);
-    expect(scores?.size).toBe(70);
-  });
-
-  it('returns null from relevance scoring when no judgment model is configured', async () => {
-    mockKeys({});
-
-    await expect(
-      scoreTypeSafeRelevance({
-        query: 'q',
-        candidateKind: 'skill',
-        relevanceQuestion: 'Relevant?',
-        candidates: [{ id: 'a', text: 'A' }],
-      }),
-    ).resolves.toBeNull();
   });
 });

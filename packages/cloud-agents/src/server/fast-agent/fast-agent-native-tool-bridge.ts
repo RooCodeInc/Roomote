@@ -486,7 +486,7 @@ export default {
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
     environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact launch target ID from the system prompt; pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, pass "${ALL_REPOSITORIES}" for all active repositories, or omit/pass null to use normal workspace routing`)}),
-    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID a user explicitly asked for, by name, description, or a capability ask such as 'your strongest model'; omit or pass null to let Roomote choose from routing rules and the deployment default"),
     reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; use only with a selected model and omit or pass null to use the model's default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
     mode: z.enum(["standard", "environment_setup", "environment_verification"]).optional().describe("Use environment_setup for an admin-approved Blank slate environment-definition task. environment_verification is rejected on every turn; recipe verification is created automatically by ensure_environment create"),
@@ -504,7 +504,7 @@ export default {
   args: {
     repository: z.string().min(1).optional().describe("Repository full name like owner/name; omit in a pull request conversation to review the current pull request"),
     pullRequestNumber: z.number().int().positive().optional().describe("Pull request number; omit in a pull request conversation to review the current pull request"),
-    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment code-review default"),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID a user explicitly asked for, by name or unambiguous description; omit or pass null to use the deployment code-review default"),
     reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; omit or pass null to use the model's code-review default"),
     kickoffMessage: z.string().min(1).describe("Brief user-facing note that the review is underway; do not mention delegation or queue state"),
   },
@@ -674,7 +674,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Add or reconnect one remote MCP integration from its HTTPS streamable-HTTP endpoint. Any member may call this. Use it for a service's official hosted remote MCP endpoint or a URL the human supplied; never invent a URL, and a local stdio project is not a hosted MCP. It is shared with everyone in the deployment by default, like an integration key; pass visibility 'owner' only when the human asked to keep it private to them, and say which it is when you report it. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or the existing Settings link for static headers/manual OAuth client setup. Roomote registers this deployment with the provider before returning an authorization link, so a returned link can succeed. A client-registration-required or needs-static-headers result means this human cannot connect it now: relay the result's reason (the provider's own words) when present, share settingsUrl as the alternative, and continue with the integration-key route. A pending-owner result means a shared server someone else added is still waiting on them or an administrator: say so, share no link, and continue with the integration-key route or a private server of their own if they ask. Server-backed results include integrationId, the actual Fast catalog ID: use that exact integrationId with find_integration_tools and call_integration_tool, never a server UUID, but do not narrate IDs or catalog checks to the human. Share authorizeUrl and settingsUrl exactly unchanged, labeled 'Authorize <name>' and 'Integration settings' respectively; never rewrite either target. The conversation resumes automatically after the human authorizes, so never ask them to send a follow-up. In user-visible progress say at most that you are checking. Never ask for or accept secrets in chat or tool arguments.",
+  description: "Add or reconnect one remote MCP integration from its HTTPS streamable-HTTP endpoint. Any member may call this. Use it for a service's official hosted remote MCP endpoint or a URL the human supplied; never invent a URL, and a local stdio project is not a hosted MCP. It is shared with everyone in the deployment by default, like an integration key; pass visibility 'owner' only when the human asked to keep it private to them, and say which it is when you report it. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or a settingsUrl for static headers/manual OAuth client setup: the Integrations page for a shared server, or Personal settings for a private one. Roomote registers this deployment with the provider before returning an authorization link, so a returned link can succeed. A client-registration-required or needs-static-headers result means this human cannot connect it now: relay the result's reason (the provider's own words) when present, share settingsUrl as the alternative, and continue with the integration-key route. A pending-owner result means a shared server someone else added is still waiting on them or an administrator: say so, share no link, and continue with the integration-key route or a private server of their own if they ask. Server-backed results include integrationId, the actual Fast catalog ID: use that exact integrationId with find_integration_tools and call_integration_tool, never a server UUID, but do not narrate IDs or catalog checks to the human. Share authorizeUrl and settingsUrl exactly unchanged, labeled 'Authorize <name>' and 'Integration settings' respectively; never rewrite either target. The conversation resumes automatically after the human authorizes, so never ask them to send a follow-up. In user-visible progress say at most that you are checking. Never ask for or accept secrets in chat or tool arguments.",
   args: {
     name: z.string().trim().min(1).max(80).describe("Short integration name; Roomote normalizes it to a lowercase slug"),
     url: z.string().url().startsWith("https://").max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
@@ -689,7 +689,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Connect or reconnect one built-in Roomote integration selected from the read-only catalog returned by find_integration_tools. Pass only the exact canonical provider id from that catalog; never guess an id or use a display name. The backend safely chooses already-connected reuse, keyless enablement, OAuth, or the existing secure Settings form. Unavailable, permission-denied, pending, operator-configuration, and denied-authorization outcomes are authoritative and must never be bypassed with a remote MCP or API key. Never accept credentials in chat or tool arguments.",
+  description: "Connect or reconnect one built-in Roomote integration selected from the read-only catalog returned by find_integration_tools. Pass only the exact canonical provider id from that catalog; never guess an id or use a display name. The backend safely chooses already-connected reuse, keyless enablement, OAuth, or the existing secure form on the Integrations page. Unavailable, permission-denied, pending, operator-configuration, and denied-authorization outcomes are authoritative and must never be bypassed with a remote MCP or API key. Never accept credentials in chat or tool arguments.",
   args: {
     integrationId: z.enum(${JSON.stringify(MCP_INTEGRATIONS.map(({ id }) => id))}).describe("Exact canonical built-in provider id returned by find_integration_tools"),
   },
@@ -1632,8 +1632,7 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
     /**
-     * Experiment-gated (`integrationToolApprovals`) per-tool approval rules
-     * in OpenCode config-permission shape, applied to the parent build agent
+     * Per-tool approval rules in OpenCode config-permission shape, applied to the parent build agent
      * and the helper subagents in the generated per-conversation config.
      * Rules live in config rather than the session ruleset so a policy
      * change never strands stale state in a persisted session: this file is

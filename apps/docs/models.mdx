@@ -54,9 +54,10 @@ a provider never re-adds models you removed.
 
 When you connect or update an API-key provider, Roomote first checks the
 submitted credentials with a small live model request. If the provider rejects
-the key, or the account has no remaining credits, nothing is saved: fix the
-credential and save again. Other failures (a rate limit, a model your account
-cannot access, or a transient provider outage) never block the save.
+the key, nothing is saved: fix the credential and save again. An account with no
+remaining credits or quota is still saved, with a warning, so you can add
+credits while you finish setting up. Other failures (a rate limit, a model your
+account cannot access, or a transient provider outage) never block the save.
 Self-hosted OpenAI-compatible endpoint connections are checked by listing the
 endpoint's models instead. Saving again without changing any credential skips
 the live check.
@@ -167,6 +168,13 @@ every role afterward. Roles a provider has no specific recommendation for are
 set to **Same as coding model**, and roles managed by environment variables are
 left untouched.
 
+You can also choose **Add your own** to save a private preset with a model and
+reasoning level for each role when that model supports reasoning. Your custom
+presets are available only to your account. They remain listed if a model
+later becomes unavailable, but cannot be applied until every unavailable role
+has a current model selection; deleting a preset does not change the active
+model mapping.
+
 ## Env-based setup
 
 Most deployments should configure providers from **Settings > Models**. Use
@@ -238,7 +246,7 @@ limits, or Grok included-usage windows.
 These numbers come from unofficial provider endpoints, so the usage line is
 hidden whenever the provider does not return usable data.
 
-Under **Settings > Automations > Inference Provider Usage Alerts**, admins can
+Under **Automations > Inference Provider Usage Alerts**, admins can
 configure hourly checks for queryable limits from ChatGPT subscription, GitHub
 Copilot, xAI Grok subscription, OpenRouter, Kimi for Coding, OpenCode Go, Z.AI,
 and Z.AI Coding Plan. Roomote posts one warning when a credential crosses its
@@ -314,32 +322,33 @@ model shown on the delegated task.
 
 The judgment model is optional. Many routing and triage steps are bounded
 decisions rather than text: whether a channel message should start work, which
-skill or tool fits a request, or whether a thread reply is meant for Roomote.
+model a delegated task needs, or whether a thread reply is meant for Roomote.
 A judgment model answers these as typed questions with probabilities in one
 fast call. Roomote supports a judgment model it runs itself and TypeSafe's Jev
 through these routes:
 
 | Judgment model | Requires |
 | --- | --- |
-| **Roomote judgment model** | `R_JUDGMENT_UPSTREAM_URL` (set automatically on Roomote Cloud) |
+| **Roomote judgment model** | `R_JUDGMENT_UPSTREAM_URL` |
 | **Jev via TypeSafe** | a [TypeSafe](/providers/inference/typesafe) API key |
 | **Jev via OpenRouter** | an [OpenRouter](/providers/inference/openrouter) API key |
 | **Jev via Vercel AI Gateway** | a [Vercel AI Gateway](/providers/inference/vercel-ai-gateway) key |
 
 Choose it under **Judgment model** in **Settings > Models**, or set
 `R_JUDGMENT_MODEL` to `roomote`, `typesafe`, `openrouter`, `vercel`, or `off`.
-A TypeSafe key alone turns on **Jev via TypeSafe**; otherwise a configured
-Roomote judgment model is used. OpenRouter and Vercel AI Gateway are used only
-when you select them, because many deployments already have those keys for
-task inference, and choosing them sends decision text to a third party.
+A TypeSafe key selects **Jev via TypeSafe** when Settings has no saved route.
+Choose the Roomote judgment model, OpenRouter, or Vercel AI Gateway to route
+decisions through those providers. To compare Jev with the Roomote judgment
+model, select Jev and set `R_JUDGMENT_SHADOW=on`; the Roomote model scores the
+same decisions for calibration while Jev remains the selected route. Many
+deployments already have OpenRouter or Vercel AI Gateway keys for task
+inference, and selecting those routes sends decision text to that provider.
 
 The **Roomote judgment model** is an open-weight model served on
-Roomote-operated infrastructure. The text a decision needs never leaves that
-infrastructure, which is why it is the default on Roomote Cloud. It answers
-the same typed questions as Jev; Roomote acts on it under the same confidence
-rules and falls back to the helper model in the same cases. Self-hosted
-deployments can point `R_JUDGMENT_UPSTREAM_URL` at any server that speaks the
-same typed decisions request.
+Roomote-operated infrastructure, where its decision text is processed. It
+answers the same typed questions as Jev and follows the same confidence rules.
+Self-hosted deployments can point `R_JUDGMENT_UPSTREAM_URL` at any server that
+speaks the same typed decisions request.
 
 When a judgment model is on, Roomote asks it first for:
 
@@ -350,42 +359,21 @@ When a judgment model is on, Roomote asks it first for:
 - whether an unmentioned reply in a Slack, Discord, or Teams thread is meant
   for Roomote after someone else spoke; it routes the reply only when
   confident, and otherwise Roomote still needs a mention
-- the environment that best fits the first request in a new session, as
-  an advisory hint the session still verifies
-- a one-line hint naming a clearly relevant [skill](/skills), including skills
-  beyond the prompt's skill list
-- ranking integration tools when a session `find_integration_tools` keyword search
-  matches nothing or more than the result limit
-- ordering [Memory](/memory) search results, moving confidently relevant
-  passages up and confidently irrelevant ones down without removing any
-- skipping triage for PR review activity that is clearly bot noise, such as an
-  automated approval, when there are no failing checks, conflicts, requested
-  changes, or open threads
 - dropping inbound [email](/providers/communications/agentmail) that is
   clearly an automatic reply, such as an out-of-office or bounce notice
-- choosing the forum tag when Roomote opens a thread in a Discord forum channel
 - whether a settled session or task turn holds something worth saving to
   [Memory](/memory) that the agent did not record itself
-- an advisory ranking of a task's own changed hunks by defect risk during its
-  self-review, before it pushes or opens a pull request (the same pre-screen
-  pull request reviews use), so the agent can re-read the riskiest hunks
 
-Roomote acts on the judgment model only when it is confident. When it is
-unsure, unavailable, or returns an error, Roomote keeps the behavior it has
-without a judgment model, usually through the deployment's helper model. The
-helper model is resolved from the **Helper model** role and does not require a
-separate decision-model connection. The text a decision needs is sent to the
-selected judgment model, so choosing Jev sends it to TypeSafe or the gateway
-you picked; keys stay on the control plane and are never sent to task
-sandboxes.
+Roomote applies a judgment when its confidence meets the configured threshold.
+When a decision needs more context, Roomote uses the configured **Helper model**
+role. The text a decision needs is sent to the selected judgment model, so
+choosing Jev sends it to TypeSafe or the gateway you picked; keys stay on the
+control plane and are never sent to task sandboxes.
 
-Some decisions run in bulk: many candidates in parallel, such as skill
-relevance and integration-tool ranking, or a check after every session and
-task turn, such as the Memory check. Roomote only runs those high-volume workloads
-through a configured judgment model (Jev or the Roomote judgment model). A
-helper model never opts into these batches, so deployments without a judgment
-model keep the existing conservative behavior and do not incur new
-high-volume language-model calls.
+Some decisions run in bulk, such as the Memory check after every session and
+task turn. Roomote evaluates those high-volume workloads with a configured
+judgment model (Jev or the Roomote judgment model), using one typed evaluation
+for each check.
 
 ## Reasoning settings
 
@@ -544,3 +532,9 @@ deployment. It helps admins compare models without relying on stale defaults.
   a model that supports the required input.
 - **A model works from one provider but not another.** Check provider-specific
   credentials, rate limits, model availability, and model ID prefix.
+- **Work stops with "You seem to have run out of credits".** The provider
+  reported that the account has no remaining credits or quota, or that a
+  ChatGPT subscription reached its usage limit. Roomote does not retry these
+  automatically, because retrying cannot succeed until the account changes.
+  Add credits or wait for the subscription limit to reset, or switch to a model
+  from another provider. Temporary rate limits are still retried automatically.

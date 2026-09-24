@@ -49,10 +49,9 @@ agents receive an opaque reference or a task-scoped substitute rather than the
 key itself.
 
 An integration-key approval created from a session also appears here when you
-choose **Only me**. Deployment-wide integration keys instead appear under the
-administrator's **Settings → Integrations** page. If an administrator changes a
-shared integration to owner-only access, Roomote moves it to that owner's
-Personal integrations card.
+choose **Only me**. Deployment-wide integration keys instead appear on the
+**Integrations** page. If an administrator changes a shared integration to
+owner-only access, Roomote moves it to that owner's Personal integrations card.
 
 See [Integration keys](/integration-keys) for approval methods, security
 boundaries, task behavior, and self-hosting options.
@@ -65,7 +64,7 @@ account. Roomote reaches the server through its proxy and keeps headers and
 OAuth tokens server-side. A server you ask Roomote to connect privately in a
 session appears here too. Open a server to edit it, manage which tools agents
 may use, or share it with everyone in the deployment; Roomote then moves it to
-**Settings → Integrations**.
+the **Integrations** page.
 
 See [Custom MCP servers](/integrations/custom-mcp-servers) for authentication
 options and security boundaries.
@@ -116,22 +115,23 @@ for every member.
 
 ### Peer conversations
 
-In an established Slack or Discord session thread, eligible human replies keep
-reaching Roomote after someone mentions another participant. When a
-[judgment model](/models#judgment-model) is configured and more than one
-person is in the thread, each unmentioned reply is first judged on who it is
-addressed to and whether it is only a closing acknowledgement; replies meant for Roomote start a turn while side discussion
-and bare acknowledgements stay silent. Without a judgment model,
-Roomote is instructed to stay quiet around peer discussion unless it is
-addressed directly. Direct Roomote mentions always work.
+Peer conversations are standard behavior in established Slack and Discord
+session threads; there is no Experimental setting to enable them. When a
+[judgment model](/models#judgment-model) is configured, each eligible unmentioned
+reply from a linked participant is checked for who it addresses and whether it
+expects a response or action. Only confident replies addressed to Roomote start
+a turn, while messages for another participant and simple acknowledgements stay
+quiet. Without a judgment model, the existing provider-specific routing
+heuristics apply. Direct Roomote mentions continue to work.
 
-Peer conversations do not monitor whole channels. Discord supplies messages
-from the established thread and resolved user mentions. Telegram is not
-included: bot privacy settings can prevent ambient group messages from reaching
-Roomote, and Telegram sessions are isolated per linked sender. Microsoft Teams
-is also not included because its channel sessions are isolated per linked
-sender; webhook delivery and delegated Graph history are not a single shared,
-owner-bound session signal.
+Teams sessions remain isolated by linked Roomote user, so they do not share a
+peer conversation across participants. With a judgment model configured,
+eligible unmentioned replies in Teams threads are still checked for their
+addressee and response intent before they start a turn. These behaviors do not
+monitor whole channels. Discord supplies messages from the established thread
+and resolved user mentions. Telegram is not included: bot privacy settings can
+prevent ambient group messages from reaching Roomote, and Telegram sessions are
+isolated per linked sender.
 
 ## Personalize how Roomote works with you
 
@@ -174,7 +174,7 @@ feature.
 ## Common issues
 
 - **A linked account is missing.** Ask an admin to enable the integration from
-  **Settings > Integrations**.
+  the **Integrations** page.
 - **A task uses the wrong identity.** Check that the relevant account is
   linked and that you started the task from the expected chat, source-control,
   or dashboard user.

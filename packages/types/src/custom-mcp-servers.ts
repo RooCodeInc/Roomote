@@ -86,8 +86,8 @@ export const MAX_PERSONAL_MCP_SERVERS = 10;
 /**
  * Who a custom remote MCP server is for, mirroring integration keys: `owner`
  * is private to the member who added it and lives in Personal settings;
- * `deployment` is shared with every member and lives in Settings →
- * Integrations. The owner or an administrator manages either kind.
+ * `deployment` is shared with every member and lives on the Integrations
+ * page. The owner or an administrator manages either kind.
  */
 export const customMcpServerVisibilitySchema = z.enum(['owner', 'deployment']);
 export type CustomMcpServerVisibility = z.infer<

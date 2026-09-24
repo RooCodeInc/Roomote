@@ -16,6 +16,7 @@ const ask = {
 function setup(
   statuses: string[] = [],
   request: unknown = { outcome: 'pending', approvalId: 'approval-1' },
+  userRequest: string | undefined = 'File the bug.',
 ) {
   const client = {
     message: vi.fn(async () => ({
@@ -40,7 +41,7 @@ function setup(
     api: api as never,
     logger: { warn: vi.fn() },
     signal: new AbortController().signal,
-    getUserRequest: () => 'File the bug.',
+    getUserRequest: () => userRequest,
     pollMs: 1,
     onPendingCountChange: (pending) => pendingCounts.push(pending),
   });
@@ -74,6 +75,35 @@ describe('createTaskToolApprovalRelay', () => {
       expect.objectContaining({ requestId: 'per_1', reply: 'once' }),
     );
     await vi.waitFor(() => expect(pendingCounts).toEqual([1, 0]));
+  });
+
+  it("sends the prompt's visible request, without injected blocks, bounded", async () => {
+    const wrapped = setup(
+      [],
+      { outcome: 'approved' },
+      '<environment-instructions>Use pnpm.</environment-instructions>\n<request>File the bug.</request>',
+    );
+    wrapped.relay.handleAsk(ask);
+    await replied(wrapped.client);
+    expect(wrapped.api.request).toHaveBeenCalledWith(
+      expect.objectContaining({ userRequest: 'File the bug.' }),
+    );
+
+    const long = setup([], { outcome: 'approved' }, 'x'.repeat(25_000));
+    long.relay.handleAsk(ask);
+    await replied(long.client);
+    expect(long.api.request).toHaveBeenCalledWith(
+      expect.objectContaining({ userRequest: 'x'.repeat(20_000) }),
+    );
+  });
+
+  it('sends no request when the harness has none', async () => {
+    const { client, api, relay } = setup([], { outcome: 'approved' }, '  ');
+    relay.handleAsk(ask);
+    await replied(client);
+    expect(api.request).toHaveBeenCalledWith(
+      expect.not.objectContaining({ userRequest: expect.anything() }),
+    );
   });
 
   it.each([

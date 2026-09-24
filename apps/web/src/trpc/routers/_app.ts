@@ -39,11 +39,14 @@ import {
   integrationToolPolicyUpsertSchema,
   integrationToolPoliciesUpsertSchema,
   taskModelMetadataSchema,
+  userTaskModelMappingPresetCreateSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
 
 import {
+  deleteFastSessionQueuedMessageCommand,
   getFastSessionMessagesCommand,
+  getFastSessionOlderMessagesCommand,
   getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
@@ -55,6 +58,7 @@ import {
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
+  deleteFastSessionQueuedMessageInputSchema,
   replyToFastSessionInputSchema,
   fastSessionPrReviewActionInputSchema,
   fastSessionCapabilityOfferResponseInputSchema,
@@ -224,8 +228,11 @@ import {
   updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
+  getDizzyExperimentEnabledCommand,
   getDeploymentExperimentsCommand,
+  getNightlyExperimentsCommand,
   setDeploymentExperimentCommand,
+  setNightlyExperimentCommand,
 } from '../commands/deployment-experiments';
 import {
   listIntegrationToolPoliciesCommand,
@@ -490,6 +497,11 @@ import {
   suggestTaskModelsCommand,
   updateTaskModelSettingsCommand,
 } from '../commands/task-models';
+import {
+  createUserTaskModelMappingPresetCommand,
+  deleteUserTaskModelMappingPresetCommand,
+  listUserTaskModelMappingPresetsCommand,
+} from '../commands/task-models/user-mapping-presets';
 import { LOCAL_TASK_MODEL_PROVIDER_IDS } from '../commands/task-models/local-provider-discovery';
 import {
   deleteJudgmentTypeSafeKeyCommand,
@@ -2517,6 +2529,24 @@ export const appRouter = createRouter({
   }),
 
   taskModels: createRouter({
+    customPresets: createRouter({
+      list: protectedProcedure.query(({ ctx: { auth } }) =>
+        listUserTaskModelMappingPresetsCommand(auth),
+      ),
+
+      create: protectedProcedure
+        .input(userTaskModelMappingPresetCreateSchema)
+        .mutation(({ ctx: { auth }, input }) =>
+          createUserTaskModelMappingPresetCommand(auth, input),
+        ),
+
+      delete: protectedProcedure
+        .input(z.object({ id: z.string().uuid() }))
+        .mutation(({ ctx: { auth }, input }) =>
+          deleteUserTaskModelMappingPresetCommand(auth, input),
+        ),
+    }),
+
     launchOptions: protectedProcedure.query(({ ctx: { auth } }) =>
       getLaunchTaskModelsCommand(auth),
     ),
@@ -3226,6 +3256,11 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
       ),
+    deleteQueuedMessage: protectedProcedure
+      .input(deleteFastSessionQueuedMessageInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        deleteFastSessionQueuedMessageCommand(auth, input),
+      ),
     startGoal: protectedProcedure
       .input(
         z.object({
@@ -3261,6 +3296,21 @@ export const appRouter = createRouter({
       .input(z.object({ sessionId: z.string().uuid() }))
       .query(({ ctx: { auth }, input }) =>
         getFastSessionMessagesCommand(auth, input.sessionId),
+      ),
+    olderMessages: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          cursor: z.object({
+            createdAt: z.string().min(1).max(64),
+            ts: z.number().int(),
+            turnSeq: z.number().int(),
+            id: z.string().uuid(),
+          }),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionOlderMessagesCommand(auth, input),
       ),
     submitUserInput: protectedProcedure
       .input(
@@ -3629,6 +3679,25 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setDeploymentExperimentCommand(auth, input),
+      ),
+  }),
+
+  nightlyExperiments: createRouter({
+    dizzyEnabled: protectedProcedure.query(({ ctx: { auth } }) =>
+      getDizzyExperimentEnabledCommand(auth),
+    ),
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getNightlyExperimentsCommand(auth),
+    ),
+    set: protectedProcedure
+      .input(
+        z.object({
+          id: z.enum(DEPLOYMENT_EXPERIMENT_IDS),
+          enabled: z.boolean(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setNightlyExperimentCommand(auth, input),
       ),
   }),
 

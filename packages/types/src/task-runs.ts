@@ -309,6 +309,7 @@ export const TRACKED_MESSAGE_KINDS = [
   'mcp_setup_nudge',
   'announcement',
   'stats_post',
+  'tool_approval',
 ] as const;
 export type TrackedMessageKind = (typeof TRACKED_MESSAGE_KINDS)[number];
 

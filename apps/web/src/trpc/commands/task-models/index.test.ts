@@ -1,5 +1,6 @@
 import {
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  DEFAULT_TASK_MODEL_ID,
   normalizeTaskModelId,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
@@ -2078,6 +2079,24 @@ describe('task model provider commands', () => {
     expect(txInsert).not.toHaveBeenCalled();
   });
 
+  it('saves a key whose account is out of credits and returns the warning', async () => {
+    mockValidateSetupModelProviderCredentials.mockResolvedValueOnce({
+      code: 'insufficient_credits',
+      message:
+        'The Anthropic account seems to be out of credits or quota. Add credits before using it.',
+    });
+
+    const result = await saveTaskModelProviderCommand(buildMockAuth(), {
+      provider: 'anthropic',
+      apiKey: 'sk-ant-empty-account',
+    });
+
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalled();
+    expect(result.validationWarning).toBe(
+      'The Anthropic account seems to be out of credits or quota. Add credits before using it.',
+    );
+  });
+
   it('saves an endpoint provider when model discovery is temporarily unavailable', async () => {
     mockCollectCandidateProviderCredentials.mockResolvedValue({
       values: [{ name: 'VLLM_BASE_URL', value: 'https://vllm.example/v1' }],
@@ -2106,9 +2125,38 @@ describe('task model provider commands', () => {
     expect(result.addedDiscoveredModelCount).toBe(0);
   });
 
+  it('saves an endpoint provider whose account is out of credits and reports it', async () => {
+    mockCollectCandidateProviderCredentials.mockResolvedValue({
+      values: [{ name: 'VLLM_BASE_URL', value: 'https://vllm.example/v1' }],
+      clearedEnvVarNames: [],
+      changedValues: [
+        { name: 'VLLM_BASE_URL', value: 'https://vllm.example/v1' },
+      ],
+      clearedPersistedEnvVarNames: [],
+      persistedEnv: {},
+    });
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'VLLM_BASE_URL',
+    ]);
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      VLLM_BASE_URL: 'https://vllm.example/v1',
+    });
+    fetchMock.mockResolvedValue(new Response(null, { status: 402 }));
+
+    const result = await saveTaskModelProviderCommand(buildMockAuth(), {
+      provider: 'vllm',
+      apiKey: 'https://vllm.example/v1',
+    });
+
+    // Credit exhaustion is not a credential problem, so the connection is
+    // saved and the post-save discovery reports why no models were added.
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalled();
+    expect(result.discoveryError).toContain('enough credits or quota');
+    expect(result.addedDiscoveredModelCount).toBe(0);
+  });
+
   it.each([
     [401, 'https://vllm.example/v1', 'rejected the API key'],
-    [402, 'https://vllm.example/v1', 'enough credits or quota'],
     [null, 'not a URL', 'valid endpoint URL'],
   ])(
     'does not save an endpoint provider after a blocking %s discovery response',
@@ -2156,9 +2204,7 @@ describe('task model provider commands', () => {
     // connected via runtime env) and keep the effective default model.
     expect(modelIds).toContain('openrouter/openai/gpt-5.6-terra');
     expect(modelIds).toContain('anthropic/claude-sonnet-5');
-    expect(seededSettings?.defaultModelId).toBe(
-      'openrouter/openai/gpt-5.6-terra',
-    );
+    expect(seededSettings?.defaultModelId).toBe(DEFAULT_TASK_MODEL_ID);
     expect(result.addedRecommendedModelCount).toBe(5);
   });
 

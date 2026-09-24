@@ -38,10 +38,12 @@ import {
   fastAgentHumanFollowUpEventSchema,
   fastAgentCapabilityOfferInputSchema,
   formatErrorForLog,
+  formatInferenceCreditsExhaustedMessage,
   formatSingleLineLog,
   manageWakeupsInputSchema,
   serviceCredentialPrepareSchema,
   serviceCredentialPrepareToolSchema,
+  resolveInferenceProviderDisplayName,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
   truncateAcpOutputText,
@@ -61,6 +63,7 @@ import {
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
   LIST_REPOSITORIES_MAX_LIMIT,
+  matchIntegrationTools,
 } from '@roomote/types';
 import {
   and,
@@ -78,8 +81,10 @@ import {
   getActiveRecipeVerificationTaskId,
   inArray,
   isBrainEnabled,
+  isChatGptSubscriptionConnected,
   isPrivateSessionsExperimentEnabled,
   isNull,
+  isXaiSubscriptionConnected,
   markSessionGoalForConversation,
   releaseSessionGoalContinuation,
   sql,
@@ -133,6 +138,7 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
+import type { TaskCommunicationTriageHint } from './fast-agent-task-communication-triage';
 import {
   inspectRAnalysisScript,
   parseRAttachmentText,
@@ -186,18 +192,16 @@ import {
   loadFastAgentPromptSkillCatalog,
 } from './fast-agent-prompt-skill-catalog';
 import { RemoteFastAgentInstanceSkillSource } from './fast-agent-instance-skill-source';
-import {
-  buildFastAgentExplicitSkillInvocationContext,
-  parseFastAgentExplicitSkillInvocation,
-} from './fast-agent-skill-invocation';
-import { buildFastAgentSkillRelevanceContext } from './fast-agent-skill-relevance';
+import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   findFastAgentActiveInferenceRetryNotice,
+  claimFastAgentHumanFollowUpSteers,
   markFastAgentDurableTurnDelivered,
   markFastAgentInferenceRetryNoticeInterruption,
   releaseFastAgentDurableTurnClaim,
+  releaseFastAgentHumanFollowUpSteerClaims,
   renewFastAgentDurableTurnClaim,
   revokeFastAgentDurableTurnReplay,
   scheduleFastAgentDurableTurnRetry,
@@ -232,6 +236,7 @@ import {
   resolveFastAgentToolApprovalRules,
   shouldDisposeInstanceForToolApprovalRules,
 } from './fast-agent-tool-approvals';
+import { resolveFastAgentToolApprovalUserRequest } from './fast-agent-tool-approval-context';
 import {
   callFastAgentIntegration,
   clearFastAgentIntegrationToolCache,
@@ -240,7 +245,6 @@ import {
 } from './fast-agent-integration-broker';
 import { McpToolCallError } from '../mcp-tool-client';
 import { describeUnknownIntegrationArguments } from './fast-agent-integration-args';
-import { matchIntegrationToolsWithRanking } from './fast-agent-integration-tool-ranking';
 import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
@@ -264,10 +268,7 @@ import {
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
-import {
-  resolveFastAgentLaunchModelSelection,
-  resolveFastAgentRoutingHint,
-} from './fast-agent-routing-hint';
+import { resolveFastAgentLaunchModel } from './fast-agent-launch-model';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -607,18 +608,17 @@ const callIntegrationToolArgsSchema = z.object(
 
 /**
  * Resolve on-demand integration tools for `find_integration_tools` from the
- * in-memory catalog; keyword matching is shared with task sandboxes, and the
- * optional judgment model can re-rank free-text queries here.
+ * in-memory catalog; keyword matching is shared with task sandboxes.
  */
-async function findFastAgentIntegrationTools(
+function findFastAgentIntegrationTools(
   integrations: FastAgentIntegration[],
   args: z.infer<typeof findIntegrationToolsArgsSchema>,
-): Promise<{
+): {
   tools: IntegrationToolCandidate[];
   truncated: boolean;
   availableToolCount: number;
   unknownIntegration: boolean;
-}> {
+} {
   if (
     args.integrationId &&
     !integrations.some((integration) => integration.id === args.integrationId)
@@ -641,7 +641,7 @@ async function findFastAgentIntegrationTools(
     })),
   );
   return {
-    ...(await matchIntegrationToolsWithRanking(candidates, args)),
+    ...matchIntegrationTools(candidates, args),
     unknownIntegration: false,
   };
 }
@@ -1132,9 +1132,13 @@ function formatFastAgentInferenceRetryNotice(
 function formatFastAgentInferenceFailure(
   failure: FastAgentInferenceFailure,
   retried: boolean,
-  context: { detail?: string; model?: string } = {},
+  context: { detail?: string; model?: string; providerName?: string } = {},
 ): string {
-  const summary = formatFastAgentInferenceFailureSummary(failure, retried);
+  const summary = formatFastAgentInferenceFailureSummary(
+    failure,
+    retried,
+    context.providerName,
+  );
   // The specific reasons already say what happened. The generic rejection
   // is the one that leaves the reader guessing, so it carries the provider's
   // own status and message, and the model that produced them.
@@ -1146,6 +1150,7 @@ function formatFastAgentInferenceFailure(
 function formatFastAgentInferenceFailureSummary(
   failure: FastAgentInferenceFailure,
   retried: boolean,
+  providerName: string | undefined,
 ): string {
   switch (failure.reason) {
     case 'content_filter':
@@ -1167,7 +1172,7 @@ function formatFastAgentInferenceFailureSummary(
         ? 'The request is still being blocked by the inference provider gateway after retrying. Please try again in a moment.'
         : 'The request was blocked by the inference provider gateway. Please try again in a moment.';
     case 'insufficient_credits':
-      return 'The inference provider account has insufficient credits or quota.';
+      return formatInferenceCreditsExhaustedMessage(providerName);
     case 'invalid_credentials':
       return 'Could not authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
     case 'model_unavailable':
@@ -1175,6 +1180,37 @@ function formatFastAgentInferenceFailureSummary(
     default:
       return 'Could not complete the request because the inference provider returned an error. Please try again in a moment.';
   }
+}
+
+/**
+ * Display name of the provider that served the failed request. A connected
+ * ChatGPT or Grok subscription wins over the API key at runtime for `openai/`
+ * and `xai/` models, so the connection decides which one ran out.
+ */
+async function resolveFastAgentInferenceProviderName(
+  model: string | undefined,
+): Promise<string | undefined> {
+  if (!model) return undefined;
+  // Naming the provider is best effort; the closeout must go out regardless.
+  const isConnected = async (check: () => Promise<boolean>) => {
+    try {
+      return await check();
+    } catch {
+      return false;
+    }
+  };
+  const [chatgptConnected, xaiSubscriptionConnected] = await Promise.all([
+    model.startsWith('openai/')
+      ? isConnected(() => isChatGptSubscriptionConnected())
+      : false,
+    model.startsWith('xai/')
+      ? isConnected(() => isXaiSubscriptionConnected())
+      : false,
+  ]);
+  return resolveInferenceProviderDisplayName(model, {
+    chatgptConnected,
+    xaiSubscriptionConnected,
+  });
 }
 
 function waitForFastAgentInferenceRetry(
@@ -1629,8 +1665,6 @@ function buildFastAgentMessages({
   resumedAfterInferenceRetry = false,
   previousAttempt,
   voiceMode = false,
-  routingHint,
-  skillRelevanceContext,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -1652,11 +1686,6 @@ function buildFastAgentMessages({
   /** What an earlier attempt at this same turn already did, when resuming. */
   previousAttempt?: FastAgentTurnAttemptSummary | null;
   voiceMode?: boolean;
-  /** Advisory environment pick for the first request of a new Session. */
-  routingHint?: string;
-  /** Per-turn `<skill_relevance>` hint; kept out of the system prompt so the
-   * prompt stays cacheable across turns. */
-  skillRelevanceContext?: string;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -1695,10 +1724,6 @@ function buildFastAgentMessages({
   const currentUserMessageText = [
     voiceMode ? '<voice_mode active="true" />' : undefined,
     explicitSkillInvocationContext,
-    routingHint
-      ? `<routing_hint>\n${escapeFastAgentEnvelopeText(routingHint)}\n</routing_hint>`
-      : undefined,
-    skillRelevanceContext,
     wrappedCurrentUserMessageText,
   ]
     .filter((entry): entry is string => Boolean(entry))
@@ -1913,6 +1938,8 @@ export async function answerFastAgentQuestion({
   platformEventKind = 'delegated_task',
   platformEventTimestampMs,
   automationReport = false,
+  taskCommunicationTriage,
+  taskCommunicationTriageEnabled = false,
   serviceCredentialPlatformActorUserId,
   serviceCredentialPlatformDenialReason,
   defaultImageArtifactIds = [],
@@ -1962,6 +1989,11 @@ export async function answerFastAgentQuestion({
   /** The settling delegated task ran for a custom automation; its closeout is
    * the run's report and may carry launchable suggestions. */
   automationReport?: boolean;
+  /** Judgment-model triage of a delegated task update, when the experiment
+   * routed this turn to the parent model. */
+  taskCommunicationTriage?: TaskCommunicationTriageHint;
+  /** The Session's task updates go through judgment-model triage. */
+  taskCommunicationTriageEnabled?: boolean;
   /** Trusted owner actor for a delegated-task continuation, resolved server-side. */
   serviceCredentialPlatformActorUserId?: string;
   serviceCredentialPlatformDenialReason?:
@@ -2621,7 +2653,7 @@ export async function answerFastAgentQuestion({
       if (deferredOversizedHumanFollowUpIds.has(rows[0]!.id)) return;
 
       const alreadyInjectedIds: string[] = [];
-      const batch: Array<{
+      let batch: Array<{
         row: (typeof rows)[number];
         followUp: z.infer<typeof fastAgentHumanFollowUpEventSchema>;
         followUpTurnId: string;
@@ -2764,117 +2796,157 @@ export async function answerFastAgentQuestion({
       }
 
       if (signal?.aborted) return;
-      for (const { row, followUp, followUpTurnId } of batch) {
-        await persistCanonicalMessage({
-          eventId: `${followUpTurnId}:user`,
-          turnId: followUpTurnId,
-          turnSeq:
-            humanFollowUpTurnSeqs.get(row.id) ??
-            (() => {
-              const turnSeq = nextTurnSeq++;
-              humanFollowUpTurnSeqs.set(row.id, turnSeq);
-              return turnSeq;
-            })(),
-          ts: row.createdAt.getTime(),
-          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-          role: 'user',
-          contentBlocks: buildFastAgentUserContentBlocks(
-            normalizeThreadText(followUp.question),
-            followUp.images ?? [],
-          ),
-          metadata: {
-            visibleInTranscript: true,
-            turnSource: 'human',
-            userId: followUp.userId,
-            ...(followUp.senderDisplayName
-              ? {
-                  userName: followUp.senderDisplayName,
-                  senderDisplayName: followUp.senderDisplayName,
-                }
-              : {}),
-            ...(followUp.senderExternalId
-              ? { senderExternalId: followUp.senderExternalId }
-              : {}),
-          },
-          payload: {},
-          source: conversation.surface,
-          nativeSessionId: activeOpenCodeSessionId,
-        });
-      }
-      if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
-      const batchMessages = batch.flatMap(({ turnMessages }) => turnMessages);
-      const batchSourceFiles = batch.flatMap(({ files }) => files);
-      const batchText = batch
-        .map(({ serializedPrompt }) => serializedPrompt)
-        .join('\n\n');
-      const batchImageDelivery =
-        batchSourceFiles.length > 0 ? await resolveImageDelivery() : undefined;
-      // The lookup above may have let a tool start or the turn end. Re-check
-      // before anything is reserved for this batch: it stays pending when
-      // abandoned here and must not have held images already.
-      if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
-      const batchInput = batchImageDelivery
-        ? holdImagesForPrompt(batchSourceFiles, batchText, batchImageDelivery)
-        : { files: batchSourceFiles, text: batchText, held: [] };
-      const batchFiles = batchInput.files;
-      const batchPrompt = batchInput.text;
-      const firstRow = batch[0]!.row;
-      const previousInstructionVersion = currentInstructionVersion;
-      const steerInstructionVersion = previousInstructionVersion + 1;
-      currentInstructionVersion = steerInstructionVersion;
-      try {
-        await nativeSteer({
-          messageId: buildFastAgentNativeSteerMessageId(
-            firstRow.id,
-            firstRow.createdAt,
-          ),
-          text: batchPrompt,
-          files: batchFiles,
-        });
-      } catch (error) {
-        if (currentInstructionVersion === steerInstructionVersion) {
-          currentInstructionVersion = previousInstructionVersion;
-        }
-        throw error;
-      }
-      // Held images become addressable only once OpenCode has accepted the
-      // steer that names them. A rejected steer stays pending and reserves
-      // fresh IDs on its next attempt instead of stacking duplicates.
-      commitTurnImages(batchInput.held);
-      if (signal?.aborted) return;
-      console.info(
-        `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
-      );
-      for (const { row, followUp } of batch) {
-        injectedHumanFollowUpIds.add(row.id);
-        steeredHumanRequests.push(followUp.question);
-      }
-      // Only a surface that explicitly marked the turn quiet-eligible may
-      // leave it unanswered; unmarked follow-ups and older rows require one.
-      if (
-        batch.some(({ followUp }) => followUp.allowSilentAmbientReply !== true)
-      ) {
-        steeredDirectedFollowUp = true;
-        startSurfaceActivity();
-      } else if (
-        batch.some(({ followUp }) => followUp.directedAtRoomote === true)
-      ) {
-        // Addressed follow-ups show activity without forbidding silence.
-        startSurfaceActivity();
-      }
-      injectedHumanFollowUpMessages.push(...batchMessages);
-      injectedHumanFollowUpFiles.push(...batchFiles);
-      // Native steering starts a new human instruction boundary inside the
-      // same OpenCode run. Prior tool results remain in-session, while local
-      // action guards reset so the user may intentionally repeat an action.
-      completedChatReactionSignatures.clear();
-      completedChatReplySignatures.clear();
-      completedTaskActions.clear();
-      taskMessageGuard.clear();
-      turnVisibleMessages.push(...batchMessages);
-      await markFastAgentHumanFollowUpsDelivered(
+      // Claim the batch before any of its prompts persist. A follow-up
+      // withdrawn since the lookup drops out here and is never delivered;
+      // while the claim holds, a withdrawal can no longer succeed, so what
+      // this steer delivers is never also reported as withdrawn.
+      const claimedIds = await claimFastAgentHumanFollowUpSteers(
         batch.map(({ row }) => row.id),
       );
+      batch = batch.filter(({ row }) => claimedIds.has(row.id));
+      if (batch.length === 0) {
+        if (requiresSeparateTurn) return;
+        continue;
+      }
+      let steerDelivered = false;
+      try {
+        for (const { row, followUp, followUpTurnId } of batch) {
+          await persistCanonicalMessage({
+            eventId: `${followUpTurnId}:user`,
+            turnId: followUpTurnId,
+            turnSeq:
+              humanFollowUpTurnSeqs.get(row.id) ??
+              (() => {
+                const turnSeq = nextTurnSeq++;
+                humanFollowUpTurnSeqs.set(row.id, turnSeq);
+                return turnSeq;
+              })(),
+            ts: row.createdAt.getTime(),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+            role: 'user',
+            contentBlocks: buildFastAgentUserContentBlocks(
+              normalizeThreadText(followUp.question),
+              followUp.images ?? [],
+            ),
+            metadata: {
+              visibleInTranscript: true,
+              turnSource: 'human',
+              userId: followUp.userId,
+              // Same delivery acknowledgment the whole-turn path records: the
+              // web queue retires a follow-up once its client id is persisted.
+              clientMessageId: followUp.currentMessageId,
+              ...(followUp.senderDisplayName
+                ? {
+                    userName: followUp.senderDisplayName,
+                    senderDisplayName: followUp.senderDisplayName,
+                  }
+                : {}),
+              ...(followUp.senderExternalId
+                ? { senderExternalId: followUp.senderExternalId }
+                : {}),
+            },
+            payload: {},
+            source: conversation.surface,
+            nativeSessionId: activeOpenCodeSessionId,
+          });
+        }
+        if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) {
+          return;
+        }
+        const batchMessages = batch.flatMap(({ turnMessages }) => turnMessages);
+        const batchSourceFiles = batch.flatMap(({ files }) => files);
+        const batchText = batch
+          .map(({ serializedPrompt }) => serializedPrompt)
+          .join('\n\n');
+        const batchImageDelivery =
+          batchSourceFiles.length > 0
+            ? await resolveImageDelivery()
+            : undefined;
+        // The lookup above may have let a tool start or the turn end.
+        // Re-check before anything is reserved for this batch: it stays
+        // pending when abandoned here and must not have held images already.
+        if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) {
+          return;
+        }
+        const batchInput = batchImageDelivery
+          ? holdImagesForPrompt(batchSourceFiles, batchText, batchImageDelivery)
+          : { files: batchSourceFiles, text: batchText, held: [] };
+        const batchFiles = batchInput.files;
+        const batchPrompt = batchInput.text;
+        const firstRow = batch[0]!.row;
+        const previousInstructionVersion = currentInstructionVersion;
+        const steerInstructionVersion = previousInstructionVersion + 1;
+        currentInstructionVersion = steerInstructionVersion;
+        try {
+          await nativeSteer({
+            messageId: buildFastAgentNativeSteerMessageId(
+              firstRow.id,
+              firstRow.createdAt,
+            ),
+            text: batchPrompt,
+            files: batchFiles,
+          });
+        } catch (error) {
+          if (currentInstructionVersion === steerInstructionVersion) {
+            currentInstructionVersion = previousInstructionVersion;
+          }
+          throw error;
+        }
+        // Held images become addressable only once OpenCode has accepted the
+        // steer that names them. A rejected steer stays pending and reserves
+        // fresh IDs on its next attempt instead of stacking duplicates.
+        commitTurnImages(batchInput.held);
+        if (signal?.aborted) return;
+        console.info(
+          `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
+        );
+        for (const { row, followUp } of batch) {
+          injectedHumanFollowUpIds.add(row.id);
+          steeredHumanRequests.push(followUp.question);
+        }
+        // Only a surface that explicitly marked the turn quiet-eligible may
+        // leave it unanswered; unmarked follow-ups and older rows require one.
+        if (
+          batch.some(
+            ({ followUp }) => followUp.allowSilentAmbientReply !== true,
+          )
+        ) {
+          steeredDirectedFollowUp = true;
+          startSurfaceActivity();
+        } else if (
+          batch.some(({ followUp }) => followUp.directedAtRoomote === true)
+        ) {
+          // Addressed follow-ups show activity without forbidding silence.
+          startSurfaceActivity();
+        }
+        injectedHumanFollowUpMessages.push(...batchMessages);
+        injectedHumanFollowUpFiles.push(...batchFiles);
+        // Native steering starts a new human instruction boundary inside the
+        // same OpenCode run. Prior tool results remain in-session, while local
+        // action guards reset so the user may intentionally repeat an action.
+        completedChatReactionSignatures.clear();
+        completedChatReplySignatures.clear();
+        completedTaskActions.clear();
+        taskMessageGuard.clear();
+        turnVisibleMessages.push(...batchMessages);
+        await markFastAgentHumanFollowUpsDelivered(
+          batch.map(({ row }) => row.id),
+        );
+        steerDelivered = true;
+      } finally {
+        // An undelivered batch goes back to the queue at once rather than
+        // waiting out the lease; its already persisted prompts still keep a
+        // later withdrawal from succeeding.
+        if (!steerDelivered) {
+          await releaseFastAgentHumanFollowUpSteerClaims([...claimedIds]).catch(
+            (error: unknown) => {
+              console.error(
+                `[Fast Agent] Failed to release native steer claims; they expire on their own: ${formatErrorForLog(error)}`,
+              );
+            },
+          );
+        }
+      }
     }
   };
   const schedulePendingHumanSteerDrain = () => {
@@ -3410,6 +3482,7 @@ export async function answerFastAgentQuestion({
         return {
           models: [],
           defaultModelId: undefined,
+          codeReviewModelId: undefined,
           codingModelRoutingRules: [],
         };
       }),
@@ -3479,32 +3552,12 @@ export async function answerFastAgentQuestion({
         return [];
       }),
     ]);
-    // The judgment model's environment pick is only useful before the Session
-    // has chosen where its work runs, so it is requested for what looks like
-    // the first human request and used only once persistence confirms it.
     const priorAssistant = session.compatibilityMessages
       .filter((message) => message.role === 'assistant')
       .at(-1);
     priorAssistantMessage = priorAssistant
       ? extractModelMessageText(priorAssistant).join('\n')
       : undefined;
-    const routingHintRequest =
-      substantiveHumanInput &&
-      !setupSession &&
-      !resumedAfterInterruption &&
-      !resumedAfterInferenceRetry &&
-      !session.openCodeSessionId &&
-      session.compatibilityMessages.length === 0
-        ? resolveFastAgentRoutingHint({
-            request: normalizeThreadText(question),
-            threadContext,
-            environments: availableEnvironments,
-            routingRules:
-              agentBehaviorSettings?.workspaceRoutingSettings?.rules,
-            models: taskModelOptions.models,
-            codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
-          })
-        : undefined;
     const [personalizationContext, availableSkills] = await Promise.all([
       platformEvent
         ? null
@@ -3542,22 +3595,6 @@ export async function answerFastAgentQuestion({
           return null;
         }),
     ]);
-    // The optional judgment model's skill hint for this request. Started now
-    // so it runs alongside the session bookkeeping below; it never rejects.
-    // A request that already names a skill with `$name` needs no hint.
-    const skillRelevanceContextPromise =
-      substantiveHumanInput &&
-      availableSkills &&
-      !parseFastAgentExplicitSkillInvocation(
-        question,
-        conversation.surface,
-        slackRoomoteUserId,
-      )
-        ? buildFastAgentSkillRelevanceContext({
-            catalog: availableSkills,
-            request: question,
-          })
-        : undefined;
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
@@ -3795,9 +3832,16 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
-    const routingHint = userMessageResult?.initialHumanTurn
-      ? await routingHintRequest
-      : undefined;
+    const collectUserMessageTexts = (): string[] => [
+      ...new Set([
+        ...threadContext
+          .filter((message) => !message.bot_id)
+          .map((message) => message.text),
+        ...[...session.compatibilityMessages, ...turnVisibleMessages]
+          .filter((message) => message.role === 'user')
+          .flatMap(extractModelMessageText),
+      ]),
+    ];
     const {
       bootstrapMessages,
       turnMessages,
@@ -3819,18 +3863,15 @@ export async function answerFastAgentQuestion({
       resumedAfterInferenceRetry,
       previousAttempt,
       voiceMode,
-      routingHint: routingHint?.context,
-      skillRelevanceContext: await skillRelevanceContextPromise,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
       Env.RELEASE_VERSION,
       packageJson.version,
     );
-    // Experiment-gated (`integrationToolApprovals`) per-tool approval rules
-    // for code-mode integration calls: native ask rules pause gated tools
-    // behind a requester decision and deny rules hide rejected tools.
-    // Undefined while the experiment is off, which keeps ungated behavior.
+    // Per-tool approval rules for code-mode integration calls: native ask
+    // rules pause gated tools behind a requester decision and deny rules hide
+    // rejected tools.
     // Approvals and session overrides are keyed on the unified Session, not
     // the Fast conversation; resolve it once for the rules and the bridge.
     const {
@@ -3860,6 +3901,8 @@ export async function answerFastAgentQuestion({
       platformEventVisibility,
       platformEventKind,
       automationReport,
+      ...(taskCommunicationTriage ? { taskCommunicationTriage } : {}),
+      taskCommunicationTriageEnabled,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       peerDirectedTurn: resolvedPeerDirectedTurn,
@@ -4481,10 +4524,7 @@ export async function answerFastAgentQuestion({
       ) {
         return nativeIntegrationError(args.integrationId);
       }
-      const found = await findFastAgentIntegrationTools(
-        onDemandIntegrations,
-        args,
-      );
+      const found = findFastAgentIntegrationTools(onDemandIntegrations, args);
       const normalizedQuery = args.query?.trim().toLowerCase();
       const catalogIntegrations = nativeIntegrationCatalog.filter(
         (integration) => {
@@ -5062,14 +5102,6 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
             const args = launchTaskArgsSchema.parse(call.args);
-            const {
-              model: selectedModel,
-              reasoningEffort: selectedReasoningEffort,
-            } = resolveFastAgentLaunchModelSelection({
-              explicitModel: args.model,
-              explicitReasoningEffort: args.reasoningEffort,
-              routingHint,
-            });
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
               NO_REPOSITORIES,
@@ -5126,16 +5158,26 @@ export async function answerFastAgentQuestion({
               }
             }
             if (
-              selectedModel &&
-              !taskModelOptions.models.some(
-                (model) => model.id === selectedModel,
-              )
+              args.model &&
+              !taskModelOptions.models.some((model) => model.id === args.model)
             ) {
               return {
                 success: false,
-                error: `Model "${selectedModel}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
+                error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
             }
+            const launchModel = await resolveFastAgentLaunchModel({
+              claimedModel: args.model,
+              claimedReasoningEffort: args.reasoningEffort,
+              work: args.prompt,
+              userMessages: collectUserMessageTexts(),
+              models: taskModelOptions.models,
+              codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
+              defaultModelId: taskModelOptions.defaultModelId,
+              userId,
+            });
+            const selectedModel = launchModel.model;
+            const selectedReasoningEffort = launchModel.reasoningEffort;
             const reasoningModelId =
               selectedModel ?? taskModelOptions.defaultModelId;
             if (
@@ -5285,7 +5327,9 @@ export async function answerFastAgentQuestion({
                 await postTaskLink(preparedTaskLink ?? result);
               }
             }
-            return result;
+            return launchModel.modelNote
+              ? { ...result, modelNote: launchModel.modelNote }
+              : result;
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
@@ -5312,6 +5356,22 @@ export async function answerFastAgentQuestion({
                 error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
             }
+            // Coding-model routing rules do not apply to reviews, whose
+            // default is the deployment's code-review model.
+            const reviewModel = await resolveFastAgentLaunchModel({
+              claimedModel: args.model,
+              claimedReasoningEffort: args.reasoningEffort,
+              work: `Review pull request ${repository}#${pullRequestNumber}`,
+              userMessages: collectUserMessageTexts(),
+              models: taskModelOptions.models,
+              codingModelRoutingRules: [],
+              // An unoverridden review runs on the code-review model, which
+              // can differ from the task default.
+              defaultModelId:
+                taskModelOptions.codeReviewModelId ??
+                taskModelOptions.defaultModelId,
+              userId,
+            });
             const signature = `review_pull_request:${repository}#${pullRequestNumber}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -5330,8 +5390,8 @@ export async function answerFastAgentQuestion({
                   repository,
                   pullRequestNumber,
                   fastConversationId: session.id,
-                  model: args.model ?? undefined,
-                  reasoningEffort: args.reasoningEffort ?? undefined,
+                  model: reviewModel.model ?? undefined,
+                  reasoningEffort: reviewModel.reasoningEffort ?? undefined,
                 },
               );
             } catch (error) {
@@ -5372,7 +5432,9 @@ export async function answerFastAgentQuestion({
               true,
             );
             visibleUpdatePosted = true;
-            return result;
+            return reviewModel.modelNote
+              ? { ...result, modelNote: reviewModel.modelNote }
+              : result;
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage: {
@@ -6317,7 +6379,14 @@ export async function answerFastAgentQuestion({
                       surface: conversation.surface as FastAgentSurface,
                       integrations: availableIntegrations,
                       autoToolKeys: toolApprovalRules.autoToolKeys,
-                      userRequest: question,
+                      resolveUserRequest: () =>
+                        resolveFastAgentToolApprovalUserRequest({
+                          turnSource,
+                          substantiveHumanInput,
+                          question,
+                          compatibilityMessages: session.compatibilityMessages,
+                          steeredHumanRequests,
+                        }),
                       signal: promptSignal,
                       ...(approvalNotificationSurface
                         ? {
@@ -6329,6 +6398,7 @@ export async function answerFastAgentQuestion({
                               await adapter.postReply({
                                 purpose: 'progress',
                                 message: `Approval needed: ${approval.integrationId} wants to run ${approval.toolName}. Allow or reject it in the session: ${sessionUrl}`,
+                                toolApproval: approval,
                               });
                             },
                           }
@@ -7078,7 +7148,17 @@ export async function answerFastAgentQuestion({
         ? formatFastAgentInferenceFailure(
             error.failure,
             inferenceRetryAttempted,
-            { detail: error.detail, model: lastResolvedInferenceModel },
+            {
+              detail: error.detail,
+              model: lastResolvedInferenceModel,
+              ...(error.failure.reason === 'insufficient_credits'
+                ? {
+                    providerName: await resolveFastAgentInferenceProviderName(
+                      lastResolvedInferenceModel,
+                    ),
+                  }
+                : {}),
+            },
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
     // The error closeout is recorded like any other closeout: its intent

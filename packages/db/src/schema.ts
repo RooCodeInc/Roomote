@@ -79,6 +79,7 @@ import type {
   CredentialEgressPhase,
   CredentialEgressRevocationKind,
   TaskModelSettings,
+  UserTaskModelMapping,
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
   UserRole,
@@ -179,6 +180,32 @@ export const userPersonalizations = pgTable('user_personalizations', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+/** Private, per-user saved mappings for the task model roles. */
+export const userTaskModelMappingPresets = pgTable(
+  'user_task_model_mapping_presets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    nameKey: text('name_key').notNull(),
+    roles: jsonb('roles').$type<UserTaskModelMapping>().notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('user_task_model_mapping_presets_owner_name_unique_idx').on(
+      table.userId,
+      table.nameKey,
+    ),
+    index('user_task_model_mapping_presets_owner_created_idx').on(
+      table.userId,
+      table.createdAt,
+    ),
+  ],
+);
 
 export const instanceSkills = pgTable(
   'instance_skills',
@@ -1715,6 +1742,20 @@ export const taskRuns = pgTable(
       .using('btree', table.vendor, table.createdAt.desc())
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure')`,
+      ),
+    // Finished runs whose sandbox sleep check has not yet examined (see
+    // destroySandboxesOfFinishedRuns). Keyed on the settlement time the sweep
+    // ranges over, one index per branch of its OR, so it reads only the
+    // lookback window instead of all unclaimed run history.
+    index('task_runs_sleep_check_finished_completed_idx')
+      .using('btree', table.completedAt)
+      .where(
+        sql`${table.status} IN ('failed', 'canceled', 'completed') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure') AND ${table.completedAt} IS NOT NULL`,
+      ),
+    index('task_runs_sleep_check_finished_canceled_idx')
+      .using('btree', table.canceledAt)
+      .where(
+        sql`${table.status} IN ('failed', 'canceled', 'completed') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure') AND ${table.completedAt} IS NULL AND ${table.canceledAt} IS NOT NULL`,
       ),
     index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
     index('task_runs_source_run_id_idx').on(table.sourceRunId),
@@ -4581,7 +4622,7 @@ export const serviceCredentialAudit = pgTable('service_credential_audit', {
 /**
  * integration_tool_policies
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`) durable
+ * Integration tool approvals: durable
  * approval policy for code-mode integration tool calls in Sessions. One row
  * per (integration, tool); deployment-scoped and admin-configured. Absence of
  * a row is the default `allow`, which preserves the pre-experiment behavior.
@@ -4617,7 +4658,7 @@ export const integrationToolPolicies = pgTable(
 /**
  * integration_tool_user_policies
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`) personal
+ * Integration tool approvals: personal
  * per-tool approval modes. Same modes as `integration_tool_policies`, scoped
  * to one user's own Sessions, and only ever tightening: the stricter of the
  * deployment and personal mode applies. `allow` is stored as no row. Rows
@@ -4652,7 +4693,7 @@ export const integrationToolUserPolicies = pgTable(
 /**
  * integration_tool_approval_requests
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`) pending
+ * Integration tool approvals: pending
  * and decided approval requests for code-mode integration tool calls gated by
  * an `ask` policy. One row is both the pending request and its redacted audit
  * outcome: arguments are stored only as a redacted display summary; the
@@ -4765,7 +4806,7 @@ export const integrationToolAutoEvaluations = pgTable(
 /**
  * integration_tool_session_overrides
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`)
+ * Integration tool approvals:
  * requester-owned, session-scoped overrides of a tool's approval mode. `allow`
  * records "don't ask again this session" for a tool the deployment gates with
  * `ask`; `ask` gates a default-allow tool for this session only. A deployment

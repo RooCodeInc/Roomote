@@ -8,6 +8,7 @@ const { mocks, queryState } = vi.hoisted(() => ({
     getQueryData: vi.fn(),
     invalidateQueries: vi.fn(),
     mutate: vi.fn(),
+    mutationRoute: null as string | null,
     refetch: vi.fn(),
     setQueryData: vi.fn(),
     toastError: vi.fn(),
@@ -49,7 +50,27 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['deployment-experiments'],
         queryOptions: () => ({}),
       },
-      set: { mutationOptions: (options: unknown) => options },
+      set: {
+        mutationOptions: (options: unknown) => {
+          mocks.mutationRoute = 'customer-preview';
+          return options;
+        },
+      },
+    },
+    nightlyExperiments: {
+      get: {
+        queryKey: () => ['nightly-experiments'],
+        queryOptions: () => ({}),
+      },
+      dizzyEnabled: {
+        queryKey: () => ['dizzy-enabled'],
+      },
+      set: {
+        mutationOptions: (options: unknown) => {
+          mocks.mutationRoute = 'internal-nightly';
+          return options;
+        },
+      },
     },
   }),
 }));
@@ -62,6 +83,7 @@ import {
 describe('useDeploymentExperiments', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.mutationRoute = null;
     queryState.data = getDeploymentExperimentValues(undefined);
     queryState.error = null;
     queryState.isFetching = false;
@@ -71,11 +93,15 @@ describe('useDeploymentExperiments', () => {
   it('exposes the same shared value to every consumer hook', () => {
     queryState.data = {
       ...getDeploymentExperimentValues(undefined),
-      results: true,
+      privateSessions: true,
     };
 
-    const first = renderHook(() => useDeploymentExperiment('results', 'fail'));
-    const second = renderHook(() => useDeploymentExperiment('results', 'fail'));
+    const first = renderHook(() =>
+      useDeploymentExperiment('privateSessions', 'fail'),
+    );
+    const second = renderHook(() =>
+      useDeploymentExperiment('privateSessions', 'fail'),
+    );
 
     expect(first.result.current.enabled).toBe(true);
     expect(second.result.current.enabled).toBe(true);
@@ -84,9 +110,42 @@ describe('useDeploymentExperiments', () => {
   it('sends one deployment experiment mutation', () => {
     const { result } = renderHook(() => useDeploymentExperiments());
 
-    act(() => result.current.setExperiment('results', true));
+    act(() => result.current.setExperiment('privateSessions', true));
 
-    expect(mocks.mutate).toHaveBeenCalledWith({ id: 'results', enabled: true });
+    expect(mocks.mutate).toHaveBeenCalledWith({
+      id: 'privateSessions',
+      enabled: true,
+    });
+    expect(mocks.mutationRoute).toBe('customer-preview');
+  });
+
+  it('uses the nightly read/write procedures for nightly settings', () => {
+    renderHook(() =>
+      useDeploymentExperiments('Save failed', 'internal-nightly'),
+    );
+
+    expect(mocks.mutationRoute).toBe('internal-nightly');
+  });
+
+  it('refreshes the runtime logo flag after changing Dizzy', async () => {
+    renderHook(() =>
+      useDeploymentExperiments('Save failed', 'internal-nightly'),
+    );
+
+    await mutationOptions.onSettled!(
+      undefined as never,
+      undefined as never,
+      { id: 'dizzy', enabled: true } as never,
+      undefined as never,
+      undefined as never,
+    );
+
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['nightly-experiments'],
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['dizzy-enabled'],
+    });
   });
 
   it('optimistically updates and rolls back only the changed deployment flag', async () => {

@@ -22,9 +22,11 @@ x-roomote-env: &roomote-env
   R_APP_URL: ${R_PUBLIC_URL:-http://localhost:13000}
   R_INSTANCE_ID: ${R_INSTANCE_ID:-}
   R_CURATED_INTEGRATIONS_DISABLED: ${R_CURATED_INTEGRATIONS_DISABLED:-false}
-  # The Brain: supplying this key gives the deployment shared memory that
-  # agents consult. It powers the brain service's embeddings and is the
-  # single activation signal — there is no Settings UI for it.
+  # The Brain: optional provider keys for the shared memory agents consult.
+  # They power the brain service's embeddings and synthesis; an enabled Brain
+  # otherwise falls back to the deployment's regular provider key. Admins turn
+  # Memory on or off in Settings > Memory. Until that toggle has been set, a
+  # key here also turns Memory on (legacy behavior).
   R_BRAIN_OPENROUTER_API_KEY: ${R_BRAIN_OPENROUTER_API_KEY:-}
   R_BRAIN_OPENAI_API_KEY: ${R_BRAIN_OPENAI_API_KEY:-}
   # Shared secret the Brain presents to /api/brain/inference. REQUIRED to
@@ -277,13 +279,14 @@ services:
   # COMPOSE_PROFILES=brain; deployments that never enable the
   # profile see no infrastructure change. Internal-only: no published
   # ports, reachable solely by the API service, which fronts it at
-  # /api/mcp/gbrain with the read-only agent credential. Wire
-  # R_GBRAIN_URL plus static tokens into api/bullmq (operator-pinned), or the
-  # normal path: set GBRAIN_ADMIN_BOOTSTRAP_TOKEN below (>= 32 chars of
-  # [A-Za-z0-9_-]) and paste http://gbrain:8931 plus that same token into
-  # Settings > Integrations > Brain; Roomote then registers its own
-  # scoped clients via the admin API. If left unset, the entrypoint generates
-  # one at /data/admin-bootstrap-token on the volume.
+  # /api/mcp/gbrain with the read-only agent credential. Wire static tokens
+  # into api/bullmq (operator-pinned), or the normal path: api/bullmq already
+  # point R_GBRAIN_URL at http://gbrain:8931 and read the admin bootstrap token
+  # from the shared volume, so Roomote registers its own scoped clients via
+  # the admin API once Memory is enabled in Settings > Memory. Set
+  # GBRAIN_ADMIN_BOOTSTRAP_TOKEN below (>= 32 chars of [A-Za-z0-9_-]) to pin
+  # the token; if left unset, the entrypoint generates one at
+  # /data/admin-bootstrap-token on the volume.
   gbrain:
     profiles: [brain]
     container_name: roomote-gbrain

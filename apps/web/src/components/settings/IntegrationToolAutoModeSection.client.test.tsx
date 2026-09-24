@@ -5,8 +5,8 @@ const state = vi.hoisted(() => ({ isAdmin: true, enabled: true }));
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({ isAdmin: state.isAdmin }),
 }));
-vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
-  useIntegrationToolApprovalsExperiment: () => ({ enabled: state.enabled }),
+vi.mock('@/hooks/useIntegrationToolAutoApprovalsExperiment', () => ({
+  useIntegrationToolAutoApprovalsExperiment: () => ({ enabled: state.enabled }),
 }));
 vi.mock('./IntegrationToolAutoModeSetting', () => ({
   IntegrationToolAutoModeSetting: () => <div data-testid="auto-mode-setting" />,
@@ -22,7 +22,7 @@ describe('IntegrationToolAutoModeSection', () => {
 
   it('shows the section to an admin while the experiment is on', () => {
     render(<IntegrationToolAutoModeSection />);
-    expect(screen.getByText('Auto mode')).toBeInTheDocument();
+    expect(screen.getByText('Auto-approval decisions')).toBeInTheDocument();
     expect(screen.getByTestId('auto-mode-setting')).toBeInTheDocument();
   });
 

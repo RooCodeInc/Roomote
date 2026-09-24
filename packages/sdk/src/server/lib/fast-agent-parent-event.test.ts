@@ -68,12 +68,30 @@ const mocks = vi.hoisted(() => ({
   linearEmitResponse: vi.fn(),
   createConversationArtifact: vi.fn(),
   isVoiceCallActive: vi.fn(),
-  isDeploymentExperimentEnabled: vi.fn().mockResolvedValue(false),
-  appendVisibleMessages: vi.fn(),
-  upsertVisibleMessage: vi.fn().mockResolvedValue({ inserted: true }),
-  publishSessionRefresh: vi.fn(),
-  runJevCommunicationExperiment: vi.fn(),
-  captureCommunicationDecision: vi.fn(),
+  gateTaskCommunication: vi.fn(
+    async (): Promise<
+      | { kind: 'skip' }
+      | {
+          kind: 'deliver';
+          hint?: {
+            decision: 'relay' | 'redirect' | 'uncertain';
+            reason: string;
+          };
+        }
+    > => ({ kind: 'deliver' }),
+  ),
+  listUnsharedTaskUpdates: vi.fn(async (): Promise<string[]> => []),
+  isTaskCommunicationTriageEnabled: vi.fn(async () => false),
+  wasTaskCloseoutRelayed: vi.fn(async () => false),
+  markTaskCloseoutRelayed: vi.fn(async () => {}),
+}));
+
+vi.mock('./task-communication-triage', () => ({
+  gateDelegatedTaskCommunication: mocks.gateTaskCommunication,
+  listUnsharedTaskUpdates: mocks.listUnsharedTaskUpdates,
+  isTaskCommunicationTriageEnabled: mocks.isTaskCommunicationTriageEnabled,
+  wasTaskCloseoutRelayed: mocks.wasTaskCloseoutRelayed,
+  markTaskCloseoutRelayed: mocks.markTaskCloseoutRelayed,
 }));
 
 vi.mock('./fast-agent-session-videos', () => ({
@@ -184,11 +202,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     },
   createFastAgentWebTaskLauncher: vi.fn(() => mocks.launchTask),
   isFastAgentVoiceCallActive: mocks.isVoiceCallActive,
-  appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
-  upsertFastAgentMessage: mocks.upsertVisibleMessage,
-  publishFastAgentSessionRefresh: mocks.publishSessionRefresh,
-  runJevFastAgentCommunicationExperiment: mocks.runJevCommunicationExperiment,
-  captureFastAgentCommunicationDecision: mocks.captureCommunicationDecision,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -215,7 +228,6 @@ vi.mock('@roomote/db/server', () => ({
   recordCustomAutomationResult: mocks.recordCustomAutomationResult,
   getSessionWakeupById: mocks.findWakeup,
   getSessionForFastConversation: mocks.findWakeupSession,
-  isDeploymentExperimentEnabled: mocks.isDeploymentExperimentEnabled,
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
@@ -525,77 +537,6 @@ describe('deliverFastAgentParentEvent', () => {
           imageArtifactIds: ['artifact-1', 'artifact-1'],
         }),
     );
-  });
-
-  it('keeps ordinary child reports on the regular LLM path when Jev is off', async () => {
-    await deliverFastAgentParentEventWithLock(
-      {
-        parent,
-        event: {
-          type: 'child_message',
-          taskId: 'task-1',
-          runId: 42,
-          actingUserId: 'u1',
-          messageId: 'child-off',
-          purpose: 'progress',
-          message: 'A milestone is ready.',
-        },
-      },
-      mocks.releaseTurnLock,
-    );
-
-    expect(mocks.isDeploymentExperimentEnabled).toHaveBeenCalledWith(
-      'fastSessionCommunicationJev',
-    );
-    expect(mocks.runJevCommunicationExperiment).not.toHaveBeenCalled();
-    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
-  });
-
-  it('uses the Jev branch when the instance experiment is enabled', async () => {
-    mocks.isDeploymentExperimentEnabled.mockResolvedValueOnce(true);
-    mocks.runJevCommunicationExperiment.mockImplementationOnce(
-      async ({
-        adapter,
-      }: {
-        adapter: { postReply: (reply: unknown) => unknown };
-      }) => {
-        await adapter.postReply({
-          purpose: 'closeout',
-          message: 'A milestone is ready.',
-        });
-        return {
-          action: 'report',
-          confidence: 0.94,
-          needsUserInputProbability: 0.04,
-          modelInferenceMs: 180,
-          orchestrationMs: 4,
-          eventToActionMs: 185,
-          messagePosted: true,
-        };
-      },
-    );
-
-    await deliverFastAgentParentEventWithLock(
-      {
-        parent,
-        event: {
-          type: 'child_message',
-          taskId: 'task-1',
-          runId: 42,
-          actingUserId: 'u1',
-          messageId: 'child-on',
-          purpose: 'progress',
-          message: 'A milestone is ready.',
-        },
-      },
-      mocks.releaseTurnLock,
-    );
-
-    expect(mocks.runJevCommunicationExperiment).toHaveBeenCalledOnce();
-    expect(mocks.upsertVisibleMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: parent.sessionId }),
-    );
-    expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 
   it('delivers a human follow-up queued at response finalization as the next turn', async () => {
@@ -1092,6 +1033,42 @@ describe('deliverFastAgentParentEvent', () => {
     });
   });
 
+  it.each([
+    [false, 'idle', 'required'],
+    [true, 'idle', 'optional'],
+    [true, 'completed', 'optional'],
+    [true, 'failed', 'required'],
+  ] as const)(
+    'makes a web settle optional only after triage relayed its closeout (relayed=%s, %s)',
+    async (closeoutRelayed, status, visibility) => {
+      mocks.wasTaskCloseoutRelayed.mockResolvedValueOnce(closeoutRelayed);
+      mocks.answerQuestion.mockResolvedValue('Settled');
+
+      await deliverFastAgentParentEvent({
+        parent: {
+          sessionId: parent.sessionId,
+          conversation: {
+            surface: 'web',
+            workspaceId: 'user-1',
+            conversationId: 'session-1',
+          },
+        },
+        event: {
+          type: 'task_settled',
+          taskId: 'task-1',
+          runId: 42,
+          status,
+          taskUrl: 'https://roomote.example/task/task-1',
+          pullRequests: [],
+        },
+      });
+
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({ platformEventVisibility: visibility }),
+      );
+    },
+  );
+
   it('passes a canonical review offer into the web transcript payload', async () => {
     const webParent = {
       sessionId: parent.sessionId,
@@ -1283,6 +1260,141 @@ describe('deliverFastAgentParentEvent', () => {
       conversation: parent.conversation,
       messageId: '101.001',
     });
+  });
+
+  it('skips the parent turn when task communication triage stays quiet', async () => {
+    mocks.gateTaskCommunication.mockResolvedValueOnce({ kind: 'skip' });
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'child_message',
+          taskId: 'task-1',
+          runId: 42,
+          actingUserId: 'u1',
+          messageId: '55555555-5555-4555-8555-555555555555',
+          purpose: 'progress',
+          message: 'Still running the test suite.',
+        },
+      }),
+    ).resolves.toBe('skipped');
+
+    expect(mocks.gateTaskCommunication).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent,
+        surface: 'slack',
+        requesterUserId: 'u1',
+        event: expect.objectContaining({ type: 'child_message' }),
+      }),
+    );
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('passes the triage decision to the parent turn for task activity', async () => {
+    mocks.gateTaskCommunication.mockResolvedValueOnce({
+      kind: 'deliver',
+      hint: { decision: 'redirect', reason: 'off_track' },
+    });
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_activity',
+        taskId: 'task-1',
+        runId: 42,
+        actingUserId: 'u1',
+        throughTs: 1_789_660_000_000,
+        items: [
+          {
+            kind: 'assistant_message',
+            text: 'Rewriting the API layer to use the new client.',
+          },
+        ],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining(
+          'Rewriting the API layer to use the new client.',
+        ),
+        turnSource: 'platform_event',
+        platformEventKind: 'delegated_task',
+        taskCommunicationTriage: { decision: 'redirect', reason: 'off_track' },
+        serviceCredentialPlatformActorUserId: 'u1',
+      }),
+    );
+  });
+
+  it.each([
+    [true, 1],
+    [false, 0],
+  ] as const)(
+    'marks a triaged closeout relayed only after a reply posts (posted=%s)',
+    async (posts, marks) => {
+      mocks.gateTaskCommunication.mockResolvedValueOnce({
+        kind: 'deliver',
+        hint: { decision: 'relay', reason: 'task_result' },
+      });
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { postReply: (reply: unknown) => unknown };
+        }) => {
+          if (posts) {
+            await adapter.postReply({ purpose: 'closeout', message: 'Done.' });
+          }
+        },
+      );
+
+      await deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'child_message',
+          taskId: 'task-1',
+          runId: 42,
+          messageId: '66666666-6666-4666-8666-666666666666',
+          purpose: 'closeout',
+          message: 'The fix is in place.',
+        },
+      });
+
+      expect(mocks.markTaskCloseoutRelayed).toHaveBeenCalledTimes(marks);
+      if (marks) {
+        expect(mocks.markTaskCloseoutRelayed).toHaveBeenCalledWith(42);
+      }
+    },
+  );
+
+  it('hands unshared task updates to the settle closeout', async () => {
+    mocks.listUnsharedTaskUpdates.mockResolvedValueOnce([
+      'The flaky test was a timezone assumption.',
+    ]);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_settled',
+        taskId: 'task-1',
+        runId: 42,
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.listUnsharedTaskUpdates).toHaveBeenCalledWith(42);
+    expect(mocks.gateTaskCommunication).not.toHaveBeenCalled();
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining(
+          '"unsharedTaskUpdates":["The flaky test was a timezone assumption."]',
+        ),
+      }),
+    );
   });
 
   it('authorizes a child continuation for the active Session owner recorded on the run', async () => {
@@ -4509,6 +4621,33 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
   });
 
+  it('tells a wakeup turn when task updates are triaged', async () => {
+    mocks.findWakeup.mockResolvedValueOnce({ status: 'active' });
+    mocks.findWakeupSession.mockResolvedValueOnce({ archivedAt: null });
+    mocks.isTaskCommunicationTriageEnabled.mockResolvedValueOnce(true);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:1',
+        wakeupId: 'wakeup-1',
+        name: 'Follow through on session tasks',
+        prompt: 'Run the Own Coding Task Follow-Through session check.',
+        runNumber: 1,
+        maxRuns: 1,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'only_when_notable',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ taskCommunicationTriageEnabled: true }),
+    );
+  });
+
   it('skips a scheduled wakeup that was cancelled after its occurrence was admitted', async () => {
     mocks.findWakeup.mockResolvedValueOnce({ status: 'cancelled' });
     const result = await deliverFastAgentParentEvent({
@@ -4557,34 +4696,6 @@ describe('deliverFastAgentParentEvent', () => {
 
     expect(result).toBe('skipped');
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
-  });
-
-  it('keeps scheduled wakeups on the regular guarded path when Jev is enabled', async () => {
-    mocks.isDeploymentExperimentEnabled.mockResolvedValueOnce(true);
-    mocks.findWakeup.mockResolvedValue({ status: 'active' });
-    mocks.findWakeupSession.mockResolvedValue({ archivedAt: null });
-    mocks.answerQuestion.mockResolvedValueOnce('Scheduled response');
-
-    const result = await deliverFastAgentParentEvent({
-      parent,
-      event: {
-        type: 'scheduled_wakeup',
-        eventId: 'wakeup-regular-path:1',
-        wakeupId: 'wakeup-regular-path',
-        name: 'Check the deploy',
-        prompt: 'Tell the user to check the deploy.',
-        runNumber: 1,
-        maxRuns: null,
-        firedAt: '2026-09-04T17:10:00.000Z',
-        nextRunAt: null,
-        reportPolicy: 'always',
-        createdByUserId: 'user-1',
-      },
-    });
-
-    expect(result).toBe('delivered');
-    expect(mocks.runJevCommunicationExperiment).not.toHaveBeenCalled();
-    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
   });
 
   it('drops the reply and cancels the turn when the wakeup is cancelled mid-turn', async () => {

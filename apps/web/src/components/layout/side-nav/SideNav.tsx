@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -29,15 +29,15 @@ import {
   useLayoutStore,
 } from '@/hooks/useLayoutOptions';
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { useDizzyExperiment } from '@/hooks/useDizzyExperiment';
 import { useLiveTaskStatus, useTaskPins } from '@/hooks/tasks';
 import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
-import { useResultsPage } from '@/hooks/useResultsPage';
 
 import {
-  getVisiblePrimaryNavItems,
-  SETUP_INCOMPLETE_NAV_TOOLTIP,
+  getVisibleSideNavSections,
+  type PrimaryNavItem,
 } from '../navigation-items';
 import { SideNavItem } from './SideNavItem';
 import { RecentSessions } from './RecentSessions';
@@ -50,16 +50,17 @@ export function getTaskIdFromPathname(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
-export const SideNav = ({
-  setupIncomplete = false,
-}: {
-  setupIncomplete?: boolean;
-}) => {
+function SideNavGroup({ children }: { children: ReactNode }) {
+  return <div className="flex flex-col gap-1">{children}</div>;
+}
+
+export const SideNav = () => {
   useHydrateLayoutStore();
 
   const pathname = usePathname();
   const { setOpen: openCommandPalette } = useCommandPalette();
   const { isAdmin } = useAuthorizedUser();
+  const isDizzyEnabled = useDizzyExperiment();
   const hasHydrated = useLayoutStore((state) => state.hasHydrated);
   const persistedIsSideNavExpanded = useLayoutStore(
     (state) => state.isSideNavExpanded,
@@ -69,11 +70,8 @@ export const SideNav = ({
   );
   const isSideNavExpanded = hasHydrated && persistedIsSideNavExpanded;
   const trpc = useTRPC();
-  const { enabled: resultsEnabled } = useResultsPage();
   const { data: unreadResultCount = 0 } = useQuery(
-    trpc.results.pendingCount.queryOptions(undefined, {
-      enabled: resultsEnabled,
-    }),
+    trpc.results.pendingCount.queryOptions(undefined),
   );
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   const { pinnedTaskIds, setTaskPinned, isTaskPinMutationPending } =
@@ -108,9 +106,9 @@ export const SideNav = ({
     () => new Set(pinnedTaskIds),
     [pinnedTaskIds],
   );
-  const visibleNavItems = useMemo(
-    () => getVisiblePrimaryNavItems({ isAdmin, resultsEnabled }),
-    [isAdmin, resultsEnabled],
+  const visibleNavSections = useMemo(
+    () => getVisibleSideNavSections({ isAdmin }),
+    [isAdmin],
   );
 
   useEffect(() => {
@@ -144,6 +142,32 @@ export const SideNav = ({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const renderNavItem = ({
+    icon,
+    href,
+    label,
+    description,
+    matchExact,
+    matchPaths,
+  }: PrimaryNavItem) => (
+    <SideNavItem
+      key={href}
+      icon={icon}
+      href={href}
+      label={label}
+      aria-label={label}
+      tooltip={label}
+      description={description}
+      expanded={isSideNavExpanded}
+      active={
+        matchExact
+          ? matchPaths.includes(pathname)
+          : matchPaths.some((path) => pathname.startsWith(path))
+      }
+      badgeCount={href === '/results' ? unreadResultCount : 0}
+    />
+  );
+
   return (
     <nav
       className={cn(
@@ -157,18 +181,12 @@ export const SideNav = ({
       {/* Logo */}
       {isSideNavExpanded ? (
         <div className="flex w-full items-center justify-between gap-3 px-2 py-1 shrink-0">
-          {setupIncomplete ? (
-            <div className="min-w-0 flex-1 opacity-50">
-              <RoomoteWordmark className="h-7" aria-label="Roomote" />
-            </div>
-          ) : (
-            <Link href="/" className="min-w-0 flex-1">
-              <RoomoteWordmark
-                className="h-7 transition-all duration-300 hover:opacity-80"
-                aria-label="Roomote"
-              />
-            </Link>
-          )}
+          <Link href="/" className="min-w-0 flex-1">
+            <RoomoteWordmark
+              className="h-7 transition-all duration-300 hover:opacity-80"
+              aria-label="Roomote"
+            />
+          </Link>
 
           <Button
             type="button"
@@ -199,7 +217,10 @@ export const SideNav = ({
                 height={28}
                 priority
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0 m-auto h-7 w-7 opacity-100 transition-opacity duration-200 group-hover:opacity-0 dark:invert"
+                className={cn(
+                  'pointer-events-none absolute inset-0 m-auto h-7 w-7 opacity-100 transition-opacity duration-200 group-hover:opacity-0 dark:invert',
+                  isDizzyEnabled && 'motion-safe:animate-spin',
+                )}
               />
               <PanelLeftOpen
                 aria-hidden="true"
@@ -214,92 +235,69 @@ export const SideNav = ({
       )}
 
       {/* Nav items — pinned to top */}
-      <div className="mt-4 flex w-full shrink-0 flex-col gap-1">
-        <SideNavItem
-          icon={Plus}
-          label="New Session"
-          tooltip={
-            <>
-              New Session (<span className="font-mono">N</span>)
-            </>
-          }
-          description="Start a session from anywhere"
-          expanded={isSideNavExpanded}
-          active={false}
-          aria-label="New Session"
-          onClick={() => setIsNewTaskDialogOpen(true)}
-        />
-
-        {visibleNavItems.map(
-          ({
-            icon,
-            href,
-            label,
-            description,
-            matchExact,
-            matchPaths,
-            requiresSetup,
-          }) => (
-            <SideNavItem
-              key={href}
-              icon={icon}
-              href={href}
-              label={label}
-              aria-label={label}
-              tooltip={
-                setupIncomplete && requiresSetup
-                  ? SETUP_INCOMPLETE_NAV_TOOLTIP
-                  : label
-              }
-              description={
-                setupIncomplete && requiresSetup ? undefined : description
-              }
-              disabled={setupIncomplete && requiresSetup}
-              focusableWhenDisabled={setupIncomplete && requiresSetup}
-              expanded={isSideNavExpanded}
-              active={
-                matchExact
-                  ? matchPaths.includes(pathname)
-                  : matchPaths.some((path) => pathname.startsWith(path))
-              }
-              badgeCount={href === '/results' ? unreadResultCount : 0}
-            />
-          ),
-        )}
-
-        <SideNavItem
-          icon={Settings}
-          href="/settings"
-          aria-label="Settings"
-          tooltip="Settings"
-          description="Manage your settings"
-          expanded={isSideNavExpanded}
-          active={pathname.startsWith('/settings')}
-        />
-
-        <SideNavItem
-          icon={Search}
-          label="Search"
-          tooltip="Search (⌘K)"
-          description="Search and navigate"
-          expanded={isSideNavExpanded}
-          active={false}
-          aria-label="Search"
-          onClick={() => openCommandPalette(true)}
-        />
-
-        {!isSideNavExpanded && (
+      <div className="mt-4 flex w-full shrink-0 flex-col gap-4">
+        <SideNavGroup>
+          {visibleNavSections.home.map(renderNavItem)}
           <SideNavItem
-            icon={ListChevronsUpDown}
-            label="Expand sidebar"
-            tooltip="Expand sidebar"
-            description="Access recent sessions from here"
-            expanded={false}
+            icon={Plus}
+            label="New Session"
+            tooltip={
+              <>
+                New Session (<span className="font-mono">N</span>)
+              </>
+            }
+            description="Start a session from anywhere"
+            expanded={isSideNavExpanded}
             active={false}
-            aria-label="Expand sidebar"
-            onClick={() => setSideNavExpanded(true)}
+            aria-label="New Session"
+            onClick={() => setIsNewTaskDialogOpen(true)}
           />
+          {visibleNavSections.sessions.map(renderNavItem)}
+        </SideNavGroup>
+
+        <SideNavGroup>
+          {visibleNavSections.manage.map(renderNavItem)}
+          <SideNavItem
+            icon={Settings}
+            href="/settings"
+            aria-label="Settings"
+            tooltip="Settings"
+            description="Manage your settings"
+            expanded={isSideNavExpanded}
+            active={pathname.startsWith('/settings')}
+          />
+        </SideNavGroup>
+
+        {visibleNavSections.insights.length > 0 && (
+          <SideNavGroup>
+            {visibleNavSections.insights.map(renderNavItem)}
+          </SideNavGroup>
         )}
+
+        <SideNavGroup>
+          <SideNavItem
+            icon={Search}
+            label="Search"
+            tooltip="Search (⌘K)"
+            description="Search and navigate"
+            expanded={isSideNavExpanded}
+            active={false}
+            aria-label="Search"
+            onClick={() => openCommandPalette(true)}
+          />
+          {!isSideNavExpanded && (
+            <SideNavItem
+              icon={ListChevronsUpDown}
+              label="Expand sidebar"
+              tooltip="Expand sidebar"
+              description="Access recent sessions from here"
+              expanded={false}
+              active={false}
+              aria-label="Expand sidebar"
+              onClick={() => setSideNavExpanded(true)}
+            />
+          )}
+        </SideNavGroup>
       </div>
 
       <div className="min-h-0 flex-1 overflow-clip">

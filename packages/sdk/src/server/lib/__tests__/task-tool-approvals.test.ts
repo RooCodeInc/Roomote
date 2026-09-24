@@ -14,6 +14,14 @@ const mocks = vi.hoisted(() => ({
   getApproval: vi.fn(async () => undefined as unknown),
   expire: vi.fn(async () => undefined),
   isPresent: vi.fn(async () => true),
+  latestUserRequest: vi.fn(async () => undefined as string | undefined),
+  postMessage: vi.fn(async () => ({ messageId: 'provider-message-1' })),
+  claimTracked: vi.fn(async () => [{ id: 'tracked-1' }]),
+  provider: vi.fn(),
+}));
+
+vi.mock('../communication-providers', () => ({
+  getCommunicationProviderAdapter: mocks.provider,
 }));
 
 vi.mock(
@@ -31,9 +39,19 @@ vi.mock(
 );
 
 vi.mock('@roomote/db/server', () => ({
-  db: { query: { taskRuns: { findFirst: mocks.findRun } } },
+  db: {
+    query: { taskRuns: { findFirst: mocks.findRun } },
+    insert: () => ({
+      values: () => ({
+        onConflictDoNothing: () => ({ returning: mocks.claimTracked }),
+      }),
+    }),
+    update: () => ({ set: () => ({ where: vi.fn(async () => undefined) }) }),
+    delete: () => ({ where: vi.fn(async () => undefined) }),
+  },
   eq: vi.fn(),
   taskRuns: { id: 'id' },
+  trackedMessages: { id: 'id' },
   isDeploymentExperimentEnabled: mocks.experiment,
   getSessionForTask: mocks.sessionForTask,
   listIntegrationToolPolicies: mocks.deploymentPolicies,
@@ -46,6 +64,7 @@ vi.mock('@roomote/db/server', () => ({
   getIntegrationToolApproval: mocks.getApproval,
   expireIntegrationToolApproval: mocks.expire,
   fingerprintIntegrationToolCall: (input: unknown) => JSON.stringify(input),
+  findLatestTaskUserRequest: mocks.latestUserRequest,
 }));
 vi.mock('@roomote/redis', () => ({
   isSessionUserPresent: mocks.isPresent,
@@ -91,22 +110,37 @@ beforeEach(() => {
   mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
   mocks.autoState.mockResolvedValue({ mode: 'off' });
   mocks.isPresent.mockResolvedValue(true);
+  mocks.latestUserRequest.mockResolvedValue(undefined);
+  mocks.claimTracked.mockResolvedValue([{ id: 'tracked-1' }]);
+  mocks.provider.mockResolvedValue({ postMessage: mocks.postMessage });
+});
+
+it('posts task-originated Slack asks in the task thread with native approval buttons', async () => {
+  mocks.findRun.mockResolvedValue({
+    taskId: 'task-1',
+    payload: {
+      communicationProvider: 'slack',
+      communicationChannelId: 'C123',
+      communicationThreadId: '123.45',
+      communicationTeamId: 'T123',
+    },
+  });
+  mocks.deploymentPolicies.mockResolvedValue([policy('save_issue', 'ask')]);
+  const result = await requestTaskToolApproval(ask);
+  expect(result).toEqual({ outcome: 'pending', approvalId: 'approval-1' });
+  expect(mocks.provider).toHaveBeenCalledWith('slack', { slackTeamId: 'T123' });
+  expect(mocks.postMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      channelId: 'C123',
+      threadId: '123.45',
+      blocks: expect.arrayContaining([
+        expect.objectContaining({ type: 'actions' }),
+      ]),
+    }),
+  );
 });
 
 describe('resolveTaskIntegrationToolApprovals', () => {
-  it('returns nothing, and resolves no servers, while the experiment is off', async () => {
-    mocks.experiment.mockResolvedValue(false);
-    const resolveServers = vi.fn(async () => ({}));
-    await expect(
-      resolveTaskIntegrationToolApprovals({
-        runId: 7,
-        actingUserId: 'user-1',
-        resolveServers,
-      }),
-    ).resolves.toBeUndefined();
-    expect(resolveServers).not.toHaveBeenCalled();
-  });
-
   it("compiles the governing policies and the task's session overrides", async () => {
     mocks.deploymentPolicies.mockResolvedValue([
       policy('save_issue', 'ask'),
@@ -178,6 +212,36 @@ describe('requestTaskToolApproval', () => {
     );
     // A person's choice: the model is never consulted.
     expect(mocks.resolveAuto).not.toHaveBeenCalled();
+  });
+
+  it("assesses against the visible part of the worker's request", async () => {
+    mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
+    await requestTaskToolApproval({
+      ...ask,
+      userRequest:
+        '<environment-instructions>Use pnpm.</environment-instructions>\n<request>File the bug.</request>',
+    });
+    expect(mocks.resolveAuto).toHaveBeenCalledWith(
+      expect.objectContaining({ userRequest: 'File the bug.' }),
+    );
+    expect(mocks.latestUserRequest).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the task's latest recorded prompt when the worker sends none", async () => {
+    mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
+    mocks.latestUserRequest.mockResolvedValue('Look up the open invoices.');
+    await requestTaskToolApproval(ask);
+    expect(mocks.latestUserRequest).toHaveBeenCalledWith('task-1');
+    expect(mocks.resolveAuto).toHaveBeenCalledWith(
+      expect.objectContaining({ userRequest: 'Look up the open invoices.' }),
+    );
+
+    // A failed lookup still assesses the call, without a request.
+    mocks.latestUserRequest.mockRejectedValue(new Error('db down'));
+    await requestTaskToolApproval(ask);
+    expect(mocks.resolveAuto).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userRequest: undefined }),
+    );
   });
 
   it('assesses a default tool and leaves a routine call for the proxy to claim', async () => {
@@ -385,14 +449,6 @@ describe('requestTaskToolApproval', () => {
     });
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({
       outcome: 'unavailable',
-    });
-    expect(mocks.insert).not.toHaveBeenCalled();
-  });
-
-  it('asks for nothing while the experiment is off', async () => {
-    mocks.experiment.mockResolvedValue(false);
-    await expect(requestTaskToolApproval(ask)).resolves.toEqual({
-      outcome: 'not_required',
     });
     expect(mocks.insert).not.toHaveBeenCalled();
   });

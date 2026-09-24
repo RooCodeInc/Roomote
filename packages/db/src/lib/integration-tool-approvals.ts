@@ -10,9 +10,9 @@ import type {
   IntegrationToolSessionOverrideMetadata,
   IntegrationToolSessionOverrideMode,
 } from '@roomote/types';
+import { redactIntegrationToolArgs } from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
-import { isDeploymentExperimentEnabledWithShareLock } from './deployment-experiments';
 import {
   integrationToolApprovalRequests,
   integrationToolAutoEvaluations,
@@ -61,42 +61,7 @@ export function fingerprintIntegrationToolCall(input: {
     .digest('hex');
 }
 
-const SECRET_KEY_PATTERN =
-  /secret|token|password|api[-_]?key|authorization|credential|private[-_]?key/i;
-const MAX_STRING_LENGTH = 200;
-const MAX_DEPTH = 6;
-
-/**
- * Display/audit preview of tool-call arguments. Secret-looking values and
- * oversized strings never reach the database or the UI; the approver still
- * sees the call's shape and ordinary arguments.
- */
-export function redactIntegrationToolArgs(value: unknown, depth = 0): unknown {
-  if (depth > MAX_DEPTH) return '[truncated]';
-  if (typeof value === 'string') {
-    return value.length > MAX_STRING_LENGTH
-      ? `${value.slice(0, MAX_STRING_LENGTH)}…[truncated]`
-      : value;
-  }
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 50)
-      .map((item) => redactIntegrationToolArgs(item, depth + 1));
-  }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .slice(0, 50)
-        .map(([key, item]) => [
-          key,
-          SECRET_KEY_PATTERN.test(key)
-            ? '[redacted]'
-            : redactIntegrationToolArgs(item, depth + 1),
-        ]),
-    );
-  }
-  return value;
-}
+export { redactIntegrationToolArgs } from '@roomote/types';
 
 type IntegrationToolPolicyRow = typeof integrationToolPolicies.$inferSelect;
 type IntegrationToolApprovalRow =
@@ -490,29 +455,15 @@ export async function decideIntegrationToolApproval(
 }
 
 /**
- * Claim an unrelayed `approved` row for relay, serialized against the
- * experiment toggle. Disabling commits `enabled=false` first and sweeps open
- * rows second, so a bare conditional update could still claim a row in
- * between and relay under a disabled experiment. Reading the setting with a
- * share lock in the same transaction closes that: either the disable already
- * committed and the claim fails, or the claim holds the lock and the disable
- * waits until the claim has committed — so the call was genuinely authorized
- * before the experiment went off. It also covers a row inserted after the
- * sweep already ran, which the sweep alone can never cancel.
+ * Claim an unrelayed `approved` row for relay: only an `approved`, unclaimed
+ * row moves to its terminal claimed status, so a double click, a second
+ * replica, or a restarted process can never relay the same decision twice.
  */
 async function claimApprovedIntegrationToolApproval(
   input: { approvalId: string; requesterUserId: string },
   claimedStatus: 'consumed' | 'auto_approved',
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
-    if (
-      !(await isDeploymentExperimentEnabledWithShareLock(
-        'integrationToolApprovals',
-        tx,
-      ))
-    ) {
-      return false;
-    }
     const [row] = await tx
       .update(integrationToolApprovalRequests)
       .set({ status: claimedStatus })
@@ -568,25 +519,6 @@ export async function expireIntegrationToolApproval(
         eq(integrationToolApprovalRequests.status, 'pending'),
       ),
     );
-}
-
-/**
- * Cancel every still-open approval (pending or approved-but-unclaimed) with a
- * recorded reason. Used when the experiment is disabled: in-flight asks fail
- * closed, approved-but-unrelayed decisions never execute, and a later
- * re-enable cannot resurrect these rows because cancelled is terminal.
- */
-export async function cancelOpenIntegrationToolApprovals(
-  reason: string,
-): Promise<number> {
-  const rows = await db
-    .update(integrationToolApprovalRequests)
-    .set({ status: 'cancelled', cancelReason: reason })
-    .where(
-      inArray(integrationToolApprovalRequests.status, ['pending', 'approved']),
-    )
-    .returning({ id: integrationToolApprovalRequests.id });
-  return rows.length;
 }
 
 async function upsertSessionOverride(
@@ -739,11 +671,10 @@ export async function insertAutoRejectedIntegrationToolApproval(
 
 /**
  * Atomically claim an unrelayed auto-approval for relay: only an `approved`,
- * unclaimed row transitions to terminal `auto_approved`. The experiment
- * disable sweep cancels `approved` rows, so a sweep that lands first makes
- * this return false and the caller rejects the native ask instead of
- * executing — no auto_approved record ever exists for a call that did not
- * run, and no disable can slip between the claim and the relay decision.
+ * unclaimed row transitions to terminal `auto_approved`. A row that is no
+ * longer claimable makes this return false and the caller rejects the native
+ * ask instead of executing, so no auto_approved record ever exists for a call
+ * that did not run.
  */
 export async function claimAutoApprovedIntegrationToolApproval(input: {
   approvalId: string;
@@ -757,21 +688,13 @@ export async function claimAutoApprovedIntegrationToolApproval(input: {
  * approval of this exact call. The agent's native ask is advisory inside a
  * sandbox, so the proxy is what makes Ask first real for a task: a call runs
  * only by consuming an approved row for the same task, tool, and arguments,
- * once. Serialized against the experiment toggle like every other claim.
+ * once.
  */
 export async function claimTaskIntegrationToolCall(input: {
   taskId: string;
   argsFingerprint: string;
 }): Promise<boolean> {
   return db.transaction(async (tx) => {
-    if (
-      !(await isDeploymentExperimentEnabledWithShareLock(
-        'integrationToolApprovals',
-        tx,
-      ))
-    ) {
-      return false;
-    }
     const [approved] = await tx
       .select({
         id: integrationToolApprovalRequests.id,

@@ -629,14 +629,27 @@ export async function drainFastAgentParentEvents(
         continue;
       }
 
-      await db
+      // Start the attempt only while the row is still pending: a follow-up
+      // its sender withdrew since the lookup must not be delivered. Starting
+      // it also clears a queued row's elapsed retry time, so a withdrawal
+      // sees the row in flight rather than parked.
+      const [attempt] = await db
         .update(fastAgentParentEvents)
         .set({
           attempts: sql`${fastAgentParentEvents.attempts} + 1`,
           lastError: null,
+          ...(row.admission === 'inline' ? {} : { retryAt: null }),
           updatedAt: new Date(),
         })
-        .where(eq(fastAgentParentEvents.id, row.id));
+        .where(
+          and(
+            eq(fastAgentParentEvents.id, row.id),
+            isNull(fastAgentParentEvents.deliveredAt),
+            isNull(fastAgentParentEvents.discardedAt),
+          ),
+        )
+        .returning({ id: fastAgentParentEvents.id });
+      if (!attempt) continue;
 
       try {
         const retryTaskStart = await buildRetryTaskStart(
