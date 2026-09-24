@@ -113,6 +113,11 @@ export type DecisionModelResolution =
   | {
       kind: 'judgment';
       supportsHighVolumeDecisions: true;
+      /**
+       * The Roomote-run upstream answers (the model Roomote trains, hosted or
+       * self-hosted), rather than Jev.
+       */
+      roomoteModel: boolean;
     }
   | {
       kind: 'helper';
@@ -1181,34 +1186,63 @@ export function resetDecisionModelCache(): void {
   cachedDecisionModel = undefined;
 }
 
+export type DecisionModelRequirements = {
+  /**
+   * The decision runs on every turn or task, so it needs a judgment backend
+   * (Jev or the Roomote-run model); the helper fallback would be an LLM call
+   * each time.
+   */
+  highVolume?: boolean;
+  /**
+   * The model Roomote trains (the `roomote` upstream, hosted or self-hosted)
+   * is not yet trusted with this decision, so only Jev answers it; with no
+   * Jev backend it is not asked, and the helper fallback is not used either.
+   * Separate from `highVolume`, which is about cost, not quality.
+   */
+  excludeRoomoteModel?: boolean;
+};
+
+function meetsRequirements(
+  value: DecisionModelResolution,
+  options: DecisionModelRequirements,
+): boolean {
+  if (options.excludeRoomoteModel) {
+    return value.kind === 'judgment' && !value.roomoteModel;
+  }
+  return !options.highVolume || value.supportsHighVolumeDecisions;
+}
+
 /**
  * Resolve the decision model in precedence order: a configured judgment
  * backend first, then the deployment helper model. Only a judgment backend
  * (Jev or the Roomote-run model) takes high-volume decisions; helper fallback remains
  * ordinary-decision-only regardless of which helper model is configured.
+ * A decision that excludes the Roomote-run model resolves to null on any
+ * backend but Jev.
  */
 export async function resolveDecisionModel(
-  options: {
-    highVolume?: boolean;
-  } = {},
+  options: DecisionModelRequirements = {},
 ): Promise<DecisionModelResolution | null> {
   const now = Date.now();
 
   if (cachedDecisionModel && cachedDecisionModel.expiresAt > now) {
-    return options.highVolume &&
-      !cachedDecisionModel.value.supportsHighVolumeDecisions
-      ? null
-      : cachedDecisionModel.value;
+    return meetsRequirements(cachedDecisionModel.value, options)
+      ? cachedDecisionModel.value
+      : null;
   }
 
   const backend = await resolveJudgmentBackend();
 
-  if (!backend && options.highVolume) {
+  if (!backend && (options.highVolume || options.excludeRoomoteModel)) {
     return null;
   }
 
   const value: DecisionModelResolution = backend
-    ? { kind: 'judgment', supportsHighVolumeDecisions: true }
+    ? {
+        kind: 'judgment',
+        supportsHighVolumeDecisions: true,
+        roomoteModel: backend.provider === 'roomote',
+      }
     : await (async () => {
         const helper = await resolveNonTaskHelperModel();
         return {
@@ -1227,7 +1261,7 @@ export async function resolveDecisionModel(
     expiresAt: now + DECISION_MODEL_CACHE_TTL_MS,
   };
 
-  return value;
+  return meetsRequirements(value, options) ? value : null;
 }
 
 function buildHelperDecisionAnswerSchema(
@@ -1308,26 +1342,21 @@ function buildHelperDecisionPrompt(
  */
 export async function evaluateDecisionModel<
   TQuestions extends Record<string, TypeSafeQuestion>,
->(params: {
-  state: unknown;
-  questions: TQuestions;
-  timeoutMs?: number;
-  highVolume?: boolean;
-  userId?: string | null;
-  taskId?: string | null;
-}): Promise<TypeSafeAnswers<TQuestions> | null> {
+>(
+  params: {
+    state: unknown;
+    questions: TQuestions;
+    timeoutMs?: number;
+    userId?: string | null;
+    taskId?: string | null;
+  } & DecisionModelRequirements,
+): Promise<TypeSafeAnswers<TQuestions> | null> {
   const decisionModel = await resolveDecisionModel({
     highVolume: params.highVolume === true,
+    excludeRoomoteModel: params.excludeRoomoteModel === true,
   });
 
   if (!decisionModel) {
-    return null;
-  }
-
-  if (
-    params.highVolume === true &&
-    !decisionModel.supportsHighVolumeDecisions
-  ) {
     return null;
   }
 

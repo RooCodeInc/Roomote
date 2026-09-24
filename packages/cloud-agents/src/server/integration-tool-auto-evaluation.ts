@@ -22,6 +22,14 @@ import {
 } from './typesafe-judgment';
 
 const AUTO_EVALUATION_TIMEOUT_MS = 20_000;
+/**
+ * Only Jev assesses tool calls for now: the model Roomote trains has not been
+ * evaluated on this decision, so a deployment on it gets no Auto (every call
+ * asks, as with no model at all) until it has been.
+ */
+export const AUTO_DECISION_REQUIREMENTS = {
+  excludeRoomoteModel: true,
+} as const;
 
 /**
  * Auto mode is a risk assessment of one paused tool call: is it risky enough
@@ -294,6 +302,7 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       },
       questions,
       timeoutMs: AUTO_EVALUATION_TIMEOUT_MS,
+      excludeRoomoteModel: AUTO_DECISION_REQUIREMENTS.excludeRoomoteModel,
       userId: input.userId,
       taskId: input.taskId,
     });
@@ -361,7 +370,7 @@ export async function resolveIntegrationToolAutoState(): Promise<IntegrationTool
   const [enabled, settings, model] = await Promise.all([
     isDeploymentExperimentEnabled('integrationToolAutoApprovals'),
     getIntegrationToolAutoSettings(),
-    resolveDecisionModel().catch(() => null),
+    resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(() => null),
   ]);
   const hosted = model?.kind === 'judgment';
   const mode = !enabled
