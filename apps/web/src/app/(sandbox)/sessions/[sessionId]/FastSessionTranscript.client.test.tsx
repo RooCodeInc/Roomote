@@ -901,6 +901,7 @@ describe('FastSessionTranscript', () => {
   });
 
   it('loads older messages near the top, preserves their order, and offers retry after failure', async () => {
+    const initialStreamCursor = 1_780_000_000_000.125;
     const cursor = {
       createdAt: '2026-01-01 00:00:00.123456+00',
       ts: 2,
@@ -929,6 +930,7 @@ describe('FastSessionTranscript', () => {
       <FastSessionTranscript
         sessionId="synthetic-long-transcript"
         initialMessagesCursor={cursor}
+        initialStreamCursor={initialStreamCursor}
         initialMessages={[
           textMessage({
             id: 'current-user',
@@ -944,6 +946,9 @@ describe('FastSessionTranscript', () => {
           }),
         ]}
       />,
+    );
+    expect(FakeEventSource.instances[0]?.url).toBe(
+      `/api/sessions/synthetic-long-transcript/stream?since=${initialStreamCursor}`,
     );
     const scrollElement = screen.getByRole('log')
       .firstElementChild as HTMLElement;

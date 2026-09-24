@@ -949,11 +949,16 @@ describe('Session queries', () => {
         source: 'web',
       })),
     );
+    await db
+      .update(fastAgentConversations)
+      .set({ updatedAt: sql`now()` })
+      .where(eq(fastAgentConversations.id, session.id));
 
     const auth = { userId: owner.id, isAdmin: false };
     const initial = await getFastSessionById(auth, session.id, {
       transcriptLimit: FAST_SESSION_TRANSCRIPT_PAGE_SIZE,
     });
+    expect(initial?.initialStreamCursor).toEqual(expect.any(Number));
     expect(initial?.messages).toHaveLength(FAST_SESSION_TRANSCRIPT_PAGE_SIZE);
     expect(initial?.messagesCursor).toMatchObject({
       ts: 1,
@@ -964,6 +969,12 @@ describe('Session queries', () => {
         .toString()
         .padStart(12, '0')}`,
     });
+    await expect(
+      getFastSessionMessagesSince(
+        session.id,
+        initial?.initialStreamCursor ?? 0,
+      ),
+    ).resolves.toMatchObject({ messages: [] });
 
     let cursor = initial?.messagesCursor ?? null;
     let combined = initial?.messages ?? [];

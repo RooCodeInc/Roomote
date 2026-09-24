@@ -610,6 +610,7 @@ export function FastSessionTranscript({
   initialMessages,
   initialQueuedMessages = [],
   initialMessagesCursor = null,
+  initialStreamCursor = null,
   canReply,
   initialTitle = null,
   fallbackTitle = 'New session',
@@ -631,6 +632,7 @@ export function FastSessionTranscript({
   initialMessages: FastSessionMessage[];
   initialQueuedMessages?: FastSessionQueuedMessage[];
   initialMessagesCursor?: FastSessionMessageCursor | null;
+  initialStreamCursor?: number | null;
   canReply?: boolean;
   initialTitle?: string | null;
   fallbackTitle?: string;
@@ -803,7 +805,12 @@ export function FastSessionTranscript({
 
   useEffect(() => {
     hasReceivedInitialSessionStateRef.current = false;
-    const source = new EventSource(`/api/sessions/${sessionId}/stream`);
+    const streamUrl = `/api/sessions/${sessionId}/stream${
+      initialStreamCursor === null
+        ? ''
+        : `?since=${encodeURIComponent(String(initialStreamCursor))}`
+    }`;
+    const source = new EventSource(streamUrl);
     const onOpen = () => {
       hasReceivedInitialSessionStateRef.current = false;
       // Chunks missed while disconnected cannot be recovered; the persisted
@@ -1074,6 +1081,7 @@ export function FastSessionTranscript({
     };
   }, [
     sessionId,
+    initialStreamCursor,
     clearStreamMessages,
     getStreamService,
     replaceOptimisticMessages,

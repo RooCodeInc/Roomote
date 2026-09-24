@@ -173,6 +173,7 @@ export default async function SessionDetailPage({
                   initialMessages={session.messages}
                   initialQueuedMessages={session.queuedMessages}
                   initialMessagesCursor={session.messagesCursor}
+                  initialStreamCursor={session.initialStreamCursor}
                   canReply
                   initialTitle={unifiedSession.title}
                   fallbackTitle={unifiedSession.title}
@@ -296,6 +297,7 @@ export default async function SessionDetailPage({
           initialMessages={session.messages}
           initialQueuedMessages={session.queuedMessages}
           initialMessagesCursor={session.messagesCursor}
+          initialStreamCursor={session.initialStreamCursor}
           canReply
           initialTitle={session.title}
           fallbackTitle={fallbackTitle}

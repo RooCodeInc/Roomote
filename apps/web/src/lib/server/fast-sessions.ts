@@ -365,6 +365,9 @@ const fastSessionSelection = {
     from ${fastAgentMessages}
     where ${fastAgentMessages.conversationId} = ${fastAgentConversations.id}
   )`,
+  // Message writes touch the conversation in the same transaction. Preserve
+  // Postgres microseconds so the client can start SSE after this snapshot.
+  initialStreamCursorMs: sql<string>`extract(epoch from ${fastAgentConversations.updatedAt}) * 1000`,
   createdAt: fastAgentConversations.createdAt,
   updatedAt: fastAgentConversations.updatedAt,
 };
@@ -1071,6 +1074,7 @@ export async function getFastSessionById(
     queuedMessages,
     hasOlderMessages: transcriptPage.nextCursor !== null,
     messagesCursor: transcriptPage.nextCursor,
+    initialStreamCursor: Number(session.initialStreamCursorMs),
     directInferenceCostMicroUsd,
     inferenceCostMicroUsd: directInferenceCostMicroUsd,
   };

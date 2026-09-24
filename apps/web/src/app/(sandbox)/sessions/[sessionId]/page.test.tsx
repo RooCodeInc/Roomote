@@ -433,6 +433,7 @@ describe('Session detail page', () => {
       messages: [],
       hasOlderMessages: false,
       messagesCursor: null,
+      initialStreamCursor: 1_780_000_000_000.125,
     });
 
     const html = renderToStaticMarkup(
@@ -491,6 +492,7 @@ describe('Session detail page', () => {
         initialTitle: 'Session title',
         fallbackTitle: 'Session title',
         privateSession: true,
+        initialStreamCursor: 1_780_000_000_000.125,
       }),
       undefined,
     );
@@ -597,6 +599,7 @@ describe('Session detail page', () => {
       messages: [],
       hasOlderMessages: false,
       messagesCursor: null,
+      initialStreamCursor: 1_780_000_000_000.125,
     });
     getFastSessionTasksMock.mockResolvedValue([
       {
