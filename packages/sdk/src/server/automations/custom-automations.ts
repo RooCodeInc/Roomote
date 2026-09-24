@@ -476,7 +476,7 @@ async function runFastCustomAutomation(params: {
   destination: CustomAutomationDestination | null;
   eventClaimedAt: Date;
   launchClaimedAt: Date;
-  trigger: 'schedule' | 'manual';
+  trigger: 'schedule' | 'manual' | 'webhook';
   /** Environment the automation was configured for, offered to the turn as a hint. */
   preferredEnvironmentId: string | null;
 }): Promise<void> {
@@ -636,8 +636,18 @@ async function launchCustomAutomationRow(
   const result = emptyJobResult();
   const frequency = getCustomAutomationFrequency(automation);
 
-  if (automation.scheduleMode !== 'cron' && frequency === 'off') {
+  if (!automation.enabled) {
     result.skippedReason = 'Automation is disabled.';
+    return result;
+  }
+
+  if (
+    !opts.manualTrigger &&
+    (automation.scheduleMode === 'off' ||
+      automation.scheduleMode === 'on_demand' ||
+      (automation.scheduleMode !== 'cron' && frequency === 'off'))
+  ) {
+    result.skippedReason = 'Automation has no scheduled run.';
     return result;
   }
 
@@ -823,7 +833,7 @@ async function launchCustomAutomationRow(
       destination,
       eventClaimedAt,
       launchClaimedAt,
-      trigger: opts.manualTrigger ? 'manual' : 'schedule',
+      trigger: opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
       preferredEnvironmentId,
     });
     result.queued = true;
@@ -919,6 +929,7 @@ export async function customAutomationsJob(
 
 export async function runCustomAutomationNow(
   id: string,
+  trigger: 'manual' | 'webhook' = 'manual',
 ): Promise<AutomationRunNowResult> {
   const automation = await getCustomAutomationById(id);
 
@@ -937,6 +948,7 @@ export async function runCustomAutomationNow(
   try {
     const result = await launchCustomAutomationRow(automation, {
       manualTrigger: true,
+      trigger,
     });
 
     if (result.launchedTaskId) {

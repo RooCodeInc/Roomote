@@ -1,17 +1,25 @@
+import { randomBytes } from 'node:crypto';
+
 import {
-  createCustomAutomation,
   and,
+  createCustomAutomation,
   db,
   deleteCustomAutomation,
   desc,
   eq,
+  ensureCustomAutomationWebhookToken,
   fastAgentConversations,
   getDeploymentTaskModelOptions,
   getBackgroundAgentSettingsForDeployment,
   getCustomAutomationById,
+  getCustomAutomationWebhookState,
+  getCustomAutomationWebhookToken,
+  isNull,
   listCustomAutomations,
   inArray,
+  setCustomAutomationWebhookToken,
   updateCustomAutomation,
+  users,
   type CustomAutomation,
 } from '@roomote/db/server';
 import {
@@ -45,6 +53,8 @@ import {
 import { captureActivationCustomAutomationChanged } from '@roomote/telemetry/server';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
 
+import { Env } from '@/lib/server/env';
+import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import type { UserAuthSuccess } from '@/types';
 
 async function getOwnedAutomation(auth: UserAuthSuccess, id: string) {
@@ -136,9 +146,11 @@ function toListItem(
   const scheduleMode =
     row.scheduleMode === 'cron'
       ? 'cron'
-      : isScheduleOnlyBackgroundAutomationFrequency(row.scheduleMode)
-        ? row.scheduleMode
-        : 'off';
+      : row.scheduleMode === 'on_demand'
+        ? 'on_demand'
+        : isScheduleOnlyBackgroundAutomationFrequency(row.scheduleMode)
+          ? row.scheduleMode
+          : 'off';
 
   return {
     id: row.id,
@@ -246,6 +258,7 @@ function assertScheduleMode(
   value: string,
 ): asserts value is CustomAutomationScheduleMode {
   if (!isScheduleOnlyBackgroundAutomationFrequency(value)) {
+    if (value === 'on_demand') return;
     if (value === 'cron') return;
     throw new Error(`Invalid schedule mode: ${value}`);
   }
@@ -496,6 +509,110 @@ export async function triggerCustomAutomationCommand(
 ): Promise<AutomationRunNowResult> {
   await getOwnedAutomation(auth, input.id);
   return runCustomAutomationNow(input.id);
+}
+
+function buildCustomAutomationWebhookUrl(id: string, token: string): string {
+  return new URL(
+    `/api/webhooks/custom-automations/${id}/${token}`,
+    getPublicAppUrl(Env),
+  ).toString();
+}
+
+async function assertWebhookAutomationEligible(
+  automation: CustomAutomation,
+): Promise<void> {
+  if (!automation.enabled) {
+    throw new Error('Enable the automation before enabling its webhook.');
+  }
+  if (!automation.createdByUserId) {
+    throw new Error('Automation owner is not configured.');
+  }
+  const owner = await db.query.users.findFirst({
+    where: and(
+      eq(users.id, automation.createdByUserId),
+      isNull(users.deletedAt),
+    ),
+    columns: { id: true },
+  });
+  if (!owner) {
+    throw new Error('Automation owner is not active.');
+  }
+}
+
+export async function getCustomAutomationWebhookCommand(
+  auth: UserAuthSuccess,
+  input: { id: string },
+): Promise<{ enabled: boolean; url: string | null }> {
+  const automation = await getOwnedAutomation(auth, input.id);
+  const webhook = await getCustomAutomationWebhookState(input.id);
+  if (
+    !automation.enabled ||
+    !automation.createdByUserId ||
+    !webhook?.enabled ||
+    !webhook.token
+  ) {
+    return { enabled: false, url: null };
+  }
+  const owner = await db.query.users.findFirst({
+    where: and(
+      eq(users.id, automation.createdByUserId),
+      isNull(users.deletedAt),
+    ),
+    columns: { id: true },
+  });
+  if (!owner) {
+    return { enabled: false, url: null };
+  }
+  return {
+    enabled: true,
+    url: buildCustomAutomationWebhookUrl(input.id, webhook.token),
+  };
+}
+
+export async function setCustomAutomationWebhookEnabledCommand(
+  auth: UserAuthSuccess,
+  input: { id: string; enabled: boolean },
+): Promise<{ enabled: boolean; url: string | null }> {
+  const automation = await getOwnedAutomation(auth, input.id);
+  if (!input.enabled) {
+    if (!(await setCustomAutomationWebhookToken(input.id, null))) {
+      throw new Error('Custom automation was not found.');
+    }
+    return { enabled: false, url: null };
+  }
+
+  await assertWebhookAutomationEligible(automation);
+  const token = await ensureCustomAutomationWebhookToken(
+    input.id,
+    randomBytes(32).toString('base64url'),
+  );
+  if (!token) {
+    throw new Error('Custom automation was not found.');
+  }
+  return {
+    enabled: true,
+    url: buildCustomAutomationWebhookUrl(input.id, token),
+  };
+}
+
+export async function rotateCustomAutomationWebhookCommand(
+  auth: UserAuthSuccess,
+  input: { id: string },
+): Promise<{ enabled: true; url: string }> {
+  const automation = await getOwnedAutomation(auth, input.id);
+  await assertWebhookAutomationEligible(automation);
+  if (!(await getCustomAutomationWebhookToken(input.id))) {
+    throw new Error('Enable webhooks before rotating the URL.');
+  }
+
+  const token = randomBytes(32).toString('base64url');
+  if (!(await setCustomAutomationWebhookToken(input.id, token))) {
+    throw new Error('Custom automation was not found.');
+  }
+  return {
+    enabled: true,
+    url: buildCustomAutomationWebhookUrl(input.id, token),
+  };
 }
 
 export async function resolveCustomAutomationScheduleCommand(

@@ -446,9 +446,12 @@ import {
   listAutomationDiscordChannelsCommand,
   listCustomAutomationsCommand,
   getCustomAutomationOptionsCommand,
+  getCustomAutomationWebhookCommand,
   resolveCustomAutomationScheduleCommand,
   listSlackChannelsCommand,
   triggerCustomAutomationCommand,
+  setCustomAutomationWebhookEnabledCommand,
+  rotateCustomAutomationWebhookCommand,
   updateBackgroundAgentSettingsCommand,
   triggerAutomationCommand,
   updateCustomAutomationCommand,
@@ -971,6 +974,7 @@ const automationsRouter = createRouter({
         resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
           'off',
+          'on_demand',
           'every_hour',
           'every_6_hours',
           'daily',
@@ -1018,6 +1022,7 @@ const automationsRouter = createRouter({
         resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
           'off',
+          'on_demand',
           'every_hour',
           'every_6_hours',
           'daily',
@@ -1049,6 +1054,24 @@ const automationsRouter = createRouter({
     )
     .mutation(({ ctx: { auth }, input }) =>
       updateCustomAutomationCommand(auth, input),
+    ),
+
+  getCustomAutomationWebhook: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(({ ctx: { auth }, input }) =>
+      getCustomAutomationWebhookCommand(auth, input),
+    ),
+
+  setCustomAutomationWebhookEnabled: protectedProcedure
+    .input(z.object({ id: z.string().uuid(), enabled: z.boolean() }))
+    .mutation(({ ctx: { auth }, input }) =>
+      setCustomAutomationWebhookEnabledCommand(auth, input),
+    ),
+
+  rotateCustomAutomationWebhook: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ ctx: { auth }, input }) =>
+      rotateCustomAutomationWebhookCommand(auth, input),
     ),
 
   deleteCustomAutomation: protectedProcedure

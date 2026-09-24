@@ -28,6 +28,10 @@ const state = vi.hoisted(() => ({
   customAutomationsLoaded: true,
   customAutomationsRefetch: vi.fn(),
   customAutomationRunPendingId: null as string | null,
+  customAutomationWebhookSettings: null as {
+    enabled: boolean;
+    url: string | null;
+  } | null,
   customAutomationTimeZone: 'UTC' as string | undefined,
   customAutomationDefaultTarget: undefined as
     | {
@@ -43,7 +47,7 @@ const state = vi.hoisted(() => ({
     name: string;
     prompt: string;
     enabled: boolean;
-    scheduleMode: 'daily' | 'weekly' | 'cron';
+    scheduleMode: 'off' | 'on_demand' | 'daily' | 'weekly' | 'cron';
     cronExpression: string | null;
     model: string | null;
     reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
@@ -311,6 +315,7 @@ const state = vi.hoisted(() => ({
 
 const queryClient = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
+  removeQueries: vi.fn(),
 }));
 
 const mutations = vi.hoisted(() => ({
@@ -318,6 +323,14 @@ const mutations = vi.hoisted(() => ({
   updateSettings: vi.fn(),
   triggerAgent: vi.fn(),
   triggerCustomAutomation: vi.fn(),
+  setCustomAutomationWebhookEnabled: vi.fn(),
+  rotateCustomAutomationWebhook: vi.fn(),
+  latestWebhookMutationOptions: null as {
+    onSuccess?: (result: { enabled: boolean; url: string | null }) => void;
+  } | null,
+  latestRotateWebhookOptions: null as {
+    onSuccess?: (result: { enabled: true; url: string }) => void;
+  } | null,
   latestSettingsOptions: null as {
     onSuccess?: (
       result: NonNullable<typeof state.nextUpdateSettingsResult>,
@@ -421,6 +434,17 @@ vi.mock('@tanstack/react-query', () => ({
       };
     }
 
+    if (key1 === 'getCustomAutomationWebhook') {
+      return {
+        isPending: false,
+        isError: false,
+        data: state.customAutomationWebhookSettings ?? {
+          enabled: false,
+          url: null,
+        },
+      };
+    }
+
     if (queryOptions.queryKey?.[0] === 'taskModels') {
       return {
         isPending: false,
@@ -490,7 +514,10 @@ vi.mock('@tanstack/react-query', () => ({
       result: NonNullable<typeof state.nextUpdateSettingsResult>,
     ) => void;
     onError?: (...args: unknown[]) => void;
-    mutationKind?: 'triggerCustomAutomation';
+    mutationKind?:
+      | 'triggerCustomAutomation'
+      | 'setCustomAutomationWebhookEnabled'
+      | 'rotateCustomAutomationWebhook';
     mutationKey?: unknown[];
   }) => {
     return {
@@ -501,6 +528,12 @@ vi.mock('@tanstack/react-query', () => ({
       mutate: vi.fn((variables: unknown) => {
         if (_options?.mutationKind === 'triggerCustomAutomation') {
           mutations.triggerCustomAutomation(variables);
+        } else if (
+          _options?.mutationKind === 'setCustomAutomationWebhookEnabled'
+        ) {
+          mutations.setCustomAutomationWebhookEnabled(variables);
+        } else if (_options?.mutationKind === 'rotateCustomAutomationWebhook') {
+          mutations.rotateCustomAutomationWebhook(variables);
         } else {
           mutations.updateSettings(variables);
         }
@@ -528,6 +561,16 @@ vi.mock('@/trpc/client', () => ({
         queryOptions: () => ({
           queryKey: ['automations', 'getCustomAutomationOptions'],
         }),
+      },
+      getCustomAutomationWebhook: {
+        queryOptions: (
+          input: { id: string },
+          options: { enabled?: boolean } = {},
+        ) => ({
+          queryKey: ['automations', 'getCustomAutomationWebhook', input.id],
+          ...options,
+        }),
+        queryKey: () => ['automations', 'getCustomAutomationWebhook'],
       },
       getSettings: {
         queryOptions: () => ({
@@ -567,6 +610,26 @@ vi.mock('@/trpc/client', () => ({
       },
       updateCustomAutomation: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+      },
+      setCustomAutomationWebhookEnabled: {
+        mutationOptions: (options?: Record<string, unknown>) => {
+          mutations.latestWebhookMutationOptions =
+            options as typeof mutations.latestWebhookMutationOptions;
+          return {
+            ...options,
+            mutationKind: 'setCustomAutomationWebhookEnabled',
+          };
+        },
+      },
+      rotateCustomAutomationWebhook: {
+        mutationOptions: (options?: Record<string, unknown>) => {
+          mutations.latestRotateWebhookOptions =
+            options as typeof mutations.latestRotateWebhookOptions;
+          return {
+            ...options,
+            mutationKind: 'rotateCustomAutomationWebhook',
+          };
+        },
       },
       deleteCustomAutomation: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
@@ -825,6 +888,7 @@ describe('AutomationsSettings', () => {
     vi.clearAllMocks();
     state.nextUpdateSettingsResult = null;
     state.customAutomationRunPendingId = null;
+    state.customAutomationWebhookSettings = null;
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
     mutations.latestCustomTriggerOptions = null;
@@ -1930,6 +1994,109 @@ describe('AutomationsSettings', () => {
         'Configure what runs, when it runs, and where the result is sent.',
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it('keeps On-demand runnable and supports webhook enable, rotate, and revoke controls', async () => {
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.customAutomations = [
+      {
+        id: 'automation-ondemand',
+        name: 'Event report',
+        prompt: 'Review the configured event.',
+        enabled: true,
+        scheduleMode: 'on_demand',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+    state.customAutomationWebhookSettings = { enabled: false, url: null };
+    window.location.hash = '';
+    render(<CustomAutomationsSection />);
+
+    expect(
+      await screen.findByRole('button', { name: 'Run Event report now' }),
+    ).toBeEnabled();
+    expect(screen.getByText(/On-demand/)).toBeInTheDocument();
+    expect(screen.getByText('No report channel')).toBeInTheDocument();
+    expect(screen.queryByText(/Next run/)).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Run Event report now' }),
+    );
+    expect(mutations.triggerCustomAutomation).toHaveBeenCalledWith({
+      id: 'automation-ondemand',
+    });
+
+    act(() => {
+      window.location.hash = '#custom-automation-automation-ondemand';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(
+      await screen.findByRole('dialog', { name: 'Edit custom automation' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Schedule' }),
+    ).toHaveTextContent('On-demand');
+    const webhookSwitch = screen.getByRole('switch', {
+      name: 'Enable webhooks',
+    });
+    fireEvent.click(webhookSwitch);
+    expect(mutations.setCustomAutomationWebhookEnabled).toHaveBeenCalledWith({
+      id: 'automation-ondemand',
+      enabled: true,
+    });
+    const initialUrl =
+      'https://roomote.example/api/webhooks/custom-automations/automation-ondemand/opaque-token';
+    await act(async () =>
+      mutations.latestWebhookMutationOptions?.onSuccess?.({
+        enabled: true,
+        url: initialUrl,
+      }),
+    );
+
+    const urlInput = screen.getByRole('textbox', { name: 'Webhook URL' });
+    expect(urlInput).toHaveAttribute('readonly');
+    expect(urlInput).toBeEnabled();
+    expect(urlInput).toHaveValue(initialUrl);
+    expect(
+      screen.getByRole('button', { name: 'Copy webhook URL' }),
+    ).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate webhook URL' }));
+    expect(mutations.rotateCustomAutomationWebhook).toHaveBeenCalledWith({
+      id: 'automation-ondemand',
+    });
+    const rotatedUrl = `${initialUrl}-rotated`;
+    await act(async () =>
+      mutations.latestRotateWebhookOptions?.onSuccess?.({
+        enabled: true,
+        url: rotatedUrl,
+      }),
+    );
+    expect(urlInput).toHaveValue(rotatedUrl);
+
+    fireEvent.click(webhookSwitch);
+    expect(
+      mutations.setCustomAutomationWebhookEnabled,
+    ).toHaveBeenLastCalledWith({ id: 'automation-ondemand', enabled: false });
+    await act(async () =>
+      mutations.latestWebhookMutationOptions?.onSuccess?.({
+        enabled: false,
+        url: null,
+      }),
+    );
+    expect(urlInput).toBeDisabled();
+    expect(urlInput).toHaveValue('');
   });
 
   it.each([

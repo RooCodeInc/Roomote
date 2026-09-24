@@ -66,6 +66,7 @@ export function isScheduleOnlyBackgroundAutomationFrequency(
 /** Cadence presets supported by user-defined custom automations. */
 export type CustomAutomationScheduleMode =
   | ScheduleOnlyBackgroundAutomationFrequency
+  | 'on_demand'
   | 'cron';
 
 export const CUSTOM_AUTOMATION_EXECUTION_MODES = [

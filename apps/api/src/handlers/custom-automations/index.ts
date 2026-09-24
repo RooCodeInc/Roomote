@@ -277,7 +277,14 @@ function buildTarget(
 
 async function resolveWriteSchedule(schedule: string, userId: string) {
   if (
-    ['off', 'every_hour', 'every_6_hours', 'daily', 'weekly'].includes(schedule)
+    [
+      'off',
+      'on_demand',
+      'every_hour',
+      'every_6_hours',
+      'daily',
+      'weekly',
+    ].includes(schedule)
   ) {
     return {
       status: 'resolved' as const,
@@ -376,10 +383,20 @@ function toApiAutomation<
     allRepositories: boolean;
     environmentId: string | null;
     executionMode: 'sandbox_task' | 'fast';
+    webhookSecret: string | null;
   },
->(automation: T): Omit<T, 'environmentId'> & { environmentId: string | null } {
+>(
+  automation: T,
+): Omit<T, 'environmentId' | 'webhookSecret'> & {
+  environmentId: string | null;
+} {
+  const publicAutomation = Object.fromEntries(
+    Object.entries(automation).filter(
+      ([key]) => key !== 'webhookSecret' && key !== 'environmentId',
+    ),
+  ) as Omit<T, 'environmentId' | 'webhookSecret'>;
   return {
-    ...automation,
+    ...publicAutomation,
     environmentId:
       automation.executionMode === 'fast'
         ? FAST_EXECUTION

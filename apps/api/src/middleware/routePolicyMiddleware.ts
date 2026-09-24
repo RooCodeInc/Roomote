@@ -195,6 +195,12 @@ function resolveRateLimitBucketKey(
       return resolvePrincipalKey(c);
     case 'state-token':
       return resolveStateTokenKey(c);
+    case 'automation-webhook':
+      return (
+        /^\/api\/webhooks\/custom-automations\/([0-9a-f-]{36})\//iu.exec(
+          c.req.path,
+        )?.[1] ?? 'invalid-path'
+      );
   }
 }
 

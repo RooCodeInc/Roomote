@@ -313,6 +313,19 @@ describe('customAutomationsJob', () => {
     });
   });
 
+  it('does not dispatch enabled on-demand automations on a scheduled tick', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, scheduleMode: 'on_demand' } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.queued).toBe(false);
+    expect(tryClaimCustomAutomationLaunch).not.toHaveBeenCalled();
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
+    expect(fastMocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
   it('runs a channel-less Fast automation as a stored Session', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
@@ -1590,6 +1603,7 @@ describe('runCustomAutomationNow', () => {
   it('acknowledges a manual Fast run after durably queueing its event', async () => {
     vi.mocked(getCustomAutomationById).mockResolvedValue({
       ...automation,
+      scheduleMode: 'on_demand',
       executionMode: 'fast',
       environmentId: null,
       target: {},
@@ -1622,6 +1636,30 @@ describe('runCustomAutomationNow', () => {
       expect.objectContaining({
         id: automation.id,
         status: 'succeeded',
+      }),
+    );
+  });
+
+  it('records webhook-triggered runs distinctly while using the normal launch checks', async () => {
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      scheduleMode: 'on_demand',
+      executionMode: 'fast',
+      environmentId: null,
+      target: {},
+      createdByUserId: 'user-1',
+    } as never);
+
+    const result = await runCustomAutomationNow(automation.id, 'webhook');
+
+    expect(result).toEqual({ outcome: 'queued' });
+    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalled();
+    expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          trigger: 'webhook',
+          automationId: automation.id,
+        }),
       }),
     );
   });

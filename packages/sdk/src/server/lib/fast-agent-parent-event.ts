@@ -228,7 +228,7 @@ export type FastAgentParentEvent =
       automationName: string;
       launchClaimedAt?: string;
       prompt: string;
-      trigger: 'schedule' | 'manual';
+      trigger: 'schedule' | 'manual' | 'webhook';
       /** Environment the automation was configured for; `all` for every repository. */
       preferredEnvironmentId?: string;
       rootMessageId?: string;
@@ -592,7 +592,7 @@ async function loadFastAgentCommunicationParent<
 type FastAutomationLaunchContext = {
   automationId: string;
   automationName: string;
-  trigger: 'schedule' | 'manual';
+  trigger: 'schedule' | 'manual' | 'webhook';
 };
 
 const AUTOMATION_OCCURRENCE_ID_PATTERN =

@@ -46,7 +46,7 @@ export const manageCustomAutomationsFieldSchemas = {
     .string()
     .optional()
     .describe(
-      `A five-field cron expression, natural-language recurring schedule, or one of these built-in presets: ${SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES.join(', ')}. Prefer a built-in preset when it matches the requested cadence.`,
+      `A five-field cron expression, natural-language recurring schedule, one of these built-in presets: ${SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES.filter((mode) => mode !== 'off').join(', ')}, or "on_demand" for runs started only with Run now or an enabled webhook.`,
     ),
   model: z
     .string()

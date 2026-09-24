@@ -308,6 +308,7 @@ describe('custom-automations MCP routes', () => {
           allRepositories: false,
           executionMode: 'sandbox_task',
           target: {},
+          webhookSecret: 'encrypted-webhook-token',
           createdByUser: { id: 'admin-1', email: 'admin@example.com' },
           lastError: 'previous failure',
         },
@@ -332,7 +333,8 @@ describe('custom-automations MCP routes', () => {
 
       const { app } = createApp();
       const apiResult = await app.request('/custom-automations');
-      expect(await apiResult.json()).toMatchObject({
+      const apiPayload = await apiResult.json();
+      expect(apiPayload).toMatchObject({
         automations: [
           {
             prompt: 'Large private prompt',
@@ -341,6 +343,7 @@ describe('custom-automations MCP routes', () => {
           },
         ],
       });
+      expect(apiPayload).not.toHaveProperty('automations.0.webhookSecret');
     });
 
     it('returns one configured prompt without unrelated automation fields', async () => {
@@ -418,6 +421,33 @@ describe('custom-automations MCP routes', () => {
           },
         },
       });
+    });
+
+    it('creates On-demand automations without schedule interpretation', async () => {
+      mockCreateCustomAutomation.mockResolvedValue({
+        id: 'automation-1',
+        environmentId: ENVIRONMENT_ID,
+        allRepositories: false,
+        noRepositories: false,
+        executionMode: 'sandbox_task',
+        webhookSecret: null,
+      });
+      const { app } = createApp();
+
+      const response = await app.request('/custom-automations', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(createBody({ schedule: 'on_demand' })),
+      });
+
+      expect(response.status).toBe(201);
+      expect(mockResolveCustomAutomationSchedule).not.toHaveBeenCalled();
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scheduleMode: 'on_demand',
+          cronExpression: null,
+        }),
+      );
     });
 
     it('returns a non-terminal queued result for a Fast run', async () => {

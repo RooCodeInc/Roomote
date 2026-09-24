@@ -5185,6 +5185,8 @@ export const customAutomations = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     prompt: text('prompt').notNull(),
+    /** Encrypted opaque bearer token for the optional custom webhook trigger. */
+    webhookSecret: encryptedText('webhook_secret'),
     resultPriority: text('result_priority')
       .notNull()
       .default('normal')

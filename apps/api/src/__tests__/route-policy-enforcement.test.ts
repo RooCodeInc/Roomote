@@ -741,6 +741,49 @@ describe('route policy enforcement', () => {
   });
 
   describe('webhook routes', () => {
+    it('routes custom automation URL credentials through the public rate-limited webhook policy', async () => {
+      const automationId = '11111111-1111-4111-8111-111111111111';
+      const path = `/api/webhooks/custom-automations/${automationId}/bad-token`;
+      expect(findRoutePolicyRule(path)).toMatchObject({
+        name: 'webhook-custom-automation',
+        policy: 'webhook',
+        rateLimits: [
+          { keySource: 'client', limit: 60, windowSeconds: 60 },
+          {
+            keySource: 'automation-webhook',
+            limit: 15,
+            windowSeconds: 60,
+          },
+        ],
+      });
+
+      const response = await createApiApp().request(`http://localhost${path}`, {
+        method: 'GET',
+      });
+      expect(response.status).toBe(405);
+      expect(response.headers.get('cache-control')).toBe('no-store, private');
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    });
+
+    it('rate limits webhook triggers per automation before token processing', async () => {
+      const automationId = '22222222-2222-4222-8222-222222222222';
+      seedRateLimitBucket(
+        'webhook-custom-automation',
+        'automation-webhook',
+        automationId,
+        60,
+        15,
+      );
+      const response = await createApiApp().request(
+        `http://localhost/api/webhooks/custom-automations/${automationId}/${'A'.repeat(43)}`,
+        { method: 'POST' },
+      );
+
+      expect(response.status).toBe(429);
+      expect(response.headers.get('cache-control')).toBe('no-store, private');
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    });
+
     it('exempts the secret-authenticated Discord worker route from shared IP limits', () => {
       expect(
         findRoutePolicyRule('/api/internal/discord/events/process'),

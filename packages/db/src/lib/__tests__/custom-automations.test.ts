@@ -8,10 +8,14 @@ import {
 import {
   createCustomAutomation,
   deleteCustomAutomation,
+  ensureCustomAutomationWebhookToken,
   getCustomAutomationById,
+  getCustomAutomationWebhookState,
+  getCustomAutomationWebhookToken,
   listCustomAutomations,
   recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
+  setCustomAutomationWebhookToken,
   tryClaimCustomAutomationLaunch,
   updateCustomAutomation,
 } from '../custom-automations';
@@ -24,6 +28,62 @@ import {
 } from '../../server';
 
 describe('custom automations helpers', () => {
+  it('stores one encrypted webhook token and supports safe rotation and revocation', async () => {
+    const created = await createCustomAutomation({
+      name: `On-demand webhook ${Date.now()}`,
+      prompt: 'Run only when manually or webhook triggered.',
+      enabled: true,
+      scheduleMode: 'on_demand',
+      environmentId: FAST_EXECUTION,
+      target: {},
+    });
+    const firstToken = 'A'.repeat(43);
+
+    try {
+      expect(
+        await ensureCustomAutomationWebhookToken(created.id, firstToken),
+      ).toBe(firstToken);
+      const stored = await db.query.customAutomations.findFirst({
+        where: eq(customAutomations.id, created.id),
+        columns: { webhookSecret: true },
+      });
+      expect(stored?.webhookSecret).toBeTruthy();
+      expect(stored?.webhookSecret).not.toBe(firstToken);
+      expect(await getCustomAutomationWebhookToken(created.id)).toBe(
+        firstToken,
+      );
+
+      const replacementToken = 'B'.repeat(43);
+      await setCustomAutomationWebhookToken(created.id, replacementToken);
+      expect(await getCustomAutomationWebhookToken(created.id)).toBe(
+        replacementToken,
+      );
+      expect(
+        await ensureCustomAutomationWebhookToken(created.id, 'C'.repeat(43)),
+      ).toBe(replacementToken);
+
+      await setCustomAutomationWebhookToken(created.id, null);
+      expect(await getCustomAutomationWebhookToken(created.id)).toBeNull();
+      expect(await getCustomAutomationWebhookState(created.id)).toMatchObject({
+        enabled: true,
+        token: null,
+      });
+
+      await setCustomAutomationWebhookToken(created.id, 'C'.repeat(43));
+      await updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: false,
+        scheduleMode: 'on_demand',
+        environmentId: FAST_EXECUTION,
+        target: {},
+      });
+      expect(await getCustomAutomationWebhookToken(created.id)).toBeNull();
+    } finally {
+      await deleteCustomAutomation(created.id);
+    }
+  });
+
   it('persists Fast as an execution mode without an environment', async () => {
     const created = await createCustomAutomation({
       name: `Fast digest ${Date.now()}`,

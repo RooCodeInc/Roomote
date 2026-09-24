@@ -35,6 +35,7 @@ import {
   BrandIcon,
   Card,
   CardContent,
+  CopyIconButton,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -43,6 +44,7 @@ import {
   Label,
   Play,
   Plus,
+  RefreshCw,
   RetryableLoadError,
   Select,
   SelectContent,
@@ -117,7 +119,7 @@ const SCHEDULE_OPTIONS: Array<{
   value: CustomAutomationScheduleMode;
   label: string;
 }> = [
-  { value: 'off', label: 'Off' },
+  { value: 'on_demand', label: 'On-demand' },
   { value: 'every_hour', label: 'Every hour' },
   { value: 'every_6_hours', label: 'Every 6 hours' },
   { value: 'daily', label: 'Daily' },
@@ -143,6 +145,7 @@ const DESTINATION_OPTIONS: Array<{
 ];
 
 function scheduleLabel(mode: CustomAutomationScheduleMode): string {
+  if (mode === 'off') return 'On-demand';
   return (
     SCHEDULE_OPTIONS.find((option) => option.value === mode)?.label ?? mode
   );
@@ -314,7 +317,7 @@ function formFromRow(
     prompt: row.prompt,
     enabled: row.enabled,
     resultPriority: row.resultPriority ?? 'normal',
-    scheduleMode: row.scheduleMode,
+    scheduleMode: row.scheduleMode === 'off' ? 'on_demand' : row.scheduleMode,
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
     model: row.model ?? '',
@@ -467,8 +470,16 @@ export function CustomAutomationsSection({
       { enabled: Boolean(editingId) },
     ),
   );
+  const webhookQuery = useQuery(
+    trpc.automations.getCustomAutomationWebhook.queryOptions(
+      { id: editingId ?? '' },
+      { enabled: Boolean(editingId), staleTime: 0, gcTime: 0 },
+    ),
+  );
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
+  const [webhookEnabled, setWebhookEnabled] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<CustomAutomationFieldErrors>(
     {},
   );
@@ -590,6 +601,8 @@ export function CustomAutomationsSection({
         toast.success('Custom automation created');
         setIsCreating(false);
         setForm(EMPTY_FORM);
+        setWebhookEnabled(false);
+        setWebhookUrl(null);
         setFieldErrors({});
         setResolvedCron(null);
         setScheduleSummary(null);
@@ -607,6 +620,8 @@ export function CustomAutomationsSection({
         toast.success('Custom automation saved');
         setEditingId(null);
         setForm(EMPTY_FORM);
+        setWebhookEnabled(false);
+        setWebhookUrl(null);
         setFieldErrors({});
         setResolvedCron(null);
         setScheduleSummary(null);
@@ -631,6 +646,32 @@ export function CustomAutomationsSection({
       onError: (error) => {
         toast.error(error.message || 'Failed to update custom automation');
       },
+    }),
+  );
+
+  const webhookMutation = useMutation(
+    trpc.automations.setCustomAutomationWebhookEnabled.mutationOptions({
+      onSuccess: (result) => {
+        setWebhookEnabled(result.enabled);
+        setWebhookUrl(result.url);
+        toast.success(
+          result.enabled
+            ? 'Webhook trigger enabled'
+            : 'Webhook trigger disabled',
+        );
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+
+  const rotateWebhookMutation = useMutation(
+    trpc.automations.rotateCustomAutomationWebhook.mutationOptions({
+      onSuccess: (result) => {
+        setWebhookEnabled(true);
+        setWebhookUrl(result.url);
+        toast.success('Webhook URL rotated; the previous URL no longer works');
+      },
+      onError: (error) => toast.error(error.message),
     }),
   );
 
@@ -682,6 +723,13 @@ export function CustomAutomationsSection({
     }),
   );
 
+  useEffect(() => {
+    if (webhookQuery.data) {
+      setWebhookEnabled(webhookQuery.data.enabled);
+      setWebhookUrl(webhookQuery.data.url);
+    }
+  }, [webhookQuery.data]);
+
   // Valid five-field cron is parsed and previewed entirely client-side; the
   // server round trip (and its LLM fallback) is only for natural language.
   const schedulingTimeZone = optionsQuery.data?.effectiveTimeZone;
@@ -700,6 +748,9 @@ export function CustomAutomationsSection({
       : scheduleSummary;
 
   const rows = useMemo(() => listQuery.data ?? [], [listQuery.data]);
+  const persistedAutomationEnabled = Boolean(
+    editingId && rows.find((row) => row.id === editingId)?.enabled,
+  );
   const initialListLoadFailed =
     listQuery.isError && listQuery.data === undefined;
   const normalizedSearch = search.trim().toLowerCase();
@@ -751,7 +802,9 @@ export function CustomAutomationsSection({
     createMutation.isPending ||
     updateMutation.isPending ||
     deleteMutation.isPending ||
-    toggleMutation.isPending;
+    toggleMutation.isPending ||
+    webhookMutation.isPending ||
+    rotateWebhookMutation.isPending;
   const selectedModel = taskModelsQuery.data?.models.find(
     (model) => model.id === form.model,
   );
@@ -763,6 +816,8 @@ export function CustomAutomationsSection({
     setIsCreating(false);
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setWebhookEnabled(false);
+    setWebhookUrl(null);
     setFieldErrors({});
     setResolvedCron(null);
     setScheduleSummary(null);
@@ -773,6 +828,9 @@ export function CustomAutomationsSection({
         `${window.location.pathname}${window.location.search}`,
       );
     }
+    queryClient.removeQueries({
+      queryKey: trpc.automations.getCustomAutomationWebhook.queryKey(),
+    });
   };
 
   const editAutomation = (
@@ -781,6 +839,8 @@ export function CustomAutomationsSection({
   ) => {
     setEditingId(row.id);
     setIsCreating(false);
+    setWebhookEnabled(false);
+    setWebhookUrl(null);
     setFieldErrors({});
     setForm({
       ...formFromRow(
@@ -812,6 +872,8 @@ export function CustomAutomationsSection({
       if (row) {
         setEditingId(row.id);
         setIsCreating(false);
+        setWebhookEnabled(false);
+        setWebhookUrl(null);
         setForm(
           formFromRow(
             row,
@@ -1265,35 +1327,117 @@ export function CustomAutomationsSection({
           </p>
         </div>
 
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Switch
-              id="custom-automation-enabled"
-              checked={form.enabled}
-              disabled={busy}
-              onCheckedChange={(checked) =>
-                setForm((current) => ({ ...current, enabled: checked }))
-              }
-            />
-            <Label htmlFor="custom-automation-enabled">Enabled</Label>
+        <div className="flex items-center gap-2">
+          <Switch
+            id="custom-automation-enabled"
+            checked={form.enabled}
+            disabled={busy}
+            onCheckedChange={(checked) =>
+              setForm((current) => ({ ...current, enabled: checked }))
+            }
+          />
+          <Label htmlFor="custom-automation-enabled">Enabled</Label>
+        </div>
+
+        {editingId ? (
+          <div className="space-y-3 border-t pt-4">
+            <div className="flex items-start gap-3">
+              <Switch
+                id="custom-automation-webhook-enabled"
+                checked={webhookEnabled}
+                disabled={
+                  busy ||
+                  !form.enabled ||
+                  !persistedAutomationEnabled ||
+                  webhookQuery.isPending
+                }
+                aria-busy={webhookMutation.isPending || undefined}
+                onCheckedChange={(enabled) =>
+                  webhookMutation.mutate({ id: editingId, enabled })
+                }
+              />
+              <div className="space-y-1">
+                <Label htmlFor="custom-automation-webhook-enabled">
+                  Enable webhooks
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  {!persistedAutomationEnabled
+                    ? 'Save this automation as enabled before configuring its webhook.'
+                    : !form.enabled
+                      ? 'Save this automation as disabled to revoke its webhook URL.'
+                      : 'POST to this private URL to start the configured automation. Request bodies are ignored. Disabling or rotating the URL revokes the previous one.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex min-w-0 items-center gap-2">
+              <Input
+                type="url"
+                aria-label="Webhook URL"
+                autoComplete="off"
+                spellCheck={false}
+                readOnly
+                disabled={
+                  !webhookEnabled ||
+                  !form.enabled ||
+                  !webhookUrl ||
+                  webhookQuery.isPending
+                }
+                value={webhookEnabled ? (webhookUrl ?? '') : ''}
+                className="min-w-0 flex-1 font-mono text-xs"
+              />
+              <CopyIconButton
+                content={webhookUrl ?? ''}
+                tooltip="Copy webhook URL"
+                aria-label="Copy webhook URL"
+                disabled={
+                  !webhookEnabled ||
+                  !form.enabled ||
+                  !webhookUrl ||
+                  webhookQuery.isPending
+                }
+              />
+              <BasicTooltip content="Rotate webhook URL; revoke the old URL">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Rotate webhook URL"
+                  disabled={
+                    !webhookEnabled || !form.enabled || !webhookUrl || busy
+                  }
+                  onClick={() =>
+                    rotateWebhookMutation.mutate({ id: editingId })
+                  }
+                >
+                  <RefreshCw />
+                </Button>
+              </BasicTooltip>
+            </div>
+            {webhookQuery.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                Failed to load webhook settings. Close and reopen this editor to
+                retry.
+              </p>
+            ) : null}
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy}
-              onClick={closeEditor}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              disabled={busy || !capabilitiesLoaded}
-              onClick={saveForm}
-            >
-              {editingId ? 'Save' : 'Create'}
-            </Button>
-          </div>
+        ) : null}
+
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={closeEditor}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={busy || !capabilitiesLoaded}
+            onClick={saveForm}
+          >
+            {editingId ? 'Save' : 'Create'}
+          </Button>
         </div>
       </div>
     </DialogContent>
@@ -1311,6 +1455,8 @@ export function CustomAutomationsSection({
           );
           setIsCreating(true);
           setEditingId(null);
+          setWebhookEnabled(false);
+          setWebhookUrl(null);
           setFieldErrors({});
           setForm({
             ...EMPTY_FORM,
