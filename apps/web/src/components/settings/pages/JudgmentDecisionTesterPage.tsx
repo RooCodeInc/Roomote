@@ -102,6 +102,19 @@ function optionsFor(
   }));
 }
 
+/** What an option means, for its tooltip: the criteria text Roomote sends. */
+function optionDescription(question: Question, key: string): string {
+  const criteria = question.criteria;
+  if (question.type === 'noul') {
+    const pair = criteria as { true?: string; false?: string } | undefined;
+    return (key === 'yes' ? pair?.true : pair?.false) ?? key;
+  }
+  if (question.type === 'choice' && criteria && !Array.isArray(criteria)) {
+    return (criteria as Record<string, string>)[key] ?? key;
+  }
+  return Array.isArray(criteria) ? (criteria[Number(key)] ?? key) : key;
+}
+
 function pickOf(
   question: Question,
   answer: Answer | undefined,
@@ -227,16 +240,10 @@ export function JudgmentDecisionTesterPage() {
       pageId="models"
       adminOnly={true}
       titleOverride="Test decisions"
+      descriptionOverride="Ask the judgment model one of Roomote's decisions by hand. Test decisions go to the configured model but are not recorded for comparison or training."
       boundedContentOnDesktop
     >
       <div className="space-y-4 md:min-h-0 md:flex-1 md:overflow-y-auto">
-        <p className="text-sm text-muted-foreground">
-          Ask the judgment model one of Roomote&apos;s decisions by hand. The
-          questions are the ones Roomote sends; edit the sample state (or the
-          questions) and ask. Test decisions go to the configured model but are
-          not recorded for comparison or training.
-        </p>
-
         {catalogQuery.isPending ? (
           <Skeleton className="h-64 w-full" />
         ) : catalog ? (
@@ -276,16 +283,6 @@ export function JudgmentDecisionTesterPage() {
                   onChange={(event) => setStateText(event.target.value)}
                   spellCheck={false}
                   className="min-h-56 font-mono text-xs"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="judgment-questions">Questions (JSON)</Label>
-                <Textarea
-                  id="judgment-questions"
-                  value={questionsText}
-                  onChange={(event) => setQuestionsText(event.target.value)}
-                  spellCheck={false}
-                  className="min-h-40 font-mono text-xs"
                 />
               </div>
 
@@ -329,6 +326,19 @@ export function JudgmentDecisionTesterPage() {
               {inputError && (
                 <p className="text-sm text-destructive">{inputError}</p>
               )}
+              <details className="space-y-1.5">
+                <summary className="cursor-pointer text-sm text-muted-foreground">
+                  Edit questions (JSON)
+                </summary>
+                <Textarea
+                  id="judgment-questions"
+                  aria-label="Questions (JSON)"
+                  value={questionsText}
+                  onChange={(event) => setQuestionsText(event.target.value)}
+                  spellCheck={false}
+                  className="min-h-40 font-mono text-xs"
+                />
+              </details>
             </div>
 
             <div className="min-w-0 space-y-3">
@@ -399,7 +409,7 @@ export function JudgmentDecisionTesterPage() {
                           <div key={option.key} className="contents">
                             <span
                               className="truncate font-mono"
-                              title={option.label}
+                              title={optionDescription(question, option.key)}
                             >
                               {option.label}
                             </span>
