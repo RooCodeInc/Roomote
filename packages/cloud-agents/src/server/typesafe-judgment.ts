@@ -323,7 +323,7 @@ class JudgmentResponseParseError extends Error {
   }
 }
 
-type JudgmentRequestRole = 'primary' | 'shadow';
+type JudgmentRequestRole = 'primary' | 'shadow' | 'test';
 
 type JudgmentUsageOutcome =
   | 'success'
@@ -921,6 +921,60 @@ async function requestVercelGateway(
   }
 }
 
+/** One request to `backend`, answers normalized to Roomote's shape. */
+async function requestFromBackend(
+  backend: JudgmentBackend,
+  state: unknown,
+  questions: Record<string, TypeSafeQuestion>,
+  timeoutMs: number,
+  tracking: JudgmentTracking,
+): Promise<{
+  answers: Record<string, unknown> | undefined;
+  response: TrackedJudgmentResponse | undefined;
+}> {
+  switch (backend.provider) {
+    case 'roomote':
+      return requestRoomoteDecisions(
+        backend,
+        state,
+        questions,
+        timeoutMs,
+        tracking,
+      );
+    case 'typesafe':
+      return requestNativeDecisions(
+        backend.apiKey,
+        state,
+        questions,
+        timeoutMs,
+        { url: TYPESAFE_API_URL, model: TYPESAFE_MODEL },
+        tracking,
+      );
+    case 'openrouter': {
+      const request = await requestNativeDecisions(
+        backend.apiKey,
+        state,
+        questions,
+        timeoutMs,
+        { url: OPENROUTER_DECISIONS_URL, model: OPENROUTER_JEV_MODEL_ID },
+        tracking,
+      );
+      return {
+        answers: withDerivedConfidence(request.answers),
+        response: request.response,
+      };
+    }
+    case 'vercel':
+      return requestVercelGateway(
+        backend.apiKey,
+        state,
+        questions,
+        timeoutMs,
+        tracking,
+      );
+  }
+}
+
 /**
  * Ask Jev a set of independent questions over the same state. Returns `null`
  * when no judgment model is configured so callers can keep their existing
@@ -957,61 +1011,13 @@ export async function evaluateTypeSafeJudgments<
   let response: TrackedJudgmentResponse | undefined;
 
   try {
-    switch (backend.provider) {
-      case 'roomote': {
-        const request = await requestRoomoteDecisions(
-          backend,
-          params.state,
-          params.questions,
-          timeoutMs,
-          tracking,
-        );
-        answers = request.answers;
-        response = request.response;
-        break;
-      }
-      case 'typesafe': {
-        const request = await requestNativeDecisions(
-          backend.apiKey,
-          params.state,
-          params.questions,
-          timeoutMs,
-          { url: TYPESAFE_API_URL, model: TYPESAFE_MODEL },
-          tracking,
-        );
-        answers = request.answers;
-        response = request.response;
-        break;
-      }
-      case 'openrouter': {
-        const request = await requestNativeDecisions(
-          backend.apiKey,
-          params.state,
-          params.questions,
-          timeoutMs,
-          {
-            url: OPENROUTER_DECISIONS_URL,
-            model: OPENROUTER_JEV_MODEL_ID,
-          },
-          tracking,
-        );
-        response = request.response;
-        answers = withDerivedConfidence(request.answers);
-        break;
-      }
-      case 'vercel': {
-        const request = await requestVercelGateway(
-          backend.apiKey,
-          params.state,
-          params.questions,
-          timeoutMs,
-          tracking,
-        );
-        answers = request.answers;
-        response = request.response;
-        break;
-      }
-    }
+    ({ answers, response } = await requestFromBackend(
+      backend,
+      params.state,
+      params.questions,
+      timeoutMs,
+      tracking,
+    ));
 
     for (const [questionId, question] of Object.entries(params.questions)) {
       if (!isValidAnswer(question, answers?.[questionId])) {
@@ -1041,6 +1047,104 @@ export async function evaluateTypeSafeJudgments<
   }
 
   return answers as TypeSafeAnswers<TQuestions>;
+}
+
+/**
+ * `configured` is the backend Roomote uses for decisions; `roomote` is the
+ * Roomote-run upstream, which answers when selected or shadows Jev.
+ */
+export type JudgmentTestTarget = 'configured' | 'roomote';
+
+export type JudgmentTestResult =
+  | {
+      ok: true;
+      provider: JudgmentBackend['provider'];
+      model: string;
+      answers: Record<string, unknown>;
+      /** Question ids whose answer Roomote would reject. */
+      invalid: string[];
+      latencyMs: number;
+    }
+  | {
+      ok: false;
+      provider: JudgmentBackend['provider'] | null;
+      error: string;
+      latencyMs?: number;
+    };
+
+const TEST_TIMEOUT_MS = 20_000;
+
+/**
+ * Ask one judgment backend directly, for the admin decision tester. Unlike
+ * evaluateTypeSafeJudgments it never shadows or captures the decision,
+ * reports invalid answers instead of throwing, and can ask the Roomote-run
+ * upstream even while Jev is the configured backend. Usage is recorded with
+ * the `test` role.
+ */
+export async function testJudgmentBackend(params: {
+  state: unknown;
+  questions: Record<string, TypeSafeQuestion>;
+  target: JudgmentTestTarget;
+}): Promise<JudgmentTestResult> {
+  let backend: JudgmentBackend | undefined;
+  if (params.target === 'roomote') {
+    const upstream = resolveRoomoteJudgmentUpstream();
+    backend = upstream ? { provider: 'roomote', ...upstream } : undefined;
+  } else {
+    backend = await resolveJudgmentBackend();
+  }
+
+  if (!backend) {
+    return {
+      ok: false,
+      provider: null,
+      error:
+        params.target === 'roomote'
+          ? 'The Roomote judgment model is not configured on this deployment.'
+          : 'No judgment model is configured.',
+    };
+  }
+
+  const tracking: JudgmentTracking = {
+    requestId: randomUUID(),
+    provider: backend.provider,
+    model: judgmentModelForBackend(backend),
+    role: 'test',
+  };
+  const started = Date.now();
+  let response: TrackedJudgmentResponse | undefined;
+
+  try {
+    const request = await requestFromBackend(
+      backend,
+      params.state,
+      params.questions,
+      TEST_TIMEOUT_MS,
+      tracking,
+    );
+    response = request.response;
+    const answers = request.answers ?? {};
+    const invalid = Object.entries(params.questions)
+      .filter(([id, question]) => !isValidAnswer(question, answers[id]))
+      .map(([id]) => id);
+    response?.finish(invalid.length > 0 ? 'validation_error' : 'success');
+    return {
+      ok: true,
+      provider: backend.provider,
+      model: tracking.model,
+      answers,
+      invalid,
+      latencyMs: Date.now() - started,
+    };
+  } catch (error) {
+    response?.finish('response_error');
+    return {
+      ok: false,
+      provider: backend.provider,
+      error: shadowFailureCategory(error),
+      latencyMs: Date.now() - started,
+    };
+  }
 }
 
 function asNumber(value: unknown): number | undefined {

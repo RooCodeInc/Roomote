@@ -49,7 +49,7 @@ export const RISK_LEVELS = [
   'Deletes, overwrites, or otherwise loses data or access that is hard to recover.',
 ] as const;
 
-const QUESTIONS = {
+export const INTEGRATION_TOOL_AUTO_QUESTIONS = {
   risk: {
     type: 'score',
     instructions:
@@ -263,7 +263,8 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       null;
     // A question with nothing to judge against is not asked: the guidance
     // one without guidance, the request one without a request.
-    const { guidanceFlagsRisk, matchesRequest, ...core } = QUESTIONS;
+    const { guidanceFlagsRisk, matchesRequest, ...core } =
+      INTEGRATION_TOOL_AUTO_QUESTIONS;
     const questions = {
       ...core,
       ...(input.userRequest && !allowlistedInternalRead

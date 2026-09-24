@@ -60,7 +60,7 @@ const TURN_MESSAGE_SCAN_LIMIT = 60;
 const DISTILLED_SUMMARY_NOTE =
   '_Roomote summarized this from the task transcript; the agent did not record a memory._';
 
-const TASK_MEMORY_GATE_QUESTIONS = {
+export const TASK_MEMORY_GATE_QUESTIONS = {
   reusableKnowledge: {
     type: 'noul',
     instructions:

@@ -51,6 +51,7 @@ import {
   resetDecisionModelCache,
   resolveDecisionModel,
   resetJudgmentBackendCache,
+  testJudgmentBackend,
 } from '../typesafe-judgment';
 
 const questions = {
@@ -1074,5 +1075,95 @@ describe('evaluateTypeSafeJudgments', () => {
     ).resolves.toEqual({
       severity: { type: 'score', score: 1.4, confidence: 0.7 },
     });
+  });
+});
+
+describe('testJudgmentBackend', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetJudgmentBackendCache();
+    resetDecisionModelCache();
+    mockEnv.R_JUDGMENT_MODEL = undefined;
+    mockEnv.R_JUDGMENT_UPSTREAM_URL = undefined;
+    mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
+    mockEnv.R_JUDGMENT_SHADOW = undefined;
+    mockGetJudgmentSelection.mockResolvedValue(null);
+    mockRecordLlmUsage.mockResolvedValue({ recorded: true });
+    mockIsJudgmentCaptureEnabled.mockReturnValue(false);
+    mockKeys({ R_TYPESAFE_API_KEY: 'ts-key' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('asks the configured backend without shadowing or capturing the decision', async () => {
+    mockIsJudgmentCaptureEnabled.mockReturnValue(true);
+    mockEnv.R_JUDGMENT_SHADOW = 'on';
+    mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+    const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+    const result = await testJudgmentBackend({
+      state: 'hi',
+      questions,
+      target: 'configured',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      provider: 'typesafe',
+      answers: directAnswers,
+      invalid: [],
+    });
+    // One request: the Roomote upstream is not called as a shadow.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockCaptureJudgment).not.toHaveBeenCalled();
+  });
+
+  it('asks the Roomote upstream directly while Jev is the configured backend', async () => {
+    mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+    const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+    const result = await testJudgmentBackend({
+      state: 'hi',
+      questions,
+      target: 'roomote',
+    });
+
+    expect(result).toMatchObject({ ok: true, provider: 'roomote' });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://judgment.internal.test/v1/decisions',
+    );
+  });
+
+  it('reports a missing backend and invalid answers instead of throwing', async () => {
+    await expect(
+      testJudgmentBackend({ state: 'hi', questions, target: 'roomote' }),
+    ).resolves.toMatchObject({ ok: false, provider: null });
+
+    mockFetchResponse({
+      answers: {
+        urgent: { type: 'noul', noul: 1.4 },
+        team: directAnswers.team,
+      },
+    });
+    await expect(
+      testJudgmentBackend({ state: 'hi', questions, target: 'configured' }),
+    ).resolves.toMatchObject({ ok: true, invalid: ['urgent'] });
+  });
+
+  it('reports an HTTP failure as a category, never the response body', async () => {
+    mockFetchResponse({ error: 'secret detail' }, { status: 503 });
+
+    const result = await testJudgmentBackend({
+      state: 'hi',
+      questions,
+      target: 'configured',
+    });
+
+    expect(result).toMatchObject({ ok: false, error: 'http_503' });
+    expect(JSON.stringify(result)).not.toContain('secret detail');
   });
 });
