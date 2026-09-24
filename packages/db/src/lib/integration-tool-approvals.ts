@@ -10,6 +10,7 @@ import type {
   IntegrationToolSessionOverrideMetadata,
   IntegrationToolSessionOverrideMode,
 } from '@roomote/types';
+import { redactIntegrationToolArgs } from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
 import {
@@ -60,42 +61,7 @@ export function fingerprintIntegrationToolCall(input: {
     .digest('hex');
 }
 
-const SECRET_KEY_PATTERN =
-  /secret|token|password|api[-_]?key|authorization|credential|private[-_]?key/i;
-const MAX_STRING_LENGTH = 200;
-const MAX_DEPTH = 6;
-
-/**
- * Display/audit preview of tool-call arguments. Secret-looking values and
- * oversized strings never reach the database or the UI; the approver still
- * sees the call's shape and ordinary arguments.
- */
-export function redactIntegrationToolArgs(value: unknown, depth = 0): unknown {
-  if (depth > MAX_DEPTH) return '[truncated]';
-  if (typeof value === 'string') {
-    return value.length > MAX_STRING_LENGTH
-      ? `${value.slice(0, MAX_STRING_LENGTH)}…[truncated]`
-      : value;
-  }
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 50)
-      .map((item) => redactIntegrationToolArgs(item, depth + 1));
-  }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .slice(0, 50)
-        .map(([key, item]) => [
-          key,
-          SECRET_KEY_PATTERN.test(key)
-            ? '[redacted]'
-            : redactIntegrationToolArgs(item, depth + 1),
-        ]),
-    );
-  }
-  return value;
-}
+export { redactIntegrationToolArgs } from '@roomote/types';
 
 type IntegrationToolPolicyRow = typeof integrationToolPolicies.$inferSelect;
 type IntegrationToolApprovalRow =

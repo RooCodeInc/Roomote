@@ -448,6 +448,8 @@ export interface NonTaskOpenCodePermissionAskHelpers {
     | {
         input?: unknown;
         toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        /** Completed tool results earlier in the paused call's turn. */
+        readContent?: string;
       }
     | undefined
   >;
@@ -456,6 +458,62 @@ export interface NonTaskOpenCodePermissionAskHelpers {
     response: 'once' | 'reject',
     message?: string,
   ) => Promise<void>;
+}
+
+/**
+ * Find the paused tool call in an OpenCode transcript, with the tool results
+ * the agent read earlier in the same turn (since the last user message), so
+ * Auto can judge whether the call follows an instruction planted in them.
+ * Under code mode the paused part is the outer `execute` call; its metadata
+ * carries the child tool calls with their structured inputs.
+ */
+export function findPausedOpenCodeToolCall(
+  messages: ReadonlyArray<{ info?: unknown; parts?: ReadonlyArray<unknown> }>,
+  callId: string,
+):
+  | {
+      input?: unknown;
+      toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+      readContent?: string;
+    }
+  | undefined {
+  let turnReads: string[] = [];
+  for (const message of messages) {
+    if (asRecord(message.info)?.role === 'user') turnReads = [];
+    for (const part of message.parts ?? []) {
+      const record = asRecord(part);
+      if (!record) continue;
+      const state = asRecord(record.state);
+      if (record.callID !== callId) {
+        if (
+          record.type === 'tool' &&
+          state?.status === 'completed' &&
+          typeof state.output === 'string' &&
+          state.output.trim()
+        ) {
+          turnReads.push(state.output);
+        }
+        continue;
+      }
+      const metadata = asRecord(state?.metadata);
+      const toolCalls = Array.isArray(metadata?.toolCalls)
+        ? metadata.toolCalls
+            .map((entry) => asRecord(entry))
+            .filter(
+              (entry): entry is Record<string, unknown> => entry !== undefined,
+            )
+            .map((entry) => ({ tool: entry.tool, input: entry.input }))
+        : undefined;
+      return {
+        input: state?.input,
+        toolCalls,
+        ...(turnReads.length > 0
+          ? { readContent: turnReads.join('\n\n') }
+          : {}),
+      };
+    }
+  }
+  return undefined;
 }
 
 export class NonTaskOpenCodeSessionNotFoundError extends Error {
@@ -1433,25 +1491,7 @@ async function runNonTaskSdkPrompt(
           sessionID: askSessionId,
           directory: sessionDirectory,
         });
-        for (const message of result.data ?? []) {
-          for (const part of message.parts ?? []) {
-            const record = asRecord(part);
-            if (!record || record.callID !== callId) continue;
-            const state = asRecord(record.state);
-            const metadata = asRecord(state?.metadata);
-            const toolCalls = Array.isArray(metadata?.toolCalls)
-              ? metadata.toolCalls
-                  .map((entry) => asRecord(entry))
-                  .filter(
-                    (entry): entry is Record<string, unknown> =>
-                      entry !== undefined,
-                  )
-                  .map((entry) => ({ tool: entry.tool, input: entry.input }))
-              : undefined;
-            return { input: state?.input, toolCalls };
-          }
-        }
-        return undefined;
+        return findPausedOpenCodeToolCall(result.data ?? [], callId);
       },
       reply: async (requestId, response, message) => {
         try {
