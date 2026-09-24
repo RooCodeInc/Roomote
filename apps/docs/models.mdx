@@ -319,7 +319,10 @@ through these routes:
 Choose it under **Judgment model** in **Settings > Models**, or set
 `R_JUDGMENT_MODEL` to `roomote`, `typesafe`, `openrouter`, `vercel`, or `off`.
 A TypeSafe key alone turns on **Jev via TypeSafe**. The Roomote judgment
-model, OpenRouter, and Vercel AI Gateway are used only when you select them.
+model, OpenRouter, and Vercel AI Gateway answer decisions only when you select
+them. The one exception is `R_JUDGMENT_SHADOW=on`, which also sends every Jev
+decision to the Roomote judgment model to compare answers, without changing the
+answer Roomote acts on.
 Many deployments already have OpenRouter or Vercel AI Gateway keys for task
 inference, and choosing them sends decision text to a third party.
 
