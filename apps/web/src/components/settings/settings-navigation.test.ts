@@ -21,4 +21,35 @@ describe('settings navigation', () => {
     expect(items.map((item) => item.id)).not.toContain('experimental');
     expect(items.map((item) => item.id)).not.toContain('models');
   });
+
+  it('shows Nightly Experiments only to admins on enabled deployments', () => {
+    const enabledForAdmin = getAccessibleSettingsNavigation({
+      isAdmin: true,
+      cloudEnabled: false,
+      nightlyExperimentsEnabled: true,
+    });
+    expect(
+      enabledForAdmin.find((item) => item.id === 'nightly-experiments'),
+    ).toMatchObject({
+      label: '🌙 Nightly Experiments',
+      href: '/settings/nightly-experiments',
+    });
+
+    const disabledForAdmin = getAccessibleSettingsNavigation({
+      isAdmin: true,
+      cloudEnabled: false,
+      nightlyExperimentsEnabled: false,
+    });
+    const enabledForMember = getAccessibleSettingsNavigation({
+      isAdmin: false,
+      cloudEnabled: false,
+      nightlyExperimentsEnabled: true,
+    });
+    expect(disabledForAdmin.map((item) => item.id)).not.toContain(
+      'nightly-experiments',
+    );
+    expect(enabledForMember.map((item) => item.id)).not.toContain(
+      'nightly-experiments',
+    );
+  });
 });

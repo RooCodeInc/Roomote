@@ -49,11 +49,11 @@ export function PageNavigationShell<T extends string = string>({
   return (
     <div
       className={cn(
-        'flex h-full min-h-0 w-full flex-1 flex-col gap-6 overflow-x-hidden overflow-y-auto px-4 py-6 md:py-8 lg:flex-row lg:items-start',
+        'relative flex h-full min-h-0 w-full flex-1 flex-col gap-6 overflow-x-hidden overflow-y-auto px-4 py-6 md:py-8 lg:flex-row lg:items-start',
         boundedContentOnDesktop && 'md:overflow-y-hidden',
       )}
     >
-      <aside className="hidden lg:block lg:w-60 lg:shrink-0 lg:absolute">
+      <aside className="hidden lg:absolute lg:inset-y-0 lg:left-0 lg:block lg:w-60 lg:shrink-0 lg:overflow-y-auto">
         <nav className="space-y-1 pl-3">
           {items.map((item) => {
             const Icon = item.icon;

@@ -5,6 +5,7 @@ const state = vi.hoisted(() => ({
   isAdmin: true,
   cloudEnabled: false,
   brainConfigured: true,
+  nightlyExperimentsEnabled: false,
   pushMock: vi.fn(),
 }));
 
@@ -36,6 +37,7 @@ vi.mock('@/hooks/useUser', () => ({
     isAdmin: state.isAdmin,
     cloudEnabled: state.cloudEnabled,
     brainConfigured: state.brainConfigured,
+    nightlyExperimentsEnabled: state.nightlyExperimentsEnabled,
   }),
 }));
 
@@ -79,6 +81,7 @@ describe('SettingsShell', () => {
     state.isAdmin = true;
     state.cloudEnabled = false;
     state.brainConfigured = true;
+    state.nightlyExperimentsEnabled = false;
     state.pushMock.mockReset();
   });
 
@@ -106,6 +109,23 @@ describe('SettingsShell', () => {
       screen.getByRole('link', { name: /sandboxes/i }),
     ).toBeInTheDocument();
     expect(screen.getByText('content')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /nightly experiments/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows Nightly Experiments when the server enables it for admins', () => {
+    state.nightlyExperimentsEnabled = true;
+
+    render(
+      <SettingsShell pageId="personal">
+        <div>content</div>
+      </SettingsShell>,
+    );
+
+    expect(
+      screen.getByRole('link', { name: /🌙 Nightly Experiments/i }),
+    ).toHaveAttribute('href', '/settings/nightly-experiments');
   });
 
   it('hides sandboxes from the settings rail when cloud mode is enabled', () => {
@@ -177,6 +197,7 @@ describe('SettingsShell', () => {
 
   it('limits non-admin tokens to personal settings and blocks admin-only content without redirecting', () => {
     state.isAdmin = false;
+    state.nightlyExperimentsEnabled = true;
 
     render(
       <SettingsShell pageId="personal" adminOnly={true}>
@@ -190,6 +211,9 @@ describe('SettingsShell', () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('link', { name: /live previews/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /nightly experiments/i }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByText('Only admins can access this settings page.'),

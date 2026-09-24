@@ -154,6 +154,9 @@ const serverSchema = {
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
+  // Operator-only settings surface for internal nightly experiments. Off by
+  // default and enforced by the web server for both page and API access.
+  R_NIGHTLY_EXPERIMENTS_ENABLED: optInBoolean(),
   // Operator policy for the curated Integrations page catalog. Enabled
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.
@@ -640,6 +643,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
   'R_TRIAL_OPENROUTER_API_KEY',
+  'R_NIGHTLY_EXPERIMENTS_ENABLED',
   // Cloud clears managed-email variables with empty strings on disable;
   // an empty enum flag must fall back to its default, not fail boot.
   'R_EMAIL_CHANNEL_ENABLED',
@@ -810,7 +814,10 @@ export const AUTH_KEYPAIR_ENV_KEYS = [
 export type AuthKeypairEnvKey = (typeof AUTH_KEYPAIR_ENV_KEYS)[number];
 
 /** Parses an opt-in boolean env flag: `true` or `1`, case-insensitive. */
-export function isEnvFlagEnabled(value: string | undefined): boolean {
+export function isEnvFlagEnabled(value: string | boolean | undefined): boolean {
+  if (value === true) return true;
+  if (typeof value !== 'string') return false;
+
   const normalized = value?.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
 }

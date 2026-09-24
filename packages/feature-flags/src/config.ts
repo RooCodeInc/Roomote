@@ -9,6 +9,29 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
 
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
 
+export const DEPLOYMENT_EXPERIMENT_AUDIENCES = [
+  'internal-nightly',
+  'customer-preview',
+  'generally-available',
+] as const;
+
+export type DeploymentExperimentAudience =
+  (typeof DEPLOYMENT_EXPERIMENT_AUDIENCES)[number];
+
+/**
+ * Every deployment experiment must choose its audience explicitly. Unknown
+ * experiments are never treated as customer-visible by default.
+ */
+export const DEPLOYMENT_EXPERIMENT_AUDIENCE = {
+  privateSessions: 'customer-preview',
+  sessionTaskCommunicationTriage: 'customer-preview',
+  browserNotifications: 'customer-preview',
+  integrationToolAutoApprovals: 'customer-preview',
+} as const satisfies Record<
+  DeploymentExperimentId,
+  DeploymentExperimentAudience
+>;
+
 export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
   privateSessions: 'private_sessions_experiment_enabled',
   browserNotifications: 'browser_notifications_experiment_enabled',

@@ -4,7 +4,7 @@ Roomote uses [Changesets](https://github.com/changesets/changesets) **as an auth
 
 ## Adding a changeset (optional)
 
-For user-visible or operator-visible changes that should show up in the changelog and influence the semver bump:
+For customer-preview or generally available changes that should show up in the public changelog and influence the semver bump:
 
 ```bash
 pnpm changeset
@@ -22,6 +22,21 @@ Choose:
 - **major** for breaking behavior changes
 
 Commit the generated file under `.changeset/` with the rest of the PR.
+
+Summaries without an audience marker remain public customer-preview notes. For
+internal nightly work, put this HTML comment on the first line of the summary
+body; the release tooling removes the marker and omits that summary from public
+notes while still applying its version bump:
+
+```md
+<!-- audience: internal-nightly -->
+
+Describe the internal change here.
+```
+
+`customer-preview` and `generally-available` markers are also accepted when
+explicitly useful. Unknown audience markers fail release preparation instead
+of being silently published.
 
 Chores, docs-only, and pure-internal refactors can skip a changeset; they ride along with the next release.
 

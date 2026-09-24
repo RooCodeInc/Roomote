@@ -8,6 +8,7 @@ import {
   GitMerge,
   IdCard,
   MessagesSquare,
+  Moon,
   ScrollText,
   ServerCog,
   Users,
@@ -28,6 +29,7 @@ export type SettingsPageId =
   | 'memory'
   | 'skills'
   | 'experimental'
+  | 'nightly-experiments'
   | 'misc';
 
 type SettingsNavigationItem = {
@@ -41,6 +43,8 @@ type SettingsNavigationItem = {
   hiddenWhenCloud?: boolean;
   /** Shown only on deployments where Memory is wired or enabled. */
   requiresBrain?: boolean;
+  /** Shown only when the deployment operator enables internal nightly tests. */
+  requiresNightlyExperiments?: boolean;
   newGroup?: boolean;
   matches: (pathname: string) => boolean;
 };
@@ -170,6 +174,19 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.experimental),
   },
   {
+    id: 'nightly-experiments',
+    label: '🌙 Nightly Experiments',
+    title: '🌙 Nightly Experiments',
+    description:
+      'Manage Roomote-internal features for controlled nightly testing.',
+    href: SETTINGS_PATHS.nightlyExperiments,
+    icon: Moon,
+    adminOnly: true,
+    requiresNightlyExperiments: true,
+    matches: (pathname) =>
+      pathname.startsWith(SETTINGS_PATHS.nightlyExperiments),
+  },
+  {
     id: 'misc',
     label: 'Deployment',
     title: 'Deployment',
@@ -185,6 +202,7 @@ export function getAccessibleSettingsNavigation(opts: {
   isAdmin: boolean;
   cloudEnabled: boolean;
   brainConfigured?: boolean;
+  nightlyExperimentsEnabled?: boolean;
 }) {
   return SETTINGS_NAVIGATION_ITEMS.filter((item) => {
     if (item.adminOnly && !opts.isAdmin) {
@@ -194,6 +212,12 @@ export function getAccessibleSettingsNavigation(opts: {
       return false;
     }
     if (item.requiresBrain && !opts.brainConfigured) {
+      return false;
+    }
+    if (
+      item.requiresNightlyExperiments &&
+      opts.nightlyExperimentsEnabled !== true
+    ) {
       return false;
     }
     return true;

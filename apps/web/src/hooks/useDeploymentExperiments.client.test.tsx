@@ -8,6 +8,7 @@ const { mocks, queryState } = vi.hoisted(() => ({
     getQueryData: vi.fn(),
     invalidateQueries: vi.fn(),
     mutate: vi.fn(),
+    mutationRoute: null as string | null,
     refetch: vi.fn(),
     setQueryData: vi.fn(),
     toastError: vi.fn(),
@@ -49,7 +50,24 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['deployment-experiments'],
         queryOptions: () => ({}),
       },
-      set: { mutationOptions: (options: unknown) => options },
+      set: {
+        mutationOptions: (options: unknown) => {
+          mocks.mutationRoute = 'customer-preview';
+          return options;
+        },
+      },
+    },
+    nightlyExperiments: {
+      get: {
+        queryKey: () => ['nightly-experiments'],
+        queryOptions: () => ({}),
+      },
+      set: {
+        mutationOptions: (options: unknown) => {
+          mocks.mutationRoute = 'internal-nightly';
+          return options;
+        },
+      },
     },
   }),
 }));
@@ -62,6 +80,7 @@ import {
 describe('useDeploymentExperiments', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.mutationRoute = null;
     queryState.data = getDeploymentExperimentValues(undefined);
     queryState.error = null;
     queryState.isFetching = false;
@@ -94,6 +113,15 @@ describe('useDeploymentExperiments', () => {
       id: 'privateSessions',
       enabled: true,
     });
+    expect(mocks.mutationRoute).toBe('customer-preview');
+  });
+
+  it('uses the nightly read/write procedures for nightly settings', () => {
+    renderHook(() =>
+      useDeploymentExperiments('Save failed', 'internal-nightly'),
+    );
+
+    expect(mocks.mutationRoute).toBe('internal-nightly');
   });
 
   it('optimistically updates and rolls back only the changed deployment flag', async () => {
