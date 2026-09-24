@@ -5,9 +5,34 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
   'browserNotifications',
   'integrationToolAutoApprovals',
   'sessionTaskCommunicationTriage',
+  'dizzy',
 ] as const;
 
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
+
+export const DEPLOYMENT_EXPERIMENT_AUDIENCES = [
+  'internal-nightly',
+  'customer-preview',
+  'generally-available',
+] as const;
+
+export type DeploymentExperimentAudience =
+  (typeof DEPLOYMENT_EXPERIMENT_AUDIENCES)[number];
+
+/**
+ * Every deployment experiment must choose its audience explicitly. Unknown
+ * experiments are never treated as customer-visible by default.
+ */
+export const DEPLOYMENT_EXPERIMENT_AUDIENCE = {
+  privateSessions: 'customer-preview',
+  sessionTaskCommunicationTriage: 'customer-preview',
+  browserNotifications: 'customer-preview',
+  integrationToolAutoApprovals: 'customer-preview',
+  dizzy: 'internal-nightly',
+} as const satisfies Record<
+  DeploymentExperimentId,
+  DeploymentExperimentAudience
+>;
 
 export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
   privateSessions: 'private_sessions_experiment_enabled',
@@ -16,6 +41,7 @@ export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
     'integration_tool_auto_approvals_experiment_enabled',
   sessionTaskCommunicationTriage:
     'session_task_communication_triage_experiment_enabled',
+  dizzy: 'dizzy_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
 
 export type DeploymentExperimentValues = Record<

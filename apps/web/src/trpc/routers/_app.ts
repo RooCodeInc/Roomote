@@ -226,8 +226,11 @@ import {
   updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
+  getDizzyExperimentEnabledCommand,
   getDeploymentExperimentsCommand,
+  getNightlyExperimentsCommand,
   setDeploymentExperimentCommand,
+  setNightlyExperimentCommand,
 } from '../commands/deployment-experiments';
 import {
   listIntegrationToolPoliciesCommand,
@@ -3631,6 +3634,25 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setDeploymentExperimentCommand(auth, input),
+      ),
+  }),
+
+  nightlyExperiments: createRouter({
+    dizzyEnabled: protectedProcedure.query(({ ctx: { auth } }) =>
+      getDizzyExperimentEnabledCommand(auth),
+    ),
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getNightlyExperimentsCommand(auth),
+    ),
+    set: protectedProcedure
+      .input(
+        z.object({
+          id: z.enum(DEPLOYMENT_EXPERIMENT_IDS),
+          enabled: z.boolean(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setNightlyExperimentCommand(auth, input),
       ),
   }),
 
