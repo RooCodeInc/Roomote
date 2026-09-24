@@ -106,8 +106,12 @@ export async function GET(
             messages,
             queuedMessages,
             cursor: nextCursor,
+            hasMore,
           } = await getFastSessionMessagesSince(session.id, cursor);
           cursor = nextCursor;
+          // Drain a resume backlog batch by batch without waiting a full
+          // interval between them.
+          if (hasMore) pollWake.request();
 
           const [conversation] = await db
             .select({

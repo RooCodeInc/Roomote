@@ -1998,6 +1998,55 @@ describe('Session queries', () => {
     ]);
   });
 
+  it('streams a resume backlog in bounded updatedAt batches', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'stream-batches',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    // Microsecond-apart timestamps; c and d share one, as rows written in a
+    // single transaction do.
+    const updatedAts = {
+      a: '2026-01-01 00:00:01.000001',
+      b: '2026-01-01 00:00:01.000002',
+      c: '2026-01-01 00:00:01.000003',
+      d: '2026-01-01 00:00:01.000003',
+      e: '2026-01-01 00:00:01.000004',
+    };
+    for (const [index, [eventId, updatedAt]] of Object.entries(
+      updatedAts,
+    ).entries()) {
+      await createFastMessage({
+        conversationId: session.id,
+        eventId,
+        turnSeq: index,
+        ts: index + 1,
+      });
+      await db
+        .update(fastAgentMessages)
+        .set({ updatedAt: sql`${updatedAt}::timestamp` })
+        .where(eq(fastAgentMessages.eventId, eventId));
+    }
+
+    const first = await getFastSessionMessagesSince(session.id, 0, {
+      batchSize: 3,
+    });
+    expect(first.messages.map((message) => message.eventId)).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+    ]);
+    expect(first.hasMore).toBe(true);
+
+    const second = await getFastSessionMessagesSince(session.id, first.cursor, {
+      batchSize: 3,
+    });
+    expect(second.messages.map((message) => message.eventId)).toEqual(['e']);
+    expect(second.hasMore).toBe(false);
+  });
+
   it('streams an in-place review offer retirement', async () => {
     const owner = await userFactory.create();
     const session = await createFastSession({

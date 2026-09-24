@@ -905,34 +905,60 @@ function prepareFastSessionMessageRow<
   };
 }
 
+/** Rows per stream poll, so resuming after a long offline gap replays the
+ * backlog in bounded batches instead of one unbounded payload. */
+const FAST_SESSION_MESSAGES_SINCE_BATCH_SIZE = 200;
+
 /**
  * Rows created or rewritten after `sinceMs` (epoch millis of the row
  * updatedAt), sanitized for the client. Rows mutate in place (tool results
  * replace their call slot), so consumers merge by eventId, not append.
+ *
+ * Returns at most one batch, taken in updatedAt order so `cursor` advances
+ * monotonically. Rows sharing the batch's last updatedAt all come back
+ * together (rows written in one transaction share a timestamp), since the
+ * next call only reads rows strictly after `cursor`. `hasMore` means the
+ * caller should poll again right away.
  */
 export async function getFastSessionMessagesSince(
   sessionId: string,
   sinceMs: number,
+  { batchSize = FAST_SESSION_MESSAGES_SINCE_BATCH_SIZE } = {},
 ): Promise<{
   messages: FastSessionMessage[];
   queuedMessages: FastSessionQueuedMessage[];
   cursor: number;
+  hasMore: boolean;
 }> {
+  const updatedAtMs = sql<number>`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000`;
+  const changedSince = and(
+    eq(fastAgentMessages.conversationId, sessionId),
+    fastSessionTranscriptVisibilityWhere,
+    sql`${updatedAtMs} > ${sinceMs}`,
+  );
+  // updatedAt of the batch's last row, compared in SQL because a JS Date
+  // would drop the microseconds; null (no bound) when fewer rows are pending.
+  const batchEnd = db
+    .select({ updatedAt: fastAgentMessages.updatedAt })
+    .from(fastAgentMessages)
+    .where(changedSince)
+    .orderBy(asc(fastAgentMessages.updatedAt))
+    .offset(batchSize - 1)
+    .limit(1);
   const rows = await db
     .select({
       ...fastSessionMessageSelection,
       // Millisecond Dates truncate Postgres microsecond timestamps, which
       // would replay the newest row on every poll — keep the cursor as a
       // fractional epoch-millisecond float instead.
-      updatedAtMs: sql<number>`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000`,
+      updatedAtMs,
     })
     .from(fastAgentMessages)
     .leftJoin(users, fastSessionMessageUserJoin)
     .where(
       and(
-        eq(fastAgentMessages.conversationId, sessionId),
-        fastSessionTranscriptVisibilityWhere,
-        sql`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000 > ${sinceMs}`,
+        changedSince,
+        sql`${fastAgentMessages.updatedAt} <= coalesce((${batchEnd}), 'infinity'::timestamp)`,
       ),
     )
     .orderBy(
@@ -957,6 +983,8 @@ export async function getFastSessionMessagesSince(
     messages: await attachFastSessionTaskTitles(messages),
     queuedMessages,
     cursor,
+    // A full batch may leave rows behind; an extra empty poll is cheap.
+    hasMore: rows.length >= batchSize,
   };
 }
 
