@@ -474,6 +474,7 @@ import {
   registerFastAgentTurnActivity,
 } from '../fast-agent-turn-lock';
 import { FAST_RESPONDING_LEASE_RENEW_MS } from '../fast-agent-constants';
+import { appendOriginalRequestToTaskText } from '../fast-agent-original-request';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -489,6 +490,11 @@ const baseParams = {
   senderDisplayName: 'Matt',
   senderExternalId: 'U123',
 };
+
+const withOriginalRequest = (
+  brief: string,
+  question: string = baseParams.question,
+) => appendOriginalRequestToTaskText({ text: brief, requests: [question] });
 
 const reactionTurnInput = {
   input: {
@@ -10972,8 +10978,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           'data:image/gif;base64,c2NyZWVuc2hvdC0y',
         ],
         model: 'anthropic/claude-sonnet-5',
-        prompt:
-          'Fix checkout.\n\nAttachment: checkout-plan.md\nAdd a retry test.',
+        prompt: `${withOriginalRequest(
+          'Fix checkout.',
+          'Fix checkout. Use Claude Sonnet 5 for it.',
+        )}\n\nAttachment: checkout-plan.md\nAdd a retry test.`,
       }),
     );
     expect(mocks.ensureOwnTaskFollowThroughWakeup).toHaveBeenCalledOnce();
@@ -11396,6 +11404,42 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it.each([
+    ['platform event', { turnSource: 'platform_event' as const }],
+    ['reaction', reactionTurnInput],
+  ])(
+    'does not forward turn text as the original request for a %s turn',
+    async (_kind, turnOptions) => {
+      const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+        await postKickoff({ taskId: 'task-1' });
+        return { success: true, taskId: 'task-1' };
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix checkout.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Started it.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        ...turnOptions,
+        adapter: callbacks({ launchTask }),
+      });
+
+      expect(launchTask).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: 'Fix checkout.' }),
+      );
+    },
+  );
+
   it('launches two tasks, keeps the turn open, messages a child, and posts a closeout', async () => {
     let taskNumber = 0;
     const order: string[] = [];
@@ -11455,9 +11499,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({ userId: 'user-1' }),
       {
         taskId: 'task-1',
-        message: 'Include the regression test.',
+        message: withOriginalRequest('Include the regression test.'),
       },
     );
+    expect(launchTask.mock.calls.map(([input]) => input.prompt)).toEqual([
+      withOriginalRequest('Fix checkout.'),
+      withOriginalRequest('Update checkout docs.'),
+    ]);
     expect(order).toEqual([
       'ack',
       'queued:task-1',
@@ -12369,8 +12417,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ userId: 'user-1' }),
         {
           taskId: 'task-1',
-          message:
-            'Include the failing test.\n\nAttachment: failure.log\nECONNRESET',
+          message: `${withOriginalRequest('Include the failing test.')}\n\nAttachment: failure.log\nECONNRESET`,
           images: [
             'data:image/png;base64,c2NyZWVuc2hvdC0x',
             'data:image/webp;base64,c2NyZWVuc2hvdC0y',
@@ -12550,7 +12597,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({ userId: 'user-1' }),
       {
         taskId: 'task-1',
-        message: 'Include the failing test.',
+        message: withOriginalRequest('Include the failing test.'),
       },
     );
   });

@@ -269,6 +269,7 @@ import {
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
 import { resolveFastAgentLaunchModel } from './fast-agent-launch-model';
+import { appendOriginalRequestToTaskText } from './fast-agent-original-request';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -3832,6 +3833,13 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
+    // The requester's own words in this turn, forwarded verbatim to delegated
+    // tasks so a condensed brief cannot drop what they spelled out. Reaction
+    // turns carry no written request, and platform events are not requests.
+    const currentHumanRequestTexts = (): string[] => [
+      ...(substantiveHumanInput ? [question] : []),
+      ...steeredHumanRequests,
+    ];
     const collectUserMessageTexts = (): string[] => [
       ...new Set([
         ...threadContext
@@ -5259,12 +5267,16 @@ export async function answerFastAgentQuestion({
               }
             };
             throwIfTurnCancelled();
+            const brief = appendOriginalRequestToTaskText({
+              text: args.prompt,
+              requests: currentHumanRequestTexts(),
+            });
             const prompt = args.includeAttachments
               ? appendAttachmentTextsToPromptText({
-                  text: args.prompt,
+                  text: brief,
                   attachmentTexts,
                 })
-              : args.prompt;
+              : brief;
             let result: Awaited<ReturnType<typeof adapter.launchTask>>;
             try {
               result = await adapter.launchTask({
@@ -5457,12 +5469,16 @@ export async function answerFastAgentQuestion({
             }
             const taskId = target.taskId;
             throwIfTurnCancelled();
+            const instruction = appendOriginalRequestToTaskText({
+              text: args.message,
+              requests: currentHumanRequestTexts(),
+            });
             const message = args.includeAttachments
               ? appendAttachmentTextsToPromptText({
-                  text: args.message,
+                  text: instruction,
                   attachmentTexts,
                 })
-              : args.message;
+              : instruction;
             return await taskMessageGuard.send(taskId, args, () =>
               sendFastAgentTaskMessage(
                 { userId, apiBaseUrl },
