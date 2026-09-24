@@ -86,6 +86,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
       channelId: 'C123',
       threadTs: '100.001',
       messageId: '100.002',
+      visibleInTranscript: true,
     });
     const order: string[] = [];
     const postKickoff = vi.fn(async () => {
@@ -205,6 +206,32 @@ describe('createFastAgentSlackTaskLauncher', () => {
         sessionId: '11111111-1111-4111-8111-111111111111',
         conversation,
       },
+    });
+    expect(
+      mocks.enqueueTask.mock.calls[0]?.[0]?.task.payload,
+    ).not.toHaveProperty('visibleInTranscript');
+  });
+
+  it('preserves an explicit hidden prompt-origin choice', async () => {
+    const launchTask = createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+      visibleInTranscript: false,
+    });
+
+    await launchTask({
+      prompt: '$sentry-triage generated suggestion context',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    expect(
+      mocks.enqueueTask.mock.calls.at(-1)?.[0]?.task.payload,
+    ).toMatchObject({
+      visibleInTranscript: false,
     });
   });
 

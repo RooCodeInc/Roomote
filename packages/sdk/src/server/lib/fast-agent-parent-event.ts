@@ -931,6 +931,7 @@ async function createSlackFastAgentParentTurn(
               : {}),
             channelId: conversation.replyTarget.channelId,
             threadTs: threadId!,
+            visibleInTranscript: false,
             // A bound automation thread keeps delegating as the automation,
             // so later launches settle as its reports too.
             ...(customAutomationId

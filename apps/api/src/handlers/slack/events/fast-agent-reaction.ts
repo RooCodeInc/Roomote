@@ -208,6 +208,7 @@ async function processFastAgentReaction(params: {
           channelId: event.item.channel,
           threadTs,
           messageId: event.item.ts,
+          visibleInTranscript: false,
         }),
         postReply: async ({
           message,

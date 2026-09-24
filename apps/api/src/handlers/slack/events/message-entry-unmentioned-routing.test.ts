@@ -14,6 +14,7 @@ const {
   lookupSlackUserMappingMock,
   recordInboundSlackConversationMessageMock,
   processFastAgentMessageMock,
+  createFastAgentSlackLiveTaskLauncherMock,
   findSessionAttentionNotificationReplyMock,
 } = vi.hoisted(() => ({
   fetchThreadMessagesMock: vi.fn(),
@@ -29,6 +30,7 @@ const {
   lookupSlackUserMappingMock: vi.fn(),
   recordInboundSlackConversationMessageMock: vi.fn(),
   processFastAgentMessageMock: vi.fn(),
+  createFastAgentSlackLiveTaskLauncherMock: vi.fn(() => vi.fn()),
   findSessionAttentionNotificationReplyMock: vi.fn(),
 }));
 
@@ -58,7 +60,8 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
   acquireSlackFastRootBindingLock: acquireRootBindingLockMock,
-  createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
+  createFastAgentSlackLiveTaskLauncher:
+    createFastAgentSlackLiveTaskLauncherMock,
   hasPendingRoutingConfirmation: hasPendingRoutingConfirmationMock,
   markSlackThreadExplicitMentionRequired:
     markSlackThreadExplicitMentionRequiredMock,
@@ -305,6 +308,9 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         directedAtRoomote: true,
         event: expect.objectContaining({ text: '<@UBOT> please continue' }),
       }),
+    );
+    expect(createFastAgentSlackLiveTaskLauncherMock).toHaveBeenCalledWith(
+      expect.objectContaining({ visibleInTranscript: true }),
     );
     expect(evaluateTypeSafeJudgmentsMock).not.toHaveBeenCalled();
   });

@@ -95,6 +95,7 @@ export async function resumePendingSlackAuthRequest(
       userId: activeMapping.userId,
       teamId: authToken.slackTeamId,
       directedAtRoomote: true,
+      visibleInTranscript: true,
       errorLogPrefix: `Failed to resume pending Slack request in thread ${authToken.threadTs}:`,
     });
 

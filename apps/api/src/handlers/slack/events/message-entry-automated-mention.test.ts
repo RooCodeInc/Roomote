@@ -142,6 +142,7 @@ describe('automated Slack message mentions', () => {
           key: 'slack_channel_auto_start',
           actor: { externalId: 'U_WORKFLOW' },
         },
+        visibleInTranscript: false,
       }),
     );
     expect(mocks.startTask).not.toHaveBeenCalled();
