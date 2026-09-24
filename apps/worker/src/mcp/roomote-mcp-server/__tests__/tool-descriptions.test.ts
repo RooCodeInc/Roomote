@@ -174,7 +174,7 @@ describe('roomote MCP tool descriptions', () => {
     ]);
   });
 
-  it('documents every built-in custom automation schedule preset', async () => {
+  it('documents recurring presets and the on-demand schedule', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(
       registeredTools,
@@ -186,10 +186,10 @@ describe('roomote MCP tool descriptions', () => {
     ).description;
 
     expect(scheduleDescription).toContain(
-      'built-in presets: off, every_hour, every_6_hours, daily, weekly',
+      'built-in presets: every_hour, every_6_hours, daily, weekly',
     );
     expect(scheduleDescription).toContain(
-      'Prefer a built-in preset when it matches the requested cadence.',
+      '"on_demand" for runs started only with Run now or an enabled webhook.',
     );
   });
 
