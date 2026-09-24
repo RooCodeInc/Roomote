@@ -1,5 +1,5 @@
 {
-  "id": "3ebd79bc-5409-463c-9810-ec440799271b",
+  "id": "d6b55826-64c3-4dd3-85e0-b7a4e41ef8e9",
   "prevId": "a3de4d55-7491-4800-afa1-e5e880f9cea2",
   "version": "7",
   "dialect": "postgresql",
@@ -16812,18 +16812,34 @@
           "method": "btree",
           "with": {}
         },
-        "task_runs_sleep_check_finished_idx": {
-          "name": "task_runs_sleep_check_finished_idx",
+        "task_runs_sleep_check_finished_completed_idx": {
+          "name": "task_runs_sleep_check_finished_completed_idx",
           "columns": [
             {
-              "expression": "created_at",
+              "expression": "completed_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "where": "\"task_runs\".\"status\" IN ('failed', 'canceled', 'completed') AND \"task_runs\".\"machine_id\" IS NOT NULL AND \"task_runs\".\"sleep_requested_at\" IS NULL AND \"task_runs\".\"snapshot_id\" IS NULL AND \"task_runs\".\"snapshot_requested_at\" IS NULL AND \"task_runs\".\"vendor\" IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure')",
+          "where": "\"task_runs\".\"status\" IN ('failed', 'canceled', 'completed') AND \"task_runs\".\"machine_id\" IS NOT NULL AND \"task_runs\".\"sleep_requested_at\" IS NULL AND \"task_runs\".\"snapshot_id\" IS NULL AND \"task_runs\".\"snapshot_requested_at\" IS NULL AND \"task_runs\".\"vendor\" IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure') AND \"task_runs\".\"completed_at\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "task_runs_sleep_check_finished_canceled_idx": {
+          "name": "task_runs_sleep_check_finished_canceled_idx",
+          "columns": [
+            {
+              "expression": "canceled_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"task_runs\".\"status\" IN ('failed', 'canceled', 'completed') AND \"task_runs\".\"machine_id\" IS NOT NULL AND \"task_runs\".\"sleep_requested_at\" IS NULL AND \"task_runs\".\"snapshot_id\" IS NULL AND \"task_runs\".\"snapshot_requested_at\" IS NULL AND \"task_runs\".\"vendor\" IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure') AND \"task_runs\".\"completed_at\" IS NULL AND \"task_runs\".\"canceled_at\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
