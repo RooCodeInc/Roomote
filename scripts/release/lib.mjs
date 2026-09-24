@@ -62,7 +62,7 @@ export function computeNextVersion(current, bumpLevels) {
 
 /**
  * Parse pending Changeset markdown files (not README).
- * Returns [{ file, summary, bumps: { [pkg]: 'major'|'minor'|'patch' } }]
+ * Returns [{ file, summary, audience, bumps: { [pkg]: 'major'|'minor'|'patch' } }]
  */
 export function parsePendingChangesets(repoRoot) {
   const dir = join(repoRoot, '.changeset');
@@ -78,13 +78,14 @@ export function parsePendingChangesets(repoRoot) {
 
     const frontmatter = fmMatch[1];
     const body = fmMatch[2].trim();
+    const { audience, summary } = parseChangesetAudience(body, name);
     const bumps = {};
     for (const line of frontmatter.split(/\r?\n/)) {
       const m = line.match(/^['"]?([^'"\s:]+)['"]?:\s*(major|minor|patch)\s*$/);
       if (m) bumps[m[1]] = m[2];
     }
     if (Object.keys(bumps).length === 0) continue;
-    entries.push({ file: name, summary: body, bumps });
+    entries.push({ file: name, summary, audience, bumps });
   }
   return entries;
 }
@@ -345,6 +346,39 @@ export function findVersionCommit({ cwd, version, ref = 'HEAD' }) {
 const CHANGELOG_HEADER =
   '# Changelog\n\nThis file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.\n\n';
 
+const CHANGESET_AUDIENCES = new Set([
+  'internal-nightly',
+  'customer-preview',
+  'generally-available',
+]);
+
+function parseChangesetAudience(body, file) {
+  const markerPosition = body.search(/<!--\s*audience\b/i);
+  if (markerPosition === -1) {
+    return { audience: 'customer-preview', summary: body };
+  }
+  if (markerPosition !== 0) {
+    throw new Error(
+      `Changeset audience marker must start the summary in ${file}`,
+    );
+  }
+
+  const markerEnd = body.indexOf('-->');
+  const marker = markerEnd === -1 ? '' : body.slice(4, markerEnd).trim();
+  const match = /^audience\s*:\s*([a-z-]+)$/i.exec(marker);
+  const audience = match?.[1];
+  if (!audience || !CHANGESET_AUDIENCES.has(audience)) {
+    throw new Error(`Invalid changeset audience marker in ${file}`);
+  }
+
+  const summary = body.slice(markerEnd + 3).trim();
+  if (/<!--\s*audience\b/i.test(summary)) {
+    throw new Error(`Duplicate changeset audience marker in ${file}`);
+  }
+
+  return { audience, summary };
+}
+
 /**
  * Build one product CHANGELOG.md release section from pending changesets,
  * grouped by the highest bump level each changeset requests.
@@ -356,7 +390,10 @@ const CHANGELOG_HEADER =
  */
 export function buildChangelogSection(pending, nextVersion, date) {
   const byLevel = { major: [], minor: [], patch: [] };
-  for (const entry of pending) {
+  const publicEntries = pending.filter(
+    (entry) => entry.audience !== 'internal-nightly',
+  );
+  for (const entry of publicEntries) {
     const highest = ['major', 'minor', 'patch'].find((level) =>
       Object.values(entry.bumps).includes(level),
     );
@@ -369,11 +406,15 @@ export function buildChangelogSection(pending, nextVersion, date) {
     byLevel.major[0] || byLevel.minor[0] || byLevel.patch[0] || null;
   const releaseSummary = highlightSource
     ? highlightSource
-    : '<one-sentence release summary — REPLACE ME>';
+    : publicEntries.length === 0
+      ? 'No public-facing changes are included in this release.'
+      : '<one-sentence release summary — REPLACE ME>';
   const highlights = (
     highlightSource
       ? [highlightSource, ...byLevel.major.slice(1), ...byLevel.minor.slice(1)]
-      : ['<highlight — REPLACE ME>']
+      : publicEntries.length === 0
+        ? []
+        : ['<highlight — REPLACE ME>']
   ).slice(0, 4);
 
   const lines = [
@@ -384,10 +425,14 @@ export function buildChangelogSection(pending, nextVersion, date) {
     '### Highlights',
     '',
   ];
-  for (const item of highlights) {
-    lines.push(`- ${item}`);
+  if (highlights.length === 0) {
+    lines.push('No public highlights.', '');
+  } else {
+    for (const item of highlights) {
+      lines.push(`- ${item}`);
+    }
+    lines.push('');
   }
-  lines.push('');
 
   for (const [label, key] of [
     ['Major changes', 'major'],
@@ -409,12 +454,14 @@ export function buildChangelogSection(pending, nextVersion, date) {
  * changing its summary or highlights.
  */
 export function amendChangelogSection(existing, pending, version) {
+  pending = pending.filter((entry) => entry.audience !== 'internal-nightly');
   const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const heading = new RegExp(`^## ${escapedVersion} \\([^\\n]+\\)$`, 'm');
   const match = heading.exec(existing);
   if (!match) {
     throw new Error(`No CHANGELOG section found for ${version}`);
   }
+  if (pending.length === 0) return existing;
 
   const start = match.index;
   const nextHeading = existing.slice(start + match[0].length).search(/\n## /);

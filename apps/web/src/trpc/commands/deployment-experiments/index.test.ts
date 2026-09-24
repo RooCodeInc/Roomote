@@ -4,11 +4,18 @@ import type { UserAuthSuccess } from '@/types';
 
 import {
   getDeploymentExperimentsCommand,
+  getDizzyExperimentEnabledCommand,
+  getNightlyExperimentsCommand,
   setDeploymentExperimentCommand,
+  setNightlyExperimentCommand,
 } from './index';
 
-function auth(userId: string, isAdmin: boolean): UserAuthSuccess {
-  return { userId, isAdmin } as UserAuthSuccess;
+function auth(
+  userId: string,
+  isAdmin: boolean,
+  nightlyExperimentsEnabled = false,
+): UserAuthSuccess {
+  return { userId, isAdmin, nightlyExperimentsEnabled } as UserAuthSuccess;
 }
 
 describe('deployment experiment commands', () => {
@@ -73,5 +80,75 @@ describe('deployment experiment commands', () => {
     ).resolves.toMatchObject({
       metadata: { results_page_enabled: true },
     });
+  });
+
+  it('blocks customer admins and members from nightly data and mutations', async () => {
+    const [admin, member] = await Promise.all([
+      userFactory.create({ role: 'admin' }),
+      userFactory.create({ role: 'member' }),
+    ]);
+
+    await expect(
+      getNightlyExperimentsCommand(auth(admin.id, true, false)),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      setNightlyExperimentCommand(auth(admin.id, true, false), {
+        id: 'privateSessions',
+        enabled: true,
+      }),
+    ).rejects.toThrow('Unauthorized');
+
+    await expect(
+      getNightlyExperimentsCommand(auth(member.id, false, true)),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      setNightlyExperimentCommand(auth(member.id, false, true), {
+        id: 'privateSessions',
+        enabled: true,
+      }),
+    ).rejects.toThrow('Unauthorized');
+  });
+
+  it('allows an enabled internal admin to read nightly values without moving customer previews', async () => {
+    const admin = await userFactory.create({ role: 'admin' });
+
+    await expect(
+      getNightlyExperimentsCommand(auth(admin.id, true, true)),
+    ).resolves.toEqual({ dizzy: false });
+    await expect(
+      getDeploymentExperimentsCommand(auth(admin.id, true, true)),
+    ).resolves.toHaveProperty('privateSessions');
+    await expect(
+      setNightlyExperimentCommand(auth(admin.id, true, true), {
+        id: 'privateSessions',
+        enabled: true,
+      }),
+    ).rejects.toThrow('Unauthorized');
+  });
+
+  it('serves only the Dizzy runtime value on deployments opted in to nightly experiments', async () => {
+    const [admin, member] = await Promise.all([
+      userFactory.create({ role: 'admin' }),
+      userFactory.create({ role: 'member' }),
+    ]);
+
+    await expect(
+      getDizzyExperimentEnabledCommand(auth(member.id, false, false)),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      getDizzyExperimentEnabledCommand(auth(member.id, false, true)),
+    ).resolves.toBe(false);
+
+    await setNightlyExperimentCommand(auth(admin.id, true, true), {
+      id: 'dizzy',
+      enabled: true,
+    });
+
+    await expect(
+      getDizzyExperimentEnabledCommand(auth(member.id, false, true)),
+    ).resolves.toBe(true);
+    await expect(
+      getNightlyExperimentsCommand(auth(member.id, false, true)),
+    ).rejects.toThrow('Unauthorized');
   });
 });

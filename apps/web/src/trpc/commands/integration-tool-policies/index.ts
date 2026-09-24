@@ -17,6 +17,7 @@ import {
   upsertIntegrationToolUserPolicies,
   upsertIntegrationToolUserPolicy,
 } from '@roomote/db/server';
+import { AUTO_DECISION_REQUIREMENTS } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
 import { resolveDecisionModel } from '@roomote/cloud-agents/server/typesafe-judgment';
 import {
   getMcpIntegration,
@@ -203,8 +204,8 @@ export async function setPersonalIntegrationToolPoliciesCommand(
 
 /**
  * Deployment-wide Auto mode, admin only. `model` names what Auto will
- * consult, so an admin sees the cost of turning it on: the hosted judgment
- * model, or the helper model when none is configured.
+ * consult: Jev, or null when there is no Jev backend (the helper model and
+ * the model Roomote trains are not used for Auto yet).
  */
 export async function getIntegrationToolAutoSettingsCommand(
   auth: UserAuthSuccess,
@@ -212,7 +213,7 @@ export async function getIntegrationToolAutoSettingsCommand(
   assertAdmin(auth);
   const [settings, model] = await Promise.all([
     getIntegrationToolAutoSettings(),
-    resolveDecisionModel().catch(() => null),
+    resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(() => null),
   ]);
   return {
     ...settings,

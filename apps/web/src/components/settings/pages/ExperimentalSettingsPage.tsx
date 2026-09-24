@@ -1,15 +1,13 @@
 'use client';
 
 import { SettingsShell } from '@/components/settings/SettingsShell';
-import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
-import { BrowserNotificationsExperimentalSetting } from '@/components/settings/BrowserNotificationsExperimentalSetting';
-import { SessionTaskCommunicationTriageExperimentalSetting } from '@/components/settings/SessionTaskCommunicationTriageExperimentalSetting';
+import { ExperimentSettingsControls } from '@/components/settings/experiment-settings-controls';
 import { RetryableLoadError } from '@/components/system';
 import { useDeploymentExperiments } from '@/hooks/useDeploymentExperiments';
 
 export function ExperimentalSettingsPage() {
   const { error, hasLoadedExperiments, isFetching, refetch } =
-    useDeploymentExperiments();
+    useDeploymentExperiments(undefined, 'customer-preview');
 
   return (
     <SettingsShell pageId="experimental" adminOnly={true}>
@@ -22,9 +20,7 @@ export function ExperimentalSettingsPage() {
         />
       ) : (
         <>
-          <PrivateSessionsExperimentalSetting />
-          <SessionTaskCommunicationTriageExperimentalSetting />
-          <BrowserNotificationsExperimentalSetting />
+          <ExperimentSettingsControls audience="customer-preview" />
         </>
       )}
     </SettingsShell>
