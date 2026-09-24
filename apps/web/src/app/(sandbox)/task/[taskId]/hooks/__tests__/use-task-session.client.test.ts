@@ -63,6 +63,65 @@ describe('getTaskRunPromptText', () => {
 });
 
 describe('getTaskRunVisiblePrompt', () => {
+  it('keeps human-authored shortcut prompts visible in task detail', () => {
+    expect(
+      getTaskRunVisiblePrompt(
+        buildTaskRun({
+          repo: 'Roomote/example-app',
+          description: '$review-code Check this change',
+        } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
+        { initiatorKind: 'user' },
+      ),
+    ).toEqual({
+      text: '$review-code Check this change',
+      visibleInTranscript: true,
+    });
+  });
+
+  it('keeps command-like messages visible after chat wrappers are removed', () => {
+    expect(
+      getTaskRunVisiblePrompt(
+        buildTaskRun({
+          text: '<slack_message>$review-code Check this change</slack_message>',
+          channel: 'C123',
+          user: 'U123',
+          ts: '123.000',
+          repo: 'Roomote/example-app',
+        } satisfies TaskPayload<typeof TaskPayloadKind.SlackAppMention>),
+        { initiatorKind: 'user' },
+      ),
+    ).toEqual({
+      text: '$review-code Check this change',
+      visibleInTranscript: true,
+    });
+  });
+
+  it('keeps explicitly hidden execution prompts hidden for human-created tasks', () => {
+    expect(
+      getTaskRunVisiblePrompt(
+        buildTaskRun({
+          repo: 'Roomote/example-app',
+          description: '$environment-setup Set up the environment',
+          visibleInTranscript: false,
+        } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
+        { initiatorKind: 'user' },
+      ),
+    ).toMatchObject({ visibleInTranscript: false });
+  });
+
+  it('keeps Roomote execution wrappers hidden for human-created tasks', () => {
+    expect(
+      getTaskRunVisiblePrompt(
+        buildTaskRun({
+          repo: 'Roomote/example-app',
+          description:
+            '<workflow>Internal execution instructions</workflow>\n/request',
+        } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
+        { initiatorKind: 'user' },
+      ),
+    ).toMatchObject({ visibleInTranscript: false });
+  });
+
   it('strips Slack thread context and reply targets from the visible prompt text', () => {
     expect(
       getTaskRunVisiblePrompt(
