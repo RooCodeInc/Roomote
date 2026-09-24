@@ -814,22 +814,32 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('rejects a recovered image from a task outside the session', async () => {
+  it('keeps a text reply when a recovered image is outside the session', async () => {
     mocks.findTaskRuns.mockResolvedValueOnce([]);
 
-    await expect(
-      deliverFastAgentParentEvent({
-        parent,
-        event: {
-          type: 'human_follow_up',
-          eventId: '100.005',
-          currentMessageId: '100.005',
-          userId: 'user-2',
-          question: 'Show me the screenshot.',
-        },
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'human_follow_up',
+        eventId: '100.005',
+        currentMessageId: '100.005',
+        userId: 'user-2',
+        question: 'Show me the screenshot.',
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('The proof is ready.'),
       }),
-    ).rejects.toThrow('Invalid Fast parent image artifact: artifact-1');
-    expect(mocks.postMessage).not.toHaveBeenCalled();
+    );
+    expect(mocks.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: expect.arrayContaining([
+          expect.objectContaining({ type: 'image' }),
+        ]),
+      }),
+    );
   });
 
   it('posts a recovered child image on a later Discord human turn', async () => {
@@ -1418,8 +1428,17 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('carries child-selected images and charts into the Fast parent turn by default', async () => {
-    mocks.answerQuestion.mockResolvedValueOnce('Shared the proof.');
+  it('attaches uploaded images even when they belong to another task and run', async () => {
+    mocks.findArtifacts.mockResolvedValueOnce([
+      {
+        id: 'artifact-1',
+        taskId: 'another-task',
+        runId: 17,
+        path: 'proof/result.png',
+        contentType: 'image/png',
+        uploaded: true,
+      },
+    ]);
 
     await deliverFastAgentParentEvent({
       parent,
@@ -1455,6 +1474,41 @@ describe('deliverFastAgentParentEvent', () => {
             },
           },
         ],
+      }),
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: expect.arrayContaining([
+          {
+            type: 'image',
+            image_url:
+              'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            alt_text: 'result.png',
+          },
+        ]),
+      }),
+    );
+  });
+
+  it('keeps a text reply when selected image artifacts are unavailable', async () => {
+    mocks.findArtifacts.mockResolvedValueOnce([]);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'child_message',
+        taskId: 'task-1',
+        runId: 42,
+        messageId: '44444444-4444-4444-8444-444444444445',
+        purpose: 'closeout',
+        message: 'The visual comparison is ready.',
+        imageArtifactIds: ['artifact-missing'],
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('The proof is ready.'),
       }),
     );
   });
