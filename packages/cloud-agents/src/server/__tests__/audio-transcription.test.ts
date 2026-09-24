@@ -9,6 +9,7 @@ vi.mock('../non-task-provider-usage', async (importOriginal) => ({
 
 import {
   AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
+  formatAudioAttachmentWarning,
   formatAudioTranscriptionResult,
   isAudioTranscriptionSupportedMimeType,
   resolveAudioTranscriptionMimeType,
@@ -124,6 +125,17 @@ describe('audio transcription', () => {
       }),
     ).toBe(
       '[Audio attachment "voice.ogg" could not be transcribed: The Audio and video model (GPT 5.6 Terra) doesn\'t support audio. Select a model that supports audio in Settings > Models > Audio and video model.]',
+    );
+  });
+
+  it('removes only trailing periods from untrusted warning text', () => {
+    expect(formatAudioAttachmentWarning('voice.ogg', 'Failed...')).toBe(
+      '[Audio attachment "voice.ogg" Failed.]',
+    );
+    const repeatedDots = '.'.repeat(20_000);
+    const reason = `${repeatedDots}not trailing`;
+    expect(formatAudioAttachmentWarning('voice.ogg', reason)).toBe(
+      `[Audio attachment "voice.ogg" ${reason}.]`,
     );
   });
 });

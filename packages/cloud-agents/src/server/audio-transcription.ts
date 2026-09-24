@@ -74,7 +74,11 @@ export function formatAudioAttachmentWarning(
   filename: string,
   reason: string,
 ): string {
-  const normalizedReason = reason.replace(/\.+$/u, '');
+  let end = reason.length;
+  while (end > 0 && reason.charCodeAt(end - 1) === 46) {
+    end -= 1;
+  }
+  const normalizedReason = reason.slice(0, end);
   return `[Audio attachment "${filename}" ${normalizedReason}.]`;
 }
 
