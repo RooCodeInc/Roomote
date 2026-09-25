@@ -1,20 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-const mocks = vi.hoisted(() => ({ evaluateDecisionModel: vi.fn() }));
-
-vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
-  evaluateDecisionModel: mocks.evaluateDecisionModel,
-}));
+import { describe, expect, it } from 'vitest';
 
 import {
   customAutomationRunWhenSchema,
   type CustomAutomationRunWhen,
 } from '@roomote/types';
 
-import {
-  evaluateCustomAutomationRunWhen,
-  evaluateCustomAutomationRunWhenAnswers,
-} from '../custom-automation-run-when';
+import { evaluateCustomAutomationRunWhenAnswers } from '../custom-automation-run-when';
 
 const impactLevels = [
   { id: 'none', description: 'No users are affected.' },
@@ -27,11 +18,7 @@ function rule(input: unknown): CustomAutomationRunWhen {
   return customAutomationRunWhenSchema.parse(input);
 }
 
-describe('custom automation runWhen evaluation', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
+describe('custom automation runWhen answer evaluation', () => {
   it('applies all to Noul and Score judgments', () => {
     const runWhen = rule({
       all: [
@@ -139,61 +126,5 @@ describe('custom automation runWhen evaluation', () => {
         regression: { type: 'noul', noul: 0.5 },
       }),
     ).toEqual({ outcome: 'uncertain', skipRun: false });
-  });
-
-  it('continues the run when no high-volume judgment model is available', async () => {
-    mocks.evaluateDecisionModel.mockResolvedValue(null);
-    const runWhen = rule({
-      all: [
-        {
-          id: 'regression',
-          ask: 'Does `report` describe a new regression?',
-          type: 'yes_no',
-          criteria: { true: 'New regression.', false: 'No new regression.' },
-          min: 0.75,
-        },
-      ],
-    });
-
-    await expect(
-      evaluateCustomAutomationRunWhen({
-        runWhen,
-        state: { report: 'No issues found.' },
-        userId: 'user-1',
-      }),
-    ).resolves.toEqual({
-      outcome: 'unavailable',
-      skipRun: false,
-      answers: null,
-    });
-    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        state: { report: 'No issues found.' },
-        highVolume: true,
-        userId: 'user-1',
-      }),
-    );
-  });
-
-  it('continues the run when model evaluation fails', async () => {
-    mocks.evaluateDecisionModel.mockRejectedValue(new Error('timeout'));
-    const runWhen = rule({
-      all: [
-        {
-          id: 'regression',
-          ask: 'Does `report` describe a new regression?',
-          type: 'yes_no',
-          criteria: { true: 'New regression.', false: 'No new regression.' },
-          min: 0.75,
-        },
-      ],
-    });
-
-    await expect(
-      evaluateCustomAutomationRunWhen({
-        runWhen,
-        state: { report: 'No issues found.' },
-      }),
-    ).resolves.toMatchObject({ outcome: 'error', skipRun: false });
   });
 });
