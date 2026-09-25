@@ -91,11 +91,11 @@ deduplicates delivery across task completion, retries, and parent-session report
 
 ## Recover from a failed start
 
-When a task cannot start, select **Try in a new task** to open an editable task
-launcher prefilled with the original text prompt, selected model, and linked
-environment. Review or change those values before starting it. This creates a
-new task instead of retrying the failed task, and attachments are not copied, so
-reattach any files the new task needs.
+When a task's sandbox cannot start, Roomote automatically retries the start up
+to two times in the same task. If those attempts fail, select **Retry** on the
+failed startup message to start another run immediately without creating a new
+task. Explicit retries remain available after the automatic retry budget is
+exhausted, as long as the failed run is still eligible for startup recovery.
 
 ## Task view
 
@@ -128,6 +128,11 @@ its operational details.
 Generated HTML artifacts open in a sandboxed **Preview** by default. Switch to
 **Code** to inspect the saved HTML source without executing it in the page that
 runs the Roomote dashboard.
+
+Roomote can also share a standalone link that opens an artifact without first
+opening its parent task or session. The link opens the exact artifact version,
+keeps the normal task or session access checks, and provides a link back to the
+source workspace.
 
 CSV and TSV artifacts use abstract table thumbnails in the gallery and open as
 tables by default. The preview keeps the first row as data unless you turn on

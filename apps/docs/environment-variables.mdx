@@ -190,6 +190,12 @@ manifest changes.
 | `SANDBOX_OIDC_PUBLIC_KEY`           | Optional                         | Primary public key for sandbox OIDC verification.                                                                                                                        |
 | `SANDBOX_OIDC_PUBLIC_KEY_SECONDARY` | Rotation                         | Secondary sandbox OIDC public key during key rotation.                                                                                                                   |
 
+For a custom multi-service deployment, provide the same `JOB_AUTH_PRIVATE_KEY`
+and `JOB_AUTH_PUBLIC_KEY` values to the web, API, controller, and BullMQ
+services. The preview proxy needs the public key. BullMQ runs session turns that
+mint MCP and other task-scoped tokens, so omitting either job-auth key there can
+make connected integrations unavailable even when the other services start.
+
 ### Models and inference providers
 
 | Env var                                | Required     | Used for                                                                                                                                |
