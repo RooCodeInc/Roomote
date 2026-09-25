@@ -230,6 +230,7 @@ import {
 import {
   getDizzyExperimentEnabledCommand,
   getDeploymentExperimentsCommand,
+  getIntegrationToolAutoApprovalsEnabledCommand,
   getNightlyExperimentsCommand,
   setDeploymentExperimentCommand,
   setNightlyExperimentCommand,
@@ -3696,6 +3697,10 @@ export const appRouter = createRouter({
   nightlyExperiments: createRouter({
     dizzyEnabled: protectedProcedure.query(({ ctx: { auth } }) =>
       getDizzyExperimentEnabledCommand(auth),
+    ),
+    integrationToolAutoApprovalsEnabled: protectedProcedure.query(
+      ({ ctx: { auth } }) =>
+        getIntegrationToolAutoApprovalsEnabledCommand(auth),
     ),
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getNightlyExperimentsCommand(auth),

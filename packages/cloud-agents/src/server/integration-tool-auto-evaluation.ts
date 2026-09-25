@@ -368,19 +368,24 @@ export type IntegrationToolAutoState = {
 };
 
 export async function resolveIntegrationToolAutoState(): Promise<IntegrationToolAutoState> {
-  const [enabled, settings, model] = await Promise.all([
+  // Some callers import this module only for the Jev requirements; defer Env
+  // initialization until the Auto state is actually resolved.
+  const [enabled, settings, nightlyExperimentsEnabled] = await Promise.all([
     isDeploymentExperimentEnabled('integrationToolAutoApprovals'),
     getIntegrationToolAutoSettings(),
-    resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(() => null),
+    import('@roomote/env').then(({ Env, isEnvFlagEnabled }) =>
+      isEnvFlagEnabled(Env.R_NIGHTLY_EXPERIMENTS_ENABLED),
+    ),
   ]);
+  if (!nightlyExperimentsEnabled || !enabled) {
+    return { mode: 'off', settings, model: null };
+  }
+
+  const model = await resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(
+    () => null,
+  );
   const hosted = model?.kind === 'judgment';
-  const mode = !enabled
-    ? 'off'
-    : settings.mode === 'on'
-      ? 'on'
-      : hosted
-        ? 'shadow'
-        : 'off';
+  const mode = settings.mode === 'on' ? 'on' : hosted ? 'shadow' : 'off';
   return { mode, settings, model: model?.kind ?? null };
 }
 

@@ -100,6 +100,12 @@ export function useDeploymentExperiments(
           queryKey: trpc.nightlyExperiments.dizzyEnabled.queryKey(),
         });
       }
+      if (isNightly && variables.id === 'integrationToolAutoApprovals') {
+        void queryClient.invalidateQueries({
+          queryKey:
+            trpc.nightlyExperiments.integrationToolAutoApprovalsEnabled.queryKey(),
+        });
+      }
     },
   };
 

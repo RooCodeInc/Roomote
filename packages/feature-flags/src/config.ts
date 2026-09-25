@@ -27,7 +27,7 @@ export const DEPLOYMENT_EXPERIMENT_AUDIENCE = {
   privateSessions: 'customer-preview',
   sessionTaskCommunicationTriage: 'customer-preview',
   browserNotifications: 'customer-preview',
-  integrationToolAutoApprovals: 'customer-preview',
+  integrationToolAutoApprovals: 'internal-nightly',
   dizzy: 'internal-nightly',
 } as const satisfies Record<
   DeploymentExperimentId,
@@ -37,8 +37,9 @@ export const DEPLOYMENT_EXPERIMENT_AUDIENCE = {
 export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
   privateSessions: 'private_sessions_experiment_enabled',
   browserNotifications: 'browser_notifications_experiment_enabled',
+  // A new key deliberately leaves the former customer-preview opt-ins dormant.
   integrationToolAutoApprovals:
-    'integration_tool_auto_approvals_experiment_enabled',
+    'integration_tool_auto_approvals_nightly_experiment_enabled',
   sessionTaskCommunicationTriage:
     'session_task_communication_triage_experiment_enabled',
   dizzy: 'dizzy_experiment_enabled',
@@ -85,7 +86,7 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     kind: 'deployment-control',
     group: null,
     description:
-      'Show the Auto-approval decisions card in Settings → Agent Guidance for admins to turn on.',
+      'Show the Auto-approval decisions card in Settings → Agent Guidance for admins on internal nightly deployments.',
   },
   [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.sessionTaskCommunicationTriage]: {
     kind: 'deployment-control',

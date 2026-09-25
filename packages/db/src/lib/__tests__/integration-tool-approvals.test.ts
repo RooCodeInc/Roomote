@@ -1,9 +1,11 @@
 import {
   db,
+  deploymentSettings,
   eq,
   integrationToolApprovalRequests,
   integrationToolAutoEvaluations,
   sessionFactory,
+  sql,
   sessions,
   taskFactory,
   userFactory,
@@ -492,6 +494,41 @@ describe('Auto mode', () => {
       mode: 'on',
       policy: 'Reads are fine. Never send messages.',
     });
+    await setIntegrationToolAutoSettings({ mode: 'off', policy: '' });
+  });
+
+  it('does not revive a saved Auto-on mode when the nightly experiment is first enabled', async () => {
+    await db
+      .insert(deploymentSettings)
+      .values({
+        id: 'default',
+        metadata: {
+          integration_tool_auto: {
+            mode: 'on',
+            policy: 'Reads are fine. Never send messages.',
+          },
+        },
+        setupCompletedAt: null,
+      })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: {
+          metadata: sql`coalesce(${deploymentSettings.metadata}, '{}'::jsonb) - 'integration_tool_auto_nightly' || ${JSON.stringify(
+            {
+              integration_tool_auto: {
+                mode: 'on',
+                policy: 'Reads are fine. Never send messages.',
+              },
+            },
+          )}::jsonb`,
+        },
+      });
+
+    await expect(getIntegrationToolAutoSettings()).resolves.toEqual({
+      mode: 'off',
+      policy: 'Reads are fine. Never send messages.',
+    });
+
     await setIntegrationToolAutoSettings({ mode: 'off', policy: '' });
   });
 
