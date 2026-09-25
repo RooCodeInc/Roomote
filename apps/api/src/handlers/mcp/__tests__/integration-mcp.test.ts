@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { RunTokenContext } from '@roomote/types';
+import { RunStatus, type RunTokenContext } from '@roomote/types';
 import { getMcpIntegration } from '@roomote/types';
 
 import type { Variables } from '../../../types';
@@ -12,6 +12,7 @@ const {
   mockDecrypt,
   mockGetTaskHumanOwnerUserIds,
   mockResolveApprovalBlocks,
+  mockFindTaskRunByRunTokenClaims,
 } = vi.hoisted(() => ({
   mockResolveApprovalBlocks: vi.fn(async () => ({
     blocks: new Map<string, string>(),
@@ -23,6 +24,7 @@ const {
   mockGetValidAccessToken: vi.fn(),
   mockDecrypt: vi.fn(),
   mockGetTaskHumanOwnerUserIds: vi.fn(),
+  mockFindTaskRunByRunTokenClaims: vi.fn(),
 }));
 
 vi.mock('../tool-approval-enforcement', () => ({
@@ -62,6 +64,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   getValidAccessToken: mockGetValidAccessToken,
+  findTaskRunByRunTokenClaims: mockFindTaskRunByRunTokenClaims,
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -172,7 +175,25 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     });
     mockGetValidAccessToken.mockResolvedValue('valid-access-token');
     mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
+    mockFindTaskRunByRunTokenClaims.mockResolvedValue({ id: 42 });
   });
+
+  it.each([RunStatus.Completed, RunStatus.Failed, RunStatus.Canceled])(
+    'rejects terminal run status %s before resolving credentials',
+    async () => {
+      mockFindTaskRunByRunTokenClaims.mockResolvedValue(null);
+
+      const response = await postMcp(
+        createApp('supermemory', createRunToken()),
+        createInitializeRequest(1),
+      );
+      const body = (await response.json()) as JsonRpcErrorBody;
+
+      expect(response.status).toBe(404);
+      expect(body.error.message).toBe('Task run not found for this MCP token');
+      expect(mockFindConnection).not.toHaveBeenCalled();
+    },
+  );
 
   it('serves a deployment-scoped integration on a run with no human actor', async () => {
     // Slack automation launches (channel auto-start) run as the deployment

@@ -809,7 +809,11 @@ const FINISHED_RUN_STATUSES = [
   RunStatus.Canceled,
   RunStatus.Completed,
 ];
-/** Leave the worker's own shutdown time to finish first. */
+/**
+ * Leave the worker's own shutdown time to finish first. Terminal run tokens
+ * are rejected by status-aware API authorization; this grace only lets the
+ * worker finish its shutdown before the provider instance is destroyed.
+ */
 const FINISHED_RUN_SANDBOX_GRACE_MS = 2 * 60 * 1_000;
 /** Longer than any provider timeout, so older rows are never re-examined. */
 const FINISHED_RUN_SANDBOX_LOOKBACK_MS = 24 * 60 * 60 * 1_000;
