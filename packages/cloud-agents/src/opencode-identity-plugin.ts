@@ -13,5 +13,65 @@ export const OPENCODE_IDENTITY_PLUGIN_SCRIPT = `export const RoomoteOpenCodeIden
         .replace(/^You are OpenCode,\\s*/iu, '');
     }
   },
+  'experimental.chat.messages.transform': async (_input, output) => {
+    // OpenRouter replays only the first reasoning_details array it finds. Keep
+    // split metadata together, and make legacy unsigned Gemini 3 tool calls
+    // explicitly use Google's documented validator-bypass sentinel.
+    for (const message of output.messages ?? []) {
+      if (
+        message.info?.role !== 'assistant' ||
+        message.info.providerID !== 'openrouter' ||
+        !/(^|\\/)gemini-3(?:[.-]|$)/iu.test(message.info.modelID ?? '')
+      ) {
+        continue;
+      }
+
+      const tool = message.parts?.find(
+        (part) => part?.type === 'tool' && typeof part.callID === 'string',
+      );
+      if (!tool) continue;
+
+      const details = [];
+      const seen = new Set();
+      for (const part of message.parts ?? []) {
+        const partDetails = part?.metadata?.openrouter?.reasoning_details;
+        if (!Array.isArray(partDetails)) continue;
+
+        for (const detail of partDetails) {
+          const key = JSON.stringify(detail);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          details.push(detail);
+        }
+      }
+
+      if (
+        !details.some(
+          (detail) =>
+            detail?.type === 'reasoning.encrypted' &&
+            typeof detail.data === 'string' &&
+            detail.data.length > 0,
+        )
+      ) {
+        details.push({
+          type: 'reasoning.encrypted',
+          data: 'skip_thought_signature_validator',
+          id: tool.callID,
+          format: 'google-gemini-v1',
+          index: 0,
+        });
+      }
+
+      const target =
+        message.parts.find((part) => part?.type === 'reasoning') ?? tool;
+      target.metadata = {
+        ...target.metadata,
+        openrouter: {
+          ...target.metadata?.openrouter,
+          reasoning_details: details,
+        },
+      };
+    }
+  },
 });
 `;
