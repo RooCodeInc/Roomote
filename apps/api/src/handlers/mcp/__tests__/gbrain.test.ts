@@ -4,21 +4,26 @@ import type { AddressInfo } from 'node:net';
 import { Hono } from 'hono';
 import {
   BRAIN_MCP_READ_INSTRUCTIONS,
+  RunStatus,
   type RunTokenContext,
 } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
-const { mockResolveConnection, mockIsBrainEmbeddingAvailable } = vi.hoisted(
-  () => ({
-    mockResolveConnection: vi.fn(),
-    mockIsBrainEmbeddingAvailable: vi.fn(),
-  }),
-);
+const {
+  mockResolveConnection,
+  mockIsBrainEmbeddingAvailable,
+  mockFindTaskRunByRunTokenClaims,
+} = vi.hoisted(() => ({
+  mockResolveConnection: vi.fn(),
+  mockIsBrainEmbeddingAvailable: vi.fn(),
+  mockFindTaskRunByRunTokenClaims: vi.fn(),
+}));
 
 vi.mock('@roomote/sdk/server', () => ({
   resolveBrainConnection: mockResolveConnection,
   isBrainEmbeddingAvailable: mockIsBrainEmbeddingAvailable,
+  findTaskRunByRunTokenClaims: mockFindTaskRunByRunTokenClaims,
 }));
 
 import { createGbrainMcpProxy, GBRAIN_READ_TOOL_NAMES } from '../gbrain';
@@ -76,6 +81,8 @@ describe('createGbrainMcpProxy', () => {
     // default for these cases is "an embedder is available".
     mockIsBrainEmbeddingAvailable.mockReset();
     mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
+    mockFindTaskRunByRunTokenClaims.mockReset();
+    mockFindTaskRunByRunTokenClaims.mockResolvedValue({ id: 42 });
   });
 
   afterEach(async () => {
@@ -115,6 +122,24 @@ describe('createGbrainMcpProxy', () => {
     const { port } = upstream?.address() as AddressInfo;
     return `http://127.0.0.1:${port}`;
   }
+
+  it.each([RunStatus.Completed, RunStatus.Failed, RunStatus.Canceled])(
+    'rejects terminal run status %s before resolving the Brain',
+    async () => {
+      mockFindTaskRunByRunTokenClaims.mockResolvedValue(null);
+
+      const response = await postMcp(createApp(), toolCall('query'));
+      const payload = (await response.json()) as {
+        error: { message: string };
+      };
+
+      expect(response.status).toBe(404);
+      expect(payload.error.message).toBe(
+        'Task run not found for this MCP token',
+      );
+      expect(mockResolveConnection).not.toHaveBeenCalled();
+    },
+  );
 
   it('404s when the deployment has no Brain', async () => {
     mockResolveConnection.mockResolvedValue(null);
