@@ -892,6 +892,14 @@ describe('ModelSettingsSection', () => {
     await waitFor(() => {
       expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
     });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', {
+          name: 'Orchestration model and reasoning',
+        }),
+      ).toHaveAttribute('aria-expanded', 'false');
+    });
     expect(updateMutateAsyncMock).toHaveBeenCalledWith(
       expect.objectContaining({
         orchestrationModelId: 'openrouter/z-ai/glm-5.2',
@@ -930,11 +938,20 @@ describe('ModelSettingsSection', () => {
       );
     });
     expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(orchestrationTrigger()).toHaveAttribute('aria-expanded', 'false');
+    });
     expect(orchestrationTrigger().textContent).toBe(originalSelection);
 
     updateMutateAsyncMock.mockReset().mockResolvedValue({ success: true });
+    fireEvent.click(orchestrationTrigger());
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
     await waitFor(() => expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(orchestrationTrigger()).toHaveAttribute('aria-expanded', 'false');
+    });
     expect(orchestrationTrigger()).toHaveTextContent('GLM 5.2');
   });
 
