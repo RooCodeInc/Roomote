@@ -162,6 +162,7 @@ async function classifyWithJudgmentModel(
 ): Promise<RequestedWorkKindDecision | undefined> {
   try {
     const answers = await evaluateTypeSafeJudgments({
+      decision: 'requested-work-kind',
       state: { prompt },
       questions: { kind: REQUESTED_WORK_KIND_QUESTION },
     });

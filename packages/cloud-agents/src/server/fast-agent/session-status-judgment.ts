@@ -302,6 +302,7 @@ export async function processSessionStatusJudgmentBatch(
       }
 
       const answers = await evaluateTypeSafeJudgments({
+        decision: 'session-status-judgment',
         state: snapshot.state,
         questions: { outcome: outcomeQuestion },
       });

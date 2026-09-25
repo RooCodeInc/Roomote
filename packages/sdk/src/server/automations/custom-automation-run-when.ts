@@ -163,6 +163,7 @@ export async function evaluateCustomAutomationRunWhen(params: {
   try {
     const questions = buildCustomAutomationRunWhenQuestions(params.runWhen);
     const answers = await evaluateDecisionModel({
+      decision: 'custom-automation-run-when',
       state: params.state,
       questions,
       timeoutMs: RUN_WHEN_TIMEOUT_MS,

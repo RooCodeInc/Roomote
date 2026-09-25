@@ -134,6 +134,7 @@ export async function evaluateCustomAutomationLaunchGate(params: {
 
   try {
     const answers = await evaluateDecisionModel({
+      decision: 'custom-automation-launch-gate',
       state,
       questions,
       timeoutMs: AUTOMATION_LAUNCH_GATE_TIMEOUT_MS,
