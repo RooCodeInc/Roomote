@@ -397,10 +397,10 @@ describe('evaluateIntegrationToolAutoDecision', () => {
 });
 
 describe('resolveIntegrationToolAutoState', () => {
-  it('only counts Jev as a model for Auto, not the model Roomote trains', async () => {
+  it('counts the Roomote judgment model for Auto', async () => {
     await resolveIntegrationToolAutoState();
     expect(mocks.resolveModel).toHaveBeenCalledWith({
-      excludeRoomoteModel: true,
+      excludeRoomoteModel: false,
     });
 
     mocks.evaluate.mockResolvedValue(modelAnswers(routine));
@@ -411,7 +411,7 @@ describe('resolveIntegrationToolAutoState', () => {
       userId: 'u1',
     });
     expect(mocks.evaluate).toHaveBeenCalledWith(
-      expect.objectContaining({ excludeRoomoteModel: true }),
+      expect.objectContaining({ excludeRoomoteModel: false }),
     );
   });
 
@@ -447,7 +447,7 @@ describe('resolveIntegrationToolAutoState', () => {
       'integrationToolAutoApprovals',
     );
     expect(mocks.resolveModel).toHaveBeenCalledWith({
-      excludeRoomoteModel: true,
+      excludeRoomoteModel: false,
     });
   });
 

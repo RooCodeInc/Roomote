@@ -306,7 +306,6 @@ export const JUDGMENT_DECISION_DEFINITIONS = {
       readContent: null,
       deploymentGuidance: 'Comments on our own Linear issues are routine.',
     },
-    note: 'Roomote asks this of Jev only; the Roomote judgment model does not answer it yet.',
   },
 } satisfies Record<string, JudgmentDecision>;
 
