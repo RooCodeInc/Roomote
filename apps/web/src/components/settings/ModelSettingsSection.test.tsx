@@ -596,7 +596,7 @@ describe('ModelSettingsSection', () => {
 
     expect(
       screen.getByText(
-        "GPT 5.4 doesn't support audio or video. Select a model that supports audio or video in Settings > Models > Audio and video model.",
+        "GPT 5.4 doesn't support audio or video. Choose a model that does.",
       ),
     ).toBeInTheDocument();
     fireEvent.click(
@@ -637,7 +637,7 @@ describe('ModelSettingsSection', () => {
 
     expect(
       screen.getByText(
-        "GLM 5.2 doesn't support audio or video. Select a model that supports audio or video in Settings > Models > Audio and video model.",
+        "GLM 5.2 doesn't support audio or video. Choose a model that does.",
       ),
     ).toBeInTheDocument();
   });

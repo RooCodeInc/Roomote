@@ -410,7 +410,7 @@ function TaskModelRoleEditor({
         {unsupportedMediaInputs.length > 0 && (
           <p className="text-xs text-muted-foreground" role="status">
             {config.role === 'audioVideo'
-              ? `${warningModelName} doesn't support ${unsupportedMediaInputNames}. Select a model that supports ${unsupportedMediaInputNames} in Settings > Models > Audio and video model.`
+              ? `${warningModelName} doesn't support ${unsupportedMediaInputNames}. Choose a model that does.`
               : `${warningModelName} can't take ${unsupportedMediaInputNames}.`}
           </p>
         )}
