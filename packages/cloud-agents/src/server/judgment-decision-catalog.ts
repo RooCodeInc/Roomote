@@ -20,7 +20,6 @@ import {
   AGENTMAIL_AUTO_REPLY_QUESTION,
   CUSTOM_AUTOMATION_LAUNCH_CRITERIA_QUESTION,
   REPLY_ADDRESSEE_QUESTION,
-  REPLY_CLOSING_ACKNOWLEDGEMENT_QUESTION,
   SESSION_STATUS_JUDGMENT_QUESTIONS,
 } from './judgment-questions';
 import { REQUESTED_WORK_KIND_QUESTION } from './requested-work-kind';
@@ -127,10 +126,9 @@ export const JUDGMENT_DECISION_DEFINITIONS = {
     id: 'unmentioned-thread-reply',
     label: 'Reply addressee',
     description:
-      'Whether an unmentioned reply in a thread is meant for Roomote, and whether it only closes the exchange.',
+      'Whether an unmentioned reply in a thread is meant for Roomote.',
     questions: {
       addressee: REPLY_ADDRESSEE_QUESTION,
-      closingAcknowledgement: REPLY_CLOSING_ACKNOWLEDGEMENT_QUESTION,
     },
     sampleState: {
       thread: {

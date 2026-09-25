@@ -7,10 +7,7 @@
  */
 
 import { evaluateTypeSafeJudgments } from '@roomote/cloud-agents/server/typesafe-judgment';
-import {
-  REPLY_ADDRESSEE_QUESTION,
-  REPLY_CLOSING_ACKNOWLEDGEMENT_QUESTION,
-} from '@roomote/cloud-agents/server/judgment-questions';
+import { REPLY_ADDRESSEE_QUESTION } from '@roomote/cloud-agents/server/judgment-questions';
 
 /**
  * One mention in a message's text, resolved by the provider so the judgment
@@ -220,14 +217,6 @@ const JUDGMENT_MAX_REPLY_LENGTH = 4_000;
  */
 const JUDGMENT_ROUTE_TO_ROOMOTE_MIN = 0.5;
 
-/**
- * A reply addressed to Roomote is dropped only when it is more likely than
- * not a bare closing acknowledgement ("ok thanks", "got it", an emoji), which
- * would otherwise spend a Fast turn on a reply nobody wants. Anything else
- * aimed at Roomote, including banter, routes. Starting value, not tuned.
- */
-const JUDGMENT_CLOSING_ACKNOWLEDGEMENT_MAX = 0.5;
-
 function truncateForJudgment(text: string, maxLength: number): string {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
@@ -354,17 +343,6 @@ function isUnitInterval(value: unknown): value is number {
   );
 }
 
-function isValidClosingAcknowledgementAnswer(
-  value: unknown,
-): value is { type: 'noul'; noul: number } {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-
-  const answer = value as Record<string, unknown>;
-  return answer.type === 'noul' && isUnitInterval(answer.noul);
-}
-
 function isValidAddresseeAnswer(value: unknown): value is {
   type: 'choice';
   choice: AddresseeChoice;
@@ -437,8 +415,8 @@ function likeliestAddressee(
 }
 
 /**
- * Asks the optional judgment model who an eligible unmentioned reply is for
- * and whether it is only a closing acknowledgement, in one request. A null result means
+ * Asks the optional judgment model who an eligible unmentioned reply is for.
+ * A null result means
  * the deployment has no judgment backend and preserves the existing heuristic
  * behavior. Once a backend is configured, transport, validation, and
  * uncertainty failures fail closed so human-to-human messages do not start an
@@ -453,7 +431,6 @@ async function judgeUnmentionedReplyAddressee(
       state: buildReplyAddresseeState(params),
       questions: {
         addressee: REPLY_ADDRESSEE_QUESTION,
-        closingAcknowledgement: REPLY_CLOSING_ACKNOWLEDGEMENT_QUESTION,
       },
     });
 
@@ -461,10 +438,7 @@ async function judgeUnmentionedReplyAddressee(
       return { kind: 'unconfigured' };
     }
 
-    if (
-      !isValidAddresseeAnswer(answers.addressee) ||
-      !isValidClosingAcknowledgementAnswer(answers.closingAcknowledgement)
-    ) {
+    if (!isValidAddresseeAnswer(answers.addressee)) {
       console.warn(
         '[UnmentionedThreadReply] Judgment model returned an invalid addressee answer, keeping the explicit-mention requirement',
       );
@@ -476,16 +450,14 @@ async function judgeUnmentionedReplyAddressee(
     const probabilities = normalizeProbabilities(
       answers.addressee.probabilities,
     );
-    const acknowledgement = answers.closingAcknowledgement.noul;
     const shouldRoute =
       likeliestAddressee(probabilities) === 'roomote' &&
-      probabilities.roomote > JUDGMENT_ROUTE_TO_ROOMOTE_MIN &&
-      acknowledgement < JUDGMENT_CLOSING_ACKNOWLEDGEMENT_MAX;
+      probabilities.roomote > JUDGMENT_ROUTE_TO_ROOMOTE_MIN;
 
     // Scores only, never message text, so operators can read the gate's
     // calibration off ordinary logs.
     console.info(
-      `[UnmentionedThreadReply] Judged reply ${params.eventMessageId}: addressee=${answers.addressee.choice} roomote=${probabilities.roomote.toFixed(2)} participant=${probabilities.participant.toFixed(2)} unclear=${probabilities.unclear.toFixed(2)} closingAck=${acknowledgement.toFixed(2)} route=${shouldRoute}`,
+      `[UnmentionedThreadReply] Judged reply ${params.eventMessageId}: addressee=${answers.addressee.choice} roomote=${probabilities.roomote.toFixed(2)} participant=${probabilities.participant.toFixed(2)} unclear=${probabilities.unclear.toFixed(2)} route=${shouldRoute}`,
     );
 
     return { kind: 'decision', shouldRoute };
@@ -524,10 +496,10 @@ function hasAnotherHumanInConversation(input: {
  * another human is part of the conversation, since a sender alone with
  * Roomote can be addressing nobody else. Explicit Roomote
  * mentions do not enter this helper and therefore cannot be vetoed here. A
- * configured model must find Roomote the likeliest addressee and the reply
- * more than a closing acknowledgement; an unconfigured model falls back to the
- * existing heuristic, while every configured failure, participant/unclear
- * answer, or bare acknowledgement stays silent.
+ * configured model must find Roomote the likeliest addressee; an unconfigured
+ * model falls back to the existing heuristic, while every configured failure
+ * or participant/unclear answer stays silent. Whether a routed reply deserves
+ * an answer (a bare "thanks") is left to Fast.
  */
 export async function resolveUnmentionedThreadReplyRouting(
   input: Parameters<typeof evaluateUnmentionedThreadReplyRouting>[0] & {
