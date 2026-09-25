@@ -183,7 +183,7 @@ describe('evaluateTypeSafeJudgments', () => {
       expect((init.signal as AbortSignal | undefined)?.aborted).toBe(false);
     });
 
-    it('does not ask the Roomote model for an unregistered decision', async () => {
+    it('does not ask the Roomote model for a decision not approved for it', async () => {
       mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
@@ -684,7 +684,7 @@ describe('evaluateTypeSafeJudgments', () => {
       ).resolves.toEqual(directAnswers);
     });
 
-    it('defaults an unregistered decision to Jev-only', async () => {
+    it('defaults a decision without a Roomote-model policy to Jev-only', async () => {
       mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
       mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: directAnswers });

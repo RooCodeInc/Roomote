@@ -1,3 +1,5 @@
+import type { JudgmentDecisionId } from './judgment-decision-catalog';
+
 /**
  * By default, only decisions explicitly listed here may use the
  * Roomote-trained model. Unknown and newly added decisions stay Jev-only until
@@ -14,7 +16,7 @@ const JUDGMENT_DECISION_POLICY: Record<string, { roomoteModel: boolean }> = {
   'agentmail-auto-reply': { roomoteModel: true },
 };
 
-export type JudgmentDecisionId = string;
+export type { JudgmentDecisionId } from './judgment-decision-catalog';
 
 export function getDecisionModelRequirements(decision?: JudgmentDecisionId): {
   excludeRoomoteModel: boolean;
