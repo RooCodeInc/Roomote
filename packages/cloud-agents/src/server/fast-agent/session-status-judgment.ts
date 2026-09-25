@@ -27,7 +27,7 @@ import {
 } from '@roomote/types';
 
 import {
-  evaluateTypeSafeJudgments,
+  evaluateDecisionModel,
   type TypeSafeChoiceQuestion,
 } from '../typesafe-judgment';
 
@@ -301,9 +301,10 @@ export async function processSessionStatusJudgmentBatch(
         continue;
       }
 
-      const answers = await evaluateTypeSafeJudgments({
+      const answers = await evaluateDecisionModel({
         state: snapshot.state,
         questions: { outcome: outcomeQuestion },
+        excludeRoomoteModel: true,
       });
       if (!answers) {
         await completeSessionStatusJudgment(db, {
