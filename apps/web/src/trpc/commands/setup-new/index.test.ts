@@ -1684,7 +1684,7 @@ describe('chooseSetupTrialInferenceCommand', () => {
     );
 
     expect(runtimeModelConfigInsert?.runtimeModelConfig).toMatchObject({
-      roomoteModel: 'roomote/openai/gpt-6-luna',
+      roomoteModel: 'roomote/openai/gpt-5.6-luna',
       roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
@@ -1693,7 +1693,7 @@ describe('chooseSetupTrialInferenceCommand', () => {
       roomotePlanningModel: null,
     });
     expect(taskModelSettingsInsert?.taskModelSettings).toMatchObject({
-      defaultModelId: 'roomote/openai/gpt-6-luna',
+      defaultModelId: 'roomote/openai/gpt-5.6-luna',
     });
   });
 
@@ -1708,7 +1708,7 @@ describe('chooseSetupTrialInferenceCommand', () => {
       gatewayModelsByLowerSlug: {},
     } as never);
     mockLookupModelMetadataFromCatalog.mockImplementation((_catalog, modelId) =>
-      modelId === 'roomote/openai/gpt-6-luna'
+      modelId === 'roomote/openai/gpt-5.6-luna'
         ? {
             metadata: {
               contextWindow: 400_000,
@@ -1733,7 +1733,7 @@ describe('chooseSetupTrialInferenceCommand', () => {
       (values) => 'taskModelSettings' in values,
     ) as { taskModelSettings?: { models?: Array<Record<string, unknown>> } };
     const luna = settingsInsert.taskModelSettings?.models?.find(
-      (model) => model.id === 'roomote/openai/gpt-6-luna',
+      (model) => model.id === 'roomote/openai/gpt-5.6-luna',
     );
     expect(luna?.metadata).toMatchObject({
       contextWindow: 400_000,
