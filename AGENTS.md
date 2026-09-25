@@ -33,8 +33,9 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 
 ## Validation
 
-- `pnpm test` — Vitest across all workspaces
+- Default to targeted test files or the narrowest package-scoped test command that covers the change.
 - Targeted tests: `pnpm exec dotenvx run -f .env.test -- pnpm --filter <package> exec vitest run path/to/file.test.ts`
+- `pnpm test` — Full repository Vitest suite; it is very slow, so run it rarely and only when a concrete reason requires full-suite coverage.
 - If `pnpm` is missing or resolves to the wrong version, run `mise install` and retry the command with `mise exec --`
 - `pnpm lint:fast && pnpm check-types:fast && pnpm knip` — Normal broad validation; matches the full pre-push suite (pre-push runs the same gates in parallel after oxlint)
 - `pnpm lint && pnpm check-types` — Full static analysis when explicitly requested

@@ -17,12 +17,14 @@ Use package-scoped validation by default.
 - Use `pnpm check` only when you intentionally want the full repo gate.
 - Use `pnpm lint:fast`, `pnpm check-types:fast`, and `pnpm knip` when you want to match the pre-push hook.
 - Use `pnpm lint` and `pnpm check-types` when you explicitly want formatting-inclusive full static validation. In this repo, `pnpm lint` includes `pnpm format:check` before the Turbo lint run.
-- Use package-scoped Vitest for targeted runs.
+- Default to targeted test files or the narrowest package-scoped test command that covers the change.
 Preferred targeted pattern:
 
 ```bash
 pnpm exec dotenvx run -f .env.test -- pnpm --filter <package> exec vitest run path/to/file.test.ts
 ```
+
+- Run the full repository test suite (`pnpm test`) only when a concrete reason requires full-suite coverage; it is very slow and should be rare.
 
 If `pnpm` is unavailable in PATH:
 
