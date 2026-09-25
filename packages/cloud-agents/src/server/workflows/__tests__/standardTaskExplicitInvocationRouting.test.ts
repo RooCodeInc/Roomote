@@ -294,14 +294,12 @@ describe('Standard Task explicit invocation routing', () => {
   it('keeps repo-local skill invocations inside the request wrapper', () => {
     const { prompt, harnessInstructions } = standardTask({
       description:
-        '$roomote-testing-validation\n\n<task_context><target>validation</target></task_context>',
+        '$roomote-agent-product\n\n<task_context><target>validation</target></task_context>',
       repo: 'Roomote/example-app',
       requestFormat: 'structured',
     });
 
-    expect(prompt.startsWith('<request>$roomote-testing-validation')).toBe(
-      true,
-    );
+    expect(prompt.startsWith('<request>$roomote-agent-product')).toBe(true);
     expect(harnessInstructions).toContain(
       'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through natural-language first-hop routing.',
     );

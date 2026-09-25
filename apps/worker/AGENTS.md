@@ -17,6 +17,12 @@ the place for general Roomote app-server internals or product business logic.
 - Treat nested sandbox behavior as a first-class constraint when touching env
   propagation, auth material, and preview wiring.
 - Add a worker-safe export when a shared helper is genuinely needed.
+- For changes in `src/sandbox-server`, ACP envelope handling, or harness event
+  rendering, start with the smallest targeted automated coverage in
+  `@roomote/worker`.
+- For manual payload inspection, use the real caller under test or a temporary
+  local-only probe instead of relying on a committed helper that no longer
+  exists.
 
 ## Don'ts
 
