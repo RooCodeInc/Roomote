@@ -32,6 +32,16 @@
       "import": "./src/server/typesafe-judgment.ts",
       "require": "./src/server/typesafe-judgment.ts"
     },
+    "./server/judgment-questions": {
+      "types": "./src/server/judgment-questions.ts",
+      "import": "./src/server/judgment-questions.ts",
+      "require": "./src/server/judgment-questions.ts"
+    },
+    "./server/judgment-decision-catalog": {
+      "types": "./src/server/judgment-decision-catalog.ts",
+      "import": "./src/server/judgment-decision-catalog.ts",
+      "require": "./src/server/judgment-decision-catalog.ts"
+    },
     "./show-widget": {
       "types": "./src/server/show-widget.ts",
       "import": "./src/server/show-widget.ts",

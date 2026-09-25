@@ -1,5 +1,5 @@
 {
-  "id": "9ed88b3f-ff75-4c20-842f-53ef6bc7ed13",
+  "id": "87c4d53d-253a-421e-af2a-5cbaa9a7e959",
   "prevId": "d6b55826-64c3-4dd3-85e0-b7a4e41ef8e9",
   "version": "7",
   "dialect": "postgresql",
@@ -1296,6 +1296,24 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "launch_criteria_snapshot": {
+          "name": "launch_criteria_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "launch_criteria_answers": {
+          "name": "launch_criteria_answers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "launch_criteria_outcome": {
+          "name": "launch_criteria_outcome",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "result_kind": {
           "name": "result_kind",
@@ -2942,6 +2960,18 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "launch_criteria": {
+          "name": "launch_criteria",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "run_when": {
+          "name": "run_when",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "result_priority": {
           "name": "result_priority",
@@ -12972,242 +13002,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.session_status_judgments": {
-      "name": "session_status_judgments",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_event_id": {
-          "name": "source_event_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "generation": {
-          "name": "generation",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_kind": {
-          "name": "source_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "confidence": {
-          "name": "confidence",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "probabilities": {
-          "name": "probabilities",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "claimed_at": {
-          "name": "claimed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "settled_at": {
-          "name": "settled_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "judged_at": {
-          "name": "judged_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error_code": {
-          "name": "error_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "session_status_judgments_session_event_unique": {
-          "name": "session_status_judgments_session_event_unique",
-          "columns": [
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "source_event_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "session_status_judgments_session_generation_unique": {
-          "name": "session_status_judgments_session_generation_unique",
-          "columns": [
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "generation",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "session_status_judgments_pending_idx": {
-          "name": "session_status_judgments_pending_idx",
-          "columns": [
-            {
-              "expression": "state",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "session_status_judgments_session_generation_idx": {
-          "name": "session_status_judgments_session_generation_idx",
-          "columns": [
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "generation",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "session_status_judgments_session_id_sessions_id_fk": {
-          "name": "session_status_judgments_session_id_sessions_id_fk",
-          "tableFrom": "session_status_judgments",
-          "tableTo": "sessions",
-          "columnsFrom": ["session_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "session_status_judgments_source_kind_check": {
-          "name": "session_status_judgments_source_kind_check",
-          "value": "\"session_status_judgments\".\"source_kind\" in ('fast_turn', 'task_terminal')"
-        },
-        "session_status_judgments_state_check": {
-          "name": "session_status_judgments_state_check",
-          "value": "\"session_status_judgments\".\"state\" in ('awaiting_settlement', 'pending', 'processing', 'applied', 'ignored', 'failed', 'stale')"
-        },
-        "session_status_judgments_outcome_check": {
-          "name": "session_status_judgments_outcome_check",
-          "value": "\"session_status_judgments\".\"outcome\" IS NULL OR \"session_status_judgments\".\"outcome\" in ('open', 'done', 'blocked', 'needs_input', 'unclear')"
-        },
-        "session_status_judgments_confidence_check": {
-          "name": "session_status_judgments_confidence_check",
-          "value": "\"session_status_judgments\".\"confidence\" IS NULL OR (\"session_status_judgments\".\"confidence\" >= 0 AND \"session_status_judgments\".\"confidence\" <= 1)"
-        },
-        "session_status_judgments_attempts_check": {
-          "name": "session_status_judgments_attempts_check",
-          "value": "\"session_status_judgments\".\"attempts\" >= 0"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.session_tasks": {

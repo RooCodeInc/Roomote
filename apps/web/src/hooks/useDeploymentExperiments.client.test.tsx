@@ -65,6 +65,9 @@ vi.mock('@/trpc/client', () => ({
       dizzyEnabled: {
         queryKey: () => ['dizzy-enabled'],
       },
+      integrationToolAutoApprovalsEnabled: {
+        queryKey: () => ['integration-tool-auto-approvals-enabled'],
+      },
       set: {
         mutationOptions: (options: unknown) => {
           mocks.mutationRoute = 'internal-nightly';
@@ -145,6 +148,27 @@ describe('useDeploymentExperiments', () => {
     });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ['dizzy-enabled'],
+    });
+  });
+
+  it('refreshes Auto runtime consumers after changing its nightly experiment', async () => {
+    renderHook(() =>
+      useDeploymentExperiments('Save failed', 'internal-nightly'),
+    );
+
+    await mutationOptions.onSettled!(
+      undefined as never,
+      undefined as never,
+      { id: 'integrationToolAutoApprovals', enabled: true } as never,
+      undefined as never,
+      undefined as never,
+    );
+
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['nightly-experiments'],
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['integration-tool-auto-approvals-enabled'],
     });
   });
 

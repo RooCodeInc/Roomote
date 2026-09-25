@@ -18,6 +18,7 @@ import {
   NO_REPOSITORIES,
   AUTOMATION_RESULT_PRIORITY_LABELS,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   type AutomationResultPriority,
   type CustomAutomationScheduleMode,
@@ -81,6 +82,7 @@ type ConnectedDestinationProvider = Exclude<
 type CustomAutomationFormState = {
   name: string;
   prompt: string;
+  launchCriteria: string;
   enabled: boolean;
   resultPriority: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
@@ -101,6 +103,7 @@ type CustomAutomationFieldErrors = Partial<
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
   prompt: '',
+  launchCriteria: '',
   enabled: true,
   resultPriority: 'normal',
   scheduleMode: 'daily',
@@ -312,6 +315,7 @@ function formFromRow(
   return {
     name: row.name,
     prompt: row.prompt,
+    launchCriteria: row.launchCriteria ?? '',
     enabled: row.enabled,
     resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
@@ -325,12 +329,18 @@ function formFromRow(
   };
 }
 
-function writeInputFromRow(row: CustomAutomationListItem) {
+function writeInputFromRow(
+  row: CustomAutomationListItem,
+  includeLaunchCriteria: boolean,
+) {
   const target = targetFromRow(row);
 
   return {
     name: row.name,
     prompt: row.prompt,
+    ...(includeLaunchCriteria
+      ? { launchCriteria: row.launchCriteria ?? '' }
+      : {}),
     enabled: row.enabled,
     resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
@@ -453,6 +463,8 @@ export function CustomAutomationsSection({
   const optionsQuery = useQuery(
     trpc.automations.getCustomAutomationOptions.queryOptions(),
   );
+  const automationLaunchCriteriaEnabled =
+    optionsQuery.data?.launchCriteriaEnabled === true;
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -902,6 +914,9 @@ export function CustomAutomationsSection({
     const payload = {
       name: form.name,
       prompt: form.prompt,
+      ...(automationLaunchCriteriaEnabled
+        ? { launchCriteria: form.launchCriteria.trim() || null }
+        : {}),
       enabled: form.enabled,
       resultPriority: form.resultPriority,
       scheduleMode: form.scheduleMode,
@@ -1007,6 +1022,32 @@ export function CustomAutomationsSection({
             </p>
           ) : null}
         </div>
+
+        {automationLaunchCriteriaEnabled ? (
+          <div className="space-y-2">
+            <Label htmlFor="custom-automation-launch-criteria">
+              Launch criteria (optional)
+            </Label>
+            <Textarea
+              id="custom-automation-launch-criteria"
+              value={form.launchCriteria}
+              maxLength={CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH}
+              disabled={busy}
+              rows={3}
+              onChange={(event) => {
+                const launchCriteria = event.target.value;
+                setForm((current) => ({ ...current, launchCriteria }));
+              }}
+              placeholder="Only investigate newly regressed issues affecting active users."
+            />
+            <p className="text-sm text-muted-foreground">
+              Before work starts, the session checks these criteria against
+              fresh findings and recent runs. When the evidence does not meet
+              them, the run ends quietly without a destination reply or
+              delegated task.
+            </p>
+          </div>
+        ) : null}
 
         <div className="space-y-2">
           <Label htmlFor="custom-automation-schedule">Schedule</Label>
@@ -1472,7 +1513,10 @@ export function CustomAutomationsSection({
 
                             toggleMutation.mutate({
                               id: row.id,
-                              ...writeInputFromRow(row),
+                              ...writeInputFromRow(
+                                row,
+                                automationLaunchCriteriaEnabled,
+                              ),
                               enabled,
                             });
                           }}

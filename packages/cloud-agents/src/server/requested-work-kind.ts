@@ -68,7 +68,7 @@ const REQUESTED_WORK_KIND_TIMEOUT_MS = 5_000;
  */
 const JUDGMENT_MIN_CONFIDENCE = 0.5;
 
-const REQUESTED_WORK_KIND_QUESTION: TypeSafeChoiceQuestion<RequestedWorkKind> =
+export const REQUESTED_WORK_KIND_QUESTION: TypeSafeChoiceQuestion<RequestedWorkKind> =
   {
     type: 'choice',
     instructions:

@@ -155,7 +155,11 @@ describe('deployment experiment commands', () => {
 
     await expect(
       getNightlyExperimentsCommand(auth(admin.id, true, true)),
-    ).resolves.toEqual({ dizzy: false });
+    ).resolves.toEqual({
+      integrationToolAutoApprovals: false,
+      dizzy: false,
+      automationLaunchCriteria: false,
+    });
     await expect(
       getDeploymentExperimentsCommand(auth(admin.id, true, true)),
     ).resolves.toHaveProperty('privateSessions');
@@ -163,6 +167,30 @@ describe('deployment experiment commands', () => {
       setNightlyExperimentCommand(auth(admin.id, true, true), {
         id: 'privateSessions',
         enabled: true,
+      }),
+    ).rejects.toThrow('Unauthorized');
+  });
+
+  it('keeps launch criteria on the Nightly control path and out of customer previews', async () => {
+    const admin = await userFactory.create({ role: 'admin' });
+    const internalAuth = auth(admin.id, true, true);
+
+    await expect(
+      setNightlyExperimentCommand(internalAuth, {
+        id: 'automationLaunchCriteria',
+        enabled: true,
+      }),
+    ).resolves.toMatchObject({ automationLaunchCriteria: true });
+    await expect(
+      getNightlyExperimentsCommand(internalAuth),
+    ).resolves.toMatchObject({ automationLaunchCriteria: true });
+    await expect(
+      getDeploymentExperimentsCommand(internalAuth),
+    ).resolves.not.toHaveProperty('automationLaunchCriteria');
+    await expect(
+      setDeploymentExperimentCommand(internalAuth, {
+        id: 'automationLaunchCriteria',
+        enabled: false,
       }),
     ).rejects.toThrow('Unauthorized');
   });
