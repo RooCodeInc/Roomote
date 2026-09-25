@@ -253,6 +253,18 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
 
 export type TaskModelRole = keyof typeof TASK_MODEL_ROLE_DESCRIPTORS;
 
+/** User-facing names for role lists in validation and other compact messages. */
+export const TASK_MODEL_ROLE_DISPLAY_NAMES = {
+  coding: 'coding',
+  orchestration: 'orchestration',
+  helper: 'helper',
+  vision: 'vision',
+  codeReview: 'code review',
+  explore: 'explore',
+  // `planning` remains the persisted/configuration key for the Advisor role.
+  planning: 'advisor',
+} as const satisfies Record<TaskModelRole, string>;
+
 export type UserTaskModelMappingRole = {
   modelId: string;
   reasoningEffort: ReasoningEffort | null;
@@ -1356,6 +1368,20 @@ export function buildTaskModelRoleOverrideEnv(
 
 const DEFAULT_RECOMMENDED_PRESET_ID = 'default';
 
+function cloneRecommendedModelPreset(
+  preset: RecommendedModelPreset,
+): RecommendedModelPreset {
+  return {
+    ...preset,
+    roles: Object.fromEntries(
+      Object.entries(preset.roles).map(([role, config]) => [
+        role,
+        config ? { ...config } : config,
+      ]),
+    ) as RecommendedModelPreset['roles'],
+  };
+}
+
 export function getRecommendedModelPresets(
   provider: Pick<
     SetupModelProviderDescriptor,
@@ -1366,7 +1392,9 @@ export function getRecommendedModelPresets(
   >,
 ): readonly RecommendedModelPreset[] {
   if (provider.recommendedPresets?.length) {
-    return provider.recommendedPresets;
+    // Provider descriptors are shared catalog data. Return independent role
+    // objects so a caller cannot mutate every provider's recommendation.
+    return provider.recommendedPresets.map(cloneRecommendedModelPreset);
   }
 
   const roleModels = provider.recommendedRoleModels ?? {};

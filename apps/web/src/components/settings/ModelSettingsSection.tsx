@@ -2045,12 +2045,14 @@ export function ModelSettingsSection({
         const model = mappingModelOptionsByRole[role].find(
           (option) => option.id === modelId,
         );
-        const reasoningEffort =
-          model?.metadata?.supportsReasoning === false
-            ? null
-            : (currentRoles[role].reasoningEffort ??
-              status?.reasoningEffort ??
-              DEFAULT_MODEL_ROLE_REASONING_EFFORTS[role]);
+        const requestedReasoningEffort =
+          currentRoles[role].reasoningEffort ??
+          status?.reasoningEffort ??
+          DEFAULT_MODEL_ROLE_REASONING_EFFORTS[role];
+        const reasoningEffort = normalizeReasoningEffortForModel(
+          requestedReasoningEffort,
+          model?.metadata,
+        );
 
         return [role, { modelId: modelId ?? '', reasoningEffort }];
       }),

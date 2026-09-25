@@ -1756,6 +1756,44 @@ describe('ModelSettingsSection', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('normalizes the initial custom-preset reasoning to the selected model', async () => {
+    const data = buildSettingsData();
+    const codingMetadata = data.models[0]!.metadata as TaskModelMetadata;
+    codingMetadata.supportsReasoning = true;
+    codingMetadata.supportedReasoningEfforts = ['low'];
+    settingsData.current = data;
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Add your own' }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    const advisorPicker = within(dialog).getByRole('button', {
+      name: 'Advisor model and reasoning',
+    });
+    expect(advisorPicker).toHaveTextContent(/GPT 5\.4\s*Low/u);
+
+    fireEvent.change(
+      within(dialog).getByPlaceholderText('Something easy to recognize'),
+      { target: { value: 'Low reasoning mapping' } },
+    );
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Create preset' }),
+    );
+
+    await waitFor(() => {
+      expect(createCustomPresetMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    const createInput = createCustomPresetMutateAsyncMock.mock.calls[0]![0] as {
+      roles: UserTaskModelMapping;
+    };
+    expect(createInput.roles.planning.reasoningEffort).toBe('low');
+  });
+
   it('keeps an unavailable current model visible and requires a replacement', async () => {
     settingsData.current = buildSettingsData({
       helperPersistedModelId: 'openrouter/removed-model',
