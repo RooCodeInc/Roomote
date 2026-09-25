@@ -84,6 +84,7 @@ describe('metadata descriptions', () => {
       'internal-nightly',
     );
     expect(getDeploymentExperimentIdsForAudience('internal-nightly')).toEqual([
+      'integrationToolAutoApprovals',
       'dizzy',
       'automationLaunchCriteria',
     ]);

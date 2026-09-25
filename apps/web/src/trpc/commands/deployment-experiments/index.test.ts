@@ -114,7 +114,11 @@ describe('deployment experiment commands', () => {
 
     await expect(
       getNightlyExperimentsCommand(auth(admin.id, true, true)),
-    ).resolves.toEqual({ dizzy: false, automationLaunchCriteria: false });
+    ).resolves.toEqual({
+      integrationToolAutoApprovals: false,
+      dizzy: false,
+      automationLaunchCriteria: false,
+    });
     await expect(
       getDeploymentExperimentsCommand(auth(admin.id, true, true)),
     ).resolves.toHaveProperty('privateSessions');

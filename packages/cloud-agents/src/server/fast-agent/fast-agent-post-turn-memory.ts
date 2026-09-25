@@ -40,7 +40,7 @@ const REPLY_MAX_CHARS = 6_000;
 const SAVED_MEMORY_MAX_CHARS = 6_000;
 const MAX_MEMORIES_PER_TURN = 3;
 
-const MEMORY_GATE_QUESTIONS = {
+export const MEMORY_GATE_QUESTIONS = {
   statedDurable: {
     type: 'noul',
     instructions:

@@ -197,7 +197,7 @@ class DesktopWorkspacePanels extends Component<
     this.cancelAnimation();
     // Keep the registered array stable until the library finishes its drag/key
     // resize. Removing an exit earlier invalidates its captured initial layout.
-    if (this.interacting) return;
+    if (this.interacting) return false;
     if (
       this.state.panels.some(
         ({ id }) => !this.props.panels.some((panel) => panel.id === id),
@@ -215,7 +215,9 @@ class DesktopWorkspacePanels extends Component<
           this.props.panels.some((panel) => panel.id === id),
         ),
       });
+      return true;
     }
+    return false;
   };
 
   handleViewportResize = () => {
@@ -261,22 +263,29 @@ class DesktopWorkspacePanels extends Component<
     previousState: DesktopPanelsState,
     widths: Map<string, number>,
   ) {
-    const changed =
-      JSON.stringify(previous.panels.map(({ id }) => id)) !==
-      JSON.stringify(this.props.panels.map(({ id }) => id));
-    if (previous.layoutWidth !== this.props.layoutWidth) this.finishAnimation();
+    const ids = this.props.panels.map(({ id }) => id);
     if (
-      changed ||
-      previous.mainMinSize !== this.props.mainMinSize ||
-      previous.panelMinSize !== this.props.panelMinSize
+      JSON.stringify(previous.panels.map(({ id }) => id)) !==
+      JSON.stringify(ids)
     ) {
-      // Register the new set before changing constraints: v2 otherwise resizes
-      // against a partially registered array and can throw on a stale index.
-      if (changed) {
-        this.pendingWidths = widths;
-        this.animatePendingChange =
-          previous.layoutWidth === this.props.layoutWidth;
-      }
+      this.pendingWidths = widths;
+      this.animatePendingChange =
+        previous.layoutWidth === this.props.layoutWidth;
+    }
+    // Commit a removal on its own before changing constraints: v2 resizes a
+    // panel whose minimum grows against the layout captured before the panel
+    // unregistered, and throws on the stale index. A narrower window both drops
+    // panels and raises their pixel-derived minimum sizes.
+    if (
+      previous.layoutWidth !== this.props.layoutWidth &&
+      this.finishAnimation()
+    )
+      return;
+    if (
+      JSON.stringify(this.state.activeIds) !== JSON.stringify(ids) ||
+      this.state.mainMinSize !== this.props.mainMinSize ||
+      this.state.panelMinSize !== this.props.panelMinSize
+    ) {
       this.setState({
         activeIds: this.props.panels.map(({ id }) => id),
         mainMinSize: this.props.mainMinSize,
