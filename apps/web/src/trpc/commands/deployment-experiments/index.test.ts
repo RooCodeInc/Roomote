@@ -82,6 +82,47 @@ describe('deployment experiment commands', () => {
     });
   });
 
+  it('makes the Sessions board deployment-wide while keeping both switches admin-only', async () => {
+    const [admin, member] = await Promise.all([
+      userFactory.create({ role: 'admin' }),
+      userFactory.create({ role: 'member' }),
+    ]);
+
+    await expect(
+      setDeploymentExperimentCommand(auth(member.id, false), {
+        id: 'sessionsBoard',
+        enabled: true,
+      }),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      setDeploymentExperimentCommand(auth(admin.id, true), {
+        id: 'sessionStatusJudgment',
+        enabled: true,
+      }),
+    ).resolves.toMatchObject({ sessionStatusJudgment: true });
+    await expect(
+      setDeploymentExperimentCommand(auth(admin.id, true), {
+        id: 'sessionsBoard',
+        enabled: true,
+      }),
+    ).resolves.toMatchObject({ sessionsBoard: true });
+    await expect(
+      getDeploymentExperimentsCommand(auth(member.id, false)),
+    ).resolves.toMatchObject({
+      sessionStatusJudgment: true,
+      sessionsBoard: true,
+    });
+
+    await setDeploymentExperimentCommand(auth(admin.id, true), {
+      id: 'sessionStatusJudgment',
+      enabled: false,
+    });
+    await setDeploymentExperimentCommand(auth(admin.id, true), {
+      id: 'sessionsBoard',
+      enabled: false,
+    });
+  });
+
   it('blocks customer admins and members from nightly data and mutations', async () => {
     const [admin, member] = await Promise.all([
       userFactory.create({ role: 'admin' }),

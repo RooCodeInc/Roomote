@@ -1,6 +1,6 @@
 {
-  "id": "c83c7ec1-11b2-4ab9-8be9-163032a48ef4",
-  "prevId": "87c4d53d-253a-421e-af2a-5cbaa9a7e959",
+  "id": "6ad8e4f0-fccf-44be-9cfb-7881f718fd7a",
+  "prevId": "c83c7ec1-11b2-4ab9-8be9-163032a48ef4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2960,6 +2960,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "webhook_secret": {
+          "name": "webhook_secret",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "launch_criteria": {
           "name": "launch_criteria",
