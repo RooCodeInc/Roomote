@@ -4,8 +4,8 @@ import type { UserAuthSuccess } from '@/types';
 
 import {
   getDeploymentExperimentsCommand,
-  getDizzyExperimentEnabledCommand,
   getNightlyExperimentsCommand,
+  getNightlyExperimentRuntimeCommand,
   setDeploymentExperimentCommand,
   setNightlyExperimentCommand,
 } from './index';
@@ -202,10 +202,14 @@ describe('deployment experiment commands', () => {
     ]);
 
     await expect(
-      getDizzyExperimentEnabledCommand(auth(member.id, false, false)),
+      getNightlyExperimentRuntimeCommand(auth(member.id, false, false), {
+        id: 'dizzy',
+      }),
     ).rejects.toThrow('Unauthorized');
     await expect(
-      getDizzyExperimentEnabledCommand(auth(member.id, false, true)),
+      getNightlyExperimentRuntimeCommand(auth(member.id, false, true), {
+        id: 'dizzy',
+      }),
     ).resolves.toBe(false);
 
     await setNightlyExperimentCommand(auth(admin.id, true, true), {
@@ -214,8 +218,15 @@ describe('deployment experiment commands', () => {
     });
 
     await expect(
-      getDizzyExperimentEnabledCommand(auth(member.id, false, true)),
+      getNightlyExperimentRuntimeCommand(auth(member.id, false, true), {
+        id: 'dizzy',
+      }),
     ).resolves.toBe(true);
+    await expect(
+      getNightlyExperimentRuntimeCommand(auth(member.id, false, true), {
+        id: 'automationLaunchCriteria',
+      }),
+    ).rejects.toThrow('Unauthorized');
     await expect(
       getNightlyExperimentsCommand(auth(member.id, false, true)),
     ).rejects.toThrow('Unauthorized');

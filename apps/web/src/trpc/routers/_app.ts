@@ -230,10 +230,9 @@ import {
   updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
-  getDizzyExperimentEnabledCommand,
   getDeploymentExperimentsCommand,
-  getIntegrationToolAutoApprovalsEnabledCommand,
   getNightlyExperimentsCommand,
+  getNightlyExperimentRuntimeCommand,
   setDeploymentExperimentCommand,
   setNightlyExperimentCommand,
 } from '../commands/deployment-experiments';
@@ -3711,13 +3710,15 @@ export const appRouter = createRouter({
   }),
 
   nightlyExperiments: createRouter({
-    dizzyEnabled: protectedProcedure.query(({ ctx: { auth } }) =>
-      getDizzyExperimentEnabledCommand(auth),
-    ),
-    integrationToolAutoApprovalsEnabled: protectedProcedure.query(
-      ({ ctx: { auth } }) =>
-        getIntegrationToolAutoApprovalsEnabledCommand(auth),
-    ),
+    runtime: protectedProcedure
+      .input(
+        z.object({
+          id: z.enum(DEPLOYMENT_EXPERIMENT_IDS),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getNightlyExperimentRuntimeCommand(auth, input),
+      ),
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getNightlyExperimentsCommand(auth),
     ),

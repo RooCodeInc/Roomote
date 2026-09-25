@@ -26,11 +26,13 @@ describe('nightly experiment API access', () => {
         enabled: true,
       }),
     ).rejects.toThrow('Unauthorized');
-    await expect(caller.nightlyExperiments.dizzyEnabled()).rejects.toThrow(
-      'Unauthorized',
-    );
     await expect(
-      caller.nightlyExperiments.integrationToolAutoApprovalsEnabled(),
+      caller.nightlyExperiments.runtime({ id: 'dizzy' }),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      caller.nightlyExperiments.runtime({
+        id: 'integrationToolAutoApprovals',
+      }),
     ).rejects.toThrow('Unauthorized');
   });
 
