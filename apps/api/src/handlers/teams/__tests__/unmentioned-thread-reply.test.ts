@@ -154,7 +154,6 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         confidence: 0.94,
         probabilities: { roomote: 0.94, participant: 0.03, unclear: 0.03 },
       },
-      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanGraphMessage({
@@ -185,7 +184,6 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         confidence: 0.93,
         probabilities: { roomote: 0.02, participant: 0.93, unclear: 0.05 },
       },
-      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanGraphMessage({
@@ -295,7 +293,6 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         confidence: 0.95,
         probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
       },
-      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanGraphMessage({

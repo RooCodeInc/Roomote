@@ -82,6 +82,21 @@ export default async function SessionsPage({
     }),
     getSessionSources(authorizedUser),
   ]);
+  const boardColumns =
+    view === 'board'
+      ? SESSION_BOARD_COLUMNS.map((column) => ({
+          column,
+          sessions: result.sessions.filter(
+            (session) =>
+              getSessionBoardColumn({
+                cachedStatus: session.cachedStatus ?? null,
+                judgmentStatus: experiments.sessionStatusJudgment
+                  ? session.judgedStatus
+                  : null,
+              }) === column,
+          ),
+        })).filter(({ sessions }) => sessions.length > 0)
+      : [];
   const olderParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value && key !== 'before' && key !== 'view')
@@ -116,24 +131,15 @@ export default async function SessionsPage({
             </EmptyHeader>
           </Empty>
         ) : view === 'board' ? (
-          <div className="grid min-w-0 grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-            {SESSION_BOARD_COLUMNS.map((column) => {
-              const columnSessions = result.sessions.filter(
-                (session) =>
-                  getSessionBoardColumn({
-                    cachedStatus: session.cachedStatus ?? null,
-                    judgmentStatus: experiments.sessionStatusJudgment
-                      ? session.judgedStatus
-                      : null,
-                  }) === column,
-              );
+          <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))] gap-3 p-4">
+            {boardColumns.map(({ column, sessions: columnSessions }) => {
               return (
                 <section
                   key={column}
                   aria-labelledby={`session-board-${column}`}
                   className="min-w-0"
                 >
-                  <header className="mb-2 flex items-center justify-between gap-2">
+                  <header className="mb-2 flex cursor-default items-center justify-between gap-2">
                     <h2
                       id={`session-board-${column}`}
                       className="text-sm font-medium capitalize"
@@ -145,20 +151,15 @@ export default async function SessionsPage({
                     </span>
                   </header>
                   <div className="divide-y-2 divide-background bg-card">
-                    {columnSessions.length > 0 ? (
-                      columnSessions.map((session) => (
-                        <SessionCard
-                          key={session.id}
-                          session={session}
-                          viewerUserId={authorizedUser.userId}
-                          query={q}
-                        />
-                      ))
-                    ) : (
-                      <p className="p-4 text-xs text-muted-foreground/70">
-                        Empty
-                      </p>
-                    )}
+                    {columnSessions.map((session) => (
+                      <SessionCard
+                        key={session.id}
+                        session={session}
+                        viewerUserId={authorizedUser.userId}
+                        query={q}
+                        hideBlockedBadge
+                      />
+                    ))}
                   </div>
                 </section>
               );

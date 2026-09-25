@@ -7,6 +7,7 @@ import {
 } from '@roomote/db/server';
 import {
   TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLE_DISPLAY_NAMES,
   TASK_MODEL_ROLES,
   normalizeTaskModelId,
   userTaskModelMappingPresetCreateSchema,
@@ -128,7 +129,7 @@ export async function createUserTaskModelMappingPresetCommand(
 
   if (unavailableRoles.length > 0) {
     throw new Error(
-      `Choose a currently available model for every role. Unavailable: ${unavailableRoles.join(', ')}.`,
+      `Choose a currently available model for every role. Unavailable: ${unavailableRoles.map((role) => TASK_MODEL_ROLE_DISPLAY_NAMES[role]).join(', ')}.`,
     );
   }
 
@@ -158,7 +159,7 @@ export async function createUserTaskModelMappingPresetCommand(
 
   if (invalidReasoningRoles.length > 0) {
     throw new Error(
-      `Choose a reasoning level supported by each selected model. Invalid: ${invalidReasoningRoles.join(', ')}.`,
+      `Choose a reasoning level supported by each selected model. Invalid: ${invalidReasoningRoles.map((role) => TASK_MODEL_ROLE_DISPLAY_NAMES[role]).join(', ')}.`,
     );
   }
 

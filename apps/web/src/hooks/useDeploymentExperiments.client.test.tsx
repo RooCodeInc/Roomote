@@ -145,27 +145,6 @@ describe('useDeploymentExperiments', () => {
     expect(mocks.mutationRoute).toBe('internal-nightly');
   });
 
-  it('refreshes the runtime logo flag after changing Dizzy', async () => {
-    renderHook(() =>
-      useDeploymentExperiments('Save failed', 'internal-nightly'),
-    );
-
-    await mutationOptions.onSettled!(
-      undefined as never,
-      undefined as never,
-      { id: 'dizzy', enabled: true } as never,
-      undefined as never,
-      undefined as never,
-    );
-
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ['nightly-experiments'],
-    });
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ['nightly-experiment-runtime', 'dizzy'],
-    });
-  });
-
   it('refreshes Auto runtime consumers after changing its nightly experiment', async () => {
     renderHook(() =>
       useDeploymentExperiments('Save failed', 'internal-nightly'),
@@ -206,7 +185,7 @@ describe('useDeploymentExperiments', () => {
     });
   });
 
-  it.each(['dizzy', 'integrationToolAutoApprovals'] as const)(
+  it.each(['integrationToolAutoApprovals'] as const)(
     'reads the shared nightly runtime resource for %s',
     (id) => {
       queryState.nightlyExperimentsEnabled = true;

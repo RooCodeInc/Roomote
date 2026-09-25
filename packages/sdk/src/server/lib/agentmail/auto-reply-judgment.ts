@@ -62,6 +62,7 @@ export async function judgeAgentMailAutoReply(
 
   try {
     const answers = await evaluateTypeSafeJudgments({
+      decision: 'agentmail-auto-reply',
       state: {
         email: {
           ...(from ? { from } : {}),

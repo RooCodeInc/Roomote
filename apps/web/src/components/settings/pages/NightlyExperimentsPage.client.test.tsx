@@ -91,13 +91,7 @@ describe('NightlyExperimentsPage', () => {
         "Internal experiment switches. You really shouldn't mess with these.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText('Dizzy')).toBeInTheDocument();
     expect(screen.getByText('Auto tool approvals setting')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Continuously spin the Roomote logo mark in the collapsed sidebar and mobile header.',
-      ),
-    ).toBeInTheDocument();
     expect(
       screen.getByRole('switch', {
         name: 'Toggle custom automation launch criteria',
@@ -123,6 +117,5 @@ describe('NightlyExperimentsPage', () => {
       screen.getByText('Failed to load nightly experiments.'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
-    expect(screen.queryByText('Dizzy')).not.toBeInTheDocument();
   });
 });

@@ -7,7 +7,6 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
   'sessionTaskCommunicationTriage',
   'sessionStatusJudgment',
   'sessionsBoard',
-  'dizzy',
   'automationLaunchCriteria',
 ] as const;
 
@@ -58,11 +57,6 @@ export const DEPLOYMENT_EXPERIMENT_CONFIG = {
     audience: 'internal-nightly',
     // A new key deliberately leaves former customer-preview opt-ins dormant.
     metadataKey: 'integration_tool_auto_approvals_nightly_experiment_enabled',
-    runtimeReadable: true,
-  },
-  dizzy: {
-    audience: 'internal-nightly',
-    metadataKey: 'dizzy_experiment_enabled',
     runtimeReadable: true,
   },
   automationLaunchCriteria: {

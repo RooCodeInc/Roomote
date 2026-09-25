@@ -61,8 +61,8 @@ type SessionCardData = {
   canManage?: boolean;
 };
 
-export function formatSessionMobileTimestamp(date: Date, now = new Date()) {
-  if (isSameDay(date, now)) return format(date, 'hh:mm b');
+export function formatSessionCompactTimestamp(date: Date, now = new Date()) {
+  if (isSameDay(date, now)) return format(date, 'HH:mm');
   if (isSameYear(date, now)) return format(date, 'LLL d');
   return format(date, 'LLL d Y', { useAdditionalWeekYearTokens: true });
 }
@@ -71,10 +71,12 @@ export function SessionCard({
   session,
   viewerUserId,
   query = '',
+  hideBlockedBadge = false,
 }: {
   session: SessionCardData;
   viewerUserId: string;
   query?: string;
+  hideBlockedBadge?: boolean;
 }) {
   const ownerDisplayName =
     getUserDisplayName({
@@ -101,8 +103,10 @@ export function SessionCard({
       )
     : getSessionArtifactsViewUrl('', session.id);
 
+  const accessibleActivityTimestamp = activityDate.toLocaleString();
+
   return (
-    <div className="ph-no-capture group relative flex w-full items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10">
+    <div className="ph-no-capture group relative flex w-full @container items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10">
       <Link
         href={`/sessions/${session.id}`}
         className="absolute inset-0 z-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -164,16 +168,25 @@ export function SessionCard({
                 </TooltipContent>
               </Tooltip>
             ) : null}
-            {status === 'active' || status === 'ready' ? null : (
+            {status === 'active' ||
+            status === 'ready' ||
+            (hideBlockedBadge && status === 'blocked') ? null : (
               <SessionStatusBadge status={status} className="capitalize" />
             )}
           </div>
-          <span className="shrink-0 text-xs text-muted-foreground md:hidden">
-            {formatSessionMobileTimestamp(activityDate)}
-          </span>
-          <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">
-            {formatDistanceToNow(activityDate, { addSuffix: true })}
-          </span>
+          <time
+            dateTime={activityDate.toISOString()}
+            aria-label={`Activity time: ${accessibleActivityTimestamp}`}
+            title={accessibleActivityTimestamp}
+            className="shrink-0 text-xs text-muted-foreground"
+          >
+            <span className="@[360px]:hidden">
+              {formatSessionCompactTimestamp(activityDate)}
+            </span>
+            <span className="hidden @[360px]:inline">
+              {formatDistanceToNow(activityDate, { addSuffix: true })}
+            </span>
+          </time>
         </div>
         <p className="mt-1 line-clamp-2 wrap-anywhere text-base font-medium group-hover:underline">
           {session.title}

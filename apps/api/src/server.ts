@@ -23,6 +23,7 @@ import {
 } from '@roomote/auth';
 
 import type { Variables } from './types';
+import { redactCustomAutomationWebhookPath } from './sensitive-path';
 import { resolveApiCorsOrigin } from './cors';
 import { createSingleLineWarnLogger } from './logging';
 import { captureApiException, flushApiSentry } from './monitoring/sentry';
@@ -62,6 +63,7 @@ import {
   taskRunsRouter,
   artifactsRouter,
   taskArtifactsRouter,
+  customAutomationWebhooks,
   oidcRouter,
   trpc,
 } from './handlers';
@@ -92,6 +94,7 @@ const SELF_AUTHENTICATING_WEBHOOK_PATHS = new Set([
   '/api/internal/discord/events/process',
   '/api/internal/cloud/deployment-access',
 ]);
+const CUSTOM_AUTOMATION_WEBHOOK_PREFIX = '/api/webhooks/custom-automations/';
 
 type ListenOptions = {
   port: number;
@@ -103,7 +106,11 @@ function isPublicOidcPath(path: string): boolean {
 }
 
 function isPublicMiddlewareBypassPath(path: string): boolean {
-  return isPublicOidcPath(path) || SELF_AUTHENTICATING_WEBHOOK_PATHS.has(path);
+  return (
+    isPublicOidcPath(path) ||
+    SELF_AUTHENTICATING_WEBHOOK_PATHS.has(path) ||
+    path.startsWith(CUSTOM_AUTOMATION_WEBHOOK_PREFIX)
+  );
 }
 
 function observedFetchImpl(
@@ -147,7 +154,7 @@ export function createApiApp(): ApiApp {
         // default), so always log server-side too — a 500 must never be
         // invisible in the logs.
         console.error(
-          `[api] Unhandled error ${c.req.method} ${c.req.path}:`,
+          `[api] Unhandled error ${c.req.method} ${redactCustomAutomationWebhookPath(c.req.path)}:`,
           error,
         );
         captureApiException(error, c);
@@ -157,7 +164,7 @@ export function createApiApp(): ApiApp {
     }
 
     console.error(
-      `[api] Unhandled error ${c.req.method} ${c.req.path}:`,
+      `[api] Unhandled error ${c.req.method} ${redactCustomAutomationWebhookPath(c.req.path)}:`,
       error,
     );
     captureApiException(error, c);
@@ -187,6 +194,14 @@ export function createApiApp(): ApiApp {
     );
 
   app.use('*', requestObservabilityMiddleware);
+
+  app.use('/api/webhooks/custom-automations/*', async (c, next) => {
+    c.header('Cache-Control', 'no-store, private');
+    c.header('Referrer-Policy', 'no-referrer');
+    c.header('X-Content-Type-Options', 'nosniff');
+    c.header('X-Robots-Tag', 'noindex');
+    await next();
+  });
 
   const corsOptions = {
     origin: resolveApiCorsOrigin,
@@ -238,6 +253,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/teams', teams);
   app.route('/api/webhooks/telegram', telegram);
   app.route('/api/webhooks/agentmail', agentmail);
+  app.route('/api/webhooks/custom-automations', customAutomationWebhooks);
   app.route('/api/internal/discord', discord);
   app.route('/api/internal/cloud', cloudDeploymentAccess);
   app.route('/api/inference', inference);

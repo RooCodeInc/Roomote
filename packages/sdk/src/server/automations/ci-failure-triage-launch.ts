@@ -10,6 +10,7 @@ import {
   type FailedCiRun,
 } from '@roomote/cloud-agents/server';
 import {
+  asc,
   and,
   db,
   eq,
@@ -91,6 +92,9 @@ async function resolveActiveSlackNotifier(
         ...(teamId ? [eq(slackInstallations.teamId, teamId)] : []),
       ),
     )
+    // Legacy unscoped destinations keep using the oldest active bot, with an
+    // ID tie-break so PostgreSQL row/index order cannot change the selection.
+    .orderBy(asc(slackInstallations.createdAt), asc(slackInstallations.id))
     .limit(1);
 
   if (!installation?.botAccessToken) {

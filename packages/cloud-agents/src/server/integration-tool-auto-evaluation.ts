@@ -20,6 +20,7 @@ import {
   evaluateDecisionModel,
   resolveDecisionModel,
 } from './typesafe-judgment';
+import { getDecisionModelRequirements } from './judgment-decision-policy';
 
 const AUTO_EVALUATION_TIMEOUT_MS = 20_000;
 /**
@@ -27,9 +28,9 @@ const AUTO_EVALUATION_TIMEOUT_MS = 20_000;
  * evaluated on this decision, so a deployment on it gets no Auto (every call
  * asks, as with no model at all) until it has been.
  */
-export const AUTO_DECISION_REQUIREMENTS = {
-  excludeRoomoteModel: true,
-} as const;
+export const AUTO_DECISION_REQUIREMENTS = getDecisionModelRequirements(
+  'integration-tool-auto-evaluation',
+);
 
 /**
  * Auto mode is a risk assessment of one paused tool call: is it risky enough
@@ -282,6 +283,7 @@ export async function evaluateIntegrationToolAutoDecision(input: {
           ? 'The target task was not launched by the current session and the user did not name it.'
           : undefined;
     const answers = await evaluateDecisionModel({
+      decision: 'integration-tool-auto-evaluation',
       state: {
         call: {
           integration: input.integrationId,

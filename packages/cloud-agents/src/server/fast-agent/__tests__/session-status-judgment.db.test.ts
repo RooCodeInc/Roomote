@@ -22,7 +22,7 @@ const { evaluateMock } = vi.hoisted(() => ({
 vi.mock('../../typesafe-judgment', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../typesafe-judgment')>();
-  return { ...actual, evaluateDecisionModel: evaluateMock };
+  return { ...actual, evaluateTypeSafeJudgments: evaluateMock };
 });
 
 import { processSessionStatusJudgmentBatch } from '../session-status-judgment';
@@ -141,7 +141,7 @@ describe('processSessionStatusJudgmentBatch', () => {
 
     expect(evaluateMock).toHaveBeenCalledOnce();
     expect(evaluateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ excludeRoomoteModel: true }),
+      expect.objectContaining({ decision: 'session-status-judgment' }),
     );
     const state = evaluateMock.mock.calls[0]?.[0].state as {
       recentMessages: Array<{ text: string }>;

@@ -155,6 +155,14 @@ describe('CI triage Slack ownership through the webhook launch path', () => {
       botAccessToken: 'xoxb-owner-b',
       isActive: true,
     });
+    await db
+      .update(slackInstallations)
+      .set({ createdAt: new Date('2026-01-01T00:00:00.000Z') })
+      .where(eq(slackInstallations.id, a.id));
+    await db
+      .update(slackInstallations)
+      .set({ createdAt: new Date('2026-01-02T00:00:00.000Z') })
+      .where(eq(slackInstallations.id, b.id));
     await db.insert(slackInstallationChannels).values([
       { slackInstallationId: a.id, channelId: 'C_FALLBACK' },
       { slackInstallationId: b.id, channelId: 'C_OWNER_B' },

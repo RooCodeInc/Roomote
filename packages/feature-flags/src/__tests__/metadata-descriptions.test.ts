@@ -57,6 +57,7 @@ describe('metadata descriptions', () => {
       getDeploymentExperimentValues({
         results_page_enabled: true,
         private_sessions_experiment_enabled: true,
+        dizzy_experiment_enabled: true,
         automation_launch_criteria_experiment_enabled: true,
         integration_keys_enabled: 'true',
       }),
@@ -68,7 +69,6 @@ describe('metadata descriptions', () => {
       sessionStatusJudgment: false,
       sessionsBoard: false,
       automationLaunchCriteria: true,
-      dizzy: false,
     });
   });
 
@@ -87,18 +87,14 @@ describe('metadata descriptions', () => {
     expect(getDeploymentExperimentAudience('automationLaunchCriteria')).toBe(
       'internal-nightly',
     );
+    expect(getDeploymentExperimentConfig('dizzy')).toBeUndefined();
     expect(getDeploymentExperimentIdsForAudience('internal-nightly')).toEqual([
       'integrationToolAutoApprovals',
-      'dizzy',
       'automationLaunchCriteria',
     ]);
   });
 
   it('classifies member-readable runtime state in the same experiment contract', () => {
-    expect(getDeploymentExperimentConfig('dizzy')).toMatchObject({
-      audience: 'internal-nightly',
-      runtimeReadable: true,
-    });
     expect(
       isDeploymentExperimentRuntimeReadable('integrationToolAutoApprovals'),
     ).toBe(true);

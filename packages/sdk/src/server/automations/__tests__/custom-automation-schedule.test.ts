@@ -158,6 +158,7 @@ describe('custom automation schedule helpers', () => {
   it.each([
     { enabled: false, scheduleMode: 'daily' as const },
     { enabled: true, scheduleMode: 'off' as const },
+    { enabled: true, scheduleMode: 'on_demand' as const },
   ])('omits a next run for disabled schedules', (schedule) => {
     expect(
       getCustomAutomationNextRunAt({

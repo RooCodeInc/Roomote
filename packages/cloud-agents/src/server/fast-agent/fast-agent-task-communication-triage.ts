@@ -241,6 +241,7 @@ export async function triageTaskCommunication(
 ): Promise<TaskCommunicationTriageResult | null> {
   const startedAt = performance.now();
   const answers = await evaluateTypeSafeJudgments({
+    decision: 'fast-agent-task-communication-triage',
     state,
     questions: TASK_COMMUNICATION_QUESTIONS,
     ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),

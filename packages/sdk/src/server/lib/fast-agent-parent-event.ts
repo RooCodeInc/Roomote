@@ -233,8 +233,10 @@ export type FastAgentParentEvent =
       automationId: string;
       automationName: string;
       launchClaimedAt?: string;
+      /** Original trigger time used to keep run recency monotonic at settlement. */
+      occurrenceAt?: string;
       prompt: string;
-      trigger: 'schedule' | 'manual';
+      trigger: 'schedule' | 'manual' | 'webhook';
       /** Saved criteria are immutable for this occurrence. */
       launchCriteria?: string | null;
       runWhen?: import('@roomote/types').CustomAutomationRunWhen | null;
@@ -602,7 +604,7 @@ async function loadFastAgentCommunicationParent<
 type FastAutomationLaunchContext = {
   automationId: string;
   automationName: string;
-  trigger: 'schedule' | 'manual';
+  trigger: 'schedule' | 'manual' | 'webhook';
 };
 
 const AUTOMATION_OCCURRENCE_ID_PATTERN =

@@ -892,6 +892,14 @@ describe('ModelSettingsSection', () => {
     await waitFor(() => {
       expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
     });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', {
+          name: 'Orchestration model and reasoning',
+        }),
+      ).toHaveAttribute('aria-expanded', 'false');
+    });
     expect(updateMutateAsyncMock).toHaveBeenCalledWith(
       expect.objectContaining({
         orchestrationModelId: 'openrouter/z-ai/glm-5.2',
@@ -930,11 +938,20 @@ describe('ModelSettingsSection', () => {
       );
     });
     expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(orchestrationTrigger()).toHaveAttribute('aria-expanded', 'false');
+    });
     expect(orchestrationTrigger().textContent).toBe(originalSelection);
 
     updateMutateAsyncMock.mockReset().mockResolvedValue({ success: true });
+    fireEvent.click(orchestrationTrigger());
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
     await waitFor(() => expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(orchestrationTrigger()).toHaveAttribute('aria-expanded', 'false');
+    });
     expect(orchestrationTrigger()).toHaveTextContent('GLM 5.2');
   });
 
@@ -1754,6 +1771,44 @@ describe('ModelSettingsSection', () => {
       'Saved the Mixed provider setup preset.',
     );
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('normalizes the initial custom-preset reasoning to the selected model', async () => {
+    const data = buildSettingsData();
+    const codingMetadata = data.models[0]!.metadata as TaskModelMetadata;
+    codingMetadata.supportsReasoning = true;
+    codingMetadata.supportedReasoningEfforts = ['low'];
+    settingsData.current = data;
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Add your own' }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    const advisorPicker = within(dialog).getByRole('button', {
+      name: 'Advisor model and reasoning',
+    });
+    expect(advisorPicker).toHaveTextContent(/GPT 5\.4\s*Low/u);
+
+    fireEvent.change(
+      within(dialog).getByPlaceholderText('Something easy to recognize'),
+      { target: { value: 'Low reasoning mapping' } },
+    );
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Create preset' }),
+    );
+
+    await waitFor(() => {
+      expect(createCustomPresetMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    const createInput = createCustomPresetMutateAsyncMock.mock.calls[0]![0] as {
+      roles: UserTaskModelMapping;
+    };
+    expect(createInput.roles.planning.reasoningEffort).toBe('low');
   });
 
   it('keeps an unavailable current model visible and requires a replacement', async () => {

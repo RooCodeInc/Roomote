@@ -300,6 +300,7 @@ export async function resolveFastAgentLaunchModel(params: {
   let answers: TypeSafeAnswers<typeof questions> | null = null;
   try {
     answers = await evaluateDecisionModel({
+      decision: 'fast-agent-launch-model',
       state: {
         defaultModel: describeDefaultModel(
           params.defaultModelId

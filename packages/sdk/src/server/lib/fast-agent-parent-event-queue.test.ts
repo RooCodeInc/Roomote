@@ -397,6 +397,109 @@ describe('Fast parent event durable queue', () => {
       {
         id: 'automation-1',
         launchClaimedAt,
+        lastRunAt: eventClaimedAt,
+        status: 'succeeded',
+      },
+    );
+  });
+
+  it('records webhook success without a shared launch claim', async () => {
+    const occurrenceAt = new Date('2026-09-25T10:02:00.000Z');
+    const webhookEvent: FastAgentParentEvent = {
+      type: 'automation_triggered',
+      eventId: 'automation-1:webhook:00000000-0000-4000-8000-000000000001',
+      automationId: 'automation-1',
+      automationName: 'Webhook report',
+      occurrenceAt: occurrenceAt.toISOString(),
+      prompt: 'Review the supplied event.',
+      trigger: 'webhook',
+    };
+    const row = pendingRow('automation-webhook-success', webhookEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: 'automation-1', lastRunAt: occurrenceAt, status: 'succeeded' },
+    );
+  });
+
+  it('records terminal webhook failure without a shared launch claim', async () => {
+    const occurrenceAt = new Date('2026-09-25T10:02:00.000Z');
+    const webhookEvent: FastAgentParentEvent = {
+      type: 'automation_triggered',
+      eventId: 'automation-1:webhook:00000000-0000-4000-8000-000000000002',
+      automationId: 'automation-1',
+      automationName: 'Webhook report',
+      occurrenceAt: occurrenceAt.toISOString(),
+      prompt: 'Review the supplied event.',
+      trigger: 'webhook',
+    };
+    const row = pendingRow('automation-webhook-failure', webhookEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+    mocks.deliver.mockRejectedValueOnce(
+      new mocks.DeliveryError('webhook run failed', {
+        replyPosted: false,
+        permanent: true,
+      }),
+    );
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        id: 'automation-1',
+        lastRunAt: occurrenceAt,
+        status: 'failed',
+        error: 'webhook run failed',
+      },
+    );
+  });
+
+  it('records the new occurrence time for a manual retry', async () => {
+    const failedOccurrenceAt = new Date('2026-09-25T09:00:00.000Z');
+    const retryClaimedAt = new Date('2026-09-25T10:00:00.000Z');
+    const manualRetryEvent: FastAgentParentEvent = {
+      type: 'automation_triggered',
+      eventId: `automation-1:${failedOccurrenceAt.toISOString()}`,
+      automationId: 'automation-1',
+      automationName: 'Webhook report',
+      launchClaimedAt: retryClaimedAt.toISOString(),
+      occurrenceAt: retryClaimedAt.toISOString(),
+      prompt: 'Review the saved report.',
+      trigger: 'manual',
+    };
+    const row = pendingRow('automation-manual-retry', manualRetryEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        id: 'automation-1',
+        launchClaimedAt: retryClaimedAt,
+        lastRunAt: retryClaimedAt,
         status: 'succeeded',
       },
     );
@@ -435,6 +538,7 @@ describe('Fast parent event durable queue', () => {
       {
         id: 'automation-1',
         launchClaimedAt,
+        lastRunAt: launchClaimedAt,
         status: 'failed',
         error: 'parent session missing',
       },
@@ -542,6 +646,7 @@ describe('Fast parent event durable queue', () => {
       {
         id: 'automation-1',
         launchClaimedAt,
+        lastRunAt: launchClaimedAt,
         status: 'succeeded',
       },
     );

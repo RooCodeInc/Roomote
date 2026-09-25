@@ -19,6 +19,10 @@ import {
   NON_TASK_INFERENCE_SURFACES,
   resolveNonTaskHelperModel,
 } from './non-task-provider-usage';
+import {
+  getDecisionModelRequirements,
+  type JudgmentDecisionId,
+} from './judgment-decision-policy';
 
 /**
  * Optional judgment-model backend. A judgment model answers typed questions
@@ -976,10 +980,11 @@ async function requestFromBackend(
 }
 
 /**
- * Ask Jev a set of independent questions over the same state. Returns `null`
- * when no judgment model is configured so callers can keep their existing
- * behavior; throws on transport, HTTP, or response-shape failures so callers
- * can log and fall back.
+ * Ask the configured judgment backend a set of independent questions over the
+ * same state. Unregistered decisions are Jev-only; returns `null` when the
+ * required backend is unavailable so callers can keep their existing behavior.
+ * Throws on transport, HTTP, or response-shape failures so callers can log and
+ * fall back.
  */
 export async function evaluateTypeSafeJudgments<
   TQuestions extends Record<string, TypeSafeQuestion>,
@@ -988,10 +993,13 @@ export async function evaluateTypeSafeJudgments<
   state: unknown;
   questions: TQuestions;
   timeoutMs?: number;
+  decision?: JudgmentDecisionId;
+  excludeRoomoteModel?: boolean;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {
+  const excludeRoomoteModel = decisionModelExcludesRoomoteModel(params);
   const backend = await resolveJudgmentBackend();
 
-  if (!backend) {
+  if (!backend || (excludeRoomoteModel && backend.provider === 'roomote')) {
     return null;
   }
 
@@ -1291,6 +1299,8 @@ export function resetDecisionModelCache(): void {
 }
 
 export type DecisionModelRequirements = {
+  /** The decision being evaluated; unregistered decisions are Jev-only. */
+  decision?: JudgmentDecisionId;
   /**
    * The decision runs on every turn or task, so it needs a judgment backend
    * (Jev or the Roomote-run model); the helper fallback would be an LLM call
@@ -1301,16 +1311,26 @@ export type DecisionModelRequirements = {
    * The model Roomote trains (the `roomote` upstream, hosted or self-hosted)
    * is not yet trusted with this decision, so only Jev answers it; with no
    * Jev backend it is not asked, and the helper fallback is not used either.
+   * An explicit value overrides the decision registry for a deliberate opt-in.
    * Separate from `highVolume`, which is about cost, not quality.
    */
   excludeRoomoteModel?: boolean;
 };
 
+function decisionModelExcludesRoomoteModel(
+  options: Pick<DecisionModelRequirements, 'decision' | 'excludeRoomoteModel'>,
+): boolean {
+  return (
+    options.excludeRoomoteModel ??
+    getDecisionModelRequirements(options.decision).excludeRoomoteModel
+  );
+}
+
 function meetsRequirements(
   value: DecisionModelResolution,
   options: DecisionModelRequirements,
 ): boolean {
-  if (options.excludeRoomoteModel) {
+  if (decisionModelExcludesRoomoteModel(options)) {
     return value.kind === 'judgment' && !value.roomoteModel;
   }
   return !options.highVolume || value.supportsHighVolumeDecisions;
@@ -1337,7 +1357,10 @@ export async function resolveDecisionModel(
 
   const backend = await resolveJudgmentBackend();
 
-  if (!backend && (options.highVolume || options.excludeRoomoteModel)) {
+  if (
+    !backend &&
+    (options.highVolume || decisionModelExcludesRoomoteModel(options))
+  ) {
     return null;
   }
 
@@ -1440,9 +1463,11 @@ function buildHelperDecisionPrompt(
 }
 
 /**
- * Evaluate a decision through Jev when available and otherwise through the
- * deployment helper model. High-volume callers must opt in and are skipped
- * unless the resolved model explicitly supports that workload.
+ * Evaluate a decision through its registered judgment policy. New and
+ * unregistered decisions are Jev-only; registered trained decisions may use
+ * the Roomote model. Helper fallback remains available to existing ordinary
+ * decisions, while high-volume callers are skipped unless the resolved model
+ * explicitly supports that workload.
  */
 export async function evaluateDecisionModel<
   TQuestions extends Record<string, TypeSafeQuestion>,
@@ -1455,9 +1480,10 @@ export async function evaluateDecisionModel<
     taskId?: string | null;
   } & DecisionModelRequirements,
 ): Promise<TypeSafeAnswers<TQuestions> | null> {
+  const excludeRoomoteModel = decisionModelExcludesRoomoteModel(params);
   const decisionModel = await resolveDecisionModel({
     highVolume: params.highVolume === true,
-    excludeRoomoteModel: params.excludeRoomoteModel === true,
+    excludeRoomoteModel,
   });
 
   if (!decisionModel) {
@@ -1465,7 +1491,7 @@ export async function evaluateDecisionModel<
   }
 
   if (decisionModel.kind === 'judgment') {
-    return evaluateTypeSafeJudgments(params);
+    return evaluateTypeSafeJudgments({ ...params, excludeRoomoteModel });
   }
 
   const { object } = await generateTrackedNonTaskObject({

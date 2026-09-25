@@ -36,10 +36,27 @@ const handler = async (req: Request) => {
     },
     // Runs once the context exists but (with `httpBatchStreamLink`) before any
     // procedure has resolved, so only the auth phase can be reported here.
-    responseMeta: () => {
+    responseMeta: ({ paths }) => {
       const authTiming = buildAuthServerTiming(authMs);
+      const headers: Record<string, string> = {};
 
-      return authTiming ? { headers: { 'server-timing': authTiming } } : {};
+      if (authTiming) {
+        headers['server-timing'] = authTiming;
+      }
+      if (
+        paths?.some((path) =>
+          [
+            'automations.getCustomAutomationWebhook',
+            'automations.setCustomAutomationWebhookEnabled',
+            'automations.rotateCustomAutomationWebhook',
+          ].includes(path),
+        )
+      ) {
+        headers['cache-control'] = 'no-store, private';
+        headers['referrer-policy'] = 'no-referrer';
+      }
+
+      return Object.keys(headers).length > 0 ? { headers } : {};
     },
   });
 
