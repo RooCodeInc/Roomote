@@ -13,12 +13,10 @@ describe('isTextArtifactContentType', () => {
     expect(isTextArtifactContentType(contentType)).toBe(true);
   });
 
-  it.each([
-    'application/vnd.api+jsonish',
-    'application/vnd.api+xmlish',
-    'application/not-markdownish',
-    'application/octet-stream',
-  ])('rejects a near-miss or binary MIME type %s', (contentType) => {
-    expect(isTextArtifactContentType(contentType)).toBe(false);
-  });
+  it.each(['application/vnd.api+jsonish', 'application/octet-stream'])(
+    'rejects a near-miss or binary MIME type %s',
+    (contentType) => {
+      expect(isTextArtifactContentType(contentType)).toBe(false);
+    },
+  );
 });

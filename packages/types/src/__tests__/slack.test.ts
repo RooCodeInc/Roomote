@@ -102,10 +102,6 @@ describe('buildSlackChannelUrl', () => {
       buildSlackChannelUrl({ slackChannelId: 'C123', slackTeamId: 'T123' }),
     ).toBe('https://slack.com/app_redirect?channel=C123&team=T123');
   });
-
-  it('returns null without a team id or domain', () => {
-    expect(buildSlackChannelUrl({ slackChannelId: 'C123' })).toBeNull();
-  });
 });
 
 describe('buildSlackUserProfileUrl', () => {
@@ -123,10 +119,6 @@ describe('buildSlackUserProfileUrl', () => {
     expect(
       buildSlackUserProfileUrl({ slackUserId: 'U123', slackTeamId: 'T123' }),
     ).toBe('slack://user?team=T123&id=U123');
-  });
-
-  it('returns null without a team id or domain', () => {
-    expect(buildSlackUserProfileUrl({ slackUserId: 'U123' })).toBeNull();
   });
 });
 
@@ -177,7 +169,9 @@ describe('buildSlackThreadPermalink', () => {
     );
   });
 
-  it('returns null when channel or thread metadata is missing', () => {
+  it('returns null when Slack destination metadata is missing', () => {
+    expect(buildSlackChannelUrl({ slackChannelId: 'C123' })).toBeNull();
+    expect(buildSlackUserProfileUrl({ slackUserId: 'U123' })).toBeNull();
     expect(
       buildSlackThreadPermalink({
         slackWorkspaceDomain: 'acme-team',

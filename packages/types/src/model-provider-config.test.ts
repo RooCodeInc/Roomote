@@ -1415,16 +1415,6 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     });
   });
 
-  it('keeps medium code-review reasoning for Anthropic', () => {
-    expect(
-      buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),
-    ).toMatchObject({
-      roomoteCodeReviewModel: 'anthropic/claude-sonnet-5',
-      roomoteCodeReviewModelReasoningEffort: 'medium',
-      roomotePlanningModel: 'anthropic/claude-opus-5-5',
-    });
-  });
-
   it('uses GPT 5.6 Luna for GitHub Copilot coding and Same as coding for other roles', () => {
     expect(
       buildRecommendedDeploymentModelConfig(

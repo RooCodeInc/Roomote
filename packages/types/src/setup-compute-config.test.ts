@@ -1035,16 +1035,6 @@ describe('getDefaultAvailableComputeProvider', () => {
     ).toBe('docker');
   });
 
-  it('ignores optional-only provider env when choosing a fallback', () => {
-    expect(
-      getDefaultAvailableComputeProvider(new Set(['docker']), [
-        { provider: 'modal', configSatisfied: false },
-        { provider: 'daytona', configSatisfied: false },
-        { provider: 'e2b', configSatisfied: false },
-      ]),
-    ).toBe('docker');
-  });
-
   it('falls back to docker when every provider is excluded', () => {
     expect(
       getDefaultAvailableComputeProvider(

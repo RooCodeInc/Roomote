@@ -26,9 +26,8 @@ describe('manage wakeups tool contract', () => {
       ).toBe(false);
     }
   });
-  it.each([1 / 60, 0.5, 31 / 60, 1, 1.5])(
-    'accepts whole seconds stored as %s minutes',
-    (minutes) => {
+  it('accepts whole seconds stored as minutes', () => {
+    for (const minutes of [1 / 60, 0.5, 31 / 60, 1, 1.5]) {
       const once = {
         mode: 'once',
         at: '2026-09-04T17:00:30.000Z',
@@ -37,8 +36,8 @@ describe('manage wakeups tool contract', () => {
       const interval = { mode: 'interval', everyMinutes: minutes };
       expect(sessionWakeupScheduleSchema.parse(once)).toEqual(once);
       expect(sessionWakeupScheduleSchema.parse(interval)).toEqual(interval);
-    },
-  );
+    }
+  });
   it('keeps every supported action in the shared Zod schema', () => {
     for (const action of MANAGE_WAKEUPS_ACTIONS) {
       expect(manageWakeupsInputSchema.parse({ action })).toEqual({ action });

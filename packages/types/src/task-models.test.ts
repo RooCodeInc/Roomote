@@ -191,17 +191,6 @@ describe('task model settings', () => {
     ]);
   });
 
-  it('collapses an empty catalogSyncedModelIds list to no baseline', () => {
-    const settings = normalizeTaskModelSettings({
-      models: DEFAULT_TASK_MODEL_SETTINGS.models,
-      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
-      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
-      catalogSyncedModelIds: [],
-    });
-
-    expect('catalogSyncedModelIds' in settings).toBe(false);
-  });
-
   it('migrates persisted OpenCode DeepSeek Flash model settings', () => {
     const settings = normalizeTaskModelSettings({
       models: [

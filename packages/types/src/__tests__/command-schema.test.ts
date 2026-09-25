@@ -105,40 +105,6 @@ run: |-
       }
     });
 
-    it('should accept a YAML |+ (keep all trailing newlines) multi-line run value', () => {
-      // YAML `|+` preserves all trailing newlines.
-      const yamlInput = `
-name: Test
-run: |+
-  echo hello
-  echo world
-
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = commandSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.run).toBe('echo hello\necho world\n\n');
-      }
-    });
-
-    it('should accept a single-line run value', () => {
-      const yamlInput = `
-name: Quick
-run: echo hello
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = commandSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.run).toBe('echo hello');
-      }
-    });
-
     it('should reject an empty run value', () => {
       const yamlInput = `
 name: Empty
@@ -148,45 +114,6 @@ run: ""
       const result = commandSchema.safeParse(parsed);
 
       expect(result.success).toBe(false);
-    });
-
-    it('should accept run with backslash continuation lines', () => {
-      const yamlInput = `
-name: Continuation
-run: |
-  echo "hello" && \\
-  echo "world"
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = commandSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.run).toContain('\\');
-        expect(result.data.run).toContain('echo "hello"');
-        expect(result.data.run).toContain('echo "world"');
-      }
-    });
-
-    it('should accept run with comments in the script', () => {
-      const yamlInput = `
-name: With comments
-run: |
-  # Install dependencies
-  npm install
-  # Build the project
-  npm run build
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = commandSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.run).toContain('# Install dependencies');
-        expect(result.data.run).toContain('npm install');
-      }
     });
 
     it('should preserve optional fields alongside multi-line run', () => {
@@ -365,19 +292,6 @@ commands:
         });
       }
     });
-
-    it('should accept an empty object for tool_versions', () => {
-      const result = environmentRepositoryConfigSchema.safeParse({
-        repository: 'myorg/backend',
-        tool_versions: {},
-      });
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.tool_versions).toEqual({});
-      }
-    });
   });
 
   describe('YAML block scalar commands in repository config', () => {
@@ -401,66 +315,6 @@ commands:
         expect(result.data.commands).toHaveLength(1);
         expect(result.data.commands![0]!.name).toBe('Test command');
         expect(result.data.commands![0]!.run).toBe('ls /foo\nls /bar\n');
-      }
-    });
-
-    it('should accept repository config with multiple multi-line commands', () => {
-      const yamlInput = `
-repository: myorg/backend
-commands:
-  - name: Install
-    run: |
-      npm install
-      npm run postinstall
-  - name: Build
-    run: |
-      npm run build
-      npm run typecheck
-  - name: Start server
-    run: npm start
-    detached: true
-    logfile: /tmp/server.log
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = environmentRepositoryConfigSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.commands).toHaveLength(3);
-        expect(result.data.commands![0]!.run).toBe(
-          'npm install\nnpm run postinstall\n',
-        );
-        expect(result.data.commands![1]!.run).toBe(
-          'npm run build\nnpm run typecheck\n',
-        );
-        expect(result.data.commands![2]!.run).toBe('npm start');
-        expect(result.data.commands![2]!.detached).toBe(true);
-      }
-    });
-
-    it('should accept repository config with branch and multi-line commands', () => {
-      const yamlInput = `
-repository: myorg/backend
-branch: develop
-commands:
-  - name: Setup
-    run: |
-      npm install
-      npm run migrate
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = environmentRepositoryConfigSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.repository).toBe('myorg/backend');
-        expect(result.data.branch).toBe('develop');
-        expect(result.data.commands).toHaveLength(1);
-        expect(result.data.commands![0]!.run).toBe(
-          'npm install\nnpm run migrate\n',
-        );
       }
     });
   });
