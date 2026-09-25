@@ -5,6 +5,10 @@ const mocks = vi.hoisted(() => ({
   recordShadow: vi.fn(async () => undefined),
   settings: vi.fn(async () => ({ mode: 'off', policy: '' })),
   experiment: vi.fn(async () => true),
+  nightlyExperimentsEnabled: true as boolean | string,
+  isEnvFlagEnabled: vi.fn(
+    (value: unknown) => value === true || value === 'true' || value === '1',
+  ),
 }));
 
 vi.mock('../typesafe-judgment', () => ({
@@ -16,6 +20,14 @@ vi.mock('@roomote/db/server', async () => ({
   isDeploymentExperimentEnabled: mocks.experiment,
   recordIntegrationToolAutoEvaluation: mocks.record,
   recordIntegrationToolShadowEvaluation: mocks.recordShadow,
+}));
+vi.mock('@roomote/env', () => ({
+  Env: {
+    get R_NIGHTLY_EXPERIMENTS_ENABLED() {
+      return mocks.nightlyExperimentsEnabled;
+    },
+  },
+  isEnvFlagEnabled: mocks.isEnvFlagEnabled,
 }));
 
 import {
@@ -62,6 +74,8 @@ beforeEach(() => {
   mocks.settings.mockResolvedValue({ mode: 'off', policy: '' });
   mocks.resolveModel.mockResolvedValue({ kind: 'judgment' });
   mocks.experiment.mockResolvedValue(true);
+  mocks.nightlyExperimentsEnabled = true;
+  mocks.isEnvFlagEnabled.mockClear();
 });
 
 describe('recommendFromAutoAnswers', () => {
@@ -432,6 +446,33 @@ describe('resolveIntegrationToolAutoState', () => {
     expect(mocks.experiment).toHaveBeenCalledWith(
       'integrationToolAutoApprovals',
     );
+    expect(mocks.resolveModel).toHaveBeenCalledWith({
+      excludeRoomoteModel: true,
+    });
+  });
+
+  it('keeps saved customer opt-ins off unless the deployment explicitly opts into nightly experiments', async () => {
+    mocks.nightlyExperimentsEnabled = false;
+    mocks.settings.mockResolvedValue({ mode: 'on', policy: 'Old guidance' });
+
+    await expect(resolveIntegrationToolAutoState()).resolves.toEqual({
+      mode: 'off',
+      settings: { mode: 'on', policy: 'Old guidance' },
+      model: null,
+    });
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('treats a string false nightly flag as disabled when env validation is skipped', async () => {
+    mocks.nightlyExperimentsEnabled = 'false';
+    mocks.settings.mockResolvedValue({ mode: 'on', policy: 'Old guidance' });
+
+    await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
+      mode: 'off',
+      model: null,
+    });
+    expect(mocks.isEnvFlagEnabled).toHaveBeenCalledWith('false');
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
   });
 
   it('shadows while off with a hosted model, so its judgment can be reviewed', async () => {

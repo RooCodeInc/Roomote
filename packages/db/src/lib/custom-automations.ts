@@ -10,12 +10,15 @@ import {
   type ScheduleOnlyBackgroundAutomationFrequency,
   CUSTOM_AUTOMATION_NAME_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   CUSTOM_AUTOMATION_CRON_MAX_LENGTH,
   CUSTOM_AUTOMATION_MODEL_MAX_LENGTH,
   FAST_EXECUTION,
   NO_REPOSITORIES,
   type ReasoningEffort,
   type AutomationResultPriority,
+  customAutomationRunWhenSchema,
+  type CustomAutomationRunWhen,
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
@@ -46,6 +49,10 @@ export type CustomAutomationWriteInput = {
   environmentId: string;
   /** Full destination target, or {} when the automation has no report destination. */
   target: OptionalAutomationTarget;
+  /** Optional typed criteria evaluated before automation work starts. */
+  runWhen?: CustomAutomationRunWhen | null;
+  /** Optional natural-language gate evaluated before automation work starts. */
+  launchCriteria?: string | null;
   createdByUserId?: string | null;
 };
 
@@ -77,9 +84,15 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
   cronExpression: string | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
+  launchCriteria?: string | null;
+  runWhen?: CustomAutomationRunWhen | null;
 } {
   const name = normalizeName(input.name);
   const prompt = input.prompt.trim();
+  const launchCriteria =
+    input.launchCriteria === undefined
+      ? undefined
+      : input.launchCriteria?.trim() || null;
 
   if (!name) {
     throw new Error('Name is required.');
@@ -98,6 +111,15 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
   if (prompt.length > CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH) {
     throw new Error(
       `Prompt must be at most ${CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH} characters.`,
+    );
+  }
+
+  if (
+    launchCriteria &&
+    launchCriteria.length > CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH
+  ) {
+    throw new Error(
+      `Launch criteria must be at most ${CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH} characters.`,
     );
   }
 
@@ -142,6 +164,11 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     throw new Error('Reasoning effort requires a model override.');
   }
 
+  const runWhen =
+    input.runWhen == null
+      ? input.runWhen
+      : customAutomationRunWhenSchema.parse(input.runWhen);
+
   if (!input.environmentId) {
     throw new Error('Environment is required.');
   }
@@ -157,7 +184,15 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     );
   }
 
-  return { name, prompt, cronExpression, model, reasoningEffort };
+  return {
+    name,
+    prompt,
+    cronExpression,
+    model,
+    reasoningEffort,
+    launchCriteria,
+    runWhen,
+  };
 }
 
 export type CustomAutomationWithCreator = CustomAutomation & {
@@ -301,8 +336,15 @@ export async function createCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression, model, reasoningEffort } =
-    assertValidWriteInput(input);
+  const {
+    name,
+    prompt,
+    cronExpression,
+    model,
+    reasoningEffort,
+    launchCriteria,
+    runWhen,
+  } = assertValidWriteInput(input);
 
   const { executionMode, allRepositories, noRepositories } = getExecutionTarget(
     input.environmentId,
@@ -329,6 +371,8 @@ export async function createCustomAutomation(
     .values({
       name,
       prompt,
+      launchCriteria: launchCriteria ?? null,
+      runWhen: runWhen ?? null,
       enabled: input.enabled,
       resultPriority: input.resultPriority ?? 'normal',
       scheduleMode: input.scheduleMode,
@@ -359,8 +403,15 @@ export async function updateCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression, model, reasoningEffort } =
-    assertValidWriteInput(input);
+  const {
+    name,
+    prompt,
+    cronExpression,
+    model,
+    reasoningEffort,
+    launchCriteria,
+    runWhen,
+  } = assertValidWriteInput(input);
 
   const existing = await getCustomAutomationById(id, client);
   if (!existing) {
@@ -392,6 +443,9 @@ export async function updateCustomAutomation(
     .set({
       name,
       prompt,
+      launchCriteria:
+        launchCriteria === undefined ? existing.launchCriteria : launchCriteria,
+      runWhen: runWhen === undefined ? existing.runWhen : runWhen,
       enabled: input.enabled,
       resultPriority: input.resultPriority ?? existing.resultPriority,
       scheduleMode: input.scheduleMode,

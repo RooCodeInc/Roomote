@@ -3,6 +3,7 @@ import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   NO_REPOSITORIES,
+  customAutomationRunWhenSchema,
 } from '@roomote/types';
 
 import {
@@ -119,6 +120,60 @@ describe('custom automations helpers', () => {
     } finally {
       await deleteCustomAutomation(created.id);
     }
+  });
+
+  it('persists, preserves, and clears launch criteria and runWhen during edits', async () => {
+    const launchCriteria = 'Only investigate new regressions.';
+    const runWhen = customAutomationRunWhenSchema.parse({
+      all: [
+        {
+          id: 'new_regression',
+          ask: 'Does `report` describe a new regression?',
+          type: 'yes_no',
+          criteria: { true: 'New regression.', false: 'No new regression.' },
+          min: 0.75,
+        },
+      ],
+    });
+    const created = await createCustomAutomation({
+      name: `Conditioned report ${Date.now()}`,
+      prompt: 'Find current regressions.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+      launchCriteria,
+      runWhen,
+    });
+
+    expect(created.launchCriteria).toBe(launchCriteria);
+    expect(created.runWhen).toEqual(runWhen);
+
+    const preserved = await updateCustomAutomation(created.id, {
+      name: created.name,
+      prompt: created.prompt,
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+    });
+    expect(preserved.launchCriteria).toBe(launchCriteria);
+    expect(preserved.runWhen).toEqual(runWhen);
+
+    const cleared = await updateCustomAutomation(created.id, {
+      name: created.name,
+      prompt: created.prompt,
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+      launchCriteria: null,
+      runWhen: null,
+    });
+    expect(cleared.launchCriteria).toBeNull();
+    expect(cleared.runWhen).toBeNull();
+
+    await deleteCustomAutomation(created.id);
   });
 
   it('persists Fast as an execution mode without an environment', async () => {

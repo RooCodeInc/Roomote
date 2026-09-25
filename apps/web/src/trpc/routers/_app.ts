@@ -18,7 +18,9 @@ import {
   workspaceRoutingSettingsSchema,
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+  customAutomationRunWhenSchema,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -230,6 +232,7 @@ import {
 import {
   getDizzyExperimentEnabledCommand,
   getDeploymentExperimentsCommand,
+  getIntegrationToolAutoApprovalsEnabledCommand,
   getNightlyExperimentsCommand,
   setDeploymentExperimentCommand,
   setNightlyExperimentCommand,
@@ -512,6 +515,11 @@ import {
   saveJudgmentTypeSafeKeyCommand,
   setJudgmentModelSelectionCommand,
 } from '../commands/task-models/judgment-model';
+import {
+  getJudgmentDecisionCatalogCommand,
+  judgmentDecisionTestSchema,
+  testJudgmentDecisionCommand,
+} from '../commands/task-models/judgment-decision-tester';
 import {
   disconnectChatGptSubscriptionCommand,
   getChatGptSubscriptionStatusCommand,
@@ -1002,6 +1010,13 @@ const automationsRouter = createRouter({
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
+        launchCriteria: z
+          .string()
+          .trim()
+          .max(CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH)
+          .nullable()
+          .optional(),
+        runWhen: customAutomationRunWhenSchema.nullable().optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
@@ -1050,6 +1065,13 @@ const automationsRouter = createRouter({
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
+        launchCriteria: z
+          .string()
+          .trim()
+          .max(CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH)
+          .nullable()
+          .optional(),
+        runWhen: customAutomationRunWhenSchema.nullable().optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
@@ -2643,6 +2665,17 @@ export const appRouter = createRouter({
         .mutation(({ ctx: { auth }, input }) =>
           setJudgmentModelSelectionCommand(auth, input),
         ),
+
+      // Settings > Models > Test decisions (admin only).
+      decisionCatalog: protectedProcedure.query(({ ctx: { auth } }) =>
+        getJudgmentDecisionCatalogCommand(auth),
+      ),
+
+      testDecision: protectedProcedure
+        .input(judgmentDecisionTestSchema)
+        .mutation(({ ctx: { auth }, input }) =>
+          testJudgmentDecisionCommand(auth, input),
+        ),
     }),
 
     discoverProviderModels: protectedProcedure
@@ -3703,6 +3736,10 @@ export const appRouter = createRouter({
   nightlyExperiments: createRouter({
     dizzyEnabled: protectedProcedure.query(({ ctx: { auth } }) =>
       getDizzyExperimentEnabledCommand(auth),
+    ),
+    integrationToolAutoApprovalsEnabled: protectedProcedure.query(
+      ({ ctx: { auth } }) =>
+        getIntegrationToolAutoApprovalsEnabledCommand(auth),
     ),
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getNightlyExperimentsCommand(auth),

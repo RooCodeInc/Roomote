@@ -12,6 +12,7 @@ import {
   getCustomAutomationById,
   getCustomAutomationFrequency,
   CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS,
+  isDeploymentExperimentEnabled,
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
   tryClaimCustomAutomationLaunch,
@@ -290,11 +291,13 @@ async function buildFastAutomationConversation(params: {
   eventId: string;
   destination: CustomAutomationDestination | null;
   target: AutomationTarget | null;
+  deferDestinationRoots?: boolean;
 }): Promise<{
   conversation: FastAgentConversation;
   rootMessageId?: string;
 }> {
   const { automation, destination, eventId, target } = params;
+  const deferDestinationRoots = params.deferDestinationRoots === true;
   if (!destination) {
     return { conversation: buildAutomationConversation(automation, eventId) };
   }
@@ -359,6 +362,16 @@ async function buildFastAutomationConversation(params: {
       throw new Error('Discord is not connected.');
     }
     if (target?.targetKind === 'discord_user') {
+      if (deferDestinationRoots) {
+        return {
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'dm',
+            conversationId: eventId,
+            replyTarget: { channelId: destination.channelId },
+          },
+        };
+      }
       const posted = await provider.postMessage({
         channelId: destination.channelId,
         text: `${automation.name} is running.`,
@@ -385,6 +398,16 @@ async function buildFastAutomationConversation(params: {
     });
     if (!channel?.installation.isActive) {
       throw new Error('Discord destination is no longer available.');
+    }
+    if (deferDestinationRoots) {
+      return {
+        conversation: {
+          surface: 'discord',
+          workspaceId: channel.installation.guildId,
+          conversationId: eventId,
+          replyTarget: { channelId: destination.channelId },
+        },
+      };
     }
     const thread = await provider.createTaskThread({
       channelId: destination.channelId,
@@ -414,6 +437,19 @@ async function buildFastAutomationConversation(params: {
     if (!provider) {
       throw new Error('Teams is not connected.');
     }
+    if (deferDestinationRoots) {
+      return {
+        conversation: {
+          surface: 'teams',
+          workspaceId: destination.teamId,
+          conversationId: eventId,
+          replyTarget: {
+            channelId: destination.channelId,
+            serviceUrl: destination.serviceUrl,
+          },
+        },
+      };
+    }
     const posted = await provider.postMessage({
       channelId: destination.channelId,
       serviceUrl: destination.serviceUrl,
@@ -441,6 +477,16 @@ async function buildFastAutomationConversation(params: {
       await createTelegramCommunicationProviderFromRuntimeCredentials();
     if (!provider) {
       throw new Error('Telegram is not connected.');
+    }
+    if (deferDestinationRoots) {
+      return {
+        conversation: {
+          surface: 'telegram',
+          workspaceId: destination.channelId,
+          conversationId: eventId,
+          replyTarget: { channelId: destination.channelId },
+        },
+      };
     }
     const managedThreadId =
       target?.targetKind === 'telegram_user'
@@ -486,14 +532,29 @@ async function runFastCustomAutomation(params: {
   if (!params.automation.createdByUserId) {
     throw new Error('Fast automation run-as user is not configured.');
   }
+  const target = isConfiguredAutomationTarget(params.automation.target)
+    ? params.automation.target
+    : null;
+  const launchCriteriaEnabled = await isDeploymentExperimentEnabled(
+    'automationLaunchCriteria',
+  ).catch((error: unknown) => {
+    console.warn(
+      `${LOG_PREFIX} Could not read custom automation launch-criteria experiment; running without launch criteria: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  });
+  const launchCriteriaRequired =
+    launchCriteriaEnabled &&
+    Boolean(
+      params.automation.launchCriteria?.trim() || params.automation.runWhen,
+    );
   const { conversation, rootMessageId } = await buildFastAutomationConversation(
     {
       automation: params.automation,
       eventId: params.eventId,
       destination: params.destination,
-      target: isConfiguredAutomationTarget(params.automation.target)
-        ? params.automation.target
-        : null,
+      target,
+      deferDestinationRoots: launchCriteriaRequired,
     },
   );
   try {
@@ -519,6 +580,15 @@ async function runFastCustomAutomation(params: {
         ? { launchClaimedAt: params.launchClaimedAt.toISOString() }
         : {}),
       prompt: params.prompt,
+      ...(launchCriteriaEnabled && params.automation.launchCriteria?.trim()
+        ? { launchCriteria: params.automation.launchCriteria }
+        : {}),
+      ...(launchCriteriaEnabled && params.automation.runWhen
+        ? { runWhen: params.automation.runWhen }
+        : {}),
+      ...(launchCriteriaRequired && target
+        ? { targetKind: target.targetKind }
+        : {}),
       trigger: params.trigger,
       ...(params.preferredEnvironmentId
         ? { preferredEnvironmentId: params.preferredEnvironmentId }
@@ -554,8 +624,9 @@ function buildCustomAutomationRunPrompt(
 
 /**
  * A run that fails before its Session can speak tells the destination so: it
- * edits the root it already posted (Discord, Teams) or posts the error
- * (Slack, Telegram). A broken automation must not fail silently.
+ * updates an existing Discord or Teams root when available, otherwise posts a
+ * standalone failure. Slack, Telegram, and Email use their direct report path.
+ * A broken automation must not fail silently.
  */
 async function reportFastAutomationStartupFailure(params: {
   automation: CustomAutomation;
@@ -585,17 +656,29 @@ async function reportFastAutomationStartupFailure(params: {
           unfurl_media: false,
         });
       }
-    } else if (conversation.surface === 'discord' && rootMessageId) {
+    } else if (conversation.surface === 'discord') {
       const provider =
         await createDiscordCommunicationProviderFromRuntimeCredentials();
-      await provider?.editMessage({
-        channelId:
-          conversation.replyTarget.threadId ??
-          conversation.replyTarget.channelId,
-        messageId: rootMessageId,
-        text: message,
-      });
-    } else if (conversation.surface === 'teams' && rootMessageId) {
+      if (rootMessageId) {
+        await provider?.editMessage({
+          channelId:
+            conversation.replyTarget.threadId ??
+            conversation.replyTarget.channelId,
+          messageId: rootMessageId,
+          text: message,
+        });
+      } else {
+        await provider?.postMessage({
+          channelId: conversation.replyTarget.channelId,
+          ...(conversation.replyTarget.threadId
+            ? { threadId: conversation.replyTarget.threadId }
+            : {}),
+          text: message,
+          textFormat: 'markdown',
+          idempotencyKey: `fast-automation-startup-failure:${conversation.conversationId}`,
+        });
+      }
+    } else if (conversation.surface === 'teams') {
       const provider =
         await createTeamsCommunicationProviderFromRuntimeCredentials();
       const route = await findTeamsConversationRoute(
@@ -607,13 +690,25 @@ async function reportFastAutomationStartupFailure(params: {
         : conversation.replyTarget.serviceUrl;
       const serviceUrl = route?.serviceUrl ?? persistedDirectMessageServiceUrl;
       if (provider && serviceUrl) {
-        await provider.updateMessage({
-          channelId: conversation.replyTarget.channelId,
-          messageId: rootMessageId,
-          serviceUrl,
-          text: message,
-          textFormat: 'markdown',
-        });
+        if (rootMessageId) {
+          await provider.updateMessage({
+            channelId: conversation.replyTarget.channelId,
+            messageId: rootMessageId,
+            serviceUrl,
+            text: message,
+            textFormat: 'markdown',
+          });
+        } else {
+          await provider.postMessage({
+            channelId: conversation.replyTarget.channelId,
+            ...(conversation.replyTarget.threadId
+              ? { threadId: conversation.replyTarget.threadId }
+              : {}),
+            serviceUrl,
+            text: message,
+            textFormat: 'markdown',
+          });
+        }
       }
     } else if (conversation.surface === 'telegram') {
       const provider =

@@ -429,6 +429,19 @@ export default {
 }
 `,
 
+  [FAST_AGENT_NATIVE_TOOL_NAMES.evaluateAutomationLaunchCriteria]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Evaluate the saved launch criteria for this custom automation after gathering the relevant current evidence with read-only tools. A confident stop ends the run quietly before delegated work or any destination reply.",
+  args: {
+    findingsReport: z.string().trim().min(1).max(12000).describe("Concise findings report grounded in the read-only tool results gathered so far"),
+  },
+  execute: (args, context) => invoke("evaluate_automation_launch_criteria", args, context),
+}
+`,
+
   [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -1631,6 +1644,7 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
+    automationLaunchCriteriaEnabled?: boolean;
     /**
      * Per-tool approval rules in OpenCode config-permission shape, applied to the parent build agent
      * and the helper subagents in the generated per-conversation config.
@@ -1715,6 +1729,8 @@ export async function getFastAgentNativeToolRuntime(
               serviceCredentialPrepareEnabled:
                 options.serviceCredentialPrepareEnabled,
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
+              automationLaunchCriteriaEnabled:
+                options.automationLaunchCriteriaEnabled,
             },
           ),
           ...toolApprovalAgentEntries,

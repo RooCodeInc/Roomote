@@ -48,6 +48,15 @@ vi.mock('@/components/settings/SettingsShell', () => ({
   ),
 }));
 
+vi.mock(
+  '@/components/settings/IntegrationToolAutoApprovalsNightlySetting',
+  () => ({
+    IntegrationToolAutoApprovalsNightlySetting: () => (
+      <div>Auto tool approvals setting</div>
+    ),
+  }),
+);
+
 import { NightlyExperimentsPage } from './NightlyExperimentsPage';
 
 describe('NightlyExperimentsPage', () => {
@@ -83,9 +92,23 @@ describe('NightlyExperimentsPage', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByText('Dizzy')).toBeInTheDocument();
+    expect(screen.getByText('Auto tool approvals setting')).toBeInTheDocument();
     expect(
       screen.getByText(
         'Continuously spin the Roomote logo mark in the collapsed sidebar and mobile header.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('switch', {
+        name: 'Toggle custom automation launch criteria',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Custom automation launch criteria'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Allow custom automations to use plain-language and typed checks before a run starts.',
       ),
     ).toBeInTheDocument();
   });

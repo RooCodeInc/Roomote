@@ -20,9 +20,18 @@ describe('nightly experiment API access', () => {
     await expect(
       caller.nightlyExperiments.set({ id: 'dizzy', enabled: true }),
     ).rejects.toThrow('Unauthorized');
+    await expect(
+      caller.nightlyExperiments.set({
+        id: 'automationLaunchCriteria',
+        enabled: true,
+      }),
+    ).rejects.toThrow('Unauthorized');
     await expect(caller.nightlyExperiments.dizzyEnabled()).rejects.toThrow(
       'Unauthorized',
     );
+    await expect(
+      caller.nightlyExperiments.integrationToolAutoApprovalsEnabled(),
+    ).rejects.toThrow('Unauthorized');
   });
 
   it('keeps management routes admin-only on opted-in deployments', async () => {
@@ -41,6 +50,12 @@ describe('nightly experiment API access', () => {
     );
     await expect(
       caller.nightlyExperiments.set({ id: 'dizzy', enabled: true }),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      caller.nightlyExperiments.set({
+        id: 'automationLaunchCriteria',
+        enabled: true,
+      }),
     ).rejects.toThrow('Unauthorized');
   });
 });

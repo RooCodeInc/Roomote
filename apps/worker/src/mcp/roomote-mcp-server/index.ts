@@ -3,7 +3,10 @@
 import { pathToFileURL } from 'node:url';
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
+import {
+  NullableOptionalsMcpServer,
+  withNullableOptionals,
+} from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { z } from 'zod';
 import {
   CALL_INTEGRATION_TOOL_TOOL,
@@ -14,7 +17,7 @@ import {
   CHAT_MESSAGE_CONTEXT_TOOL,
   chatDestinationLookupFieldSchemas,
   chatDestinationLookupInputSchema,
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  getManageCustomAutomationsTool,
   CREATE_CUSTOM_SKILL_TOOL,
   OPEN_ARTIFACT_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
@@ -22,6 +25,7 @@ import {
   createTaskEnvVarRequestBaseSchema,
   dataVisualizationInputsSchema,
   type DataVisualizationInput,
+  type ManageCustomAutomationsInput,
   PRODUCT_NAME,
   PUBLIC_URL_FETCH_TOOL,
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
@@ -102,7 +106,10 @@ import type { ToolResult } from './types.js';
 import { errorResult } from './tool-result.js';
 import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
-import { handleManageCustomAutomations } from './custom-automations.js';
+import {
+  handleManageCustomAutomations,
+  resolveCustomAutomationLaunchCriteriaEnabled,
+} from './custom-automations.js';
 import {
   handleCreateCustomSkill,
   handleUpdateCustomSkill,
@@ -133,6 +140,10 @@ export const roomoteMcpServer = new NullableOptionalsMcpServer({
   name: 'roomote-mcp-server',
   version: '1.0.0',
 });
+
+let automationLaunchCriteriaEnabled = false;
+const initialManageCustomAutomationsTool =
+  getManageCustomAutomationsTool(false);
 
 roomoteMcpServer.registerTool(
   PUBLIC_URL_FETCH_TOOL.name,
@@ -169,20 +180,24 @@ const uuidStringSchema = z
     message: 'Value must be a UUID.',
   });
 
-roomoteMcpServer.registerTool(
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+const manageCustomAutomationsToolRegistration = roomoteMcpServer.registerTool(
+  initialManageCustomAutomationsTool.name,
   {
-    title: MANAGE_CUSTOM_AUTOMATIONS_TOOL.title,
-    description: MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
-    inputSchema: MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
-    annotations: MANAGE_CUSTOM_AUTOMATIONS_TOOL.annotations,
+    title: initialManageCustomAutomationsTool.title,
+    description: initialManageCustomAutomationsTool.description,
+    inputSchema: initialManageCustomAutomationsTool.inputSchema,
+    annotations: initialManageCustomAutomationsTool.annotations,
   },
   async (params): Promise<ToolResult> => {
     const config = getRoomoteConfig();
     if (!config) {
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
-    return handleManageCustomAutomations(params, config);
+    return handleManageCustomAutomations(
+      params as ManageCustomAutomationsInput,
+      config,
+      automationLaunchCriteriaEnabled,
+    );
   },
 );
 
@@ -2163,6 +2178,20 @@ async function main() {
   installWorkerFatalProcessHandlers({
     uncaughtExceptionStage: 'roomote-mcp-server.uncaughtException',
     unhandledRejectionStage: 'roomote-mcp-server.unhandledRejection',
+  });
+
+  const config = getRoomoteConfig();
+  automationLaunchCriteriaEnabled = config
+    ? await resolveCustomAutomationLaunchCriteriaEnabled(config)
+    : false;
+  const manageCustomAutomationsTool = getManageCustomAutomationsTool(
+    automationLaunchCriteriaEnabled,
+  );
+  manageCustomAutomationsToolRegistration.update({
+    description: manageCustomAutomationsTool.description,
+    paramsSchema: withNullableOptionals(
+      manageCustomAutomationsTool.inputSchema,
+    ),
   });
 
   const transport = new StdioServerTransport();

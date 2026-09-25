@@ -24,7 +24,10 @@ import {
   db,
   customAutomations,
   eq,
+  fastAgentProviderMessages,
+  getAutomationResultByDedupeKey,
   getCustomAutomationById,
+  listRecentCustomAutomationResults,
   recordCustomAutomationResult,
   getSessionForFastConversation,
   getSessionWakeupById,
@@ -75,7 +78,9 @@ import {
   type TaskRunErrorCode,
   type SourceControlProvider,
   type StandardTask,
+  type AutomationTarget,
   isFastAgentSourceControlConversation,
+  isFastAgentCommunicationConversation,
   stripLeadingIntegrationSavedBlock,
 } from '@roomote/types';
 
@@ -108,6 +113,7 @@ import {
 } from './manager-slack';
 import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
 import { enqueueAutomationResultPreparation } from './automation-result-preparation';
+import { evaluateCustomAutomationLaunchGate } from '../automations/custom-automation-launch-gate';
 import {
   appendFastAutomationSuggestionInstruction,
   postFastAutomationSuggestionsToDiscord,
@@ -229,6 +235,10 @@ export type FastAgentParentEvent =
       launchClaimedAt?: string;
       prompt: string;
       trigger: 'schedule' | 'manual' | 'webhook';
+      /** Saved criteria are immutable for this occurrence. */
+      launchCriteria?: string | null;
+      runWhen?: import('@roomote/types').CustomAutomationRunWhen | null;
+      targetKind?: AutomationTarget['targetKind'];
       /** Environment the automation was configured for; `all` for every repository. */
       preferredEnvironmentId?: string;
       rootMessageId?: string;
@@ -637,6 +647,181 @@ async function resolveFastAutomationLaunchContext(params: {
     automationName: automation?.name ?? 'Custom automation',
     trigger: 'schedule',
   };
+}
+
+async function findFastAutomationRootMessage(input: {
+  sessionId: string;
+  conversation: FastAgentConversation;
+}): Promise<{ messageId: string; threadId: string | null } | null> {
+  if (!isFastAgentCommunicationConversation(input.conversation)) return null;
+  const row = await db.query.fastAgentProviderMessages.findFirst({
+    where: and(
+      eq(fastAgentProviderMessages.conversationId, input.sessionId),
+      eq(fastAgentProviderMessages.provider, input.conversation.surface),
+      eq(fastAgentProviderMessages.workspaceId, input.conversation.workspaceId),
+      eq(
+        fastAgentProviderMessages.channelId,
+        input.conversation.replyTarget.channelId,
+      ),
+    ),
+    columns: { messageId: true, threadId: true },
+    orderBy: [asc(fastAgentProviderMessages.createdAt)],
+  });
+  return row ?? null;
+}
+
+/** Create the provider root only after a criteria-bearing run continues. */
+async function prepareFastAutomationDestinationRoot(params: {
+  event: Extract<FastAgentParentEvent, { type: 'automation_triggered' }>;
+  sessionId: string;
+  userId: string;
+  conversation: FastAgentConversation;
+}): Promise<FastAgentConversation> {
+  const { event, conversation, sessionId, userId } = params;
+  if (
+    conversation.surface !== 'discord' &&
+    conversation.surface !== 'teams' &&
+    conversation.surface !== 'telegram'
+  ) {
+    return conversation;
+  }
+
+  const existing = await findFastAutomationRootMessage({
+    sessionId,
+    conversation,
+  });
+  if (existing) {
+    event.rootMessageId = existing.messageId;
+    const threadId =
+      existing.threadId ?? conversation.replyTarget.threadId ?? undefined;
+    if (threadId === conversation.replyTarget.threadId) return conversation;
+    const updated = {
+      ...conversation,
+      replyTarget: {
+        ...conversation.replyTarget,
+        ...(threadId ? { threadId } : {}),
+      },
+    } as FastAgentConversation;
+    const stored = await fastAgentConversationRepository.getOrCreate({
+      userId,
+      conversation: updated,
+    });
+    Object.assign(conversation, stored.conversation);
+    return conversation;
+  }
+
+  if (conversation.surface === 'discord') {
+    const provider =
+      await createDiscordCommunicationProviderFromRuntimeCredentials();
+    if (!provider) throw new Error('Discord is not connected.');
+    if (params.event.targetKind === 'discord_user') {
+      const posted = await provider.postMessage({
+        channelId: conversation.replyTarget.channelId,
+        text: `${event.automationName} is running.`,
+        textFormat: 'markdown',
+        idempotencyKey: `fast-automation-root:${event.eventId}`,
+      });
+      event.rootMessageId = posted.messageId;
+      await recordFastAgentConversationMessageBestEffort({
+        sessionId,
+        conversation,
+        messageId: posted.messageId,
+      });
+      return conversation;
+    }
+
+    const thread = await provider.createTaskThread({
+      channelId: conversation.replyTarget.channelId,
+      name: event.automationName,
+      initialText: `${event.automationName} is running.`,
+    });
+    if (!thread.messageId) {
+      throw new Error('Discord did not return an automation root message id.');
+    }
+    event.rootMessageId = thread.messageId;
+    const updated = {
+      ...conversation,
+      replyTarget: {
+        ...conversation.replyTarget,
+        threadId: thread.channelId,
+      },
+    } as FastAgentConversation;
+    await recordFastAgentConversationMessageBestEffort({
+      sessionId,
+      conversation: updated,
+      messageId: thread.messageId,
+    });
+    const stored = await fastAgentConversationRepository.getOrCreate({
+      userId,
+      conversation: updated,
+    });
+    Object.assign(conversation, stored.conversation);
+    return conversation;
+  }
+
+  if (conversation.surface === 'teams') {
+    const serviceUrl = conversation.replyTarget.serviceUrl;
+    if (!serviceUrl) throw new Error('Teams destination is unavailable.');
+    const provider =
+      await createTeamsCommunicationProviderFromRuntimeCredentials();
+    if (!provider) throw new Error('Teams is not connected.');
+    const posted = await provider.postMessage({
+      channelId: conversation.replyTarget.channelId,
+      serviceUrl,
+      text: `${event.automationName} is running.`,
+      textFormat: 'markdown',
+      idempotencyKey: `fast-automation-root:${event.eventId}`,
+    });
+    event.rootMessageId = posted.messageId;
+    const updated = {
+      ...conversation,
+      replyTarget: {
+        ...conversation.replyTarget,
+        ...(params.event.targetKind === 'teams_channel'
+          ? { threadId: posted.messageId }
+          : {}),
+      },
+    } as FastAgentConversation;
+    await recordFastAgentConversationMessageBestEffort({
+      sessionId,
+      conversation: updated,
+      messageId: posted.messageId,
+    });
+    const stored = await fastAgentConversationRepository.getOrCreate({
+      userId,
+      conversation: updated,
+    });
+    Object.assign(conversation, stored.conversation);
+    return conversation;
+  }
+
+  if (params.event.targetKind !== 'telegram_user') return conversation;
+  const provider =
+    await createTelegramCommunicationProviderFromRuntimeCredentials();
+  if (!provider) throw new Error('Telegram is not connected.');
+  const topic = await provider.createForumTopic({
+    channelId: conversation.replyTarget.channelId,
+    name: buildCommunicationTaskThreadName(event.automationName),
+  });
+  event.rootMessageId = topic.messageThreadId;
+  const updated = {
+    ...conversation,
+    replyTarget: {
+      ...conversation.replyTarget,
+      threadId: topic.messageThreadId,
+    },
+  } as FastAgentConversation;
+  await recordFastAgentConversationMessageBestEffort({
+    sessionId,
+    conversation: updated,
+    messageId: topic.messageThreadId,
+  });
+  const stored = await fastAgentConversationRepository.getOrCreate({
+    userId,
+    conversation: updated,
+  });
+  Object.assign(conversation, stored.conversation);
+  return conversation;
 }
 
 /**
@@ -2913,6 +3098,130 @@ export async function deliverFastAgentParentEventWithLock(
         replyPosted = true;
       },
     });
+    if (
+      params.event.type === 'automation_triggered' &&
+      Boolean(params.event.launchCriteria?.trim() || params.event.runWhen)
+    ) {
+      const launchEvent = params.event;
+      const baseAdapter = parentTurn.adapter;
+      parentTurn = {
+        ...parentTurn,
+        adapter: {
+          ...baseAdapter,
+          evaluateAutomationLaunchCriteria: async ({
+            findingsReport,
+            rawToolResults,
+          }) => {
+            const dedupeKey = `fast-launch-gate:${launchEvent.eventId}`;
+            const decideFromSaved = (
+              result: Awaited<
+                ReturnType<typeof getAutomationResultByDedupeKey>
+              >,
+            ) => ({
+              decision:
+                result?.launchCriteriaOutcome?.launchCriteria === 'skipped' ||
+                result?.launchCriteriaOutcome?.runWhen === 'skipped'
+                  ? ('stop' as const)
+                  : ('continue' as const),
+            });
+
+            try {
+              const existing = await getAutomationResultByDedupeKey(dedupeKey);
+              if (existing) return decideFromSaved(existing);
+            } catch (error) {
+              console.warn(
+                `[FastAutomation] Could not read prior launch decision for ${launchEvent.automationId}; continuing: ${error instanceof Error ? error.message : String(error)}`,
+              );
+              return { decision: 'continue' as const };
+            }
+
+            const recentResults = await listRecentCustomAutomationResults(
+              launchEvent.automationId,
+              5,
+            ).catch((error) => {
+              console.warn(
+                `[FastAutomation] Could not load recent results for ${launchEvent.automationId}; continuing without them: ${error instanceof Error ? error.message : String(error)}`,
+              );
+              return [];
+            });
+            const evaluation = await evaluateCustomAutomationLaunchGate({
+              automationId: launchEvent.automationId,
+              automationPrompt: launchEvent.prompt,
+              launchCriteria: launchEvent.launchCriteria ?? null,
+              runWhen: launchEvent.runWhen ?? null,
+              findingsReport,
+              rawToolResults,
+              recentResults,
+              userId: parentTurn.userId,
+            });
+
+            try {
+              const sourceSession = await getSessionForFastConversation(
+                db,
+                params.parent.sessionId,
+              );
+              const recorded = await recordCustomAutomationResult({
+                automationId: launchEvent.automationId,
+                userId: parentTurn.userId,
+                ...(sourceSession ? { sourceSessionId: sourceSession.id } : {}),
+                content: findingsReport.slice(0, 12_000),
+                resultKind: 'outcome',
+                dedupeKey,
+                visibility: 'private',
+                launchCriteriaSnapshot: {
+                  ...(launchEvent.launchCriteria?.trim()
+                    ? { launchCriteria: launchEvent.launchCriteria }
+                    : {}),
+                  ...(launchEvent.runWhen
+                    ? { runWhen: launchEvent.runWhen }
+                    : {}),
+                },
+                ...(evaluation.launchCriteriaAnswers ||
+                evaluation.runWhenAnswers
+                  ? {
+                      launchCriteriaAnswers: {
+                        ...(evaluation.launchCriteriaAnswers
+                          ? evaluation.launchCriteriaAnswers
+                          : {}),
+                        ...(evaluation.runWhenAnswers
+                          ? { runWhen: evaluation.runWhenAnswers }
+                          : {}),
+                      },
+                    }
+                  : {}),
+                launchCriteriaOutcome: {
+                  ...(evaluation.launchCriteriaOutcome
+                    ? { launchCriteria: evaluation.launchCriteriaOutcome }
+                    : {}),
+                  ...(evaluation.runWhenOutcome
+                    ? { runWhen: evaluation.runWhenOutcome }
+                    : {}),
+                },
+              });
+              const saved =
+                recorded ?? (await getAutomationResultByDedupeKey(dedupeKey));
+              if (!saved) throw new Error('Launch decision was not saved.');
+              return decideFromSaved(saved);
+            } catch (error) {
+              console.warn(
+                `[FastAutomation] Could not persist launch decision for ${launchEvent.automationId}; continuing: ${error instanceof Error ? error.message : String(error)}`,
+              );
+              return { decision: 'continue' as const };
+            }
+          },
+          prepareAutomationLaunch: async () => {
+            const conversation = await prepareFastAutomationDestinationRoot({
+              event: launchEvent,
+              sessionId: params.parent.sessionId,
+              userId: parentTurn.userId,
+              conversation: parentTurn.conversation,
+            });
+            parentTurn.conversation = conversation;
+            return conversation;
+          },
+        },
+      };
+    }
     if (isFastAutomationReportEvent(params.event)) {
       const reportEvent = params.event;
       const automationId =
@@ -2925,42 +3234,39 @@ export async function deliverFastAgentParentEventWithLock(
         adapter: {
           ...baseAdapter,
           postReply: async (reply) => {
-            if (reply.kickoff) {
-              return;
-            }
+            if (reply.kickoff) return;
             const posted = await baseAdapter.postReply(reply);
             if (
-              reply.purpose === 'closeout' ||
-              reply.purpose === 'clarification'
+              reply.purpose !== 'closeout' &&
+              reply.purpose !== 'clarification'
             ) {
-              const sourceSession = await getSessionForFastConversation(
-                db,
-                params.parent.sessionId,
-              );
-              const result = await recordCustomAutomationResult({
-                automationId,
-                userId: parentTurn.userId,
-                ...(reportEvent.type === 'task_settled'
-                  ? {
-                      sourceTaskId: reportEvent.taskId,
-                      sourceRunId: reportEvent.runId,
-                    }
-                  : {}),
-                ...(sourceSession ? { sourceSessionId: sourceSession.id } : {}),
-                content: reply.message,
-                resultKind:
-                  reply.purpose === 'clarification'
-                    ? 'input_request'
-                    : 'outcome',
-                dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
-                visibility: await resolveCustomAutomationResultVisibility(
-                  automationId,
-                ).catch(() => 'private' as const),
-              }).catch(() => undefined);
-              if (result) {
-                await enqueueAutomationResultPreparation(result.id);
-              }
+              return posted;
             }
+
+            const dedupeKey = `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`;
+            const sourceSession = await getSessionForFastConversation(
+              db,
+              params.parent.sessionId,
+            );
+            const result = await recordCustomAutomationResult({
+              automationId,
+              userId: parentTurn.userId,
+              ...(reportEvent.type === 'task_settled'
+                ? {
+                    sourceTaskId: reportEvent.taskId,
+                    sourceRunId: reportEvent.runId,
+                  }
+                : {}),
+              ...(sourceSession ? { sourceSessionId: sourceSession.id } : {}),
+              content: reply.message,
+              resultKind:
+                reply.purpose === 'clarification' ? 'input_request' : 'outcome',
+              dedupeKey,
+              visibility: await resolveCustomAutomationResultVisibility(
+                automationId,
+              ).catch(() => 'private' as const),
+            }).catch(() => undefined);
+            if (result) await enqueueAutomationResultPreparation(result.id);
             return posted;
           },
         },
@@ -3095,6 +3401,12 @@ export async function deliverFastAgentParentEventWithLock(
           : params.event.type === 'scheduled_wakeup'
             ? 'scheduled_wakeup'
             : 'delegated_task'),
+      automationLaunchCriteriaRequired:
+        params.event.type === 'automation_triggered' &&
+        Boolean(params.event.launchCriteria?.trim() || params.event.runWhen),
+      automationLaunchRootRequired:
+        params.event.type === 'automation_triggered' &&
+        params.event.targetKind === 'telegram_user',
       ...(params.event.type === 'child_message' && params.event.admittedAtMs
         ? { platformEventTimestampMs: params.event.admittedAtMs }
         : {}),

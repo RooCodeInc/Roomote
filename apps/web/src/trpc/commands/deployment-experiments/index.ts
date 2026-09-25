@@ -65,6 +65,21 @@ export async function getDizzyExperimentEnabledCommand(
   return (await getDeploymentExperiments()).dizzy;
 }
 
+/**
+ * Auto is deployment-wide runtime behavior, so signed-in users on an
+ * explicitly opted-in internal deployment may read its enabled state. Only
+ * admins can manage the switch or see the other nightly experiment values.
+ */
+export async function getIntegrationToolAutoApprovalsEnabledCommand(
+  auth: UserAuthSuccess,
+): Promise<boolean> {
+  if (auth.nightlyExperimentsEnabled !== true) {
+    throw new Error('Unauthorized');
+  }
+
+  return (await getDeploymentExperiments()).integrationToolAutoApprovals;
+}
+
 export async function setNightlyExperimentCommand(
   auth: UserAuthSuccess,
   input: { id: DeploymentExperimentId; enabled: boolean },

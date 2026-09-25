@@ -65,6 +65,8 @@ const visibleReport = () =>
   and(
     eq(automationResults.resultVisibility, 'shared'),
     isNull(automationResults.supersededAt),
+    sql`coalesce(${automationResults.launchCriteriaOutcome}->>'launchCriteria', '') <> 'skipped'`,
+    sql`coalesce(${automationResults.launchCriteriaOutcome}->>'runWhen', '') <> 'skipped'`,
   )!;
 const visibleSuggestion = () =>
   and(

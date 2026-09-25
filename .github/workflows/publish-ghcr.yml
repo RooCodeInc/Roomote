@@ -248,6 +248,20 @@ jobs:
             image: roomote-gbrain
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
+          # The optional CPU decision model (judgment sidecar), for the same
+          # template-based deployments.
+          - app: judgment
+            context: .docker/judgment
+            dockerfile: .docker/judgment/Dockerfile
+            image: roomote-judgment
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: judgment
+            context: .docker/judgment
+            dockerfile: .docker/judgment/Dockerfile
+            image: roomote-judgment
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -321,6 +335,8 @@ jobs:
             image: roomote-worker
           - app: gbrain
             image: roomote-gbrain
+          - app: judgment
+            image: roomote-judgment
     steps:
       - name: Download digests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
