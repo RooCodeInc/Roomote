@@ -609,11 +609,10 @@ export function useSessionWorkspacePanels({
         selectedTaskId: selectedPanelTaskId,
         capacity: taskPanelCapacity,
       });
-      if (
-        taskId !== selectedPanelTaskId &&
-        selectedPanelTaskId &&
-        taskPanelCapacity === 1
-      ) {
+      const shouldPersistTaskSelection =
+        taskPanelCapacity === 1 &&
+        (!isMdOrLarger || Boolean(selectedPanelTaskId));
+      if (taskId !== selectedPanelTaskId && shouldPersistTaskSelection) {
         selectTask(taskId);
       }
     },
@@ -623,6 +622,7 @@ export function useSessionWorkspacePanels({
       selectTask,
       sessionId,
       taskPanelCapacity,
+      isMdOrLarger,
     ],
   );
   const openTasksPanel = useCallback(() => {

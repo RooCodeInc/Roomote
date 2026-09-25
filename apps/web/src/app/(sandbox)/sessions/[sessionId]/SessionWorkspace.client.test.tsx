@@ -1660,6 +1660,54 @@ describe('SessionWorkspace', () => {
     );
   });
 
+  it('persists a mobile Tasks-panel selection through refresh and close', () => {
+    const workspace = renderWorkspace({
+      isMobile: true,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'View coding task: Update homepage background',
+      }),
+    );
+
+    expect(routerReplaceMock).toHaveBeenCalledWith(
+      '/sessions/session-1?task=task-1',
+    );
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+
+    searchParamsState.value = 'task=task-1';
+    workspace.refresh();
+
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+
+    routerReplaceMock.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel task-1' }));
+
+    expect(routerReplaceMock).toHaveBeenCalledWith('/sessions/session-1');
+  });
+
+  it('keeps a desktop one-panel Tasks selection local when no task is URL-selected', () => {
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1024,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'View coding task: Update homepage background',
+      }),
+    );
+
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+  });
+
   it('disables the Artifacts control when the gallery is empty', () => {
     renderWorkspace({ isMobile: false });
 
