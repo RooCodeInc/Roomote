@@ -6,23 +6,23 @@ vi.mock('../../(sandbox)/sessions/[sessionId]/SessionDeleteAction', () => ({
   ),
 }));
 
-import { formatSessionMobileTimestamp, SessionCard } from './SessionCard';
+import { formatSessionCompactTimestamp, SessionCard } from './SessionCard';
 
-describe('formatSessionMobileTimestamp', () => {
+describe('formatSessionCompactTimestamp', () => {
   const now = new Date(2026, 8, 21, 15, 30);
 
   it.each([
-    [new Date(2026, 8, 21, 9, 5), '09:05 AM'],
+    [new Date(2026, 8, 21, 9, 5), '09:05'],
     [new Date(2026, 8, 20, 23, 59), 'Sep 20'],
     [new Date(2025, 6, 4, 12, 0), 'Jul 4 2025'],
   ])('formats %s for compact mobile display', (date, expected) => {
-    expect(formatSessionMobileTimestamp(date, now)).toBe(expected);
+    expect(formatSessionCompactTimestamp(date, now)).toBe(expected);
   });
 });
 
 describe('SessionCard', () => {
   it('links to the transcript without repository or execution metadata', async () => {
-    render(
+    const { container } = render(
       <SessionCard
         viewerUserId="user-1"
         session={{
@@ -68,6 +68,13 @@ describe('SessionCard', () => {
     expect(
       screen.getByRole('link', { name: /Update homepage background/ }),
     ).toHaveAttribute('href', '/sessions/session-1');
+    const activityTime = container.querySelector('time');
+    expect(activityTime).toHaveAttribute('dateTime');
+    expect(activityTime).toHaveAttribute('title');
+    expect(activityTime).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('Activity time:'),
+    );
     expect(screen.getByText('Test User from Web')).toBeInTheDocument();
     expect(screen.queryByText(/started a session/)).not.toBeInTheDocument();
     expect(screen.getByText('$0.01')).toBeInTheDocument();
@@ -220,6 +227,17 @@ describe('SessionCard', () => {
       />,
     );
     expect(screen.getByText('blocked')).toHaveClass('capitalize');
+
+    rerender(
+      <SessionCard
+        session={{ ...session, cachedStatus: 'blocked' }}
+        viewerUserId="user-1"
+        hideBlockedBadge
+      />,
+    );
+    expect(
+      screen.queryByText('blocked', { exact: true }),
+    ).not.toBeInTheDocument();
   });
 
   it('labels automation-owned sessions with the automation actor', () => {
