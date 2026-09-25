@@ -233,6 +233,8 @@ export type FastAgentParentEvent =
       automationId: string;
       automationName: string;
       launchClaimedAt?: string;
+      /** Original trigger time used to keep run recency monotonic at settlement. */
+      occurrenceAt?: string;
       prompt: string;
       trigger: 'schedule' | 'manual' | 'webhook';
       /** Saved criteria are immutable for this occurrence. */

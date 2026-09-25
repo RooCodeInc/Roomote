@@ -517,7 +517,7 @@ async function markDiscarded(id: string, error: unknown) {
 
 function getAutomationOutcomeIdentity(
   event: FastAgentParentEvent,
-): { id: string; launchClaimedAt?: Date } | null {
+): { id: string; lastRunAt: Date; launchClaimedAt?: Date } | null {
   if (event.type !== 'automation_triggered') return null;
 
   const prefix = `${event.automationId}:`;
@@ -525,7 +525,17 @@ function getAutomationOutcomeIdentity(
 
   if (event.trigger === 'webhook') {
     if (!event.eventId.startsWith(`${prefix}webhook:`)) return null;
-    return { id: event.automationId };
+  }
+
+  const occurrenceAt = event.occurrenceAt
+    ? new Date(event.occurrenceAt)
+    : event.trigger === 'webhook'
+      ? new Date()
+      : new Date(event.eventId.slice(prefix.length));
+  if (Number.isNaN(occurrenceAt.getTime())) return null;
+
+  if (event.trigger === 'webhook') {
+    return { id: event.automationId, lastRunAt: occurrenceAt };
   }
 
   const launchClaimedAt = new Date(
@@ -533,7 +543,7 @@ function getAutomationOutcomeIdentity(
   );
   if (Number.isNaN(launchClaimedAt.getTime())) return null;
 
-  return { id: event.automationId, launchClaimedAt };
+  return { id: event.automationId, launchClaimedAt, lastRunAt: occurrenceAt };
 }
 
 async function finalizeAutomationLaunch(

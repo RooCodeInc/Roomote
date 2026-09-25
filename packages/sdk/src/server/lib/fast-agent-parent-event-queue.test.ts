@@ -397,17 +397,20 @@ describe('Fast parent event durable queue', () => {
       {
         id: 'automation-1',
         launchClaimedAt,
+        lastRunAt: eventClaimedAt,
         status: 'succeeded',
       },
     );
   });
 
   it('records webhook success without a shared launch claim', async () => {
+    const occurrenceAt = new Date('2026-09-25T10:02:00.000Z');
     const webhookEvent: FastAgentParentEvent = {
       type: 'automation_triggered',
       eventId: 'automation-1:webhook:00000000-0000-4000-8000-000000000001',
       automationId: 'automation-1',
       automationName: 'Webhook report',
+      occurrenceAt: occurrenceAt.toISOString(),
       prompt: 'Review the supplied event.',
       trigger: 'webhook',
     };
@@ -424,16 +427,18 @@ describe('Fast parent event durable queue', () => {
 
     expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
       expect.anything(),
-      { id: 'automation-1', status: 'succeeded' },
+      { id: 'automation-1', lastRunAt: occurrenceAt, status: 'succeeded' },
     );
   });
 
   it('records terminal webhook failure without a shared launch claim', async () => {
+    const occurrenceAt = new Date('2026-09-25T10:02:00.000Z');
     const webhookEvent: FastAgentParentEvent = {
       type: 'automation_triggered',
       eventId: 'automation-1:webhook:00000000-0000-4000-8000-000000000002',
       automationId: 'automation-1',
       automationName: 'Webhook report',
+      occurrenceAt: occurrenceAt.toISOString(),
       prompt: 'Review the supplied event.',
       trigger: 'webhook',
     };
@@ -458,6 +463,7 @@ describe('Fast parent event durable queue', () => {
       expect.anything(),
       {
         id: 'automation-1',
+        lastRunAt: occurrenceAt,
         status: 'failed',
         error: 'webhook run failed',
       },
@@ -497,6 +503,7 @@ describe('Fast parent event durable queue', () => {
       {
         id: 'automation-1',
         launchClaimedAt,
+        lastRunAt: launchClaimedAt,
         status: 'failed',
         error: 'parent session missing',
       },
@@ -604,6 +611,7 @@ describe('Fast parent event durable queue', () => {
       {
         id: 'automation-1',
         launchClaimedAt,
+        lastRunAt: launchClaimedAt,
         status: 'succeeded',
       },
     );

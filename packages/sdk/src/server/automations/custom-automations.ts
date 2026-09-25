@@ -524,6 +524,7 @@ async function runFastCustomAutomation(params: {
   prompt: string;
   destination: CustomAutomationDestination | null;
   eventId: string;
+  occurrenceAt: Date;
   launchClaimedAt: Date | null;
   trigger: 'schedule' | 'manual' | 'webhook';
   /** Environment the automation was configured for, offered to the turn as a hint. */
@@ -576,6 +577,7 @@ async function runFastCustomAutomation(params: {
       eventId: params.eventId,
       automationId: params.automation.id,
       automationName: params.automation.name,
+      occurrenceAt: params.occurrenceAt.toISOString(),
       ...(params.launchClaimedAt
         ? { launchClaimedAt: params.launchClaimedAt.toISOString() }
         : {}),
@@ -954,6 +956,7 @@ async function launchCustomAutomationRow(
       ),
       destination,
       eventId,
+      occurrenceAt: eventClaimedAt,
       launchClaimedAt,
       trigger: opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
       preferredEnvironmentId,

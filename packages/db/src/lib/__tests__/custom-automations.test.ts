@@ -491,7 +491,7 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
-  it('records an unfenced outcome without clearing an active launch claim', async () => {
+  it('keeps the latest run occurrence when an older claim settles after a webhook', async () => {
     const created = await createCustomAutomation({
       name: `Concurrent webhook outcome ${Date.now()}`,
       prompt: 'Review the supplied event.',
@@ -506,22 +506,46 @@ describe('custom automations helpers', () => {
     );
     expect(launchClaimedAt).toBeInstanceOf(Date);
 
-    const outcomeAt = new Date('2026-09-25T09:00:00.000Z');
+    const webhookOccurrenceAt = new Date(launchClaimedAt!.getTime() + 120_000);
+    const webhookSettledAt = new Date(webhookOccurrenceAt.getTime() + 30_000);
+    const scheduledSettledAt = new Date(webhookSettledAt.getTime() + 30_000);
     try {
       await expect(
         recordCustomAutomationRunOutcome(db, {
           id: created.id,
           status: 'succeeded',
-          at: outcomeAt,
+          at: webhookSettledAt,
+          lastRunAt: webhookOccurrenceAt,
+        }),
+      ).resolves.toBe(true);
+
+      const afterWebhook = await getCustomAutomationById(created.id);
+      expect(afterWebhook?.lastRunAt?.getTime()).toBe(
+        webhookOccurrenceAt.getTime(),
+      );
+      expect(afterWebhook?.lastSucceededAt?.getTime()).toBe(
+        webhookSettledAt.getTime(),
+      );
+      expect(afterWebhook?.launchClaimedAt?.getTime()).toBe(
+        launchClaimedAt?.getTime(),
+      );
+
+      await expect(
+        recordCustomAutomationRunOutcome(db, {
+          id: created.id,
+          status: 'succeeded',
+          at: scheduledSettledAt,
+          lastRunAt: launchClaimedAt!,
+          launchClaimedAt: launchClaimedAt!,
         }),
       ).resolves.toBe(true);
 
       const updated = await getCustomAutomationById(created.id);
-      expect(updated?.lastRunAt?.getTime()).toBe(outcomeAt.getTime());
-      expect(updated?.lastSucceededAt?.getTime()).toBe(outcomeAt.getTime());
-      expect(updated?.launchClaimedAt?.getTime()).toBe(
-        launchClaimedAt?.getTime(),
+      expect(updated?.lastRunAt?.getTime()).toBe(webhookOccurrenceAt.getTime());
+      expect(updated?.lastSucceededAt?.getTime()).toBe(
+        scheduledSettledAt.getTime(),
       );
+      expect(updated?.launchClaimedAt).toBeNull();
     } finally {
       if (launchClaimedAt) {
         await releaseCustomAutomationLaunchClaim(created.id, launchClaimedAt);

@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 
 import {
   ALL_REPOSITORIES,
@@ -503,13 +503,17 @@ export async function recordCustomAutomationRunOutcome(
   const update: Partial<typeof customAutomations.$inferInsert> = {
     updatedAt: at,
   };
+  const requestedLastRunAt =
+    params.lastRunAt === 'skip' ? null : (params.lastRunAt ?? at);
+  const lastRunAtUpdate = requestedLastRunAt
+    ? sql`GREATEST(${customAutomations.lastRunAt}, ${sql.param(
+        requestedLastRunAt,
+        customAutomations.lastRunAt,
+      )})`
+    : undefined;
 
   if (params.launchClaimedAt) {
     update.launchClaimedAt = null;
-  }
-
-  if (params.lastRunAt !== 'skip') {
-    update.lastRunAt = params.lastRunAt ?? at;
   }
 
   if (params.launchClaimedAt && params.lastLaunchedTaskId !== undefined) {
@@ -536,7 +540,10 @@ export async function recordCustomAutomationRunOutcome(
 
   const updated = await client
     .update(customAutomations)
-    .set(update)
+    .set({
+      ...update,
+      ...(lastRunAtUpdate ? { lastRunAt: lastRunAtUpdate } : {}),
+    })
     .where(where)
     .returning({ id: customAutomations.id });
 
