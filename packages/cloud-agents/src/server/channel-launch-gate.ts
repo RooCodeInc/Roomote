@@ -95,6 +95,7 @@ async function evaluateWithJudgmentModel(params: {
 
   try {
     const answers = await evaluateTypeSafeJudgments({
+      decision: 'channel-launch-gate',
       state: {
         launchCriteria: params.launchCriteria,
         channel: params.channel,

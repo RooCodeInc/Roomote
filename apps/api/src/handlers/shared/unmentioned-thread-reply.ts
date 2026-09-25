@@ -449,6 +449,7 @@ async function judgeUnmentionedReplyAddressee(
 ): Promise<UnmentionedReplyJudgment> {
   try {
     const answers = await evaluateTypeSafeJudgments({
+      decision: 'unmentioned-thread-reply',
       state: buildReplyAddresseeState(params),
       questions: {
         addressee: REPLY_ADDRESSEE_QUESTION,

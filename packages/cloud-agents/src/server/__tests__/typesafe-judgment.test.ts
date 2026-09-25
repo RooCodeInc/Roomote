@@ -159,7 +159,11 @@ describe('evaluateTypeSafeJudgments', () => {
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
       await expect(
-        evaluateTypeSafeJudgments({ state: { text: 'hi' }, questions }),
+        evaluateTypeSafeJudgments({
+          state: { text: 'hi' },
+          questions,
+          decision: 'fast-agent-launch-model',
+        }),
       ).resolves.toEqual({
         urgent: { type: 'noul', noul: 0.92 },
         team: { ...upstreamAnswers.team, confidence: 0.9 },
@@ -179,13 +183,31 @@ describe('evaluateTypeSafeJudgments', () => {
       expect((init.signal as AbortSignal | undefined)?.aborted).toBe(false);
     });
 
+    it('does not ask the Roomote model for an unregistered decision', async () => {
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
+
+      await expect(
+        evaluateTypeSafeJudgments({
+          state: 'hi',
+          questions,
+          decision: 'session-status-judgment',
+        }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('sends no Authorization header for an upstream without a key', async () => {
       mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
       mockKeys({});
       mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
-      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+      await evaluateTypeSafeJudgments({
+        state: 'hi',
+        questions,
+        decision: 'fast-agent-launch-model',
+      });
 
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(init.headers).not.toHaveProperty('Authorization');
@@ -194,7 +216,11 @@ describe('evaluateTypeSafeJudgments', () => {
     it('leaves a TypeSafe key in charge when not selected', async () => {
       const fetchMock = mockFetchResponse({ answers: directAnswers });
 
-      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+      await evaluateTypeSafeJudgments({
+        state: 'hi',
+        questions,
+        decision: 'fast-agent-launch-model',
+      });
 
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
         'https://api.typesafe.ai/v1/systemone',
@@ -205,7 +231,11 @@ describe('evaluateTypeSafeJudgments', () => {
       mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
-      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+      await evaluateTypeSafeJudgments({
+        state: 'hi',
+        questions,
+        decision: 'fast-agent-launch-model',
+      });
 
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
         'https://judgment.internal.test/v1/decisions',
@@ -231,7 +261,11 @@ describe('evaluateTypeSafeJudgments', () => {
       });
 
       await expect(
-        evaluateTypeSafeJudgments({ state: 'hi', questions }),
+        evaluateTypeSafeJudgments({
+          state: 'hi',
+          questions,
+          decision: 'fast-agent-launch-model',
+        }),
       ).rejects.toThrow('missing a valid answer');
     });
   });
@@ -378,7 +412,11 @@ describe('evaluateTypeSafeJudgments', () => {
         },
       });
 
-      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+      await evaluateTypeSafeJudgments({
+        state: 'hi',
+        questions,
+        decision: 'fast-agent-launch-model',
+      });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -646,12 +684,44 @@ describe('evaluateTypeSafeJudgments', () => {
       ).resolves.toEqual(directAnswers);
     });
 
+    it('defaults an unregistered decision to Jev-only', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await expect(
+        evaluateDecisionModel({
+          decision: 'session-status-judgment',
+          state: 'hi',
+          questions,
+        }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('allows the Roomote model for a trained decision', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await expect(
+        evaluateDecisionModel({
+          decision: 'fast-agent-launch-model',
+          state: 'hi',
+          questions,
+        }),
+      ).resolves.toEqual(directAnswers);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('skips the decision on the Roomote-run model, even when cached', async () => {
       mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
       mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: directAnswers });
 
-      await expect(resolveDecisionModel()).resolves.toMatchObject({
+      await expect(
+        resolveDecisionModel({ decision: 'fast-agent-launch-model' }),
+      ).resolves.toMatchObject({
         kind: 'judgment',
         roomoteModel: true,
       });
@@ -713,7 +783,11 @@ describe('evaluateTypeSafeJudgments', () => {
     });
 
     await expect(
-      evaluateDecisionModel({ state: 'hi', questions }),
+      evaluateDecisionModel({
+        state: 'hi',
+        questions,
+        decision: 'fast-agent-launch-model',
+      }),
     ).resolves.toEqual(directAnswers);
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -731,7 +805,11 @@ describe('evaluateTypeSafeJudgments', () => {
       object: { answers: directAnswers },
     });
 
-    await evaluateDecisionModel({ state: 'hi', questions });
+    await evaluateDecisionModel({
+      state: 'hi',
+      questions,
+      decision: 'fast-agent-launch-model',
+    });
 
     const call = mockGenerateTrackedNonTaskObject.mock.calls.at(-1)![0] as {
       prompt: string;
