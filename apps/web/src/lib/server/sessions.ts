@@ -12,6 +12,7 @@ import {
   fastAgentMessages,
   gte,
   getSessionGoal,
+  getLatestSessionStatusJudgments,
   gt,
   ilike,
   inArray,
@@ -70,6 +71,7 @@ type SessionListInput = {
   q?: string | null;
   ids?: string[];
   ownedOnly?: boolean;
+  includeJudgedStatus?: boolean;
   before?: string | null;
   limit?: number;
 };
@@ -593,12 +595,15 @@ async function hydrateSessionRows(
   options: {
     /** Skip the linked-tasks query when the caller already fetched them. */
     preloadedLinkedTasks?: HydratedLinkedTask[];
+    /** Board judgments remain hidden while the board experiment is disabled. */
+    includeJudgedStatus?: boolean;
   } = {},
 ) {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => row.id);
   const [
     linkedTasks,
+    judgmentRows,
     linkedPullRequests,
     participants,
     directSessionUsage,
@@ -626,6 +631,9 @@ async function hydrateSessionRows(
         .where(
           and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)),
         ),
+    options.includeJudgedStatus
+      ? getLatestSessionStatusJudgments(db, ids)
+      : Promise.resolve([]),
     db
       .select({
         sessionId: sessionTasks.sessionId,
@@ -776,6 +784,9 @@ async function hydrateSessionRows(
   ]);
 
   const pinned = new Set(pins.map((pin) => pin.sessionId));
+  const judgmentBySession = new Map(
+    judgmentRows.map((judgment) => [judgment.sessionId, judgment]),
+  );
   const artifactsBySession = new Map<string, SessionListArtifact[]>();
   for (const artifact of [...linkedTaskArtifacts, ...directSessionArtifacts]) {
     if (!artifact.sessionId) continue;
@@ -832,6 +843,11 @@ async function hydrateSessionRows(
     const sessionArtifacts = artifactsBySession.get(row.id) ?? [];
     return {
       ...row,
+      judgedStatus:
+        options.includeJudgedStatus &&
+        judgmentBySession.get(row.id)?.state === 'applied'
+          ? (judgmentBySession.get(row.id)?.outcome ?? null)
+          : null,
       canManage:
         row.privacy === 'private'
           ? row.privateOwnerUserId === auth.userId
@@ -882,7 +898,9 @@ export async function getSessions(auth: SessionAuth, input: SessionListInput) {
   const page = pageRows.map(({ searchRank: _searchRank, ...row }) => row);
   const last = pageRows.at(-1);
   const [hydratedSessions, searchSnippets] = await Promise.all([
-    hydrateSessionRows(auth, page),
+    hydrateSessionRows(auth, page, {
+      includeJudgedStatus: input.includeJudgedStatus,
+    }),
     getSessionSearchSnippets(
       auth,
       page.map((session) => session.id),

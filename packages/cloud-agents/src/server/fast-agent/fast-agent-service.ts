@@ -89,6 +89,8 @@ import {
   isXaiSubscriptionConnected,
   markSessionGoalForConversation,
   releaseSessionGoalContinuation,
+  createSessionStatusJudgmentRequest,
+  settleSessionStatusJudgmentTurn,
   sql,
   touchSessionActivity,
   withEnvironmentVerificationRetryLock,
@@ -459,6 +461,35 @@ async function setFastSessionResponding(
     respondingUntil: responding
       ? new Date(Date.now() + FAST_RESPONDING_LEASE_MS)
       : null,
+  });
+}
+
+async function beginFastTurnStatusJudgment(
+  fastConversationId: string,
+  turnId: string,
+): Promise<void> {
+  if (!(await isDeploymentExperimentEnabled('sessionStatusJudgment'))) return;
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  if (!session) return;
+  await createSessionStatusJudgmentRequest(db, {
+    sessionId: session.id,
+    sourceEventId: turnId,
+    sourceKind: 'fast_turn',
+    state: 'awaiting_settlement',
+  });
+}
+
+async function settleFastTurnStatusJudgment(
+  fastConversationId: string,
+  turnId: string,
+  visible: boolean,
+): Promise<void> {
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  if (!session) return;
+  await settleSessionStatusJudgmentTurn(db, {
+    sessionId: session.id,
+    sourceEventId: turnId,
+    visible,
   });
 }
 
@@ -3742,6 +3773,13 @@ export async function answerFastAgentQuestion({
         );
       });
     }
+    if (substantiveHumanInput) {
+      await beginFastTurnStatusJudgment(session.id, turnId).catch((error) => {
+        console.warn(
+          `[sessions] Failed to invalidate the prior status judgment: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
     await setFastSessionResponding(
       session.id,
       true,
@@ -6446,6 +6484,15 @@ export async function answerFastAgentQuestion({
         });
       }
       await settleDurableTurn();
+      await settleFastTurnStatusJudgment(
+        session.id,
+        turnId,
+        Boolean(lastVisibleMessage || visibleUpdatePosted),
+      ).catch((error) => {
+        console.warn(
+          `[sessions] Failed to queue the settled status judgment: ${formatErrorForLog(error)}`,
+        );
+      });
       await mirrorPendingMessages();
       await notifyUserAttention();
       return lastVisibleMessage;
@@ -7260,6 +7307,15 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    await settleFastTurnStatusJudgment(
+      session.id,
+      turnId,
+      Boolean(lastVisibleMessage || visibleUpdatePosted),
+    ).catch((error) => {
+      console.warn(
+        `[sessions] Failed to queue the settled status judgment: ${formatErrorForLog(error)}`,
+      );
+    });
     if (
       (substantiveHumanInput || steeredHumanRequests.length > 0) &&
       !setupSession &&
@@ -7542,6 +7598,17 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    if (canonicalConversationId) {
+      await settleFastTurnStatusJudgment(
+        canonicalConversationId,
+        turnId,
+        Boolean(lastVisibleMessage || visibleUpdatePosted),
+      ).catch((error) => {
+        console.warn(
+          `[sessions] Failed to queue the settled status judgment: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
     await notifyUserAttention();
     return lastVisibleMessage || message;
   } finally {

@@ -12,11 +12,13 @@ import {
   taskRuns,
   sessions,
   sessionTasks,
+  sessionStatusJudgments,
   sessionFactory,
   taskFactory,
   syncTaskStateFromRuns,
   deriveTaskStateFromRuns,
   selectTaskStateRun,
+  setDeploymentExperimentEnabled,
 } from '../../server';
 import type { CreateTaskRun } from '../../types';
 
@@ -71,6 +73,7 @@ async function readTask(taskId: string) {
 }
 
 afterEach(async () => {
+  await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
   while (createdTaskIds.length > 0) {
     const taskId = createdTaskIds.pop()!;
     // task_runs.task_id cascades on task delete.
@@ -146,6 +149,44 @@ describe('deriveTaskStateFromRuns', () => {
 });
 
 describe('syncTaskStateFromRuns', () => {
+  it('queues a status judgment in the task-state transaction on terminal transition', async () => {
+    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
+    const task = await makeTask('active');
+    const run = await insertRun({
+      taskId: task.id,
+      status: RunStatus.Idle,
+      startedAt: new Date(),
+    });
+    const session = await sessionFactory.create({ cachedStatus: 'active' });
+    createdSessionIds.push(session.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(taskRuns)
+        .set({ status: RunStatus.Completed })
+        .where(eq(taskRuns.id, run.id));
+      await syncTaskStateFromRuns(tx, task.id);
+    });
+
+    const [judgment] = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(eq(sessionStatusJudgments.sessionId, session.id));
+    expect(judgment).toEqual(
+      expect.objectContaining({
+        sourceEventId: `task-run:${run.id}:completed`,
+        sourceKind: 'task_terminal',
+        state: 'pending',
+      }),
+    );
+    await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
+  });
+
   it('marks an only-child Session ready when sleep completion settles its task', async () => {
     const task = await makeTask('active');
     const run = await insertRun({

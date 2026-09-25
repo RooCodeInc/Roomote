@@ -56,6 +56,19 @@ vi.mock(
 );
 
 vi.mock(
+  '@/components/settings/SessionStatusJudgmentExperimentalSetting',
+  () => ({
+    SessionStatusJudgmentExperimentalSetting: () => (
+      <div>Session status judgment setting</div>
+    ),
+  }),
+);
+
+vi.mock('@/components/settings/SessionsBoardExperimentalSetting', () => ({
+  SessionsBoardExperimentalSetting: () => <div>Sessions board setting</div>,
+}));
+
+vi.mock(
   '@/components/settings/AutomationLaunchCriteriaExperimentalSetting',
   () => ({
     AutomationLaunchCriteriaExperimentalSetting: () => (
@@ -91,6 +104,10 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.getByText('Task communication triage setting'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText('Session status judgment setting'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Sessions board setting')).toBeInTheDocument();
     expect(
       screen.queryByText('Custom automation launch criteria setting'),
     ).not.toBeInTheDocument();

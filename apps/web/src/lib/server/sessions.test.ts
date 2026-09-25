@@ -16,6 +16,7 @@ import {
   sessionFactory,
   sessionParticipants,
   sessions,
+  sessionStatusJudgments,
   sessionTasks,
   taskArtifacts,
   taskFactory,
@@ -236,6 +237,75 @@ describe('unified Session queries', () => {
     await expect(
       getSessionById({ ...otherAuth, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id });
+  });
+
+  it('hydrates only the latest applied judgment without changing runtime status', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      cachedStatus: 'ready',
+    });
+    const auth = { userId: owner.id, isAdmin: false };
+    try {
+      await db.insert(sessionStatusJudgments).values([
+        {
+          sessionId: session.id,
+          sourceEventId: 'turn-1',
+          generation: 1,
+          sourceKind: 'fast_turn',
+          state: 'applied',
+          outcome: 'done',
+          confidence: 0.97,
+        },
+        {
+          sessionId: session.id,
+          sourceEventId: 'turn-2',
+          generation: 2,
+          sourceKind: 'fast_turn',
+          state: 'ignored',
+          outcome: 'unclear',
+          confidence: 0.4,
+        },
+      ]);
+
+      const hidden = await getSessions(auth, { ids: [session.id] });
+      expect(hidden.sessions[0]?.judgedStatus).toBeNull();
+
+      const listed = await getSessions(auth, {
+        ids: [session.id],
+        includeJudgedStatus: true,
+      });
+      expect(listed.sessions[0]).toMatchObject({
+        cachedStatus: 'ready',
+        judgedStatus: null,
+      });
+
+      await db
+        .delete(sessionStatusJudgments)
+        .where(eq(sessionStatusJudgments.sessionId, session.id));
+      await db.insert(sessionStatusJudgments).values({
+        sessionId: session.id,
+        sourceEventId: 'turn-3',
+        generation: 3,
+        sourceKind: 'fast_turn',
+        state: 'applied',
+        outcome: 'done',
+        confidence: 0.97,
+      });
+
+      const latest = await getSessions(auth, {
+        ids: [session.id],
+        includeJudgedStatus: true,
+      });
+      expect(latest.sessions[0]).toMatchObject({
+        cachedStatus: 'ready',
+        judgedStatus: 'done',
+      });
+    } finally {
+      await db.delete(sessions).where(eq(sessions.id, session.id));
+      await db.delete(users).where(eq(users.id, owner.id));
+    }
   });
 
   it.each(['task', 'fast'] as const)(
