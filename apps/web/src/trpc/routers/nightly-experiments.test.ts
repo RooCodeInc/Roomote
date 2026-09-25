@@ -18,16 +18,10 @@ describe('nightly experiment API access', () => {
       'Unauthorized',
     );
     await expect(
-      caller.nightlyExperiments.set({ id: 'dizzy', enabled: true }),
-    ).rejects.toThrow('Unauthorized');
-    await expect(
       caller.nightlyExperiments.set({
         id: 'automationLaunchCriteria',
         enabled: true,
       }),
-    ).rejects.toThrow('Unauthorized');
-    await expect(
-      caller.nightlyExperiments.runtime({ id: 'dizzy' }),
     ).rejects.toThrow('Unauthorized');
     await expect(
       caller.nightlyExperiments.runtime({
@@ -50,9 +44,6 @@ describe('nightly experiment API access', () => {
     await expect(caller.nightlyExperiments.get()).rejects.toThrow(
       'Unauthorized',
     );
-    await expect(
-      caller.nightlyExperiments.set({ id: 'dizzy', enabled: true }),
-    ).rejects.toThrow('Unauthorized');
     await expect(
       caller.nightlyExperiments.set({
         id: 'automationLaunchCriteria',

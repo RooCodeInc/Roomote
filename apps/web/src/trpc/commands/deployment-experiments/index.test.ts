@@ -5,7 +5,6 @@ import type { UserAuthSuccess } from '@/types';
 import {
   getDeploymentExperimentsCommand,
   getNightlyExperimentsCommand,
-  getNightlyExperimentRuntimeCommand,
   setDeploymentExperimentCommand,
   setNightlyExperimentCommand,
 } from './index';
@@ -157,7 +156,6 @@ describe('deployment experiment commands', () => {
       getNightlyExperimentsCommand(auth(admin.id, true, true)),
     ).resolves.toEqual({
       integrationToolAutoApprovals: false,
-      dizzy: false,
       automationLaunchCriteria: false,
     });
     await expect(
@@ -192,43 +190,6 @@ describe('deployment experiment commands', () => {
         id: 'automationLaunchCriteria',
         enabled: false,
       }),
-    ).rejects.toThrow('Unauthorized');
-  });
-
-  it('serves only the Dizzy runtime value on deployments opted in to nightly experiments', async () => {
-    const [admin, member] = await Promise.all([
-      userFactory.create({ role: 'admin' }),
-      userFactory.create({ role: 'member' }),
-    ]);
-
-    await expect(
-      getNightlyExperimentRuntimeCommand(auth(member.id, false, false), {
-        id: 'dizzy',
-      }),
-    ).rejects.toThrow('Unauthorized');
-    await expect(
-      getNightlyExperimentRuntimeCommand(auth(member.id, false, true), {
-        id: 'dizzy',
-      }),
-    ).resolves.toBe(false);
-
-    await setNightlyExperimentCommand(auth(admin.id, true, true), {
-      id: 'dizzy',
-      enabled: true,
-    });
-
-    await expect(
-      getNightlyExperimentRuntimeCommand(auth(member.id, false, true), {
-        id: 'dizzy',
-      }),
-    ).resolves.toBe(true);
-    await expect(
-      getNightlyExperimentRuntimeCommand(auth(member.id, false, true), {
-        id: 'automationLaunchCriteria',
-      }),
-    ).rejects.toThrow('Unauthorized');
-    await expect(
-      getNightlyExperimentsCommand(auth(member.id, false, true)),
     ).rejects.toThrow('Unauthorized');
   });
 });

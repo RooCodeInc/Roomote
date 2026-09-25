@@ -29,7 +29,6 @@ import {
   useLayoutStore,
 } from '@/hooks/useLayoutOptions';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { useDizzyExperiment } from '@/hooks/useDizzyExperiment';
 import { useLiveTaskStatus, useTaskPins } from '@/hooks/tasks';
 import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
@@ -60,7 +59,6 @@ export const SideNav = () => {
   const pathname = usePathname();
   const { setOpen: openCommandPalette } = useCommandPalette();
   const { isAdmin } = useAuthorizedUser();
-  const isDizzyEnabled = useDizzyExperiment();
   const hasHydrated = useLayoutStore((state) => state.hasHydrated);
   const persistedIsSideNavExpanded = useLayoutStore(
     (state) => state.isSideNavExpanded,
@@ -217,10 +215,7 @@ export const SideNav = () => {
                 height={28}
                 priority
                 aria-hidden="true"
-                className={cn(
-                  'pointer-events-none absolute inset-0 m-auto h-7 w-7 opacity-100 transition-opacity duration-200 group-hover:opacity-0 dark:invert',
-                  isDizzyEnabled && 'motion-safe:animate-spin',
-                )}
+                className="pointer-events-none absolute inset-0 m-auto h-7 w-7 opacity-100 transition-opacity duration-200 group-hover:opacity-0 dark:invert"
               />
               <PanelLeftOpen
                 aria-hidden="true"
