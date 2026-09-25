@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CRITERIA_MET_QUESTION } from '../channel-launch-gate';
 import { MEMORY_GATE_QUESTIONS } from '../fast-agent/fast-agent-post-turn-memory';
 import { TASK_COMMUNICATION_QUESTIONS } from '../fast-agent/fast-agent-task-communication-triage';
+import { SESSION_STATUS_JUDGMENT_QUESTION } from '../fast-agent/session-status-judgment';
 import { JUDGMENT_DECISION_CATALOG } from '../judgment-decision-catalog';
 import { REPLY_ADDRESSEE_QUESTION } from '../judgment-questions';
 
@@ -22,6 +23,9 @@ describe('JUDGMENT_DECISION_CATALOG', () => {
     );
     expect(byId['channel-launch-gate']?.questions.criteriaMet).toBe(
       CRITERIA_MET_QUESTION,
+    );
+    expect(byId['session-status-judgment']?.questions.outcome).toBe(
+      SESSION_STATUS_JUDGMENT_QUESTION,
     );
   });
 

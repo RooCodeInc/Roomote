@@ -15,6 +15,7 @@ import {
   TASK_COMMUNICATION_QUESTIONS,
   type TaskCommunicationTriageState,
 } from './fast-agent/fast-agent-task-communication-triage';
+import { SESSION_STATUS_JUDGMENT_QUESTION } from './fast-agent/session-status-judgment';
 import { INTEGRATION_TOOL_AUTO_QUESTIONS } from './integration-tool-auto-evaluation';
 import {
   AGENTMAIL_AUTO_REPLY_QUESTION,
@@ -114,6 +115,37 @@ export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
       turnTs: '2026-09-24T14:05:00Z',
       existing_memory: '',
     },
+  },
+  {
+    id: 'session-status-judgment',
+    label: 'Session status',
+    description:
+      'Whether the current Session request is still open, done, blocked, waiting for input, or unclear.',
+    questions: { outcome: SESSION_STATUS_JUDGMENT_QUESTION },
+    sampleState: {
+      objective:
+        'Add a retry button to the billing page and verify the failed checkout path.',
+      recentMessages: [
+        {
+          role: 'user',
+          text: 'Please add a retry button for failed checkouts.',
+        },
+        {
+          role: 'assistant',
+          text: 'The button is implemented; I am running the checkout tests.',
+        },
+      ],
+      childTasks: [
+        {
+          title: 'Run checkout tests',
+          state: 'completed',
+          request: 'Run the checkout test suite.',
+          result: 'The checkout tests passed.',
+        },
+      ],
+      goalStatus: 'active',
+    },
+    note: 'Roomote asks this of Jev only; the Roomote judgment model does not answer it yet.',
   },
   {
     id: 'unmentioned-thread-reply',
