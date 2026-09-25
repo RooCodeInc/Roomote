@@ -403,76 +403,47 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.slackChannel).toBe('C123');
   });
 
-  it('allows GitLab target branch metadata on PR review payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      type: TaskPayloadKind.GithubPrReview,
-      userId: 'user-1',
-      payload: {
+  it('preserves target branch metadata across provider-specific PR reviews', () => {
+    for (const scenario of [
+      {
+        provider: 'gitlab',
         repo: 'acme/backend',
-        sourceControlProvider: 'gitlab',
-        prNumber: 42,
-        prTitle: 'Update backend',
         prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
-        headSha: 'abc123',
-        branchName: 'feature/test',
-        targetBranch: 'main',
       },
-    });
-
-    if (parsed.type !== TaskPayloadKind.GithubPrReview) {
-      throw new Error('Expected GithubPrReview task');
-    }
-
-    expect(parsed.payload.targetBranch).toBe('main');
-  });
-
-  it('allows Gitea target branch metadata on PR review payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      type: TaskPayloadKind.GithubPrReview,
-      userId: 'user-1',
-      payload: {
+      {
+        provider: 'gitea',
         repo: 'acme/backend',
-        sourceControlProvider: 'gitea',
-        prNumber: 42,
-        prTitle: 'Update backend',
         prUrl: 'https://git.example.com/acme/backend/pulls/42',
-        headSha: 'abc123',
-        branchName: 'feature/test',
-        targetBranch: 'main',
       },
-    });
-
-    if (parsed.type !== TaskPayloadKind.GithubPrReview) {
-      throw new Error('Expected GithubPrReview task');
-    }
-
-    expect(parsed.payload.sourceControlProvider).toBe('gitea');
-    expect(parsed.payload.targetBranch).toBe('main');
-  });
-
-  it('allows Azure DevOps target branch metadata on PR review payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      type: TaskPayloadKind.GithubPrReview,
-      userId: 'user-1',
-      payload: {
+      {
+        provider: 'ado',
         repo: 'acme/Platform/backend',
-        sourceControlProvider: 'ado',
-        prNumber: 42,
-        prTitle: 'Update backend',
         prUrl:
           'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
-        headSha: 'abc123',
-        branchName: 'feature/test',
-        targetBranch: 'main',
       },
-    });
+    ] as const) {
+      const parsed = taskSpecSchema.parse({
+        type: TaskPayloadKind.GithubPrReview,
+        userId: 'user-1',
+        payload: {
+          repo: scenario.repo,
+          sourceControlProvider: scenario.provider,
+          prNumber: 42,
+          prTitle: 'Update backend',
+          prUrl: scenario.prUrl,
+          headSha: 'abc123',
+          branchName: 'feature/test',
+          targetBranch: 'main',
+        },
+      });
 
-    if (parsed.type !== TaskPayloadKind.GithubPrReview) {
-      throw new Error('Expected GithubPrReview task');
+      if (parsed.type !== TaskPayloadKind.GithubPrReview) {
+        throw new Error('Expected GithubPrReview task');
+      }
+
+      expect(parsed.payload.sourceControlProvider).toBe(scenario.provider);
+      expect(parsed.payload.targetBranch).toBe('main');
     }
-
-    expect(parsed.payload.sourceControlProvider).toBe('ado');
-    expect(parsed.payload.targetBranch).toBe('main');
   });
 
   it('parses GithubPrReviewFollowUp payloads without any inner bootstrap mode', () => {
@@ -695,58 +666,24 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.description).toBe('Investigate this flow');
   });
 
-  it('parses shared reasoningEffort overrides on task payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      userId: 'user-1',
-      type: TaskPayloadKind.StandardTask,
-      payload: {
-        repo: 'owner/repo',
-        description: 'Investigate this flow',
-        reasoningEffort: 'medium',
-      },
-    });
+  it('preserves supported reasoningEffort overrides on task payloads', () => {
+    for (const reasoningEffort of ['medium', 'xhigh', 'max'] as const) {
+      const parsed = taskSpecSchema.parse({
+        userId: 'user-1',
+        type: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Investigate this flow',
+          reasoningEffort,
+        },
+      });
 
-    if (parsed.type !== TaskPayloadKind.StandardTask) {
-      throw new Error('Expected StandardTask payload');
+      if (parsed.type !== TaskPayloadKind.StandardTask) {
+        throw new Error('Expected StandardTask payload');
+      }
+
+      expect(parsed.payload.reasoningEffort).toBe(reasoningEffort);
     }
-
-    expect(parsed.payload.reasoningEffort).toBe('medium');
-  });
-
-  it('parses xhigh reasoningEffort overrides on task payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      userId: 'user-1',
-      type: TaskPayloadKind.StandardTask,
-      payload: {
-        repo: 'owner/repo',
-        description: 'Investigate this flow',
-        reasoningEffort: 'xhigh',
-      },
-    });
-
-    if (parsed.type !== TaskPayloadKind.StandardTask) {
-      throw new Error('Expected StandardTask payload');
-    }
-
-    expect(parsed.payload.reasoningEffort).toBe('xhigh');
-  });
-
-  it('parses max reasoningEffort overrides on task payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      userId: 'user-1',
-      type: TaskPayloadKind.StandardTask,
-      payload: {
-        repo: 'owner/repo',
-        description: 'Investigate this flow',
-        reasoningEffort: 'max',
-      },
-    });
-
-    if (parsed.type !== TaskPayloadKind.StandardTask) {
-      throw new Error('Expected StandardTask payload');
-    }
-
-    expect(parsed.payload.reasoningEffort).toBe('max');
   });
 
   it('parses OpenCode harness model overrides on task payloads', () => {
@@ -1257,7 +1194,7 @@ describe('taskSpecSchema', () => {
     expect(parsed.success).toBe(false);
   });
 
-  it('resolves a repository workspace from a single repo payload', () => {
+  it('resolves repository, set, no-repository, and environment workspaces', () => {
     expect(
       resolveTaskWorkspace({
         repo: 'owner/repo',
@@ -1270,9 +1207,6 @@ describe('taskSpecSchema', () => {
       branch: 'main',
       sha: 'abc1234',
     });
-  });
-
-  it('resolves a repository_set workspace from a scoped all-repositories payload', () => {
     expect(
       resolveTaskWorkspace({
         repo: '__all_repositories__',
@@ -1282,18 +1216,12 @@ describe('taskSpecSchema', () => {
       type: 'repository_set',
       repositories: ['acme/api', 'acme/web'],
     });
-  });
-
-  it('resolves an explicit no-repositories workspace without widening its scope', () => {
     expect(
       resolveTaskWorkspace({
         repo: NO_REPOSITORIES,
         selectedRepositories: ['acme/api'],
       }),
     ).toEqual({ type: 'no_repositories' });
-  });
-
-  it('keeps an explicit environment authoritative over the no-repositories sentinel', () => {
     expect(
       resolveTaskWorkspace({
         repo: NO_REPOSITORIES,
@@ -1304,9 +1232,6 @@ describe('taskSpecSchema', () => {
       environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
       sourceRepo: NO_REPOSITORIES,
     });
-  });
-
-  it('resolves an environment workspace while preserving source pin context', () => {
     expect(
       resolveTaskWorkspace({
         repo: 'acme/api',

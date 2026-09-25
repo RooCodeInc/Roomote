@@ -23,13 +23,9 @@ const singleQuestion = {
 };
 
 describe('request_user_input multi-select payloads', () => {
-  it('defaults legacy questions to single mode without multi-select fields', () => {
+  it('preserves legacy and multi-select question payload behavior', () => {
     const question = parseAcpRequestUserInputQuestion(singleQuestion);
-
     expect(question?.multiple).toBeUndefined();
-  });
-
-  it('validates shared single, multiple, and Other answer semantics', () => {
     expect(
       getAcpRequestUserInputValidationError([singleQuestion], {
         mode: { answers: ['Fast', 'Thorough'] },
@@ -53,28 +49,17 @@ describe('request_user_input multi-select payloads', () => {
         { mode: { answers: ['Balanced', 'Careful'] } },
       ),
     ).toBe('One or more selections are not valid options.');
-  });
-
-  it('parses explicit multiple mode', () => {
-    const question = parseAcpRequestUserInputQuestion({
-      ...singleQuestion,
-      multiple: true,
-    });
-
-    expect(question?.multiple).toBe(true);
-  });
-
-  it('ignores removed selectionMode and minSelections fields', () => {
-    const question = parseAcpRequestUserInputQuestion({
-      ...singleQuestion,
-      selectionMode: 'multiple',
-      minSelections: 99,
-    });
-
-    expect(question?.multiple).toBeUndefined();
-  });
-
-  it('parses request params with multi-select metadata intact', () => {
+    expect(
+      parseAcpRequestUserInputQuestion({ ...singleQuestion, multiple: true })
+        ?.multiple,
+    ).toBe(true);
+    expect(
+      parseAcpRequestUserInputQuestion({
+        ...singleQuestion,
+        selectionMode: 'multiple',
+        minSelections: 99,
+      })?.multiple,
+    ).toBeUndefined();
     const params = parseAcpRequestUserInputRequestParams({
       sessionId: 's',
       turnId: 't',
@@ -220,7 +205,7 @@ describe('request_user_input response transcript formatting', () => {
     ],
   };
 
-  it('renders a known option ID as its label without changing the response', () => {
+  it('formats submitted answers without mutating or revealing secrets', () => {
     const response = {
       resolution: 'submitted' as const,
       answers: { mode: { answers: ['fast'] } },
@@ -228,9 +213,6 @@ describe('request_user_input response transcript formatting', () => {
 
     expect(formatRequestUserInputResponseText(request, response)).toBe('Fast');
     expect(response.answers.mode.answers).toEqual(['fast']);
-  });
-
-  it('preserves unknown custom text and legacy label or index values', () => {
     expect(
       formatRequestUserInputResponseText(request, {
         resolution: 'submitted',
@@ -249,9 +231,6 @@ describe('request_user_input response transcript formatting', () => {
         answers: { mode: { answers: ['1'] } },
       }),
     ).toBe('1');
-  });
-
-  it('renders the setup continuation option as Continue', () => {
     expect(
       formatRequestUserInputResponseText(
         {
@@ -275,9 +254,6 @@ describe('request_user_input response transcript formatting', () => {
         },
       ),
     ).toBe('Continue');
-  });
-
-  it('renders multi-select option IDs as a comma-separated label list', () => {
     expect(
       formatRequestUserInputResponseText(
         {
@@ -303,9 +279,6 @@ describe('request_user_input response transcript formatting', () => {
         },
       ),
     ).toBe('Slack, Notion');
-  });
-
-  it('continues to mask secret answers before resolving option labels', () => {
     expect(
       formatRequestUserInputResponseText(
         {
