@@ -2,6 +2,31 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.13.1 (2026-09-25)
+
+Roomote 1.13.1 improves automation triggers, judgment-model setup, model selection, and reliability across Sessions, tasks, and chat providers.
+
+### Highlights
+
+- Run custom automations on demand or from a private POST webhook with bounded input and independent runs.
+- Run the optional CPU judgment sidecar on self-hosted deployments and test judgment decisions from Settings.
+- Enable the optional Sessions board and status classification while keeping access and lifecycle changes under admin control.
+- Keep Discord images, model pickers, Session workspaces, and task sandboxes reliable through common recovery paths.
+
+### Patch changes
+
+- Custom automations can now run on demand or from a private POST webhook, with bounded one-run input, independent runs, credential rotation, and rate limiting.
+- Custom model mapping presets now save supported reasoning values without mutating provider recommendations, and validation names the Advisor role correctly.
+- Discord Fast replies now deliver selected task screenshots, including deferred and retry paths, instead of silently dropping image attachments.
+- Self-hosted deployments can run a CPU decision model beside the stack, so the Memory check, reply addressing, and Roomote's other typed decisions work without a Jev key or a GPU. The judgment sidecar serves `roomote/roomote-judgment-gliner`, a GLiNER 2.5 model fine-tuned on Roomote's decisions, behind the same decision contract Roomote's `roomote` judgment backend calls, capped at 4 GB and 4 CPUs by default. It is opt-in like Memory: the `judgment` compose profile in the self-host and production Compose files, and an idle service in the Railway, Render, and Coolify templates that stays unused until `R_JUDGMENT_UPSTREAM_URL` points at it. The image is published as `ghcr.io/roocodeinc/roomote-judgment`. `docker-compose.self-host.yml` now passes `R_JUDGMENT_MODEL`, `R_JUDGMENT_UPSTREAM_URL`, and `R_JUDGMENT_UPSTREAM_API_KEY` to the app services.
+- Admins can test the judgment model by hand under **Settings > Models > Test decisions**. The page lists each decision Roomote asks it, with the exact questions and an editable sample state, and shows each answer's probabilities and latency. It can ask the Roomote judgment model beside Jev when both are configured. Test decisions go to the configured judgment model but are never captured or shadowed.
+- New provider connections and fresh deployments now use GPT 5.6 Luna as the coding default while keeping GPT-6 models available, and existing explicit model selections stay unchanged.
+- Long model lists in New Session and model pickers now respond to mouse-wheel and trackpad scrolling while preserving keyboard and focus behavior.
+- Stopped, failed, and canceled task runs now release their sandboxes through bounded cleanup, reducing stale capacity usage and preventing leaked sandboxes from blocking new work.
+- Narrowing a Session window no longer crashes when task panels are removed and resized together.
+- Add an optional Sessions board with judgment-model status classification. An administrator can enable each experiment deployment-wide; members see the board only for sessions they can already access.
+- In multi-person Slack, Discord, and Teams threads, acknowledgements addressed to Roomote now use the same addressee routing as other replies before deciding whether to respond.
+
 ## 1.13.0 (2026-09-23)
 
 Roomote 1.13 brings automation Results to everyone, lets you control integration access, adds reusable personal model mappings, and makes Sessions easier to manage.
