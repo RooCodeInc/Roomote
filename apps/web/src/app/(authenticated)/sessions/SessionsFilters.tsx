@@ -25,6 +25,8 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
   Input,
+  Columns3,
+  List,
   MessagesSquare,
   Search,
   Share2,
@@ -126,6 +128,8 @@ export function SessionsFilters({
   timePeriod,
   scope = 'all',
   status = 'all',
+  view = 'list',
+  boardEnabled = false,
   query = '',
   repository = null,
   pullRequest = null,
@@ -137,6 +141,8 @@ export function SessionsFilters({
   timePeriod: TimePeriodFilter;
   scope?: string;
   status?: string;
+  view?: 'list' | 'board';
+  boardEnabled?: boolean;
   query?: string;
   repository?: string | null;
   pullRequest?: string | null;
@@ -159,13 +165,13 @@ export function SessionsFilters({
   const updateParams = useCallback(
     (mutate: (params: URLSearchParams) => void) => {
       const params = new URLSearchParams(searchParams);
-      params.delete('view');
+      if (!boardEnabled) params.delete('view');
       mutate(params);
       params.delete('before');
       const nextQuery = params.toString();
       router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
     },
-    [router, pathname, searchParams],
+    [boardEnabled, router, pathname, searchParams],
   );
 
   useEffect(() => {
@@ -366,6 +372,34 @@ export function SessionsFilters({
         >
           <Search />
         </Button>
+        {boardEnabled ? (
+          <div className="flex items-center rounded-lg border border-border p-0.5">
+            <Button
+              variant={view === 'list' ? 'default' : 'ghost'}
+              size="sm"
+              aria-label="List view"
+              aria-pressed={view === 'list'}
+              title="List view"
+              className="rounded-r-none"
+              onClick={() => updateParams((params) => params.delete('view'))}
+            >
+              <List />
+            </Button>
+            <Button
+              variant={view === 'board' ? 'default' : 'ghost'}
+              size="sm"
+              aria-label="Board view"
+              aria-pressed={view === 'board'}
+              title="Board view"
+              className="rounded-l-none"
+              onClick={() =>
+                updateParams((params) => params.set('view', 'board'))
+              }
+            >
+              <Columns3 />
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

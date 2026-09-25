@@ -65,6 +65,8 @@ describe('metadata descriptions', () => {
       browserNotifications: false,
       integrationToolAutoApprovals: false,
       sessionTaskCommunicationTriage: false,
+      sessionStatusJudgment: false,
+      sessionsBoard: false,
       automationLaunchCriteria: true,
       dizzy: false,
     });

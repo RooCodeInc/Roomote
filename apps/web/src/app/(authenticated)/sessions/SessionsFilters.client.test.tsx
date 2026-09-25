@@ -93,6 +93,17 @@ describe('SessionsFilters', () => {
     );
   });
 
+  it('keeps the board switch hidden until enabled and preserves its URL when available', () => {
+    const { rerender } = render(<SessionsFilters {...baseProps} />);
+    expect(
+      screen.queryByRole('button', { name: 'Board view' }),
+    ).not.toBeInTheDocument();
+
+    rerender(<SessionsFilters {...baseProps} boardEnabled view="list" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Board view' }));
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
+  });
+
   it.each([false, true])(
     'keeps primary navigation available while a filter menu is open (mobile: %s)',
     async (isMobile) => {

@@ -118,6 +118,7 @@ export * from './lib/managed-access';
 export * from './lib/user-personalization';
 export * from './lib/personal-preferences';
 export * from './lib/deployment-experiments';
+export * from './lib/session-status-judgments';
 export * from './lib/private-sessions-experiment';
 export * from './fixtures/development-fixtures';
 
@@ -148,6 +149,8 @@ export {
   taskPinsRelations,
   sessions,
   sessionGoals,
+  sessionStatusJudgments,
+  sessionStatusJudgmentsRelations,
   sessionsRelations,
   sessionTasks,
   sessionTasksRelations,
@@ -311,6 +314,8 @@ export type {
   SessionOwnerKind,
   SessionSourceSurface,
   SessionStatus,
+  SessionStatusJudgmentSourceKind,
+  SessionStatusJudgmentState,
   SessionTaskOrigin,
   SessionParticipantRole,
   SessionBackfillPhase,
