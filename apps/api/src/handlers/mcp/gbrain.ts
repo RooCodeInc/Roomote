@@ -86,6 +86,7 @@ export function createGbrainMcpProxy(options?: { allowAuthTokens?: boolean }) {
       return {
         authHeader: connection.token,
         upstream: `${connection.baseUrl.replace(/\/$/, '')}/mcp`,
+        toolApprovalIntegrationId: 'gbrain',
       };
     },
   });
