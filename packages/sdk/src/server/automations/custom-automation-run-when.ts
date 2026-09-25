@@ -1,7 +1,4 @@
-import {
-  evaluateDecisionModel,
-  type TypeSafeQuestion,
-} from '@roomote/cloud-agents/server/typesafe-judgment';
+import type { TypeSafeQuestion } from '@roomote/cloud-agents/server/typesafe-judgment';
 import type {
   CustomAutomationRunWhen,
   CustomAutomationRunWhenCondition,
@@ -9,15 +6,7 @@ import type {
   CustomAutomationRunWhenOutcome,
 } from '@roomote/types';
 
-const RUN_WHEN_TIMEOUT_MS = 3_000;
-
 type ConditionVerdict = 'pass' | 'fail' | 'uncertain';
-
-type CustomAutomationRunWhenEvaluation = {
-  outcome: CustomAutomationRunWhenOutcome;
-  skipRun: boolean;
-  answers: Record<string, CustomAutomationRunWhenJudgmentAnswer> | null;
-};
 
 function getConditions(runWhen: CustomAutomationRunWhen) {
   return [...(runWhen.all ?? []), ...(runWhen.any ?? [])];
@@ -104,7 +93,7 @@ function evaluateGroup(
 export function evaluateCustomAutomationRunWhenAnswers(
   runWhen: CustomAutomationRunWhen,
   answers: Record<string, CustomAutomationRunWhenJudgmentAnswer>,
-): Pick<CustomAutomationRunWhenEvaluation, 'outcome' | 'skipRun'> {
+): { outcome: CustomAutomationRunWhenOutcome; skipRun: boolean } {
   const groups: ConditionVerdict[] = [];
   if (runWhen.all) {
     groups.push(
@@ -147,46 +136,4 @@ export function buildCustomAutomationRunWhenQuestions(
       buildQuestion(condition),
     ]),
   );
-}
-
-/**
- * Evaluate typed run conditions against the shared launch-gate state.
- * High-volume mode is deliberate: an unavailable judgment backend does not
- * trigger a helper-model call.
- */
-export async function evaluateCustomAutomationRunWhen(params: {
-  runWhen: CustomAutomationRunWhen;
-  state: Record<string, unknown>;
-  userId?: string | null;
-  taskId?: string | null;
-}): Promise<CustomAutomationRunWhenEvaluation> {
-  try {
-    const questions = buildCustomAutomationRunWhenQuestions(params.runWhen);
-    const answers = await evaluateDecisionModel({
-      decision: 'custom-automation-run-when',
-      state: params.state,
-      questions,
-      timeoutMs: RUN_WHEN_TIMEOUT_MS,
-      highVolume: true,
-      userId: params.userId,
-      taskId: params.taskId,
-    });
-    if (!answers) {
-      return { outcome: 'unavailable', skipRun: false, answers: null };
-    }
-
-    const rawAnswers = answers as Record<
-      string,
-      CustomAutomationRunWhenJudgmentAnswer
-    >;
-    return {
-      ...evaluateCustomAutomationRunWhenAnswers(params.runWhen, rawAnswers),
-      answers: rawAnswers,
-    };
-  } catch (error) {
-    console.warn(
-      `[CustomAutomationRunWhen] Evaluation failed open: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return { outcome: 'error', skipRun: false, answers: null };
-  }
 }
