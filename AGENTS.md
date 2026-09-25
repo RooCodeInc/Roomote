@@ -26,8 +26,9 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 
 ## Build
 
-- `pnpm lint` — oxfmt format check + monorepo oxlint + residual ESLint in web and worker
-- `pnpm check-types` — TypeScript type checking
+- `pnpm lint:fast` — normal broad lint path: monorepo oxlint + residual ESLint in web and worker
+- `pnpm check-types:fast` — normal broad type-check path
+- `pnpm lint` and `pnpm check-types` — formatting-inclusive full static validation when explicitly requested
 - `pnpm format` — oxfmt formatting
 
 ## Validation
@@ -35,9 +36,9 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - `pnpm test` — Vitest across all workspaces
 - Targeted tests: `pnpm exec dotenvx run -f .env.test -- pnpm --filter <package> exec vitest run path/to/file.test.ts`
 - If `pnpm` is missing or resolves to the wrong version, run `mise install` and retry the command with `mise exec --`
-- `pnpm lint && pnpm check-types` — Full static analysis
-- `pnpm lint:fast && pnpm check-types:fast && pnpm knip` — Matches the full pre-push suite (pre-push runs the same gates in parallel after oxlint)
-- `pnpm check` — Runs lint + check-types + test + knip
+- `pnpm lint:fast && pnpm check-types:fast && pnpm knip` — Normal broad validation; matches the full pre-push suite (pre-push runs the same gates in parallel after oxlint)
+- `pnpm lint && pnpm check-types` — Full static analysis when explicitly requested
+- `pnpm check` — Full repo gate when intentionally requested; runs lint + check-types + test + knip
 - If `pnpm lint` fails because of formatting, run `pnpm format` and rerun `pnpm lint`
 - Pre-commit hooks: `lint-staged` (oxfmt on staged files). Pre-push: `node scripts/pre-push-checks.mjs` (oxlint, then web/worker residual ESLint + `check-types:fast` + knip in parallel).
 

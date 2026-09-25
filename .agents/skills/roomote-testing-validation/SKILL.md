@@ -69,6 +69,6 @@ mise exec -- pnpm exec dotenvx run -f .env.test -- pnpm --filter <package> exec 
 
 ## Output Standard
 
-- Choose the smallest command set that proves the change.
+- Choose the smallest command set that proves the change; after focused checks pass, do not escalate to broader checks unless the change's scope, repository guidance, or a failure gives a concrete reason.
 - State clearly what you ran and what you did not run.
 - If a validation path is blocked by environment setup, say so and give the exact command that should be used once the environment exists.
