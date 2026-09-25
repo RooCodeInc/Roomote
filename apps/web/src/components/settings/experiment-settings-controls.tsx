@@ -9,9 +9,11 @@ import type {
 import { getDeploymentExperimentAudience } from '@roomote/feature-flags';
 
 import { BrowserNotificationsExperimentalSetting } from './BrowserNotificationsExperimentalSetting';
-import { DizzyExperimentalSetting } from './DizzyExperimentalSetting';
+import { AutomationLaunchCriteriaExperimentalSetting } from './AutomationLaunchCriteriaExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from './PrivateSessionsExperimentalSetting';
 import { SessionTaskCommunicationTriageExperimentalSetting } from './SessionTaskCommunicationTriageExperimentalSetting';
+import { SessionStatusJudgmentExperimentalSetting } from './SessionStatusJudgmentExperimentalSetting';
+import { SessionsBoardExperimentalSetting } from './SessionsBoardExperimentalSetting';
 
 const DEPLOYMENT_EXPERIMENT_SETTINGS: Record<
   DeploymentExperimentId,
@@ -20,10 +22,12 @@ const DEPLOYMENT_EXPERIMENT_SETTINGS: Record<
   privateSessions: PrivateSessionsExperimentalSetting,
   sessionTaskCommunicationTriage:
     SessionTaskCommunicationTriageExperimentalSetting,
+  sessionStatusJudgment: SessionStatusJudgmentExperimentalSetting,
+  sessionsBoard: SessionsBoardExperimentalSetting,
   browserNotifications: BrowserNotificationsExperimentalSetting,
   // The Auto tool approvals control was deliberately removed in PR #3180.
   integrationToolAutoApprovals: null,
-  dizzy: DizzyExperimentalSetting,
+  automationLaunchCriteria: AutomationLaunchCriteriaExperimentalSetting,
 };
 
 export function getExperimentSettingIds(

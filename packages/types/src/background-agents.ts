@@ -66,6 +66,7 @@ export function isScheduleOnlyBackgroundAutomationFrequency(
 /** Cadence presets supported by user-defined custom automations. */
 export type CustomAutomationScheduleMode =
   | ScheduleOnlyBackgroundAutomationFrequency
+  | 'on_demand'
   | 'cron';
 
 export const CUSTOM_AUTOMATION_EXECUTION_MODES = [
@@ -78,6 +79,7 @@ export type CustomAutomationExecutionMode =
 export const CUSTOM_AUTOMATION_NAME_MAX_LENGTH = 100;
 
 export const CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH = 16_000;
+export const CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH = 4_000;
 export const CUSTOM_AUTOMATION_CRON_MAX_LENGTH = 200;
 export const CUSTOM_AUTOMATION_MODEL_MAX_LENGTH = 200;
 export type SecurityAuditorFrequency =

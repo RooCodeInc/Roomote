@@ -1,4 +1,20 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+
+const { experimentState, sessionStatusState } = vi.hoisted(() => ({
+  experimentState: { boardEnabled: false, judgmentEnabled: false },
+  sessionStatusState: {
+    current: ['active', 'needs_input', 'blocked', 'ready', 'done'] as Array<
+      'active' | 'needs_input' | 'blocked' | 'ready' | 'done'
+    >,
+  },
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  getDeploymentExperiments: async () => ({
+    sessionsBoard: experimentState.boardEnabled,
+    sessionStatusJudgment: experimentState.judgmentEnabled,
+  }),
+}));
 
 import SessionsPage from './page';
 
@@ -8,8 +24,8 @@ vi.mock('@/lib/server/auth-context', () => ({
 vi.mock('./SessionsFilters', () => ({ SessionsFilters: () => null }));
 vi.mock('@/lib/server/sessions', () => ({
   getSessionSources: vi.fn().mockResolvedValue([]),
-  getSessions: vi.fn().mockResolvedValue({
-    sessions: ['active', 'needs_input', 'blocked', null].map((status) => ({
+  getSessions: vi.fn().mockImplementation(async () => ({
+    sessions: sessionStatusState.current.map((status) => ({
       id: status ?? 'ready',
       title: `Review ${status ?? 'ready'} ${'long-unbroken-title'.repeat(20)}`,
       ownerKind: 'user',
@@ -21,7 +37,8 @@ vi.mock('@/lib/server/sessions', () => ({
       privacy: 'shared',
       sourceSurface: 'web',
       activityAt: 1_788_000_000,
-      cachedStatus: status,
+      cachedStatus: status === 'done' ? 'ready' : status,
+      judgedStatus: status === 'done' ? 'done' : null,
       executionCount: 0,
       inferenceCostMicroUsd: 0,
       directInferenceCostMicroUsd: 0,
@@ -36,14 +53,32 @@ vi.mock('@/lib/server/sessions', () => ({
       tasks: [],
     })),
     nextCursor: 'older-cursor',
-  }),
+  })),
 }));
 
 describe('Sessions list', () => {
+  beforeEach(() => {
+    experimentState.boardEnabled = false;
+    experimentState.judgmentEnabled = false;
+    sessionStatusState.current = [
+      'active',
+      'needs_input',
+      'blocked',
+      'ready',
+      'done',
+    ];
+  });
+
   it('keeps every session and long-content link accessible, including older sessions', async () => {
     render(await SessionsPage({ searchParams: Promise.resolve({}) }));
 
-    for (const status of ['active', 'needs_input', 'blocked', 'ready']) {
+    for (const status of [
+      'active',
+      'needs_input',
+      'blocked',
+      'ready',
+      'done',
+    ]) {
       expect(
         screen.getByRole('link', { name: new RegExp(`Review ${status}`) }),
       ).toHaveAttribute('href', `/sessions/${status}`);
@@ -62,5 +97,71 @@ describe('Sessions list', () => {
     expect(
       screen.getByRole('link', { name: 'Show older sessions' }),
     ).toHaveAttribute('href', '/sessions?before=older-cursor');
+  });
+
+  it('does not expose the board from a direct URL until the deployment flag is enabled', async () => {
+    render(
+      await SessionsPage({
+        searchParams: Promise.resolve({ view: 'board' }),
+      }),
+    );
+
+    expect(
+      screen.queryByRole('heading', { name: 'done' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Show older sessions' }),
+    ).toHaveAttribute('href', '/sessions?before=older-cursor');
+  });
+
+  it('shows deployment-wide board lanes while preserving each Session card', async () => {
+    experimentState.boardEnabled = true;
+    experimentState.judgmentEnabled = true;
+
+    render(
+      await SessionsPage({
+        searchParams: Promise.resolve({ view: 'board' }),
+      }),
+    );
+
+    const doneSection = screen
+      .getByRole('heading', { name: 'done' })
+      .closest('section');
+    expect(doneSection).not.toBeNull();
+    expect(
+      within(doneSection!).getByRole('link', { name: /Review done/ }),
+    ).toHaveAttribute('href', '/sessions/done');
+    expect(
+      screen.getByRole('link', { name: 'Show older sessions' }),
+    ).toHaveAttribute('href', '/sessions?view=board&before=older-cursor');
+  });
+
+  it('hides empty board lanes and blocked card badges', async () => {
+    experimentState.boardEnabled = true;
+    experimentState.judgmentEnabled = true;
+    sessionStatusState.current = ['active', 'blocked', 'done'];
+
+    render(
+      await SessionsPage({
+        searchParams: Promise.resolve({ view: 'board' }),
+      }),
+    );
+
+    expect(screen.getAllByRole('region')).toHaveLength(3);
+    expect(
+      screen.queryByRole('heading', { name: 'needs input' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'ready' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Empty')).not.toBeInTheDocument();
+
+    const blockedSection = screen.getByRole('region', { name: 'blocked' });
+    expect(
+      within(blockedSection).getAllByText('blocked', { exact: true }),
+    ).toHaveLength(1);
+    expect(
+      within(blockedSection).getByRole('heading').parentElement,
+    ).toHaveClass('cursor-default');
   });
 });

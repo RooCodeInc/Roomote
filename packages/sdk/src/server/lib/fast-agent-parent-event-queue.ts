@@ -515,18 +515,35 @@ async function markDiscarded(id: string, error: unknown) {
     .where(eq(fastAgentParentEvents.id, id));
 }
 
-function getAutomationLaunchClaim(event: FastAgentParentEvent) {
+function getAutomationOutcomeIdentity(
+  event: FastAgentParentEvent,
+): { id: string; lastRunAt: Date; launchClaimedAt?: Date } | null {
   if (event.type !== 'automation_triggered') return null;
 
   const prefix = `${event.automationId}:`;
   if (!event.eventId.startsWith(prefix)) return null;
+
+  if (event.trigger === 'webhook') {
+    if (!event.eventId.startsWith(`${prefix}webhook:`)) return null;
+  }
+
+  const occurrenceAt = event.occurrenceAt
+    ? new Date(event.occurrenceAt)
+    : event.trigger === 'webhook'
+      ? new Date()
+      : new Date(event.eventId.slice(prefix.length));
+  if (Number.isNaN(occurrenceAt.getTime())) return null;
+
+  if (event.trigger === 'webhook') {
+    return { id: event.automationId, lastRunAt: occurrenceAt };
+  }
 
   const launchClaimedAt = new Date(
     event.launchClaimedAt ?? event.eventId.slice(prefix.length),
   );
   if (Number.isNaN(launchClaimedAt.getTime())) return null;
 
-  return { id: event.automationId, launchClaimedAt };
+  return { id: event.automationId, launchClaimedAt, lastRunAt: occurrenceAt };
 }
 
 async function finalizeAutomationLaunch(
@@ -534,11 +551,11 @@ async function finalizeAutomationLaunch(
   status: 'succeeded' | 'failed',
   error?: unknown,
 ) {
-  const claim = getAutomationLaunchClaim(event);
-  if (!claim) return;
+  const outcomeIdentity = getAutomationOutcomeIdentity(event);
+  if (!outcomeIdentity) return;
 
   await recordCustomAutomationRunOutcome(db, {
-    ...claim,
+    ...outcomeIdentity,
     status,
     ...(status === 'failed'
       ? { error: error instanceof Error ? error.message : String(error) }

@@ -147,6 +147,47 @@ Restore verifies the encrypted bundle and checksums before replacing any
 state, restores the original `.env` (including `ENCRYPTION_KEY`), repopulates
 empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
 
+## Decision model on CPU (optional)
+
+Roomote asks a decision model small typed questions: whether a turn is worth
+remembering, who a thread reply is for, when a running task has news for the
+user, which model a delegated task should use. With a TypeSafe key, Jev
+answers them. Without one, the `judgment` profile runs a CPU decision model
+beside the stack, so these features work with no external decision API and no
+GPU.
+
+Add these to `.env`:
+
+```sh
+COMPOSE_PROFILES=judgment                          # or append to an existing list
+R_JUDGMENT_UPSTREAM_URL=http://judgment:8080
+R_JUDGMENT_MODEL=roomote                           # or choose it in Settings > Models
+```
+
+The sidecar serves
+[`roomote/roomote-judgment-gliner`](https://huggingface.co/roomote/roomote-judgment-gliner),
+a GLiNER 2.5 model fine-tuned on Roomote's decisions and trained only on
+synthetic data. It downloads the model on first start and keeps it in the
+`roomote_judgment_models` volume. Its model card lists the decisions it covers
+and its accuracy; on real decisions it trails Jev by a few points, and Roomote
+acts on a decision only when the model is confident. Tool-call auto-approval
+still requires Jev. To serve a different checkpoint, set `JUDGMENT_MODEL` to a
+Hugging Face id or path (and `JUDGMENT_HF_TOKEN` if it is private).
+
+The sidecar is reachable only on the stack's internal network; set
+`R_JUDGMENT_UPSTREAM_API_KEY` as well to require a bearer token.
+
+Sizing: the container is capped at `JUDGMENT_MEMORY_LIMIT` (default `4g`) and
+`JUDGMENT_CPUS` (default `4`). It uses about 1.5 GB, and on 4 cores a decision
+takes about 0.3 to 1 second (p90 about 2 seconds). Decisions run one at a
+time, so a burst of them queues and more cores make each one faster.
+
+The production install (`install.sh`) and the Railway, Render, and Coolify
+templates carry the same service, opt-in like Memory: in the production
+install it is the `judgment` profile, and in the templates it idles without
+loading its model until `R_JUDGMENT_UPSTREAM_URL` points at it and the
+Roomote judgment model is selected. Each template's README has the steps.
+
 ## Upgrades and rollback
 
 `roomote upgrade` is designed so a bad release cannot strand your deployment:

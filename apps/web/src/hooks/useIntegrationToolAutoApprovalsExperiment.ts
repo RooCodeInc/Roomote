@@ -1,14 +1,13 @@
 'use client';
 
-import { useDeploymentExperiment } from './useDeploymentExperiments';
+import { useDeploymentExperimentRuntime } from './useDeploymentExperiments';
 
 /**
- * Auto tool approvals are experimental; per-tool approvals are not. While
- * this is off, a tool nobody has made a choice about simply runs.
+ * Auto tool approvals are an internal nightly experiment; per-tool approvals
+ * are not. The runtime value is readable by members only on opted-in internal
+ * deployments, so ordinary deployments never query the nightly runtime
+ * procedure.
  */
 export function useIntegrationToolAutoApprovalsExperiment() {
-  return useDeploymentExperiment(
-    'integrationToolAutoApprovals',
-    'Failed to update Auto tool approvals.',
-  );
+  return useDeploymentExperimentRuntime('integrationToolAutoApprovals');
 }

@@ -4,6 +4,7 @@ import {
 } from '@roomote/db/server';
 import {
   getDeploymentExperimentAudience,
+  isDeploymentExperimentRuntimeReadable,
   selectDeploymentExperimentValuesForAudiences,
   type DeploymentExperimentId,
 } from '@roomote/feature-flags';
@@ -51,18 +52,22 @@ export async function getNightlyExperimentsCommand(auth: UserAuthSuccess) {
 }
 
 /**
- * The logo animation is a deployment-wide runtime effect, so every signed-in
- * user on an explicitly opted-in internal deployment can read this one bit.
- * Management reads and writes remain admin-only above.
+ * Runtime behavior is deployment-wide, so signed-in users on an explicitly
+ * opted-in internal deployment may read only experiments marked as runtime
+ * readable. Management reads and writes remain admin-only above.
  */
-export async function getDizzyExperimentEnabledCommand(
+export async function getNightlyExperimentRuntimeCommand(
   auth: UserAuthSuccess,
+  input: { id: DeploymentExperimentId },
 ): Promise<boolean> {
-  if (auth.nightlyExperimentsEnabled !== true) {
+  if (
+    auth.nightlyExperimentsEnabled !== true ||
+    !isDeploymentExperimentRuntimeReadable(input.id)
+  ) {
     throw new Error('Unauthorized');
   }
 
-  return (await getDeploymentExperiments()).dizzy;
+  return (await getDeploymentExperiments())[input.id];
 }
 
 export async function setNightlyExperimentCommand(

@@ -4,8 +4,11 @@ import {
   type AutomationResultPriority,
   type AutomationResultKind,
   type AutomationResultVisibility,
+  type CustomAutomationLaunchCriteriaAnswers,
+  type CustomAutomationLaunchCriteriaOutcomes,
+  type CustomAutomationLaunchCriteriaSnapshot,
 } from '@roomote/types';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import {
@@ -298,6 +301,9 @@ async function recordCustomAutomationResultWithClient(
     dedupeKey: string;
     priority?: AutomationResultPriority;
     visibility: AutomationResultVisibility;
+    launchCriteriaSnapshot?: CustomAutomationLaunchCriteriaSnapshot;
+    launchCriteriaAnswers?: CustomAutomationLaunchCriteriaAnswers;
+    launchCriteriaOutcome?: CustomAutomationLaunchCriteriaOutcomes;
   },
   client: DatabaseOrTransaction,
 ) {
@@ -322,6 +328,15 @@ async function recordCustomAutomationResultWithClient(
   });
   if (!automation) return null;
   const fallback = fallbackResultCopy(params.content, automation.name);
+  const launchCriteriaSkipped =
+    params.launchCriteriaOutcome?.launchCriteria === 'skipped';
+  const conditionSkipped =
+    launchCriteriaSkipped ||
+    params.launchCriteriaOutcome?.runWhen === 'skipped';
+  const hasLaunchCriteria = Boolean(
+    params.launchCriteriaSnapshot?.launchCriteria,
+  );
+  const preparedAt = conditionSkipped ? new Date() : null;
 
   const [result] = await client
     .insert(automationResults)
@@ -339,15 +354,32 @@ async function recordCustomAutomationResultWithClient(
       resultVisibility: params.visibility,
       automationName: automation.name,
       content: params.content,
+      launchCriteriaSnapshot: params.launchCriteriaSnapshot ?? null,
+      launchCriteriaAnswers: params.launchCriteriaAnswers ?? null,
+      launchCriteriaOutcome: params.launchCriteriaOutcome ?? null,
       resultKind: params.resultKind ?? 'outcome',
       ...fallback,
+      ...(conditionSkipped
+        ? {
+            headline:
+              launchCriteriaSkipped && hasLaunchCriteria
+                ? 'Run skipped by launch criteria'
+                : 'Run skipped by saved conditions',
+            decisionContext:
+              launchCriteriaSkipped && hasLaunchCriteria
+                ? 'The automation work did not start because its saved launch criteria did not pass. Inspect the automation to review the findings and raw answers.'
+                : 'The automation work did not start because its saved typed conditions did not pass. Inspect the automation to review the questions and raw answers.',
+            preparationStatus: 'ready' as const,
+            preparedAt,
+          }
+        : {}),
       priority: params.priority ?? automation.resultPriority,
       dedupeKey: params.dedupeKey,
     })
     .onConflictDoNothing({ target: automationResults.dedupeKey })
     .returning();
 
-  if (params.sourceTaskId) {
+  if (params.sourceTaskId && !conditionSkipped) {
     await reconcileAutomationResultAcceptance(params.sourceTaskId, client);
   }
   if (result && params.sourceRunId && params.resultKind !== 'input_request') {
@@ -364,6 +396,67 @@ async function recordCustomAutomationResultWithClient(
   }
 
   return result ?? null;
+}
+
+export async function listCustomAutomationConditionRuns(
+  automationId: string,
+  limit = 5,
+  client: DatabaseOrTransaction = db,
+) {
+  return client.query.automationResults.findMany({
+    where: and(
+      eq(automationResults.customAutomationId, automationId),
+      isNotNull(automationResults.launchCriteriaSnapshot),
+    ),
+    columns: {
+      id: true,
+      content: true,
+      createdAt: true,
+      launchCriteriaSnapshot: true,
+      launchCriteriaAnswers: true,
+      launchCriteriaOutcome: true,
+    },
+    orderBy: [desc(automationResults.createdAt)],
+    limit: Math.min(Math.max(Math.trunc(limit) || 1, 1), 20),
+  });
+}
+
+/** Recent private/shared custom automation results supplied to its launch gate. */
+export async function listRecentCustomAutomationResults(
+  automationId: string,
+  limit = 5,
+  client: DatabaseOrTransaction = db,
+) {
+  const results = await client.query.automationResults.findMany({
+    where: and(
+      eq(automationResults.customAutomationId, automationId),
+      eq(automationResults.resultKind, 'outcome'),
+      isNull(automationResults.supersededAt),
+      isNull(automationResults.ignoredAt),
+    ),
+    columns: {
+      content: true,
+      createdAt: true,
+      launchCriteriaOutcome: true,
+    },
+    orderBy: [desc(automationResults.createdAt)],
+    limit: Math.min(Math.max(Math.trunc(limit) || 1, 1), 10),
+  });
+  return results.map((result) => ({
+    content: result.content,
+    createdAt: result.createdAt,
+    launchCriteriaOutcome: result.launchCriteriaOutcome?.launchCriteria ?? null,
+    runWhenOutcome: result.launchCriteriaOutcome?.runWhen ?? null,
+  }));
+}
+
+export async function getAutomationResultByDedupeKey(
+  dedupeKey: string,
+  client: DatabaseOrTransaction = db,
+) {
+  return client.query.automationResults.findFirst({
+    where: eq(automationResults.dedupeKey, dedupeKey),
+  });
 }
 
 export async function recordBackgroundAutomationResult(
@@ -421,6 +514,9 @@ export async function recordCustomAutomationResult(
     dedupeKey: string;
     priority?: AutomationResultPriority;
     visibility: AutomationResultVisibility;
+    launchCriteriaSnapshot?: CustomAutomationLaunchCriteriaSnapshot;
+    launchCriteriaAnswers?: CustomAutomationLaunchCriteriaAnswers;
+    launchCriteriaOutcome?: CustomAutomationLaunchCriteriaOutcomes;
   },
   client: DatabaseOrTransaction = db,
 ) {

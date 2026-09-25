@@ -55,6 +55,28 @@ vi.mock(
   }),
 );
 
+vi.mock(
+  '@/components/settings/SessionStatusJudgmentExperimentalSetting',
+  () => ({
+    SessionStatusJudgmentExperimentalSetting: () => (
+      <div>Session status judgment setting</div>
+    ),
+  }),
+);
+
+vi.mock('@/components/settings/SessionsBoardExperimentalSetting', () => ({
+  SessionsBoardExperimentalSetting: () => <div>Sessions board setting</div>,
+}));
+
+vi.mock(
+  '@/components/settings/AutomationLaunchCriteriaExperimentalSetting',
+  () => ({
+    AutomationLaunchCriteriaExperimentalSetting: () => (
+      <div>Custom automation launch criteria setting</div>
+    ),
+  }),
+);
+
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
 describe('ExperimentalSettingsPage', () => {
@@ -65,7 +87,7 @@ describe('ExperimentalSettingsPage', () => {
     state.isFetching = false;
   });
 
-  it('keeps experimental settings admin-only and hides Auto tool approvals', () => {
+  it('keeps customer-preview settings admin-only and omits internal experiments', () => {
     render(<ExperimentalSettingsPage />);
 
     expect(screen.getByTestId('experimental-settings')).toHaveAttribute(
@@ -82,6 +104,13 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.getByText('Task communication triage setting'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText('Session status judgment setting'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Sessions board setting')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Custom automation launch criteria setting'),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
   });
 

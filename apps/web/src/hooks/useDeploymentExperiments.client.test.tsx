@@ -10,16 +10,19 @@ const { mocks, queryState } = vi.hoisted(() => ({
     mutate: vi.fn(),
     mutationRoute: null as string | null,
     refetch: vi.fn(),
+    runtimeQueryOptions: vi.fn(),
     setQueryData: vi.fn(),
     toastError: vi.fn(),
   },
   queryState: {
     data: undefined as
       | ReturnType<typeof getDeploymentExperimentValues>
+      | boolean
       | undefined,
     error: null as Error | null,
     isFetching: false,
     isPending: true,
+    nightlyExperimentsEnabled: false,
   },
 }));
 
@@ -43,6 +46,12 @@ vi.mock('sonner', () => ({
   toast: { error: mocks.toastError },
 }));
 
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({
+    nightlyExperimentsEnabled: queryState.nightlyExperimentsEnabled,
+  }),
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     deploymentExperiments: {
@@ -62,8 +71,15 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['nightly-experiments'],
         queryOptions: () => ({}),
       },
-      dizzyEnabled: {
-        queryKey: () => ['dizzy-enabled'],
+      runtime: {
+        queryKey: ({ id }: { id: string }) => [
+          'nightly-experiment-runtime',
+          id,
+        ],
+        queryOptions: (input: unknown, options: unknown) => {
+          mocks.runtimeQueryOptions(input, options);
+          return { input, options };
+        },
       },
       set: {
         mutationOptions: (options: unknown) => {
@@ -76,6 +92,7 @@ vi.mock('@/trpc/client', () => ({
 }));
 
 import {
+  useDeploymentExperimentRuntime,
   useDeploymentExperiment,
   useDeploymentExperiments,
 } from './useDeploymentExperiments';
@@ -88,6 +105,7 @@ describe('useDeploymentExperiments', () => {
     queryState.error = null;
     queryState.isFetching = false;
     queryState.isPending = false;
+    queryState.nightlyExperimentsEnabled = false;
   });
 
   it('exposes the same shared value to every consumer hook', () => {
@@ -127,7 +145,7 @@ describe('useDeploymentExperiments', () => {
     expect(mocks.mutationRoute).toBe('internal-nightly');
   });
 
-  it('refreshes the runtime logo flag after changing Dizzy', async () => {
+  it('refreshes Auto runtime consumers after changing its nightly experiment', async () => {
     renderHook(() =>
       useDeploymentExperiments('Save failed', 'internal-nightly'),
     );
@@ -135,7 +153,7 @@ describe('useDeploymentExperiments', () => {
     await mutationOptions.onSettled!(
       undefined as never,
       undefined as never,
-      { id: 'dizzy', enabled: true } as never,
+      { id: 'integrationToolAutoApprovals', enabled: true } as never,
       undefined as never,
       undefined as never,
     );
@@ -144,9 +162,44 @@ describe('useDeploymentExperiments', () => {
       queryKey: ['nightly-experiments'],
     });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ['dizzy-enabled'],
+      queryKey: ['nightly-experiment-runtime', 'integrationToolAutoApprovals'],
     });
   });
+
+  it('does not invalidate a runtime reader for a nightly setting without one', async () => {
+    renderHook(() =>
+      useDeploymentExperiments('Save failed', 'internal-nightly'),
+    );
+
+    await mutationOptions.onSettled!(
+      undefined as never,
+      undefined as never,
+      { id: 'automationLaunchCriteria', enabled: true } as never,
+      undefined as never,
+      undefined as never,
+    );
+
+    expect(mocks.invalidateQueries).toHaveBeenCalledTimes(1);
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['nightly-experiments'],
+    });
+  });
+
+  it.each(['integrationToolAutoApprovals'] as const)(
+    'reads the shared nightly runtime resource for %s',
+    (id) => {
+      queryState.nightlyExperimentsEnabled = true;
+      queryState.data = true;
+
+      const { result } = renderHook(() => useDeploymentExperimentRuntime(id));
+
+      expect(result.current).toEqual({ enabled: true, isLoading: false });
+      expect(mocks.runtimeQueryOptions).toHaveBeenCalledWith(
+        { id },
+        { enabled: true },
+      );
+    },
+  );
 
   it('optimistically updates and rolls back only the changed deployment flag', async () => {
     const previous = getDeploymentExperimentValues(undefined);

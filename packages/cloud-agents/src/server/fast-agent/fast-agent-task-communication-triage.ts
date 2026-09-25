@@ -46,7 +46,7 @@ export type TaskCommunicationTriageState = {
   update: TaskCommunicationUpdate;
 };
 
-const questions = {
+export const TASK_COMMUNICATION_QUESTIONS = {
   needs_user: {
     type: 'noul',
     instructions:
@@ -109,7 +109,7 @@ const questions = {
   },
 } as const satisfies Record<string, TypeSafeNoulQuestion>;
 
-export type TaskCommunicationSignal = keyof typeof questions;
+export type TaskCommunicationSignal = keyof typeof TASK_COMMUNICATION_QUESTIONS;
 
 export type TaskCommunicationSignals = Record<TaskCommunicationSignal, number>;
 
@@ -241,8 +241,9 @@ export async function triageTaskCommunication(
 ): Promise<TaskCommunicationTriageResult | null> {
   const startedAt = performance.now();
   const answers = await evaluateTypeSafeJudgments({
+    decision: 'fast-agent-task-communication-triage',
     state,
-    questions,
+    questions: TASK_COMMUNICATION_QUESTIONS,
     ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
   });
   if (!answers) {

@@ -68,7 +68,7 @@ const REQUESTED_WORK_KIND_TIMEOUT_MS = 5_000;
  */
 const JUDGMENT_MIN_CONFIDENCE = 0.5;
 
-const REQUESTED_WORK_KIND_QUESTION: TypeSafeChoiceQuestion<RequestedWorkKind> =
+export const REQUESTED_WORK_KIND_QUESTION: TypeSafeChoiceQuestion<RequestedWorkKind> =
   {
     type: 'choice',
     instructions:
@@ -162,6 +162,7 @@ async function classifyWithJudgmentModel(
 ): Promise<RequestedWorkKindDecision | undefined> {
   try {
     const answers = await evaluateTypeSafeJudgments({
+      decision: 'requested-work-kind',
       state: { prompt },
       questions: { kind: REQUESTED_WORK_KIND_QUESTION },
     });

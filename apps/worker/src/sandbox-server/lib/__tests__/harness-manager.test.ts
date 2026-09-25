@@ -3044,7 +3044,7 @@ describe('HarnessManager touchKeepalive', () => {
     }
   });
 
-  it('getSleepAt returns null for stopped phase', () => {
+  it('getSleepAt gives a soft-stopped task the idle window from the stop', () => {
     vi.setSystemTime(new Date('2026-03-19T12:00:00.000Z'));
 
     const { harness, manager } = createManager({
@@ -3064,9 +3064,52 @@ describe('HarnessManager touchKeepalive', () => {
       expect(manager.getStatus().phase).toBe('running');
       expect(manager.getSleepAt()).not.toBeNull();
 
+      vi.setSystemTime(new Date('2026-03-19T12:05:00.000Z'));
       manager.cancelTask();
       expect(manager.getStatus().phase).toBe('stopped');
-      expect(manager.getSleepAt()).toBeNull();
+
+      const stoppedAt = Date.parse('2026-03-19T12:05:00.000Z');
+      expect(manager.getSleepAt()).toBe(stoppedAt + 60_000);
+
+      // The deadline stays anchored to the stop instead of sliding forward.
+      vi.setSystemTime(new Date('2026-03-19T12:05:30.000Z'));
+      expect(manager.getSleepAt()).toBe(stoppedAt + 60_000);
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('terminal cancel never publishes a sleep deadline on its way to shutdown', async () => {
+    vi.setSystemTime(new Date('2026-03-19T12:00:00.000Z'));
+
+    const { harness, manager } = createManager({
+      keepaliveMs: 60_000,
+      sandboxTimeoutMs: 20 * 60 * 1_000,
+    });
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTask({ prompt: 'hello' });
+
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-cancel-term-phases'],
+      } as TaskEvent);
+
+      const publishedSleepAts: Array<[string, number | null]> = [];
+      manager.on('stateChange', (phase) => {
+        publishedSleepAts.push([phase, manager.getSleepAt()]);
+      });
+
+      const shutdownPromise = manager.waitForShutdown();
+      manager.cancelTask({ terminate: true });
+      await shutdownPromise;
+
+      expect(publishedSleepAts.map(([phase]) => phase)).toContain('stopped');
+      expect(publishedSleepAts.every(([, sleepAt]) => sleepAt === null)).toBe(
+        true,
+      );
     } finally {
       manager.dispose();
       harness.dispose();
@@ -3478,7 +3521,6 @@ describe('HarnessManager error status', () => {
       // the runtime side because there is nothing to abort yet.
       manager.cancelTask();
       expect(manager.getStatus().phase).toBe('stopped');
-      expect(manager.getSleepAt()).toBeNull();
       expect(manager.getState().cancelTriggeredAt).toBeDefined();
 
       harness.emitCommandError({

@@ -9,7 +9,6 @@ import { Button, Plus, Search } from '@/components/system';
 import { useCommandPalette } from '@/components/layout/CommandPaletteContext';
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { useDizzyExperiment } from '@/hooks/useDizzyExperiment';
 
 import { ChatWidgetButton } from '../ChatWidgetButton';
 import { UserMenu } from '../UserMenu';
@@ -24,7 +23,6 @@ export const NavbarHeader = ({ className, ...props }: NavbarHeaderProps) => {
   const { setOpen: openCommandPalette } = useCommandPalette();
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   useAuthorizedUser();
-  const isDizzyEnabled = useDizzyExperiment();
 
   return (
     <>
@@ -43,10 +41,7 @@ export const NavbarHeader = ({ className, ...props }: NavbarHeaderProps) => {
             width={28}
             height={28}
             priority
-            className={cn(
-              'h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert',
-              isDizzyEnabled && 'motion-safe:animate-spin',
-            )}
+            className="h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert"
           />
         </Link>
         <Button

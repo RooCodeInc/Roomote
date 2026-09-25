@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
     ) => void;
   } | null,
   isAdmin: true,
+  automationLaunchCriteriaEnabled: false,
   catalogQueryOptions: [] as Array<{ enabled?: boolean }>,
   queriedKeys: [] as unknown[],
   customAutomationsPending: false,
@@ -28,6 +29,10 @@ const state = vi.hoisted(() => ({
   customAutomationsLoaded: true,
   customAutomationsRefetch: vi.fn(),
   customAutomationRunPendingId: null as string | null,
+  customAutomationWebhookSettings: null as {
+    enabled: boolean;
+    url: string | null;
+  } | null,
   customAutomationTimeZone: 'UTC' as string | undefined,
   customAutomationDefaultTarget: undefined as
     | {
@@ -43,7 +48,7 @@ const state = vi.hoisted(() => ({
     name: string;
     prompt: string;
     enabled: boolean;
-    scheduleMode: 'daily' | 'weekly' | 'cron';
+    scheduleMode: 'off' | 'on_demand' | 'daily' | 'weekly' | 'cron';
     cronExpression: string | null;
     model: string | null;
     reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
@@ -311,6 +316,7 @@ const state = vi.hoisted(() => ({
 
 const queryClient = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
+  removeQueries: vi.fn(),
 }));
 
 const mutations = vi.hoisted(() => ({
@@ -318,6 +324,14 @@ const mutations = vi.hoisted(() => ({
   updateSettings: vi.fn(),
   triggerAgent: vi.fn(),
   triggerCustomAutomation: vi.fn(),
+  setCustomAutomationWebhookEnabled: vi.fn(),
+  rotateCustomAutomationWebhook: vi.fn(),
+  latestWebhookMutationOptions: null as {
+    onSuccess?: (result: { enabled: boolean; url: string | null }) => void;
+  } | null,
+  latestRotateWebhookOptions: null as {
+    onSuccess?: (result: { enabled: true; url: string }) => void;
+  } | null,
   latestSettingsOptions: null as {
     onSuccess?: (
       result: NonNullable<typeof state.nextUpdateSettingsResult>,
@@ -377,6 +391,7 @@ vi.mock('@tanstack/react-query', () => ({
       return {
         isPending: state.settingsQuery.isPending,
         data: {
+          launchCriteriaEnabled: state.automationLaunchCriteriaEnabled,
           capabilities: state.settingsQuery.data.capabilities,
           managerSlackChannelId,
           managerDiscordChannelId,
@@ -418,6 +433,17 @@ vi.mock('@tanstack/react-query', () => ({
           ? state.customAutomations
           : undefined,
         refetch: state.customAutomationsRefetch,
+      };
+    }
+
+    if (key1 === 'getCustomAutomationWebhook') {
+      return {
+        isPending: false,
+        isError: false,
+        data: state.customAutomationWebhookSettings ?? {
+          enabled: false,
+          url: null,
+        },
       };
     }
 
@@ -490,7 +516,10 @@ vi.mock('@tanstack/react-query', () => ({
       result: NonNullable<typeof state.nextUpdateSettingsResult>,
     ) => void;
     onError?: (...args: unknown[]) => void;
-    mutationKind?: 'triggerCustomAutomation';
+    mutationKind?:
+      | 'triggerCustomAutomation'
+      | 'setCustomAutomationWebhookEnabled'
+      | 'rotateCustomAutomationWebhook';
     mutationKey?: unknown[];
   }) => {
     return {
@@ -501,6 +530,12 @@ vi.mock('@tanstack/react-query', () => ({
       mutate: vi.fn((variables: unknown) => {
         if (_options?.mutationKind === 'triggerCustomAutomation') {
           mutations.triggerCustomAutomation(variables);
+        } else if (
+          _options?.mutationKind === 'setCustomAutomationWebhookEnabled'
+        ) {
+          mutations.setCustomAutomationWebhookEnabled(variables);
+        } else if (_options?.mutationKind === 'rotateCustomAutomationWebhook') {
+          mutations.rotateCustomAutomationWebhook(variables);
         } else {
           mutations.updateSettings(variables);
         }
@@ -528,6 +563,16 @@ vi.mock('@/trpc/client', () => ({
         queryOptions: () => ({
           queryKey: ['automations', 'getCustomAutomationOptions'],
         }),
+      },
+      getCustomAutomationWebhook: {
+        queryOptions: (
+          input: { id: string },
+          options: { enabled?: boolean } = {},
+        ) => ({
+          queryKey: ['automations', 'getCustomAutomationWebhook', input.id],
+          ...options,
+        }),
+        queryKey: () => ['automations', 'getCustomAutomationWebhook'],
       },
       getSettings: {
         queryOptions: () => ({
@@ -567,6 +612,26 @@ vi.mock('@/trpc/client', () => ({
       },
       updateCustomAutomation: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+      },
+      setCustomAutomationWebhookEnabled: {
+        mutationOptions: (options?: Record<string, unknown>) => {
+          mutations.latestWebhookMutationOptions =
+            options as typeof mutations.latestWebhookMutationOptions;
+          return {
+            ...options,
+            mutationKind: 'setCustomAutomationWebhookEnabled',
+          };
+        },
+      },
+      rotateCustomAutomationWebhook: {
+        mutationOptions: (options?: Record<string, unknown>) => {
+          mutations.latestRotateWebhookOptions =
+            options as typeof mutations.latestRotateWebhookOptions;
+          return {
+            ...options,
+            mutationKind: 'rotateCustomAutomationWebhook',
+          };
+        },
       },
       deleteCustomAutomation: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
@@ -684,6 +749,130 @@ it('opens the standalone custom editor without querying admin settings', () => {
   expect(state.queriedKeys).not.toContainEqual(['comms', 'status']);
 });
 
+it('saves optional launch criteria when creating a custom automation', () => {
+  state.automationLaunchCriteriaEnabled = true;
+  render(<CustomAutomationsSection />);
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+    target: { value: 'Regression scan' },
+  });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+    target: { value: 'Check current production issues.' },
+  });
+  const launchCriteria = screen.getByRole('textbox', {
+    name: 'Launch criteria (optional)',
+  });
+  expect(launchCriteria).toHaveAttribute('maxLength', '4000');
+  fireEvent.change(launchCriteria, {
+    target: { value: 'Only investigate new production regressions.' },
+  });
+  fireEvent.click(
+    screen.getByRole('combobox', { name: 'Preferred environment' }),
+  );
+  fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+  expect(mutations.updateSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: 'Regression scan',
+      launchCriteria: 'Only investigate new production regressions.',
+    }),
+  );
+});
+
+it('prefills and updates launch criteria when editing a custom automation', async () => {
+  state.automationLaunchCriteriaEnabled = true;
+  setRunnableCustomAutomation('Only investigate new checkout regressions.');
+  render(<AutomationsSettings />);
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Configure Daily scan' }),
+  );
+  const launchCriteria = screen.getByRole('textbox', {
+    name: 'Launch criteria (optional)',
+  });
+  expect(launchCriteria).toHaveValue(
+    'Only investigate new checkout regressions.',
+  );
+  fireEvent.change(launchCriteria, {
+    target: { value: 'Only investigate regressions affecting active users.' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  expect(mutations.updateSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: 'automation-1',
+      launchCriteria: 'Only investigate regressions affecting active users.',
+    }),
+  );
+});
+
+it('hides and omits custom automation launch criteria while the experiment is off', () => {
+  state.automationLaunchCriteriaEnabled = false;
+  render(<CustomAutomationsSection />);
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+
+  expect(
+    screen.queryByRole('textbox', { name: 'Launch criteria (optional)' }),
+  ).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+    target: { value: 'Unconditional report' },
+  });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+    target: { value: 'Summarize current production issues.' },
+  });
+  fireEvent.click(
+    screen.getByRole('combobox', { name: 'Preferred environment' }),
+  );
+  fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+  mutations.updateSettings.mockClear();
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+  expect(mutations.updateSettings).toHaveBeenCalledOnce();
+  expect(mutations.updateSettings.mock.calls[0]?.[0]).not.toHaveProperty(
+    'launchCriteria',
+  );
+});
+
+it('lets users toggle an automation with saved criteria while the experiment is off', async () => {
+  state.automationLaunchCriteriaEnabled = false;
+  setRunnableCustomAutomation('Only investigate new checkout regressions.');
+  render(<AutomationsSettings />);
+
+  const toggle = await screen.findByRole('switch', {
+    name: 'Toggle Daily scan',
+  });
+  mutations.updateSettings.mockClear();
+  fireEvent.click(toggle);
+
+  expect(mutations.updateSettings).toHaveBeenCalledOnce();
+  expect(mutations.updateSettings.mock.calls[0]?.[0]).toMatchObject({
+    id: 'automation-1',
+    enabled: false,
+  });
+  expect(mutations.updateSettings.mock.calls[0]?.[0]).not.toHaveProperty(
+    'launchCriteria',
+  );
+});
+
+it('keeps channel auto-start launch criteria editable with the custom experiment off', async () => {
+  state.automationLaunchCriteriaEnabled = false;
+  render(<AutomationsSettings />);
+  fireEvent.click(
+    await screen.findByRole('button', {
+      name: /(?:Set up|Configure) Auto-respond to channels/,
+    }),
+  );
+
+  const criteria = await screen.findByRole('textbox', {
+    name: 'Launch criteria (optional)',
+  });
+  fireEvent.change(criteria, {
+    target: { value: 'Only start for new incidents.' },
+  });
+
+  expect(criteria).toHaveValue('Only start for new incidents.');
+});
+
 it('validates required custom automation fields before creating', () => {
   render(<CustomAutomationsSection />);
   fireEvent.click(screen.getByRole('button', { name: 'New' }));
@@ -794,12 +983,13 @@ function closeAutomationDialog() {
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 }
 
-function setRunnableCustomAutomation() {
+function setRunnableCustomAutomation(launchCriteria?: string) {
   state.customAutomations = [
     {
       id: 'automation-1',
       name: 'Daily scan',
       prompt: 'Find flaky tests.',
+      ...(launchCriteria !== undefined ? { launchCriteria } : {}),
       enabled: true,
       scheduleMode: 'daily',
       cronExpression: null,
@@ -825,6 +1015,8 @@ describe('AutomationsSettings', () => {
     vi.clearAllMocks();
     state.nextUpdateSettingsResult = null;
     state.customAutomationRunPendingId = null;
+    state.customAutomationWebhookSettings = null;
+    state.automationLaunchCriteriaEnabled = false;
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
     mutations.latestCustomTriggerOptions = null;
@@ -1930,6 +2122,114 @@ describe('AutomationsSettings', () => {
         'Configure what runs, when it runs, and where the result is sent.',
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it('keeps On-demand runnable and supports webhook enable, rotate, and revoke controls', async () => {
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.customAutomations = [
+      {
+        id: 'automation-ondemand',
+        name: 'Event report',
+        prompt: 'Review the configured event.',
+        enabled: true,
+        scheduleMode: 'on_demand',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+    state.customAutomationWebhookSettings = { enabled: false, url: null };
+    window.location.hash = '';
+    render(<CustomAutomationsSection />);
+
+    expect(
+      await screen.findByRole('button', { name: 'Run Event report now' }),
+    ).toBeEnabled();
+    expect(screen.getByText(/On-demand/)).toBeInTheDocument();
+    expect(screen.getByText('No report channel')).toBeInTheDocument();
+    expect(screen.queryByText(/Next run/)).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Run Event report now' }),
+    );
+    expect(mutations.triggerCustomAutomation).toHaveBeenCalledWith({
+      id: 'automation-ondemand',
+    });
+
+    act(() => {
+      window.location.hash = '#custom-automation-automation-ondemand';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(
+      await screen.findByRole('dialog', { name: 'Edit custom automation' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Schedule' }),
+    ).toHaveTextContent('On-demand');
+    const webhookSwitch = screen.getByRole('switch', {
+      name: 'Enable webhooks',
+    });
+    expect(
+      screen.getByText(
+        /text\/plain or JSON bodies provide untrusted input for this run only/,
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(webhookSwitch);
+    expect(mutations.setCustomAutomationWebhookEnabled).toHaveBeenCalledWith({
+      id: 'automation-ondemand',
+      enabled: true,
+    });
+    const initialUrl =
+      'https://roomote.example/api/webhooks/custom-automations/automation-ondemand/opaque-token';
+    await act(async () =>
+      mutations.latestWebhookMutationOptions?.onSuccess?.({
+        enabled: true,
+        url: initialUrl,
+      }),
+    );
+
+    const urlInput = screen.getByRole('textbox', { name: 'Webhook URL' });
+    expect(urlInput).toHaveAttribute('readonly');
+    expect(urlInput).toBeEnabled();
+    expect(urlInput).toHaveValue(initialUrl);
+    expect(
+      screen.getByRole('button', { name: 'Copy webhook URL' }),
+    ).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate webhook URL' }));
+    expect(mutations.rotateCustomAutomationWebhook).toHaveBeenCalledWith({
+      id: 'automation-ondemand',
+    });
+    const rotatedUrl = `${initialUrl}-rotated`;
+    await act(async () =>
+      mutations.latestRotateWebhookOptions?.onSuccess?.({
+        enabled: true,
+        url: rotatedUrl,
+      }),
+    );
+    expect(urlInput).toHaveValue(rotatedUrl);
+
+    fireEvent.click(webhookSwitch);
+    expect(
+      mutations.setCustomAutomationWebhookEnabled,
+    ).toHaveBeenLastCalledWith({ id: 'automation-ondemand', enabled: false });
+    await act(async () =>
+      mutations.latestWebhookMutationOptions?.onSuccess?.({
+        enabled: false,
+        url: null,
+      }),
+    );
+    expect(urlInput).toBeDisabled();
+    expect(urlInput).toHaveValue('');
   });
 
   it.each([

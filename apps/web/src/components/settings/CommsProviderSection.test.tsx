@@ -1501,7 +1501,7 @@ describe('CommsProviderSection', () => {
       ).not.toBeInTheDocument();
     });
 
-    it('shows when Cloud-managed Email has not been provisioned', () => {
+    it('explains that Cloud-managed Email allocates its inbox on first send', () => {
       state.cloudEnabled = true;
       render(
         <CommsProviderSection
@@ -1519,7 +1519,7 @@ describe('CommsProviderSection', () => {
 
       expect(
         screen.getByText(
-          'Managed Email is unavailable. Roomote Cloud has not provisioned an inbox for this deployment.',
+          "Roomote Cloud creates this deployment's inbox the first time Roomote sends an email.",
         ),
       ).toBeVisible();
       expect(screen.queryByText('AgentMail API Key')).not.toBeInTheDocument();

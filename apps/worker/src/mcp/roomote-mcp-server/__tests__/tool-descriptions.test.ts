@@ -12,6 +12,7 @@ import {
   CREATE_CUSTOM_SKILL_TOOL,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  getManageCustomAutomationsTool,
   OPEN_ARTIFACT_TOOL,
   PUBLIC_URL_FETCH_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
@@ -174,7 +175,7 @@ describe('roomote MCP tool descriptions', () => {
     ]);
   });
 
-  it('documents every built-in custom automation schedule preset', async () => {
+  it('documents recurring presets and the on-demand schedule', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(
       registeredTools,
@@ -186,10 +187,10 @@ describe('roomote MCP tool descriptions', () => {
     ).description;
 
     expect(scheduleDescription).toContain(
-      'built-in presets: off, every_hour, every_6_hours, daily, weekly',
+      'built-in presets: every_hour, every_6_hours, daily, weekly',
     );
     expect(scheduleDescription).toContain(
-      'Prefer a built-in preset when it matches the requested cadence.',
+      '"on_demand" for runs started only with Run now or an enabled webhook.',
     );
   });
 
@@ -215,16 +216,15 @@ describe('roomote MCP tool descriptions', () => {
     ).toBe(false);
   });
 
-  it('registers the shared custom automation descriptor unchanged', async () => {
+  it('starts with launch-condition fields hidden until the server reads the experiment state', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(
       registeredTools,
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
     );
+    const disabledTool = getManageCustomAutomationsTool(false);
 
-    expect(automationsTool.config.description).toBe(
-      MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
-    );
+    expect(automationsTool.config.description).toBe(disabledTool.description);
     expect(automationsTool.config.description).toContain(
       'Members can create and manage their own custom automations',
     );
@@ -235,17 +235,21 @@ describe('roomote MCP tool descriptions', () => {
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.annotations,
     );
     expect(Object.keys(automationsTool.config.inputSchema)).toEqual(
-      Object.keys(MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema),
+      Object.keys(disabledTool.inputSchema),
     );
-    for (const fieldName of Object.keys(
-      MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
-    )) {
+    for (const fieldName of Object.keys(disabledTool.inputSchema)) {
       expect(automationsTool.config.inputSchema[fieldName]?.description).toBe(
-        MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema[
-          fieldName as keyof typeof MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema
+        disabledTool.inputSchema[
+          fieldName as keyof typeof disabledTool.inputSchema
         ].description,
       );
     }
+    expect(automationsTool.config.inputSchema).not.toHaveProperty(
+      'launchCriteria',
+    );
+    expect(automationsTool.config.inputSchema).not.toHaveProperty('runWhen');
+    expect(automationsTool.config.description).not.toContain('launchCriteria');
+    expect(automationsTool.config.description).not.toContain('runWhen');
   });
 
   it('registers the shared custom skill descriptor with its advertised fields', async () => {

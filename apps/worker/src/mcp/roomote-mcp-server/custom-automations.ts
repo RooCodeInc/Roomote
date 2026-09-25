@@ -11,6 +11,7 @@ import { errorResult } from './tool-result.js';
 export async function handleManageCustomAutomations(
   params: ManageCustomAutomationsInput,
   config: RoomoteConfig,
+  launchCriteriaEnabled = true,
 ): Promise<ToolResult> {
   const built = buildManageCustomAutomationsRequest(params);
   if (!built.ok) return errorResult(built.error);
@@ -44,6 +45,7 @@ export async function handleManageCustomAutomations(
   const payload = compactManageCustomAutomationsResult(
     params.action,
     rawPayload,
+    { includeLaunchCriteria: launchCriteriaEnabled },
   );
   if (!response.ok) {
     const message =
@@ -61,4 +63,33 @@ export async function handleManageCustomAutomations(
       },
     ],
   };
+}
+
+export async function resolveCustomAutomationLaunchCriteriaEnabled(
+  config: RoomoteConfig,
+): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(
+      `${config.platformApiUrl}/api/mcp/custom-automations/experiment`,
+      { headers: buildApiHeaders(config) },
+      {
+        label: 'Failed to read custom automation capabilities',
+        timeoutMs: 5_000,
+      },
+    );
+    if (!response.ok) return false;
+    const payload: unknown = await response.json();
+    return (
+      payload !== null &&
+      typeof payload === 'object' &&
+      'launchCriteriaEnabled' in payload &&
+      payload.launchCriteriaEnabled === true
+    );
+  } catch (error) {
+    console.error(
+      'Could not load custom automation capabilities; hiding launch criteria.',
+      error instanceof Error ? error.message : String(error),
+    );
+    return false;
+  }
 }

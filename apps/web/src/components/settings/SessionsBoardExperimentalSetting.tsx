@@ -1,26 +1,29 @@
 'use client';
 
-import { RefreshCw, Switch } from '@/components/system';
+import { Columns3, Switch } from '@/components/system';
 import { useDeploymentExperiment } from '@/hooks/useDeploymentExperiments';
 
 import { Section } from './Section';
 
-export function DizzyExperimentalSetting() {
+export function SessionsBoardExperimentalSetting() {
   const { enabled, isLoading, isUpdating, setEnabled } =
-    useDeploymentExperiment('dizzy', 'Failed to save the Dizzy experiment.');
+    useDeploymentExperiment(
+      'sessionsBoard',
+      'Failed to update the Sessions board setting.',
+    );
 
   return (
-    <Section icon={RefreshCw} title="Dizzy">
+    <Section icon={Columns3} title="Sessions board">
       <div className="flex gap-3">
         <Switch
-          aria-label="Toggle Dizzy"
+          aria-label="Toggle Sessions board"
           checked={enabled}
           disabled={isLoading || isUpdating}
           onCheckedChange={setEnabled}
         />
         <p className="text-sm text-muted-foreground">
-          Continuously spin the Roomote logo mark in the collapsed sidebar and
-          mobile header.
+          Show the Sessions board to deployment members. Everyone keeps their
+          existing access to Sessions.
         </p>
       </div>
     </Section>

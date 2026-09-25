@@ -226,6 +226,9 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
   private runtimeQueuedMessagesCount = 0;
   private deferredTurnSettlement: DeferredTurnSettlement | null = null;
   private terminalProviderErrorPending = false;
+  // Set by a terminal cancel so the brief `stopped` phase it passes through on
+  // the way to shutdown never publishes a resumable sleep deadline.
+  private terminalCancelPending = false;
   private completionDecisionPending = false;
   private completionDecisionSequence = 0;
   private continuationStartPending = false;
@@ -563,6 +566,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     this.state.cancelTriggeredAt = undefined;
     this.state.lastErrorMessage = undefined;
     this.terminalProviderErrorPending = false;
+    this.terminalCancelPending = false;
     this.completionDecisionPending = false;
     this.continuationStartPending = false;
     this.fallbackCompletionSequence = 0;
@@ -606,6 +610,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       // Terminal cancel still tears the sandbox down even if the turn already
       // settled — provider Cancel should never leave a live machine behind.
       if (options?.terminate && this.phase !== 'shutting_down') {
+        this.terminalCancelPending = true;
         this.state.cancelTriggeredAt =
           this.state.cancelTriggeredAt ?? Date.now();
         this.state.taskAbortedAt = this.state.taskAbortedAt ?? Date.now();
@@ -626,6 +631,9 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     }
 
     this.state.cancelTriggeredAt = Date.now();
+    if (options?.terminate) {
+      this.terminalCancelPending = true;
+    }
     this.setPhase('stopped');
 
     this.sendHarnessCommand({
@@ -741,8 +749,23 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
    * BullMQ auto-snapshot eligibility.
    */
   getSleepAt(): number | null {
+    // A soft stop keeps the sandbox resumable, but only for the ordinary idle
+    // window. Without a deadline nothing retires it, and it holds a provider
+    // slot until the provider's own timeout.
     if (this.phase === 'stopped') {
-      return null;
+      if (this.terminalCancelPending) {
+        return null;
+      }
+
+      const anchor =
+        Math.max(
+          this.state.cancelTriggeredAt ?? 0,
+          this.state.taskAbortedAt ?? 0,
+          this.state.lastMessageAt ?? 0,
+          this.state.lastActivityAt ?? 0,
+        ) || Date.now();
+
+      return Math.min(anchor + this.keepaliveMs, this.getHardSleepAt());
     }
 
     // Terminal cancel must not publish a due sleep deadline. That would turn a
@@ -862,6 +885,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     this.runtimeQueuedMessagesCount = 0;
     this.deferredTurnSettlement = null;
     this.terminalProviderErrorPending = false;
+    this.terminalCancelPending = false;
   }
 
   private clearTurnSettlementState(): void {
@@ -869,6 +893,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     this.state.taskAbortedAt = undefined;
     this.state.cancelTriggeredAt = undefined;
     this.terminalProviderErrorPending = false;
+    this.terminalCancelPending = false;
   }
 
   private invokeOnStart(taskId: string): void {

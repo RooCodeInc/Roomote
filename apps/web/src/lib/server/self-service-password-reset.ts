@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { resolveAgentMailRuntimeCredentials } from '@roomote/db/server';
+import { canSendAgentMailWithRuntimeCredentials } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 
 import { isEmailChannelEnabled } from './env';
@@ -33,8 +33,7 @@ export async function isSelfServicePasswordResetAvailable(): Promise<boolean> {
     return false;
   }
 
-  const credentials = await resolveAgentMailRuntimeCredentials();
-  return Boolean(credentials.apiKey && credentials.inboxId);
+  return canSendAgentMailWithRuntimeCredentials();
 }
 
 export async function isSelfServicePasswordResetAllowed(input: {
