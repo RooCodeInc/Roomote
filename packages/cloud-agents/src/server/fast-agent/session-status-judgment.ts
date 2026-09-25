@@ -26,32 +26,13 @@ import {
   type SessionStatusJudgmentOutcome,
 } from '@roomote/types';
 
-import {
-  evaluateTypeSafeJudgments,
-  type TypeSafeChoiceQuestion,
-} from '../typesafe-judgment';
+import { SESSION_STATUS_JUDGMENT_QUESTIONS } from '../judgment-questions';
+import { evaluateTypeSafeJudgments } from '../typesafe-judgment';
 
 const MAX_JUDGMENTS_PER_TICK = 4;
 const MAX_CONTEXT_CHARS = 10_000;
 const MAX_RECENT_MESSAGES = 8;
 const MAX_TASKS = 12;
-
-export const SESSION_STATUS_JUDGMENT_QUESTION: TypeSafeChoiceQuestion<SessionStatusJudgmentOutcome> =
-  {
-    type: 'choice',
-    instructions:
-      'Classify the current outcome of the user’s request in this Session. Judge only what the user asked for and what the visible evidence says happened. Do not treat a plan, intent, or an unverified claim as completion.',
-    criteria: {
-      open: 'The request is still being worked on or has a clear unresolved next step.',
-      done: 'The requested answer or work was actually delivered, with no unfinished promise or active child task.',
-      blocked:
-        'The requested work cannot continue because of a real external dependency or failure that needs follow-up.',
-      needs_input:
-        'Roomote is waiting for a concrete answer, decision, or action from the user before it can continue.',
-      unclear:
-        'The visible request and results do not provide enough evidence to choose another outcome confidently.',
-    },
-  };
 
 const confidenceThreshold: Record<SessionStatusJudgmentOutcome, number> = {
   open: 0.7,
@@ -305,7 +286,7 @@ export async function processSessionStatusJudgmentBatch(
       const answers = await evaluateTypeSafeJudgments({
         decision: 'session-status-judgment',
         state: snapshot.state,
-        questions: { outcome: SESSION_STATUS_JUDGMENT_QUESTION },
+        questions: SESSION_STATUS_JUDGMENT_QUESTIONS,
       });
       if (!answers) {
         await completeSessionStatusJudgment(db, {

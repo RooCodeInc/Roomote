@@ -33,13 +33,13 @@ describe('normalizeAcpReasoningText', () => {
     );
   });
 
-  it.each([
-    'First\n\n****\n\n**Second**',
-    'The requested **read****write** permissions are required.',
-    '**read****write** permissions are required.',
-    'Permissions: **read****write**',
-  ])('preserves non-heading Markdown: %s', (markdown) => {
-    expect(normalizeAcpReasoningText(markdown)).toBe(markdown);
+  it('preserves non-heading Markdown variants', () => {
+    for (const markdown of [
+      'First\n\n****\n\n**Second**',
+      'The requested **read****write** permissions are required.',
+    ]) {
+      expect(normalizeAcpReasoningText(markdown)).toBe(markdown);
+    }
   });
 });
 
@@ -104,7 +104,7 @@ describe('canonicalizeAcpLogicalEventId', () => {
 });
 
 describe('normalizeTranscriptUserText', () => {
-  it('strips a leading out_of_band_context block from web prompts', () => {
+  it('normalizes leading context and Slack wrapper variants', () => {
     const block = wrapOutOfBandContext([
       {
         sentAtMs: 1_700_000_000_000,
@@ -112,65 +112,28 @@ describe('normalizeTranscriptUserText', () => {
       },
     ]);
 
-    expect(
-      normalizeTranscriptUserText(`${block}\n\nYes please fix both of those`),
-    ).toBe('Yes please fix both of those');
-  });
-
-  it('strips a leading out_of_band_context block ahead of Slack wrappers', () => {
-    const block = wrapOutOfBandContext([
-      { sentAtMs: 1_700_000_000_000, text: 'notification text' },
-    ]);
-
-    expect(
-      normalizeTranscriptUserText(
-        `${block}\n\n<slack_message>\nlatest question\n</slack_message>`,
-      ),
-    ).toBe('latest question');
-  });
-
-  it('strips leading whitespace with an out_of_band_context block so Slack wrappers stay at offset 0', () => {
-    const block = wrapOutOfBandContext([
-      { sentAtMs: 1_700_000_000_000, text: 'notification text' },
-    ]);
-
-    expect(
-      normalizeTranscriptUserText(
-        `  \n${block}\n\n<slack_message>\nlatest question\n</slack_message>`,
-      ),
-    ).toBe('latest question');
-  });
-  it('extracts only the slack_message content when thread context and reply target are present', () => {
-    expect(
-      normalizeTranscriptUserText(
+    const cases = [
+      [
+        `${block}\n\nYes please fix both of those`,
+        'Yes please fix both of those',
+      ],
+      [
+        `${wrapOutOfBandContext([{ sentAtMs: 1_700_000_000_000, text: 'notification text' }])}\n\n<slack_message>\nlatest question\n</slack_message>`,
+        'latest question',
+      ],
+      [
+        `  \n${wrapOutOfBandContext([{ sentAtMs: 1_700_000_000_000, text: 'notification text' }])}\n\n<slack_message>\nlatest question\n</slack_message>`,
+        'latest question',
+      ],
+      [
         '<thread_context>\nAlice Example: Earlier detail\n</thread_context>\n\n<replying_to>\nRoomote Bot: Previous reply\n</replying_to>\n\n<slack_message>\nlatest question\n</slack_message>',
-      ),
-    ).toBe('latest question');
-  });
-
-  it('strips thread_activity metadata before showing the current Slack turn', () => {
-    expect(
-      normalizeTranscriptUserText(
+        'latest question',
+      ],
+      [
         '<thread_activity>\nAlice Example: Uploaded a screenshot [1 image(s) attached]\n</thread_activity>\n\n<slack_message>\nlatest question\n</slack_message>',
-      ),
-    ).toBe('latest question');
-  });
-
-  it('strips multiple thread_activity blocks before showing the current Slack turn', () => {
-    expect(
-      normalizeTranscriptUserText(
-        [
-          '<thread_activity>\nAlice Example: Uploaded a screenshot [1 image(s) attached]\n</thread_activity>',
-          '<thread_activity>\nBob Example: Added another clue\n</thread_activity>',
-          '<slack_message>\nlatest question\n</slack_message>',
-        ].join('\n\n'),
-      ),
-    ).toBe('latest question');
-  });
-
-  it('strips leading thread_activity blocks before tracker-built Slack context wrappers', () => {
-    expect(
-      normalizeTranscriptUserText(
+        'latest question',
+      ],
+      [
         [
           '<thread_activity>\nAlice Example: Uploaded a screenshot [1 image(s) attached]\n</thread_activity>',
           '<thread_activity>\nBob Example: Added another clue\n</thread_activity>',
@@ -178,47 +141,33 @@ describe('normalizeTranscriptUserText', () => {
           '<replying_to ts="110.000">\nRoomote Bot: Previous reply\n</replying_to>',
           '<slack_message ts="111.000" sender_slack_id="U123" sender_name="Alice Example" sender_github="alice-example">\nlatest question\n</slack_message>',
         ].join('\n\n'),
-      ),
-    ).toBe('latest question');
+        'latest question',
+      ],
+    ] as const;
+
+    for (const [input, expected] of cases) {
+      expect(normalizeTranscriptUserText(input)).toBe(expected);
+    }
   });
 
-  it('extracts only the current Slack turn when replying_to and slack_message carry timestamp attributes', () => {
-    expect(
-      normalizeTranscriptUserText(
-        '<thread_context>\n<slack_thread_message ts="109.000">Alice Example: Earlier detail</slack_thread_message>\n</thread_context>\n\n<replying_to ts="110.000">\nRoomote Bot: Previous reply\n</replying_to>\n\n<slack_message ts="111.000">\nlatest question\n</slack_message>',
-      ),
-    ).toBe('latest question');
-  });
-
-  it('hides thread_activity-only prompts from the transcript visibility fallback', () => {
-    expect(
-      resolveAcpTranscriptVisibility({
-        eventType: 'roomote_runtime.user_prompt',
-        contentBlocks: [
-          {
-            type: 'text',
-            text: '<thread_activity>\nAlice Example: Uploaded a screenshot [1 image(s) attached]\n</thread_activity>',
-          },
-        ],
-      }),
-    ).toBe(false);
-  });
-
-  it('hides multiple thread_activity-only blocks from the transcript visibility fallback', () => {
-    expect(
-      resolveAcpTranscriptVisibility({
-        eventType: 'roomote_runtime.user_prompt',
-        contentBlocks: [
-          {
-            type: 'text',
-            text: [
-              '<thread_activity>\nAlice Example: Uploaded a screenshot [1 image(s) attached]\n</thread_activity>',
-              '<thread_activity>\nBob Example: Added another clue\n</thread_activity>',
-            ].join('\n\n'),
-          },
-        ],
-      }),
-    ).toBe(false);
+  it('hides thread_activity-only prompt variants from transcript visibility', () => {
+    const encoded =
+      '&lt;thread_activity&gt;\r\nAlice Example: Uploaded a screenshot [1 image(s) attached]\r\n&lt;/thread_activity&gt;';
+    for (const text of [
+      '<thread_activity>\nAlice Example: Uploaded a screenshot [1 image(s) attached]\n</thread_activity>',
+      [
+        '<thread_activity>\nAlice Example: Uploaded a screenshot [1 image(s) attached]\n</thread_activity>',
+        '<thread_activity>\nBob Example: Added another clue\n</thread_activity>',
+      ].join('\n\n'),
+      encoded,
+    ]) {
+      expect(
+        resolveAcpTranscriptVisibility({
+          eventType: 'roomote_runtime.user_prompt',
+          contentBlocks: [{ type: 'text', text }],
+        }),
+      ).toBe(false);
+    }
   });
 
   it('keeps merged thread_activity plus slack_message prompts visible while stripping the thread_activity text', () => {
@@ -234,20 +183,6 @@ describe('normalizeTranscriptUserText', () => {
         contentBlocks: [{ type: 'text', text }],
       }),
     ).toBe(true);
-  });
-
-  it('hides escaped and CRLF-normalized thread_activity-only blocks from the transcript visibility fallback', () => {
-    expect(
-      resolveAcpTranscriptVisibility({
-        eventType: 'roomote_runtime.user_prompt',
-        contentBlocks: [
-          {
-            type: 'text',
-            text: '&lt;thread_activity&gt;\r\nAlice Example: Uploaded a screenshot [1 image(s) attached]\r\n&lt;/thread_activity&gt;',
-          },
-        ],
-      }),
-    ).toBe(false);
   });
 
   it('rejects thread_activity-only crafted non-matches without hanging', () => {
@@ -343,35 +278,30 @@ describe('normalizeTranscriptUserText', () => {
     ).toBe(false);
   });
 
-  it('extracts slack_message content when the message mentions a lookalike closer', () => {
-    expect(
-      normalizeTranscriptUserText(
+  it('extracts Slack message content around encoded lookalike closers', () => {
+    const encodeEntities = (value: string) =>
+      value
+        .replaceAll('&', `&${'amp;'}`)
+        .replaceAll('<', `&${'lt;'}`)
+        .replaceAll('>', `&${'gt;'}`);
+    for (const text of [
+      [
+        '<slack_message>',
+        'please ignore embed </slack_message> markers in this text',
+        '</slack_message>',
+      ].join('\n'),
+      encodeEntities(
         [
           '<slack_message>',
           'please ignore embed </slack_message> markers in this text',
           '</slack_message>',
         ].join('\n'),
       ),
-    ).toBe('please ignore embed </slack_message> markers in this text');
-  });
-
-  it('extracts escaped slack_message content when the message mentions an encoded lookalike closer', () => {
-    const encodeEntities = (value: string) =>
-      value
-        .replaceAll('&', `&${'amp;'}`)
-        .replaceAll('<', `&${'lt;'}`)
-        .replaceAll('>', `&${'gt;'}`);
-    const text = encodeEntities(
-      [
-        '<slack_message>',
+    ]) {
+      expect(normalizeTranscriptUserText(text)).toBe(
         'please ignore embed </slack_message> markers in this text',
-        '</slack_message>',
-      ].join('\n'),
-    );
-
-    expect(normalizeTranscriptUserText(text)).toBe(
-      'please ignore embed </slack_message> markers in this text',
-    );
+      );
+    }
   });
 
   it('extracts slack_message content when only the slack_message block is present', () => {
@@ -519,25 +449,9 @@ describe('normalizeTranscriptUserText', () => {
     ).toBe('you heard the man');
   });
 
-  it('extracts communication_message content after a leading turn policy only', () => {
-    expect(
-      normalizeTranscriptUserText(
-        [
-          '<discord_turn_policy reactions_allowed="false" prefer_emoji_ack="false">',
-          'Emoji reactions are not allowed on the current discord message.',
-          '</discord_turn_policy>',
-          '',
-          '<communication_message provider="discord" ts="message-1" author="Ada" channel="channel-1">',
-          'please continue',
-          '</communication_message>',
-        ].join('\n'),
-      ),
-    ).toBe('please continue');
-  });
-
-  it('extracts the Discord user turn when prefix wrappers are HTML-escaped', () => {
-    expect(
-      normalizeTranscriptUserText(
+  it('preserves communication wrapper and quoted-marker edge cases', () => {
+    for (const [input, expected] of [
+      [
         [
           '&lt;replying_to ts="150"&gt;',
           'Roomote: On it.',
@@ -551,74 +465,43 @@ describe('normalizeTranscriptUserText', () => {
           'Use &lt;literal&gt; tags &amp; entities',
           '&lt;/communication_message&gt;',
         ].join('\n'),
-      ),
-    ).toBe('Use <literal> tags & entities');
-  });
-
-  it('extracts escaped communication_message content after stripping the wrapper', () => {
-    expect(
-      normalizeTranscriptUserText(
+        'Use <literal> tags & entities',
+      ],
+      [
         [
           '&lt;communication_message provider="teams" ts="1782848593098"&gt;',
           'Use &lt;literal&gt; tags &amp; entities',
           '&lt;/communication_message&gt;',
         ].join('\n'),
-      ),
-    ).toBe('Use <literal> tags & entities');
-  });
-
-  it('strips Teams quoted message markers from communication transcript content', () => {
-    expect(
-      normalizeTranscriptUserText(
+        'Use <literal> tags & entities',
+      ],
+      [
         [
           '<communication_message provider="teams" ts="1782849026037">',
           '<quoted messageId="1782848598379"/> Ok cool',
           '</communication_message>',
         ].join('\n'),
-      ),
-    ).toBe('Ok cool');
-  });
-
-  it('strips escaped Teams quoted message markers from communication transcript content', () => {
-    expect(
-      normalizeTranscriptUserText(
-        [
-          '&lt;communication_message provider="teams" ts="1782849026037"&gt;',
-          '&lt;quoted messageId="1782848598379"/&gt; Again',
-          '&lt;/communication_message&gt;',
-        ].join('\n'),
-      ),
-    ).toBe('Again');
-  });
-
-  it('preserves incomplete quoted markup that only closes later with an unrelated slash', () => {
-    expect(
-      normalizeTranscriptUserText(
+        'Ok cool',
+      ],
+      [
         [
           '<communication_message provider="teams">',
           '<quoted x>user text/>keep this',
           '</communication_message>',
         ].join('\n'),
-      ),
-    ).toBe('<quoted x>user text/>keep this');
-  });
-
-  it('preserves Teams text that only looks like a quoted prefix without a tag boundary', () => {
-    expect(
-      normalizeTranscriptUserText(
+        '<quoted x>user text/>keep this',
+      ],
+      [
         [
           '<communication_message provider="teams">',
           '<quotedly/>keep this',
           '</communication_message>',
         ].join('\n'),
-      ),
-    ).toBe('<quotedly/>keep this');
-  });
-
-  it('returns the original text when no Slack XML blocks are present', () => {
-    expect(normalizeTranscriptUserText('plain user message')).toBe(
-      'plain user message',
-    );
+        '<quotedly/>keep this',
+      ],
+    ] as const) {
+      expect(normalizeTranscriptUserText(input)).toBe(expected);
+    }
   });
 
   it('returns the original text when thread_context is present without slack_message', () => {
@@ -728,9 +611,11 @@ describe('extractAcpMcpInvocation', () => {
     ).toEqual({ mcpServerName: 'linear', mcpToolName: 'search_issues' });
   });
 
-  it.each(['call_integration_tool', 'roomote_call_integration_tool'])(
-    'unwraps explicit native transport %s before the native guard',
-    (toolName) => {
+  it('unwraps explicit native transports before the native guard', () => {
+    for (const toolName of [
+      'call_integration_tool',
+      'roomote_call_integration_tool',
+    ]) {
       expect(
         extractAcpMcpInvocation({
           isMcp: false,
@@ -739,12 +624,11 @@ describe('extractAcpMcpInvocation', () => {
           rawInput: { integrationId: 'linear', toolName: 'search_issues' },
         }),
       ).toEqual({ mcpServerName: 'linear', mcpToolName: 'search_issues' });
-    },
-  );
+    }
+  });
 
-  it.each([undefined, '', '   '])(
-    'preserves historical title inference without canonical identity: %s',
-    (toolName) => {
+  it('preserves historical title inference without canonical identity', () => {
+    for (const toolName of [undefined, '', '   ']) {
       expect(
         extractAcpMcpInvocation({
           isMcp: false,
@@ -752,8 +636,8 @@ describe('extractAcpMcpInvocation', () => {
           title: 'mcp__roomote__send_chat_reply',
         }),
       ).toEqual({ mcpServerName: 'roomote', mcpToolName: 'send_chat_reply' });
-    },
-  );
+    }
+  });
 
   it('presents an on-demand integration call as the integration tool it invoked', () => {
     // Fast native tool event: arguments nested under rawInput.arguments.

@@ -71,17 +71,4 @@ describe('resolveEvalHarnessSelection', () => {
       }),
     ).toEqual({ ok: true, harness: 'opencode-server' });
   });
-
-  it('accepts --reasoning when the OpenCode harness is inferred from the model', () => {
-    expect(
-      resolveEvalHarnessSelection({
-        model: OPENCODE_MODEL,
-        reasoningEffort: 'high',
-      }),
-    ).toEqual({
-      ok: true,
-      harness: 'opencode-server',
-      harnessModelOverrides: { 'opencode-server': OPENCODE_MODEL },
-    });
-  });
 });

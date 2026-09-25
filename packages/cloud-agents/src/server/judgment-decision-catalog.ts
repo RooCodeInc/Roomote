@@ -15,12 +15,12 @@ import {
   TASK_COMMUNICATION_QUESTIONS,
   type TaskCommunicationTriageState,
 } from './fast-agent/fast-agent-task-communication-triage';
-import { SESSION_STATUS_JUDGMENT_QUESTION } from './fast-agent/session-status-judgment';
 import { INTEGRATION_TOOL_AUTO_QUESTIONS } from './integration-tool-auto-evaluation';
 import {
   AGENTMAIL_AUTO_REPLY_QUESTION,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_QUESTION,
   REPLY_ADDRESSEE_QUESTION,
-  REPLY_CLOSING_ACKNOWLEDGEMENT_QUESTION,
+  SESSION_STATUS_JUDGMENT_QUESTIONS,
 } from './judgment-questions';
 import { REQUESTED_WORK_KIND_QUESTION } from './requested-work-kind';
 import { TASK_MEMORY_GATE_QUESTIONS } from './task-run-memory-distillation';
@@ -87,8 +87,14 @@ const sampleTriageState: TaskCommunicationTriageState = {
   },
 };
 
-export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
-  {
+/**
+ * The single registry for production judgment decisions. Production callers'
+ * `decision` values are typed from its keys, while the tester list below is
+ * derived from the same definitions so a new registered decision cannot be
+ * added to runtime without appearing in Settings > Models > Test decisions.
+ */
+export const JUDGMENT_DECISION_DEFINITIONS = {
+  'fast-agent-post-turn-memory': {
     id: 'fast-agent-post-turn-memory',
     label: 'Memory check (chat turn)',
     description:
@@ -102,7 +108,7 @@ export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
       saved_memories: '- Deploys go out from the release branch on Thursdays.',
     },
   },
-  {
+  'task-run-memory-distillation': {
     id: 'task-run-memory-distillation',
     label: 'Memory check (task run)',
     description:
@@ -116,45 +122,13 @@ export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
       existing_memory: '',
     },
   },
-  {
-    id: 'session-status-judgment',
-    label: 'Session status',
-    description:
-      'Whether the current Session request is still open, done, blocked, waiting for input, or unclear.',
-    questions: { outcome: SESSION_STATUS_JUDGMENT_QUESTION },
-    sampleState: {
-      objective:
-        'Add a retry button to the billing page and verify the failed checkout path.',
-      recentMessages: [
-        {
-          role: 'user',
-          text: 'Please add a retry button for failed checkouts.',
-        },
-        {
-          role: 'assistant',
-          text: 'The button is implemented; I am running the checkout tests.',
-        },
-      ],
-      childTasks: [
-        {
-          title: 'Run checkout tests',
-          state: 'completed',
-          request: 'Run the checkout test suite.',
-          result: 'The checkout tests passed.',
-        },
-      ],
-      goalStatus: 'active',
-    },
-    note: 'Roomote asks this of Jev only; the Roomote judgment model does not answer it yet.',
-  },
-  {
+  'unmentioned-thread-reply': {
     id: 'unmentioned-thread-reply',
     label: 'Reply addressee',
     description:
-      'Whether an unmentioned reply in a thread is meant for Roomote, and whether it only closes the exchange.',
+      'Whether an unmentioned reply in a thread is meant for Roomote.',
     questions: {
       addressee: REPLY_ADDRESSEE_QUESTION,
-      closingAcknowledgement: REPLY_CLOSING_ACKNOWLEDGEMENT_QUESTION,
     },
     sampleState: {
       thread: {
@@ -181,7 +155,7 @@ export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
       },
     },
   },
-  {
+  'fast-agent-task-communication-triage': {
     id: 'fast-agent-task-communication-triage',
     label: 'Task communication triage',
     description:
@@ -189,7 +163,30 @@ export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
     questions: TASK_COMMUNICATION_QUESTIONS,
     sampleState: sampleTriageState,
   },
-  {
+  'session-status-judgment': {
+    id: 'session-status-judgment',
+    label: 'Session status',
+    description:
+      'After Session activity, whether the user’s request is open, done, blocked, waiting for input, or unclear.',
+    questions: SESSION_STATUS_JUDGMENT_QUESTIONS,
+    sampleState: {
+      objective: 'Fix the flaky checkout test and open a pull request.',
+      recentMessages: [
+        {
+          role: 'user',
+          text: 'Please fix the flaky checkout test and open a pull request.',
+        },
+        {
+          role: 'assistant',
+          text: 'The test is fixed, but the staging payment sandbox is unavailable. Should I mock the payment client or wait for staging to return?',
+        },
+      ],
+      childTasks: [],
+      goalStatus: null,
+    },
+    note: 'The Session status decision is not yet approved for the Roomote-trained model.',
+  },
+  'fast-agent-launch-model': {
     id: 'fast-agent-launch-model',
     label: "Delegated task's model",
     description:
@@ -210,7 +207,7 @@ export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
       earlierMessages: [],
     },
   },
-  {
+  'channel-launch-gate': {
     id: 'channel-launch-gate',
     label: 'Channel launch criteria',
     description:
@@ -239,7 +236,33 @@ export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
     },
     note: 'Roomote asks `duplicate` only when an earlier message in the channel launched work.',
   },
-  {
+  'custom-automation-launch-gate': {
+    id: 'custom-automation-launch-gate',
+    label: 'Custom automation launch criteria',
+    description:
+      'Whether the evidence gathered for a custom automation satisfies its saved launch criteria.',
+    questions: {
+      criteriaMet: CUSTOM_AUTOMATION_LAUNCH_CRITERIA_QUESTION,
+    },
+    sampleState: {
+      automationPrompt: 'Review payment API errors and report regressions.',
+      launchCriteria: 'The payment API error rate is above 5%.',
+      findingsReport:
+        'The payment API error rate is 8% over the last 15 minutes, above the saved threshold.',
+      report:
+        'The payment API error rate is 8% over the last 15 minutes, above the saved threshold.',
+      rawToolResults: [
+        {
+          integrationId: 'sentry',
+          toolName: 'search_events',
+          result: 'Payment API error rate: 8% over the last 15 minutes.',
+        },
+      ],
+      recentResults: [],
+    },
+    note: 'Additional `run_when_*` questions are generated from each automation’s saved criteria.',
+  },
+  'requested-work-kind': {
     id: 'requested-work-kind',
     label: 'Requested work kind',
     description:
@@ -250,7 +273,7 @@ export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
         'Before we touch anything, can you write up how we would move session storage from Redis to Postgres, and what could break?',
     },
   },
-  {
+  'agentmail-auto-reply': {
     id: 'agentmail-auto-reply',
     label: 'Automatic email reply',
     description: 'Whether inbound email is an automatic reply.',
@@ -263,7 +286,7 @@ export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
       },
     },
   },
-  {
+  'integration-tool-auto-evaluation': {
     id: 'integration-tool-auto-evaluation',
     label: 'Tool call auto-approval',
     description:
@@ -285,4 +308,10 @@ export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = [
     },
     note: 'Roomote asks this of Jev only; the Roomote judgment model does not answer it yet.',
   },
-];
+} satisfies Record<string, JudgmentDecision>;
+
+export type JudgmentDecisionId = keyof typeof JUDGMENT_DECISION_DEFINITIONS;
+
+export const JUDGMENT_DECISION_CATALOG: JudgmentDecision[] = Object.values(
+  JUDGMENT_DECISION_DEFINITIONS,
+);

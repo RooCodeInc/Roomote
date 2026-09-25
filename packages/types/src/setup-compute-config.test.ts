@@ -21,25 +21,17 @@ import {
 } from './setup-compute-config';
 
 describe('normalizeDeploymentComputeConfig', () => {
-  it('returns null for missing or invalid providers', () => {
+  it('normalizes provider selection and exclusion inputs', () => {
     expect(normalizeDeploymentComputeConfig(null)).toEqual({
       defaultProvider: null,
       excludedProviders: [],
     });
     expect(
-      normalizeDeploymentComputeConfig({
-        defaultProvider: 'fly' as never,
-      }),
+      normalizeDeploymentComputeConfig({ defaultProvider: 'fly' as never }),
     ).toEqual({ defaultProvider: null, excludedProviders: [] });
-  });
-
-  it('keeps valid providers', () => {
     expect(
       normalizeDeploymentComputeConfig({ defaultProvider: 'modal' }),
     ).toEqual({ defaultProvider: 'modal', excludedProviders: [] });
-  });
-
-  it('keeps only valid unique excluded providers', () => {
     expect(
       normalizeDeploymentComputeConfig({
         excludedProviders: ['docker', 'docker', 'invalid' as never],
@@ -442,69 +434,39 @@ describe('buildSetupComputeStatus', () => {
     ).toBe(true);
   });
 
-  it('marks the E2B template as setup-provisionable only with a registry-qualified worker image', () => {
-    const findTemplateField = (
-      status: ReturnType<typeof buildSetupComputeStatus>,
-    ) =>
-      status.providers
-        .find((provider) => provider.provider === 'e2b')
-        ?.fields.find((field) => field.envVarName === 'E2B_TEMPLATE_ID');
-
+  it('keeps setup-time artifacts provisionable only from registry worker images', () => {
     const provisionable = buildSetupComputeStatus({
       runtimeEnv: {
         DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
       },
     });
-
-    expect(findTemplateField(provisionable)).toMatchObject({
-      runtimeSatisfied: false,
-      savedSatisfied: false,
-      defaultSatisfied: false,
-      setupProvisionable: true,
-    });
-
-    // Provisionable infrastructure keeps E2B in the picker but does not
-    // complete the config on its own — the built template must be persisted.
-    const e2bStatus = provisionable.providers.find(
-      (provider) => provider.provider === 'e2b',
-    );
-    expect(e2bStatus?.infrastructureSatisfied).toBe(true);
-    expect(e2bStatus?.configSatisfied).toBe(false);
-
     const localImage = buildSetupComputeStatus({
       runtimeEnv: { DOCKER_WORKER_IMAGE: 'roomote-worker:local' },
     });
 
-    expect(findTemplateField(localImage)?.setupProvisionable).toBe(false);
-  });
+    for (const [provider, envVarName] of [
+      ['e2b', 'E2B_TEMPLATE_ID'],
+      ['daytona', 'DAYTONA_SNAPSHOT_NAME'],
+    ] as const) {
+      const findField = (status: ReturnType<typeof buildSetupComputeStatus>) =>
+        status.providers
+          .find((candidate) => candidate.provider === provider)
+          ?.fields.find((field) => field.envVarName === envVarName);
+      const provisionableField = findField(provisionable);
+      const provisionableProvider = provisionable.providers.find(
+        (candidate) => candidate.provider === provider,
+      );
 
-  it('marks the Daytona snapshot as setup-provisionable only with a registry-qualified worker image', () => {
-    const findSnapshotField = (
-      status: ReturnType<typeof buildSetupComputeStatus>,
-    ) =>
-      status.providers
-        .find((provider) => provider.provider === 'daytona')
-        ?.fields.find((field) => field.envVarName === 'DAYTONA_SNAPSHOT_NAME');
-
-    const provisionable = buildSetupComputeStatus({
-      runtimeEnv: {
-        DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
-      },
-    });
-
-    expect(findSnapshotField(provisionable)?.setupProvisionable).toBe(true);
-
-    const daytonaStatus = provisionable.providers.find(
-      (provider) => provider.provider === 'daytona',
-    );
-    expect(daytonaStatus?.infrastructureSatisfied).toBe(true);
-    expect(daytonaStatus?.configSatisfied).toBe(false);
-
-    const localImage = buildSetupComputeStatus({
-      runtimeEnv: { DOCKER_WORKER_IMAGE: 'roomote-worker:local' },
-    });
-
-    expect(findSnapshotField(localImage)?.setupProvisionable).toBe(false);
+      expect(provisionableField).toMatchObject({
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        defaultSatisfied: false,
+        setupProvisionable: true,
+      });
+      expect(provisionableProvider?.infrastructureSatisfied).toBe(true);
+      expect(provisionableProvider?.configSatisfied).toBe(false);
+      expect(findField(localImage)?.setupProvisionable).toBe(false);
+    }
   });
 
   it('prefers the wizard selection over the persisted default for preselection', () => {
@@ -793,12 +755,9 @@ describe('getComputeFieldValidationError', () => {
     input: { type: 'number' as const, min: 1, max: 168, step: 1 },
   };
 
-  it('accepts blank and in-range whole-number values', () => {
+  it('validates numeric constraints and Box machine types', () => {
     expect(getComputeFieldValidationError(field, '')).toBeNull();
     expect(getComputeFieldValidationError(field, '72')).toBeNull();
-  });
-
-  it('rejects values outside the configured constraints', () => {
     expect(getComputeFieldValidationError(field, '0')).toBe(
       'Retention period (hours) must be at least 1.',
     );
@@ -808,9 +767,6 @@ describe('getComputeFieldValidationError', () => {
     expect(getComputeFieldValidationError(field, '1.5')).toBe(
       'Retention period (hours) must be a whole number.',
     );
-  });
-
-  it('accepts only supported Box machine types', () => {
     const machineType = getSetupComputeProvider('box').fields.find(
       (candidate) => candidate.envVarName === 'BOX_MACHINE_TYPE',
     )!;
@@ -825,67 +781,51 @@ describe('getComputeFieldValidationError', () => {
 });
 
 describe('deriveWorkerImageFromReleaseVersion', () => {
-  it('derives the published worker image from the baked release version', () => {
-    expect(
-      deriveWorkerImageFromReleaseVersion({ RELEASE_VERSION: 'v1.2.3' }),
-    ).toBe('ghcr.io/roocodeinc/roomote-worker:v1.2.3');
-    expect(
-      deriveWorkerImageFromReleaseVersion({
-        RELEASE_VERSION: 'develop-abc12345',
-      }),
-    ).toBe('ghcr.io/roocodeinc/roomote-worker:develop-abc12345');
-  });
-
-  it('honors a ROOMOTE_WORKER_IMAGE_REPO override', () => {
-    expect(
-      deriveWorkerImageFromReleaseVersion({
-        RELEASE_VERSION: 'v1.2.3',
-        ROOMOTE_WORKER_IMAGE_REPO: 'registry.example.com/fork/worker',
-      }),
-    ).toBe('registry.example.com/fork/worker:v1.2.3');
-    expect(
-      deriveWorkerImageFromReleaseVersion({
-        RELEASE_VERSION: 'v1.2.3',
-        ROOMOTE_WORKER_IMAGE_REPO: '   ',
-      }),
-    ).toBe('ghcr.io/roocodeinc/roomote-worker:v1.2.3');
-  });
-
-  it('returns null for unset or self-host release versions', () => {
-    expect(deriveWorkerImageFromReleaseVersion({})).toBeNull();
-    expect(
-      deriveWorkerImageFromReleaseVersion({ RELEASE_VERSION: '' }),
-    ).toBeNull();
-    expect(
-      deriveWorkerImageFromReleaseVersion({ RELEASE_VERSION: '   ' }),
-    ).toBeNull();
-    expect(
-      deriveWorkerImageFromReleaseVersion({ RELEASE_VERSION: 'self-host' }),
-    ).toBeNull();
-    expect(
-      deriveWorkerImageFromReleaseVersion({
-        RELEASE_VERSION: 'self-host-local',
-      }),
-    ).toBeNull();
-    expect(
-      deriveWorkerImageFromReleaseVersion({
-        RELEASE_VERSION: 'self-host-production',
-      }),
-    ).toBeNull();
+  it('derives, overrides, and rejects worker image release inputs', () => {
+    for (const [env, expected] of [
+      [
+        { RELEASE_VERSION: 'v1.2.3' },
+        'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
+      ],
+      [
+        { RELEASE_VERSION: 'develop-abc12345' },
+        'ghcr.io/roocodeinc/roomote-worker:develop-abc12345',
+      ],
+      [
+        {
+          RELEASE_VERSION: 'v1.2.3',
+          ROOMOTE_WORKER_IMAGE_REPO: 'registry.example.com/fork/worker',
+        },
+        'registry.example.com/fork/worker:v1.2.3',
+      ],
+      [
+        { RELEASE_VERSION: 'v1.2.3', ROOMOTE_WORKER_IMAGE_REPO: '   ' },
+        'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
+      ],
+    ] as const) {
+      expect(deriveWorkerImageFromReleaseVersion(env)).toBe(expected);
+    }
+    for (const env of [
+      {},
+      { RELEASE_VERSION: '' },
+      { RELEASE_VERSION: '   ' },
+      { RELEASE_VERSION: 'self-host' },
+      { RELEASE_VERSION: 'self-host-local' },
+      { RELEASE_VERSION: 'self-host-production' },
+    ]) {
+      expect(deriveWorkerImageFromReleaseVersion(env)).toBeNull();
+    }
   });
 });
 
 describe('resolveEffectiveDockerWorkerImage', () => {
-  it('prefers an explicit DOCKER_WORKER_IMAGE over the derived default', () => {
+  it('resolves explicit, derived, blank, and missing worker images', () => {
     expect(
       resolveEffectiveDockerWorkerImage({
         DOCKER_WORKER_IMAGE: 'registry.example.com/custom/worker:pinned',
         RELEASE_VERSION: 'v1.2.3',
       }),
     ).toBe('registry.example.com/custom/worker:pinned');
-  });
-
-  it('falls back to the release-version derivation when unset or blank', () => {
     expect(
       resolveEffectiveDockerWorkerImage({ RELEASE_VERSION: 'v1.2.3' }),
     ).toBe('ghcr.io/roocodeinc/roomote-worker:v1.2.3');
@@ -900,7 +840,7 @@ describe('resolveEffectiveDockerWorkerImage', () => {
 });
 
 describe('deriveModalBaseImageRefDefault', () => {
-  it('returns registry-qualified worker images', () => {
+  it('accepts only registry-qualified worker images', () => {
     expect(
       deriveModalBaseImageRefDefault(
         'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
@@ -911,9 +851,6 @@ describe('deriveModalBaseImageRefDefault', () => {
         '  ghcr.io/roocodeinc/roomote-worker:develop-abc123  ',
       ),
     ).toBe('ghcr.io/roocodeinc/roomote-worker:develop-abc123');
-  });
-
-  it('rejects blank and non-registry-qualified images', () => {
     expect(deriveModalBaseImageRefDefault(undefined)).toBeNull();
     expect(deriveModalBaseImageRefDefault(null)).toBeNull();
     expect(deriveModalBaseImageRefDefault('')).toBeNull();
@@ -923,7 +860,7 @@ describe('deriveModalBaseImageRefDefault', () => {
 });
 
 describe('resolveDerivedModalBaseImageRef', () => {
-  it('derives the Modal base image from the effective worker image inputs', () => {
+  it('derives the Modal base image from hosted, local, and pinned inputs', () => {
     expect(resolveDerivedModalBaseImageRef({ RELEASE_VERSION: 'v1.2.3' })).toBe(
       'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
     );
@@ -933,9 +870,6 @@ describe('resolveDerivedModalBaseImageRef', () => {
         RELEASE_VERSION: 'v1.2.3',
       }),
     ).toBe('registry.example.com/custom/worker:tag');
-  });
-
-  it('falls back to the development Modal image when no hosted image is configured', () => {
     expect(resolveDerivedModalBaseImageRef({ NODE_ENV: 'development' })).toBe(
       'ghcr.io/roocodeinc/roomote-worker:develop',
     );
@@ -945,9 +879,6 @@ describe('resolveDerivedModalBaseImageRef', () => {
         DOCKER_WORKER_IMAGE: 'roomote-worker:local',
       }),
     ).toBe(DEVELOPMENT_MODAL_BASE_IMAGE_REF);
-  });
-
-  it('uses the immutable development worker image selected by the dev launcher', () => {
     expect(
       resolveDerivedModalBaseImageRef({
         NODE_ENV: 'development',
@@ -980,74 +911,52 @@ describe('parseExcludedComputeProviders', () => {
 });
 
 describe('pickPreferredConfiguredComputeProvider', () => {
-  it('prefers the last catalog-ordered cloud over Local Docker', () => {
-    expect(
-      pickPreferredConfiguredComputeProvider(['docker', 'modal', 'e2b']),
-    ).toBe('e2b');
-  });
-
-  it('returns docker when it is the only available provider', () => {
-    expect(pickPreferredConfiguredComputeProvider(['docker'])).toBe('docker');
+  it('selects configured providers according to catalog precedence', () => {
+    for (const [providers, expected] of [
+      [['docker', 'modal', 'e2b'], 'e2b'],
+      [['docker'], 'docker'],
+    ] as const) {
+      expect(pickPreferredConfiguredComputeProvider(providers)).toBe(expected);
+    }
   });
 });
 
 describe('getDefaultAvailableComputeProvider', () => {
-  it('returns the preferred configured non-excluded provider', () => {
-    expect(
-      getDefaultAvailableComputeProvider(new Set(['docker', 'modal']), [
-        { provider: 'daytona', configSatisfied: true },
-      ]),
-    ).toBe('daytona');
-  });
-
-  it('keeps docker when it is not excluded and no live status is provided', () => {
-    expect(getDefaultAvailableComputeProvider(new Set(['modal']))).toBe(
-      'docker',
-    );
-  });
-
-  it('prefers a configured cloud provider over Local Docker', () => {
-    expect(
-      getDefaultAvailableComputeProvider(new Set(), [
-        { provider: 'modal', configSatisfied: true },
-        { provider: 'docker', configSatisfied: true },
-      ]),
-    ).toBe('modal');
-  });
-
-  it('prefers the last catalog-ordered configured cloud when several are ready', () => {
-    expect(
-      getDefaultAvailableComputeProvider(new Set(), [
-        { provider: 'modal', configSatisfied: true },
-        { provider: 'e2b', configSatisfied: true },
-        { provider: 'docker', configSatisfied: true },
-      ]),
-    ).toBe('e2b');
-  });
-
-  it('falls back to docker when excluded providers are not configured', () => {
-    expect(
-      getDefaultAvailableComputeProvider(new Set(['docker']), [
-        { provider: 'modal', configSatisfied: false },
-        { provider: 'daytona', configSatisfied: false },
-        { provider: 'e2b', configSatisfied: false },
-      ]),
-    ).toBe('docker');
-  });
-
-  it('ignores optional-only provider env when choosing a fallback', () => {
-    expect(
-      getDefaultAvailableComputeProvider(new Set(['docker']), [
-        { provider: 'modal', configSatisfied: false },
-        { provider: 'daytona', configSatisfied: false },
-        { provider: 'e2b', configSatisfied: false },
-      ]),
-    ).toBe('docker');
-  });
-
-  it('falls back to docker when every provider is excluded', () => {
-    expect(
-      getDefaultAvailableComputeProvider(
+  it('selects the preferred available provider across exclusions and readiness', () => {
+    for (const [excluded, statuses, expected] of [
+      [
+        new Set(['docker', 'modal']),
+        [{ provider: 'daytona', configSatisfied: true }],
+        'daytona',
+      ],
+      [new Set(['modal']), undefined, 'docker'],
+      [
+        new Set(),
+        [
+          { provider: 'modal', configSatisfied: true },
+          { provider: 'docker', configSatisfied: true },
+        ],
+        'modal',
+      ],
+      [
+        new Set(),
+        [
+          { provider: 'modal', configSatisfied: true },
+          { provider: 'e2b', configSatisfied: true },
+          { provider: 'docker', configSatisfied: true },
+        ],
+        'e2b',
+      ],
+      [
+        new Set(['docker']),
+        [
+          { provider: 'modal', configSatisfied: false },
+          { provider: 'daytona', configSatisfied: false },
+          { provider: 'e2b', configSatisfied: false },
+        ],
+        'docker',
+      ],
+      [
         new Set([
           'docker',
           'modal',
@@ -1057,7 +966,19 @@ describe('getDefaultAvailableComputeProvider', () => {
           'box',
           'azure',
         ]),
-      ),
-    ).toBe('docker');
+        undefined,
+        'docker',
+      ],
+    ] as const) {
+      const excludedProviders = excluded as Parameters<
+        typeof getDefaultAvailableComputeProvider
+      >[0];
+      const liveStatuses = statuses as Parameters<
+        typeof getDefaultAvailableComputeProvider
+      >[1];
+      expect(
+        getDefaultAvailableComputeProvider(excludedProviders, liveStatuses),
+      ).toBe(expected);
+    }
   });
 });

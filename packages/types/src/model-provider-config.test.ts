@@ -493,124 +493,76 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
-  it('recommends Claude Fable 5.1 from every supported provider', () => {
-    const fable51ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-      (provider) => {
+  it('preserves supported catalog routes for representative recommended models', () => {
+    const expectedByModel = [
+      {
+        displayName: 'Claude Fable 5.1',
+        expected: [
+          ['roomote', 'roomote/anthropic/claude-fable-5.1'],
+          ['openrouter', 'openrouter/anthropic/claude-fable-5.1'],
+          ['vercel', 'vercel/anthropic/claude-fable-5.1'],
+          ['requesty', 'requesty/claude-fable-5.1'],
+          ['anthropic', 'anthropic/claude-fable-5-1'],
+          ['opencode', 'opencode/claude-fable-5-1'],
+          ['amazon-bedrock', 'bedrock-mantle/anthropic.claude-fable-5-1'],
+          ['github-copilot', 'github-copilot/claude-fable-5.1'],
+        ],
+      },
+      {
+        displayName: 'Claude Opus 5.5',
+        expected: [
+          ['roomote', 'roomote/anthropic/claude-opus-5.5'],
+          ['openrouter', 'openrouter/anthropic/claude-opus-5.5'],
+          ['vercel', 'vercel/anthropic/claude-opus-5.5'],
+          ['requesty', 'requesty/anthropic/claude-opus-5-5'],
+          ['azure', 'azure/claude-opus-5-5'],
+          [
+            'azure-cognitive-services',
+            'azure-cognitive-services/claude-opus-5-5',
+          ],
+          ['anthropic', 'anthropic/claude-opus-5-5'],
+          ['opencode', 'opencode/claude-opus-5-5'],
+          ['amazon-bedrock', 'bedrock-mantle/anthropic.claude-opus-5-5'],
+          ['github-copilot', 'github-copilot/claude-opus-5.5'],
+        ],
+      },
+      {
+        displayName: 'Kimi K3',
+        expected: [
+          ['openrouter', 'openrouter/moonshotai/kimi-k3'],
+          ['vercel', 'vercel/moonshotai/kimi-k3'],
+          ['requesty', 'requesty/kimi-k3'],
+          ['baseten', 'baseten/moonshotai/Kimi-K3'],
+          ['togetherai', 'togetherai/moonshotai/Kimi-K3'],
+          ['moonshotai', 'moonshotai/kimi-k3'],
+          ['kimi-for-coding', 'kimi-for-coding/k3'],
+          ['opencode', 'opencode/kimi-k3'],
+          ['opencode-go', 'opencode-go/kimi-k3'],
+          ['github-copilot', 'github-copilot/kimi-k3'],
+        ],
+      },
+      {
+        displayName: 'Qwen3.8 Max',
+        expected: [
+          ['openrouter', 'openrouter/qwen/qwen3.8-max-0902'],
+          ['vercel', 'vercel/alibaba/qwen3.8-max'],
+          ['opencode-go', 'opencode-go/qwen3.8-max'],
+        ],
+      },
+    ] as const;
+
+    for (const { displayName, expected } of expectedByModel) {
+      const providers = displayName.startsWith('Claude')
+        ? SETUP_MODEL_PROVIDER_CATALOG
+        : userSelectableProviders;
+      const providersByModel = providers.flatMap((provider) => {
         const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'Claude Fable 5.1',
+          (suggestion) => suggestion.displayName === displayName,
         );
-
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
-
-    expect(fable51ByProvider).toEqual([
-      {
-        providerId: 'roomote',
-        modelId: 'roomote/anthropic/claude-fable-5.1',
-      },
-      {
-        providerId: 'openrouter',
-        modelId: 'openrouter/anthropic/claude-fable-5.1',
-      },
-      {
-        providerId: 'vercel',
-        modelId: 'vercel/anthropic/claude-fable-5.1',
-      },
-      { providerId: 'requesty', modelId: 'requesty/claude-fable-5.1' },
-      { providerId: 'anthropic', modelId: 'anthropic/claude-fable-5-1' },
-      { providerId: 'opencode', modelId: 'opencode/claude-fable-5-1' },
-      {
-        providerId: 'amazon-bedrock',
-        modelId: 'bedrock-mantle/anthropic.claude-fable-5-1',
-      },
-      {
-        providerId: 'github-copilot',
-        modelId: 'github-copilot/claude-fable-5.1',
-      },
-    ]);
-  });
-
-  it('recommends Claude Opus 5.5 from every supported provider route', () => {
-    const opus55ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-      (provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'Claude Opus 5.5',
-        );
-
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
-
-    expect(opus55ByProvider).toEqual([
-      {
-        providerId: 'roomote',
-        modelId: 'roomote/anthropic/claude-opus-5.5',
-      },
-      {
-        providerId: 'openrouter',
-        modelId: 'openrouter/anthropic/claude-opus-5.5',
-      },
-      { providerId: 'vercel', modelId: 'vercel/anthropic/claude-opus-5.5' },
-      {
-        providerId: 'requesty',
-        modelId: 'requesty/anthropic/claude-opus-5-5',
-      },
-      { providerId: 'azure', modelId: 'azure/claude-opus-5-5' },
-      {
-        providerId: 'azure-cognitive-services',
-        modelId: 'azure-cognitive-services/claude-opus-5-5',
-      },
-      { providerId: 'anthropic', modelId: 'anthropic/claude-opus-5-5' },
-      { providerId: 'opencode', modelId: 'opencode/claude-opus-5-5' },
-      {
-        providerId: 'amazon-bedrock',
-        modelId: 'bedrock-mantle/anthropic.claude-opus-5-5',
-      },
-      {
-        providerId: 'github-copilot',
-        modelId: 'github-copilot/claude-opus-5.5',
-      },
-    ]);
-  });
-
-  it('recommends Kimi K3 only from supported providers', () => {
-    const kimiK3ByProvider = userSelectableProviders.flatMap((provider) => {
-      const model = provider.suggestedTaskModels.find(
-        (suggestion) => suggestion.displayName === 'Kimi K3',
-      );
-
-      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-    });
-
-    expect(kimiK3ByProvider).toEqual([
-      { providerId: 'openrouter', modelId: 'openrouter/moonshotai/kimi-k3' },
-      { providerId: 'vercel', modelId: 'vercel/moonshotai/kimi-k3' },
-      { providerId: 'requesty', modelId: 'requesty/kimi-k3' },
-      { providerId: 'baseten', modelId: 'baseten/moonshotai/Kimi-K3' },
-      { providerId: 'togetherai', modelId: 'togetherai/moonshotai/Kimi-K3' },
-      { providerId: 'moonshotai', modelId: 'moonshotai/kimi-k3' },
-      { providerId: 'kimi-for-coding', modelId: 'kimi-for-coding/k3' },
-      { providerId: 'opencode', modelId: 'opencode/kimi-k3' },
-      { providerId: 'opencode-go', modelId: 'opencode-go/kimi-k3' },
-      { providerId: 'github-copilot', modelId: 'github-copilot/kimi-k3' },
-    ]);
-  });
-
-  it('recommends Qwen3.8 Max only from supported providers', () => {
-    const providersByModel = userSelectableProviders.flatMap((provider) => {
-      const model = provider.suggestedTaskModels.find(
-        (suggestion) => suggestion.displayName === 'Qwen3.8 Max',
-      );
-
-      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-    });
-
-    expect(providersByModel).toEqual([
-      { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.8-max-0902' },
-      { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.8-max' },
-      { providerId: 'opencode-go', modelId: 'opencode-go/qwen3.8-max' },
-    ]);
+        return model ? [[provider.id, model.id] as const] : [];
+      });
+      expect(providersByModel).toEqual(expected);
+    }
   });
 
   it('uses GPT 5.6 Luna for OpenCode Go coding and retains GPT-6 Luna', () => {
@@ -632,26 +584,47 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
   });
 
-  it('recommends GLM 5.3 where available and retains GLM 5.2 elsewhere', () => {
-    const glm53ByProvider = userSelectableProviders.flatMap((provider) => {
-      const model = provider.suggestedTaskModels.find(
-        (suggestion) => suggestion.displayName === 'GLM 5.3',
-      );
-
-      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-    });
-
-    expect(glm53ByProvider).toEqual([
-      { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.3' },
-      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.3' },
-      { providerId: 'requesty', modelId: 'requesty/glm-5.3' },
-      { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3' },
-      { providerId: 'zai', modelId: 'zai/glm-5.3' },
-      {
-        providerId: 'zai-coding-plan',
-        modelId: 'zai-coding-plan/glm-5.3',
-      },
-    ]);
+  it('preserves GLM catalog routes and defaults across providers', () => {
+    for (const [displayName, expected] of [
+      [
+        'GLM 5.3',
+        [
+          ['openrouter', 'openrouter/z-ai/glm-5.3'],
+          ['vercel', 'vercel/zai/glm-5.3'],
+          ['requesty', 'requesty/glm-5.3'],
+          ['opencode-go', 'opencode-go/glm-5.3'],
+          ['zai', 'zai/glm-5.3'],
+          ['zai-coding-plan', 'zai-coding-plan/glm-5.3'],
+        ],
+      ],
+      [
+        'GLM 5.3 Flash',
+        [
+          ['openrouter', 'openrouter/z-ai/glm-5.3-flash'],
+          ['vercel', 'vercel/zai/glm-5.3-flash'],
+          ['requesty', 'requesty/glm-5.3-flash'],
+          ['opencode-go', 'opencode-go/glm-5.3-flash'],
+          ['zai', 'zai/glm-5.3-flash'],
+          ['zai-coding-plan', 'zai-coding-plan/glm-5.3-flash'],
+        ],
+      ],
+      [
+        'GLM 5.2',
+        [
+          ['baseten', 'baseten/zai-org/GLM-5.2'],
+          ['togetherai', 'togetherai/zai-org/GLM-5.2'],
+          ['opencode', 'opencode/glm-5.2'],
+        ],
+      ],
+    ] as const) {
+      const providersByModel = userSelectableProviders.flatMap((provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === displayName,
+        );
+        return model ? [[provider.id, model.id] as const] : [];
+      });
+      expect(providersByModel).toEqual(expected);
+    }
     expect(getSetupModelProvider('zai-coding-plan').defaultRoomoteModel).toBe(
       'zai-coding-plan/glm-5.3',
     );
@@ -659,88 +632,49 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('zai'))
         .roomoteModel,
     ).toBe('zai/glm-5.3');
-    expect(
-      userSelectableProviders.flatMap((provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'GLM 5.2',
-        );
-
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      }),
-    ).toEqual([
-      { providerId: 'baseten', modelId: 'baseten/zai-org/GLM-5.2' },
-      { providerId: 'togetherai', modelId: 'togetherai/zai-org/GLM-5.2' },
-      { providerId: 'opencode', modelId: 'opencode/glm-5.2' },
-    ]);
   });
 
-  it('recommends GLM 5.3 Flash from every supported provider', () => {
-    const glm53FlashByProvider = userSelectableProviders.flatMap((provider) => {
-      const model = provider.suggestedTaskModels.find(
-        (suggestion) => suggestion.displayName === 'GLM 5.3 Flash',
-      );
-
-      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-    });
-
-    expect(glm53FlashByProvider).toEqual([
+  it('recommends each GPT family only from providers that support it', () => {
+    for (const { displayName, modelId, providerIds } of [
       {
-        providerId: 'openrouter',
-        modelId: 'openrouter/z-ai/glm-5.3-flash',
+        displayName: 'GPT-6 Astra',
+        modelId: 'gpt-6-astra',
+        providerIds: [
+          'roomote',
+          'openrouter',
+          'vercel',
+          'openai',
+          'opencode',
+          'github-copilot',
+          'chatgpt',
+        ],
       },
-      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.3-flash' },
-      { providerId: 'requesty', modelId: 'requesty/glm-5.3-flash' },
-      { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3-flash' },
-      { providerId: 'zai', modelId: 'zai/glm-5.3-flash' },
       {
-        providerId: 'zai-coding-plan',
-        modelId: 'zai-coding-plan/glm-5.3-flash',
+        displayName: 'GPT 5.6 Sol',
+        modelId: 'gpt-5.6-sol',
+        providerIds: pairedGpt6ProviderIds,
       },
-    ]);
-  });
-
-  it.each([
-    {
-      displayName: 'GPT-6 Astra',
-      modelId: 'gpt-6-astra',
-      providerIds: [
-        'roomote',
-        'openrouter',
-        'vercel',
-        'openai',
-        'opencode',
-        'github-copilot',
-        'chatgpt',
-      ],
-    },
-    {
-      displayName: 'GPT 5.6 Sol',
-      modelId: 'gpt-5.6-sol',
-      providerIds: pairedGpt6ProviderIds,
-    },
-    {
-      displayName: 'GPT-6 Sol',
-      modelId: 'gpt-6-sol',
-      providerIds: pairedGpt6ProviderIds,
-    },
-    {
-      displayName: 'GPT 5.6 Terra',
-      modelId: 'gpt-5.6-terra',
-      providerIds: pairedGpt6ProviderIds,
-    },
-    {
-      displayName: 'GPT 5.6 Luna',
-      modelId: 'gpt-5.6-luna',
-      providerIds: gpt56LunaProviderIds,
-    },
-    {
-      displayName: 'GPT-6 Luna',
-      modelId: 'gpt-6-luna',
-      providerIds: gpt6LunaProviderIds,
-    },
-  ])(
-    'recommends $displayName only from providers that support it',
-    ({ displayName, modelId, providerIds }) => {
+      {
+        displayName: 'GPT-6 Sol',
+        modelId: 'gpt-6-sol',
+        providerIds: pairedGpt6ProviderIds,
+      },
+      {
+        displayName: 'GPT 5.6 Terra',
+        modelId: 'gpt-5.6-terra',
+        providerIds: pairedGpt6ProviderIds,
+      },
+      {
+        displayName: 'GPT 5.6 Luna',
+        modelId: 'gpt-5.6-luna',
+        providerIds: gpt56LunaProviderIds,
+      },
+      {
+        displayName: 'GPT-6 Luna',
+        modelId: 'gpt-6-luna',
+        providerIds: gpt6LunaProviderIds,
+      },
+    ] as const) {
       const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
         (provider) => {
           const model = provider.suggestedTaskModels.find(
@@ -775,12 +709,12 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       expect(providersByModel).toEqual(
         providerIds
           ? providerCandidates.filter(({ providerId }) =>
-              providerIds.includes(providerId),
+              (providerIds as readonly string[]).includes(providerId),
             )
           : providerCandidates,
       );
-    },
-  );
+    }
+  });
 
   it('uses GPT 5.6 Luna as the default coding model and Same as coding for other roles', () => {
     for (const provider of SETUP_MODEL_PROVIDER_CATALOG) {
@@ -820,104 +754,48 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
-  it('recommends Gemini 3.8 Flash from every provider that offered 3.7', () => {
-    const geminiFlashByProvider = userSelectableProviders.flatMap(
-      (provider) => {
+  it('preserves Gemini and DeepSeek catalog routes across providers', () => {
+    for (const [displayName, expected] of [
+      [
+        'Gemini 3.8 Flash',
+        [
+          ['openrouter', 'openrouter/google/gemini-3.8-flash'],
+          ['vercel', 'vercel/google/gemini-3.8-flash'],
+          ['requesty', 'requesty/gemini-3.8-flash'],
+          ['opencode', 'opencode/gemini-3.8-flash'],
+          ['google', 'google/gemini-3.8-flash'],
+        ],
+      ],
+      [
+        'DeepSeek V4.1 Flash',
+        [
+          ['openrouter', 'openrouter/deepseek/deepseek-v4.1-flash'],
+          ['vercel', 'vercel/deepseek/deepseek-v4.1-flash'],
+          ['deepseek', 'deepseek/deepseek-flash'],
+          ['opencode-go', 'opencode-go/deepseek-v4.1-flash'],
+        ],
+      ],
+      [
+        'DeepSeek V4 Pro 0813',
+        [
+          ['openrouter', 'openrouter/deepseek/deepseek-v4-pro-0813'],
+          ['vercel', 'vercel/deepseek/deepseek-v4-pro-0813'],
+          ['baseten', 'baseten/deepseek-ai/DeepSeek-V4-Pro'],
+          ['togetherai', 'togetherai/deepseek-ai/DeepSeek-V4-Pro'],
+          ['deepseek', 'deepseek/deepseek-v4-pro'],
+          ['opencode', 'opencode/deepseek-v4-pro'],
+          ['opencode-go', 'opencode-go/deepseek-v4-pro'],
+        ],
+      ],
+    ] as const) {
+      const providersByModel = userSelectableProviders.flatMap((provider) => {
         const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'Gemini 3.8 Flash',
+          (suggestion) => suggestion.displayName === displayName,
         );
-
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
-
-    expect(geminiFlashByProvider).toEqual([
-      {
-        providerId: 'openrouter',
-        modelId: 'openrouter/google/gemini-3.8-flash',
-      },
-      { providerId: 'vercel', modelId: 'vercel/google/gemini-3.8-flash' },
-      {
-        providerId: 'requesty',
-        modelId: 'requesty/gemini-3.8-flash',
-      },
-      { providerId: 'opencode', modelId: 'opencode/gemini-3.8-flash' },
-      { providerId: 'google', modelId: 'google/gemini-3.8-flash' },
-    ]);
-  });
-
-  it("uses each provider's DeepSeek V4.1 Flash model slug", () => {
-    const deepSeekFlashByProvider = userSelectableProviders.flatMap(
-      (provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'DeepSeek V4.1 Flash',
-        );
-
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
-
-    expect(deepSeekFlashByProvider).toEqual([
-      {
-        providerId: 'openrouter',
-        modelId: 'openrouter/deepseek/deepseek-v4.1-flash',
-      },
-      {
-        providerId: 'vercel',
-        modelId: 'vercel/deepseek/deepseek-v4.1-flash',
-      },
-      {
-        providerId: 'deepseek',
-        modelId: 'deepseek/deepseek-flash',
-      },
-      {
-        providerId: 'opencode-go',
-        modelId: 'opencode-go/deepseek-v4.1-flash',
-      },
-    ]);
-  });
-
-  it("uses each provider's DeepSeek V4 Pro 0813 model slug", () => {
-    const deepSeekProByProvider = userSelectableProviders.flatMap(
-      (provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'DeepSeek V4 Pro 0813',
-        );
-
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
-
-    expect(deepSeekProByProvider).toEqual([
-      {
-        providerId: 'openrouter',
-        modelId: 'openrouter/deepseek/deepseek-v4-pro-0813',
-      },
-      {
-        providerId: 'vercel',
-        modelId: 'vercel/deepseek/deepseek-v4-pro-0813',
-      },
-      {
-        providerId: 'baseten',
-        modelId: 'baseten/deepseek-ai/DeepSeek-V4-Pro',
-      },
-      {
-        providerId: 'togetherai',
-        modelId: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
-      },
-      {
-        providerId: 'deepseek',
-        modelId: 'deepseek/deepseek-v4-pro',
-      },
-      {
-        providerId: 'opencode',
-        modelId: 'opencode/deepseek-v4-pro',
-      },
-      {
-        providerId: 'opencode-go',
-        modelId: 'opencode-go/deepseek-v4-pro',
-      },
-    ]);
+        return model ? [[provider.id, model.id] as const] : [];
+      });
+      expect(providersByModel).toEqual(expected);
+    }
   });
 
   it('registers Kimi for Coding as an Anthropic-style API-key provider', () => {
@@ -1412,16 +1290,6 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteCodeReviewModelReasoningEffort: 'medium',
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: null,
-    });
-  });
-
-  it('keeps medium code-review reasoning for Anthropic', () => {
-    expect(
-      buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),
-    ).toMatchObject({
-      roomoteCodeReviewModel: 'anthropic/claude-sonnet-5',
-      roomoteCodeReviewModelReasoningEffort: 'medium',
-      roomotePlanningModel: 'anthropic/claude-opus-5-5',
     });
   });
 
