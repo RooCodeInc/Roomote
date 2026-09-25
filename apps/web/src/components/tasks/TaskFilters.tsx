@@ -237,6 +237,37 @@ export const TaskFilters = ({
     () => getTaskTypeFilterButtonLabel(taskTypes),
     [taskTypes],
   );
+  const userButtonLabel =
+    filterUserId === 'all'
+      ? 'Any User'
+      : effectiveUserId
+        ? effectiveUserId === defaultUserId
+          ? 'You'
+          : (userOptions.find((u) => u.value === effectiveUserId)?.label ??
+            'User')
+        : 'You';
+  const repositoryButtonLabel = repositoryName
+    ? repositoryName.startsWith('env:')
+      ? (environmentOptions.find((e) => e.value === repositoryName.slice(4))
+          ?.label ?? repositoryName)
+      : (repositories.find((repository) => repository.value === repositoryName)
+          ?.label ?? repositoryName)
+    : 'Environment';
+  const modelButtonLabel = model
+    ? (modelOptions.find((option) => option.value === model)?.label ?? model)
+    : 'Model';
+  const timePeriodButtonLabel =
+    timePeriod === 'all'
+      ? 'Time'
+      : timePeriod === 1
+        ? 'Today'
+        : timePeriod === 7
+          ? 'Last 7 Days'
+          : timePeriod === 30
+            ? 'Last 30 Days'
+            : timePeriod === 90
+              ? 'Last 90 Days'
+              : 'Time';
 
   const toggleTaskType = (taskType: TaskWorkflow) => {
     if (!onTaskTypesChange) {
@@ -259,6 +290,7 @@ export const TaskFilters = ({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
+              aria-label={`User filter: ${userButtonLabel}`}
               variant="ghost"
               size="sm"
               className={cn(
@@ -269,14 +301,7 @@ export const TaskFilters = ({
             >
               <CircleUserRound className="size-4 lg:mr-1.5" />
               <span className="hidden lg:inline-block truncate max-w-48 align-middle">
-                {filterUserId === 'all'
-                  ? 'Any User'
-                  : effectiveUserId
-                    ? effectiveUserId === defaultUserId
-                      ? 'You'
-                      : (userOptions.find((u) => u.value === effectiveUserId)
-                          ?.label ?? 'User')
-                    : 'You'}
+                {userButtonLabel}
               </span>
               <ChevronDown className="ml-1 h-3 w-3 hidden lg:inline-block align-middle shrink-0" />
             </Button>
@@ -330,6 +355,7 @@ export const TaskFilters = ({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
+              aria-label={`Environment filter: ${repositoryButtonLabel}`}
               variant="ghost"
               size="sm"
               className={cn(
@@ -340,15 +366,7 @@ export const TaskFilters = ({
             >
               <VectorSquare className="size-4 lg:mr-1.5" />
               <span className="hidden lg:inline-block truncate max-w-48 align-middle">
-                {repositoryName
-                  ? repositoryName.startsWith('env:')
-                    ? (environmentOptions.find(
-                        (e) => e.value === repositoryName.slice(4),
-                      )?.label ?? repositoryName)
-                    : (repositories.find(
-                        (repository) => repository.value === repositoryName,
-                      )?.label ?? repositoryName)
-                  : 'Environment'}
+                {repositoryButtonLabel}
               </span>
               <ChevronDown className="ml-1 h-3 w-3 hidden lg:inline-block align-middle shrink-0" />
             </Button>
@@ -411,6 +429,7 @@ export const TaskFilters = ({
         >
           <DropdownMenuTrigger asChild>
             <Button
+              aria-label={`Pull request filter: ${pullRequestButtonLabel}`}
               variant="ghost"
               size="sm"
               className={cn(
@@ -502,6 +521,7 @@ export const TaskFilters = ({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
+              aria-label={`Model filter: ${modelButtonLabel}`}
               variant="ghost"
               size="sm"
               className={cn(
@@ -512,10 +532,7 @@ export const TaskFilters = ({
             >
               <Brain className="size-4 lg:mr-1.5" />
               <span className="hidden lg:inline-block truncate max-w-48 align-middle">
-                {model
-                  ? (modelOptions.find((option) => option.value === model)
-                      ?.label ?? model)
-                  : 'Model'}
+                {modelButtonLabel}
               </span>
               <ChevronDown className="ml-1 h-3 w-3 hidden lg:inline-block align-middle shrink-0" />
             </Button>
@@ -554,6 +571,7 @@ export const TaskFilters = ({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
+              aria-label={`Task type filter: ${taskTypeButtonLabel}`}
               variant="ghost"
               size="sm"
               className={cn(
@@ -631,6 +649,7 @@ export const TaskFilters = ({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
+              aria-label={`Time filter: ${timePeriodButtonLabel}`}
               variant="ghost"
               size="sm"
               className={cn(
@@ -641,17 +660,7 @@ export const TaskFilters = ({
             >
               <Calendar className="size-4 lg:mr-1.5" />
               <span className="hidden lg:inline-block truncate max-w-48 align-middle">
-                {timePeriod === 'all'
-                  ? 'Time'
-                  : timePeriod === 1
-                    ? 'Today'
-                    : timePeriod === 7
-                      ? 'Last 7 Days'
-                      : timePeriod === 30
-                        ? 'Last 30 Days'
-                        : timePeriod === 90
-                          ? 'Last 90 Days'
-                          : 'Time'}
+                {timePeriodButtonLabel}
               </span>
               <ChevronDown className="ml-1 h-3 w-3 hidden lg:inline-block align-middle shrink-0" />
             </Button>
