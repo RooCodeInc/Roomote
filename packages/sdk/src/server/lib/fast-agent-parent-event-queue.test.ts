@@ -402,6 +402,68 @@ describe('Fast parent event durable queue', () => {
     );
   });
 
+  it('records webhook success without a shared launch claim', async () => {
+    const webhookEvent: FastAgentParentEvent = {
+      type: 'automation_triggered',
+      eventId: 'automation-1:webhook:00000000-0000-4000-8000-000000000001',
+      automationId: 'automation-1',
+      automationName: 'Webhook report',
+      prompt: 'Review the supplied event.',
+      trigger: 'webhook',
+    };
+    const row = pendingRow('automation-webhook-success', webhookEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: 'automation-1', status: 'succeeded' },
+    );
+  });
+
+  it('records terminal webhook failure without a shared launch claim', async () => {
+    const webhookEvent: FastAgentParentEvent = {
+      type: 'automation_triggered',
+      eventId: 'automation-1:webhook:00000000-0000-4000-8000-000000000002',
+      automationId: 'automation-1',
+      automationName: 'Webhook report',
+      prompt: 'Review the supplied event.',
+      trigger: 'webhook',
+    };
+    const row = pendingRow('automation-webhook-failure', webhookEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+    mocks.deliver.mockRejectedValueOnce(
+      new mocks.DeliveryError('webhook run failed', {
+        replyPosted: false,
+        permanent: true,
+      }),
+    );
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        id: 'automation-1',
+        status: 'failed',
+        error: 'webhook run failed',
+      },
+    );
+  });
+
   it('records a permanent Fast automation delivery failure', async () => {
     const launchClaimedAt = new Date('2026-09-01T14:25:14.129Z');
     const automationEvent = {

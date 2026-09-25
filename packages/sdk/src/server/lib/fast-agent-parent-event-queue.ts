@@ -515,11 +515,18 @@ async function markDiscarded(id: string, error: unknown) {
     .where(eq(fastAgentParentEvents.id, id));
 }
 
-function getAutomationLaunchClaim(event: FastAgentParentEvent) {
+function getAutomationOutcomeIdentity(
+  event: FastAgentParentEvent,
+): { id: string; launchClaimedAt?: Date } | null {
   if (event.type !== 'automation_triggered') return null;
 
   const prefix = `${event.automationId}:`;
   if (!event.eventId.startsWith(prefix)) return null;
+
+  if (event.trigger === 'webhook') {
+    if (!event.eventId.startsWith(`${prefix}webhook:`)) return null;
+    return { id: event.automationId };
+  }
 
   const launchClaimedAt = new Date(
     event.launchClaimedAt ?? event.eventId.slice(prefix.length),
@@ -534,11 +541,11 @@ async function finalizeAutomationLaunch(
   status: 'succeeded' | 'failed',
   error?: unknown,
 ) {
-  const claim = getAutomationLaunchClaim(event);
-  if (!claim) return;
+  const outcomeIdentity = getAutomationOutcomeIdentity(event);
+  if (!outcomeIdentity) return;
 
   await recordCustomAutomationRunOutcome(db, {
-    ...claim,
+    ...outcomeIdentity,
     status,
     ...(status === 'failed'
       ? { error: error instanceof Error ? error.message : String(error) }

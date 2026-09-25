@@ -491,6 +491,45 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
+  it('records an unfenced outcome without clearing an active launch claim', async () => {
+    const created = await createCustomAutomation({
+      name: `Concurrent webhook outcome ${Date.now()}`,
+      prompt: 'Review the supplied event.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+    });
+    const launchClaimedAt = await tryClaimCustomAutomationLaunch(
+      created.id,
+      created.lastRunAt,
+    );
+    expect(launchClaimedAt).toBeInstanceOf(Date);
+
+    const outcomeAt = new Date('2026-09-25T09:00:00.000Z');
+    try {
+      await expect(
+        recordCustomAutomationRunOutcome(db, {
+          id: created.id,
+          status: 'succeeded',
+          at: outcomeAt,
+        }),
+      ).resolves.toBe(true);
+
+      const updated = await getCustomAutomationById(created.id);
+      expect(updated?.lastRunAt?.getTime()).toBe(outcomeAt.getTime());
+      expect(updated?.lastSucceededAt?.getTime()).toBe(outcomeAt.getTime());
+      expect(updated?.launchClaimedAt?.getTime()).toBe(
+        launchClaimedAt?.getTime(),
+      );
+    } finally {
+      if (launchClaimedAt) {
+        await releaseCustomAutomationLaunchClaim(created.id, launchClaimedAt);
+      }
+      await deleteCustomAutomation(created.id);
+    }
+  });
+
   it('rejects a partially specified report destination', async () => {
     await expect(
       createCustomAutomation({
