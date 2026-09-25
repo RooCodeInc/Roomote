@@ -1,64 +1,37 @@
 import { renderHook } from '@testing-library/react';
 
-const { queryState, state } = vi.hoisted(() => ({
-  queryState: { data: false as boolean | undefined },
-  state: {
-    queryOptions: vi.fn(),
-    nightlyExperimentsEnabled: false,
+const state = vi.hoisted(() => ({
+  enabled: false,
+  requestedId: null as string | null,
+}));
+
+vi.mock('./useDeploymentExperiments', () => ({
+  useDeploymentExperimentRuntime: (id: string) => {
+    state.requestedId = id;
+    return { enabled: state.enabled, isLoading: false };
   },
-}));
-
-vi.mock('@tanstack/react-query', () => ({
-  useQuery: (options: unknown) => {
-    state.queryOptions(options);
-    return queryState;
-  },
-}));
-
-vi.mock('@/hooks/useUser', () => ({
-  useAuthorizedUser: () => ({
-    nightlyExperimentsEnabled: state.nightlyExperimentsEnabled,
-  }),
-}));
-
-vi.mock('@/trpc/client', () => ({
-  useTRPC: () => ({
-    nightlyExperiments: {
-      dizzyEnabled: {
-        queryOptions: (_input: undefined, options: unknown) => ({ options }),
-      },
-    },
-  }),
 }));
 
 import { useDizzyExperiment } from './useDizzyExperiment';
 
 describe('useDizzyExperiment', () => {
   beforeEach(() => {
-    state.nightlyExperimentsEnabled = false;
-    queryState.data = false;
+    state.enabled = false;
+    state.requestedId = null;
   });
 
-  it('does not enable the runtime query when the deployment has not opted in', () => {
-    queryState.data = true;
-
+  it('reads the shared runtime contract for Dizzy', () => {
     const { result } = renderHook(() => useDizzyExperiment());
 
     expect(result.current).toBe(false);
-    expect(state.queryOptions).toHaveBeenCalledWith(
-      expect.objectContaining({ options: { enabled: false } }),
-    );
+    expect(state.requestedId).toBe('dizzy');
   });
 
-  it('uses the server-gated runtime value on an opted-in deployment', () => {
-    state.nightlyExperimentsEnabled = true;
-    queryState.data = true;
+  it('returns the shared runtime value when enabled', () => {
+    state.enabled = true;
 
     const { result } = renderHook(() => useDizzyExperiment());
 
     expect(result.current).toBe(true);
-    expect(state.queryOptions).toHaveBeenCalledWith(
-      expect.objectContaining({ options: { enabled: true } }),
-    );
   });
 });

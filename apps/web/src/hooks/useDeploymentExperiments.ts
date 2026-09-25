@@ -6,13 +6,16 @@ import { toast } from 'sonner';
 import type {
   DeploymentExperimentAudience,
   DeploymentExperimentId,
+  DeploymentExperimentRuntimeId,
   DeploymentExperimentValues,
 } from '@roomote/feature-flags';
 import {
   getDeploymentExperimentAudience,
   getDeploymentExperimentValues,
+  isDeploymentExperimentRuntimeReadable,
 } from '@roomote/feature-flags';
 
+import { useAuthorizedUser } from '@/hooks/useUser';
 import { useTRPC } from '@/trpc/client';
 
 type MutationContext = {
@@ -30,20 +33,12 @@ export function useDeploymentExperiments(
   const queryKey = isNightly
     ? trpc.nightlyExperiments.get.queryKey()
     : trpc.deploymentExperiments.get.queryKey();
-  const customerPreviewQuery = useQuery(
-    trpc.deploymentExperiments.get.queryOptions(undefined, {
-      enabled: !isNightly,
-    }),
+  const query = useQuery(
+    isNightly
+      ? trpc.nightlyExperiments.get.queryOptions()
+      : trpc.deploymentExperiments.get.queryOptions(),
   );
-  const nightlyQuery = useQuery(
-    trpc.nightlyExperiments.get.queryOptions(undefined, {
-      enabled: isNightly,
-    }),
-  );
-  const query = isNightly ? nightlyQuery : customerPreviewQuery;
-  const experiments = query.data as
-    | Partial<DeploymentExperimentValues>
-    | undefined;
+  const experiments = query.data;
 
   const mutationLifecycle = {
     onMutate: async (variables: {
@@ -95,15 +90,11 @@ export function useDeploymentExperiments(
       variables: { id: DeploymentExperimentId },
     ) => {
       void queryClient.invalidateQueries({ queryKey });
-      if (isNightly && variables.id === 'dizzy') {
+      if (isNightly && isDeploymentExperimentRuntimeReadable(variables.id)) {
         void queryClient.invalidateQueries({
-          queryKey: trpc.nightlyExperiments.dizzyEnabled.queryKey(),
-        });
-      }
-      if (isNightly && variables.id === 'integrationToolAutoApprovals') {
-        void queryClient.invalidateQueries({
-          queryKey:
-            trpc.nightlyExperiments.integrationToolAutoApprovalsEnabled.queryKey(),
+          queryKey: trpc.nightlyExperiments.runtime.queryKey({
+            id: variables.id,
+          }),
         });
       }
     },
@@ -124,6 +115,24 @@ export function useDeploymentExperiments(
     refetch: query.refetch,
     setExperiment: (id: DeploymentExperimentId, enabled: boolean) =>
       mutation.mutate({ id, enabled }),
+  };
+}
+
+export function useDeploymentExperimentRuntime(
+  id: DeploymentExperimentRuntimeId,
+) {
+  const { nightlyExperimentsEnabled } = useAuthorizedUser();
+  const trpc = useTRPC();
+  const query = useQuery(
+    trpc.nightlyExperiments.runtime.queryOptions(
+      { id },
+      { enabled: nightlyExperimentsEnabled === true },
+    ),
+  );
+
+  return {
+    enabled: nightlyExperimentsEnabled === true && query.data === true,
+    isLoading: nightlyExperimentsEnabled === true && query.isPending,
   };
 }
 

@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 
 import {
-  DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
+  DEPLOYMENT_EXPERIMENT_CONFIG,
   getDeploymentExperimentAudience,
   getDeploymentExperimentValues,
   type DeploymentExperimentId,
@@ -45,7 +45,7 @@ export async function setDeploymentExperimentEnabled(
   database: DatabaseOrTransaction = db,
 ): Promise<DeploymentExperimentValues> {
   const metadata = {
-    [DEPLOYMENT_EXPERIMENT_METADATA_KEYS[id]]: enabled,
+    [DEPLOYMENT_EXPERIMENT_CONFIG[id].metadataKey]: enabled,
   };
 
   await database

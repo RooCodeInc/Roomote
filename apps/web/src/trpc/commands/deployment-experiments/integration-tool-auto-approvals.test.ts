@@ -2,7 +2,7 @@ import type { UserAuthSuccess } from '@/types';
 
 import {
   getDeploymentExperimentsCommand,
-  getIntegrationToolAutoApprovalsEnabledCommand,
+  getNightlyExperimentRuntimeCommand,
   getNightlyExperimentsCommand,
   setDeploymentExperimentCommand,
   setNightlyExperimentCommand,
@@ -41,11 +41,16 @@ describe('Auto tool approvals nightly experiment', () => {
       integrationToolAutoApprovals: false,
     });
     await expect(
-      getIntegrationToolAutoApprovalsEnabledCommand(member),
+      getNightlyExperimentRuntimeCommand(member, {
+        id: 'integrationToolAutoApprovals',
+      }),
     ).resolves.toBe(false);
     await expect(
-      getIntegrationToolAutoApprovalsEnabledCommand(
+      getNightlyExperimentRuntimeCommand(
         auth('customer-member', false, false),
+        {
+          id: 'integrationToolAutoApprovals',
+        },
       ),
     ).rejects.toThrow('Unauthorized');
 
@@ -55,7 +60,9 @@ describe('Auto tool approvals nightly experiment', () => {
         enabled: true,
       });
       await expect(
-        getIntegrationToolAutoApprovalsEnabledCommand(member),
+        getNightlyExperimentRuntimeCommand(member, {
+          id: 'integrationToolAutoApprovals',
+        }),
       ).resolves.toBe(true);
     } finally {
       await setNightlyExperimentCommand(admin, {

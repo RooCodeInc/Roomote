@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  DEPLOYMENT_EXPERIMENT_AUDIENCE,
   DEPLOYMENT_EXPERIMENT_AUDIENCES,
+  DEPLOYMENT_EXPERIMENT_CONFIG,
   DEPLOYMENT_EXPERIMENT_IDS,
+  getDeploymentExperimentConfig,
   getBooleanMetadataDescriptorByKey,
   getDeploymentExperimentAudience,
   getDeploymentExperimentIdsForAudience,
   getDeploymentExperimentValues,
+  isDeploymentExperimentRuntimeReadable,
 } from '../index';
 
 describe('metadata descriptions', () => {
@@ -69,11 +71,11 @@ describe('metadata descriptions', () => {
   });
 
   it('requires an explicit supported audience for every experiment', () => {
-    expect(Object.keys(DEPLOYMENT_EXPERIMENT_AUDIENCE).sort()).toEqual(
+    expect(Object.keys(DEPLOYMENT_EXPERIMENT_CONFIG).sort()).toEqual(
       [...DEPLOYMENT_EXPERIMENT_IDS].sort(),
     );
     expect(
-      Object.values(DEPLOYMENT_EXPERIMENT_AUDIENCE).every((audience) =>
+      Object.values(DEPLOYMENT_EXPERIMENT_CONFIG).every(({ audience }) =>
         DEPLOYMENT_EXPERIMENT_AUDIENCES.includes(audience),
       ),
     ).toBe(true);
@@ -88,5 +90,19 @@ describe('metadata descriptions', () => {
       'dizzy',
       'automationLaunchCriteria',
     ]);
+  });
+
+  it('classifies member-readable runtime state in the same experiment contract', () => {
+    expect(getDeploymentExperimentConfig('dizzy')).toMatchObject({
+      audience: 'internal-nightly',
+      runtimeReadable: true,
+    });
+    expect(
+      isDeploymentExperimentRuntimeReadable('integrationToolAutoApprovals'),
+    ).toBe(true);
+    expect(
+      isDeploymentExperimentRuntimeReadable('automationLaunchCriteria'),
+    ).toBe(false);
+    expect(isDeploymentExperimentRuntimeReadable('unknown')).toBe(false);
   });
 });
