@@ -1540,6 +1540,19 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     ]);
   });
 
+  it('returns independent copies of provider preset role configs', () => {
+    const provider = getSetupModelProvider('openai');
+    const presets = getRecommendedModelPresets(provider);
+    const coding = presets[0]?.roles.coding;
+
+    expect(coding).toBeDefined();
+    coding!.modelId = 'openai/mutated-by-caller';
+
+    expect(getRecommendedModelPresets(provider)[0]?.roles.coding?.modelId).toBe(
+      'openai/gpt-5.6-luna',
+    );
+  });
+
   it('resolves arbitrary preset ids and labels with role reasoning efforts', () => {
     const provider = {
       defaultRoomoteModel: 'example/default',
