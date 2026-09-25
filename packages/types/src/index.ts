@@ -79,6 +79,7 @@ export * from './mcp-tool-policy';
 export * from './managed-access';
 export * from './manage-custom-automations-tool';
 export * from './create-custom-skill-tool';
+export * from './partnership-guide-tool';
 export * from './open-artifact-tool';
 export * from './mcp-service-detection';
 export * from './platform-issue-reports';

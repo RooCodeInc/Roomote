@@ -16,3 +16,4 @@ export * from './fast-agent-tasks';
 export * from './fast-agent-task-communication-triage';
 export * from './session-status-judgment';
 export * from './fast-agent-pinned-launch';
+export { resolveDefaultSkillRoot } from './fast-agent-skill-store';

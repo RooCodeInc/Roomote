@@ -165,6 +165,26 @@ describe('tokenAuthMiddleware token extraction', () => {
     expect(mockValidateAuthToken).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['a removed member', { id: 'removed-user', deletedAt: new Date() }],
+    ['a nonmember', undefined],
+  ])('does not attach an MCP token for %s', async (_label, user) => {
+    mockValidateMcpAccessToken.mockResolvedValue({
+      tokenType: 'mcp',
+      userId: user?.id ?? 'missing-user',
+      resource: 'https://api.example.com/mcp',
+      scopes: ['mcp:roomote'],
+      version: 1,
+    });
+    mockFindUser.mockResolvedValue(user);
+
+    await expect(
+      requestAuthContext('/mcp', {
+        authorization: 'Bearer invalid-member-token',
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('accepts the run token from x-api-key on the inference gateway', async () => {
     const authContext = await requestAuthContext(
       '/api/inference/anthropic/v1/messages',

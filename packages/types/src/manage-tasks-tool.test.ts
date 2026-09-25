@@ -26,7 +26,10 @@ describe('Roomote MCP management contract', () => {
       'direct task operations retained for compatibility',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
-      'Summarize substantive outbound messages as “Client → Roomote”',
+      'Toward the user, synthesize customer-relevant findings, decisions and tradeoffs, progress, and limitations',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'use labeled “Agent → Roomote” / “Roomote → Agent” relays only when the user asks to see the exchange',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
       'Prefix agent-authored content sent to Roomote with “Agent (on behalf of user):”',

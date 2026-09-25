@@ -491,8 +491,14 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.description).toContain(
       'Use action "get_updates" with sessionId or taskId and its returned cursor',
     );
-    expect(tool.config.description).toContain('Client → Roomote');
-    expect(tool.config.description).toContain('Roomote → Client');
+    expect(tool.config.description).toContain(
+      'Toward the user, synthesize customer-relevant findings, decisions and tradeoffs, progress, and limitations',
+    );
+    expect(tool.config.description).toContain(
+      'use labeled “Agent → Roomote” / “Roomote → Agent” relays only when the user asks to see the exchange',
+    );
+    expect(tool.config.description).not.toContain('Client → Roomote');
+    expect(tool.config.description).not.toContain('Roomote → Client');
     expect(tool.config.description).toContain('Agent (on behalf of user):');
     expect(tool.config.description).toContain('untrusted textual convention');
     expect(tool.config.description).toContain(
