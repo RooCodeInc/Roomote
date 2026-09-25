@@ -184,7 +184,6 @@ export const JUDGMENT_DECISION_DEFINITIONS = {
       childTasks: [],
       goalStatus: null,
     },
-    note: 'The Session status decision is not yet approved for the Roomote-trained model.',
   },
   'fast-agent-launch-model': {
     id: 'fast-agent-launch-model',
