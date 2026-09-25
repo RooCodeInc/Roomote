@@ -205,8 +205,8 @@ export async function setPersonalIntegrationToolPoliciesCommand(
 
 /**
  * Deployment-wide Auto mode, admin only. `model` names what Auto will
- * consult: Jev, or null when there is no Jev backend (the helper model and
- * the model Roomote trains are not used for Auto yet).
+ * consult: the selected judgment model (Jev or the Roomote judgment model), or
+ * null when there is none (the helper model is not used for Auto).
  */
 export async function getIntegrationToolAutoSettingsCommand(
   auth: UserAuthSuccess,

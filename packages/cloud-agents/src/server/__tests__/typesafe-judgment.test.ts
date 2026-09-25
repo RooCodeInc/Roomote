@@ -53,6 +53,7 @@ import {
   resetJudgmentBackendCache,
   testJudgmentBackend,
 } from '../typesafe-judgment';
+import type { JudgmentDecisionId } from '../judgment-decision-catalog';
 
 const questions = {
   urgent: { type: 'noul', instructions: 'Does this convey urgency?' },
@@ -191,7 +192,7 @@ describe('evaluateTypeSafeJudgments', () => {
         evaluateTypeSafeJudgments({
           state: 'hi',
           questions,
-          decision: 'session-status-judgment',
+          decision: 'a-new-decision' as JudgmentDecisionId,
         }),
       ).resolves.toBeNull();
       expect(fetchMock).not.toHaveBeenCalled();
@@ -691,7 +692,8 @@ describe('evaluateTypeSafeJudgments', () => {
 
       await expect(
         evaluateDecisionModel({
-          decision: 'session-status-judgment',
+          // Every catalog decision is registered; a new one would not be yet.
+          decision: 'a-new-decision' as JudgmentDecisionId,
           state: 'hi',
           questions,
         }),

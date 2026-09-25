@@ -14,6 +14,9 @@ const JUDGMENT_DECISION_POLICY: Record<string, { roomoteModel: boolean }> = {
   'channel-launch-gate': { roomoteModel: true },
   'requested-work-kind': { roomoteModel: true },
   'agentmail-auto-reply': { roomoteModel: true },
+  'integration-tool-auto-evaluation': { roomoteModel: true },
+  'session-status-judgment': { roomoteModel: true },
+  'custom-automation-launch-gate': { roomoteModel: true },
 };
 
 export type { JudgmentDecisionId } from './judgment-decision-catalog';
