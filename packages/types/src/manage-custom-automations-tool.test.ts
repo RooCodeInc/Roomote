@@ -111,7 +111,10 @@ describe('manage custom automations tool contract', () => {
     ).toContain('Blank slate sandbox without repositories');
     expect(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.schedule.description,
-    ).toContain('off, every_hour, every_6_hours, daily, weekly');
+    ).toContain('every_hour, every_6_hours, daily, weekly');
+    expect(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.schedule.description,
+    ).toContain('on_demand');
     expect(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.prompt.description,
     ).toContain('Do not mention internal tool names or parameters.');
@@ -146,6 +149,18 @@ describe('manage custom automations tool contract', () => {
     expect(tool.description).not.toContain('runWhen');
     expect(tool.inputSchema).not.toHaveProperty('launchCriteria');
     expect(tool.inputSchema).not.toHaveProperty('runWhen');
+  });
+
+  it('accepts On-demand as a custom automation schedule', () => {
+    expect(
+      manageCustomAutomationsInputSchema.safeParse({
+        action: 'create',
+        name: 'Event-triggered report',
+        prompt: 'Report on workflow events.',
+        schedule: 'on_demand',
+        environmentId: FAST_EXECUTION,
+      }).success,
+    ).toBe(true);
   });
 
   it('compacts list records to operational fields', () => {

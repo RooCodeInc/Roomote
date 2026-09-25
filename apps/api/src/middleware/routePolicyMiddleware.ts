@@ -195,6 +195,15 @@ function resolveRateLimitBucketKey(
       return resolvePrincipalKey(c);
     case 'state-token':
       return resolveStateTokenKey(c);
+    case 'webhook-credential': {
+      const token =
+        /^\/api\/webhooks\/custom-automations\/[^/]+\/([^/]+)$/u.exec(
+          c.req.path,
+        )?.[1];
+      return token
+        ? createHash('sha256').update(token).digest('hex')
+        : 'invalid-path';
+    }
   }
 }
 

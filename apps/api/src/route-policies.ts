@@ -45,8 +45,14 @@ export type RoutePolicyClass =
  * - `state-token`: SHA-256 of the `state` string field in the JSON request
  *   body. Legitimate callers use a fresh single-use token per flow, so they
  *   never share a bucket; repeated hammering of one token is throttled.
+ * - `webhook-credential`: SHA-256 of the URL bearer token, never the token
+ *   itself, so each credential has a bounded delivery bucket.
  */
-export type RouteRateLimitKeySource = 'client' | 'principal' | 'state-token';
+export type RouteRateLimitKeySource =
+  | 'client'
+  | 'principal'
+  | 'state-token'
+  | 'webhook-credential';
 
 export type RouteRateLimit = {
   keySource: RouteRateLimitKeySource;
@@ -244,6 +250,15 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     match: { type: 'prefix', path: '/api/webhooks/agentmail' },
     policy: 'webhook',
     rateLimits: WEBHOOK_RATE_LIMITS,
+  },
+  {
+    name: 'webhook-custom-automation',
+    match: { type: 'prefix', path: '/api/webhooks/custom-automations' },
+    policy: 'webhook',
+    rateLimits: [
+      { keySource: 'client', limit: 60, windowSeconds: 60 },
+      { keySource: 'webhook-credential', limit: 15, windowSeconds: 60 },
+    ],
   },
   {
     // The BullMQ worker authenticates this route with the Discord gateway

@@ -21,9 +21,12 @@ export {
   createCustomAutomationCommand,
   deleteCustomAutomationCommand,
   getCustomAutomationOptionsCommand,
+  getCustomAutomationWebhookCommand,
   listCustomAutomationsCommand,
   resolveCustomAutomationScheduleCommand,
   triggerCustomAutomationCommand,
+  setCustomAutomationWebhookEnabledCommand,
+  rotateCustomAutomationWebhookCommand,
   updateCustomAutomationCommand,
 } from './custom-automations';
 export type {
