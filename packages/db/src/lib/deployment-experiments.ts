@@ -2,10 +2,12 @@ import { eq, sql } from 'drizzle-orm';
 
 import {
   DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
+  getDeploymentExperimentAudience,
   getDeploymentExperimentValues,
   type DeploymentExperimentId,
   type DeploymentExperimentValues,
 } from '@roomote/feature-flags';
+import { Env, isEnvFlagEnabled } from '@roomote/env';
 
 import { db, type DatabaseOrTransaction } from '../db';
 import { deploymentSettings } from '../schema';
@@ -27,6 +29,13 @@ export async function isDeploymentExperimentEnabled(
   id: DeploymentExperimentId,
   database: DatabaseOrTransaction = db,
 ): Promise<boolean> {
+  if (
+    getDeploymentExperimentAudience(id) === 'internal-nightly' &&
+    !isEnvFlagEnabled(Env.R_NIGHTLY_EXPERIMENTS_ENABLED)
+  ) {
+    return false;
+  }
+
   return (await getDeploymentExperiments(database))[id];
 }
 

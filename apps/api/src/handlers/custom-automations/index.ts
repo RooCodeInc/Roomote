@@ -10,6 +10,8 @@ import {
   eq,
   getDeploymentTaskModelOptions,
   getCustomAutomationById,
+  isDeploymentExperimentEnabled,
+  listCustomAutomationConditionRuns,
   isNull,
   listCustomAutomations,
   updateCustomAutomation,
@@ -30,7 +32,9 @@ import {
   FAST_EXECUTION,
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+  customAutomationRunWhenSchema,
   getAutomationTargetEmailIdentityId,
   getAutomationTargetKind,
   type BackgroundAutomationProvider,
@@ -78,6 +82,13 @@ const writeSchema = z.object({
     .optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
+  runWhen: customAutomationRunWhenSchema.nullable().optional(),
+  launchCriteria: z
+    .string()
+    .trim()
+    .max(CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH)
+    .nullable()
+    .optional(),
 });
 
 const updateSchema = z.object({
@@ -100,12 +111,28 @@ const updateSchema = z.object({
     .optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
+  runWhen: customAutomationRunWhenSchema.nullable().optional(),
+  launchCriteria: z
+    .string()
+    .trim()
+    .max(CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH)
+    .nullable()
+    .optional(),
 });
 
 const UNIQUE_VIOLATION_CODE = '23505';
 const NAME_UNIQUE_INDEX = 'custom_automations_name_unique_idx';
 export const DUPLICATE_AUTOMATION_NAME_ERROR =
   'A custom automation with this name already exists.';
+
+function hasLaunchCriteriaFields(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    ('launchCriteria' in value || 'runWhen' in value)
+  );
+}
 
 /**
  * Whether the error (or anything in its cause chain — drizzle wraps the
@@ -397,6 +424,14 @@ customAutomationsRouter.get('/', async (c) =>
   }),
 );
 
+customAutomationsRouter.get('/experiment', async (c) =>
+  c.json({
+    launchCriteriaEnabled: await isDeploymentExperimentEnabled(
+      'automationLaunchCriteria',
+    ),
+  }),
+);
+
 customAutomationsRouter.get('/models', async (c) =>
   c.json(await getDeploymentTaskModelOptions()),
 );
@@ -436,12 +471,36 @@ customAutomationsRouter.get('/:id', async (c) => {
   if (!automation || !canManage(c, automation)) {
     return c.json({ error: 'Custom automation was not found.' }, 404);
   }
+  const conditionRuns = await listCustomAutomationConditionRuns(automation.id);
   return c.json({
     automation: {
       id: automation.id,
       name: automation.name,
       prompt: automation.prompt,
+      launchCriteria: automation.launchCriteria,
+      runWhen: automation.runWhen,
     },
+    conditionRuns: conditionRuns.map((run) => {
+      const outcomes = run.launchCriteriaOutcome;
+      const launchCriteriaOutcome = outcomes?.launchCriteria ?? null;
+      const runWhenOutcome = outcomes?.runWhen ?? null;
+      const answers = run.launchCriteriaAnswers;
+      return {
+        id: run.id,
+        createdAt: run.createdAt,
+        outcome: runWhenOutcome ?? launchCriteriaOutcome,
+        runWhen: run.launchCriteriaSnapshot?.runWhen ?? null,
+        answers: answers?.runWhen ?? null,
+        ...(launchCriteriaOutcome || runWhenOutcome
+          ? { findingsExcerpt: run.content.slice(0, 2_000) }
+          : { reportExcerpt: run.content.slice(0, 2_000) }),
+        launchCriteria: run.launchCriteriaSnapshot?.launchCriteria ?? null,
+        launchCriteriaOutcome,
+        launchCriteriaAnswers: answers?.criteriaMet
+          ? { criteriaMet: answers.criteriaMet }
+          : null,
+      };
+    }),
   });
 });
 
@@ -465,7 +524,17 @@ customAutomationsRouter.post('/resolve-schedule', async (c) => {
 });
 
 customAutomationsRouter.post('/', async (c) => {
-  const parsed = writeSchema.safeParse(await c.req.json());
+  const body: unknown = await c.req.json();
+  if (
+    hasLaunchCriteriaFields(body) &&
+    !(await isDeploymentExperimentEnabled('automationLaunchCriteria'))
+  ) {
+    return c.json(
+      { error: 'Custom automation launch criteria are not enabled.' },
+      400,
+    );
+  }
+  const parsed = writeSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   try {
     await assertEnabledModel(parsed.data.model, parsed.data.reasoningEffort);
@@ -501,6 +570,12 @@ customAutomationsRouter.post('/', async (c) => {
       reasoningEffort: parsed.data.reasoningEffort ?? null,
       environmentId: parsed.data.environmentId,
       target: buildTarget(parsed.data, actorId(c)),
+      ...(parsed.data.launchCriteria !== undefined
+        ? { launchCriteria: parsed.data.launchCriteria }
+        : {}),
+      ...(parsed.data.runWhen !== undefined
+        ? { runWhen: parsed.data.runWhen }
+        : {}),
       createdByUserId: actorId(c),
     });
     void captureActivationCustomAutomationChanged(
@@ -522,7 +597,17 @@ customAutomationsRouter.post('/', async (c) => {
 });
 
 customAutomationsRouter.patch('/:id', async (c) => {
-  const parsed = updateSchema.safeParse(await c.req.json());
+  const body: unknown = await c.req.json();
+  if (
+    hasLaunchCriteriaFields(body) &&
+    !(await isDeploymentExperimentEnabled('automationLaunchCriteria'))
+  ) {
+    return c.json(
+      { error: 'Custom automation launch criteria are not enabled.' },
+      400,
+    );
+  }
+  const parsed = updateSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   const existing = await getCustomAutomationById(c.req.param('id'));
   if (!existing || !canManage(c, existing)) {
@@ -642,6 +727,12 @@ customAutomationsRouter.patch('/:id', async (c) => {
               existing.createdByUserId ?? actorId(c),
             )
           : existingTarget,
+      ...(parsed.data.launchCriteria !== undefined
+        ? { launchCriteria: parsed.data.launchCriteria }
+        : {}),
+      ...(parsed.data.runWhen !== undefined
+        ? { runWhen: parsed.data.runWhen }
+        : {}),
     });
     return c.json({
       automation: toApiAutomation(automation),

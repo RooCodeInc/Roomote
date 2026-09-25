@@ -397,7 +397,7 @@ function createRoomoteTransport() {
   });
 }
 
-function createRoomoteMcpServer(
+async function createRoomoteMcpServer(
   auth: McpAuthContext,
   actingUserId: string | null,
   toolAuth: McpAuth,
@@ -413,7 +413,7 @@ function createRoomoteMcpServer(
       registerRoomoteCommunicationTools(server, actingUserId);
     }
   }
-  registerRoomoteCustomAutomationsTool(server, toolAuth);
+  await registerRoomoteCustomAutomationsTool(server, toolAuth);
   registerRoomoteCustomSkillsTool(server, toolAuth);
   registerRoomoteArtifactTool(server, toolAuth);
   registerRoomotePublicUrlFetchTool(server);
@@ -591,7 +591,7 @@ function createRoomoteMcpRouter(options: {
               }
             : rawAuth,
       };
-      const server = createRoomoteMcpServer(
+      const server = await createRoomoteMcpServer(
         auth,
         actingUserId,
         toolAuth,

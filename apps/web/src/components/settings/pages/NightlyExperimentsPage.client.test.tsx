@@ -98,6 +98,19 @@ describe('NightlyExperimentsPage', () => {
         'Continuously spin the Roomote logo mark in the collapsed sidebar and mobile header.',
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('switch', {
+        name: 'Toggle custom automation launch criteria',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Custom automation launch criteria'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Allow custom automations to use plain-language and typed checks before a run starts.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('renders one retryable error without default-valued settings', () => {

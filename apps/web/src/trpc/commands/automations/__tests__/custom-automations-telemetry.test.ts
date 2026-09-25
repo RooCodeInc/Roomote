@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   canStartAgentMailConversationWithUser: vi.fn(),
   listAvailableAgentMailOutboundIdentities: vi.fn(),
   resolveDefaultAutomationTarget: vi.fn(),
+  isDeploymentExperimentEnabled: vi.fn(),
   captureActivationCustomAutomationChanged: vi.fn(),
 }));
 
@@ -35,6 +36,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => ({
   listCustomAutomations: mocks.listCustomAutomations,
   getBackgroundAgentSettingsForDeployment:
     mocks.getBackgroundAgentSettingsForDeployment,
+  isDeploymentExperimentEnabled: mocks.isDeploymentExperimentEnabled,
   updateCustomAutomation: mocks.updateCustomAutomation,
 }));
 
@@ -106,6 +108,7 @@ describe('custom automation activation telemetry', () => {
     mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
     mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
     mocks.resolveDefaultAutomationTarget.mockResolvedValue(null);
+    mocks.isDeploymentExperimentEnabled.mockResolvedValue(true);
   });
 
   it('tracks creation with only the destination provider classification', async () => {
@@ -126,6 +129,76 @@ describe('custom automation activation telemetry', () => {
     expect(mocks.captureActivationCustomAutomationChanged).toHaveBeenCalledWith(
       'created',
       'slack',
+    );
+  });
+
+  it('rejects custom launch criteria and typed conditions while disabled', async () => {
+    mocks.isDeploymentExperimentEnabled.mockResolvedValue(false);
+    const input = {
+      name: 'Nightly report',
+      prompt: 'Summarize yesterday.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: 'environment-id',
+    };
+
+    await expect(
+      createCustomAutomationCommand(adminAuth, {
+        ...input,
+        launchCriteria: 'Only investigate new regressions.',
+      }),
+    ).rejects.toThrow('Custom automation launch criteria are not enabled.');
+    await expect(
+      createCustomAutomationCommand(adminAuth, {
+        ...input,
+        runWhen: { all: [] } as never,
+      }),
+    ).rejects.toThrow('Custom automation launch criteria are not enabled.');
+    expect(mocks.createCustomAutomation).not.toHaveBeenCalled();
+    await expect(
+      updateCustomAutomationCommand(adminAuth, {
+        ...input,
+        id: 'automation-id',
+        launchCriteria: 'Only investigate new regressions.',
+      }),
+    ).rejects.toThrow('Custom automation launch criteria are not enabled.');
+    expect(mocks.getCustomAutomationById).not.toHaveBeenCalled();
+    expect(mocks.updateCustomAutomation).not.toHaveBeenCalled();
+  });
+
+  it('allows disabling an automation with saved criteria while the experiment is off', async () => {
+    mocks.isDeploymentExperimentEnabled.mockResolvedValue(false);
+    mocks.resolveDeploymentTimeZone.mockResolvedValue({
+      timeZone: 'UTC',
+      source: 'utc_fallback',
+      updatedAt: null,
+    });
+    mocks.getCustomAutomationById.mockResolvedValue({
+      ...customAutomation(),
+      createdByUserId: 'user-admin',
+      launchCriteria: 'Only investigate new regressions.',
+      runWhen: null,
+    } as never);
+    mocks.updateCustomAutomation.mockResolvedValue(customAutomation());
+
+    await updateCustomAutomationCommand(adminAuth, {
+      id: 'automation-id',
+      name: 'Nightly report',
+      prompt: 'Summarize yesterday.',
+      enabled: false,
+      scheduleMode: 'daily',
+      environmentId: 'environment-id',
+    });
+
+    expect(mocks.updateCustomAutomation).toHaveBeenCalledOnce();
+    expect(mocks.updateCustomAutomation.mock.calls[0]?.[1]).toMatchObject({
+      enabled: false,
+    });
+    expect(mocks.updateCustomAutomation.mock.calls[0]?.[1]).not.toHaveProperty(
+      'launchCriteria',
+    );
+    expect(mocks.updateCustomAutomation.mock.calls[0]?.[1]).not.toHaveProperty(
+      'runWhen',
     );
   });
 
@@ -276,6 +349,7 @@ describe('custom automation ownership', () => {
     mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
     mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
     mocks.resolveDefaultAutomationTarget.mockResolvedValue(null);
+    mocks.isDeploymentExperimentEnabled.mockResolvedValue(true);
   });
 
   it('returns only member-safe connection flags and timezone without reading admin settings', async () => {
@@ -289,6 +363,7 @@ describe('custom automation ownership', () => {
     await expect(
       getCustomAutomationOptionsCommand(memberAuth),
     ).resolves.toEqual({
+      launchCriteriaEnabled: true,
       capabilities: {
         slackConnected: true,
         discordConnected: false,
@@ -350,6 +425,7 @@ describe('custom automation ownership', () => {
     await expect(
       getCustomAutomationOptionsCommand(memberAuth),
     ).resolves.toEqual({
+      launchCriteriaEnabled: true,
       capabilities: {
         slackConnected: false,
         discordConnected: false,
@@ -371,6 +447,14 @@ describe('custom automation ownership', () => {
     });
   });
 
+  it('reports launch criteria disabled when the nightly deployment opt-in is off', async () => {
+    mocks.isDeploymentExperimentEnabled.mockResolvedValue(false);
+
+    await expect(
+      getCustomAutomationOptionsCommand(memberAuth),
+    ).resolves.toMatchObject({ launchCriteriaEnabled: false });
+  });
+
   it('allows admin channel defaults without returning other settings', async () => {
     mocks.listConnectedCommunicationProviders.mockResolvedValue([
       'discord',
@@ -384,6 +468,7 @@ describe('custom automation ownership', () => {
     });
     await expect(getCustomAutomationOptionsCommand(adminAuth)).resolves.toEqual(
       {
+        launchCriteriaEnabled: true,
         capabilities: {
           slackConnected: false,
           discordConnected: true,

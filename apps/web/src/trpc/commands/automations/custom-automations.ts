@@ -8,6 +8,7 @@ import {
   fastAgentConversations,
   getDeploymentTaskModelOptions,
   getBackgroundAgentSettingsForDeployment,
+  isDeploymentExperimentEnabled,
   getCustomAutomationById,
   listCustomAutomations,
   inArray,
@@ -30,6 +31,7 @@ import {
 import {
   ALL_REPOSITORIES,
   AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   FAST_EXECUTION,
   NO_REPOSITORIES,
   getAutomationTargetEmailIdentityId,
@@ -39,6 +41,7 @@ import {
   type BackgroundAutomationProvider,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
+  type CustomAutomationRunWhen,
   type ReasoningEffort,
   type AutomationResultPriority,
 } from '@roomote/types';
@@ -71,6 +74,7 @@ export type CustomAutomationListItem = {
   executionMode: 'sandbox_task' | 'fast';
   environmentId: string | null;
   target: OptionalAutomationTarget;
+  launchCriteria?: string | null;
   lastRunAt: Date | null;
   lastSucceededAt: Date | null;
   lastFailedAt: Date | null;
@@ -124,6 +128,8 @@ export type CustomAutomationWriteInput = {
   targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram' | 'email';
   targetMode?: 'channel' | 'direct_message';
   targetChannelId?: string;
+  launchCriteria?: string | null;
+  runWhen?: CustomAutomationRunWhen | null;
 };
 
 function toListItem(
@@ -160,6 +166,7 @@ function toListItem(
             ? NO_REPOSITORIES
             : row.environmentId,
     target: row.target,
+    launchCriteria: row.launchCriteria,
     lastRunAt: row.lastRunAt,
     lastSucceededAt: row.lastSucceededAt,
     lastFailedAt: row.lastFailedAt,
@@ -301,6 +308,29 @@ async function assertAutomationModelSelection(
   }
 }
 
+function assertLaunchCriteria(value?: string | null): void {
+  if (
+    value &&
+    value.trim().length > CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH
+  ) {
+    throw new Error(
+      `Launch criteria must be at most ${CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH} characters.`,
+    );
+  }
+}
+
+async function assertLaunchCriteriaExperimentEnabled(input: {
+  launchCriteria?: string | null;
+  runWhen?: CustomAutomationRunWhen | null;
+}): Promise<void> {
+  if (input.launchCriteria === undefined && input.runWhen === undefined) {
+    return;
+  }
+  if (!(await isDeploymentExperimentEnabled('automationLaunchCriteria'))) {
+    throw new Error('Custom automation launch criteria are not enabled.');
+  }
+}
+
 export async function listCustomAutomationsCommand(
   auth: UserAuthSuccess,
 ): Promise<CustomAutomationListItem[]> {
@@ -354,21 +384,29 @@ export async function getCustomAutomationOptionsCommand(
     ? await getOwnedAutomation(auth, input.automationId)
     : null;
   const ownerUserId = automation?.createdByUserId ?? auth.userId;
-  const [providers, emailIdentities, { timeZone }, settings, defaultTarget] =
-    await Promise.all([
-      listConnectedCommunicationProviders(),
-      listAvailableAgentMailOutboundIdentities(ownerUserId),
-      resolveDeploymentTimeZone(),
-      auth.isAdmin ? getBackgroundAgentSettingsForDeployment() : null,
-      resolveDefaultAutomationTarget({
-        ownerUserId,
-        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
-        existingTarget: automation?.target,
-        includeSharedChannels: auth.isAdmin,
-      }),
-    ]);
+  const [
+    providers,
+    emailIdentities,
+    { timeZone },
+    settings,
+    defaultTarget,
+    launchCriteriaEnabled,
+  ] = await Promise.all([
+    listConnectedCommunicationProviders(),
+    listAvailableAgentMailOutboundIdentities(ownerUserId),
+    resolveDeploymentTimeZone(),
+    auth.isAdmin ? getBackgroundAgentSettingsForDeployment() : null,
+    resolveDefaultAutomationTarget({
+      ownerUserId,
+      capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+      existingTarget: automation?.target,
+      includeSharedChannels: auth.isAdmin,
+    }),
+    isDeploymentExperimentEnabled('automationLaunchCriteria'),
+  ]);
 
   return {
+    launchCriteriaEnabled,
     capabilities: {
       slackConnected: providers.includes('slack'),
       discordConnected: providers.includes('discord'),
@@ -389,6 +427,7 @@ export async function createCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: CustomAutomationWriteInput,
 ): Promise<CustomAutomationListItem> {
+  await assertLaunchCriteriaExperimentEnabled(input);
   assertScheduleMode(input.scheduleMode);
   const scheduleContext = await resolveDeploymentTimeZone();
   const cronExpression =
@@ -407,6 +446,8 @@ export async function createCustomAutomationCommand(
   }
   await assertAutomationModelSelection(input.model, input.reasoningEffort);
 
+  assertLaunchCriteria(input.launchCriteria);
+
   const created = await createCustomAutomation({
     name: input.name,
     prompt: input.prompt,
@@ -418,6 +459,10 @@ export async function createCustomAutomationCommand(
     reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
     target: buildTarget(input, auth.userId),
+    ...(input.launchCriteria !== undefined
+      ? { launchCriteria: input.launchCriteria }
+      : {}),
+    ...(input.runWhen !== undefined ? { runWhen: input.runWhen } : {}),
     createdByUserId: auth.userId,
   });
 
@@ -433,6 +478,7 @@ export async function updateCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: CustomAutomationWriteInput & { id: string },
 ): Promise<CustomAutomationListItem> {
+  await assertLaunchCriteriaExperimentEnabled(input);
   const existing = await getOwnedAutomation(auth, input.id);
   assertScheduleMode(input.scheduleMode);
   const scheduleContext = await resolveDeploymentTimeZone();
@@ -460,6 +506,8 @@ export async function updateCustomAutomationCommand(
   }
   await assertAutomationModelSelection(input.model, input.reasoningEffort);
 
+  assertLaunchCriteria(input.launchCriteria);
+
   const updated = await updateCustomAutomation(input.id, {
     name: input.name,
     prompt: input.prompt,
@@ -471,6 +519,10 @@ export async function updateCustomAutomationCommand(
     reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
     target,
+    ...(input.launchCriteria !== undefined
+      ? { launchCriteria: input.launchCriteria }
+      : {}),
+    ...(input.runWhen !== undefined ? { runWhen: input.runWhen } : {}),
   });
 
   return toListItem(updated, null, scheduleContext);
