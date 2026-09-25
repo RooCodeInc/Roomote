@@ -470,6 +470,41 @@ describe('Fast parent event durable queue', () => {
     );
   });
 
+  it('records the new occurrence time for a manual retry', async () => {
+    const failedOccurrenceAt = new Date('2026-09-25T09:00:00.000Z');
+    const retryClaimedAt = new Date('2026-09-25T10:00:00.000Z');
+    const manualRetryEvent: FastAgentParentEvent = {
+      type: 'automation_triggered',
+      eventId: `automation-1:${failedOccurrenceAt.toISOString()}`,
+      automationId: 'automation-1',
+      automationName: 'Webhook report',
+      launchClaimedAt: retryClaimedAt.toISOString(),
+      occurrenceAt: retryClaimedAt.toISOString(),
+      prompt: 'Review the saved report.',
+      trigger: 'manual',
+    };
+    const row = pendingRow('automation-manual-retry', manualRetryEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        id: 'automation-1',
+        launchClaimedAt: retryClaimedAt,
+        lastRunAt: retryClaimedAt,
+        status: 'succeeded',
+      },
+    );
+  });
+
   it('records a permanent Fast automation delivery failure', async () => {
     const launchClaimedAt = new Date('2026-09-01T14:25:14.129Z');
     const automationEvent = {

@@ -927,11 +927,16 @@ async function launchCustomAutomationRow(
     return result;
   }
 
+  const isManualRetry =
+    !webhookTrigger &&
+    opts.manualTrigger &&
+    Boolean(automation.lastError && automation.lastRunAt);
   const eventClaimedAt = webhookTrigger
     ? new Date()
-    : opts.manualTrigger && automation.lastError && automation.lastRunAt
-      ? automation.lastRunAt
+    : isManualRetry
+      ? automation.lastRunAt!
       : launchClaimedAt!;
+  const occurrenceAt = isManualRetry ? launchClaimedAt! : eventClaimedAt;
   const eventId = webhookTrigger
     ? `${automation.id}:webhook:${randomUUID()}`
     : `${automation.id}:${eventClaimedAt.toISOString()}`;
@@ -956,7 +961,7 @@ async function launchCustomAutomationRow(
       ),
       destination,
       eventId,
-      occurrenceAt: eventClaimedAt,
+      occurrenceAt,
       launchClaimedAt,
       trigger: opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
       preferredEnvironmentId,
@@ -971,7 +976,7 @@ async function launchCustomAutomationRow(
           id: automation.id,
           status: 'failed',
           error: message,
-          lastRunAt: eventClaimedAt,
+          lastRunAt: occurrenceAt,
           launchClaimedAt,
         });
         if (!settled) {

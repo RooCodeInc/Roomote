@@ -537,6 +537,7 @@ describe('customAutomationsJob', () => {
         automationId: automation.id,
         automationName: automation.name,
         launchClaimedAt: claimAt.toISOString(),
+        occurrenceAt: claimAt.toISOString(),
         prompt: automation.prompt,
         trigger: 'schedule',
         preferredEnvironmentId: automation.environmentId,
@@ -2033,6 +2034,7 @@ describe('runCustomAutomationNow', () => {
         event: expect.objectContaining({
           eventId: `${automation.id}:${failedClaim.toISOString()}`,
           launchClaimedAt: recoveryClaim.toISOString(),
+          occurrenceAt: recoveryClaim.toISOString(),
         }),
       }),
     );

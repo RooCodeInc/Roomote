@@ -103,6 +103,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     select: mockDbSelect,
   },
+  asc: vi.fn((value: unknown) => value),
   eq: vi.fn((left: unknown, right: unknown) => [left, right]),
   and: vi.fn((...args: unknown[]) => args),
   getAutomationRuntime: mockGetAutomationRuntime,
@@ -275,7 +276,9 @@ describe('launchCiFailureTriageForFailedRun', () => {
     mockDbSelect.mockImplementation(() => ({
       from: () => ({
         where: () => ({
-          limit: async () => [{ botAccessToken: 'xoxb-test' }],
+          orderBy: () => ({
+            limit: async () => [{ botAccessToken: 'xoxb-test' }],
+          }),
         }),
       }),
     }));
