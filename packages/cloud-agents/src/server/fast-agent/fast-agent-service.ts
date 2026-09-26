@@ -201,6 +201,7 @@ import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   findFastAgentActiveInferenceRetryNotice,
+  listRecentFastAgentHumanUserPromptTexts,
   claimFastAgentHumanFollowUpSteers,
   markFastAgentDurableTurnDelivered,
   markFastAgentInferenceRetryNoticeInterruption,
@@ -240,7 +241,10 @@ import {
   resolveFastAgentToolApprovalRules,
   shouldDisposeInstanceForToolApprovalRules,
 } from './fast-agent-tool-approvals';
-import { resolveFastAgentToolApprovalUserRequest } from './fast-agent-tool-approval-context';
+import {
+  resolveFastAgentToolApprovalSessionUserMessages,
+  resolveFastAgentToolApprovalUserRequest,
+} from './fast-agent-tool-approval-context';
 import {
   callFastAgentIntegration,
   clearFastAgentIntegrationToolCache,
@@ -3837,6 +3841,8 @@ export async function answerFastAgentQuestion({
       : null;
     // A resumed run re-persists the same prompt; it keeps the attempt's
     // place and time so the transcript still reads in order.
+    const userPromptTs =
+      previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now();
     const userEvent = previousAttempt?.prompt
       ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
       : allocateCanonicalEvent('user');
@@ -3844,8 +3850,7 @@ export async function answerFastAgentQuestion({
       {
         ...userEvent,
         turnId,
-        ts:
-          previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now(),
+        ts: userPromptTs,
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
         contentBlocks: buildFastAgentUserContentBlocks(
@@ -6705,6 +6710,13 @@ export async function answerFastAgentQuestion({
                   isFastAgentApprovalChatSurface(conversation.surface)
                     ? conversation.surface
                     : undefined;
+                let priorHumanMessagesPromise: Promise<string[]> | undefined;
+                const resolvePriorHumanMessages = () =>
+                  (priorHumanMessagesPromise ??=
+                    listRecentFastAgentHumanUserPromptTexts({
+                      conversationId: session.id,
+                      beforeTs: userPromptTs,
+                    }));
                 // Native per-tool approval bridge for gated code-mode
                 // integration calls. Web conversations surface the pending
                 // card in the Session transcript; chat-originated
@@ -6721,12 +6733,20 @@ export async function answerFastAgentQuestion({
                       surface: conversation.surface as FastAgentSurface,
                       integrations: availableIntegrations,
                       autoToolKeys: toolApprovalRules.autoToolKeys,
-                      resolveUserRequest: () =>
+                      resolveUserRequest: async () =>
                         resolveFastAgentToolApprovalUserRequest({
                           turnSource,
                           substantiveHumanInput,
                           question,
-                          compatibilityMessages: session.compatibilityMessages,
+                          priorHumanMessages: await resolvePriorHumanMessages(),
+                          steeredHumanRequests,
+                        }),
+                      resolveSessionUserMessages: async () =>
+                        resolveFastAgentToolApprovalSessionUserMessages({
+                          turnSource,
+                          substantiveHumanInput,
+                          question,
+                          priorHumanMessages: await resolvePriorHumanMessages(),
                           steeredHumanRequests,
                         }),
                       signal: promptSignal,
