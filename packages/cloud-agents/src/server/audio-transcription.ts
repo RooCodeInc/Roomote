@@ -20,7 +20,7 @@ const AUDIO_TRANSCRIPTION_SUPPORTED_MIME_TYPES = new Set([
 
 export type AudioTranscriptionResult =
   | { status: 'transcribed'; transcript: string }
-  | { status: 'unsupported_model' }
+  | { status: 'unsupported_model'; message: string }
   | { status: 'oversized' }
   | { status: 'failed' };
 
@@ -74,7 +74,12 @@ export function formatAudioAttachmentWarning(
   filename: string,
   reason: string,
 ): string {
-  return `[Audio attachment "${filename}" ${reason}.]`;
+  let end = reason.length;
+  while (end > 0 && reason.charCodeAt(end - 1) === 46) {
+    end -= 1;
+  }
+  const normalizedReason = reason.slice(0, end);
+  return `[Audio attachment "${filename}" ${normalizedReason}.]`;
 }
 
 export function formatAudioTranscriptionResult(
@@ -87,7 +92,7 @@ export function formatAudioTranscriptionResult(
   if (result.status === 'unsupported_model') {
     return formatAudioAttachmentWarning(
       filename,
-      'could not be transcribed because no configured model supports audio input',
+      `could not be transcribed: ${result.message}`,
     );
   }
   if (result.status === 'oversized') {
@@ -126,7 +131,6 @@ export async function transcribeAudioAttachment(input: {
       userId: input.userId,
       taskId: input.taskId,
       requiredInputModality: 'audio',
-      reasoningEffort: 'low',
       maxOutputTokens: 8_000,
       system:
         'Transcribe the attached audio faithfully in its original language. Preserve technical terms. Mark unintelligible portions instead of guessing. Return only the transcript.',
@@ -145,7 +149,7 @@ export async function transcribeAudioAttachment(input: {
     return { status: 'transcribed', transcript };
   } catch (error) {
     if (error instanceof NonTaskInputModalityUnsupportedError) {
-      return { status: 'unsupported_model' };
+      return { status: 'unsupported_model', message: error.message };
     }
 
     console.error(

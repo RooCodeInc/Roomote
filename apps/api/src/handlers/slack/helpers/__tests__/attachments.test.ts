@@ -24,14 +24,14 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       filename: string,
       result:
         | { status: 'transcribed'; transcript: string }
-        | { status: 'unsupported_model' }
+        | { status: 'unsupported_model'; message: string }
         | { status: 'oversized' }
         | { status: 'failed' },
     ) =>
       result.status === 'transcribed'
         ? `Audio attachment transcript ("${filename}"):\n${result.transcript}`
         : result.status === 'unsupported_model'
-          ? `[Audio attachment "${filename}" could not be transcribed because no configured model supports audio input.]`
+          ? `[Audio attachment "${filename}" could not be transcribed: ${result.message}]`
           : result.status === 'oversized'
             ? `[Audio attachment "${filename}" could not be transcribed because it exceeds the 20 MiB limit.]`
             : `[Audio attachment "${filename}" could not be transcribed.]`,
@@ -96,13 +96,15 @@ describe('processSlackAttachments audio', () => {
     ]);
   });
 
-  it('keeps an audio-only task actionable when no model supports audio', async () => {
+  it('keeps an audio-only task actionable when the Audio and video model lacks audio support', async () => {
     const slack = {
       downloadSlackFile: vi.fn().mockResolvedValue(Buffer.from('audio')),
       processSlackFiles: vi.fn().mockResolvedValue([]),
     };
     transcribeAudioAttachmentMock.mockResolvedValue({
       status: 'unsupported_model',
+      message:
+        "The Audio and video model (GPT 5.6 Terra) doesn't support audio. Select a model that supports audio in Settings > Models > Audio and video model.",
     });
 
     const result = await processSlackAttachments({
@@ -121,7 +123,7 @@ describe('processSlackAttachments audio', () => {
     });
 
     expect(result.attachmentTexts).toEqual([
-      '[Audio attachment "Audio Clip.m4a" could not be transcribed because no configured model supports audio input.]',
+      '[Audio attachment "Audio Clip.m4a" could not be transcribed: The Audio and video model (GPT 5.6 Terra) doesn\'t support audio. Select a model that supports audio in Settings > Models > Audio and video model.]',
     ]);
   });
 

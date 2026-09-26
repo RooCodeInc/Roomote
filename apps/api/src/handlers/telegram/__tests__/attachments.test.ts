@@ -92,6 +92,8 @@ describe('attachTelegramMediaToQueuedMessage audio', () => {
     });
     transcribeAudioAttachmentMock.mockResolvedValue({
       status: 'unsupported_model',
+      message:
+        "The Audio and video model (GPT 5.6 Terra) doesn't support audio. Select a model that supports audio in Settings > Models > Audio and video model.",
     });
 
     const result = await attachTelegramMediaToQueuedMessage({
@@ -109,6 +111,7 @@ describe('attachTelegramMediaToQueuedMessage audio', () => {
       botToken: 'secret-token',
     });
 
-    expect(result.text).toContain('no configured model supports audio input');
+    expect(result.text).toContain('GPT 5.6 Terra');
+    expect(result.text).toContain('Settings > Models > Audio and video model');
   });
 });

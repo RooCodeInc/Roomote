@@ -69,9 +69,15 @@ as an image input.
 
 Images never change which model handles your request. When the active model
 accepts image input, it sees the image itself. When it does not, Roomote keeps
-that model in charge and has the configured vision model (or, failing that,
+that model in charge and has the configured Vision model (or, failing that,
 the helper or coding model) describe the image on request, the same way a
 coding task delegates visual inspection to a hidden subagent.
+
+Audio transcription and video descriptions use a separate **Audio and video
+model** in **Settings > Models**, defaulting to **Same as coding model**. Choose
+a model that supports the input you use. Roomote warns when its model catalog
+shows that audio or video input is unsupported, and does not silently switch to
+the Vision or coding model if media processing fails.
 
 That means you can ask things like:
 

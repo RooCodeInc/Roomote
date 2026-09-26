@@ -285,7 +285,8 @@ where you want more speed, quality, or cost control.
 | Default coding model | Normal Roomote tasks: code changes, debugging, tests, repo investigation, and follow-ups | Strong tool use, coding quality, long-context reliability, and good instruction following |
 | Orchestration model  | Session answers and coordination of delegated task launches                              | Low latency, conversational quality, and reliable tool routing                             |
 | Helper model         | Lightweight routing, titles, summaries, and quick internal decisions                     | Low latency, low cost, and enough accuracy for short judgments                            |
-| Vision model         | Visual inspection, screenshots, UI review, and image-heavy work                          | Image understanding, layout reasoning, and concise visual feedback                        |
+| Vision model         | Image inspection                                                                           | Image input support                                                                         |
+| Audio and video model | Audio transcription and video descriptions                                                | Audio/sound and video input support                                                         |
 | Code review model    | Initial PR or MR review tasks and review-sync work                                       | Careful reasoning, bug finding, security awareness, and willingness to cite evidence      |
 | Explore model        | Repository search and focused codebase exploration                                      | Fast tool use, low latency, and reliable source-grounded investigation                    |
 | Advisor model        | Planning turns and advisor consultations inside longer coding tasks                      | Deliberate reasoning, decomposition, and ability to keep constraints in mind              |
@@ -294,6 +295,16 @@ You do not need a separate model for every role. Set a specialized role to
 **Same as coding model** to inherit the default. Many teams start with one
 strong default model, then split out a faster orchestration or helper model, or
 a stronger review model, after they can see real usage.
+
+The **Vision model** handles image attachments when the active model cannot
+inspect them. The separate **Audio and video model** handles audio transcription
+and video descriptions. Both roles default to **Same as coding model**, and
+either can be configured independently in **Settings > Models**. Roomote warns
+when catalog metadata shows that the selected media model does not support
+audio or video; it does not silently switch to the Vision or coding model.
+
+The task model switcher also includes an Audio and video role override. Changes
+to a task's role selections apply from its next message.
 
 ### Coding model routing rules
 
@@ -392,7 +403,7 @@ outcome, not everywhere by default.
 A practical starting point:
 
 - use **Medium** for the default coding model
-- use **Low** for orchestration, helper, vision, and explore work unless you see quality issues
+- use **Low** for orchestration, helper, media, and explore work unless you see quality issues
 - use **High** for code review and advisor work when you want more careful
   analysis
 - reserve **Extra high** or **Max** for models and workflows where the added
@@ -407,7 +418,7 @@ Deployment settings define the defaults, but each task can override them from
 the web task view. The model chip in the message composer shows the task's
 current coding model and reasoning level; open it to switch the coding model,
 or expand **All roles** to override the planning, code review, explore,
-helper, or vision role for that task only.
+helper, or media role for that task only.
 
 Changes apply from the next message: a turn that is already running finishes
 on the old settings, and the next turn (including its sub-agents) uses the new
@@ -480,11 +491,10 @@ For helper work, prioritize:
 - low cost
 - acceptable accuracy on short routing and summarization prompts
 
-For vision work, prioritize:
+For media work, prioritize:
 
-- support for image inputs
-- layout and screenshot understanding
-- clear descriptions of what changed or what looks wrong
+- support for the image, audio, and video inputs you use
+- layout and screenshot understanding, accurate transcription, and clear video descriptions
 
 For code review, prioritize:
 
@@ -530,8 +540,11 @@ deployment. It helps admins compare models without relying on stale defaults.
   the model is enabled in **Settings > Models**.
 - **Tasks are expensive or slow.** Move helper work to a cheaper model, lower
   reasoning where quality allows, or choose a faster default model.
-- **A vision task cannot inspect images.** Use a model with image input support
-  for the vision role.
+- **An image attachment cannot be read.** Check the selected **Vision model**
+  in **Settings > Models** for image input support.
+- **An audio or video attachment is not processed.** Turn on **Also use for
+  audio and video** under **Vision model** in **Settings > Models**, then choose
+  a model that supports the required input.
 - **A model works from one provider but not another.** Check provider-specific
   credentials, rate limits, model availability, and model ID prefix.
 - **Work stops with "You seem to have run out of credits".** The provider

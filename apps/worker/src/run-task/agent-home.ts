@@ -1492,6 +1492,12 @@ function resolveModelBackedOpenCodeConfig(
         isLiteLlmConfigured,
       )
     : undefined;
+  const rawAudioVideoModel = runtimeEnv.R_AUDIO_VIDEO_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_AUDIO_VIDEO_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
   const rawCodeReviewModel = runtimeEnv.R_CODE_REVIEW_MODEL?.trim()
     ? applyImplicitLiteLlmModelPrefix(
         runtimeEnv.R_CODE_REVIEW_MODEL.trim(),
@@ -1519,6 +1525,9 @@ function resolveModelBackedOpenCodeConfig(
   const visionModelReasoningEffort = normalizeOptionalReasoningEffort(
     runtimeEnv.R_VISION_MODEL_REASONING_EFFORT?.trim(),
   );
+  const audioVideoModelReasoningEffort = normalizeOptionalReasoningEffort(
+    runtimeEnv.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT?.trim(),
+  );
   const codeReviewModelReasoningEffort = normalizeOptionalReasoningEffort(
     runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT?.trim(),
   );
@@ -1538,6 +1547,10 @@ function resolveModelBackedOpenCodeConfig(
 
   if (rawVisionModel) {
     validateRoomoteModelEnv('R_VISION_MODEL', rawVisionModel);
+  }
+
+  if (rawAudioVideoModel) {
+    validateRoomoteModelEnv('R_AUDIO_VIDEO_MODEL', rawAudioVideoModel);
   }
 
   if (rawCodeReviewModel) {
@@ -1583,6 +1596,12 @@ function resolveModelBackedOpenCodeConfig(
         toBedrockMantleRuntimeModelId(rawVisionModel),
       )
     : undefined;
+  const audioVideoModel = rawAudioVideoModel
+    ? collectOpenRouterVariantModelAlias(
+        variantAliases,
+        toBedrockMantleRuntimeModelId(rawAudioVideoModel),
+      )
+    : undefined;
   const codeReviewModel = rawCodeReviewModel
     ? collectOpenRouterVariantModelAlias(
         variantAliases,
@@ -1606,12 +1625,14 @@ function resolveModelBackedOpenCodeConfig(
   delete runtimeEnv.R_MODEL;
   delete runtimeEnv.R_SMALL_MODEL;
   delete runtimeEnv.R_VISION_MODEL;
+  delete runtimeEnv.R_AUDIO_VIDEO_MODEL;
   delete runtimeEnv.R_CODE_REVIEW_MODEL;
   delete runtimeEnv.R_EXPLORE_MODEL;
   delete runtimeEnv.R_PLANNING_MODEL;
   delete runtimeEnv.R_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_SMALL_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_VISION_MODEL_REASONING_EFFORT;
+  delete runtimeEnv.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT;
@@ -1717,7 +1738,7 @@ function resolveModelBackedOpenCodeConfig(
   // Reasoning levels are configured per default-model role, so a level is only
   // applied when the model in play is the one the role was configured with.
   // Role precedence for a shared model: effective coding model first, then the
-  // persisted coding model, then a distinct helper model. The vision level is
+  // persisted coding model, then distinct helper/media models. The vision level is
   // scoped to the visual subagent via agent-level options above. A per-task
   // reasoning effort (stamped at launch for model overrides, or set
   // explicitly via the public API) wins over the role-configured levels.
@@ -1759,11 +1780,27 @@ function resolveModelBackedOpenCodeConfig(
     );
   }
 
+  if (
+    audioVideoModel &&
+    audioVideoModelReasoningEffort &&
+    audioVideoModel !== model &&
+    audioVideoModel !== effectiveCodingModel &&
+    audioVideoModel !== smallModel &&
+    audioVideoModel !== visionModel
+  ) {
+    providerReasoningConfig = mergeOpenCodeModelReasoningOptions(
+      providerReasoningConfig,
+      audioVideoModel,
+      audioVideoModelReasoningEffort,
+    );
+  }
+
   const configuredModelIds = [
     effectiveCodingModel,
     model,
     smallModel,
     visionModel,
+    audioVideoModel,
     codeReviewModel,
     exploreModel,
     planningModel,
@@ -1804,6 +1841,7 @@ function resolveModelBackedOpenCodeConfig(
               visionModel ?? effectiveCodingModel,
               modelContextWindows,
               modelCosts,
+              { audioVideoModel },
             ),
             runtimeEnv,
             configuredModelIds,
@@ -2205,6 +2243,7 @@ function removeDisabledProviderConfiguration(
     'R_MODEL',
     'R_SMALL_MODEL',
     'R_VISION_MODEL',
+    'R_AUDIO_VIDEO_MODEL',
     'R_CODE_REVIEW_MODEL',
     'R_EXPLORE_MODEL',
     'R_PLANNING_MODEL',

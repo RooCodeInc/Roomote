@@ -7,6 +7,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   REASONING_EFFORT_VALUES,
+  TASK_MODEL_OVERRIDE_ROLES,
   type PrReviewActionOfferStatus,
   RunStatus,
   TaskPayloadKind,
@@ -716,14 +717,7 @@ async function getResolvedSandboxTaskRunForTaskAccess(
 
 export const updateTaskModelSelectionInputSchema = z.object({
   taskId: z.string(),
-  role: z.enum([
-    'coding',
-    'helper',
-    'vision',
-    'codeReview',
-    'explore',
-    'planning',
-  ]),
+  role: z.enum(['coding', ...TASK_MODEL_OVERRIDE_ROLES]),
   /**
    * Desired model for the role, or null for the deployment default (for the
    * coding role this re-stamps the deployment's default launch model).

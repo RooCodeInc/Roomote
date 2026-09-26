@@ -1,4 +1,4 @@
-import { formatErrorForLog } from '@roomote/types';
+import { formatErrorForLog, type ReasoningEffort } from '@roomote/types';
 
 import {
   generateTrackedNonTaskText,
@@ -17,8 +17,11 @@ import {
 export async function describeVideoAttachment(input: {
   userId?: string | null;
   taskId?: string | null;
+  taskRunId?: number;
   videoBytes: Buffer;
   mimeType: string;
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
   userTextContext?: string;
 }): Promise<string | null> {
   const startedAt = Date.now();
@@ -42,6 +45,11 @@ export async function describeVideoAttachment(input: {
       surface: NON_TASK_INFERENCE_SURFACES.chatVideoDescription,
       userId: input.userId,
       taskId: input.taskId,
+      ...(input.taskRunId ? { taskRunId: input.taskRunId } : {}),
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.reasoningEffort
+        ? { reasoningEffort: input.reasoningEffort }
+        : {}),
       requiredInputModality: 'video',
       system: VIDEO_AGENT_SYSTEM_PROMPT,
       prompt: buildVideoAgentUserPrompt({
@@ -62,9 +70,9 @@ export async function describeVideoAttachment(input: {
   } catch (error) {
     if (error instanceof NonTaskInputModalityUnsupportedError) {
       console.warn(
-        `[Video Agent] Skipping video description because no configured model supports video input (${Date.now() - startedAt}ms)`,
+        `[Video Agent] Skipping video description: ${error.message} (${Date.now() - startedAt}ms)`,
       );
-      return null;
+      return error.message;
     }
 
     console.error(

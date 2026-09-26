@@ -128,12 +128,14 @@ describe('WorkerEnv', () => {
         R_MODEL: 'openrouter/openai/gpt-5.4',
         R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
         R_VISION_MODEL: 'openrouter/openai/gpt-5.5',
+        R_AUDIO_VIDEO_MODEL: 'openrouter/google/gemini-3.8-flash',
         R_CODE_REVIEW_MODEL: 'openrouter/openai/gpt-5.5',
         R_EXPLORE_MODEL: 'openrouter/openai/gpt-5.4-mini',
         R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
         R_MODEL_REASONING_EFFORT: 'medium',
         R_SMALL_MODEL_REASONING_EFFORT: 'low',
         R_VISION_MODEL_REASONING_EFFORT: 'low',
+        R_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'medium',
         R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
         R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
         R_PLANNING_MODEL_REASONING_EFFORT: 'high',
@@ -151,6 +153,7 @@ describe('WorkerEnv', () => {
       expect(userEnv).not.toHaveProperty('R_MODEL');
       expect(userEnv).not.toHaveProperty('R_SMALL_MODEL');
       expect(userEnv).not.toHaveProperty('R_VISION_MODEL');
+      expect(userEnv).not.toHaveProperty('R_AUDIO_VIDEO_MODEL');
       expect(userEnv).not.toHaveProperty('R_CODE_REVIEW_MODEL');
       expect(userEnv).not.toHaveProperty('R_EXPLORE_MODEL');
       expect(userEnv).not.toHaveProperty('R_PLANNING_MODEL');
@@ -163,6 +166,9 @@ describe('WorkerEnv', () => {
       expect(openCodeEnv.R_MODEL).toBe('openrouter/openai/gpt-5.4');
       expect(openCodeEnv.R_SMALL_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
       expect(openCodeEnv.R_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
+      expect(openCodeEnv.R_AUDIO_VIDEO_MODEL).toBe(
+        'openrouter/google/gemini-3.8-flash',
+      );
       expect(openCodeEnv.R_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
       expect(openCodeEnv.R_EXPLORE_MODEL).toBe(
         'openrouter/openai/gpt-5.4-mini',
@@ -173,6 +179,7 @@ describe('WorkerEnv', () => {
       expect(openCodeEnv.R_MODEL_REASONING_EFFORT).toBe('medium');
       expect(openCodeEnv.R_SMALL_MODEL_REASONING_EFFORT).toBe('low');
       expect(openCodeEnv.R_VISION_MODEL_REASONING_EFFORT).toBe('low');
+      expect(openCodeEnv.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT).toBe('medium');
       expect(openCodeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBe('high');
       expect(openCodeEnv.R_EXPLORE_MODEL_REASONING_EFFORT).toBe('low');
       expect(openCodeEnv.R_PLANNING_MODEL_REASONING_EFFORT).toBe('high');

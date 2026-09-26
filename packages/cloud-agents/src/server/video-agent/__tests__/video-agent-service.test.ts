@@ -58,9 +58,9 @@ describe('video-agent-service', () => {
     );
   });
 
-  it('returns null when configured models do not support video', async () => {
+  it('returns Audio and video model guidance when the selected model does not support video', async () => {
     generateTrackedNonTaskTextMock.mockRejectedValue(
-      new NonTaskInputModalityUnsupportedError('video'),
+      new NonTaskInputModalityUnsupportedError('video', 'Gemini 3.6 Flash'),
     );
 
     const description = await describeVideoAttachment({
@@ -68,9 +68,10 @@ describe('video-agent-service', () => {
       mimeType: 'video/mp4',
     });
 
-    expect(description).toBeNull();
+    expect(description).toContain('Gemini 3.6 Flash');
+    expect(description).toContain("doesn't support video");
     expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining('no configured model supports video input'),
+      expect.stringContaining('Settings > Models > Audio and video model'),
     );
   });
 
@@ -87,6 +88,22 @@ describe('video-agent-service', () => {
     expect(description).toBeNull();
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('provider unavailable'),
+    );
+  });
+
+  it('leaves raw provider failures distinct from normalized capability errors', async () => {
+    generateTrackedNonTaskTextMock.mockRejectedValue(
+      new Error('The model cannot process video input.'),
+    );
+
+    const description = await describeVideoAttachment({
+      videoBytes: Buffer.from('video-bytes'),
+      mimeType: 'video/mp4',
+    });
+
+    expect(description).toBeNull();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('The model cannot process video input.'),
     );
   });
 
