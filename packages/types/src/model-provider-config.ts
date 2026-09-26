@@ -401,6 +401,84 @@ function buildRecommendedCodingPresetRoles(
   };
 }
 
+const DEFAULT_RECOMMENDED_PRESET_ID = 'default';
+const LUNA_DEFAULT_RECOMMENDED_PRESET_ID = 'luna-default';
+
+function buildRecommendedAllRoleModels(
+  modelId: string,
+  reasoningEffort?: ReasoningEffort,
+): RecommendedModelPreset['roles'] {
+  // Orchestration intentionally follows coding, matching the historical
+  // provider mappings and its existing runtime fallback.
+  return Object.fromEntries(
+    TASK_MODEL_ROLES.filter((role) => role !== 'orchestration').map((role) => [
+      role,
+      {
+        modelId,
+        ...(role === 'coding' && reasoningEffort ? { reasoningEffort } : {}),
+      },
+    ]),
+  ) as RecommendedModelPreset['roles'];
+}
+
+function buildLunaDefaultModelPreset(modelId: string): RecommendedModelPreset {
+  return {
+    id: LUNA_DEFAULT_RECOMMENDED_PRESET_ID,
+    label: 'Default',
+    default: true,
+    roles: buildRecommendedAllRoleModels(modelId, 'medium'),
+  };
+}
+
+function buildLegacyRecommendedModelPreset(options: {
+  defaultModelId: string;
+  recommendedCodingModelId?: string;
+  recommendedRoleModels: RecommendedRoleModels;
+  recommendedRoleReasoningEfforts?: RecommendedRoleReasoningEfforts;
+  defaultPreset?: boolean;
+}): RecommendedModelPreset {
+  const roles: RecommendedModelPreset['roles'] = {
+    coding: {
+      modelId: options.recommendedCodingModelId ?? options.defaultModelId,
+    },
+    ...Object.fromEntries(
+      Object.entries(options.recommendedRoleModels).map(([role, modelId]) => {
+        const reasoningEffort =
+          options.recommendedRoleReasoningEfforts?.[
+            role as keyof RecommendedRoleReasoningEfforts
+          ];
+
+        return [
+          role,
+          {
+            modelId,
+            ...(reasoningEffort ? { reasoningEffort } : {}),
+          },
+        ];
+      }),
+    ),
+  };
+
+  return {
+    id: DEFAULT_RECOMMENDED_PRESET_ID,
+    label: 'Recommended',
+    ...(options.defaultPreset ? { default: true } : {}),
+    roles,
+  };
+}
+
+function buildDefaultAndRecommendedModelPresets(options: {
+  defaultModelId: string;
+  recommendedCodingModelId?: string;
+  recommendedRoleModels: RecommendedRoleModels;
+  recommendedRoleReasoningEfforts?: RecommendedRoleReasoningEfforts;
+}): readonly RecommendedModelPreset[] {
+  return [
+    buildLunaDefaultModelPreset(options.defaultModelId),
+    buildLegacyRecommendedModelPreset(options),
+  ];
+}
+
 export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
   'openrouter';
 
@@ -413,16 +491,66 @@ export const DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER =
   'roomote-dev-login-intentionally-invalid';
 
 const OPENAI_RECOMMENDED_MODEL_PRESETS = [
+  buildLunaDefaultModelPreset('openai/gpt-5.6-luna'),
   {
     id: 'default',
     label: 'Recommended',
-    default: true,
-    roles: buildRecommendedCodingPresetRoles('openai/gpt-5.6-luna', 'medium'),
+    roles: {
+      coding: {
+        modelId: 'openai/gpt-6-sol',
+        reasoningEffort: 'medium',
+      },
+      helper: {
+        modelId: 'openai/gpt-6-luna',
+        reasoningEffort: 'low',
+      },
+      vision: {
+        modelId: 'openai/gpt-6-sol',
+        reasoningEffort: 'low',
+      },
+      codeReview: {
+        modelId: 'openai/gpt-5.6-terra',
+        reasoningEffort: 'high',
+      },
+      explore: {
+        modelId: 'openai/gpt-6-luna',
+        reasoningEffort: 'low',
+      },
+      planning: {
+        modelId: 'openai/gpt-6-sol',
+        reasoningEffort: 'xhigh',
+      },
+    },
   },
   {
     id: 'luna-max',
     label: 'Luna Max',
-    roles: buildRecommendedCodingPresetRoles('openai/gpt-6-luna', 'max'),
+    roles: {
+      coding: {
+        modelId: 'openai/gpt-6-luna',
+        reasoningEffort: 'max',
+      },
+      helper: {
+        modelId: 'openai/gpt-6-luna',
+        reasoningEffort: 'low',
+      },
+      vision: {
+        modelId: 'openai/gpt-6-sol',
+        reasoningEffort: 'low',
+      },
+      codeReview: {
+        modelId: 'openai/gpt-5.6-terra',
+        reasoningEffort: 'high',
+      },
+      explore: {
+        modelId: 'openai/gpt-6-luna',
+        reasoningEffort: 'low',
+      },
+      planning: {
+        modelId: 'openai/gpt-6-sol',
+        reasoningEffort: 'xhigh',
+      },
+    },
   },
 ] as const satisfies readonly RecommendedModelPreset[];
 
@@ -431,7 +559,7 @@ const OPENROUTER_EFFICIENT_MODEL_PRESET = {
   label: 'Efficient',
   // Reasoning efforts are intentionally unset so the shared per-role
   // defaults apply, exactly as they do for a hand-configured model.
-  roles: buildRecommendedCodingPresetRoles('openrouter/openai/gpt-5.6-luna'),
+  roles: buildRecommendedAllRoleModels('openrouter/openai/gpt-6-luna'),
 } as const satisfies RecommendedModelPreset;
 
 /**
@@ -474,7 +602,9 @@ function rebaseOpenRouterPresetForRoomote(
 }
 
 const ROOMOTE_TRIAL_MODEL_PRESET = {
-  ...rebaseOpenRouterPresetForRoomote(OPENROUTER_EFFICIENT_MODEL_PRESET),
+  ...rebaseOpenRouterPresetForRoomote(
+    buildLunaDefaultModelPreset('openrouter/openai/gpt-5.6-luna'),
+  ),
   id: ROOMOTE_TRIAL_MODEL_PRESET_ID,
   label: 'Roomote Trial',
   default: true,
@@ -513,22 +643,58 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
     ),
     recommendedPresets: [
+      buildLunaDefaultModelPreset(DEFAULT_TASK_MODEL_ID),
       {
         id: 'balanced',
         label: 'Balanced',
-        default: true,
-        roles: buildRecommendedCodingPresetRoles(
-          DEFAULT_TASK_MODEL_ID,
-          'medium',
-        ),
+        roles: {
+          coding: {
+            modelId: 'openrouter/openai/gpt-5.6-terra',
+            reasoningEffort: 'medium',
+          },
+          helper: {
+            modelId: 'openrouter/google/gemini-3.8-flash',
+            reasoningEffort: 'low',
+          },
+          codeReview: {
+            modelId: 'openrouter/anthropic/claude-sonnet-5',
+            reasoningEffort: 'medium',
+          },
+          explore: {
+            modelId: 'openrouter/google/gemini-3.8-flash',
+            reasoningEffort: 'low',
+          },
+          planning: {
+            modelId: 'openrouter/anthropic/claude-opus-5.5',
+            reasoningEffort: 'high',
+          },
+        },
       },
       {
         id: 'quick-turnaround',
         label: 'Quick turnaround',
-        roles: buildRecommendedCodingPresetRoles(
-          'openrouter/openai/gpt-6-luna',
-          'low',
-        ),
+        roles: {
+          coding: {
+            modelId: 'openrouter/google/gemini-3.8-flash',
+            reasoningEffort: 'low',
+          },
+          helper: {
+            modelId: 'openrouter/google/gemini-3.8-flash',
+            reasoningEffort: 'low',
+          },
+          codeReview: {
+            modelId: 'openrouter/anthropic/claude-sonnet-5',
+            reasoningEffort: 'medium',
+          },
+          explore: {
+            modelId: 'openrouter/google/gemini-3.8-flash',
+            reasoningEffort: 'low',
+          },
+          planning: {
+            modelId: 'openrouter/anthropic/claude-opus-5.5',
+            reasoningEffort: 'medium',
+          },
+        },
       },
       OPENROUTER_EFFICIENT_MODEL_PRESET,
     ],
@@ -562,6 +728,17 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'minimax-m3': 'vercel/minimax/minimax-m3',
       'grok-4-7': 'vercel/spacexai/grok-4.7',
     }),
+    recommendedPresets: buildDefaultAndRecommendedModelPresets({
+      defaultModelId: 'vercel/openai/gpt-5.6-luna',
+      recommendedCodingModelId: 'vercel/openai/gpt-5.6-terra',
+      recommendedRoleModels: {
+        helper: 'vercel/google/gemini-3.8-flash',
+        codeReview: 'vercel/anthropic/claude-sonnet-5',
+        explore: 'vercel/google/gemini-3.8-flash',
+        planning: 'vercel/anthropic/claude-opus-5.5',
+      },
+      recommendedRoleReasoningEfforts: { codeReview: 'medium' },
+    }),
   },
   {
     id: 'requesty',
@@ -586,6 +763,17 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'glm-5-3': 'requesty/glm-5.3',
       'kimi-k3': 'requesty/kimi-k3',
       'grok-4-7': 'requesty/xai/grok-4.7',
+    }),
+    recommendedPresets: buildDefaultAndRecommendedModelPresets({
+      defaultModelId: 'requesty/gpt-5.6-luna@eu',
+      recommendedCodingModelId: 'requesty/claude-sonnet-5',
+      recommendedRoleModels: {
+        helper: 'requesty/gemini-3.8-flash',
+        codeReview: 'requesty/claude-sonnet-5',
+        explore: 'requesty/gemini-3.8-flash',
+        planning: 'requesty/anthropic/claude-opus-5-5',
+      },
+      recommendedRoleReasoningEfforts: { codeReview: 'medium' },
     }),
   },
   {
@@ -685,6 +873,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-6-luna': 'azure/gpt-6-luna',
       'claude-opus-5-5': 'azure/claude-opus-5-5',
     }),
+    recommendedPresets: buildDefaultAndRecommendedModelPresets({
+      defaultModelId: 'azure/gpt-5.6-luna',
+      recommendedCodingModelId: 'azure/gpt-5.6-terra',
+      recommendedRoleModels: {
+        helper: 'azure/gpt-6-luna',
+        codeReview: 'azure/gpt-6-sol',
+        explore: 'azure/gpt-6-luna',
+        planning: 'azure/gpt-6-sol',
+      },
+    }),
   },
   {
     id: 'azure-cognitive-services',
@@ -713,6 +911,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-luna': 'azure-cognitive-services/gpt-5.6-luna',
       'gpt-6-luna': 'azure-cognitive-services/gpt-6-luna',
       'claude-opus-5-5': 'azure-cognitive-services/claude-opus-5-5',
+    }),
+    recommendedPresets: buildDefaultAndRecommendedModelPresets({
+      defaultModelId: 'azure-cognitive-services/gpt-5.6-luna',
+      recommendedCodingModelId: 'azure-cognitive-services/gpt-5.6-terra',
+      recommendedRoleModels: {
+        helper: 'azure-cognitive-services/gpt-6-luna',
+        codeReview: 'azure-cognitive-services/gpt-6-sol',
+        explore: 'azure-cognitive-services/gpt-6-luna',
+        planning: 'azure-cognitive-services/gpt-6-sol',
+      },
     }),
   },
   {
@@ -821,6 +1029,18 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'minimax-m3': 'opencode/minimax-m3',
       'grok-4-7': 'opencode/grok-4.7',
     }),
+    recommendedPresets: buildDefaultAndRecommendedModelPresets({
+      defaultModelId: 'opencode/gpt-5.6-luna',
+      recommendedCodingModelId: 'opencode/big-pickle',
+      recommendedRoleModels: {
+        helper: 'opencode/gemini-3.8-flash',
+        vision: 'opencode/claude-sonnet-5',
+        codeReview: 'opencode/claude-sonnet-5',
+        explore: 'opencode/gemini-3.8-flash',
+        planning: 'opencode/claude-opus-5-5',
+      },
+      recommendedRoleReasoningEfforts: { codeReview: 'medium' },
+    }),
   },
   {
     id: 'opencode-go',
@@ -847,6 +1067,17 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'qwen3-8-max': 'opencode-go/qwen3.8-max',
       'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
       'gpt-6-luna': 'opencode-go/gpt-6-luna',
+    }),
+    recommendedPresets: buildDefaultAndRecommendedModelPresets({
+      defaultModelId: 'opencode-go/gpt-5.6-luna',
+      recommendedCodingModelId: 'opencode-go/glm-5.3',
+      recommendedRoleModels: {
+        helper: 'opencode-go/gpt-5.6-luna',
+        vision: 'opencode-go/gpt-5.6-luna',
+        codeReview: 'opencode-go/minimax-m3',
+        explore: 'opencode-go/deepseek-v4.1-flash',
+        planning: 'opencode-go/qwen3.8-max',
+      },
     }),
   },
   {
@@ -884,6 +1115,17 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'bedrock-mantle/openai.gpt-5.6-terra',
       'gpt-5-6-luna': 'bedrock-mantle/openai.gpt-5.6-luna',
       'gpt-6-luna': 'bedrock-mantle/openai.gpt-6-luna',
+    }),
+    recommendedPresets: buildDefaultAndRecommendedModelPresets({
+      defaultModelId: 'bedrock-mantle/openai.gpt-5.6-luna',
+      recommendedCodingModelId: 'bedrock-mantle/anthropic.claude-sonnet-5',
+      recommendedRoleModels: {
+        helper: 'bedrock-mantle/anthropic.claude-haiku-4-5',
+        codeReview: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        explore: 'bedrock-mantle/anthropic.claude-haiku-4-5',
+        planning: 'bedrock-mantle/anthropic.claude-opus-5-5',
+      },
+      recommendedRoleReasoningEfforts: { codeReview: 'medium' },
     }),
   },
   {
@@ -1003,12 +1245,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k2-7-code': 'github-copilot/kimi-k2.7-code',
     }),
     recommendedPresets: [
+      buildLunaDefaultModelPreset('github-copilot/gpt-5.6-luna'),
       {
         id: 'default',
         label: 'Recommended',
-        default: true,
         roles: buildRecommendedCodingPresetRoles(
-          'github-copilot/gpt-5.6-luna',
+          'github-copilot/gpt-6-luna',
           'medium',
         ),
       },
@@ -1366,8 +1608,6 @@ export function buildTaskModelRoleOverrideEnv(
   return env;
 }
 
-const DEFAULT_RECOMMENDED_PRESET_ID = 'default';
-
 function cloneRecommendedModelPreset(
   preset: RecommendedModelPreset,
 ): RecommendedModelPreset {
@@ -1397,32 +1637,13 @@ export function getRecommendedModelPresets(
     return provider.recommendedPresets.map(cloneRecommendedModelPreset);
   }
 
-  const roleModels = provider.recommendedRoleModels ?? {};
   return [
-    {
-      id: DEFAULT_RECOMMENDED_PRESET_ID,
-      label: 'Recommended',
-      default: true,
-      roles: {
-        coding: { modelId: provider.defaultRoomoteModel },
-        ...Object.fromEntries(
-          Object.entries(roleModels).map(([role, modelId]) => {
-            const reasoningEffort =
-              provider.recommendedRoleReasoningEfforts?.[
-                role as keyof RecommendedRoleReasoningEfforts
-              ];
-
-            return [
-              role,
-              {
-                modelId,
-                ...(reasoningEffort ? { reasoningEffort } : {}),
-              },
-            ];
-          }),
-        ),
-      },
-    },
+    buildLegacyRecommendedModelPreset({
+      defaultModelId: provider.defaultRoomoteModel,
+      recommendedRoleModels: provider.recommendedRoleModels ?? {},
+      recommendedRoleReasoningEfforts: provider.recommendedRoleReasoningEfforts,
+      defaultPreset: true,
+    }),
   ];
 }
 

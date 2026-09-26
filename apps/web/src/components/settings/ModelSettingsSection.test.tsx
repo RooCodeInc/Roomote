@@ -1369,6 +1369,53 @@ describe('ModelSettingsSection', () => {
     );
   });
 
+  it('shows the named Default preset without a redundant default suffix', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['openrouter'],
+      recommendedPresetsByProvider: {
+        openrouter: [
+          {
+            id: 'luna-default',
+            label: 'Default',
+            default: true,
+            roles: {
+              coding: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+              helper: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+              vision: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+              codeReview: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+              explore: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+              planning: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+            },
+          },
+          {
+            id: 'balanced',
+            label: 'Balanced',
+            roles: {
+              coding: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+              helper: { modelId: 'openrouter/google/gemini-3.8-flash' },
+            },
+          },
+        ],
+      },
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+
+    expect(
+      await screen.findByRole('option', { name: 'OpenRouter: Default' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'OpenRouter: Default (default)' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: 'OpenRouter: Balanced' }),
+    ).toBeInTheDocument();
+  });
+
   it('applies a named preset with models outside the suggested catalog and preserves env-managed reasoning', async () => {
     settingsData.current = buildSettingsData({
       helperReasoningManagedByEnv: true,
