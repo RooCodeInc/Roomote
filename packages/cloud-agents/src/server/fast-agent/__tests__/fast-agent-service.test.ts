@@ -1567,6 +1567,35 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('honors an explicit empty image selection over default event images', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The result is ready without an attachment.',
+          imageArtifactIds: [],
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      defaultImageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'The result is ready without an attachment.',
+      imageArtifactIds: [],
+    });
+  });
+
   it('persists child-selected charts when the parent omits the optional chart argument', async () => {
     const chart = {
       title: 'Traffic sources',

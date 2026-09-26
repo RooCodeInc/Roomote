@@ -4078,7 +4078,7 @@ export async function answerFastAgentQuestion({
           : reply;
       const replyWithImages = {
         ...eligibleReply,
-        ...(!eligibleReply.imageArtifactIds?.length &&
+        ...(eligibleReply.imageArtifactIds === undefined &&
         defaultImageArtifactIds.length
           ? { imageArtifactIds: defaultImageArtifactIds }
           : {}),
@@ -5037,9 +5037,9 @@ export async function answerFastAgentQuestion({
             const requestedImageArtifactIds = args.imageArtifactIds ?? [];
             const requestedVideoArtifactIds = args.videoArtifactIds ?? [];
             const signatureImageArtifactIds =
-              requestedImageArtifactIds.length > 0
-                ? requestedImageArtifactIds
-                : defaultImageArtifactIds;
+              args.imageArtifactIds === undefined
+                ? defaultImageArtifactIds
+                : requestedImageArtifactIds;
             const signature = JSON.stringify([
               args.purpose,
               message,
@@ -5068,7 +5068,7 @@ export async function answerFastAgentQuestion({
               {
                 purpose: args.purpose,
                 message,
-                ...(requestedImageArtifactIds.length
+                ...(args.imageArtifactIds !== undefined
                   ? { imageArtifactIds: requestedImageArtifactIds }
                   : {}),
                 ...(requestedVideoArtifactIds.length

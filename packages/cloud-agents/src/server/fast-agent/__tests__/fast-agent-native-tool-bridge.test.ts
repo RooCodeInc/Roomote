@@ -155,6 +155,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain(
       'Never claim an image or screenshot is attached, shown, or included unless this list is non-empty',
     );
+    expect(replySource).toContain(
+      'Pass an explicit empty list to suppress default event images and keep the reply text-only',
+    );
     expect(replySource).toContain('accessible artifact viewer link');
     expect(replySource).toContain(
       'videoArtifactIds: z.array(z.string()).optional()',
