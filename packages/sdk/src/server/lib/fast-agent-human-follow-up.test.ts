@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
   enqueueParentEvent: vi.fn(),
+  insertValues: vi.fn(),
   updateWhere: vi.fn(),
   insertOnConflict: vi.fn(),
   insertReturning: vi.fn(),
@@ -29,7 +30,7 @@ vi.mock('@roomote/db/server', () => ({
   db: (() => {
     const tx = {
       insert: vi.fn(() => ({
-        values: vi.fn(() => ({ onConflictDoNothing: mocks.insertOnConflict })),
+        values: mocks.insertValues,
       })),
       update: vi.fn(() => ({
         set: vi.fn(() => ({ where: mocks.updateWhere })),
@@ -75,6 +76,9 @@ describe('persistFastAgentInlineHumanTurn', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateWhere.mockResolvedValue(undefined);
+    mocks.insertValues.mockReturnValue({
+      onConflictDoNothing: mocks.insertOnConflict,
+    });
     mocks.insertOnConflict.mockReturnValue({
       returning: mocks.insertReturning,
     });
@@ -95,6 +99,45 @@ describe('persistFastAgentInlineHumanTurn', () => {
     expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
     // The supersede sweep runs once the row is known to be pending.
     expect(mocks.updateWhere).toHaveBeenCalledOnce();
+  });
+
+  it('sanitizes NUL characters before inline JSONB admission', async () => {
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+
+    await persistFastAgentInlineHumanTurn({
+      parent: {
+        ...parent,
+        conversation: {
+          ...parent.conversation,
+          replyTarget: {
+            ...parent.conversation.replyTarget,
+            threadId: '100.\0' + '1',
+          },
+        },
+      },
+      event: { ...event, question: 'Change\0 direction.' },
+    });
+
+    expect(mocks.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent: {
+          ...parent,
+          conversation: {
+            ...parent.conversation,
+            replyTarget: {
+              ...parent.conversation.replyTarget,
+              threadId: '100.1',
+            },
+          },
+        },
+        event: { ...event, question: 'Change direction.' },
+      }),
+    );
   });
 
   it('does not supersede a parked request with a quiet-eligible provider aside', async () => {

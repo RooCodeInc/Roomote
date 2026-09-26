@@ -20,6 +20,7 @@ import {
   buildFastAgentParentEventKey,
   enqueueFastAgentParentEvent,
 } from './fast-agent-parent-event-queue';
+import { sanitizeFastAgentParentEventJson } from './fast-agent-parent-event-json';
 
 export type FastAgentDurableTurn = {
   id: string;
@@ -102,7 +103,9 @@ export async function admitFastAgentInlineHumanTurn(params: {
   parent: FastAgentParent;
   event: FastAgentHumanFollowUpEvent;
 }): Promise<FastAgentInlineHumanTurnAdmission> {
-  const eventKey = buildFastAgentParentEventKey(params);
+  const parent = sanitizeFastAgentParentEventJson(params.parent);
+  const event = sanitizeFastAgentParentEventJson(params.event);
+  const eventKey = buildFastAgentParentEventKey({ parent, event });
   // Admission and supersession commit together, so recovery can never see
   // the new row without the older interrupted row already retired.
   return db.transaction(async (tx) => {
@@ -112,10 +115,10 @@ export async function admitFastAgentInlineHumanTurn(params: {
     const inserted = await tx
       .insert(fastAgentParentEvents)
       .values({
-        conversationId: params.parent.sessionId,
+        conversationId: parent.sessionId,
         eventKey,
-        parent: params.parent,
-        event: params.event,
+        parent,
+        event,
         admission: 'inline',
         claimedUntil,
       })
@@ -153,8 +156,8 @@ export async function admitFastAgentInlineHumanTurn(params: {
 
     // An ambient aside may be ignored; it cannot replace an unfinished request.
     if (
-      supersedesPendingTurns(params.event) &&
-      params.event.allowSilentAmbientReply !== true
+      supersedesPendingTurns(event) &&
+      event.allowSilentAmbientReply !== true
     ) {
       await tx
         .update(fastAgentParentEvents)
@@ -165,7 +168,7 @@ export async function admitFastAgentInlineHumanTurn(params: {
         })
         .where(
           and(
-            eq(fastAgentParentEvents.conversationId, params.parent.sessionId),
+            eq(fastAgentParentEvents.conversationId, parent.sessionId),
             eq(fastAgentParentEvents.admission, 'inline'),
             ne(fastAgentParentEvents.eventKey, eventKey),
             isNull(fastAgentParentEvents.deliveredAt),
