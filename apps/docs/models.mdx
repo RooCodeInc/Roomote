@@ -335,9 +335,10 @@ inference, and selecting those routes sends decision text to that provider.
 
 The **Roomote judgment model** is an open-weight model served on
 Roomote-operated infrastructure, where its decision text is processed. It
-answers the same typed questions as Jev and follows the same confidence rules.
-Self-hosted deployments can point `R_JUDGMENT_UPSTREAM_URL` at any server that
-speaks the same typed decisions request.
+answers the same typed questions as Jev and follows the same confidence rules
+for decisions in its evaluated policy. Self-hosted deployments can point
+`R_JUDGMENT_UPSTREAM_URL` at any server that speaks the same typed decisions
+request.
 
 When a judgment model is on, Roomote asks it first for:
 
