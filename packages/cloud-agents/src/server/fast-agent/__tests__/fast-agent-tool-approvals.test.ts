@@ -92,7 +92,6 @@ import {
   extractApprovalCallArgs,
   hashIntegrationToolApprovalRules,
   integrationToolApprovalRulesToConfig,
-  isFastAgentApprovalChatSurface,
   resolveFastAgentToolApprovalRules,
   resolveFastAgentToolApprovalSession,
   shouldDisposeInstanceForToolApprovalRules,
@@ -814,22 +813,6 @@ describe('resolveFastAgentToolApprovalSession', () => {
       deciderUserId: 'acting-user',
     });
   });
-});
-
-describe('approval chat surfaces', () => {
-  it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
-    'treats %s as a present approval surface',
-    (surface) => {
-      expect(isFastAgentApprovalChatSurface(surface)).toBe(true);
-    },
-  );
-
-  it.each(['web', 'agentmail', 'automation'] as const)(
-    'does not treat %s as a chat approval surface',
-    (surface) => {
-      expect(isFastAgentApprovalChatSurface(surface)).toBe(false);
-    },
-  );
 });
 
 describe('tool approval bridge', () => {

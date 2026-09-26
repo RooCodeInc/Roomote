@@ -16,12 +16,12 @@ import {
   taskRuns,
   trackedMessages,
 } from '@roomote/db/server';
-import { isSessionUserPresent } from '@roomote/redis';
 import {
   describeIntegrationToolAutoDeny,
   resolveIntegrationToolAutoDecision,
   resolveIntegrationToolAutoState,
 } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
+import { isAutoApprovalRequesterPresent } from '@roomote/cloud-agents/server/integration-tool-auto-approval-presence';
 import {
   compileTaskIntegrationToolApprovals,
   integrationToolModeIsAutoAssessed,
@@ -104,48 +104,6 @@ async function publishTaskToolApproval(input: {
   } catch (error) {
     await db.delete(trackedMessages).where(eq(trackedMessages.id, claim.id));
     throw error;
-  }
-}
-
-const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
-
-async function isTaskSessionOwnerPresent(input: {
-  sessionId: string;
-  userId: string;
-  sourceSurface: string | null | undefined;
-}): Promise<boolean> {
-  if (
-    input.sourceSurface === 'slack' ||
-    input.sourceSurface === 'discord' ||
-    input.sourceSurface === 'teams' ||
-    input.sourceSurface === 'telegram'
-  ) {
-    return true;
-  }
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      isSessionUserPresent({
-        sessionId: input.sessionId,
-        userId: input.userId,
-      }),
-      new Promise<boolean>((resolve) => {
-        timeout = setTimeout(() => {
-          console.warn(
-            `[Task tool approvals] Presence lookup timed out for Session ${input.sessionId}; asking defensively.`,
-          );
-          resolve(true);
-        }, SESSION_PRESENCE_LOOKUP_TIMEOUT_MS);
-        timeout.unref?.();
-      }),
-    ]);
-  } catch (error) {
-    console.warn(
-      `[Task tool approvals] Presence lookup failed for Session ${input.sessionId}; asking defensively: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return true;
-  } finally {
-    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -345,10 +303,10 @@ export async function requestTaskToolApproval(input: {
     return { outcome: 'approved' };
   }
   if (auto?.action === 'ask') {
-    const ownerPresent = await isTaskSessionOwnerPresent({
+    const ownerPresent = await isAutoApprovalRequesterPresent({
       sessionId: session.sessionId,
       userId: session.ownerUserId,
-      sourceSurface: session.sourceSurface,
+      surface: session.sourceSurface,
     });
     if (!ownerPresent) {
       // Born-terminal audit row; no card is shown while the owner is away.

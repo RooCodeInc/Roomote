@@ -19,7 +19,6 @@ import {
   markIntegrationToolApprovalConsumed,
   sessionTasks,
 } from '@roomote/db/server';
-import { isSessionUserPresent } from '@roomote/redis';
 import {
   integrationToolModeIsAutoAssessed,
   integrationToolPolicyKey,
@@ -37,6 +36,7 @@ import {
   resolveIntegrationToolAutoDecision,
   resolveIntegrationToolAutoState,
 } from '../integration-tool-auto-evaluation';
+import { isAutoApprovalRequesterPresent } from '../integration-tool-auto-approval-presence';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 
@@ -61,7 +61,6 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
  *   call with changed arguments is a new ask by construction.
  */
 const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
-const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
 
 async function isFastAgentLaunchedTask(
   sessionId: string,
@@ -79,22 +78,6 @@ async function isFastAgentLaunchedTask(
     )
     .limit(1);
   return association !== undefined;
-}
-
-type FastAgentApprovalChatSurface = Extract<
-  FastAgentSurface,
-  'slack' | 'discord' | 'teams' | 'telegram'
->;
-
-export function isFastAgentApprovalChatSurface(
-  surface: FastAgentSurface,
-): surface is FastAgentApprovalChatSurface {
-  return (
-    surface === 'slack' ||
-    surface === 'discord' ||
-    surface === 'teams' ||
-    surface === 'telegram'
-  );
 }
 
 /**
@@ -423,35 +406,6 @@ export function createFastAgentToolApprovalBridge(input: {
   const handledRequestIds = new Set<string>();
   const notifiedApprovalIds = new Set<string>();
 
-  const ownerIsPresent = async (): Promise<boolean> => {
-    if (isFastAgentApprovalChatSurface(input.surface)) return true;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        isSessionUserPresent({
-          sessionId: input.sessionId,
-          userId: input.userId,
-        }),
-        new Promise<boolean>((resolve) => {
-          timeout = setTimeout(() => {
-            console.warn(
-              `[Fast Agent] Presence lookup timed out for Session ${input.sessionId}; asking defensively.`,
-            );
-            resolve(true);
-          }, SESSION_PRESENCE_LOOKUP_TIMEOUT_MS);
-          timeout.unref?.();
-        }),
-      ]);
-    } catch (error) {
-      console.warn(
-        `[Fast Agent] Presence lookup failed for Session ${input.sessionId}; asking defensively: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return true;
-    } finally {
-      if (timeout) clearTimeout(timeout);
-    }
-  };
-
   // A code-mode child call's dotted name (`server.tool`) is unambiguous even
   // when its flattened permission key (`server_tool`) is not, so it is the
   // identity source for colliding keys. Flattening replaces the first dot.
@@ -590,7 +544,14 @@ export function createFastAgentToolApprovalBridge(input: {
         await helpers.reply(ask.requestId, 'once');
         return;
       }
-      if (auto?.action === 'ask' && !(await ownerIsPresent())) {
+      if (
+        auto?.action === 'ask' &&
+        !(await isAutoApprovalRequesterPresent({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          surface: input.surface,
+        }))
+      ) {
         // The audit row is born terminal `auto_rejected` with the assessment;
         // if it cannot be written the outer handler rejects the ask instead
         // of denying it unrecorded. No card is shown while the owner is away.

@@ -27,6 +27,11 @@
       "import": "./src/server/integration-tool-auto-evaluation.ts",
       "require": "./src/server/integration-tool-auto-evaluation.ts"
     },
+    "./server/integration-tool-auto-approval-presence": {
+      "types": "./src/server/integration-tool-auto-approval-presence.ts",
+      "import": "./src/server/integration-tool-auto-approval-presence.ts",
+      "require": "./src/server/integration-tool-auto-approval-presence.ts"
+    },
     "./server/typesafe-judgment": {
       "types": "./src/server/typesafe-judgment.ts",
       "import": "./src/server/typesafe-judgment.ts",
