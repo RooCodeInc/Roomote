@@ -35,7 +35,11 @@ import {
   markTaskStartParallelCountsEndedAtForTaskIds,
 } from '@roomote/db/server';
 import { captureEvent } from '@roomote/telemetry/server';
-import { settleLiveTaskMessageOnExit, stopTaskRun } from '@roomote/sdk/server';
+import {
+  settleLiveTaskMessageOnExit,
+  stopSessionTaskRuns,
+  stopTaskRun,
+} from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import {
@@ -83,49 +87,11 @@ export async function stopSessionTasksCommand(
     return { success: false as const, stoppedCount: 0 };
   }
 
-  const runs = await db
-    .select({
-      id: taskRuns.id,
-      taskId: taskRuns.taskId,
-      payload: taskRuns.payload,
-      status: taskRuns.status,
-      sandboxServerUrl: taskRuns.sandboxServerUrl,
-      actingUserId: taskRuns.actingUserId,
-    })
-    .from(taskRuns)
-    .innerJoin(sessionTasks, eq(sessionTasks.taskId, taskRuns.taskId))
-    .where(
-      and(
-        eq(sessionTasks.sessionId, sessionId),
-        inArray(taskRuns.status, activeRunStatuses as readonly RunStatus[]),
-      ),
-    );
-
-  const results = await Promise.all(
-    runs.map(async (run) => {
-      const result = await stopTaskRun({
-        run,
-        authUserId: auth.userId,
-        terminate: false,
-        cancelledBy: { name: auth.name ?? undefined, source: 'web' },
-      }).catch(() => null);
-      if (result?.success) return true;
-
-      const current = await db.query.taskRuns.findFirst({
-        where: eq(taskRuns.id, run.id),
-        columns: { status: true },
-      });
-      return !current || isExitedRunStatus(current.status);
-    }),
-  );
-  const stoppedCount = results.filter(Boolean).length;
-  return {
-    success: stoppedCount === runs.length,
-    stoppedCount,
-    ...(stoppedCount === runs.length
-      ? {}
-      : { failedCount: runs.length - stoppedCount }),
-  };
+  return stopSessionTaskRuns({
+    sessionId,
+    authUserId: auth.userId,
+    cancelledBy: { name: auth.name ?? undefined, source: 'web' },
+  });
 }
 
 export async function deleteSessionCommand(

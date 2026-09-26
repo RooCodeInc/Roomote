@@ -58,6 +58,7 @@ const mocks = vi.hoisted(() => ({
   callViaEmojiConfig: vi.fn(),
   appendAccountLinkHelpText: vi.fn(async (message: string) => message),
   startGoal: vi.fn(),
+  stopChatSessionTasks: vi.fn(),
   acquireFastTurnLock: vi.fn(),
   answerFast: vi.fn(),
   hasFastSession: vi.fn(),
@@ -134,6 +135,9 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 vi.mock('../../tasks/continue-session-attention-reply', () => ({
   continueSessionAttentionReply: vi.fn(async () => false),
+}));
+vi.mock('../../tasks/session-stop-command.js', () => ({
+  stopChatSessionTasks: mocks.stopChatSessionTasks,
 }));
 
 vi.mock('@roomote/sdk/server/communication', () => ({
@@ -349,6 +353,11 @@ describe('Discord Gateway event handler', () => {
       launchResult: { id: 17, taskId: 'task-17' },
     });
     mocks.startGoal.mockResolvedValue({ success: true, goal: {} });
+    mocks.stopChatSessionTasks.mockResolvedValue({
+      kind: 'stopped',
+      stoppedCount: 2,
+      text: 'Stopped 2 active tasks. The work remains resumable; send another message here to continue.',
+    });
     mocks.acquireFastTurnLock.mockResolvedValue(
       vi.fn().mockResolvedValue(undefined),
     );
@@ -2492,6 +2501,44 @@ describe('Discord Gateway event handler', () => {
         }),
       }),
     );
+  });
+
+  it('uses /stop to soft-stop all linked Session tasks and preserve continuation', async () => {
+    const interaction = {
+      id: 'interaction-stop',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: { name: 'stop', type: 1 },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      stopRequested: true,
+      outcome: 'stopped',
+    });
+    expect(mocks.stopChatSessionTasks).toHaveBeenCalledWith({
+      provider: 'discord',
+      workspaceId: 'dm',
+      channelId: 'dm-1',
+      conversationId: 'dm-1',
+      userId: 'roomote-user-1',
+      displayName: 'matt',
+    });
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Stopped 2 active tasks. The work remains resumable; send another message here to continue.',
+        ephemeral: true,
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.startGoal).not.toHaveBeenCalled();
   });
 
   it('uses /goal to start a session goal', async () => {

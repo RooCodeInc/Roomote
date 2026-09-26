@@ -24,7 +24,7 @@ does not require an inbound webhook or public callback URL.
    token, and save.
 
 Roomote reads the bot and application identity from the token and registers
-the `/new`, `/goal`, `/link`, and `/help` commands automatically. You
+the `/new`, `/goal`, `/stop`, `/link`, and `/help` commands automatically. You
 do not need to copy an application ID or bot name into Roomote.
 
 <Warning>
@@ -121,6 +121,9 @@ on the **Automations** page, the same way you would pick a Slack channel.
   DM, `/new` sends the request into the DM conversation
 - use `/goal objective:<objective>` to make the current session pursue an
   objective across multiple turns; it may delegate child tasks as needed
+- use `/stop` in a Roomote session thread or DM to resumably stop all active
+  tasks linked to that session, including delegated tasks; send another message
+  to continue later
 - Discord DMs, mentions, attachments, and eligible thread replies from your
   linked account always enter a session, which answers directly or
   delegates repository work into tasks

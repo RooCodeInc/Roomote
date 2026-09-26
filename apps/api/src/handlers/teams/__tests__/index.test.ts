@@ -65,6 +65,7 @@ const {
   isFastProviderMessageMock,
   finalizeWorkItemMock,
   releaseWorkItemMock,
+  stopChatSessionTasksMock,
 } = vi.hoisted(() => ({
   authAccountsFindFirstMock: vi.fn(),
   authAccountsFindManyMock: vi.fn(),
@@ -134,6 +135,7 @@ const {
   isFastProviderMessageMock: vi.fn(),
   finalizeWorkItemMock: vi.fn(),
   releaseWorkItemMock: vi.fn(),
+  stopChatSessionTasksMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -331,6 +333,9 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('../../tasks/continue-session-attention-reply', () => ({
   continueSessionAttentionReply: vi.fn(async () => false),
 }));
+vi.mock('../../tasks/session-stop-command.js', () => ({
+  stopChatSessionTasks: stopChatSessionTasksMock,
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildFastAgentReactionExternalInputQuestion: vi.fn(
@@ -413,6 +418,11 @@ function createJwtPayload(payload: Record<string, unknown>) {
 describe('Teams webhook handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    stopChatSessionTasksMock.mockResolvedValue({
+      kind: 'stopped',
+      stoppedCount: 2,
+      text: 'Stopped 2 active tasks. The work remains resumable; send another message here to continue.',
+    });
     continueFastReplyMock.mockResolvedValue(true);
     queueFastReplyMock.mockResolvedValue(true);
     findFastMessageSessionMock.mockResolvedValue(null);
@@ -512,6 +522,44 @@ describe('Teams webhook handler', () => {
         value: await options.onAcquired(),
       }),
     );
+  });
+
+  it('stops active Session tasks for a linked Teams command and keeps them resumable', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValue({
+      userId: 'mapped-user-1',
+    });
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({ text: '<at>Roomote</at> /stop' }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      stopRequested: true,
+      outcome: 'stopped',
+    });
+    expect(stopChatSessionTasksMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'teams',
+        workspaceId: 'tenant-1',
+        userId: 'mapped-user-1',
+        replyToMessageId: 'activity-root',
+      }),
+    );
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Stopped 2 active tasks. The work remains resumable; send another message here to continue.',
+      }),
+    );
+    expect(queueCommunicationMessageOnceMock).not.toHaveBeenCalled();
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
   });
 
   it('rejects Teams webhooks without a valid Bot Framework JWT', async () => {

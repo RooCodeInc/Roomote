@@ -161,6 +161,40 @@ export async function findFastAgentSessionForProviderReply(
     : null;
 }
 
+/**
+ * Find the owner-bound Fast session for an explicit chat command. Prefer the
+ * reply/thread binding (which also supports sessions started on another
+ * surface), then fall back to the provider's stable conversation identity for
+ * private chats and other routes without a thread root.
+ */
+export async function findFastAgentSessionForProviderConversation(
+  input: ProviderRoute & {
+    conversationId: string;
+    userId: string;
+    replyToMessageId?: string;
+  },
+): Promise<FastAgentConversationRecord | null> {
+  const routed = await findFastAgentSessionForProviderReply(input);
+  if (routed) return routed;
+
+  const conversation: FastAgentConversation = {
+    surface: input.provider,
+    workspaceId: input.workspaceId,
+    conversationId: input.conversationId,
+    replyTarget: {
+      channelId: input.channelId,
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+    },
+  };
+  const session =
+    await fastAgentConversationRepository.findByConversation(conversation);
+
+  return session?.userId === input.userId &&
+    matchesProviderRoute(session, input)
+    ? session
+    : null;
+}
+
 export async function findFastAgentSessionForProviderMessage(
   input: ProviderRoute & { messageId: string; userId?: string },
 ): Promise<FastAgentConversationRecord | null> {
