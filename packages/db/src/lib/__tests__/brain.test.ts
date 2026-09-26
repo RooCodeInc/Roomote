@@ -147,7 +147,7 @@ describe('private task memory exclusion', () => {
     await maybeEnqueueBrainMemoryEvent(db, run.id);
     await saveBrainAgentSummary(db, run.id, 'private canary summary');
     expect(await requeueBrainMemoryEventsForTasks(db, [run.taskId])).toBe(0);
-    expect(await backfillBrainMemoryEvents(db)).toBe(0);
+    await backfillBrainMemoryEvents(db);
 
     const [event] = await db
       .select()

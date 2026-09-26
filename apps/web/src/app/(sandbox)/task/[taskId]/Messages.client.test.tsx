@@ -222,6 +222,9 @@ vi.mock('@/components/system', () => ({
   }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button {...props}>{children}</button>
   ),
+  Bug: () => <svg aria-hidden="true" />,
+  FileText: () => <svg aria-hidden="true" />,
+  GitPullRequest: () => <svg aria-hidden="true" />,
   Lightbulb: () => <svg aria-hidden="true" />,
   Skeleton: ({ className }: { className?: string }) => (
     <div className={className} />
