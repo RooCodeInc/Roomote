@@ -4,6 +4,7 @@ import {
   eq,
   inArray,
   taskFactory,
+  taskPullRequests,
   tasks,
   userFactory,
   users,
@@ -79,6 +80,30 @@ describe('Results commands', () => {
       repositoryName: 'RooCodeInc/Roomote',
       repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
     });
+    await db.insert(taskPullRequests).values([
+      {
+        taskId: sourceTask.id,
+        prUrl: 'https://gitlab.com/RooCodeInc/Docs/-/merge_requests/12',
+        prTitle: 'Update docs',
+        repository: 'RooCodeInc/Docs',
+        prNumber: 12,
+      },
+      {
+        taskId: sourceTask.id,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/1',
+        prTitle: 'Add result links',
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 1,
+        createdByRoomote: true,
+      },
+      {
+        taskId: sourceTask.id,
+        prUrl: 'http://github.com/RooCodeInc/Roomote/pull/2',
+        prTitle: 'Insecure URL is omitted',
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 2,
+      },
+    ]);
     const [report] = await db
       .insert(automationResults)
       .values({
@@ -172,11 +197,45 @@ describe('Results commands', () => {
           id: suggestion!.id,
           headline: 'Patch the alert',
           content: '',
+          pullRequests: [
+            {
+              url: 'https://github.com/RooCodeInc/Roomote/pull/1',
+              title: 'Add result links',
+              repository: 'RooCodeInc/Roomote',
+              number: 1,
+            },
+            {
+              url: 'https://gitlab.com/RooCodeInc/Docs/-/merge_requests/12',
+              title: 'Update docs',
+              repository: 'RooCodeInc/Docs',
+              number: 12,
+            },
+          ],
           actions: [expect.objectContaining({ action: 'start_investigation' })],
         }),
         expect.objectContaining({
           id: report!.id,
-          actions: [expect.objectContaining({ action: 'respond_in_task' })],
+          pullRequests: [
+            {
+              url: 'https://github.com/RooCodeInc/Roomote/pull/1',
+              title: 'Add result links',
+              repository: 'RooCodeInc/Roomote',
+              number: 1,
+            },
+            {
+              url: 'https://gitlab.com/RooCodeInc/Docs/-/merge_requests/12',
+              title: 'Update docs',
+              repository: 'RooCodeInc/Docs',
+              number: 12,
+            },
+          ],
+          actions: [
+            expect.objectContaining({ action: 'respond_in_task' }),
+            expect.objectContaining({
+              action: 'open_pr',
+              href: 'https://github.com/RooCodeInc/Roomote/pull/1',
+            }),
+          ],
         }),
       ]);
 
@@ -287,8 +346,11 @@ describe('Results commands', () => {
           isAdmin: user.role === 'admin',
         } as UserAuthSuccess;
         await expect(listResultsCommand(auth)).resolves.toEqual([
-          expect.objectContaining({ id: sharedSuggestion!.id }),
-          expect.objectContaining({ id: sharedReport!.id }),
+          expect.objectContaining({
+            id: sharedSuggestion!.id,
+            pullRequests: [],
+          }),
+          expect.objectContaining({ id: sharedReport!.id, pullRequests: [] }),
         ]);
         await expect(getUnreadResultCountCommand(auth)).resolves.toBe(2);
 
