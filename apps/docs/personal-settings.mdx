@@ -118,20 +118,21 @@ for every member.
 Peer conversations are standard behavior in established Slack and Discord
 session threads; there is no Experimental setting to enable them. When a
 [judgment model](/models#judgment-model) is configured, each eligible unmentioned
-reply from a linked participant is checked for who it addresses and whether it
-expects a response or action. Only confident replies addressed to Roomote start
-a turn, while messages for another participant and simple acknowledgements stay
-quiet. Without a judgment model, the existing provider-specific routing
-heuristics apply. Direct Roomote mentions continue to work.
+reply from a linked participant is checked for who it addresses. Only confident
+replies addressed to Roomote start a turn, while messages for another
+participant stay quiet. Acknowledgements addressed to Roomote use the same
+addressee gate, then the session decides whether a response is warranted.
+Without a judgment model, the existing provider-specific routing heuristics
+apply. Direct Roomote mentions continue to work.
 
 Teams sessions remain isolated by linked Roomote user, so they do not share a
 peer conversation across participants. With a judgment model configured,
 eligible unmentioned replies in Teams threads are still checked for their
-addressee and response intent before they start a turn. These behaviors do not
-monitor whole channels. Discord supplies messages from the established thread
-and resolved user mentions. Telegram is not included: bot privacy settings can
-prevent ambient group messages from reaching Roomote, and Telegram sessions are
-isolated per linked sender.
+addressee before they start a turn. These behaviors do not monitor whole
+channels. Discord supplies messages from the established thread and resolved
+user mentions. Telegram is not included: bot privacy settings can prevent
+ambient group messages from reaching Roomote, and Telegram sessions are isolated
+per linked sender.
 
 ## Personalize how Roomote works with you
 
