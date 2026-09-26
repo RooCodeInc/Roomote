@@ -501,6 +501,7 @@ import {
   saveTaskModelProviderCommand,
   suggestTaskModelsCommand,
   updateTaskModelSettingsCommand,
+  updateTaskModelFastModeCommand,
 } from '../commands/task-models';
 import {
   createUserTaskModelMappingPresetCommand,
@@ -2758,6 +2759,17 @@ export const appRouter = createRouter({
     refreshMetadata: protectedProcedure.mutation(({ ctx: { auth } }) =>
       refreshTaskModelMetadataCommand(auth),
     ),
+
+    updateFastMode: protectedProcedure
+      .input(
+        z.object({
+          capabilityId: z.string().trim().min(1),
+          mode: z.enum(['inherit', 'normal', 'fast']),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateTaskModelFastModeCommand(auth, input),
+      ),
 
     update: protectedProcedure
       .input(

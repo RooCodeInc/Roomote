@@ -264,6 +264,33 @@ Admins can enable or disable models from the task model list. The default model
 must stay enabled, because Roomote uses it when a task does not request a
 specific model.
 
+### Per-model Fast mode
+
+**Model Fast modes** offers **Inherit**, **Normal**, and **Fast** for confirmed
+provider routes. The setting applies to the exact model and authentication route;
+the same `openai/...` model can have a ChatGPT subscription choice and a separate
+OpenAI API-key choice.
+
+- **Inherit** uses the ChatGPT account-level Fast mode switch for subscription
+  requests, or the OpenAI project service-tier default for API-key requests.
+- **Normal** requests standard processing for that model, even when its inherited
+  default is Fast.
+- **Fast** requests the provider's Fast mode and may cost more. OpenAI can serve
+  a Fast request as Standard during traffic ramps. For requests the gateway can
+  inspect, Roomote checks the Responses API tier and logs reported Standard
+  downgrades; very large request bodies or responses without a tier signal
+  cannot be confirmed.
+
+Fast mode also depends on provider-side eligibility. OpenAI project region and
+data-residency settings can limit access to Fast processing for some models.
+
+When a ChatGPT subscription and OpenAI API key are both connected, Roomote uses
+the subscription route for `openai/...` models. OpenAI API-key choices are saved
+for that separate route and are inactive while the subscription takes
+precedence. The ChatGPT subscription gateway does not currently provide a
+reliable response-tier signal, so its Fast selection records the requested
+mode, not confirmation of the tier used for an individual response.
+
 Model settings affect new task starts. Running tasks and resumed snapshots keep
 the model that was selected when they started.
 

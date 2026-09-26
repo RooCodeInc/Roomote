@@ -16,10 +16,12 @@ import {
   isConfiguredEnvValue,
   isInferenceGatewayCoveredEnvVar,
   isSettingsOnlyProviderEnvVar,
+  MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   normalizeTaskModelSettings,
   parseModelProviderEnvKeys,
+  resolveModelFastModeRequestOptions,
   ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   ROOMOTE_INFERENCE_PROVIDER_ID,
   resolveSetupModelProviderIdFromModel,
@@ -118,17 +120,19 @@ async function loadPersistedRuntimeModelConfig(
       taskModelSettings: true,
     },
   });
+  const taskModelSettings = normalizeTaskModelSettings(
+    deployment?.taskModelSettings,
+  );
 
   return {
     runtimeModelConfig: normalizeDeploymentModelConfig(
       deployment?.runtimeModelConfig,
     ),
-    catalogModels: getTaskModelCatalog(deployment?.taskModelSettings),
-    enabledCatalogModels: getEnabledTaskModels(deployment?.taskModelSettings),
-    defaultModelId: getDefaultTaskModelId(deployment?.taskModelSettings),
-    codingModelRoutingRules: normalizeTaskModelSettings(
-      deployment?.taskModelSettings,
-    ).codingModelRoutingRules,
+    catalogModels: getTaskModelCatalog(taskModelSettings),
+    enabledCatalogModels: getEnabledTaskModels(taskModelSettings),
+    defaultModelId: getDefaultTaskModelId(taskModelSettings),
+    codingModelRoutingRules: taskModelSettings.codingModelRoutingRules,
+    fastModeOverrides: taskModelSettings.fastModeOverrides,
   };
 }
 
@@ -434,7 +438,13 @@ async function resolveModelRuntimeEnv(
   const executor = options.executor ?? db;
   const [
     persistedEnvVars,
-    { runtimeModelConfig, catalogModels, enabledCatalogModels, defaultModelId },
+    {
+      runtimeModelConfig,
+      catalogModels,
+      enabledCatalogModels,
+      defaultModelId,
+      fastModeOverrides,
+    },
   ] = await Promise.all([
     resolveEffectiveDeploymentEnvVars({
       deploymentEnvVars: options.deploymentEnvVars,
@@ -657,6 +667,22 @@ async function resolveModelRuntimeEnv(
   const chatGptFastMode = injectedOpenCodeAuthContent
     ? await isChatGptSubscriptionFastModeEnabled(executor)
     : false;
+  const openAiApiKeyAvailable = Boolean(
+    normalizeConfiguredValue(runtimeEnv.OPENAI_API_KEY) ??
+    normalizeConfiguredValue(persistedEnvVars.OPENAI_API_KEY),
+  );
+  const modelFastModeRequestOptions = injectedOpenCodeAuthContent
+    ? resolveModelFastModeRequestOptions({
+        authKind: 'chatgpt-oauth',
+        overrides: fastModeOverrides,
+        chatgptAccountFastMode: chatGptFastMode,
+      })
+    : openAiApiKeyAvailable
+      ? resolveModelFastModeRequestOptions({
+          authKind: 'openai-api-key',
+          overrides: fastModeOverrides,
+        })
+      : {};
   const usesGitHubCopilotModel = [
     ...resolvedRoleModels,
     ...gatewaySwitchableModelIds,
@@ -750,6 +776,13 @@ async function resolveModelRuntimeEnv(
       ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }
       : {}),
     ...(chatGptFastMode ? { [CHATGPT_FAST_MODE_ENV_VAR_NAME]: '1' } : {}),
+    ...(Object.keys(modelFastModeRequestOptions).length > 0
+      ? {
+          [MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME]: JSON.stringify(
+            modelFastModeRequestOptions,
+          ),
+        }
+      : {}),
     ...(routeGitHubCopilotThroughGateway
       ? { [INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME]: '1' }
       : {}),

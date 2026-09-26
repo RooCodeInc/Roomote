@@ -57,6 +57,7 @@ import {
   ModelReasoningPickerTrigger,
 } from '@/components/tasks/ModelReasoningPicker';
 import { JudgmentModelRow } from './JudgmentModelRow';
+import { ModelFastModeSettings } from './ModelFastModeSettings';
 import {
   CodingModelRoutingRulesEditor,
   cloneCodingModelRoutingRules,
@@ -2302,6 +2303,11 @@ export function ModelSettingsSection({
           <JudgmentModelRow />
         </div>
       </Section>
+
+      <ModelFastModeSettings
+        connectedProviders={connectedProviders}
+        overrides={settingsData.fastModeOverrides ?? {}}
+      />
 
       <Dialog
         open={applyDialog !== null}

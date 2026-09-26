@@ -20,6 +20,12 @@ Roomote stores and refreshes the authorization securely. Connected models retain
 the `openai/` model prefix, so the Models page identifies the active connection
 rather than creating a separate model namespace.
 
+The account-level **Default Fast mode** setting is used by per-model choices set
+to **Inherit**. In **Settings > Models**, set an eligible model to **Normal** to
+keep it on standard processing or **Fast** to request faster processing for that
+model. The subscription gateway does not currently expose a reliable response
+signal confirming which tier served an individual request.
+
 ## Cost behavior
 
 Requests count against the included limits of the connected ChatGPT plan rather

@@ -202,6 +202,55 @@ describe('inference gateway', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects unsupported direct OpenAI Fast requests before the upstream call', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/openai/v1/responses',
+      { model: 'gpt-5.4-pro', service_tier: 'priority' },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining('Fast mode is not available'),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('logs a response-reported Standard downgrade for OpenAI Fast requests', async () => {
+    const fetchMock = stubUpstreamFetch(
+      new Response(
+        JSON.stringify({
+          model: 'gpt-6-astra',
+          service_tier: 'default',
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/openai/v1/responses',
+      { model: 'gpt-6-astra', service_tier: 'priority' },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      model: 'gpt-6-astra',
+      service_tier: 'default',
+    });
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('Fast mode request was served as Standard'),
+      ),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
   it('rejects upstream paths outside the provider allowlist', async () => {
     const fetchMock = stubUpstreamFetch();
     const response = await postMessages(

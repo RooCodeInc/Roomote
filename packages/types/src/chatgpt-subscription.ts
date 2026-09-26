@@ -1,3 +1,8 @@
+import {
+  MODEL_FAST_MODE_CAPABILITIES,
+  mergeOpenCodeModelFastModeOptions,
+} from './model-fast-mode';
+
 /**
  * OpenAI ChatGPT subscription OAuth constants.
  *
@@ -34,23 +39,6 @@ export const CHATGPT_FAST_MODE_ENV_VAR_NAME = 'R_CHATGPT_FAST_MODE';
  */
 export const CHATGPT_OPENCODE_PROVIDER_ID = 'openai';
 
-const CHATGPT_FAST_MODE_MODEL_IDS = new Set([
-  'gpt-6-astra',
-  'gpt-6-sol',
-  'gpt-6-luna',
-  'gpt-5.4',
-  'gpt-5.5',
-  'gpt-5.6',
-  'gpt-5.6-terra',
-  'gpt-5.6-sol',
-  'gpt-5.6-luna',
-]);
-
-// Codex calls this user-facing mode "fast", but its canonical Responses API
-// service tier is `priority`. OpenCode validates model provider options before
-// sending the request and rejects the legacy `fast` alias.
-const CHATGPT_FAST_MODE_SERVICE_TIER = 'priority';
-
 /**
  * Adds ChatGPT fast mode to supported OpenAI models while preserving any
  * existing per-model options such as reasoning effort.
@@ -59,50 +47,20 @@ export function mergeOpenCodeChatGptFastModeOptions(
   providerConfig: Record<string, unknown>,
   modelIds: Array<string | undefined>,
 ): Record<string, unknown> {
-  let merged = providerConfig;
+  const chatGptCapabilitiesByModelId = new Map(
+    MODEL_FAST_MODE_CAPABILITIES.filter(
+      (capability) => capability.authKind === 'chatgpt-oauth',
+    ).map((capability) => [capability.modelId, capability]),
+  );
+  const serviceTiers = Object.fromEntries(
+    [...new Set(modelIds)].flatMap((modelId) =>
+      modelId && chatGptCapabilitiesByModelId.has(modelId)
+        ? [[modelId, chatGptCapabilitiesByModelId.get(modelId)!.request.fast]]
+        : [],
+    ),
+  );
 
-  for (const modelId of new Set(modelIds)) {
-    if (!modelId?.startsWith(`${CHATGPT_OPENCODE_PROVIDER_ID}/`)) {
-      continue;
-    }
-
-    const openCodeModelId = modelId.slice(
-      CHATGPT_OPENCODE_PROVIDER_ID.length + 1,
-    );
-    if (!CHATGPT_FAST_MODE_MODEL_IDS.has(openCodeModelId)) {
-      continue;
-    }
-
-    const providerEntry = asRecord(merged[CHATGPT_OPENCODE_PROVIDER_ID]);
-    const models = asRecord(providerEntry.models);
-    const model = asRecord(models[openCodeModelId]);
-    const options = asRecord(model.options);
-
-    merged = {
-      ...merged,
-      [CHATGPT_OPENCODE_PROVIDER_ID]: {
-        ...providerEntry,
-        models: {
-          ...models,
-          [openCodeModelId]: {
-            ...model,
-            options: {
-              ...options,
-              serviceTier: CHATGPT_FAST_MODE_SERVICE_TIER,
-            },
-          },
-        },
-      },
-    };
-  }
-
-  return merged;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return mergeOpenCodeModelFastModeOptions(providerConfig, serviceTiers);
 }
 
 /**

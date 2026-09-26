@@ -328,6 +328,7 @@ export function buildAutoAddedTaskModelSettings(options: {
     // provider does not wipe it.
     catalogSyncedModelIds: persisted?.catalogSyncedModelIds,
     codingModelRoutingRules: persisted?.codingModelRoutingRules,
+    fastModeOverrides: persisted?.fastModeOverrides,
   });
 
   return { taskModelSettings, addedModels };

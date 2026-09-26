@@ -128,6 +128,7 @@ import {
   refreshTaskModelMetadataCommand,
   saveTaskModelProviderCommand,
   updateTaskModelSettingsCommand,
+  updateTaskModelFastModeCommand,
 } from './index';
 
 const PROVIDER_ENV_VAR_NAMES = [
@@ -363,6 +364,45 @@ describe('lookupTaskModelCommand', () => {
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('validates and persists a Fast override for the direct OpenAI route', async () => {
+    process.env.OPENAI_API_KEY = 'sk-openai';
+
+    await expect(
+      updateTaskModelFastModeCommand(buildMockAuth(), {
+        capabilityId: 'openai:openai-api-key:gpt-6-astra:responses',
+        mode: 'fast',
+      }),
+    ).resolves.toEqual({ success: true });
+
+    expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          taskModelSettings: expect.objectContaining({
+            fastModeOverrides: {
+              'openai:openai-api-key:gpt-6-astra:responses': 'fast',
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('rejects unsupported Fast routes but permits clearing their stale choices', async () => {
+    await expect(
+      updateTaskModelFastModeCommand(buildMockAuth(), {
+        capabilityId: 'unknown-provider:old-model:responses',
+        mode: 'fast',
+      }),
+    ).rejects.toThrow('no longer supported');
+
+    await expect(
+      updateTaskModelFastModeCommand(buildMockAuth(), {
+        capabilityId: 'unknown-provider:old-model:responses',
+        mode: 'inherit',
+      }),
+    ).resolves.toEqual({ success: true });
   });
 
   it('uses discovery data when looking up a local provider model', async () => {
