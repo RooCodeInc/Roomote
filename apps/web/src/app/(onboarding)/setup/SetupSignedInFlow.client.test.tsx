@@ -70,8 +70,11 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('./hooks', () => ({
-  useSetupFlow: () => ({
+  useSetupFlow: (options: { syncUrl?: boolean } = {}) => ({
     ...flowState.current,
+    syncUrl:
+      (options.syncUrl ?? true) &&
+      flowState.current.status?.setupCompletedAt == null,
     transitionDirection: 1,
     entryContext: {
       openrouterOauthStatus: null,
@@ -191,6 +194,34 @@ describe('SetupSignedInFlow', () => {
 
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/'));
     expect(commitSetupUrlMock).not.toHaveBeenCalled();
+  });
+
+  it('does not rewrite the setup URL when only the redirect status knows setup is complete', async () => {
+    setupStatusState.current = {
+      data: { setupCompletedAt: '2026-09-04T12:02:14.782Z' },
+      isLoading: false,
+      isError: false,
+    };
+    // Stale flow cache: setupNew.status predates completion.
+    flowState.current.status = buildFlowStatus({
+      setupNewState: { modelProvider: 'chatgpt' },
+    });
+
+    render(<SetupSignedInFlow />);
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/'));
+    expect(commitSetupUrlMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the model provider in the URL while setup is open', async () => {
+    flowState.current.status = buildFlowStatus({
+      setupNewState: { modelProvider: 'chatgpt' },
+    });
+
+    render(<SetupSignedInFlow />);
+
+    await waitFor(() => expect(commitSetupUrlMock).toHaveBeenCalled());
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 
   it('leaves the setup Session hand-off alone when it is in flight', () => {

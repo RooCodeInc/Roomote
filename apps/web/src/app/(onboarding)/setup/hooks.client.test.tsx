@@ -108,4 +108,14 @@ describe('useSetupFlow', () => {
     expect(replaceMock).not.toHaveBeenCalled();
     expect(pushMock).not.toHaveBeenCalled();
   });
+
+  it('leaves the URL alone while the caller disables URL sync', async () => {
+    window.history.replaceState({}, '', '/setup?token=setup-token');
+    const { result } = renderHook(() => useSetupFlow({ syncUrl: false }));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(result.current.syncUrl).toBe(false);
+    expect(replaceMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
 });
