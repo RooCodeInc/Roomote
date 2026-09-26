@@ -59,6 +59,7 @@ export * from './logging';
 export * from './llm-usage';
 export * from './bedrock-opencode-provider';
 export * from './catalog-provider-credentials';
+export * from './cloudflare-opencode-provider';
 export * from './kimi-for-coding-opencode-provider';
 export * from './inference-gateway';
 export * from './judgment-model';

@@ -353,8 +353,17 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     'github-copilot',
     'chatgpt',
   ] as const;
+  // Cloudflare AI Gateway routes the 5.6 family but not the 6-series.
+  const pairedGpt56ProviderIds: readonly string[] = [
+    ...pairedGpt6ProviderIds,
+    'cloudflare-ai-gateway',
+  ];
   const gpt6LunaProviderIds = [...pairedGpt6ProviderIds, 'opencode-go'];
-  const gpt56LunaProviderIds = [...pairedGpt6ProviderIds, 'opencode-go'];
+  const gpt56LunaProviderIds = [
+    ...pairedGpt6ProviderIds,
+    'opencode-go',
+    'cloudflare-ai-gateway',
+  ];
 
   it('exposes the supported setup providers for the onboarding UI', () => {
     expect(userSelectableProviders.map((provider) => provider.id)).toEqual([
@@ -363,6 +372,8 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty',
       'baseten',
       'togetherai',
+      'cloudflare-ai-gateway',
+      'cloudflare-workers-ai',
       'deepseek',
       'openai',
       'azure',
@@ -515,6 +526,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
           ['openrouter', 'openrouter/anthropic/claude-opus-5.5'],
           ['vercel', 'vercel/anthropic/claude-opus-5.5'],
           ['requesty', 'requesty/anthropic/claude-opus-5-5'],
+          [
+            'cloudflare-ai-gateway',
+            'cloudflare-ai-gateway/anthropic/claude-opus-5-5',
+          ],
           ['azure', 'azure/claude-opus-5-5'],
           [
             'azure-cognitive-services',
@@ -534,6 +549,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
           ['requesty', 'requesty/kimi-k3'],
           ['baseten', 'baseten/moonshotai/Kimi-K3'],
           ['togetherai', 'togetherai/moonshotai/Kimi-K3'],
+          ['cloudflare-ai-gateway', 'cloudflare-ai-gateway/moonshotai/kimi-k3'],
           ['moonshotai', 'moonshotai/kimi-k3'],
           ['kimi-for-coding', 'kimi-for-coding/k3'],
           ['opencode', 'opencode/kimi-k3'],
@@ -592,6 +608,14 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
           ['openrouter', 'openrouter/z-ai/glm-5.3'],
           ['vercel', 'vercel/zai/glm-5.3'],
           ['requesty', 'requesty/glm-5.3'],
+          [
+            'cloudflare-ai-gateway',
+            'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.3',
+          ],
+          [
+            'cloudflare-workers-ai',
+            'cloudflare-workers-ai/@cf/zai-org/glm-5.3',
+          ],
           ['opencode-go', 'opencode-go/glm-5.3'],
           ['zai', 'zai/glm-5.3'],
           ['zai-coding-plan', 'zai-coding-plan/glm-5.3'],
@@ -603,6 +627,14 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
           ['openrouter', 'openrouter/z-ai/glm-5.3-flash'],
           ['vercel', 'vercel/zai/glm-5.3-flash'],
           ['requesty', 'requesty/glm-5.3-flash'],
+          [
+            'cloudflare-ai-gateway',
+            'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.3-flash',
+          ],
+          [
+            'cloudflare-workers-ai',
+            'cloudflare-workers-ai/@cf/zai-org/glm-5.3-flash',
+          ],
           ['opencode-go', 'opencode-go/glm-5.3-flash'],
           ['zai', 'zai/glm-5.3-flash'],
           ['zai-coding-plan', 'zai-coding-plan/glm-5.3-flash'],
@@ -613,6 +645,14 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         [
           ['baseten', 'baseten/zai-org/GLM-5.2'],
           ['togetherai', 'togetherai/zai-org/GLM-5.2'],
+          [
+            'cloudflare-ai-gateway',
+            'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2',
+          ],
+          [
+            'cloudflare-workers-ai',
+            'cloudflare-workers-ai/@cf/zai-org/glm-5.2',
+          ],
           ['opencode', 'opencode/glm-5.2'],
         ],
       ],
@@ -652,7 +692,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       {
         displayName: 'GPT 5.6 Sol',
         modelId: 'gpt-5.6-sol',
-        providerIds: pairedGpt6ProviderIds,
+        providerIds: pairedGpt56ProviderIds,
       },
       {
         displayName: 'GPT-6 Sol',
@@ -662,7 +702,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       {
         displayName: 'GPT 5.6 Terra',
         modelId: 'gpt-5.6-terra',
-        providerIds: pairedGpt6ProviderIds,
+        providerIds: pairedGpt56ProviderIds,
       },
       {
         displayName: 'GPT 5.6 Luna',
@@ -690,6 +730,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         { providerId: 'openrouter', modelId: `openrouter/openai/${modelId}` },
         { providerId: 'vercel', modelId: `vercel/openai/${modelId}` },
         { providerId: 'requesty', modelId: `requesty/${modelId}@eu` },
+        {
+          providerId: 'cloudflare-ai-gateway',
+          modelId: `cloudflare-ai-gateway/openai/${modelId}`,
+        },
         { providerId: 'openai', modelId: `openai/${modelId}` },
         { providerId: 'azure', modelId: `azure/${modelId}` },
         {
@@ -722,7 +766,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         (suggestion) => suggestion.displayName === 'GPT 5.6 Luna',
       );
 
-      if (!luna) {
+      // Providers with explicit role recommendations intentionally choose
+      // their own coding default and non-coding roles (Cloudflare AI Gateway
+      // recommends a stronger planning model than its coding default).
+      if (!luna || 'recommendedRoleModels' in provider) {
         continue;
       }
 
@@ -2174,5 +2221,215 @@ describe('collectSetupModelProviderCredentialValues', () => {
         action: 'save it',
       }),
     ).toThrow('Enter a valid Region for Z.AI to save it.');
+  });
+});
+
+describe('Cloudflare inference providers', () => {
+  const gatewayProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+    (provider) => provider.id === 'cloudflare-ai-gateway',
+  );
+  const workersProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+    (provider) => provider.id === 'cloudflare-workers-ai',
+  );
+
+  it('exposes Cloudflare AI Gateway and Workers AI as two catalog providers', () => {
+    expect(gatewayProvider).toMatchObject({
+      id: 'cloudflare-ai-gateway',
+      label: 'Cloudflare AI Gateway',
+      envVarName: 'CLOUDFLARE_AI_GATEWAY_API_TOKEN',
+      envVarLabel: 'API token',
+      authKind: 'api-key',
+      defaultRoomoteModel: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+    });
+    expect(gatewayProvider?.credentialHelp?.text).toMatch(
+      /Workers AI (access|permission)/u,
+    );
+    expect(gatewayProvider?.credentialHelp?.text).not.toMatch(
+      /token with AI Gateway access/u,
+    );
+    expect(gatewayProvider?.additionalEnvFields).toEqual([
+      {
+        envVarName: 'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID',
+        label: 'Account ID',
+        secret: false,
+        required: true,
+        placeholder: 'your-account-id',
+      },
+      {
+        envVarName: 'CLOUDFLARE_AI_GATEWAY_ID',
+        label: 'Gateway ID',
+        secret: false,
+        required: true,
+        placeholder: 'default',
+      },
+    ]);
+    expect(
+      gatewayProvider?.suggestedTaskModels.map((model) => model.id),
+    ).toEqual(
+      expect.arrayContaining([
+        'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+        'cloudflare-ai-gateway/anthropic/claude-sonnet-5',
+        'cloudflare-ai-gateway/moonshotai/kimi-k3',
+      ]),
+    );
+    expect(
+      gatewayProvider?.suggestedTaskModels.every((model) =>
+        model.id.startsWith('cloudflare-ai-gateway/'),
+      ),
+    ).toBe(true);
+
+    expect(workersProvider).toMatchObject({
+      id: 'cloudflare-workers-ai',
+      label: 'Cloudflare Workers AI',
+      envVarName: 'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+      envVarLabel: 'API token',
+      authKind: 'api-key',
+      defaultRoomoteModel:
+        'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+    });
+    expect(workersProvider?.additionalEnvFields).toEqual([
+      {
+        envVarName: 'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
+        label: 'Account ID',
+        secret: false,
+        required: true,
+        placeholder: 'your-account-id',
+      },
+    ]);
+    expect(
+      workersProvider?.suggestedTaskModels.map((model) => model.id),
+    ).toEqual(
+      expect.arrayContaining([
+        'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+        'cloudflare-workers-ai/@cf/zai-org/glm-5.3-flash',
+        'cloudflare-workers-ai/@cf/zai-org/glm-5.3',
+        'cloudflare-workers-ai/@cf/zai-org/glm-5.2',
+      ]),
+    );
+    expect(
+      workersProvider?.suggestedTaskModels.every((model) =>
+        model.id.startsWith('cloudflare-workers-ai/'),
+      ),
+    ).toBe(true);
+
+    expect(getModelProviderLabel('cloudflare-ai-gateway')).toBe(
+      'Cloudflare AI Gateway',
+    );
+    expect(getModelProviderLabel('cloudflare-workers-ai')).toBe(
+      'Cloudflare Workers AI',
+    );
+    expect(
+      resolveSetupModelProviderIdFromModel(
+        'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      ),
+    ).toBe('cloudflare-ai-gateway');
+    expect(
+      resolveSetupModelProviderIdFromModel(
+        'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      ),
+    ).toBe('cloudflare-workers-ai');
+    expect(
+      getModelProviderEnvKeyCandidates({
+        providerId: 'cloudflare-ai-gateway',
+      }),
+    ).toEqual([
+      'CLOUDFLARE_AI_GATEWAY_API_TOKEN',
+      'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID',
+      'CLOUDFLARE_AI_GATEWAY_ID',
+    ]);
+    expect(
+      getModelProviderEnvKeyCandidates({
+        providerId: 'cloudflare-workers-ai',
+      }),
+    ).toEqual([
+      'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+      'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
+    ]);
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'CLOUDFLARE_AI_GATEWAY_API_TOKEN',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'CLOUDFLARE_AI_GATEWAY_ID',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
+    );
+  });
+
+  it('does not treat a complete AI Gateway config as Workers AI connectedness', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'cf-gateway-token',
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+        CLOUDFLARE_AI_GATEWAY_ID: 'default',
+      },
+    });
+
+    expect(
+      status.providers.find(
+        (provider) => provider.id === 'cloudflare-ai-gateway',
+      ),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: true,
+      savedApiKeySatisfied: false,
+    });
+    expect(
+      status.providers.find(
+        (provider) => provider.id === 'cloudflare-workers-ai',
+      ),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: false,
+    });
+  });
+
+  it('does not treat a complete Workers AI config as AI Gateway connectedness', () => {
+    const status = buildSetupModelStatus({
+      persistedEnvVarNames: [
+        'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+        'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
+      ],
+      persistedEnvVarValues: {
+        CLOUDFLARE_WORKERS_AI_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      },
+    });
+
+    expect(
+      status.providers.find(
+        (provider) => provider.id === 'cloudflare-workers-ai',
+      ),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: true,
+    });
+    expect(
+      status.providers.find(
+        (provider) => provider.id === 'cloudflare-ai-gateway',
+      ),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: false,
+    });
+  });
+
+  it('requires the AI Gateway id in addition to the token and account', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'cf-gateway-token',
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      },
+    });
+
+    expect(
+      status.providers.find(
+        (provider) => provider.id === 'cloudflare-ai-gateway',
+      )?.runtimeApiKeySatisfied,
+    ).toBe(false);
   });
 });

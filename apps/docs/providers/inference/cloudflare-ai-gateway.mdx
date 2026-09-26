@@ -1,0 +1,70 @@
+---
+title: Cloudflare AI Gateway
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/cloudflare.svg'
+description: Route Roomote model calls through Cloudflare AI Gateway.
+---
+
+Cloudflare AI Gateway is a multi-vendor control plane for model calls. Use it
+when you want one Cloudflare token, account, and gateway to reach models from
+several providers, with Cloudflare's logging, caching, and routing in front.
+
+This is a separate connection from [Cloudflare Workers AI](/providers/inference/cloudflare-workers-ai).
+Connecting AI Gateway does not connect Workers AI.
+
+## Get credentials
+
+Create a [Cloudflare API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
+with **Account > Workers AI** permission. Roomote calls Cloudflare's unified
+`/accounts/<id>/ai/v1` REST surface, and a token that only has AI Gateway
+permission is rejected with 401. Copy the account ID from the Cloudflare
+dashboard, then create or select an
+[AI Gateway](https://developers.cloudflare.com/ai-gateway/get-started/) and
+copy its gateway ID. A `default` gateway is created automatically on first use.
+
+Configure stored provider keys or unified billing in Cloudflare for the vendors
+you plan to call through the gateway.
+
+## Configuration
+
+Add **Cloudflare AI Gateway** in **Settings > Models**, then enter the API
+token, account ID, and gateway ID. Environment-variable configuration uses:
+
+```sh
+CLOUDFLARE_AI_GATEWAY_API_TOKEN=...
+CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID=your-account-id
+CLOUDFLARE_AI_GATEWAY_ID=default
+```
+
+Roomote exposes supported models under the
+`cloudflare-ai-gateway/<vendor>/<model>` prefix and adds a recommended
+cross-vendor set. Apply the recommended mapping or choose models individually
+for each role.
+
+In gateway mode, the API token stays on the Roomote control plane. Requests are
+proxied to Cloudflare's OpenAI-compatible `/ai/v1` surface with the account ID
+in the URL and the gateway ID in the `cf-aig-gateway-id` header.
+
+## Cost behavior
+
+Cloudflare records gateway usage and applies the billing terms, stored-key
+routing, and upstream provider pricing configured for the account. Roomote
+records token usage and estimates model cost from metadata; Cloudflare usage
+and invoice are authoritative. See [AI Gateway pricing](https://developers.cloudflare.com/ai-gateway/pricing/).
+
+## Verify setup
+
+1. save the API token, account ID, and gateway ID
+2. confirm Cloudflare AI Gateway models appear in **Settings > Models**
+3. enable a model and assign it to the coding role
+4. run a small task and confirm it appears in Cloudflare AI Gateway logs
+
+## Common issues
+
+- **The token is rejected.** Confirm it is a Cloudflare API token with
+  Account > Workers AI permission. An AI Gateway-only token returns 401 on
+  the `/ai/v1` REST API Roomote uses.
+- **A model cannot be routed.** Check that the vendor is enabled on the
+  selected gateway and that stored keys or unified billing cover that model.
+- **Workers AI models fail.** `@cf/` models through AI Gateway still need
+  Workers AI access on the token. Connecting Workers AI as its own provider is
+  a separate step.
