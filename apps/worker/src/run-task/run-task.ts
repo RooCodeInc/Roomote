@@ -43,7 +43,6 @@ import {
   type LinearSessionMessage,
 } from '@roomote/linear/client';
 import { prependSlackMessages } from '@roomote/slack/client';
-import { prependCommunicationMessages } from '@roomote/communication/messages';
 
 import {
   HarnessManager,
@@ -2066,7 +2065,11 @@ export const runTask = async ({
 
       await Promise.all(
         Array.from(messagesByProvider.entries()).map(([provider, messages]) =>
-          prependCommunicationMessages(provider, taskRun.id, messages),
+          sdk.taskRuns.prependCommunicationMessages({
+            provider,
+            runId: taskRun.id,
+            messages,
+          }),
         ),
       );
     };
