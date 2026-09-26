@@ -70,6 +70,20 @@ describe('normalizeTaskModelId', () => {
     expect(normalizeTaskModelId('togetherai/deepseek-ai/DeepSeek-V4-Pro')).toBe(
       'togetherai/deepseek-ai/DeepSeek-V4-Pro',
     );
+    expect(
+      normalizeTaskModelId('cloudflare-ai-gateway/openai/gpt-5.6-terra'),
+    ).toBe('cloudflare-ai-gateway/openai/gpt-5.6-terra');
+    expect(normalizeTaskModelId('cloudflare-ai-gateway/custom-route')).toBe(
+      'cloudflare-ai-gateway/custom-route',
+    );
+    expect(
+      normalizeTaskModelId(
+        'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      ),
+    ).toBe('cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code');
+    expect(normalizeTaskModelId('cloudflare-workers-ai/custom-route')).toBe(
+      'cloudflare-workers-ai/custom-route',
+    );
     expect(normalizeTaskModelId('opencode/big-pickle')).toBe(
       'opencode/big-pickle',
     );

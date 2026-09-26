@@ -78,6 +78,8 @@
               "providers/inference/azure-foundry",
               "providers/inference/azure-openai",
               "providers/inference/baseten",
+              "providers/inference/cloudflare-ai-gateway",
+              "providers/inference/cloudflare-workers-ai",
               "providers/inference/chatgpt",
               "providers/inference/deepseek",
               "providers/inference/github-copilot",

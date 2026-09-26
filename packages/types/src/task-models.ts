@@ -21,6 +21,8 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'requesty',
   'baseten',
   'togetherai',
+  'cloudflare-ai-gateway',
+  'cloudflare-workers-ai',
   'deepseek',
   'openai',
   'azure',
@@ -82,6 +84,8 @@ export const GATEWAY_TASK_MODEL_PROVIDER_IDS = [
   'requesty',
   'baseten',
   'togetherai',
+  'cloudflare-ai-gateway',
+  'cloudflare-workers-ai',
 ] as const;
 
 export const TASK_MODEL_INPUT_TYPES = [

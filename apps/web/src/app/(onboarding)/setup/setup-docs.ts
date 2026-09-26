@@ -30,6 +30,8 @@ const MODEL_PROVIDER_DOC_PATHS: Partial<
   'azure-cognitive-services': 'providers/inference/azure-foundry',
   baseten: 'providers/inference/baseten',
   chatgpt: 'providers/inference/chatgpt',
+  'cloudflare-ai-gateway': 'providers/inference/cloudflare-ai-gateway',
+  'cloudflare-workers-ai': 'providers/inference/cloudflare-workers-ai',
   deepseek: 'providers/inference/deepseek',
   'github-copilot': 'providers/inference/github-copilot',
   google: 'providers/inference/google-gemini',
