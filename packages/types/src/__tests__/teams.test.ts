@@ -56,16 +56,13 @@ describe('buildTeamsMessagePermalink', () => {
     ).toBe('https://teams.microsoft.com/l/app/bot-app-id');
   });
 
-  it('returns null for a personal conversation when no bot app id is available', () => {
+  it('returns null for conversations without enough link metadata', () => {
     expect(
       buildTeamsMessagePermalink({
         conversationId: 'a:personal-conversation',
         messageId: 'activity-2',
       }),
     ).toBeNull();
-  });
-
-  it('returns null when the conversation id or message id is missing for a channel conversation', () => {
     expect(
       buildTeamsMessagePermalink({
         conversationId: '19:channel@thread.v2',

@@ -998,13 +998,15 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    const summary = screen.getByText('Saved to memory');
-    expect(summary).toBeInTheDocument();
-    expect(summary.closest('details')).not.toHaveAttribute('open');
-    fireEvent.click(summary);
-    expect(summary.closest('details')).toHaveAttribute('open');
+    const toolHeader = screen.getByRole('button', {
+      name: 'Saved to memory Completed',
+    });
+    expect(toolHeader).toBeInTheDocument();
+    expect(toolHeader).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toolHeader);
+    expect(toolHeader).toHaveAttribute('aria-expanded', 'true');
     expect(
-      screen.getByText('Staging deploys use the release branch.'),
+      screen.getByText(/Staging deploys use the release branch\./),
     ).toBeInTheDocument();
   });
 
@@ -1038,7 +1040,9 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(screen.getByText('Saved to memory')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Saved to memory Completed' }),
+    ).toBeInTheDocument();
   });
 
   it('restores each Session draft and scroll position without focusing after a direct switch', () => {

@@ -154,6 +154,13 @@ when you want to use it.
 
 ### Recommended default models
 
+**GPT 5.6 Luna** is the default coding model for Roomote's default OpenRouter
+setup and for new Vercel AI Gateway, Requesty, OpenAI, Azure OpenAI, Azure AI
+Foundry, OpenCode Zen, OpenCode Go, Amazon Bedrock, GitHub Copilot, and ChatGPT
+subscription connections. The recommended OpenAI, ChatGPT subscription, and
+GitHub Copilot mapping presets also select GPT 5.6 Luna with medium reasoning.
+Existing saved defaults and role mappings do not change automatically.
+
 Providers also carry recommended defaults for the model roles below — for
 example a strong model for planning and code review and a fast, low-cost model
 for helper and explore work. Connecting a provider in the setup wizard applies
@@ -335,9 +342,10 @@ inference, and selecting those routes sends decision text to that provider.
 
 The **Roomote judgment model** is an open-weight model served on
 Roomote-operated infrastructure, where its decision text is processed. It
-answers the same typed questions as Jev and follows the same confidence rules.
-Self-hosted deployments can point `R_JUDGMENT_UPSTREAM_URL` at any server that
-speaks the same typed decisions request.
+answers the same typed questions as Jev and follows the same confidence rules
+for decisions in its evaluated policy. Self-hosted deployments can point
+`R_JUDGMENT_UPSTREAM_URL` at any server that speaks the same typed decisions
+request.
 
 When a judgment model is on, Roomote asks it first for:
 

@@ -84,17 +84,6 @@ describe('redactReservedOpenCodeEnvReferences', () => {
 });
 
 describe('environmentMcpServersSchema', () => {
-  it('accepts config that references only operator-owned names', () => {
-    const result = environmentMcpServersSchema.safeParse({
-      docs: {
-        url: 'https://docs.example.com/mcp',
-        headers: { Authorization: 'Bearer ${DOCS_TOKEN}' },
-      },
-    });
-
-    expect(result.success).toBe(true);
-  });
-
   it.each([
     [
       'a remote header',

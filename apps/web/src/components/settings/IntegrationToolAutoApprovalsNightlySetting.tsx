@@ -23,8 +23,8 @@ export function IntegrationToolAutoApprovalsNightlySetting() {
         />
         <p className="text-sm text-muted-foreground">
           Expose the Auto-approval decisions card in Settings → Agent Guidance.
-          Jev is required for Auto to make decisions, and saved per-tool choices
-          continue to take priority.
+          A judgment model is required for Auto to make decisions, and saved
+          per-tool choices continue to take priority.
         </p>
       </div>
     </Section>

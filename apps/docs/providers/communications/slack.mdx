@@ -260,9 +260,10 @@ Eligible human discussion in an established Roomote Slack thread keeps reaching
 Roomote after another participant is mentioned. When a
 [judgment model](/models#judgment-model) is configured, every unmentioned
 reply from a linked member in a Roomote thread with more than one person is
-judged before it can start a turn: it routes when the model finds it is addressed to Roomote and is more
-than a closing acknowledgement, so messages meant for a colleague and simple
-acknowledgements stay silent. Without a judgment model, Roomote stays quiet
+judged before it can start a turn: it routes when the model finds it is
+addressed to Roomote. Messages meant for a colleague stay silent;
+acknowledgements addressed to Roomote reach the session, which then decides
+whether a response is warranted. Without a judgment model, Roomote stays quiet
 around peer discussion unless directly addressed. Direct mentions always work.
 
 Every Roomote reply ends with a compact footer: **Reply anytime**, a plain

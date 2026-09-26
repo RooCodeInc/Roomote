@@ -140,6 +140,9 @@ describe('processSessionStatusJudgmentBatch', () => {
     await expect(processSessionStatusJudgmentBatch()).resolves.toBe(1);
 
     expect(evaluateMock).toHaveBeenCalledOnce();
+    expect(evaluateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: 'session-status-judgment' }),
+    );
     const state = evaluateMock.mock.calls[0]?.[0].state as {
       recentMessages: Array<{ text: string }>;
     };

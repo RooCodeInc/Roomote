@@ -163,8 +163,9 @@ session separate. Those signals are not treated as one shared, owner-bound
 conversation or as permission to monitor a channel. When a
 [judgment model](/models#judgment-model) is configured and more than one
 person is in the thread, an eligible unmentioned thread reply still routes
-only when the model finds it is addressed to Roomote and more than a closing
-acknowledgement.
+only when the model finds it is addressed to Roomote. An acknowledgement that
+passes that addressee check reaches the session, which then decides whether a
+response is warranted.
 
 Replies to Roomote messages continue the bound session. Existing task
 conversations keep their active-task and resumable-snapshot behavior, and Roomote

@@ -24,9 +24,9 @@ import { getDecisionModelRequirements } from './judgment-decision-policy';
 
 const AUTO_EVALUATION_TIMEOUT_MS = 20_000;
 /**
- * Only Jev assesses tool calls for now: the model Roomote trains has not been
- * evaluated on this decision, so a deployment on it gets no Auto (every call
- * asks, as with no model at all) until it has been.
+ * Which judgment models may assess tool calls, from the decision policy: Jev,
+ * or the Roomote judgment model when the deployment selected it. The helper
+ * model never does.
  */
 export const AUTO_DECISION_REQUIREMENTS = getDecisionModelRequirements(
   'integration-tool-auto-evaluation',
@@ -370,7 +370,7 @@ export type IntegrationToolAutoState = {
 };
 
 export async function resolveIntegrationToolAutoState(): Promise<IntegrationToolAutoState> {
-  // Some callers import this module only for the Jev requirements; defer Env
+  // Some callers import this module only for the model requirements; defer Env
   // initialization until the Auto state is actually resolved.
   const [enabled, settings, nightlyExperimentsEnabled] = await Promise.all([
     isDeploymentExperimentEnabled('integrationToolAutoApprovals'),

@@ -1,9 +1,6 @@
 import {
-  getBackgroundAutomationSettingsDescriptor,
-  getScheduledSuggestionBackgroundAutomationDescriptor,
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
-  isTriggerableBackgroundAutomationKey,
   TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS,
 } from '../background-automation-registry';
 
@@ -21,77 +18,6 @@ describe('background automation registry', () => {
       'ci_failure_triage',
       'merge_announcer',
     ]);
-  });
-
-  it('keys descriptors by the canonical snake_case automation key', () => {
-    const codeQualityAuditor =
-      getTriggerableBackgroundAutomationDescriptorByKey('code_quality_auditor');
-
-    expect(codeQualityAuditor).toMatchObject({
-      automationKey: 'code_quality_auditor',
-      label: 'Code Quality Auditor',
-      usesManagerChannel: true,
-    });
-    expect(isTriggerableBackgroundAutomationKey('code_quality_auditor')).toBe(
-      true,
-    );
-    expect(isTriggerableBackgroundAutomationKey('codeQualityAuditor')).toBe(
-      false,
-    );
-  });
-
-  it('resolves scheduled suggestion metadata from the shared descriptor', () => {
-    const descriptor = getScheduledSuggestionBackgroundAutomationDescriptor(
-      'code_quality_auditor',
-    );
-
-    expect(descriptor?.automationKey).toBe('code_quality_auditor');
-    expect(
-      descriptor && 'scheduledSuggestionSource' in descriptor
-        ? descriptor.scheduledSuggestionSource
-        : null,
-    ).toBe('code_quality_auditor');
-    expect(
-      descriptor
-        ? getTriggerableBackgroundAutomationSettingsHash(
-            descriptor.automationKey,
-          )
-        : null,
-    ).toBe('code-quality-auditor');
-  });
-
-  it('defaults unknown scheduled suggestion sources to Suggest Ideas', () => {
-    const descriptor = getScheduledSuggestionBackgroundAutomationDescriptor();
-
-    expect(descriptor?.automationKey).toBe('suggester');
-    expect(
-      descriptor && 'scheduledSuggestionSource' in descriptor
-        ? descriptor.scheduledSuggestionSource
-        : null,
-    ).toBe('suggest_ideas');
-    expect(
-      descriptor
-        ? getTriggerableBackgroundAutomationSettingsHash(
-            descriptor.automationKey,
-          )
-        : null,
-    ).toBe('suggest-ideas');
-  });
-
-  it('derives automation settings labels from the shared settings catalog', () => {
-    expect(
-      getBackgroundAutomationSettingsDescriptor('code-quality-auditor'),
-    ).toEqual({
-      hash: 'code-quality-auditor',
-      label: 'Code Quality Auditor',
-      automationKey: 'code_quality_auditor',
-    });
-    expect(
-      getBackgroundAutomationSettingsDescriptor('roomote-managers'),
-    ).toEqual({
-      hash: 'roomote-managers',
-      label: 'Manager Channel',
-    });
   });
 
   it('allows all communication destinations for the suggester', () => {

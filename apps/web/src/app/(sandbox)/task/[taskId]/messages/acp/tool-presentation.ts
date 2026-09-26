@@ -475,6 +475,15 @@ function resolveReceiptLanguage(
       verb: byPhase('Adding', 'Added', 'Failed to Add'),
       object: 'chat reaction',
     };
+  if (toolName === 'memory_saved')
+    return {
+      verb: byPhase(
+        'Saving to memory',
+        'Saved to memory',
+        'Failed to Save to memory',
+      ),
+      object: '',
+    };
   if (
     toolName === 'save_memory' ||
     (toolName === 'save_task_memory' && serverName === 'roomote')

@@ -17,7 +17,7 @@ it('offers the Auto switch on the nightly page and updates its flag', () => {
 
   expect(screen.getByText('Auto tool approvals')).toBeInTheDocument();
   expect(
-    screen.getByText(/Jev is required for Auto to make decisions/),
+    screen.getByText(/A judgment model is required for Auto to make decisions/),
   ).toBeInTheDocument();
   fireEvent.click(
     screen.getByRole('switch', { name: 'Toggle Auto tool approvals' }),

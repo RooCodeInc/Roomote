@@ -91,4 +91,31 @@ describe('useSetupFlow', () => {
     await waitFor(() => expect(result.current.step).toBe('env-vars'));
     expect(replaceMock).toHaveBeenCalledWith('/setup?step=env-vars');
   });
+
+  it('leaves the URL alone once setup is complete', async () => {
+    queryState.current = {
+      ...buildStatus(),
+      setupCompletedAt: '2026-09-04T12:02:14.782Z',
+      setupNewState: {
+        authProvider: null,
+        modelProvider: 'chatgpt',
+      },
+    };
+    window.history.replaceState({}, '', '/setup?token=setup-token');
+    renderHook(() => useSetupFlow());
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(replaceMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves the URL alone while the caller disables URL sync', async () => {
+    window.history.replaceState({}, '', '/setup?token=setup-token');
+    const { result } = renderHook(() => useSetupFlow({ syncUrl: false }));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(result.current.syncUrl).toBe(false);
+    expect(replaceMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
 });

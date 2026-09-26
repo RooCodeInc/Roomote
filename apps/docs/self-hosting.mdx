@@ -170,9 +170,10 @@ a GLiNER 2.5 model fine-tuned on Roomote's decisions and trained only on
 synthetic data. It downloads the model on first start and keeps it in the
 `roomote_judgment_models` volume. Its model card lists the decisions it covers
 and its accuracy; on real decisions it trails Jev by a few points, and Roomote
-acts on a decision only when the model is confident. Tool-call auto-approval
-still requires Jev. To serve a different checkpoint, set `JUDGMENT_MODEL` to a
-Hugging Face id or path (and `JUDGMENT_HF_TOKEN` if it is private).
+acts on a decision only when the model is confident and the decision is in its
+evaluated policy. Unsupported decisions keep their existing safe fallback. To
+serve a different checkpoint, set `JUDGMENT_MODEL` to a Hugging Face id or path
+(and `JUDGMENT_HF_TOKEN` if it is private).
 
 The sidecar is reachable only on the stack's internal network; set
 `R_JUDGMENT_UPSTREAM_API_KEY` as well to require a bearer token.
