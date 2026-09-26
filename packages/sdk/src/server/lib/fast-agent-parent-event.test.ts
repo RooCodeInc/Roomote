@@ -1493,6 +1493,88 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('posts child-reported visual-proof images as native Slack image blocks by default', async () => {
+    mocks.answerQuestion.mockImplementationOnce(async (params) => {
+      expect(params.defaultImageArtifactIds).toEqual(['artifact-1']);
+      return params.adapter.postReply({
+        purpose: 'closeout',
+        message: 'The visual proof is ready.',
+        imageArtifactIds: params.defaultImageArtifactIds,
+      });
+    });
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'child_message',
+        taskId: 'task-1',
+        runId: 42,
+        messageId: 'proof-report-1',
+        purpose: 'closeout',
+        message: 'The visual proof is ready.',
+        imageArtifactIds: ['artifact-1'],
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: expect.arrayContaining([
+          {
+            type: 'image',
+            image_url:
+              'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            alt_text: 'result.png',
+          },
+        ]),
+      }),
+    );
+  });
+
+  it('posts child-reported visual-proof images through the Discord image field by default', async () => {
+    const discordParent = {
+      ...parent,
+      conversation: {
+        surface: 'discord' as const,
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async (params) => {
+      expect(params.defaultImageArtifactIds).toEqual(['artifact-1']);
+      return params.adapter.postReply({
+        purpose: 'closeout',
+        message: 'The visual proof is ready.',
+        imageArtifactIds: params.defaultImageArtifactIds,
+      });
+    });
+
+    await deliverFastAgentParentEvent({
+      parent: discordParent,
+      event: {
+        type: 'child_message',
+        taskId: 'task-1',
+        runId: 42,
+        messageId: 'proof-report-2',
+        purpose: 'closeout',
+        message: 'The visual proof is ready.',
+        imageArtifactIds: ['artifact-1'],
+      },
+    });
+
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: [
+          {
+            url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            altText: 'result.png',
+            contentType: 'image/png',
+          },
+        ],
+      }),
+    );
+  });
+
   it('captures an automation platform turn without a chat provider', async () => {
     const automationParent = {
       sessionId: parent.sessionId,
