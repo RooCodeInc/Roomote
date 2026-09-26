@@ -188,6 +188,10 @@ export function useSetupFlow(
 
   useEffect(() => {
     if (!status || initializedRef.current) return;
+    // A completed deployment is about to be redirected Home. Rewriting the
+    // /setup URL here would race that redirect and can strand the admin on
+    // the setup spinner.
+    if (status.setupCompletedAt != null) return;
     initializedRef.current = true;
     const resolved = resolveStep(entryContext.step);
     navigateToStep(resolved, 'replace');

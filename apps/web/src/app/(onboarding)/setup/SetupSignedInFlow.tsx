@@ -68,7 +68,12 @@ export function SetupSignedInFlow() {
   const selectedModelProvider =
     pendingModelProvider ?? status?.setupNewState.modelProvider;
 
+  const flowSetupCompleted = status?.setupCompletedAt != null;
+
   useEffect(() => {
+    // Leave the URL alone once setup is complete so this sync cannot
+    // supersede the redirect Home below.
+    if (flowSetupCompleted) return;
     const params = readSetupSearchParams();
     if (selectedModelProvider) {
       if (params.get('modelProvider') === selectedModelProvider) return;
@@ -78,7 +83,12 @@ export function SetupSignedInFlow() {
       params.delete('modelProvider');
     }
     commitSetupUrl(params);
-  }, [commitSetupUrl, readSetupSearchParams, selectedModelProvider]);
+  }, [
+    commitSetupUrl,
+    flowSetupCompleted,
+    readSetupSearchParams,
+    selectedModelProvider,
+  ]);
 
   const shouldEvaluateSetupRedirect = isSignedIn && isAdmin;
   const setupRedirectPath =

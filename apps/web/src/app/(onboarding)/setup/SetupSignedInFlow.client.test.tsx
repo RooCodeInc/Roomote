@@ -1,33 +1,39 @@
 import { render, screen, waitFor } from '@testing-library/react';
 
-const { replaceMock, setupStatusState, createSessionState, flowState } =
-  vi.hoisted(() => ({
-    replaceMock: vi.fn(),
-    setupStatusState: {
-      current: {
-        data: null as Record<string, unknown> | null,
-        isLoading: false,
-        isError: false,
-      },
+const {
+  replaceMock,
+  commitSetupUrlMock,
+  setupStatusState,
+  createSessionState,
+  flowState,
+} = vi.hoisted(() => ({
+  replaceMock: vi.fn(),
+  commitSetupUrlMock: vi.fn(),
+  setupStatusState: {
+    current: {
+      data: null as Record<string, unknown> | null,
+      isLoading: false,
+      isError: false,
     },
-    createSessionState: {
-      current: {
-        mutate: vi.fn(),
-        isPending: false,
-        isError: false,
-        data: undefined as { sessionId: string } | undefined,
-        error: null,
-      },
+  },
+  createSessionState: {
+    current: {
+      mutate: vi.fn(),
+      isPending: false,
+      isError: false,
+      data: undefined as { sessionId: string } | undefined,
+      error: null,
     },
-    flowState: {
-      current: {
-        step: 'inference' as const,
-        status: null as Record<string, unknown> | null,
-        isLoading: false,
-        isError: false,
-      },
+  },
+  flowState: {
+    current: {
+      step: 'inference' as const,
+      status: null as Record<string, unknown> | null,
+      isLoading: false,
+      isError: false,
     },
-  }));
+  },
+}));
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
@@ -76,7 +82,7 @@ vi.mock('./hooks', () => ({
     goToNextStep: vi.fn(),
     canGoBack: false,
     readSetupSearchParams: () => new URLSearchParams(),
-    commitSetupUrl: vi.fn(),
+    commitSetupUrl: commitSetupUrlMock,
   }),
 }));
 
@@ -109,6 +115,7 @@ function buildFlowStatus(overrides: Record<string, unknown> = {}) {
 describe('SetupSignedInFlow', () => {
   beforeEach(() => {
     replaceMock.mockClear();
+    commitSetupUrlMock.mockClear();
     createSessionState.current = {
       mutate: vi.fn(),
       isPending: false,
@@ -166,6 +173,24 @@ describe('SetupSignedInFlow', () => {
     ).not.toBeInTheDocument();
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/'));
     expect(createSessionState.current.mutate).not.toHaveBeenCalled();
+  });
+
+  it('does not rewrite the setup URL once setup is complete', async () => {
+    setupStatusState.current = {
+      data: { setupCompletedAt: '2026-09-04T12:02:14.782Z' },
+      isLoading: false,
+      isError: false,
+    };
+    flowState.current.status = buildFlowStatus({
+      setupCompletedAt: '2026-09-04T12:02:14.782Z',
+      modelSetup: { setupSatisfied: true, setupSatisfiedByRuntimeEnv: false },
+      setupNewState: { modelProvider: 'chatgpt' },
+    });
+
+    render(<SetupSignedInFlow />);
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/'));
+    expect(commitSetupUrlMock).not.toHaveBeenCalled();
   });
 
   it('leaves the setup Session hand-off alone when it is in flight', () => {
