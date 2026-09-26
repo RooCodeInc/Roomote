@@ -40,6 +40,8 @@ export type SandboxReconnect = (
 ) => void;
 
 const CONNECTION_TIMEOUT_MS = 5_000;
+const INITIAL_CONNECTION_BACKGROUND_RETRY_INTERVAL_MS = 10_000;
+const ESTABLISHED_CONNECTION_BACKGROUND_RETRY_INTERVAL_MS = 60_000;
 
 interface UseSandboxLiveConnectionOptions {
   taskId: string;
@@ -604,6 +606,10 @@ export function useSandboxLiveConnection({
           );
         },
         triggerReconnect: () => reconnect(),
+        backgroundRetryIntervalMs: () =>
+          store.getState().hasConnectedOnce
+            ? ESTABLISHED_CONNECTION_BACKGROUND_RETRY_INTERVAL_MS
+            : INITIAL_CONNECTION_BACKGROUND_RETRY_INTERVAL_MS,
       }),
     [store, reconnect],
   );

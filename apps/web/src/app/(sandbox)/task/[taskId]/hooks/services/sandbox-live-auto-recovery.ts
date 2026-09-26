@@ -10,7 +10,7 @@ interface StartSandboxLiveAutoRecoveryOptions {
   /** Kick off a reconnect attempt (same path as the manual Reconnect button). */
   triggerReconnect: () => void;
   attemptThrottleMs?: number;
-  backgroundRetryIntervalMs?: number;
+  backgroundRetryIntervalMs?: number | (() => number);
 }
 
 /**
@@ -59,14 +59,37 @@ export function startSandboxLiveAutoRecovery({
   window.addEventListener('online', handleOnline);
   document.addEventListener('visibilitychange', handleVisibilityChange);
 
-  const backgroundRetryInterval = setInterval(
-    attempt,
-    backgroundRetryIntervalMs,
-  );
+  const getBackgroundRetryIntervalMs =
+    typeof backgroundRetryIntervalMs === 'function'
+      ? backgroundRetryIntervalMs
+      : () => backgroundRetryIntervalMs;
+  let isCleanedUp = false;
+  let backgroundRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleBackgroundRetry = () => {
+    if (isCleanedUp) {
+      return;
+    }
+
+    backgroundRetryTimer = setTimeout(() => {
+      backgroundRetryTimer = null;
+
+      if (isCleanedUp) {
+        return;
+      }
+
+      attempt();
+      scheduleBackgroundRetry();
+    }, getBackgroundRetryIntervalMs());
+  };
+
+  scheduleBackgroundRetry();
 
   return () => {
+    isCleanedUp = true;
     window.removeEventListener('online', handleOnline);
     document.removeEventListener('visibilitychange', handleVisibilityChange);
-    clearInterval(backgroundRetryInterval);
+    if (backgroundRetryTimer) {
+      clearTimeout(backgroundRetryTimer);
+    }
   };
 }
