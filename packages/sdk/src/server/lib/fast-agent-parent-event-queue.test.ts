@@ -280,6 +280,56 @@ describe('Fast parent event durable queue', () => {
     expect(mocks.queueAdd).toHaveBeenCalledOnce();
   });
 
+  it('sanitizes nested NUL characters before either durable admission path', async () => {
+    const parentWithNul = {
+      ...parent,
+      conversation: {
+        ...parent.conversation,
+        threadId: '100.\0' + '1',
+      },
+    };
+    const eventWithNul = {
+      ...pullRequestOpenedEvent,
+      untrustedTaskGeneratedContext: '> \0<!-- attribution -->',
+      pullRequest: {
+        ...pullRequestOpenedEvent.pullRequest,
+        title: 'Keep\0 delivery ordered',
+      },
+    };
+
+    await enqueueFastAgentParentEvent({
+      parent: parentWithNul,
+      event: eventWithNul,
+    });
+    await enqueueFastAgentParentEventForRun({
+      parent: parentWithNul,
+      event: eventWithNul,
+      runId: 42,
+    });
+
+    for (const [values] of mocks.insertValues.mock.calls) {
+      expect(values).toEqual(
+        expect.objectContaining({
+          parent: {
+            ...parent,
+            conversation: {
+              ...parent.conversation,
+              threadId: '100.1',
+            },
+          },
+          event: {
+            ...eventWithNul,
+            untrustedTaskGeneratedContext: '> <!-- attribution -->',
+            pullRequest: {
+              ...eventWithNul.pullRequest,
+              title: 'Keep delivery ordered',
+            },
+          },
+        }),
+      );
+    }
+  });
+
   it('persists and publishes one canonical child-report receipt before waking the parent', async () => {
     await enqueueFastAgentParentEvent({ parent, event });
 
