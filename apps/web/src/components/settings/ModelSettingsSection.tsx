@@ -510,14 +510,16 @@ function UseRecommendedDefaultsAction({
                   <CommandItem
                     key={preset.id}
                     value={`${provider.label} ${preset.label}`}
-                    aria-label={`${provider.label}: ${preset.label}${preset.default ? ' (default)' : ''}`}
+                    aria-label={`${provider.label}: ${preset.label}${preset.default && preset.label !== 'Default' ? ' (default)' : ''}`}
                     onSelect={() => {
                       setOpen(false);
                       onSelectProvider(provider, preset);
                     }}
                   >
                     {preset.label}
-                    {preset.default && ' (default)'}
+                    {preset.default &&
+                      preset.label !== 'Default' &&
+                      ' (default)'}
                   </CommandItem>
                 ))}
               </CommandGroup>
