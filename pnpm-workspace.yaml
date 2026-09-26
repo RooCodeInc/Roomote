@@ -8,4 +8,6 @@ minimumReleaseAgeExclude:
   - jose
   # Allow the patched releases while they finish maturing.
   - brace-expansion
+  # Keep the OpenCode SDK aligned with the CLI for the security release.
+  - '@opencode-ai/sdk@1.18.32'
 blockExoticSubdeps: true
