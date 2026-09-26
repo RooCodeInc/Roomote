@@ -124,6 +124,7 @@ describe('launchDiscordTask', () => {
         userId: 'user-1',
         ts: 'message-1',
       },
+      visibleInTranscript: true,
       metadata: {
         communicationProvider: 'discord',
         communicationGuildId: 'guild-1',
@@ -183,6 +184,7 @@ describe('launchDiscordTask', () => {
             communicationThreadId: 'thread-41',
             communicationMessageId: 'thread-message-1',
             communicationSourceEventId: 'message-1',
+            visibleInTranscript: true,
             discordTaskThread: true,
           }),
         },

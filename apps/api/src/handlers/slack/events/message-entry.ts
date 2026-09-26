@@ -654,6 +654,7 @@ export async function processSlackChannelAutoStartTask(params: {
         slack,
         userId: launchIdentity.launchUserId,
         teamId,
+        visibleInTranscript: !isBotAuthored,
         directedAtRoomote:
           !isBotAuthored ||
           mentionsSlackBot(event, slackInstallation.botUserId),
@@ -1024,6 +1025,7 @@ async function processAutomatedAppMentionTask(params: {
             ? { actor: { externalId: event.user } }
             : {}),
         },
+        visibleInTranscript: false,
         resolveActiveTasks: () =>
           resolveFastAgentReplyTasks({
             slack,
@@ -1115,10 +1117,17 @@ export function startFastAgentResponse(params: {
    * turns pass their automation initiator so delegated work keeps automation
    * provenance instead of appearing installer-initiated. */
   delegatedTaskInitiator?: TaskInitiator;
+  /** Prompt visibility from the launch origin, not inferred from initiator. */
+  visibleInTranscript?: boolean;
   originSessionId?: string;
   errorLogPrefix: string;
 }): Promise<FastAgentStartResult> {
-  const { errorLogPrefix, delegatedTaskInitiator, ...fastAgentParams } = params;
+  const {
+    errorLogPrefix,
+    delegatedTaskInitiator,
+    visibleInTranscript,
+    ...fastAgentParams
+  } = params;
   return startAcceptedFastAgentTurn({
     run: ({ onAccepted, onRejected }) =>
       processFastAgentMessage({
@@ -1134,6 +1143,7 @@ export function startFastAgentResponse(params: {
           ...(delegatedTaskInitiator
             ? { initiator: delegatedTaskInitiator }
             : {}),
+          ...(visibleInTranscript !== undefined ? { visibleInTranscript } : {}),
           ...(params.slackInstallation.teamDomain
             ? { teamDomain: params.slackInstallation.teamDomain }
             : {}),
@@ -1311,6 +1321,7 @@ async function handleSlackEntryEvent(params: {
       slack,
       userId: userMapping.userId,
       teamId,
+      visibleInTranscript: true,
       resolveActiveTasks: () =>
         resolveFastAgentReplyTasks({
           slack,

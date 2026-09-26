@@ -757,6 +757,33 @@ describe('Messages', () => {
     );
   });
 
+  it('renders a visible command-style initial prompt in the task transcript', () => {
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            prompt: {
+              text: '$review-code Check this change',
+              visibleInTranscript: true,
+            },
+            taskRun: { id: 1 },
+          } as never
+        }
+      />,
+    );
+
+    expect(
+      screen.getByText('$review-code Check this change'),
+    ).toBeInTheDocument();
+    expect(mockBuildAcpRenderBlocks).toHaveBeenCalledWith(
+      [],
+      expect.objectContaining({
+        shouldHideFirstMessage: true,
+      }),
+    );
+  });
+
   it('hides the first ACP user prompt when the session prompt is rendered above', () => {
     render(
       <Messages

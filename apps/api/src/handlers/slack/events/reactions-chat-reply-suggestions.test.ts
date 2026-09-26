@@ -502,6 +502,7 @@ describe('chat reply suggestion reactions', () => {
       if (launchKind === 'router') {
         expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
           expect.objectContaining({
+            visibleInTranscript: false,
             event: expect.objectContaining({
               channel: 'C1',
               ts: 'execution-thread-ts',

@@ -161,6 +161,10 @@ describe('launchTask', () => {
     // Guard against the regression: the raw row fields must not leak through.
     expect(json.id).toBeUndefined();
     expect(json.error).toBeUndefined();
+    const launchedTask = mockLaunchPinned.mock.calls[0]?.[0] as {
+      task: { payload: { visibleInTranscript?: boolean } };
+    };
+    expect(launchedTask.task.payload.visibleInTranscript).toBe(true);
   });
 
   it('maps read-only launch rejection to a stable 409 error', async () => {

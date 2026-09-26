@@ -1504,6 +1504,7 @@ async function launchTeamsTask(input: {
   queuedMessage: QueuedTeamsCommunicationMessage;
   metadata: TeamsActivityCommunicationMetadata;
   workspace: TeamsWorkspaceSelection;
+  visibleInTranscript?: boolean;
   /** The session that owns this task; its transcript gets the kickoff. */
   fastAgentParent?: FastAgentParent;
   /** Runs inside the launch gate before the child becomes runnable. */
@@ -1526,6 +1527,9 @@ async function launchTeamsTask(input: {
         ...input.metadata,
         ...(input.fastAgentParent
           ? buildFastAgentChildTaskMetadata(input.fastAgentParent)
+          : {}),
+        ...(input.visibleInTranscript !== undefined
+          ? { visibleInTranscript: input.visibleInTranscript }
           : {}),
       },
     };
@@ -1609,6 +1613,7 @@ async function launchPinnedTeamsSuggestionTask(input: {
         queuedMessage: input.queuedMessage,
         metadata: input.metadata,
         workspace: input.workspace,
+        visibleInTranscript: false,
         fastAgentParent: parent,
         beforeEnqueue: async () => {
           await postKickoff();

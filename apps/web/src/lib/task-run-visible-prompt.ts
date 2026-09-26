@@ -127,9 +127,9 @@ function getTaskRunPromptImages(
 }
 
 /**
- * Builds a visible session prompt from the task run's launch payload.
- * Prompts derived from the user's original launch input are always visible;
- * the server marks harness-injected bootstrap prompts as hidden separately.
+ * Builds a session prompt from the task run's launch payload. Explicit
+ * visibility remains authoritative. Do not infer prompt authorship from the
+ * task initiator: internally generated task prompts can also be user-triggered.
  */
 export function getTaskRunVisiblePrompt(
   taskRun: Pick<TaskRunDetail, 'payload'> | null | undefined,

@@ -142,6 +142,8 @@ export async function processDiscordFastAgentMessage(
      * turns pass their automation initiator so delegated work keeps automation
      * provenance instead of appearing installer-initiated. */
     delegatedTaskInitiator?: TaskInitiator;
+    /** Visibility comes from the entry surface, not the delegated task initiator. */
+    visibleInTranscript?: boolean;
     onAccepted?: (abort: () => Promise<void>) => void;
     onRejected?: () => void;
   } & DiscordFastAgentSource,
@@ -505,6 +507,9 @@ export async function processDiscordFastAgentMessage(
             applicationId: input.applicationId,
             requesterDiscordUserId: input.sender.id,
             launchOwnerUserId: input.senderUserId,
+            ...(input.visibleInTranscript !== undefined
+              ? { visibleInTranscript: input.visibleInTranscript }
+              : {}),
             ...(input.delegatedTaskInitiator
               ? { initiator: input.delegatedTaskInitiator }
               : {}),
