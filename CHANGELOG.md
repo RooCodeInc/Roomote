@@ -4,18 +4,18 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.13.2 (2026-09-26)
 
-Roomote 1.13.2 expands evaluated Session judgment support while keeping setup and transcript experiences reliable.
+Roomote 1.13.2 expands evaluated session judgment support while keeping setup and transcript experiences reliable.
 
 ### Highlights
 
-- Use the Roomote judgment model for evaluated Session status classification when the experiment is enabled.
-- See saved-to-memory events in the same expandable tool rows as other Session and task activity.
+- Use the Roomote judgment model for evaluated session status classification when the experiment is enabled.
+- See saved-to-memory events in the same expandable tool rows as other session and task activity.
 - Reopen a completed setup link without leaving the setup page on a loading spinner.
 
 ### Patch changes
 
-- The Roomote judgment model now supports evaluated Session status classification when enabled, while decisions outside its policy keep the existing safe fallback.
-- Saved-to-memory events in Session and task transcripts now use the same expandable tool row as other tool activity, preserving the saved facts and memory label.
+- The Roomote judgment model now supports evaluated session status classification when enabled, while decisions outside its policy keep the existing safe fallback.
+- Saved-to-memory events in session and task transcripts now use the same expandable tool row as other tool activity, preserving the saved facts and memory label.
 - Reopening a completed setup link now returns admins to Home instead of leaving the setup page on a loading spinner.
 
 ## 1.13.1 (2026-09-25)
