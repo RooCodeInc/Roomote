@@ -67,6 +67,10 @@ function hasBootstrapProgress(status: {
 export function useSetupFlow(
   options: {
     enabled?: boolean;
+    // False while the caller is about to leave /setup (for example the
+    // completed-deployment redirect Home). The flow then never rewrites the
+    // setup URL, so it cannot supersede that navigation.
+    syncUrl?: boolean;
   } = {},
 ) {
   const trpc = useTRPC();
@@ -78,6 +82,7 @@ export function useSetupFlow(
     }),
   );
   const status = statusQuery.data;
+  const syncUrl = (options.syncUrl ?? true) && status?.setupCompletedAt == null;
   const [entryContext] = useState(readUrlEntryContext);
   const [step, setStep] = useState<SetupStep>('welcome');
   const [transitionDirection, setTransitionDirection] =
@@ -187,7 +192,7 @@ export function useSetupFlow(
   );
 
   useEffect(() => {
-    if (!status || initializedRef.current) return;
+    if (!status || initializedRef.current || !syncUrl) return;
     initializedRef.current = true;
     const resolved = resolveStep(entryContext.step);
     navigateToStep(resolved, 'replace');
@@ -204,20 +209,21 @@ export function useSetupFlow(
     readSetupSearchParams,
     resolveStep,
     status,
+    syncUrl,
   ]);
 
   useEffect(() => {
-    if (!status || !initializedRef.current) return;
+    if (!status || !initializedRef.current || !syncUrl) return;
     const current = stepRef.current;
     if (current !== pinnedStepRef.current && shouldSkip(current)) {
       const fallback = findNextStep();
       if (fallback) navigateToStep(fallback, 'replace');
     }
-  }, [findNextStep, navigateToStep, shouldSkip, status]);
+  }, [findNextStep, navigateToStep, shouldSkip, status, syncUrl]);
 
   useEffect(() => {
     const onPopState = () => {
-      if (!status || !initializedRef.current) return;
+      if (!status || !initializedRef.current || !syncUrl) return;
       pendingSearchRef.current = null;
       navigationHistoryRef.current = [];
       pinnedStepRef.current = null;
@@ -231,7 +237,7 @@ export function useSetupFlow(
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [navigateToStep, resolveStep, setStepWithTransition, status]);
+  }, [navigateToStep, resolveStep, setStepWithTransition, status, syncUrl]);
 
   const goToStep = useCallback(
     (nextStep: SetupStep, revisit: { revisit?: boolean } = {}) => {
@@ -276,6 +282,7 @@ export function useSetupFlow(
     goToNextStep,
     readSetupSearchParams,
     commitSetupUrl,
+    syncUrl,
     status,
     isLoading: statusQuery.isLoading,
     isError: statusQuery.isError,
