@@ -1,5 +1,5 @@
 /** JSON values persisted in Fast parent-event JSONB payloads. */
-export type FastAgentParentEventJsonValue =
+type FastAgentParentEventJsonValue =
   | null
   | boolean
   | number

@@ -173,7 +173,7 @@ export function buildFastAgentParentEventKey(params: {
   return hash.digest('hex');
 }
 
-export type FastAgentParentEventAdmission = {
+type FastAgentParentEventAdmission = {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
   eventKey: string;
