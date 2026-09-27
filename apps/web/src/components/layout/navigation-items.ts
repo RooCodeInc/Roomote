@@ -91,6 +91,17 @@ export function getVisiblePrimaryNavItems(opts: {
   return PRIMARY_NAV_ITEMS.filter((item) => !item.adminOnly || opts.isAdmin);
 }
 
+export function isVisiblePrimaryNavPath(
+  pathname: string,
+  opts: { isAdmin: boolean },
+): boolean {
+  return getVisiblePrimaryNavItems(opts).some((item) =>
+    item.matchExact
+      ? item.matchPaths.includes(pathname)
+      : item.matchPaths.some((path) => pathname.startsWith(path)),
+  );
+}
+
 export function getVisibleSideNavSections(opts: {
   isAdmin: boolean;
 }): Record<SideNavSection, PrimaryNavItem[]> {
