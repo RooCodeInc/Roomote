@@ -25,4 +25,31 @@ describe('sanitizeFastAgentParentEventJson', () => {
 
     expect(sanitizeFastAgentParentEventJson(payload)).toBe(payload);
   });
+
+  it('rebuilds only the branches affected by sanitization', () => {
+    const untouched = { value: 'keep this reference' };
+    const payload = {
+      untouched,
+      nested: { value: 'remove\0this character' },
+    };
+
+    const sanitized = sanitizeFastAgentParentEventJson(
+      payload,
+    ) as typeof payload;
+
+    expect(sanitized).not.toBe(payload);
+    expect(sanitized.untouched).toBe(untouched);
+    expect(sanitized.nested).not.toBe(payload.nested);
+  });
+
+  it('rejects sanitized key collisions instead of dropping a property', () => {
+    const payload = {
+      ['same\0key']: 'earlier value',
+      samekey: 'later value',
+    };
+
+    expect(() => sanitizeFastAgentParentEventJson(payload)).toThrow(
+      'Fast parent event JSON keys collide after NUL sanitization.',
+    );
+  });
 });

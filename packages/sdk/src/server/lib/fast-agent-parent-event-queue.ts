@@ -173,6 +173,30 @@ export function buildFastAgentParentEventKey(params: {
   return hash.digest('hex');
 }
 
+type FastAgentParentEventAdmission = {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  eventKey: string;
+};
+
+/** Normalize every durable admission before deriving any related identity. */
+export function normalizeFastAgentParentEvent(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+}): FastAgentParentEventAdmission {
+  const parent = sanitizeFastAgentParentEventJson(
+    params.parent,
+  ) as FastAgentParent;
+  const event = sanitizeFastAgentParentEventJson(
+    params.event,
+  ) as FastAgentParentEvent;
+  return {
+    parent,
+    event,
+    eventKey: buildFastAgentParentEventKey({ parent, event }),
+  };
+}
+
 async function addWakeupJob(request: FastAgentParentEventQueueRequest) {
   await getFastAgentParentEventQueue().add('deliver', request, {
     jobId: request.eventKey,
@@ -234,10 +258,8 @@ export async function enqueueFastAgentParentEvent(params: {
   event: FastAgentParentEvent;
   retryTaskStartRunId?: number;
 }): Promise<{ eventKey: string; queued: true }> {
-  const parent = sanitizeFastAgentParentEventJson(params.parent);
-  const event = sanitizeFastAgentParentEventJson(params.event);
+  const { parent, event, eventKey } = normalizeFastAgentParentEvent(params);
   const admissionStartedAt = Date.now();
-  const eventKey = buildFastAgentParentEventKey({ parent, event });
   await db
     .insert(fastAgentParentEvents)
     .values({
@@ -339,9 +361,7 @@ export async function enqueueFastAgentParentEventForRun(params: {
   event: FastAgentPullRequestOpenedEvent;
   runId: number;
 }): Promise<{ eventKey: string; queued: boolean }> {
-  const parent = sanitizeFastAgentParentEventJson(params.parent);
-  const event = sanitizeFastAgentParentEventJson(params.event);
-  const eventKey = buildFastAgentParentEventKey({ parent, event });
+  const { parent, event, eventKey } = normalizeFastAgentParentEvent(params);
   const queued = await db.transaction(async (tx) => {
     const [run] = await tx
       .select({ status: taskRuns.status })

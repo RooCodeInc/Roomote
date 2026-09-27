@@ -17,10 +17,9 @@ import type {
 } from '@roomote/types';
 
 import {
-  buildFastAgentParentEventKey,
   enqueueFastAgentParentEvent,
+  normalizeFastAgentParentEvent,
 } from './fast-agent-parent-event-queue';
-import { sanitizeFastAgentParentEventJson } from './fast-agent-parent-event-json';
 
 export type FastAgentDurableTurn = {
   id: string;
@@ -103,9 +102,11 @@ export async function admitFastAgentInlineHumanTurn(params: {
   parent: FastAgentParent;
   event: FastAgentHumanFollowUpEvent;
 }): Promise<FastAgentInlineHumanTurnAdmission> {
-  const parent = sanitizeFastAgentParentEventJson(params.parent);
-  const event = sanitizeFastAgentParentEventJson(params.event);
-  const eventKey = buildFastAgentParentEventKey({ parent, event });
+  const normalized = normalizeFastAgentParentEvent(params);
+  if (normalized.event.type !== 'human_follow_up') {
+    throw new Error('Fast inline admission received a non-human event.');
+  }
+  const { parent, event, eventKey } = normalized;
   // Admission and supersession commit together, so recovery can never see
   // the new row without the older interrupted row already retired.
   return db.transaction(async (tx) => {
