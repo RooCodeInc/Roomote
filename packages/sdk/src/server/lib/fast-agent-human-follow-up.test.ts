@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
   enqueueParentEvent: vi.fn(),
+  normalizeParentEvent: vi.fn(),
   insertValues: vi.fn(),
   updateWhere: vi.fn(),
   insertOnConflict: vi.fn(),
@@ -46,9 +47,10 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('./fast-agent-parent-event-queue', () => ({
   enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
-  buildFastAgentParentEventKey: vi.fn(() => 'stable-event-key'),
+  normalizeFastAgentParentEvent: mocks.normalizeParentEvent,
 }));
 
+import { sanitizeFastAgentParentEventJson } from './fast-agent-parent-event-json';
 import {
   admitFastAgentHumanFollowUp,
   admitFastAgentInlineHumanTurn,
@@ -71,6 +73,14 @@ const event = {
   userId: 'user-1',
   question: 'Change direction.',
 };
+
+mocks.normalizeParentEvent.mockImplementation(
+  ({ parent: candidateParent, event: candidateEvent }) => ({
+    parent: sanitizeFastAgentParentEventJson(candidateParent),
+    event: sanitizeFastAgentParentEventJson(candidateEvent),
+    eventKey: 'stable-event-key',
+  }),
+);
 
 describe('persistFastAgentInlineHumanTurn', () => {
   beforeEach(() => {
