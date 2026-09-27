@@ -1,6 +1,7 @@
 import {
   getVisiblePrimaryNavItems,
   getVisibleSideNavSections,
+  isVisiblePrimaryNavPath,
 } from './navigation-items';
 
 describe('getVisiblePrimaryNavItems', () => {
@@ -60,5 +61,35 @@ describe('getVisibleSideNavSections', () => {
       manage: ['/automations', '/results', '/integrations'],
       insights: [],
     });
+  });
+});
+
+describe('isVisiblePrimaryNavPath', () => {
+  it.each([
+    '/',
+    '/sessions',
+    '/automations',
+    '/results',
+    '/integrations',
+    '/analytics',
+  ])('recognizes %s as an admin navigation path', (pathname) => {
+    expect(isVisiblePrimaryNavPath(pathname, { isAdmin: true })).toBe(true);
+  });
+
+  it('recognizes navigation subpaths and rejects unrelated routes', () => {
+    expect(isVisiblePrimaryNavPath('/analytics/costs', { isAdmin: true })).toBe(
+      true,
+    );
+    expect(isVisiblePrimaryNavPath('/tasks', { isAdmin: true })).toBe(true);
+    expect(isVisiblePrimaryNavPath('/cloud-agents', { isAdmin: true })).toBe(
+      true,
+    );
+    expect(isVisiblePrimaryNavPath('/setup', { isAdmin: true })).toBe(false);
+  });
+
+  it('does not expose admin-only navigation paths to members', () => {
+    expect(isVisiblePrimaryNavPath('/analytics', { isAdmin: false })).toBe(
+      false,
+    );
   });
 });

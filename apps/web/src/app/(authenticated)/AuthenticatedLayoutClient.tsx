@@ -9,6 +9,7 @@ import { getSetupRedirectPath } from '@/lib/setup-status';
 import { useRedirectToSignIn } from '@/hooks/useSignInRedirect';
 import { useUser } from '@/hooks/useUser';
 import { useTRPC } from '@/trpc/client';
+import { isVisiblePrimaryNavPath } from '@/components/layout/navigation-items';
 
 import { NavbarHeader, SideNav, FramedSurface } from '@/components/layout';
 import { CommandPaletteProvider } from '@/components/layout/CommandPaletteContext';
@@ -71,7 +72,7 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
   // Platform issue reports can be raised by the setup Session itself, so the
   // admin must be able to confirm them before setup is complete.
   const isSetupExemptRoute =
-    pathname === '/integrations' ||
+    isVisiblePrimaryNavPath(pathname, { isAdmin: user?.isAdmin === true }) ||
     pathname === '/settings' ||
     pathname.startsWith('/settings/') ||
     pathname.startsWith('/platform-issues/');
