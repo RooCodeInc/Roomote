@@ -2,6 +2,20 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.13.3 (2026-09-27)
+
+Roomote 1.13.3 restores differentiated model choices and keeps Fast event delivery reliable when generated context contains invalid characters.
+
+### Highlights
+
+- Choose differentiated model mapping presets for provider-specific role recommendations, while Default keeps GPT 5.6 Luna as the current baseline.
+- Keep Fast pull-request and task operations working when generated parent-event context contains PostgreSQL-incompatible NUL characters.
+
+### Patch changes
+
+- Model mapping presets now keep each provider's differentiated role recommendations instead of flattening every recommended option to GPT 5.6 Luna, while the new Default preset still uses the current Luna route and existing selections remain unchanged.
+- Fast parent events now remove PostgreSQL-incompatible NUL characters from nested payloads before durable admission, so pull-request and task operations no longer fail solely because generated context contains a NUL while ordinary payloads and event ordering remain unchanged.
+
 ## 1.13.2 (2026-09-26)
 
 Roomote 1.13.2 expands evaluated session judgment support while keeping setup and transcript experiences reliable.

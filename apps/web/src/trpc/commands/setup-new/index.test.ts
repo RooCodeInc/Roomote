@@ -1659,7 +1659,7 @@ describe('chooseSetupTrialInferenceCommand', () => {
     vi.unstubAllEnvs();
   });
 
-  it('seeds the Efficient Roomote defaults and records the managed provider choice', async () => {
+  it('seeds the Default Roomote mapping and records the managed provider choice', async () => {
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'R_TRIAL_OPENROUTER_API_KEY',
@@ -1686,11 +1686,11 @@ describe('chooseSetupTrialInferenceCommand', () => {
     expect(runtimeModelConfigInsert?.runtimeModelConfig).toMatchObject({
       roomoteModel: 'roomote/openai/gpt-5.6-luna',
       roomoteOrchestrationModel: null,
-      roomoteSmallModel: null,
-      roomoteVisionModel: null,
-      roomoteCodeReviewModel: null,
-      roomoteExploreModel: null,
-      roomotePlanningModel: null,
+      roomoteSmallModel: 'roomote/openai/gpt-5.6-luna',
+      roomoteVisionModel: 'roomote/openai/gpt-5.6-luna',
+      roomoteCodeReviewModel: 'roomote/openai/gpt-5.6-luna',
+      roomoteExploreModel: 'roomote/openai/gpt-5.6-luna',
+      roomotePlanningModel: 'roomote/openai/gpt-5.6-luna',
     });
     expect(taskModelSettingsInsert?.taskModelSettings).toMatchObject({
       defaultModelId: 'roomote/openai/gpt-5.6-luna',

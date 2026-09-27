@@ -130,8 +130,12 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('./fast-agent-parent-event', () => ({
   buildEventClientMessageSeed: vi.fn(
-    (event: { type: string; messageId?: string }) =>
-      `${event.type}:${event.messageId ?? 'event'}`,
+    (event: {
+      type: string;
+      messageId?: string;
+      pullRequest?: { url: string };
+    }) =>
+      `${event.type}:${event.messageId ?? event.pullRequest?.url ?? 'event'}`,
   ),
   deliverFastAgentParentEventWithLock: mocks.deliver,
   FastAgentParentEventDeliveryError: mocks.DeliveryError,
@@ -278,6 +282,114 @@ describe('Fast parent event durable queue', () => {
 
     expect(mocks.insertOnConflict).toHaveBeenCalledTimes(2);
     expect(mocks.queueAdd).toHaveBeenCalledOnce();
+  });
+
+  it('sanitizes nested NUL characters before either durable admission path', async () => {
+    const parentWithNul = {
+      ...parent,
+      conversation: {
+        ...parent.conversation,
+        threadId: '100.\0' + '1',
+      },
+    };
+    const eventWithNul = {
+      ...pullRequestOpenedEvent,
+      untrustedTaskGeneratedContext: '> \0<!-- attribution -->',
+      pullRequest: {
+        ...pullRequestOpenedEvent.pullRequest,
+        title: 'Keep\0 delivery ordered',
+      },
+    };
+
+    await enqueueFastAgentParentEvent({
+      parent: parentWithNul,
+      event: eventWithNul,
+    });
+    await enqueueFastAgentParentEventForRun({
+      parent: parentWithNul,
+      event: eventWithNul,
+      runId: 42,
+    });
+
+    for (const [values] of mocks.insertValues.mock.calls) {
+      expect(values).toEqual(
+        expect.objectContaining({
+          parent: {
+            ...parent,
+            conversation: {
+              ...parent.conversation,
+              threadId: '100.1',
+            },
+          },
+          event: {
+            ...eventWithNul,
+            untrustedTaskGeneratedContext: '> <!-- attribution -->',
+            pullRequest: {
+              ...eventWithNul.pullRequest,
+              title: 'Keep delivery ordered',
+            },
+          },
+        }),
+      );
+    }
+  });
+
+  it('uses the normalized parent and event for both persistence and idempotency', async () => {
+    const parentWithNul = {
+      ...parent,
+      sessionId: `${parent.sessionId}\0`,
+    };
+    const eventWithNul = {
+      ...pullRequestOpenedEvent,
+      pullRequest: {
+        ...pullRequestOpenedEvent.pullRequest,
+        url: 'https://github.com/acme/web/pull/42\0',
+      },
+    };
+    const normalizedParent = {
+      ...parentWithNul,
+      sessionId: parent.sessionId,
+    };
+    const normalizedEvent = {
+      ...eventWithNul,
+      pullRequest: {
+        ...eventWithNul.pullRequest,
+        url: 'https://github.com/acme/web/pull/42',
+      },
+    };
+    const expectedEventKey = buildFastAgentParentEventKey({
+      parent: normalizedParent,
+      event: normalizedEvent,
+    });
+
+    await enqueueFastAgentParentEvent({
+      parent: parentWithNul,
+      event: eventWithNul,
+    });
+    await enqueueFastAgentParentEventForRun({
+      parent: parentWithNul,
+      event: eventWithNul,
+      runId: 42,
+    });
+
+    expect(mocks.insertValues).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        conversationId: parent.sessionId,
+        eventKey: expectedEventKey,
+        parent: normalizedParent,
+        event: normalizedEvent,
+      }),
+    );
+    expect(mocks.insertValues).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        conversationId: parent.sessionId,
+        eventKey: expectedEventKey,
+        parent: normalizedParent,
+        event: normalizedEvent,
+      }),
+    );
   });
 
   it('persists and publishes one canonical child-report receipt before waking the parent', async () => {
