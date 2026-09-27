@@ -387,6 +387,20 @@ Some models expose reasoning controls. Roomote lets admins set reasoning levels
 for the main model roles: **Low**, **Medium**, **High**, **Extra high**, or
 **Max**.
 
+The available levels are model-specific. A model can support only a subset of
+these levels, so do not assume that every model accepts every choice. When
+Roomote has current model metadata, the picker shows the levels advertised for
+the selected model, and custom mapping presets are checked against those same
+capabilities before they are saved or applied. The supported levels can also
+vary between provider routes for the same model family.
+
+For a custom or self-hosted OpenAI-compatible endpoint, capability metadata
+depends on what that endpoint reports. After adding a model or changing a
+provider, refresh model metadata in **Settings > Models** and confirm the
+available choices in the picker. If the endpoint does not expose configurable
+reasoning, Roomote hides the selector for that model; check the endpoint's
+model documentation before setting effort-related environment variables.
+
 Higher reasoning can improve planning, debugging, and review quality, but it
 can also increase latency and cost. Use it where deeper thinking changes the
 outcome, not everywhere by default.
