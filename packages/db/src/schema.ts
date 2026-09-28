@@ -4506,9 +4506,7 @@ export const sessions = pgTable(
     ),
     index('sessions_inactivity_due_idx')
       .on(table.visibility, table.inactivityDueAt, table.id)
-      .where(
-        sql`${table.inactivityDueAt} IS NOT NULL AND ${table.manualStatus} IS NULL`,
-      ),
+      .where(sql`${table.inactivityDueAt} IS NOT NULL`),
     index('sessions_owner_user_id_idx').on(table.ownerUserId),
     uniqueIndex('sessions_fast_conversation_id_unique')
       .on(table.fastConversationId)

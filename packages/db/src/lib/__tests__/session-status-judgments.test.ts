@@ -204,6 +204,7 @@ describe('Session status judgment requests', () => {
   });
 
   it('clears a manual status when a newer visible user message exists', async () => {
+    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const user = await userFactory.create();
     userIds.push(user.id);
     const [conversation] = await db
@@ -216,7 +217,7 @@ describe('Session status judgment requests', () => {
       })
       .returning();
     conversationIds.push(conversation!.id);
-    const manualStatusSetAt = new Date(Date.now() - 60_000);
+    const manualStatusSetAt = new Date(Date.now() - 6 * 24 * 60 * 60 * 1_000);
     const session = await sessionFactory.create({
       fastConversationId: conversation!.id,
       cachedStatus: 'blocked',
@@ -229,7 +230,7 @@ describe('Session status judgment requests', () => {
       eventId: 'manual-status-newer-user',
       turnId: 'manual-status-newer-turn',
       turnSeq: 1,
-      ts: Date.now(),
+      ts: Date.now() - 5 * 24 * 60 * 60 * 1_000,
       eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
       role: 'user',
       contentBlocks: [{ type: 'text', text: 'Continue automatically.' }],
@@ -251,6 +252,11 @@ describe('Session status judgment requests', () => {
       manualStatus: null,
       manualStatusSetAt: null,
     });
+
+    await refreshSessionInactivityDueAt(db, session.id);
+    await expect(
+      enqueueInactiveSessionStatusJudgmentRequests(db),
+    ).resolves.toBe(1);
   });
 
   it('discards a result if the deployment experiment is disabled mid-flight', async () => {

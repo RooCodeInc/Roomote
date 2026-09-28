@@ -2,6 +2,7 @@ import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   and,
   claimSessionStatusJudgmentRequests,
+  clearManualStatusAfterNewerUserMessage,
   completeSessionStatusJudgment,
   desc,
   db,
@@ -343,6 +344,7 @@ export async function processSessionStatusJudgmentBatch(
   const requests = await claimSessionStatusJudgmentRequests(db, limit);
   for (const request of requests) {
     try {
+      await clearManualStatusAfterNewerUserMessage(db, request.sessionId);
       const snapshot = await loadJudgmentState(request.sessionId);
       if (!snapshot) {
         await completeSessionStatusJudgment(db, {

@@ -106,7 +106,6 @@ export async function enqueueInactiveSessionStatusJudgmentRequests(
       floor(extract(epoch FROM session.inactivity_due_at) * 1000)::bigint AS due_ms
     FROM sessions AS session
     WHERE session.visibility = 'visible'
-      AND session.manual_status IS NULL
       AND session.inactivity_due_at <= now()
       AND NOT EXISTS (
         SELECT 1
