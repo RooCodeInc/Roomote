@@ -55,6 +55,26 @@ describe('convertMarkdownInlineToRichText', () => {
     ]);
   });
 
+  it('renders known emoji shortcodes in Markdown and Slack link labels', () => {
+    expect(
+      convertMarkdownInlineToRichText(
+        '[Passed :white_check_mark:](https://example.com/report) and <https://example.com/report|Passed :thumbsup::skin-tone-6:>',
+      ),
+    ).toEqual([
+      {
+        type: 'link',
+        url: 'https://example.com/report',
+        text: 'Passed ✅',
+      },
+      { type: 'text', text: ' and ' },
+      {
+        type: 'link',
+        url: 'https://example.com/report',
+        text: 'Passed 👍🏿',
+      },
+    ]);
+  });
+
   it('leaves snake_case and arithmetic alone', () => {
     expect(
       convertMarkdownInlineToRichText('set slack_user_id to 2*3*4'),

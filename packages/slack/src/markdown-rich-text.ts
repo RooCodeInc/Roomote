@@ -178,7 +178,14 @@ export function convertMarkdownInlineToRichText(
         } else {
           const url = hasAngleBrackets ? destination.slice(1, -1) : destination;
           elements.push(
-            withStyle({ type: 'link', url, text: parsed[1]! }, style),
+            withStyle(
+              {
+                type: 'link',
+                url,
+                text: normalizeKnownSlackEmojiShortcodes(parsed[1]!),
+              },
+              style,
+            ),
           );
         }
       }
@@ -186,7 +193,13 @@ export function convertMarkdownInlineToRichText(
       const [url, label] = slackLink.slice(1, -1).split('|', 2);
       elements.push(
         withStyle(
-          { type: 'link', url: url!, ...(label ? { text: label } : {}) },
+          {
+            type: 'link',
+            url: url!,
+            ...(label
+              ? { text: normalizeKnownSlackEmojiShortcodes(label) }
+              : {}),
+          },
           style,
         ),
       );
