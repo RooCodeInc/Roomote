@@ -128,6 +128,9 @@ describe('resolveModelsDevSlug', () => {
     expect(
       resolveModelsDevSlug('bedrock-mantle/anthropic.claude-haiku-4-5'),
     ).toBe('anthropic/claude-haiku-4-5');
+    expect(
+      resolveModelsDevSlug('bedrock-mantle/global.anthropic.claude-sonnet-5-5'),
+    ).toBe('anthropic/claude-sonnet-5-5');
   });
 });
 
@@ -331,11 +334,11 @@ describe('lookupModelMetadataFromCatalog', () => {
     ).toBe(true);
   });
 
-  it('resolves Bedrock Mantle metadata through the underlying model lab', () => {
+  it('resolves global Bedrock Mantle metadata through the underlying model lab', () => {
     const catalog = buildCatalog({
       models: {
-        'anthropic/claude-sonnet-5': {
-          name: 'Claude Sonnet 5',
+        'anthropic/claude-sonnet-5-5': {
+          name: 'Claude Sonnet 5.5',
           modalities: { input: ['text', 'image', 'pdf'] },
           limit: { context: 200000 },
         },
@@ -343,8 +346,8 @@ describe('lookupModelMetadataFromCatalog', () => {
       providers: {
         anthropic: {
           models: {
-            'anthropic/claude-sonnet-5': {
-              cost: { input: 3, output: 15 },
+            'anthropic/claude-sonnet-5-5': {
+              cost: { input: 2, output: 10 },
             },
           },
         },
@@ -353,16 +356,16 @@ describe('lookupModelMetadataFromCatalog', () => {
 
     const result = lookupModelMetadataFromCatalog(
       catalog,
-      'bedrock-mantle/anthropic.claude-sonnet-5',
+      'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
     );
 
     expect(result.metadata).toEqual({
       contextWindow: 200000,
       inputTypes: ['text', 'image', 'pdf'],
-      inputPricePerToken: 3 / 1_000_000,
-      outputPricePerToken: 15 / 1_000_000,
+      inputPricePerToken: 2 / 1_000_000,
+      outputPricePerToken: 10 / 1_000_000,
     });
-    expect(result.displayName).toBe('Claude Sonnet 5');
+    expect(result.displayName).toBe('Claude Sonnet 5.5');
   });
 
   it('resolves native Bedrock metadata from its provider catalog', () => {
