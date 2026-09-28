@@ -199,10 +199,14 @@ describe('SessionActions', () => {
       .getAllByRole('button')
       .map((button) => button.textContent?.trim())
       .filter(Boolean);
-    expect(labels).toEqual(['Stop tasks', 'Archive session', 'Delete session']);
-    expect(screen.getByText('Stop tasks').closest('button')).toContainElement(
-      document.querySelector('[data-icon="square"]'),
-    );
+    expect(labels).toEqual([
+      'Stop all tasks',
+      'Archive session',
+      'Delete session',
+    ]);
+    expect(
+      screen.getByText('Stop all tasks').closest('button'),
+    ).toContainElement(document.querySelector('[data-icon="square"]'));
     expect(
       screen.getByText('Archive session').closest('button'),
     ).toContainElement(document.querySelector('[data-icon="archive"]'));
@@ -210,7 +214,7 @@ describe('SessionActions', () => {
       screen.getByText('Delete session').closest('button'),
     ).toHaveAttribute('data-variant', 'destructive');
 
-    fireEvent.click(screen.getByText('Stop tasks'));
+    fireEvent.click(screen.getByText('Stop all tasks'));
     expect(mocks.stop).toHaveBeenCalledWith({ sessionId: 'session-1' });
     expect(screen.queryByRole('heading')).not.toBeInTheDocument();
 
@@ -258,16 +262,34 @@ describe('SessionActions', () => {
 
     const submenu = screen.getByTestId('session-status-submenu');
     expect(
+      screen
+        .getAllByRole('button')
+        .map((button) => button.textContent?.trim())
+        .filter(Boolean),
+    ).toEqual([
+      'Stop all tasks',
+      'Mark session as...',
+      'needs input',
+      'blocked',
+      'ready',
+      'done',
+      'Archive session',
+      'Delete session',
+    ]);
+    expect(
       Array.from(submenu.querySelectorAll('button')).map((button) =>
         button.textContent?.trim(),
       ),
-    ).toEqual(['active', 'needs input', 'blocked', 'ready']);
+    ).toEqual(['needs input', 'blocked', 'ready', 'done']);
+    expect(
+      screen.queryByRole('button', { name: 'active' }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'blocked' })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'active' }));
+    fireEvent.click(screen.getByRole('button', { name: 'done' }));
     expect(mocks.setStatus).toHaveBeenCalledWith({
       sessionId: 'session-1',
-      status: 'active',
+      status: 'done',
     });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ['sessions', 'byId', { sessionId: 'session-1' }],

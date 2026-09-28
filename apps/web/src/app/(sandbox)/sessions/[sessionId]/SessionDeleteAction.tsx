@@ -6,7 +6,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   getSessionStatusLabel,
-  SESSION_STATUSES,
+  SESSION_MANUAL_STATUSES,
+  type SessionManualStatus,
   type SessionStatus,
 } from '@roomote/types';
 
@@ -47,7 +48,7 @@ export function SessionActions({
 }: {
   sessionId: string;
   listRow?: boolean;
-  status?: SessionStatus | null;
+  status?: SessionStatus | SessionManualStatus | null;
   sessionStatusExperimentEnabled?: boolean;
 }) {
   const trpc = useTRPC();
@@ -122,7 +123,8 @@ export function SessionActions({
           toast.error('Failed to update session status.');
           return;
         }
-        const nextStatus = (variables as { status: SessionStatus }).status;
+        const nextStatus = (variables as { status: SessionManualStatus })
+          .status;
         toast.success(
           `Session marked as ${getSessionStatusLabel(nextStatus)}.`,
         );
@@ -178,6 +180,14 @@ export function SessionActions({
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" side="left">
+          <DropdownMenuItem
+            onClick={() => stopTasks.mutate({ sessionId })}
+            disabled={isPending}
+            className="flex cursor-pointer items-center gap-2"
+          >
+            <Square className="size-4" />
+            Stop all tasks
+          </DropdownMenuItem>
           {sessionStatusExperimentEnabled ? (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger className="flex cursor-pointer items-center gap-2">
@@ -191,11 +201,11 @@ export function SessionActions({
                     if (value === currentStatus) return;
                     setStatus.mutate({
                       sessionId,
-                      status: value as SessionStatus,
+                      status: value as SessionManualStatus,
                     });
                   }}
                 >
-                  {SESSION_STATUSES.map((nextStatus) => (
+                  {SESSION_MANUAL_STATUSES.map((nextStatus) => (
                     <DropdownMenuRadioItem
                       key={nextStatus}
                       value={nextStatus}
@@ -209,14 +219,6 @@ export function SessionActions({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           ) : null}
-          <DropdownMenuItem
-            onClick={() => stopTasks.mutate({ sessionId })}
-            disabled={isPending}
-            className="flex cursor-pointer items-center gap-2"
-          >
-            <Square className="size-4" />
-            Stop tasks
-          </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => archiveSession.mutate({ sessionId })}
             disabled={isPending}

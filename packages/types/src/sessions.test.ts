@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { getSessionBoardColumn } from './sessions';
+import { getSessionBoardColumn, SESSION_MANUAL_STATUSES } from './sessions';
+
+describe('SESSION_MANUAL_STATUSES', () => {
+  it('keeps manual statuses in product order without exposing active', () => {
+    expect(SESSION_MANUAL_STATUSES).toEqual([
+      'needs_input',
+      'blocked',
+      'ready',
+      'done',
+    ]);
+  });
+});
 
 describe('getSessionBoardColumn', () => {
   it('keeps live runtime and structured-input states authoritative', () => {
@@ -53,5 +64,13 @@ describe('getSessionBoardColumn', () => {
         judgmentStatus: 'done',
       }),
     ).toBe('ready');
+
+    expect(
+      getSessionBoardColumn({
+        cachedStatus: 'active',
+        manualStatus: 'done',
+        judgmentStatus: 'open',
+      }),
+    ).toBe('done');
   });
 });
