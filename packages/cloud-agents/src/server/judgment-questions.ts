@@ -16,10 +16,10 @@ export const SESSION_STATUS_OUTCOME_QUESTION: TypeSafeChoiceQuestion<SessionStat
     instructions:
       'Classify the current outcome of the user’s request in this Session. Judge only what the user asked for and what the visible evidence says happened. Do not treat a plan, intent, or an unverified claim as completion.',
     criteria: {
-      open: 'The request is still being worked on or has a clear unresolved next step.',
+      open: 'The request is still being worked on, and Roomote can continue without a concrete answer, decision, or action from the user. It can remain open while the user independently verifies an artifact or reviews a PR; use needs_input only when a user answer, decision, or action is required before Roomote can continue.',
       done: 'The requested answer or work was actually delivered, with no unfinished promise or active child task.',
       blocked:
-        'The requested work cannot continue because of a real external dependency or failure that needs follow-up.',
+        'The requested work cannot continue because of a real external dependency or failure that needs follow-up; use needs_input instead when a user answer, decision, or action is required.',
       needs_input:
         'Roomote is waiting for a concrete answer, decision, or action from the user before it can continue.',
       unclear:
