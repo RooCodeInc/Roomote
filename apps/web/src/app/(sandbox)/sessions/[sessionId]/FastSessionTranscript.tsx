@@ -50,7 +50,10 @@ import {
   Shimmer,
 } from '@/components/ai-elements';
 import { type SlackMentionScope } from '@/components/ai-elements/slack-mention-context';
-import { SlackMentionTranscriptProvider } from '@/components/ai-elements/slack-message-references';
+import {
+  buildSlackTranscriptMentionText,
+  SlackMentionTranscriptProvider,
+} from '@/components/ai-elements/slack-message-references';
 import { WorkspaceHeader } from '@/components/layout';
 import {
   Alert,
@@ -1532,14 +1535,9 @@ export function FastSessionTranscript({
   ]);
   const slackMentionText = useMemo(
     () =>
-      [...uiMessagesBeforeInput, ...uiMessagesAfterInput]
-        .filter(
-          (message) =>
-            (message.role === 'assistant' || message.role === 'user') &&
-            Boolean(message.text),
-        )
-        .map((message) => message.text ?? '')
-        .join('\n'),
+      buildSlackTranscriptMentionText({
+        messages: [...uiMessagesBeforeInput, ...uiMessagesAfterInput],
+      }),
     [uiMessagesAfterInput, uiMessagesBeforeInput],
   );
   const transcriptWorking =

@@ -1,7 +1,11 @@
 import { render, screen } from '@testing-library/react';
 
 import { SlackMentionProvider } from './slack-mention-context';
-import { SlackMentionResolutionProvider } from './slack-message-references';
+import {
+  buildSlackTranscriptMentionText,
+  renderSlackMessageMarkdown,
+  SlackMentionResolutionProvider,
+} from './slack-message-references';
 import { SlackMessageText } from './slack-message-text';
 
 const resolveUsersState = vi.hoisted(() => ({
@@ -205,6 +209,51 @@ describe('SlackMessageText', () => {
       userIds: Array.from({ length: 50 }, (_, index) => `U${index + 1}`),
       channelIds: ['C1'],
     });
+  });
+
+  it('preserves existing Markdown link labels and destinations', () => {
+    const markdown = renderSlackMessageMarkdown(
+      '[<@U1>](https://example.com) and <#C1>',
+      {
+        users: {
+          U1: {
+            name: 'Maya',
+            profileUrl: 'https://acme.slack.com/team/U1',
+          },
+        },
+        channels: {
+          C1: {
+            name: 'ops',
+            url: 'https://acme.slack.com/archives/C1',
+          },
+        },
+      },
+    );
+
+    expect(markdown).toBe(
+      '[<@U1>](https://example.com) and [#ops](https://acme.slack.com/archives/C1)',
+    );
+  });
+
+  it('excludes hidden transcript rows and prompts from lookup text', () => {
+    expect(
+      buildSlackTranscriptMentionText({
+        includeSessionPrompt: true,
+        sessionPrompt: {
+          role: 'user',
+          text: 'Hidden prompt <@Uhidden-prompt>.',
+          visibleInTranscript: false,
+        },
+        messages: [
+          {
+            role: 'assistant',
+            text: 'Hidden row <@Uhidden-row>.',
+            visibleInTranscript: false,
+          },
+          { role: 'assistant', text: 'Visible row <@Uvisible>.' },
+        ],
+      }),
+    ).toBe('Visible row <@Uvisible>.');
   });
 
   it('falls back to the inline label or raw id while unresolved', () => {

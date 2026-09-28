@@ -27,7 +27,10 @@ import {
   type MessageUiOptions,
 } from '@/components/ai-elements/message-ui-options';
 import { type SlackMentionScope } from '@/components/ai-elements/slack-mention-context';
-import { SlackMentionTranscriptProvider } from '@/components/ai-elements/slack-message-references';
+import {
+  buildSlackTranscriptMentionText,
+  SlackMentionTranscriptProvider,
+} from '@/components/ai-elements/slack-message-references';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { Button, Skeleton } from '@/components/system';
@@ -293,18 +296,11 @@ const MessagesBase = ({
     Boolean(sessionPrompt);
   const slackMentionText = useMemo(
     () =>
-      [
-        shouldRenderSessionPrompt ? (sessionPrompt?.text ?? '') : null,
-        ...messages
-          .filter(
-            (message) =>
-              (message.role === 'assistant' || message.role === 'user') &&
-              Boolean(message.text),
-          )
-          .map((message) => message.text ?? ''),
-      ]
-        .filter((text): text is string => Boolean(text))
-        .join('\n'),
+      buildSlackTranscriptMentionText({
+        messages,
+        sessionPrompt,
+        includeSessionPrompt: shouldRenderSessionPrompt,
+      }),
     [messages, sessionPrompt?.text, shouldRenderSessionPrompt],
   );
   const resolvedHideFirstAcpUserPrompt =

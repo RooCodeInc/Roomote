@@ -90,18 +90,28 @@ vi.mock('@/components/ai-elements/message-ui-options', () => ({
   ),
 }));
 
-vi.mock('@/components/ai-elements/slack-message-references', () => ({
-  SlackMentionTranscriptProvider: ({
-    children,
-    text,
-  }: {
-    children: ReactNode;
-    text: string;
-  }) => {
-    slackMentionState.text = text;
-    return <>{children}</>;
+vi.mock(
+  '@/components/ai-elements/slack-message-references',
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import('@/components/ai-elements/slack-message-references')
+      >();
+    return {
+      ...actual,
+      SlackMentionTranscriptProvider: ({
+        children,
+        text,
+      }: {
+        children: ReactNode;
+        text: string;
+      }) => {
+        slackMentionState.text = text;
+        return <>{children}</>;
+      },
+    };
   },
-}));
+);
 
 vi.mock('./hooks', () => ({
   useSandboxMessages: () => ({
@@ -283,6 +293,11 @@ describe('Messages', () => {
 
   it('does not resolve hidden session prompt references', () => {
     sandboxMessagesState.messages = [
+      {
+        role: 'assistant',
+        text: 'Hidden row with <@Uhidden-row>.',
+        visibleInTranscript: false,
+      },
       {
         role: 'assistant',
         text: 'Visible reply with <@Uvisible>.',

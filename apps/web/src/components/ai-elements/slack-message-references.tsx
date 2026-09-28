@@ -24,6 +24,40 @@ export type ResolvedSlackReferences = {
   channels: Record<string, { name: string; url: string | null }>;
 };
 
+export type SlackTranscriptTextSource = {
+  role?: string | null;
+  text?: string | null;
+  visibleInTranscript?: boolean;
+};
+
+export function buildSlackTranscriptMentionText(params: {
+  messages: ReadonlyArray<SlackTranscriptTextSource>;
+  sessionPrompt?: SlackTranscriptTextSource | null;
+  includeSessionPrompt?: boolean;
+}): string {
+  const texts: string[] = [];
+  if (
+    params.includeSessionPrompt &&
+    params.sessionPrompt?.visibleInTranscript !== false &&
+    params.sessionPrompt.text
+  ) {
+    texts.push(params.sessionPrompt.text);
+  }
+
+  for (const message of params.messages) {
+    if (
+      message.visibleInTranscript === false ||
+      (message.role !== 'assistant' && message.role !== 'user') ||
+      !message.text
+    ) {
+      continue;
+    }
+    texts.push(message.text);
+  }
+
+  return texts.join('\n');
+}
+
 function escapeMarkdownLabel(label: string): string {
   return label
     .replaceAll('\\', '\\\\')
@@ -63,6 +97,47 @@ function renderSlackMarkdownToken(
   }
 }
 
+function findMarkdownLinkEnd(text: string, start: number): number | null {
+  let labelDepth = 0;
+  let labelEnd = -1;
+
+  for (let index = start; index < text.length; index += 1) {
+    if (text[index] === '\\') {
+      index += 1;
+      continue;
+    }
+    if (text[index] === '[') labelDepth += 1;
+    if (text[index] === ']') {
+      labelDepth -= 1;
+      if (labelDepth === 0) {
+        labelEnd = index;
+        break;
+      }
+    }
+  }
+
+  if (labelEnd === -1) return null;
+  if (text[labelEnd + 1] === '[') {
+    const referenceEnd = text.indexOf(']', labelEnd + 2);
+    return referenceEnd === -1 ? null : referenceEnd + 1;
+  }
+  if (text[labelEnd + 1] !== '(') return null;
+
+  let destinationDepth = 1;
+  for (let index = labelEnd + 2; index < text.length; index += 1) {
+    if (text[index] === '\\') {
+      index += 1;
+      continue;
+    }
+    if (text[index] === '(') destinationDepth += 1;
+    if (text[index] === ')' && --destinationDepth === 0) {
+      return index + 1;
+    }
+  }
+
+  return null;
+}
+
 function renderSlackMarkdownLine(
   line: string,
   references: ResolvedSlackReferences,
@@ -71,6 +146,21 @@ function renderSlackMarkdownLine(
   let cursor = 0;
 
   while (cursor < line.length) {
+    const linkStart =
+      line[cursor] === '['
+        ? cursor
+        : line[cursor] === '!' && line[cursor + 1] === '['
+          ? cursor + 1
+          : -1;
+    if (linkStart !== -1) {
+      const linkEnd = findMarkdownLinkEnd(line, linkStart);
+      if (linkEnd !== null) {
+        output += line.slice(cursor, linkEnd);
+        cursor = linkEnd;
+        continue;
+      }
+    }
+
     if (line[cursor] === '`') {
       let runLength = 1;
       while (line[cursor + runLength] === '`') runLength += 1;
