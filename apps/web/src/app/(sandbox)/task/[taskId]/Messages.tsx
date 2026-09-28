@@ -301,7 +301,7 @@ const MessagesBase = ({
         sessionPrompt,
         includeSessionPrompt: shouldRenderSessionPrompt,
       }),
-    [messages, sessionPrompt?.text, shouldRenderSessionPrompt],
+    [messages, sessionPrompt, shouldRenderSessionPrompt],
   );
   const resolvedHideFirstAcpUserPrompt =
     hideFirstAcpUserPrompt ?? shouldRenderSessionPrompt;
