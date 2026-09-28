@@ -310,7 +310,7 @@ describe('sessionsReconcileJob', () => {
     });
   });
 
-  it('re-evaluates an idle Session after it crosses the inactivity boundary', async () => {
+  it('requeues an idle Session after it crosses the inactivity boundary', async () => {
     await sessionsReconcileJob();
     await sessionsReconcileJob();
     await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
@@ -348,7 +348,9 @@ describe('sessionsReconcileJob', () => {
         .select()
         .from(sessionStatusJudgments)
         .where(eq(sessionStatusJudgments.sessionId, session.id));
-      expect(judgment).toMatchObject({ state: 'applied', outcome: 'done' });
+      expect(judgment).toMatchObject({
+        sourceEventId: `inactivity:${latestVisibleUserTs}`,
+      });
     } finally {
       await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
       await db.delete(sessions).where(eq(sessions.id, session.id));
