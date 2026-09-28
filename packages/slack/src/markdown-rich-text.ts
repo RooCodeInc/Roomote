@@ -1,3 +1,5 @@
+import { formatReactionEmojiForDisplay } from '@roomote/communication/reaction-emoji';
+
 /**
  * Markdown → Slack `rich_text` conversion for surfaces that take a
  * rich_text entity instead of a `markdown` block (task and automation cards).
@@ -46,6 +48,16 @@ type SlackRichTextConversionOptions = {
   angleBracketLinkDestinations?: boolean;
 };
 
+// Rich-text text elements do not apply Slack's `:name:` markdown parsing.
+const SLACK_EMOJI_SHORTCODE_PATTERN = /:[a-z0-9_+-]+(?:::[a-z0-9_+-]+)*:/giu;
+
+function normalizeKnownSlackEmojiShortcodes(text: string): string {
+  return text.replace(SLACK_EMOJI_SHORTCODE_PATTERN, (shortcode) => {
+    const display = formatReactionEmojiForDisplay(shortcode);
+    return display.startsWith(':') ? shortcode : display;
+  });
+}
+
 // Every repetition is bounded so a pathological message (for example a
 // long run of "[" or "<http://|") cannot make matching superlinear.
 const INLINE_PATTERN =
@@ -91,7 +103,9 @@ export function convertMarkdownInlineToRichText(
   let last = 0;
 
   const pushText = (value: string) => {
-    if (!value) {
+    const normalizedValue = normalizeKnownSlackEmojiShortcodes(value);
+
+    if (!normalizedValue) {
       return;
     }
     // Adjacent plain text (for example the punctuation trimmed off a bare
@@ -101,10 +115,10 @@ export function convertMarkdownInlineToRichText(
       previous?.type === 'text' &&
       JSON.stringify(previous.style ?? {}) === JSON.stringify(style)
     ) {
-      previous.text += value;
+      previous.text += normalizedValue;
       return;
     }
-    elements.push(withStyle({ type: 'text', text: value }, style));
+    elements.push(withStyle({ type: 'text', text: normalizedValue }, style));
   };
 
   for (const match of text.matchAll(INLINE_PATTERN)) {

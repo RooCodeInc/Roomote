@@ -40,6 +40,31 @@ describe('automation result blocks', () => {
     expect(buildAutomationResultContentBlocks('  \n')).toEqual([]);
   });
 
+  it('renders shortcode emoji in structured automation report content', () => {
+    const report = 'Completed :white_check_mark: and ✅.';
+    const [container] = buildAutomationResultBlocks({
+      title: 'Daily report',
+      iconUrl: 'https://app.example.com/automation-icons/zap.png',
+      configureUrl: 'https://app.example.com/automations#daily-report',
+      contentText: report,
+    });
+
+    expect(buildAutomationResultContentBlocks(report)).toEqual([
+      { type: 'markdown', text: report },
+    ]);
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toContainEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text: 'Completed ✅ and ✅.' }],
+        },
+      ],
+    });
+  });
+
   it('builds a container with formatted Markdown, images, metadata, and actions', () => {
     const [container] = buildAutomationResultBlocks({
       title: 'Daily report',

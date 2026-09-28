@@ -22,6 +22,19 @@ describe('convertMarkdownInlineToRichText', () => {
     ]);
   });
 
+  it('renders known Slack emoji shortcodes without changing Unicode or custom names', () => {
+    expect(
+      convertMarkdownInlineToRichText(
+        'Ready :white_check_mark: :thumbsup::skin-tone-6: ✅ :ship_it:',
+      ),
+    ).toEqual([
+      {
+        type: 'text',
+        text: 'Ready ✅ 👍🏿 ✅ :ship_it:',
+      },
+    ]);
+  });
+
   it('nests styles and converts markdown, Slack, and bare links', () => {
     expect(
       convertMarkdownInlineToRichText(
