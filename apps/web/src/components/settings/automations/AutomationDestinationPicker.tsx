@@ -133,11 +133,17 @@ export function AutomationDestinationPicker({
         : provider === 'email'
           ? defaultEmailIdentityId
           : '';
+  const canChooseMode =
+    value.provider !== 'none' &&
+    allowChannel &&
+    allowDirectMessage &&
+    value.provider !== 'email' &&
+    channelProviders.includes(value.provider);
 
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
-      <div className="grid gap-2">
+      <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,8rem)_minmax(0,8rem)_minmax(0,1fr)]">
         <Select
           value={
             value.provider === 'none' && !allowNone ? undefined : value.provider
@@ -162,7 +168,7 @@ export function AutomationDestinationPicker({
           <SelectTrigger
             id={id}
             aria-label="Destination provider"
-            className="w-full sm:max-w-52"
+            className="w-full"
           >
             <SelectValue placeholder={noneLabel} />
           </SelectTrigger>
@@ -180,25 +186,13 @@ export function AutomationDestinationPicker({
 
         {value.provider === 'none' ? (
           noneDescription ? (
-            <p className="self-center text-sm text-muted-foreground">
+            <p className="self-center text-sm text-muted-foreground md:col-span-2">
               {noneDescription}
             </p>
           ) : null
         ) : (
-          <div
-            className={
-              allowChannel &&
-              allowDirectMessage &&
-              value.provider !== 'email' &&
-              channelProviders.includes(value.provider)
-                ? 'grid min-w-0 gap-2 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-center'
-                : 'grid min-w-0 gap-2'
-            }
-          >
-            {allowChannel &&
-            allowDirectMessage &&
-            value.provider !== 'email' &&
-            channelProviders.includes(value.provider) ? (
+          <>
+            {canChooseMode ? (
               <Select
                 value={value.mode}
                 disabled={disabled}
@@ -227,11 +221,70 @@ export function AutomationDestinationPicker({
               </Select>
             ) : null}
 
-            {value.provider === 'email' ? (
-              <div className="grid gap-2">
+            <div
+              className={canChooseMode ? 'min-w-0' : 'min-w-0 md:col-span-2'}
+            >
+              {value.provider === 'email' ? (
+                <>
+                  <Select
+                    handoffRef={
+                      value.channelId || emailOptions.length === 0
+                        ? undefined
+                        : (target) => {
+                            nextDestinationRef.current = target;
+                          }
+                    }
+                    value={value.channelId}
+                    disabled={disabled}
+                    onValueChange={(identityId) =>
+                      onChange({ ...value, channelId: identityId })
+                    }
+                  >
+                    <SelectTrigger
+                      aria-label="Email address"
+                      className="min-w-0 w-full sm:max-w-96"
+                    >
+                      <SelectValue placeholder="Select Email address" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {emailOptions.map((identity) => (
+                        <SelectItem key={identity.id} value={identity.id}>
+                          {identity.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Reports use only this selected identity and stop if it is no
+                    longer eligible.
+                  </p>
+                </>
+              ) : (value.provider === 'teams' ||
+                  value.provider === 'telegram') &&
+                fixedDestinationLabels[value.provider] ? (
+                <p className="self-center text-sm text-muted-foreground">
+                  {fixedDestinationLabels[value.provider]}
+                </p>
+              ) : value.mode === 'direct_message' ? (
+                <p className="self-center text-sm text-muted-foreground">
+                  Results are sent privately to your linked {providerLabel}{' '}
+                  account.
+                </p>
+              ) : value.provider === 'slack' && channelCatalogAvailable ? (
+                <SlackChannelSelect
+                  id={`${id}-channel`}
+                  className="min-w-0 w-full"
+                  value={value.channelId || null}
+                  options={slackOptions}
+                  disabled={disabled}
+                  onChange={(channelId) =>
+                    onChange({ ...value, channelId: channelId ?? '' })
+                  }
+                />
+              ) : value.provider === 'discord' && channelCatalogAvailable ? (
                 <Select
                   handoffRef={
-                    value.channelId || emailOptions.length === 0
+                    value.channelId || discordOptions.length === 0
                       ? undefined
                       : (target) => {
                           nextDestinationRef.current = target;
@@ -239,105 +292,53 @@ export function AutomationDestinationPicker({
                   }
                   value={value.channelId}
                   disabled={disabled}
-                  onValueChange={(identityId) =>
-                    onChange({ ...value, channelId: identityId })
+                  onValueChange={(channelId) =>
+                    onChange({ ...value, channelId })
                   }
                 >
                   <SelectTrigger
-                    aria-label="Email address"
-                    className="min-w-0 w-full sm:max-w-96"
+                    aria-label="Destination channel"
+                    className="min-w-0 w-full"
                   >
-                    <SelectValue placeholder="Select Email address" />
+                    <SelectValue placeholder="Select Discord channel" />
                   </SelectTrigger>
                   <SelectContent>
-                    {emailOptions.map((identity) => (
-                      <SelectItem key={identity.id} value={identity.id}>
-                        {identity.label}
+                    {discordOptions.map((channel) => (
+                      <SelectItem key={channel.id} value={channel.id}>
+                        {channel.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-sm text-muted-foreground">
-                  Reports use only this selected identity and stop if it is no
-                  longer eligible.
-                </p>
-              </div>
-            ) : (value.provider === 'teams' || value.provider === 'telegram') &&
-              fixedDestinationLabels[value.provider] ? (
-              <p className="self-center text-sm text-muted-foreground">
-                {fixedDestinationLabels[value.provider]}
-              </p>
-            ) : value.mode === 'direct_message' ? (
-              <p className="self-center text-sm text-muted-foreground">
-                Results are sent privately to your linked {providerLabel}{' '}
-                account.
-              </p>
-            ) : value.provider === 'slack' && channelCatalogAvailable ? (
-              <SlackChannelSelect
-                id={`${id}-channel`}
-                className="min-w-0 w-full"
-                value={value.channelId || null}
-                options={slackOptions}
-                disabled={disabled}
-                onChange={(channelId) =>
-                  onChange({ ...value, channelId: channelId ?? '' })
-                }
-              />
-            ) : value.provider === 'discord' && channelCatalogAvailable ? (
-              <Select
-                handoffRef={
-                  value.channelId || discordOptions.length === 0
-                    ? undefined
-                    : (target) => {
-                        nextDestinationRef.current = target;
-                      }
-                }
-                value={value.channelId}
-                disabled={disabled}
-                onValueChange={(channelId) => onChange({ ...value, channelId })}
-              >
-                <SelectTrigger
+              ) : (
+                <Input
+                  ref={
+                    value.channelId
+                      ? undefined
+                      : (target) => {
+                          nextDestinationRef.current = target;
+                        }
+                  }
                   aria-label="Destination channel"
                   className="min-w-0 w-full"
-                >
-                  <SelectValue placeholder="Select Discord channel" />
-                </SelectTrigger>
-                <SelectContent>
-                  {discordOptions.map((channel) => (
-                    <SelectItem key={channel.id} value={channel.id}>
-                      {channel.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                ref={
-                  value.channelId
-                    ? undefined
-                    : (target) => {
-                        nextDestinationRef.current = target;
-                      }
-                }
-                aria-label="Destination channel"
-                className="min-w-0 w-full"
-                value={value.channelId}
-                disabled={disabled}
-                onChange={(event) =>
-                  onChange({ ...value, channelId: event.target.value })
-                }
-                placeholder={
-                  value.provider === 'slack'
-                    ? 'Slack channel ID'
-                    : value.provider === 'discord'
-                      ? 'Discord channel ID'
-                      : value.provider === 'teams'
-                        ? 'Teams conversation ID'
-                        : 'Telegram chat ID'
-                }
-              />
-            )}
-          </div>
+                  value={value.channelId}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    onChange({ ...value, channelId: event.target.value })
+                  }
+                  placeholder={
+                    value.provider === 'slack'
+                      ? 'Slack channel ID'
+                      : value.provider === 'discord'
+                        ? 'Discord channel ID'
+                        : value.provider === 'teams'
+                          ? 'Teams conversation ID'
+                          : 'Telegram chat ID'
+                  }
+                />
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>

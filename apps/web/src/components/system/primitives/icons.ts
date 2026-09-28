@@ -166,6 +166,7 @@ export {
   RectangleHorizontal,
   RotateCcw,
   RotateCcwKey,
+  Rss,
   ScrollText,
   Rows4,
   ScanFace,
