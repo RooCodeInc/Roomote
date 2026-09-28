@@ -356,6 +356,28 @@ describe('createJudgeEnforcement', () => {
     await expect(enforcement.beforeTaskCompletion()).resolves.toBe('finalize');
   });
 
+  it('does not follow a replacement symlink while restoring JUDGE.json', async () => {
+    const root = await createRepo({
+      criteria: [{ rule: 'Use sentence case.' }],
+    });
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'roomote-judge-target-'));
+    roots.push(root, outsideRoot);
+    const outsidePath = join(outsideRoot, 'target.txt');
+    await writeFile(outsidePath, 'must remain unchanged\n');
+    const enforcement = await createEnforcement(root, vi.fn());
+
+    await execa('rm', ['JUDGE.json'], { cwd: root });
+    await symlink(outsidePath, join(root, 'JUDGE.json'));
+    await writeFile(join(root, 'Example.tsx'), 'changed\n');
+
+    await expect(enforcement.beforeTaskCompletion()).resolves.toMatchObject({
+      disposition: 'fail',
+    });
+    await expect(readFile(outsidePath, 'utf8')).resolves.toBe(
+      'must remain unchanged\n',
+    );
+  });
+
   it('restores immutable JUDGE.json, allows successful repair, and blocks after three failed rounds', async () => {
     const root = await createRepo({
       criteria: [{ rule: 'Use sentence case.' }],

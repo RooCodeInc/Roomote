@@ -5,7 +5,6 @@ import {
   open,
   readFile,
   unlink,
-  writeFile,
   type FileHandle,
 } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -115,6 +114,65 @@ async function openRegularFile(filePath: string): Promise<FileHandle | null> {
     }
 
     throw error;
+  }
+
+  try {
+    if (!(await handle.stat()).isFile()) {
+      await handle.close();
+      return null;
+    }
+
+    return handle;
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function openWritableRegularFile(
+  filePath: string,
+  createIfMissing: boolean,
+): Promise<FileHandle | null> {
+  const existingFlags =
+    fsConstants.O_WRONLY |
+    fsConstants.O_TRUNC |
+    (fsConstants.O_NOFOLLOW ?? 0) |
+    (fsConstants.O_NONBLOCK ?? 0);
+  let handle: FileHandle;
+
+  try {
+    handle = await open(filePath, existingFlags);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' && createIfMissing) {
+      try {
+        handle = await open(
+          filePath,
+          fsConstants.O_WRONLY |
+            fsConstants.O_CREAT |
+            fsConstants.O_EXCL |
+            (fsConstants.O_NOFOLLOW ?? 0) |
+            (fsConstants.O_NONBLOCK ?? 0),
+          0o600,
+        );
+      } catch (createError) {
+        const createCode = (createError as NodeJS.ErrnoException).code;
+        if (
+          createCode === 'EEXIST' ||
+          createCode === 'ELOOP' ||
+          createCode === 'EISDIR' ||
+          createCode === 'ENXIO'
+        ) {
+          return null;
+        }
+
+        throw createError;
+      }
+    } else if (code === 'ELOOP' || code === 'EISDIR' || code === 'ENXIO') {
+      return null;
+    } else {
+      throw error;
+    }
   }
 
   try {
@@ -422,26 +480,35 @@ async function restorePolicySnapshot(
   snapshot: JudgePolicySnapshot,
 ): Promise<boolean> {
   try {
-    const stats = await lstat(snapshot.policyPath).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return null;
-      }
-      throw error;
-    });
-
-    if (stats?.isSymbolicLink()) {
-      return false;
-    }
-
     if (snapshot.policyBytes === null) {
+      const stats = await lstat(snapshot.policyPath).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return null;
+        }
+        throw error;
+      });
+
+      if (!stats) {
+        return true;
+      }
+
       await unlink(snapshot.policyPath).catch((error: unknown) => {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       });
-    } else {
-      await writeFile(snapshot.policyPath, snapshot.policyBytes, { flag: 'w' });
+      return true;
     }
 
-    return true;
+    const handle = await openWritableRegularFile(snapshot.policyPath, true);
+    if (!handle) {
+      return false;
+    }
+
+    try {
+      await handle.writeFile(snapshot.policyBytes);
+      return true;
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
   } catch {
     return false;
   }
