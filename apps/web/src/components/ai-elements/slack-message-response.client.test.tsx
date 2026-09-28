@@ -93,6 +93,22 @@ describe('Slack references in assistant Markdown', () => {
     expect(screen.getByText('Keep this bold.')).toBeInTheDocument();
   });
 
+  it('renders resolved references in headings and tight list items', async () => {
+    render(renderResponse('## <#C456>\n\n- ask <@U123> to post there'));
+
+    expect(
+      await screen.findByRole('heading', { name: '#ops' }),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '#ops' })).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/archives/C456',
+    );
+    expect(await screen.findByRole('link', { name: '@Maya' })).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/team/U123',
+    );
+  });
+
   it('updates links when resolver data arrives after hydration', async () => {
     const text = 'Post in <#C456> and ask <@U123>.';
     resolveState.data = undefined;

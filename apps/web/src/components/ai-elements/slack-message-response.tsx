@@ -3,10 +3,13 @@
 import {
   Children,
   cloneElement,
+  createElement,
   isValidElement,
   type ComponentProps,
   type ReactNode,
 } from 'react';
+
+import { cn } from '@/lib/utils';
 
 import { CustomLink } from './custom-link';
 import { CustomParagraph, MessageResponse } from './message';
@@ -20,6 +23,16 @@ const RECURSIVE_ELEMENTS = new Set([
   's',
   'span',
   'strong',
+]);
+const TEXT_CONTAINER_TAGS = new Set([
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'li',
+  'p',
 ]);
 
 function renderSlackTextChildren(children: ReactNode): ReactNode {
@@ -52,11 +65,23 @@ function renderSlackTextChildren(children: ReactNode): ReactNode {
   });
 }
 
-function SlackMarkdownParagraph(props: ComponentProps<typeof CustomParagraph>) {
-  return (
-    <CustomParagraph {...props}>
-      {renderSlackTextChildren(props.children)}
-    </CustomParagraph>
+function SlackMarkdownTextContainer({
+  children,
+  node,
+  ...props
+}: ComponentProps<typeof CustomParagraph>) {
+  const tagName = TEXT_CONTAINER_TAGS.has(node?.tagName ?? '')
+    ? node?.tagName
+    : 'p';
+  const className =
+    tagName === 'p'
+      ? cn('min-w-0 [overflow-wrap:anywhere]', props.className)
+      : props.className;
+
+  return createElement(
+    tagName,
+    { ...props, className },
+    renderSlackTextChildren(children),
   );
 }
 
@@ -67,7 +92,14 @@ export function SlackMessageResponse({ text }: { text: string }) {
       components={{
         a: CustomLink,
         code: 'code',
-        p: SlackMarkdownParagraph,
+        h1: SlackMarkdownTextContainer,
+        h2: SlackMarkdownTextContainer,
+        h3: SlackMarkdownTextContainer,
+        h4: SlackMarkdownTextContainer,
+        h5: SlackMarkdownTextContainer,
+        h6: SlackMarkdownTextContainer,
+        li: SlackMarkdownTextContainer,
+        p: SlackMarkdownTextContainer,
         pre: 'pre',
       }}
     >
