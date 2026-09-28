@@ -343,7 +343,7 @@ describe('createJudgeEnforcement', () => {
     );
   });
 
-  it('skips changed symlinks and FIFOs before hashing or reading them', async () => {
+  it('skips changed symlinks and other non-regular paths before hashing or reading them', async () => {
     const root = await createRepo({
       criteria: [{ rule: 'Use sentence case.', files: ['*.tsx'] }],
     });
@@ -351,7 +351,7 @@ describe('createJudgeEnforcement', () => {
     await writeFile(join(root, 'outside.txt'), 'outside checkout content\n');
     const enforcement = await createEnforcement(root, vi.fn());
     await symlink('outside.txt', join(root, 'link.tsx'));
-    await execa('mkfifo', ['pipe.tsx'], { cwd: root });
+    await execa('mkdir', ['directory.tsx'], { cwd: root });
 
     await expect(enforcement.beforeTaskCompletion()).resolves.toBe('finalize');
   });
