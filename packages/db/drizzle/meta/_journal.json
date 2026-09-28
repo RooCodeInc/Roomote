@@ -841,6 +841,13 @@
       "when": 1790331860594,
       "tag": "0119_sticky_pestilence",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1790592997955,
+      "tag": "0120_quick_king_cobra",
+      "breakpoints": true
     }
   ]
 }

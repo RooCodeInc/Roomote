@@ -42,18 +42,26 @@ export async function enqueueInactiveSessionStatusJudgmentRequests(
     WITH latest_visible_user_messages AS (
       SELECT
         s.id AS session_id,
-        max(fam.ts) AS latest_ts
+        latest.latest_ts
       FROM sessions AS s
-      INNER JOIN fast_agent_messages AS fam
-        ON fam.conversation_id = s.fast_conversation_id
+      CROSS JOIN LATERAL (
+        -- The partial conversation-order index lets this lookup stop at the
+        -- newest visible user message instead of aggregating the transcript.
+        SELECT fam.ts AS latest_ts
+        FROM fast_agent_messages AS fam
+        WHERE fam.conversation_id = s.fast_conversation_id
+          AND fam.role = 'user'
+          AND (
+            fam.metadata ->> 'visibleInTranscript' = 'true'
+            OR (
+              fam.metadata ->> 'visibleInTranscript' IS NULL
+              AND fam.event_type <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+            )
+          )
+        ORDER BY fam.ts DESC
+        LIMIT 1
+      ) AS latest
       WHERE s.visibility = 'visible'
-        AND fam.role = 'user'
-        AND CASE
-          WHEN fam.metadata ->> 'visibleInTranscript' IS NOT NULL
-            THEN fam.metadata ->> 'visibleInTranscript' = 'true'
-          ELSE fam.event_type <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
-        END
-      GROUP BY s.id
     )
     SELECT
       session_id,

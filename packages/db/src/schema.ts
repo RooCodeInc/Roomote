@@ -3841,6 +3841,19 @@ export const fastAgentMessages = pgTable(
       table.ts,
       table.turnSeq,
     ),
+    index('fast_agent_messages_visible_user_order_idx').on(
+      table.conversationId,
+      table.ts.desc(),
+    ).where(sql`
+        ${table.role} = 'user'
+        AND (
+          ${table.metadata} ->> 'visibleInTranscript' = 'true'
+          OR (
+            ${table.metadata} ->> 'visibleInTranscript' IS NULL
+            AND ${table.eventType} <> 'roomote_runtime.user_prompt'
+          )
+        )
+      `),
   ],
 );
 
