@@ -26,10 +26,8 @@ import {
   MessageUiOptionsProvider,
   type MessageUiOptions,
 } from '@/components/ai-elements/message-ui-options';
-import {
-  SlackMentionProvider,
-  type SlackMentionScope,
-} from '@/components/ai-elements/slack-mention-context';
+import { type SlackMentionScope } from '@/components/ai-elements/slack-mention-context';
+import { SlackMentionTranscriptProvider } from '@/components/ai-elements/slack-message-references';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { Button, Skeleton } from '@/components/system';
@@ -289,6 +287,20 @@ const MessagesBase = ({
   const hasAnchor =
     typeof window !== 'undefined' && !!window.location.hash.slice(1);
   const sessionPrompt = session.prompt;
+  const slackMentionText = useMemo(
+    () =>
+      [
+        sessionPrompt?.text ?? '',
+        ...messages
+          .filter(
+            (message) =>
+              (message.role === 'assistant' || message.role === 'user') &&
+              Boolean(message.text),
+          )
+          .map((message) => message.text ?? ''),
+      ].join('\n'),
+    [messages, sessionPrompt?.text],
+  );
   const shouldRenderSessionPrompt =
     renderSessionPrompt &&
     sessionPrompt?.visibleInTranscript !== false &&
@@ -323,7 +335,10 @@ const MessagesBase = ({
 
   return (
     <MessageUiOptionsProvider value={resolvedMessageUiOptions}>
-      <SlackMentionProvider scope={slackMentionScope}>
+      <SlackMentionTranscriptProvider
+        scope={slackMentionScope}
+        text={slackMentionText}
+      >
         <Conversation
           className="min-h-0 flex-1"
           initial={hasAnchor ? false : initialScrollBehavior}
@@ -352,7 +367,7 @@ const MessagesBase = ({
           {scrollRef && <ScrollBridge handleRef={scrollRef} />}
           <ScrollToHash messages={messages} />
         </Conversation>
-      </SlackMentionProvider>
+      </SlackMentionTranscriptProvider>
     </MessageUiOptionsProvider>
   );
 };
