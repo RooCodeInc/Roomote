@@ -180,6 +180,14 @@ export function SessionActions({
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" side="left">
+          <DropdownMenuItem
+            onClick={() => stopTasks.mutate({ sessionId })}
+            disabled={isPending}
+            className="flex cursor-pointer items-center gap-2"
+          >
+            <Square className="size-4" />
+            Stop all tasks
+          </DropdownMenuItem>
           {sessionStatusExperimentEnabled ? (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger className="flex cursor-pointer items-center gap-2">
@@ -211,14 +219,6 @@ export function SessionActions({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           ) : null}
-          <DropdownMenuItem
-            onClick={() => stopTasks.mutate({ sessionId })}
-            disabled={isPending}
-            className="flex cursor-pointer items-center gap-2"
-          >
-            <Square className="size-4" />
-            Stop tasks
-          </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => archiveSession.mutate({ sessionId })}
             disabled={isPending}
