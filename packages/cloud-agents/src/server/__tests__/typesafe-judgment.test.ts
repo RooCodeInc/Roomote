@@ -749,6 +749,38 @@ describe('evaluateTypeSafeJudgments', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    it('keeps judge.json decisions on Jev', async () => {
+      mockGetJudgmentSelection.mockResolvedValue('typesafe');
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await expect(
+        evaluateDecisionModel({
+          decision: 'judge-file-criterion',
+          state: 'changed repository file',
+          questions,
+        }),
+      ).resolves.toEqual(directAnswers);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.typesafe.ai/v1/systemone',
+        expect.anything(),
+      );
+    });
+
+    it('does not ask the Roomote model for judge.json decisions', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await expect(
+        evaluateDecisionModel({
+          decision: 'judge-file-criterion',
+          state: 'changed repository file',
+          questions,
+        }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('allows the Roomote model for a trained decision', async () => {
       mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
       mockGetJudgmentSelection.mockResolvedValue('roomote');
