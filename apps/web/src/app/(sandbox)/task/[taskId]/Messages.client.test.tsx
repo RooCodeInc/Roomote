@@ -28,6 +28,10 @@ const sandboxMessagesState = vi.hoisted(() => ({
   messages: [] as unknown[],
 }));
 
+const slackMentionState = vi.hoisted(() => ({
+  text: null as string | null,
+}));
+
 const historyControlsState = vi.hoisted(() => ({
   isError: false,
   isRetrying: false,
@@ -84,6 +88,19 @@ vi.mock('@/components/ai-elements/message-ui-options', () => ({
       {children}
     </div>
   ),
+}));
+
+vi.mock('@/components/ai-elements/slack-message-references', () => ({
+  SlackMentionTranscriptProvider: ({
+    children,
+    text,
+  }: {
+    children: ReactNode;
+    text: string;
+  }) => {
+    slackMentionState.text = text;
+    return <>{children}</>;
+  },
 }));
 
 vi.mock('./hooks', () => ({
@@ -251,6 +268,7 @@ describe('Messages', () => {
     narrationModeState.enabled = false;
     taskPhaseState.phase = null;
     sandboxMessagesState.messages = [];
+    slackMentionState.text = null;
     historyControlsState.isError = false;
     historyControlsState.isRetrying = false;
     historyControlsState.hasOlderMessages = false;
@@ -261,6 +279,33 @@ describe('Messages', () => {
     scrollState.element = null;
     scrollState.stopScroll.mockClear();
     mockBuildAcpRenderBlocks.mockReturnValue([]);
+  });
+
+  it('does not resolve hidden session prompt references', () => {
+    sandboxMessagesState.messages = [
+      {
+        role: 'assistant',
+        text: 'Visible reply with <@Uvisible>.',
+      },
+    ];
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            taskRun: null,
+            prompt: {
+              role: 'user',
+              text: 'Hidden prompt with <@Uhidden>.',
+              visibleInTranscript: false,
+            },
+          } as never
+        }
+      />,
+    );
+
+    expect(slackMentionState.text).toBe('Visible reply with <@Uvisible>.');
   });
 
   it('offers retry when initial conversation history fails', async () => {

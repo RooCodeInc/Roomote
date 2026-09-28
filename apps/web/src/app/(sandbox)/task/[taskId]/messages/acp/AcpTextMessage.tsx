@@ -48,8 +48,10 @@ import { AcpDataVisualizations } from './AcpDataVisualizations';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 import { SlackMessageText } from '@/components/ai-elements/slack-message-text';
-import { useSlackMessageReferences } from '@/components/ai-elements/slack-message-references';
-import { remarkSlackMessageReferences } from '@/components/ai-elements/remark-slack-message-references';
+import {
+  renderSlackMessageMarkdown,
+  useSlackMessageReferences,
+} from '@/components/ai-elements/slack-message-references';
 import { useOpenSessionArtifactViewer } from '@/app/(sandbox)/sessions/[sessionId]/session-task-panel-context';
 import { useArtifactLink } from '../../hooks/ArtifactLinkProvider';
 
@@ -139,16 +141,12 @@ function getReactionReceiptContent(msg: AcpUiMessage): string | null {
 
 function SlackMarkdownMessage({ text }: { text: string }) {
   const { references } = useSlackMessageReferences(text);
-  const additionalRemarkPlugins = useMemo(
-    () => [remarkSlackMessageReferences(references)],
-    [references],
+  const markdown = useMemo(
+    () => renderSlackMessageMarkdown(text, references),
+    [references, text],
   );
 
-  return (
-    <MessageResponse additionalRemarkPlugins={additionalRemarkPlugins}>
-      {text}
-    </MessageResponse>
-  );
+  return <MessageResponse>{markdown}</MessageResponse>;
 }
 
 function formatLinkedReviewResultTitle(

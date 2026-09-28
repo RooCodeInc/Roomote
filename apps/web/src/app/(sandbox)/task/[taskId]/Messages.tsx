@@ -287,10 +287,14 @@ const MessagesBase = ({
   const hasAnchor =
     typeof window !== 'undefined' && !!window.location.hash.slice(1);
   const sessionPrompt = session.prompt;
+  const shouldRenderSessionPrompt =
+    renderSessionPrompt &&
+    sessionPrompt?.visibleInTranscript !== false &&
+    Boolean(sessionPrompt);
   const slackMentionText = useMemo(
     () =>
       [
-        sessionPrompt?.text ?? '',
+        shouldRenderSessionPrompt ? (sessionPrompt?.text ?? '') : null,
         ...messages
           .filter(
             (message) =>
@@ -298,13 +302,11 @@ const MessagesBase = ({
               Boolean(message.text),
           )
           .map((message) => message.text ?? ''),
-      ].join('\n'),
-    [messages, sessionPrompt?.text],
+      ]
+        .filter((text): text is string => Boolean(text))
+        .join('\n'),
+    [messages, sessionPrompt?.text, shouldRenderSessionPrompt],
   );
-  const shouldRenderSessionPrompt =
-    renderSessionPrompt &&
-    sessionPrompt?.visibleInTranscript !== false &&
-    Boolean(sessionPrompt);
   const resolvedHideFirstAcpUserPrompt =
     hideFirstAcpUserPrompt ?? shouldRenderSessionPrompt;
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({

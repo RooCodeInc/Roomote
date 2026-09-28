@@ -92,19 +92,8 @@ vi.mock('@/components/ai-elements', () => ({
   MessagePlainText: ({ children }: { children: ReactNode }) => (
     <div data-testid="message-plain-text">{children}</div>
   ),
-  MessageResponse: ({
-    children,
-    additionalRemarkPlugins,
-  }: {
-    children: ReactNode;
-    additionalRemarkPlugins?: unknown[];
-  }) => (
-    <div
-      data-testid="message-response"
-      data-slack-references={additionalRemarkPlugins ? 'enabled' : 'disabled'}
-    >
-      {children}
-    </div>
+  MessageResponse: ({ children }: { children: ReactNode }) => (
+    <div data-testid="message-response">{children}</div>
   ),
   MessageTimestamp: ({ ts, anchorId }: { ts: number; anchorId?: string }) => (
     <time data-anchor-id={anchorId}>{String(ts)}</time>
@@ -265,7 +254,7 @@ describe('AcpTextMessage', () => {
     ).toBeVisible();
   });
 
-  it('uses the Slack-aware Markdown renderer for assistant references', () => {
+  it('renders assistant Slack references through the shared Markdown path', () => {
     render(
       <SlackMentionProvider scope={{ kind: 'task', taskId: 'task-1' }}>
         <AcpTextMessage
@@ -284,9 +273,8 @@ describe('AcpTextMessage', () => {
       </SlackMentionProvider>,
     );
 
-    expect(screen.getByTestId('message-response')).toHaveAttribute(
-      'data-slack-references',
-      'enabled',
+    expect(screen.getByTestId('message-response')).toHaveTextContent(
+      'Post in #C456 and ask @U123.',
     );
   });
 
