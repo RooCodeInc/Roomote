@@ -67,6 +67,7 @@ describe('evaluateJudgeFileCriteria', () => {
       expect.objectContaining({
         decision: 'judge-file-criterion',
         highVolume: true,
+        skipShadow: true,
         state: expect.objectContaining({
           ...state,
           criteria: expect.any(Array),

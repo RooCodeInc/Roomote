@@ -749,21 +749,34 @@ describe('evaluateTypeSafeJudgments', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it('keeps judge.json decisions on Jev', async () => {
+    it('keeps judge.json criteria on Jev without Roomote shadowing', async () => {
       mockGetJudgmentSelection.mockResolvedValue('typesafe');
+      mockEnv.R_JUDGMENT_SHADOW = 'on';
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
       const fetchMock = mockFetchResponse({ answers: directAnswers });
+      const state = {
+        path: 'apps/web/src/Example.tsx',
+        patch: '+<p>Save your work.</p>',
+        finalContent: '<p>Save your work.</p>',
+        criteria: [
+          {
+            id: 'criterion_0',
+            rule: 'Do not describe functionality in UI text.',
+          },
+        ],
+      };
 
       await expect(
         evaluateDecisionModel({
           decision: 'judge-file-criterion',
-          state: 'changed repository file',
+          state,
           questions,
+          skipShadow: true,
         }),
       ).resolves.toEqual(directAnswers);
-      expect(fetchMock).toHaveBeenCalledWith(
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
         'https://api.typesafe.ai/v1/systemone',
-        expect.anything(),
-      );
+      ]);
     });
 
     it('does not ask the Roomote model for judge.json decisions', async () => {

@@ -1329,6 +1329,8 @@ export type DecisionModelRequirements = {
    * Separate from `highVolume`, which is about cost, not quality.
    */
   excludeRoomoteModel?: boolean;
+  /** Do not send a secondary Roomote shadow request for this decision. */
+  skipShadow?: boolean;
 };
 
 function decisionModelExcludesRoomoteModel(
