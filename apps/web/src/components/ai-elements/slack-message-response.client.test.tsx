@@ -96,9 +96,8 @@ describe('Slack references in assistant Markdown', () => {
   it('renders resolved references in headings and tight list items', async () => {
     render(renderResponse('## <#C456>\n\n- ask <@U123> to post there'));
 
-    expect(
-      await screen.findByRole('heading', { name: '#ops' }),
-    ).toBeInTheDocument();
+    const heading = await screen.findByRole('heading', { name: '#ops' });
+    expect(heading).toHaveAttribute('data-streamdown', 'heading-2');
     expect(await screen.findByRole('link', { name: '#ops' })).toHaveAttribute(
       'href',
       'https://acme.slack.com/archives/C456',
@@ -106,6 +105,10 @@ describe('Slack references in assistant Markdown', () => {
     expect(await screen.findByRole('link', { name: '@Maya' })).toHaveAttribute(
       'href',
       'https://acme.slack.com/team/U123',
+    );
+    expect(screen.getByRole('listitem')).toHaveAttribute(
+      'data-streamdown',
+      'list-item',
     );
   });
 

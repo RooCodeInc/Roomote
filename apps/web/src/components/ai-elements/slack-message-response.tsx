@@ -71,10 +71,22 @@ function createSlackMarkdownElement<Tag extends keyof JSX.IntrinsicElements>(
       tag === 'p'
         ? cn('min-w-0 [overflow-wrap:anywhere]', rest.className)
         : rest.className;
+    const streamdownTag =
+      tag === 'p'
+        ? 'paragraph'
+        : tag === 'li'
+          ? 'list-item'
+          : tag.startsWith('h')
+            ? `heading-${tag.slice(1)}`
+            : undefined;
 
     return createElement(
       tag,
-      { ...rest, className } as Record<string, unknown>,
+      {
+        ...rest,
+        className,
+        ...(streamdownTag ? { 'data-streamdown': streamdownTag } : {}),
+      } as Record<string, unknown>,
       renderSlackTextChildren(children),
     );
   };
