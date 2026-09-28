@@ -62,6 +62,7 @@ export async function evaluateJudgeFileCriteria(input: {
     timeoutMs: input.timeoutMs,
     decision: 'judge-file-criterion',
     highVolume: true,
+    skipShadow: true,
   });
 
   if (!answers) {

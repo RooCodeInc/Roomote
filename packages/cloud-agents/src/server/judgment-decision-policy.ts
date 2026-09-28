@@ -17,7 +17,6 @@ const JUDGMENT_DECISION_POLICY: Record<string, { roomoteModel: boolean }> = {
   'integration-tool-auto-evaluation': { roomoteModel: true },
   'session-status-judgment': { roomoteModel: true },
   'custom-automation-launch-gate': { roomoteModel: true },
-  'judge-file-criterion': { roomoteModel: true },
 };
 
 export type { JudgmentDecisionId } from './judgment-decision-catalog';

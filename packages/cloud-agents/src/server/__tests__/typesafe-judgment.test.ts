@@ -749,6 +749,51 @@ describe('evaluateTypeSafeJudgments', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    it('keeps judge.json criteria on Jev without Roomote shadowing', async () => {
+      mockGetJudgmentSelection.mockResolvedValue('typesafe');
+      mockEnv.R_JUDGMENT_SHADOW = 'on';
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+      const state = {
+        path: 'apps/web/src/Example.tsx',
+        patch: '+<p>Save your work.</p>',
+        finalContent: '<p>Save your work.</p>',
+        criteria: [
+          {
+            id: 'criterion_0',
+            rule: 'Do not describe functionality in UI text.',
+          },
+        ],
+      };
+
+      await expect(
+        evaluateDecisionModel({
+          decision: 'judge-file-criterion',
+          state,
+          questions,
+          skipShadow: true,
+        }),
+      ).resolves.toEqual(directAnswers);
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        'https://api.typesafe.ai/v1/systemone',
+      ]);
+    });
+
+    it('does not ask the Roomote model for judge.json decisions', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await expect(
+        evaluateDecisionModel({
+          decision: 'judge-file-criterion',
+          state: 'changed repository file',
+          questions,
+        }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('allows the Roomote model for a trained decision', async () => {
       mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
       mockGetJudgmentSelection.mockResolvedValue('roomote');
