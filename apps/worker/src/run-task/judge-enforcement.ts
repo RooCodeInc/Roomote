@@ -1,12 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import {
-  lstat,
-  open,
-  readFile,
-  unlink,
-  type FileHandle,
-} from 'node:fs/promises';
+import { lstat, open, unlink, type FileHandle } from 'node:fs/promises';
 import * as path from 'node:path';
 
 import ignore from 'ignore';
@@ -356,18 +350,30 @@ async function readPolicySnapshot(
 ): Promise<JudgeRepository | null> {
   const policyPath = path.join(root, JUDGE_POLICY_FILE_NAME);
 
-  let policyBytes: Buffer;
-  try {
-    const stats = await lstat(policyPath);
-    if (stats.isSymbolicLink() || !isSafeRegularFile(stats)) {
-      throw new Error('JUDGE.json is not a regular file');
-    }
-    policyBytes = await readFile(policyPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+  const policyHandle = await openRegularFile(policyPath);
+  if (!policyHandle) {
+    const stats = await lstat(policyPath).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    });
+
+    if (!stats) {
       return null;
     }
-    throw error;
+
+    throw new Error('JUDGE.json is not a safe regular file');
+  }
+
+  let policyBytes: Buffer;
+  try {
+    if (!isSafeRegularFile(await policyHandle.stat())) {
+      throw new Error('JUDGE.json is not a safe regular file');
+    }
+    policyBytes = await policyHandle.readFile();
+  } finally {
+    await policyHandle.close().catch(() => undefined);
   }
 
   const parsed = JSON.parse(policyBytes.toString('utf8')) as unknown;

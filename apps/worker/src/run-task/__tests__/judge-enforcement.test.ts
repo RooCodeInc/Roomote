@@ -363,6 +363,35 @@ describe('createJudgeEnforcement', () => {
     await expect(enforcement.beforeTaskCompletion()).resolves.toBe('finalize');
   });
 
+  it('fails open with a warning when startup JUDGE.json is replaced by a link', async () => {
+    const root = await createRepo({
+      criteria: [{ rule: 'Use sentence case.' }],
+    });
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'roomote-judge-startup-'));
+    roots.push(root, outsideRoot);
+    const outsidePath = join(outsideRoot, 'target.json');
+    await writeFile(
+      outsidePath,
+      JSON.stringify({ criteria: [{ rule: 'Do not load this policy.' }] }),
+    );
+    await execa('rm', ['JUDGE.json'], { cwd: root });
+    await symlink(outsidePath, join(root, 'JUDGE.json'));
+    const logger = createLogger();
+    const evaluate = vi.fn();
+    const enforcement = await createJudgeEnforcement({
+      runId: 1,
+      repoPaths: repoPaths(root),
+      logger,
+      evaluate,
+    });
+
+    await expect(enforcement.beforeTaskCompletion()).resolves.toBe('finalize');
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('JUDGE.json is invalid'),
+    );
+    expect(evaluate).not.toHaveBeenCalled();
+  });
+
   it('skips hard-linked changed files and never truncates a hard-linked policy target', async () => {
     const root = await createRepo({
       criteria: [{ rule: 'Use sentence case.', files: ['*.tsx'] }],
