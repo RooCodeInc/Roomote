@@ -231,6 +231,7 @@ describe('taskRunsRouter queue message guards', () => {
         true,
       );
       expect(jevgrepMocks.experiment).toHaveBeenCalledWith('jevgrep');
+      expect(jevgrepMocks.backend).toHaveBeenCalledWith({ bypassCache: true });
     },
   );
 

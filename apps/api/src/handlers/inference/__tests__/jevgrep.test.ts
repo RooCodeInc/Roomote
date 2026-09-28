@@ -28,6 +28,7 @@ it('uses the configured Jev model and preserves probabilities in the CLI wire fo
     state: request.state,
     questions: request.questions,
     excludeRoomoteModel: true,
+    bypassBackendCache: true,
     timeoutMs: 15_000,
   });
 });

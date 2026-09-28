@@ -221,9 +221,13 @@ async function resolveJudgmentBackendUncached(): Promise<
 }
 
 /** Cached briefly because judgments sit on hot paths. */
-export async function resolveJudgmentBackend(): Promise<
-  JudgmentBackend | undefined
-> {
+export async function resolveJudgmentBackend(
+  options: { bypassCache?: boolean } = {},
+): Promise<JudgmentBackend | undefined> {
+  // Source-disclosure decisions must observe settings across API processes;
+  // invalidating one process's cache when settings are saved is insufficient.
+  if (options.bypassCache) return resolveJudgmentBackendUncached();
+
   const now = Date.now();
 
   if (cachedBackend && cachedBackend.expiresAt > now) {
@@ -995,9 +999,13 @@ export async function evaluateTypeSafeJudgments<
   timeoutMs?: number;
   decision?: JudgmentDecisionId;
   excludeRoomoteModel?: boolean;
+  /** Read the current provider before sending source, ignoring the hot-path cache. */
+  bypassBackendCache?: boolean;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {
   const excludeRoomoteModel = decisionModelExcludesRoomoteModel(params);
-  const backend = await resolveJudgmentBackend();
+  const backend = await resolveJudgmentBackend({
+    bypassCache: params.bypassBackendCache,
+  });
 
   if (!backend || (excludeRoomoteModel && backend.provider === 'roomote')) {
     return null;

@@ -1023,7 +1023,7 @@ export const taskRunsRouter = router({
   isJevgrepEnabled: runScoped(z.object({ runId: z.number() }), 'runId').query(
     async () => {
       if (!(await isDeploymentExperimentEnabled('jevgrep'))) return false;
-      const backend = await resolveJudgmentBackend();
+      const backend = await resolveJudgmentBackend({ bypassCache: true });
       return Boolean(backend && backend.provider !== 'roomote');
     },
   ),
