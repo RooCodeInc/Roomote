@@ -237,6 +237,11 @@ describe('Session status judgment requests', () => {
       metadata: { visibleInTranscript: true, userId: user.id },
     });
 
+    await refreshSessionInactivityDueAt(db, session.id);
+    await expect(
+      enqueueInactiveSessionStatusJudgmentRequests(db),
+    ).resolves.toBe(0);
+
     await clearManualStatusAfterNewerUserMessage(db, session.id);
 
     const [updated] = await db
