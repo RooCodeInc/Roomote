@@ -21,6 +21,7 @@ import {
   type ReasoningEffort,
   type RunStatus,
   type SessionGoal,
+  type SessionManualStatus,
   type SessionStatus,
 } from '@roomote/types';
 
@@ -203,6 +204,7 @@ export type SessionInfo = {
   createdAt: Date;
   status: string | null;
   cachedStatus: SessionStatus | null;
+  manualStatus: SessionManualStatus | null;
   goal?: SessionGoal | null;
   tasks: SessionTaskSummary[];
   artifacts?: SessionArtifact[];
@@ -1141,7 +1143,10 @@ export function SessionWorkspace({
                     <SessionActions
                       sessionId={session.id}
                       status={
-                        currentSession?.cachedStatus ?? session.cachedStatus
+                        currentSession
+                          ? (currentSession.manualStatus ??
+                            currentSession.cachedStatus)
+                          : (session.manualStatus ?? session.cachedStatus)
                       }
                       sessionStatusExperimentEnabled={
                         session.sessionStatusExperimentEnabled

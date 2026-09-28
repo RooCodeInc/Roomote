@@ -1,0 +1,2 @@
+ALTER TABLE "sessions" DROP CONSTRAINT "sessions_manual_status_check";--> statement-breakpoint
+ALTER TABLE "sessions" ADD CONSTRAINT "sessions_manual_status_check" CHECK ("sessions"."manual_status" IS NULL OR "sessions"."manual_status" in ('needs_input', 'blocked', 'ready', 'done'));

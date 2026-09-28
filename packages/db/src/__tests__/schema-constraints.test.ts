@@ -204,6 +204,27 @@ describe('sessions CHECK and uniqueness constraints', () => {
     },
   );
 
+  it('allows done as a manual status without widening cached_status', async () => {
+    const session = await createSession({
+      cachedStatus: 'active',
+      manualStatus: 'done',
+    });
+
+    expect(session).toMatchObject({
+      cachedStatus: 'active',
+      manualStatus: 'done',
+    });
+  });
+
+  it('rejects active as a manual status', async () => {
+    await expectConstraintViolation(
+      createSession({
+        manualStatus: 'active' as never,
+      }),
+      'sessions_manual_status_check',
+    );
+  });
+
   it('enforces the owner shape', async () => {
     const user = await userFactory.create();
     createdUserIds.push(user.id);

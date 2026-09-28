@@ -40,7 +40,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   HAS_PULL_REQUEST_FILTER_VALUE,
   LINEAR_SESSION_ACTOR_PREFIX,
-  type SessionStatus,
+  type SessionManualStatus,
   type BackgroundAutomationKey,
 } from '@roomote/types';
 import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
@@ -1388,7 +1388,7 @@ export async function updateSessionMetadata(
   changes: {
     title?: string;
     archivedAt?: Date | null;
-    manualStatus?: SessionStatus | null;
+    manualStatus?: SessionManualStatus | null;
   },
 ) {
   const updatedAt = new Date();
@@ -1400,7 +1400,9 @@ export async function updateSessionMetadata(
         ...(changes.manualStatus === undefined
           ? {}
           : {
-              cachedStatus: changes.manualStatus,
+              ...(changes.manualStatus === 'done'
+                ? {}
+                : { cachedStatus: changes.manualStatus }),
               manualStatusSetAt:
                 changes.manualStatus === null ? null : updatedAt,
             }),

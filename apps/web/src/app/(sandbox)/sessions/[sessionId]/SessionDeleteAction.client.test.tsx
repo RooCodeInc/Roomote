@@ -261,13 +261,16 @@ describe('SessionActions', () => {
       Array.from(submenu.querySelectorAll('button')).map((button) =>
         button.textContent?.trim(),
       ),
-    ).toEqual(['active', 'needs input', 'blocked', 'ready']);
+    ).toEqual(['needs input', 'blocked', 'ready', 'done']);
+    expect(
+      screen.queryByRole('button', { name: 'active' }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'blocked' })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'active' }));
+    fireEvent.click(screen.getByRole('button', { name: 'done' }));
     expect(mocks.setStatus).toHaveBeenCalledWith({
       sessionId: 'session-1',
-      status: 'active',
+      status: 'done',
     });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ['sessions', 'byId', { sessionId: 'session-1' }],

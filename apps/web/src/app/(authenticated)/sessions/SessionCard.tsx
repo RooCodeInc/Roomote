@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { format, formatDistanceToNow, isSameDay, isSameYear } from 'date-fns';
+import type { SessionManualStatus } from '@roomote/types';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import {
@@ -35,6 +36,7 @@ type SessionCardData = {
   sourceSurface: string;
   activityAt: number;
   cachedStatus: 'active' | 'needs_input' | 'blocked' | 'ready' | null;
+  manualStatus?: SessionManualStatus | null;
   executionCount: number;
   inferenceCostMicroUsd: number;
   directInferenceCostMicroUsd: number;
@@ -225,7 +227,7 @@ export function SessionCard({
           <SessionActions
             sessionId={session.id}
             listRow
-            status={session.cachedStatus}
+            status={session.manualStatus ?? session.cachedStatus}
             sessionStatusExperimentEnabled={sessionStatusExperimentEnabled}
           />
         </div>

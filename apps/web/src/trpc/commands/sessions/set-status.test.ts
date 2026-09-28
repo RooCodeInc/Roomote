@@ -17,7 +17,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => ({
   getDeploymentExperiments: getDeploymentExperimentsMock,
 }));
 
-import { setSessionStatusCommand } from './index';
+import { sessionStatusInputSchema, setSessionStatusCommand } from './index';
 
 describe('setSessionStatusCommand', () => {
   beforeEach(() => {
@@ -49,30 +49,30 @@ describe('setSessionStatusCommand', () => {
     return { auth, owner, session };
   }
 
-  it('persists canonical statuses for a session manager and denies strangers', async () => {
+  it('persists manual done without changing the lifecycle cache and denies strangers', async () => {
     const { auth, owner, session } = await fixture();
     const stranger = await userFactory.create();
 
     await expect(
-      setSessionStatusCommand(auth, session.id, 'blocked'),
+      setSessionStatusCommand(auth, session.id, 'done'),
     ).resolves.toMatchObject({
       id: session.id,
-      cachedStatus: 'blocked',
-      manualStatus: 'blocked',
+      cachedStatus: 'ready',
+      manualStatus: 'done',
     });
     await touchSessionActivity(db, session.id, 100);
     await expect(
       db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
     ).resolves.toMatchObject({
-      cachedStatus: 'blocked',
-      manualStatus: 'blocked',
+      cachedStatus: 'ready',
+      manualStatus: 'done',
     });
 
     await expect(
       setSessionStatusCommand(
         { userId: stranger.id, isAdmin: false } as UserAuthSuccess,
         session.id,
-        'active',
+        'done',
       ),
     ).resolves.toBeNull();
     expect(owner.id).not.toBe(stranger.id);
@@ -86,10 +86,27 @@ describe('setSessionStatusCommand', () => {
     });
 
     await expect(
-      setSessionStatusCommand(auth, session.id, 'active'),
+      setSessionStatusCommand(auth, session.id, 'done'),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(
       db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
     ).resolves.toMatchObject({ cachedStatus: 'ready' });
+  });
+
+  it('validates the manual status vocabulary and excludes active', async () => {
+    const { session } = await fixture();
+
+    expect(
+      sessionStatusInputSchema.safeParse({
+        sessionId: session.id,
+        status: 'active',
+      }).success,
+    ).toBe(false);
+    expect(
+      sessionStatusInputSchema.safeParse({
+        sessionId: session.id,
+        status: 'done',
+      }).success,
+    ).toBe(true);
   });
 });

@@ -194,6 +194,32 @@ describe('session helpers', () => {
     );
   });
 
+  it('preserves a manual done override during lifecycle reconciliation', async () => {
+    const session = await sessionFactory.create({
+      activityAt: 100,
+      cachedStatus: 'active',
+      manualStatus: 'done',
+    });
+    createdSessionIds.push(session.id);
+    const task = await taskFactory.create({ state: 'completed' });
+    createdTaskIds.push(task.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+
+    const updated = await touchSessionActivity(db, session.id, 200);
+
+    expect(updated).toEqual(
+      expect.objectContaining({
+        activityAt: 200,
+        cachedStatus: 'active',
+        manualStatus: 'done',
+      }),
+    );
+  });
+
   it('excludes soft-deleted tasks when recomputing cached status', async () => {
     const session = await sessionFactory.create({
       activityAt: 100,

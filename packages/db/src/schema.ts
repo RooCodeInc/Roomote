@@ -89,6 +89,7 @@ import type {
   FastAgentParent,
   FastAgentSurface,
   ReasoningEffort,
+  SessionManualStatus,
   SessionStatus,
   SessionPrivacy,
   SessionWakeupReportPolicy,
@@ -4420,7 +4421,7 @@ export const automationsRelations = relations(automations, ({ many }) => ({
 
 export type SessionOwnerKind = 'user' | 'automation' | 'system';
 export type SessionSourceSurface = TaskSurface | FastAgentSurface;
-export type { SessionPrivacy, SessionStatus };
+export type { SessionManualStatus, SessionPrivacy, SessionStatus };
 export type SessionTaskOrigin =
   | 'direct_launch'
   | 'fast_delegation'
@@ -4486,8 +4487,9 @@ export const sessions = pgTable(
     activityAt: bigint('activity_at', { mode: 'number' }).notNull(),
     cachedStatus: text('cached_status').$type<SessionStatus>(),
     // Optional user-selected status. When present, runtime reconciliation
-    // preserves it while cached_status remains the effective Session status.
-    manualStatus: text('manual_status').$type<SessionStatus>(),
+    // preserves it while cached_status remains the deterministic lifecycle
+    // status. 'done' is intentionally valid here but not in cached_status.
+    manualStatus: text('manual_status').$type<SessionManualStatus>(),
     manualStatusSetAt: timestamp('manual_status_set_at'),
     inactivityDueAt: timestamp('inactivity_due_at'),
     // Fast-conversation responding lease: while this is in the future, status
@@ -4550,7 +4552,7 @@ export const sessions = pgTable(
     ),
     check(
       'sessions_manual_status_check',
-      sql`${table.manualStatus} IS NULL OR ${table.manualStatus} in ('active', 'needs_input', 'blocked', 'ready')`,
+      sql`${table.manualStatus} IS NULL OR ${table.manualStatus} in ('needs_input', 'blocked', 'ready', 'done')`,
     ),
   ],
 );
