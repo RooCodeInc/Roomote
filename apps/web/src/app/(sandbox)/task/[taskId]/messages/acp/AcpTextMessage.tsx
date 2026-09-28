@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType } from 'react';
+import { useState, type ComponentType } from 'react';
 import Link from 'next/link';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -34,7 +34,6 @@ import {
   MessagePlainText,
   MessageCopyButton,
   MessageNewTaskButton,
-  MessageResponse,
   MessageTimestamp,
 } from '@/components/ai-elements';
 
@@ -48,10 +47,7 @@ import { AcpDataVisualizations } from './AcpDataVisualizations';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 import { SlackMessageText } from '@/components/ai-elements/slack-message-text';
-import {
-  renderSlackMessageMarkdown,
-  useSlackMessageReferences,
-} from '@/components/ai-elements/slack-message-references';
+import { SlackMessageResponse } from '@/components/ai-elements/slack-message-response';
 import { useOpenSessionArtifactViewer } from '@/app/(sandbox)/sessions/[sessionId]/session-task-panel-context';
 import { useArtifactLink } from '../../hooks/ArtifactLinkProvider';
 
@@ -137,16 +133,6 @@ function getReactionReceiptContent(msg: AcpUiMessage): string | null {
   if (typeof reaction !== 'string') return null;
 
   return formatReactionEmojiForDisplay(reaction) || null;
-}
-
-function SlackMarkdownMessage({ text }: { text: string }) {
-  const { references } = useSlackMessageReferences(text);
-  const markdown = useMemo(
-    () => renderSlackMessageMarkdown(text, references),
-    [references, text],
-  );
-
-  return <MessageResponse>{markdown}</MessageResponse>;
 }
 
 function formatLinkedReviewResultTitle(
@@ -442,7 +428,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
               </MessagePlainText>
             </CollapsibleContent>
           ) : (
-            <SlackMarkdownMessage text={content} />
+            <SlackMessageResponse text={content} />
           )}
           {!isUser && msg.charts?.length ? (
             <AcpDataVisualizations charts={msg.charts} />
