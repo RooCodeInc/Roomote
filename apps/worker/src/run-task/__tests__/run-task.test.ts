@@ -1,3 +1,7 @@
+vi.mock('../jevgrep', () => ({
+  setupJevgrep: vi.fn().mockResolvedValue(false),
+}));
+
 import { EventEmitter } from 'node:events';
 
 const {
@@ -4526,7 +4530,7 @@ describe('runTask', () => {
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
-        excludeSkillNames: ['doctor', 'zero'],
+        excludeSkillNames: ['doctor', 'zero', 'jevgrep'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(

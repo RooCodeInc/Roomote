@@ -1,3 +1,8 @@
+vi.mock('../jevgrep', () => ({
+  setupJevgrep: vi.fn().mockResolvedValue(false),
+}));
+
+import { setupJevgrep } from '../jevgrep';
 import { EventEmitter } from 'node:events';
 
 const {
@@ -278,7 +283,7 @@ describe('Zero integration runtime gating', () => {
     expect(installZeroCliMock).not.toHaveBeenCalled();
     expect(activateSkillsFolderMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        excludeSkillNames: ['doctor', 'zero'],
+        excludeSkillNames: ['doctor', 'zero', 'jevgrep'],
       }),
     );
   });
@@ -302,8 +307,28 @@ describe('Zero integration runtime gating', () => {
     expect(installZeroCliMock).toHaveBeenCalledTimes(1);
     expect(activateSkillsFolderMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        excludeSkillNames: ['doctor'],
+        excludeSkillNames: ['doctor', 'jevgrep'],
       }),
     );
   });
+});
+
+it('activates Jevgrep only after runtime setup succeeds', async () => {
+  vi.mocked(setupJevgrep).mockResolvedValueOnce(true);
+  await runTask({
+    ...baseRunTaskArgs(),
+    taskRun: {
+      id: 301,
+      taskId: 'task-jevgrep',
+      payloadKind: TaskPayloadKind.StandardTask,
+      harness: 'opencode-server',
+      payload: {},
+      result: null,
+    } as never,
+  });
+  expect(activateSkillsFolderMock).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      excludeSkillNames: expect.not.arrayContaining(['jevgrep']),
+    }),
+  );
 });

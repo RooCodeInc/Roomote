@@ -1,6 +1,12 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { db, eq, slackInstallations } from '@roomote/db/server';
+import { resolveJudgmentBackend } from '@roomote/cloud-agents/server/typesafe-judgment';
+import {
+  db,
+  eq,
+  isDeploymentExperimentEnabled,
+  slackInstallations,
+} from '@roomote/db/server';
 
 import {
   RunStatus,
@@ -1013,6 +1019,14 @@ export const taskRunsRouter = router({
     z.object({ runId: z.number() }),
     'runId',
   ).query(({ ctx, input }) => getResolvedRuntimeEnvVars(ctx.auth, input)),
+
+  isJevgrepEnabled: runScoped(z.object({ runId: z.number() }), 'runId').query(
+    async () => {
+      if (!(await isDeploymentExperimentEnabled('jevgrep'))) return false;
+      const backend = await resolveJudgmentBackend();
+      return Boolean(backend && backend.provider !== 'roomote');
+    },
+  ),
 
   refreshGitHubTokenWithMetadata: runScoped(
     z.object({ runId: z.number() }),

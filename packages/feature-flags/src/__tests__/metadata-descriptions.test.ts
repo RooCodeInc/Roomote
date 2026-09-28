@@ -62,6 +62,7 @@ describe('metadata descriptions', () => {
         integration_keys_enabled: 'true',
       }),
     ).toEqual({
+      jevgrep: false,
       privateSessions: true,
       browserNotifications: false,
       integrationToolAutoApprovals: false,

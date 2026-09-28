@@ -1,3 +1,15 @@
+const jevgrepMocks = vi.hoisted(() => ({
+  experiment: vi.fn(),
+  backend: vi.fn(),
+}));
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  resolveJudgmentBackend: jevgrepMocks.backend,
+}));
+vi.mock('@roomote/db/server', async (original) => ({
+  ...(await original<typeof import('@roomote/db/server')>()),
+  isDeploymentExperimentEnabled: jevgrepMocks.experiment,
+}));
+
 import { z } from 'zod';
 
 import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
@@ -205,6 +217,38 @@ describe('taskRunsRouter queue message guards', () => {
     mockClaimShowWidgetFallbackDelivery.mockResolvedValue({ claimed: true });
     mockReleaseShowWidgetFallbackDelivery.mockResolvedValue(undefined);
     mockUpdateTaskRun.mockResolvedValue(undefined);
+  });
+
+  it.each(['typesafe', 'openrouter', 'vercel'])(
+    'enables Jevgrep for configured %s with explicit opt-in',
+    async (provider) => {
+      jevgrepMocks.experiment.mockResolvedValue(true);
+      jevgrepMocks.backend.mockResolvedValue({
+        provider,
+        apiKey: 'server-only-key',
+      });
+      expect(await createRunCaller().isJevgrepEnabled({ runId: 42 })).toBe(
+        true,
+      );
+      expect(jevgrepMocks.experiment).toHaveBeenCalledWith('jevgrep');
+    },
+  );
+
+  it.each([undefined, { provider: 'roomote', apiKey: 'server-only-key' }])(
+    'does not enable Jevgrep without a Jev backend',
+    async (backend) => {
+      jevgrepMocks.experiment.mockResolvedValue(true);
+      jevgrepMocks.backend.mockResolvedValue(backend);
+      expect(await createRunCaller().isJevgrepEnabled({ runId: 42 })).toBe(
+        false,
+      );
+    },
+  );
+
+  it('does not resolve provider credentials when the experiment is off', async () => {
+    jevgrepMocks.experiment.mockResolvedValue(false);
+    expect(await createRunCaller().isJevgrepEnabled({ runId: 42 })).toBe(false);
+    expect(jevgrepMocks.backend).not.toHaveBeenCalled();
   });
 
   it('strips actingUserId from run-token update input (confused-deputy guard)', async () => {

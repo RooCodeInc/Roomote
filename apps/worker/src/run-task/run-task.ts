@@ -84,6 +84,7 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { installZeroCli } from '../commands/setup/agent-clis';
+import { setupJevgrep } from './jevgrep';
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
@@ -947,6 +948,14 @@ export const runTask = async ({
 
     const homeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
+    const jevgrepEnabled = await setupJevgrep({
+      runId: taskRun.id,
+      homeDir,
+      trpcUrl: workerEnv.trpcUrl,
+      runtimeEnv,
+      logger,
+    });
+
     // Admin opt-in for Zero: only install the CLI / activate the skill when
     // the Integrations page has Zero enabled for the deployment.
     let zeroIntegrationEnabled = false;
@@ -988,6 +997,7 @@ export const runTask = async ({
       excludeSkillNames: [
         ...FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
         ...(zeroIntegrationEnabled ? [] : ['zero']),
+        ...(jevgrepEnabled ? [] : ['jevgrep']),
       ],
     });
 
