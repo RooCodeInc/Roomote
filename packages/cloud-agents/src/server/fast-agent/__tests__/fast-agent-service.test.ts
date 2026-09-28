@@ -11491,7 +11491,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     },
   ])(
-    'restores the deferred $surface root when its queued custom automation gate is disabled',
+    'keeps the $surface root deferred when its queued custom automation gate is disabled',
     async (conversation) => {
       const evaluateAutomationLaunchCriteria = vi.fn(async () => ({
         decision: 'continue' as const,
@@ -11523,12 +11523,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         adapter,
         turnSource: 'platform_event',
         platformEventKind: 'automation',
-        platformEventVisibility: 'required',
+        platformEventVisibility: 'optional',
         automationLaunchCriteriaRequired: true,
       });
 
       expect(evaluateAutomationLaunchCriteria).not.toHaveBeenCalled();
-      expect(prepareAutomationLaunch).toHaveBeenCalledOnce();
+      expect(prepareAutomationLaunch).not.toHaveBeenCalled();
       expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(Array),
@@ -13085,6 +13085,67 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).resolves.toBe('');
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
+
+  it('silently ignores an optional automation platform event', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.ignoreEvent, {
+          reason: 'No qualifying result to report.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'optional',
+        adapter,
+      }),
+    ).resolves.toBe('');
+    expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'keeps a Telegram no-op silent with launch criteria enabled=%s',
+    async (experimentEnabled) => {
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.ignoreEvent, {
+            reason: 'No qualifying result to report.',
+          });
+          return '';
+        },
+      );
+      mocks.deploymentExperimentEnabled.mockResolvedValue(experimentEnabled);
+      const prepareAutomationLaunch = vi.fn(async () => undefined);
+      const adapter = callbacks({ prepareAutomationLaunch });
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          platformEventKind: 'automation',
+          platformEventVisibility: 'optional',
+          automationLaunchRootRequired: true,
+          conversation: {
+            surface: 'telegram',
+            workspaceId: 'telegram-dm-1',
+            conversationId: 'automation-1:occurrence-1',
+            replyTarget: { channelId: 'telegram-dm-1' },
+          },
+          adapter,
+        }),
+      ).resolves.toBe('');
+      expect(adapter.postReply).not.toHaveBeenCalled();
+      expect(prepareAutomationLaunch).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects reaction side effects on non-reactable human reaction input', async () => {
     let reactionResult: unknown;

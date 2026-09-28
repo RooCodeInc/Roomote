@@ -1521,7 +1521,7 @@ describe('deliverFastAgentParentEvent', () => {
       expect.objectContaining({
         conversation: automationParent.conversation,
         platformEventKind: 'automation',
-        platformEventVisibility: 'required',
+        platformEventVisibility: 'optional',
         turnSource: 'platform_event',
       }),
     );
@@ -1884,6 +1884,142 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(mocks.updateMessage).not.toHaveBeenCalled();
     expect(mocks.bindConversation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      surface: 'discord' as const,
+      workspaceId: 'guild-1',
+      targetKind: 'discord_channel' as const,
+      replyTarget: { channelId: 'channel-1' },
+    },
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      targetKind: 'teams_channel' as const,
+      replyTarget: {
+        channelId: 'teams-channel-1',
+        serviceUrl: 'https://smba.example.com/amer/',
+      },
+    },
+    {
+      surface: 'telegram' as const,
+      workspaceId: 'telegram-dm-1',
+      targetKind: 'telegram_user' as const,
+      replyTarget: { channelId: 'telegram-dm-1' },
+    },
+  ])(
+    'materializes a deferred $surface automation root for a meaningful closeout',
+    async ({ surface, workspaceId, targetKind, replyTarget }) => {
+      const createForumTopic = vi
+        .fn()
+        .mockResolvedValue({ messageThreadId: 'telegram-topic-1' });
+      if (surface === 'telegram') {
+        mocks.createTelegramProvider.mockResolvedValue({
+          ...(await mocks.createTelegramProvider()),
+          createForumTopic,
+        });
+      }
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'A finding needs attention.',
+        });
+      });
+
+      await deliverFastAgentParentEvent({
+        parent: {
+          sessionId: parent.sessionId,
+          conversation: {
+            surface,
+            workspaceId,
+            conversationId: `${surface}-deferred-occurrence`,
+            replyTarget,
+          },
+        },
+        event: {
+          type: 'automation_triggered',
+          eventId: `${surface}-deferred-occurrence`,
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          targetKind,
+          trigger: 'schedule',
+        },
+      });
+
+      if (surface === 'discord') {
+        expect(mocks.createDiscordThread).toHaveBeenCalledWith(
+          expect.objectContaining({
+            channelId: 'channel-1',
+            initialText: 'Weekly scan is running.',
+          }),
+        );
+      } else if (surface === 'teams') {
+        expect(mocks.teamsPostMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            channelId: 'teams-channel-1',
+            text: 'Weekly scan is running.',
+          }),
+        );
+      } else {
+        expect(createForumTopic).toHaveBeenCalledWith({
+          channelId: 'telegram-dm-1',
+          name: 'Weekly scan',
+        });
+        expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            channelId: 'telegram-dm-1',
+            threadId: 'telegram-topic-1',
+          }),
+        );
+      }
+    },
+  );
+
+  it('materializes a deferred automation root before delegated work launches', async () => {
+    const postKickoff = vi.fn().mockResolvedValue(undefined);
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+      await adapter.launchTask({
+        prompt: 'Investigate the regression.',
+        environmentId: null,
+        model: null,
+        parentSessionId: parent.sessionId,
+        postKickoff,
+      });
+    });
+
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'discord-deferred-launch',
+          replyTarget: { channelId: 'channel-1' },
+        },
+      },
+      event: {
+        type: 'automation_triggered',
+        eventId: 'discord-deferred-launch',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find actionable regressions.',
+        targetKind: 'discord_channel',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.createDiscordThread).toHaveBeenNthCalledWith(1, {
+      channelId: 'channel-1',
+      name: 'Weekly scan',
+      initialText: 'Weekly scan is running.',
+    });
+    expect(mocks.enqueueTask).toHaveBeenCalledOnce();
+    expect(postKickoff).toHaveBeenCalledWith({
+      taskId: 'child-task-1',
+      taskUrl: 'https://roomote.example/task/child-task-1',
+    });
   });
 
   it('creates the delayed Slack root for a meaningful artifact closeout', async () => {
@@ -2257,6 +2393,7 @@ describe('deliverFastAgentParentEvent', () => {
         replyTarget: { channelId: 'telegram-dm-1' },
       },
     };
+    mocks.answerQuestion.mockResolvedValueOnce('');
 
     await deliverFastAgentParentEvent({
       parent: pendingParent,
