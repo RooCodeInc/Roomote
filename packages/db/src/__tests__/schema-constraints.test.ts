@@ -216,13 +216,16 @@ describe('sessions CHECK and uniqueness constraints', () => {
     });
   });
 
-  it('rejects active as a manual status', async () => {
-    await expectConstraintViolation(
-      createSession({
-        manualStatus: 'active' as never,
-      }),
-      'sessions_manual_status_check',
-    );
+  it('keeps active in the database vocabulary for N-1 rollback compatibility', async () => {
+    const session = await createSession({
+      cachedStatus: 'active',
+      manualStatus: 'active' as never,
+    });
+
+    expect(session).toMatchObject({
+      cachedStatus: 'active',
+      manualStatus: 'active',
+    });
   });
 
   it('enforces the owner shape', async () => {

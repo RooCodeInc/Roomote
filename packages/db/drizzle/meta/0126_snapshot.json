@@ -13890,7 +13890,7 @@
         },
         "sessions_manual_status_check": {
           "name": "sessions_manual_status_check",
-          "value": "\"sessions\".\"manual_status\" IS NULL OR \"sessions\".\"manual_status\" in ('needs_input', 'blocked', 'ready', 'done')"
+          "value": "\"sessions\".\"manual_status\" IS NULL OR \"sessions\".\"manual_status\" in ('active', 'needs_input', 'blocked', 'ready', 'done')"
         }
       },
       "isRLSEnabled": false
