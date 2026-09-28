@@ -1,6 +1,6 @@
 {
-  "id": "d8e9a963-db02-4dba-b304-57141fb3d75a",
-  "prevId": "6ad8e4f0-fccf-44be-9cfb-7881f718fd7a",
+  "id": "5c3016dd-832f-483a-82f8-2b356e6c67b6",
+  "prevId": "d8e9a963-db02-4dba-b304-57141fb3d75a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5394,6 +5394,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "fast_agent_messages_visible_user_order_idx": {
+          "name": "fast_agent_messages_visible_user_order_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ts",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\n        \"fast_agent_messages\".\"role\" = 'user'\n        AND (\n          \"fast_agent_messages\".\"metadata\" ->> 'visibleInTranscript' = 'true'\n          OR (\n            \"fast_agent_messages\".\"metadata\" ->> 'visibleInTranscript' IS NULL\n            AND \"fast_agent_messages\".\"event_type\" <> 'roomote_runtime.user_prompt'\n          )\n        )\n      ",
           "concurrently": false,
           "method": "btree",
           "with": {}

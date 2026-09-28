@@ -11,6 +11,7 @@ import {
   SESSION_STATUSES,
   fastConversationMemorySlug,
   isExitedRunStatus,
+  type SessionStatus,
 } from '@roomote/types';
 import {
   and,
@@ -20,6 +21,7 @@ import {
   db,
   eq,
   fastAgentConversations,
+  getDeploymentExperiments,
   getSessionGoal,
   inArray,
   markSessionGoal,
@@ -126,6 +128,25 @@ export async function stopSessionTasksCommand(
       ? {}
       : { failedCount: runs.length - stoppedCount }),
   };
+}
+
+export async function setSessionStatusCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+  status: SessionStatus,
+) {
+  const session = await findAccessibleSession(auth, sessionId);
+  if (!canManageSession(auth, session)) return null;
+
+  const experiments = await getDeploymentExperiments();
+  if (!experiments.sessionStatusJudgment) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Session status changes are not enabled.',
+    });
+  }
+
+  return updateSessionMetadata(auth, sessionId, { manualStatus: status });
 }
 
 export async function deleteSessionCommand(

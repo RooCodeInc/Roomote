@@ -90,6 +90,7 @@ export default async function SessionsPage({
             (session) =>
               getSessionBoardColumn({
                 cachedStatus: session.cachedStatus ?? null,
+                manualStatus: session.manualStatus ?? null,
                 judgmentStatus: experiments.sessionStatusJudgment
                   ? session.judgedStatus
                   : null,
@@ -158,6 +159,9 @@ export default async function SessionsPage({
                         viewerUserId={authorizedUser.userId}
                         query={q}
                         hideBlockedBadge
+                        sessionStatusExperimentEnabled={
+                          experiments.sessionStatusJudgment
+                        }
                       />
                     ))}
                   </div>
@@ -173,6 +177,9 @@ export default async function SessionsPage({
                 session={session}
                 viewerUserId={authorizedUser.userId}
                 query={q}
+                sessionStatusExperimentEnabled={
+                  experiments.sessionStatusJudgment
+                }
               />
             ))}
           </div>

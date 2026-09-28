@@ -154,7 +154,10 @@ async function refreshLockedSession(
       : lockedSession.respondingUntil;
 
   let cachedStatus = lockedSession.cachedStatus;
-  if (options.recomputeStatus !== false) {
+  if (
+    options.recomputeStatus !== false &&
+    lockedSession.manualStatus === null
+  ) {
     const linkedTasks = await tx
       .selectDistinctOn([tasks.id], {
         state: tasks.state,
