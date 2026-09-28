@@ -221,11 +221,10 @@ export function parseReviewSummaryMarkerSha(
 }
 
 export function hasMalformedReviewSummaryMarker(body: string): boolean {
-  const markerSha = body.match(
-    /<!--\s*roomote-review-summary\s+[^>]*\bsha=([^\s>]+)/i,
-  )?.[1];
+  const markerTokens = getReviewSummaryMarkerTokens(body);
+  const hasShaToken = markerTokens?.some((token) => token.startsWith('sha='));
   return (
-    markerSha !== undefined && parseReviewSummaryMarkerSha(body) === undefined
+    hasShaToken === true && parseReviewSummaryMarkerSha(body) === undefined
   );
 }
 

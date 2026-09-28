@@ -8,6 +8,7 @@ import {
   gt,
   gte,
   inArray,
+  isNull,
   lt,
   lte,
   or,
@@ -623,12 +624,28 @@ async function shouldSuppressRoomoteReviewCiFailure(
       lte(prReviewEvents.observedAt, input.observedAt),
       sql`${prReviewEvents.event}->>'kind' = 'review_summary'`,
     ),
-    columns: { event: true },
+    columns: { event: true, observedAt: true },
     orderBy: [desc(prReviewEvents.observedAt)],
     limit: 2,
   });
 
   if (summaries.length !== 1) {
+    return false;
+  }
+
+  const newerOpenCycle = await executor.query.prReviewCycles.findFirst({
+    where: and(
+      eq(prReviewCycles.sourceControlProvider, input.sourceControlProvider),
+      eq(prReviewCycles.repository, input.repository),
+      eq(prReviewCycles.prNumber, input.prNumber),
+      eq(prReviewCycles.reviewHeadSha, input.reviewHeadSha),
+      gt(prReviewCycles.startedAt, summaries[0]!.observedAt),
+      lte(prReviewCycles.startedAt, input.observedAt),
+      isNull(prReviewCycles.completedAt),
+    ),
+    columns: { id: true },
+  });
+  if (newerOpenCycle) {
     return false;
   }
 

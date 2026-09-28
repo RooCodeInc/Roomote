@@ -487,6 +487,61 @@ describe('durable PR review events', () => {
     ).resolves.toEqual([{ superseded: false }]);
   });
 
+  it('does not suppress CI for a newer open same-head review cycle', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/newer-review-cycle-${task.id}`;
+    await associate(task.id, repository, 1663);
+    await persistPrReviewEvent({
+      ...eventInput(repository, 1663, `summary-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'same-head',
+        reviewResult: { outcome: 'findings_remain', findingCount: 1 },
+      },
+      batchKind: 'roomote',
+      batchId: null,
+      reviewHeadSha: 'same-head',
+      roomoteAuthored: true,
+      isSummary: true,
+      observedAt: new Date('2026-08-25T18:26:03Z'),
+    });
+    await recordPrReviewCycleState({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber: 1663,
+      reviewHeadSha: 'same-head',
+      cycleId: 'newer-cycle',
+      phase: 'open',
+      observedAt: new Date('2026-08-25T18:27:03Z'),
+    });
+
+    const result = await persistPrReviewEvent({
+      ...eventInput(repository, 1663, `check-run-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'ci_failure',
+        authorLogin: 'roomote-community',
+        checkName: 'Roomote code review',
+        reviewHeadSha: 'same-head',
+      },
+      batchKind: 'human',
+      batchId: null,
+      reviewHeadSha: 'same-head',
+      observedAt: new Date('2026-08-25T18:28:03Z'),
+    });
+
+    expect(result.projectedTaskCount).toBe(1);
+    await expect(
+      db
+        .select({ superseded: prReviewEvents.superseded })
+        .from(prReviewEvents)
+        .where(eq(prReviewEvents.eventKey, `check-run-${task.id}`)),
+    ).resolves.toEqual([{ superseded: false }]);
+  });
+
   it('keeps human feedback separate when coalescing a CI failure', async () => {
     const task = await taskFactory.create();
     const repository = `owner/cross-trigger-human-${task.id}`;
