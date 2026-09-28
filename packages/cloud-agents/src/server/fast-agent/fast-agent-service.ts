@@ -2099,6 +2099,8 @@ export async function answerFastAgentQuestion({
     userId,
   });
   const platformEvent = turnSource === 'platform_event';
+  const automationReply =
+    platformEvent && (platformEventKind === 'automation' || automationReport);
   const automationLaunchCriteriaExperimentEnabled =
     await isDeploymentExperimentEnabled('automationLaunchCriteria').catch(
       (error: unknown) => {
@@ -2661,7 +2663,9 @@ export async function answerFastAgentQuestion({
       ? promptText
       : promptText.startsWith(delivered)
         ? promptText.slice(delivered.length)
-        : replyTextTracker.unconsumedText();
+        : automationReply
+          ? promptText
+          : replyTextTracker.unconsumedText();
     replyTextTracker.consumeUnconsumed();
     return remainder;
   };
@@ -4945,6 +4949,13 @@ export async function answerFastAgentQuestion({
               };
             }
             const args = chatReplyArgsSchema.parse(call.args);
+            if (automationReply && args.message === undefined) {
+              return {
+                success: false,
+                error:
+                  'Automation replies require an explicit message containing only the finished announcement, result, or clarification. Call send_chat_reply again with message; omit progress narration and tool activity.',
+              };
+            }
             if (args.message === undefined) await waitForSettledReplyText();
             const message = (
               args.message ?? replyTextTracker.unconsumedText()

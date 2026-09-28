@@ -14751,6 +14751,97 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     });
 
+    it.each([false, true])(
+      'requires an explicit automation report after narration (delegated=%s)',
+      async (automationReport) => {
+        const postReply = vi.fn().mockResolvedValue(undefined);
+        const announcement = 'Weekly duties: Alex on logs, Sam on releases.';
+        mocks.generateText.mockImplementation(
+          async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-1');
+            for (const [index, text] of [
+              "I'll check the previous assignments.",
+              'The history request timed out. I will retry.',
+              announcement,
+            ].entries()) {
+              options.onAssistantTextUpdated?.({
+                messageId: `message-${index}`,
+                partId: `part-${index}`,
+                text,
+                completed: true,
+              });
+            }
+            expect(
+              await invokeTool(nativeToolNames.sendChatReply, {
+                purpose: 'closeout',
+              }),
+            ).toMatchObject({
+              success: false,
+              error: expect.stringContaining('explicit message'),
+            });
+            expect(postReply).not.toHaveBeenCalled();
+            await invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'closeout',
+              message: announcement,
+            });
+            return announcement;
+          },
+        );
+        await answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          platformEventKind: automationReport ? 'delegated_task' : 'automation',
+          automationReport,
+          adapter: callbacks({ postReply }),
+        });
+        expect(postReply).toHaveBeenCalledExactlyOnceWith({
+          purpose: 'closeout',
+          message: announcement,
+        });
+        expect(persistedAssistantRows().at(-1)?.contentBlocks).toEqual([
+          { type: 'text', text: announcement },
+        ]);
+      },
+    );
+
+    it('uses only the final automation message for automatic closeout', async () => {
+      const postReply = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'earlier',
+            partId: 'earlier-text',
+            text: 'I will check the history.',
+            completed: true,
+          });
+          options.onAssistantTextUpdated?.({
+            messageId: 'final',
+            partId: 'final-text',
+            text: 'The weekly announcement.',
+            completed: true,
+          });
+          await options.onMessageCompleted?.({
+            id: 'final',
+            sessionId: 'opencode-session-1',
+            createdAtMs: 100,
+            completedAtMs: 200,
+          });
+          return 'The weekly announcement.';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        adapter: callbacks({ postReply }),
+      });
+      expect(postReply).toHaveBeenCalledExactlyOnceWith({
+        purpose: 'closeout',
+        message: 'The weekly announcement.',
+      });
+    });
+
     it('rejects a reply call with nothing written and no message', async () => {
       let result: unknown;
       mocks.generateText.mockImplementation(
