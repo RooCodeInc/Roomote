@@ -876,6 +876,13 @@
       "when": 1790595640979,
       "tag": "0124_modern_hercules",
       "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1790596831236,
+      "tag": "0125_boring_nico_minoru",
+      "breakpoints": true
     }
   ]
 }
