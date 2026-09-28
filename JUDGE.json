@@ -10,7 +10,8 @@
       "files": [
         "apps/worker/src/env/**/*.ts",
         "apps/worker/src/run-task/**/*.ts",
-        "apps/worker/src/sandbox-server/**/*.ts"
+        "apps/worker/src/sandbox-server/**/*.ts",
+        "apps/worker/src/command-executor/**/*.ts"
       ],
       "threshold": 0.95
     },
