@@ -442,6 +442,51 @@ describe('durable PR review events', () => {
     });
   });
 
+  it('keeps a clean review outcome independent from a same-head CI failure', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/clean-review-ci-${task.id}`;
+    await associate(task.id, repository, 1662);
+    await persistPrReviewEvent({
+      ...eventInput(repository, 1662, `summary-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'reviewed-head',
+        reviewResult: { outcome: 'clean', findingCount: 0 },
+      },
+      batchKind: 'roomote',
+      batchId: null,
+      reviewHeadSha: 'reviewed-head',
+      roomoteAuthored: true,
+      isSummary: true,
+      observedAt: new Date('2026-08-25T18:26:03Z'),
+    });
+    const result = await persistPrReviewEvent({
+      ...eventInput(repository, 1662, `check-run-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'ci_failure',
+        authorLogin: 'roomote-community',
+        checkName: 'Roomote code review',
+        reviewHeadSha: 'reviewed-head',
+      },
+      batchKind: 'human',
+      batchId: null,
+      reviewHeadSha: 'reviewed-head',
+      observedAt: new Date('2026-08-25T18:29:28Z'),
+    });
+
+    expect(result.projectedTaskCount).toBe(1);
+    await expect(
+      db
+        .select({ superseded: prReviewEvents.superseded })
+        .from(prReviewEvents)
+        .where(eq(prReviewEvents.eventKey, `check-run-${task.id}`)),
+    ).resolves.toEqual([{ superseded: false }]);
+  });
+
   it('keeps human feedback separate when coalescing a CI failure', async () => {
     const task = await taskFactory.create();
     const repository = `owner/cross-trigger-human-${task.id}`;

@@ -49,6 +49,7 @@ function eventInput(input: {
   headSha?: string;
   roomoteAuthored?: boolean;
   isSummary?: boolean;
+  eventFields?: Record<string, unknown>;
   dueAt?: Date;
   observedAt?: Date;
 }) {
@@ -66,6 +67,7 @@ function eventInput(input: {
       providerEventId: input.eventKey,
       ...(input.headSha ? { reviewHeadSha: input.headSha } : {}),
       ...(input.roomoteAuthored ? { roomoteAuthored: true } : {}),
+      ...(input.eventFields ?? {}),
     },
     batchKind: input.roomoteAuthored
       ? ('roomote' as const)
@@ -298,6 +300,141 @@ describe('canonical PR review notification ownership', () => {
           .where(eq(prReviewNotificationUnits.repository, repository)),
       ).resolves.toHaveLength(expectedUnits);
     }
+  });
+
+  it('coalesces a batchless summary and suppresses its claimed same-head CI fallback', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/batchless-summary-${task.id}`;
+    const headSha = 'same-head';
+    await associate(task.id, repository, 17);
+
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 17,
+        eventKey: 'review-comment',
+        kind: 'review_comment',
+        batchId: 'github-review:5343826546',
+        headSha,
+        roomoteAuthored: true,
+        observedAt: new Date('2026-08-26T05:00:25.000Z'),
+      }),
+    );
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 17,
+        eventKey: 'terminal-summary',
+        kind: 'review_summary',
+        headSha,
+        roomoteAuthored: true,
+        isSummary: true,
+        observedAt: new Date('2026-08-26T05:00:49.000Z'),
+        eventFields: {
+          reviewTaskId: '3sy73y2rdp7a3',
+          summary: '1 issue outstanding.',
+          reviewResult: {
+            outcome: 'findings_remain',
+            findingCount: 1,
+          },
+        },
+      }),
+    );
+
+    const [claim] = await claimForRepository(repository);
+    expect(claim).toMatchObject({ ownershipVersion: 'canonical' });
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical summary claim');
+    }
+
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+      values: { followUpPrompt: 'Resolve the outstanding review issue.' },
+    });
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'prepared',
+      status: 'awaiting_user_action',
+      values: {
+        routeProvider: 'slack',
+        routeWorkspaceId: 'T123',
+        routeChannelId: 'C123',
+        routeThreadId: 'thread-1',
+      },
+    });
+    await expect(
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'yes',
+      }),
+    ).resolves.toBeTruthy();
+
+    const ciResult = await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 17,
+        eventKey: 'ci-fallback',
+        kind: 'ci_failure',
+        headSha,
+        observedAt: new Date('2026-08-26T05:00:51.000Z'),
+        eventFields: {
+          checkName: 'Roomote code review',
+        },
+      }),
+    );
+
+    expect(ciResult).toMatchObject({
+      projectedTaskCount: 0,
+      reason: 'review_feedback_already_notified',
+    });
+    await expect(
+      db
+        .select({ superseded: prReviewEvents.superseded })
+        .from(prReviewEvents)
+        .where(eq(prReviewEvents.eventKey, 'ci-fallback')),
+    ).resolves.toEqual([{ superseded: true }]);
+    await expect(
+      db
+        .select({ id: prReviewNotificationUnits.id })
+        .from(prReviewNotificationUnits)
+        .where(eq(prReviewNotificationUnits.repository, repository)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      db
+        .select({ id: prReviewNotificationDeliveries.id })
+        .from(prReviewNotificationDeliveries)
+        .where(
+          eq(
+            prReviewNotificationDeliveries.notificationUnitId,
+            claim.notificationUnitId,
+          ),
+        ),
+    ).resolves.toHaveLength(1);
+
+    const nextCommitResult = await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 17,
+        eventKey: 'next-commit-ci-fallback',
+        kind: 'ci_failure',
+        headSha: 'next-head',
+        observedAt: new Date('2026-08-26T05:01:10.000Z'),
+        eventFields: {
+          checkName: 'Roomote code review',
+        },
+      }),
+    );
+    expect(nextCommitResult.projectedTaskCount).toBe(1);
+    await expect(
+      db
+        .select({ id: prReviewNotificationUnits.id })
+        .from(prReviewNotificationUnits)
+        .where(eq(prReviewNotificationUnits.repository, repository)),
+    ).resolves.toHaveLength(2);
   });
 
   it('keeps the same episode id separate across head SHAs', async () => {

@@ -38,6 +38,7 @@ import {
 const CLAIM_LIMIT = 100;
 const DELIVERY_LEASE_MS = 10 * 60 * 1000;
 const EVENT_ASSOCIATION_WINDOW_MS = 24 * 60 * 60 * 1000;
+const ROOMOTE_REVIEW_CI_SUPPRESSION_WINDOW_MS = 15 * 60 * 1000;
 
 export type DurablePrReviewEvent = {
   eventKey: string;
@@ -340,7 +341,10 @@ export async function persistPrReviewEventInTransaction(
 ): Promise<{
   projectedTaskCount: number;
   event: Record<string, unknown>;
-  reason?: 'review_cycle_completed' | 'stale_review_cycle';
+  reason?:
+    | 'review_cycle_completed'
+    | 'stale_review_cycle'
+    | 'review_feedback_already_notified';
 }> {
   await lockPrReviewReference(
     executor,
@@ -370,7 +374,7 @@ export async function persistPrReviewEventInTransaction(
       });
     }
   }
-  const superseded = Boolean(
+  const supersededByCompletedCycle = Boolean(
     input.roomoteAuthored &&
     !input.isSummary &&
     cycle?.completedAt &&
@@ -381,6 +385,10 @@ export async function persistPrReviewEventInTransaction(
     cycle?.completedAt &&
     cycle.completedAt > input.observedAt,
   );
+  const reviewFeedbackAlreadyNotified =
+    await shouldSuppressRoomoteReviewCiFailure(executor, input);
+  const superseded =
+    supersededByCompletedCycle || reviewFeedbackAlreadyNotified;
   const automatedBatchId =
     input.automatedAuthorId && input.batchId
       ? await resolveAutomatedBatchId(executor, {
@@ -461,7 +469,12 @@ export async function persistPrReviewEventInTransaction(
     return {
       projectedTaskCount: 0,
       event: eventPayload,
-      ...(superseded ? { reason: 'review_cycle_completed' as const } : {}),
+      ...(supersededByCompletedCycle
+        ? { reason: 'review_cycle_completed' as const }
+        : {}),
+      ...(reviewFeedbackAlreadyNotified
+        ? { reason: 'review_feedback_already_notified' as const }
+        : {}),
       ...(staleSummary ? { reason: 'stale_review_cycle' as const } : {}),
     };
   }
@@ -493,7 +506,12 @@ export async function persistPrReviewEventInTransaction(
 
   const assigned = await assignPrReviewNotificationUnit(
     executor,
-    { ...input, batchId, event: eventPayload },
+    {
+      ...input,
+      batchId,
+      event: eventPayload,
+      summaryWithoutBatchId: input.isSummary === true && !input.batchId,
+    },
     stored.id,
   );
   return {
@@ -566,6 +584,52 @@ export async function recordPrReviewCycleState(input: {
         set: { completedAt: input.observedAt },
       });
   });
+}
+
+async function shouldSuppressRoomoteReviewCiFailure(
+  executor: DatabaseOrTransaction,
+  input: DurablePrReviewEvent,
+): Promise<boolean> {
+  if (
+    input.event.kind !== 'ci_failure' ||
+    input.event.checkName !== 'Roomote code review' ||
+    !input.reviewHeadSha
+  ) {
+    return false;
+  }
+
+  const summaries = await executor.query.prReviewEvents.findMany({
+    where: and(
+      eq(prReviewEvents.sourceControlProvider, input.sourceControlProvider),
+      eq(prReviewEvents.repository, input.repository),
+      eq(prReviewEvents.prNumber, input.prNumber),
+      eq(prReviewEvents.batchKind, 'roomote'),
+      eq(prReviewEvents.reviewHeadSha, input.reviewHeadSha),
+      eq(prReviewEvents.superseded, false),
+      gt(
+        prReviewEvents.observedAt,
+        new Date(
+          input.observedAt.getTime() - ROOMOTE_REVIEW_CI_SUPPRESSION_WINDOW_MS,
+        ),
+      ),
+      lte(prReviewEvents.observedAt, input.observedAt),
+      sql`${prReviewEvents.event}->>'kind' = 'review_summary'`,
+    ),
+    columns: { event: true },
+    orderBy: [desc(prReviewEvents.observedAt)],
+    limit: 2,
+  });
+
+  if (summaries.length !== 1) {
+    return false;
+  }
+
+  const reviewResult = summaries[0]?.event.reviewResult;
+  return (
+    typeof reviewResult === 'object' &&
+    reviewResult !== null &&
+    (reviewResult as { outcome?: unknown }).outcome === 'findings_remain'
+  );
 }
 
 export async function projectPendingPrReviewEventsForAssociation(

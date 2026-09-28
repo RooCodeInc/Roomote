@@ -118,6 +118,8 @@ type UnitInput = {
   reviewHeadSha?: string | null;
   roomoteAuthored?: boolean;
   isSummary?: boolean;
+  /** True when a terminal summary arrived without a provider batch id. */
+  summaryWithoutBatchId?: boolean;
 };
 
 type PrLinkIdentity = {
@@ -513,6 +515,33 @@ export async function assignPrReviewNotificationUnit(
       repositoryKey,
     );
     targetUnit = candidates.length === 1 ? candidates[0] : null;
+  }
+
+  if (
+    !targetUnit &&
+    input.isSummary &&
+    input.summaryWithoutBatchId &&
+    input.reviewHeadSha
+  ) {
+    // A terminal issue-comment summary can lack the review webhook's batch id.
+    // If exactly one provisional Roomote unit is open for this head, it is the
+    // same review episode; attach the summary before its CI fallback can post.
+    const candidates = await matchingOpenRoomoteUnits(
+      executor,
+      input,
+      repositoryKey,
+    );
+    targetUnit = candidates.length === 1 ? candidates[0] : null;
+    if (targetUnit) {
+      await executor
+        .update(prReviewNotificationUnits)
+        .set({
+          dueAt: sql`least(${prReviewNotificationUnits.dueAt}, ${input.dueAt.toISOString()}::timestamp)`,
+          lastObservedAt: sql`greatest(${prReviewNotificationUnits.lastObservedAt}, ${input.observedAt.toISOString()}::timestamp)`,
+          updatedAt: new Date(),
+        })
+        .where(eq(prReviewNotificationUnits.id, targetUnit.id));
+    }
   }
 
   if (!targetUnit) {
