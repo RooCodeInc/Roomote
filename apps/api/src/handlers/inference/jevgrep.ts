@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { isDeploymentExperimentEnabled } from '@roomote/db/server';
 import { evaluateTypeSafeJudgments } from '@roomote/cloud-agents/server/typesafe-judgment';
 
-// Jevgrep 0.4.1 asks boolean relevance questions using TypeSafe's native wire
+// Jevgrep 0.4.3 asks boolean relevance questions using TypeSafe's native wire
 // format. The server selects the configured Jev backend and model; callers
 // cannot select an upstream, supply credentials, or enable the Roomote model.
 const requestSchema = z.object({

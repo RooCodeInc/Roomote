@@ -48,7 +48,7 @@ beforeEach(() => {
     fs.mkdirSync(path.join(root, 'dist/bin'), { recursive: true });
     fs.writeFileSync(
       path.join(root, 'package.json'),
-      JSON.stringify({ version: '0.4.1', type: 'module' }),
+      JSON.stringify({ version: '0.4.3', type: 'module' }),
     );
     fs.writeFileSync(
       path.join(root, 'dist/bin/index.js'),
@@ -69,7 +69,7 @@ afterEach(() => fs.rmSync(homeDir, { recursive: true, force: true }));
 it('installs and routes the CLI through the gateway with run auth and auth bypass', async () => {
   expect(await setup()).toBe(true);
   expect(mocks.enabled).toHaveBeenCalledWith({ runId: 42 });
-  expect(mocks.install.mock.calls[0]?.[1]).toContain('@dzhng/jevgrep@0.4.1');
+  expect(mocks.install.mock.calls[0]?.[1]).toContain('@dzhng/jevgrep@0.4.3');
   const root = path.join(homeDir, '.roomote/jevgrep');
   const credentials = fs.readFileSync(
     path.join(root, 'config/jevgrep/credentials.json'),
