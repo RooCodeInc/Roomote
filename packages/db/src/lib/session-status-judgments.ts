@@ -7,7 +7,6 @@ import {
 
 import type { DatabaseOrTransaction } from '../db';
 import {
-  fastAgentMessages,
   sessionStatusJudgments,
   sessions,
   type SessionStatusJudgmentSourceKind,
