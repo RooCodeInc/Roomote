@@ -63,6 +63,8 @@ export function SettingsShell({
       title={titleOverride ?? navigationItem?.title ?? ''}
       description={descriptionOverride ?? navigationItem?.description}
       mobileLabel="Settings page"
+      desktopNavigationBreakpoint="md"
+      desktopContentScrollOnDesktop
       headerAction={headerAction}
       showHeaderActionOnMobile={showHeaderActionOnMobile}
       boundedContentOnDesktop={boundedContentOnDesktop}

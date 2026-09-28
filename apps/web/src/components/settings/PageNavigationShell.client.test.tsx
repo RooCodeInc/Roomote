@@ -75,4 +75,67 @@ describe('PageNavigationShell', () => {
     );
     expect(screen.getByText('content')).toBeInTheDocument();
   });
+
+  it('aligns the md desktop rail with the content and keeps it non-scrollable', () => {
+    const { container } = render(
+      <PageNavigationShell
+        items={[
+          {
+            id: 'personal',
+            label: 'Personal',
+            icon: mockIcon,
+            href: '/settings',
+          },
+        ]}
+        activeItemId="personal"
+        desktopNavigationBreakpoint="md"
+        desktopContentScrollOnDesktop
+        title="Personal"
+        mobileLabel="Settings page"
+        onItemSelect={() => undefined}
+      >
+        <div>content</div>
+      </PageNavigationShell>,
+    );
+
+    expect(container.firstChild).toHaveClass(
+      'md:flex-row',
+      'md:items-start',
+      'md:overflow-hidden',
+    );
+    expect(container.querySelector('aside')).toHaveClass(
+      'md:top-8',
+      'md:overflow-visible',
+    );
+    expect(container.querySelector('aside')).not.toHaveClass(
+      'md:overflow-y-auto',
+    );
+    expect(container.querySelector('aside + div')).toHaveClass('md:ml-68');
+    expect(container.querySelector('aside + div')).toHaveClass(
+      'md:overflow-y-auto',
+    );
+  });
+
+  it('keeps bounded desktop children as the inner scroll owner', () => {
+    const { container } = render(
+      <PageNavigationShell
+        items={[]}
+        activeItemId="personal"
+        desktopNavigationBreakpoint="md"
+        desktopContentScrollOnDesktop
+        boundedContentOnDesktop
+        hideNavigation
+        title="Models"
+        mobileLabel="Settings page"
+        onItemSelect={() => undefined}
+      >
+        <div>content</div>
+      </PageNavigationShell>,
+    );
+
+    expect(container.firstChild).toHaveClass('md:overflow-hidden');
+    expect(container.querySelector('div > div > div:last-child')).toHaveClass(
+      'md:overflow-hidden',
+    );
+  });
 });

@@ -24,6 +24,8 @@ type PageNavigationShellItem<T extends string = string> = {
 type PageNavigationShellProps<T extends string = string> = {
   items: PageNavigationShellItem<T>[];
   activeItemId: T;
+  desktopNavigationBreakpoint?: 'md' | 'lg';
+  desktopContentScrollOnDesktop?: boolean;
   hideNavigation?: boolean;
   title: string;
   description?: string;
@@ -38,6 +40,8 @@ type PageNavigationShellProps<T extends string = string> = {
 export function PageNavigationShell<T extends string = string>({
   items,
   activeItemId,
+  desktopNavigationBreakpoint = 'lg',
+  desktopContentScrollOnDesktop = false,
   hideNavigation = false,
   title,
   description,
@@ -48,15 +52,45 @@ export function PageNavigationShell<T extends string = string>({
   onItemSelect,
   children,
 }: PageNavigationShellProps<T>) {
+  const desktopLayoutClasses =
+    desktopNavigationBreakpoint === 'md'
+      ? {
+          content: 'md:ml-68',
+          mobileNavigation: 'md:hidden',
+          navigation:
+            'hidden md:absolute md:top-8 md:left-0 md:block md:w-60 md:shrink-0 md:overflow-visible',
+          row: 'md:flex-row md:items-start',
+          rootScroll: 'md:overflow-hidden',
+          scrollableContent:
+            'md:flex md:h-full md:min-h-0 md:flex-col md:gap-6 md:overflow-y-auto md:space-y-0',
+          boundedContent:
+            'md:flex md:h-full md:min-h-0 md:flex-col md:gap-6 md:overflow-hidden md:space-y-0',
+        }
+      : {
+          content: 'lg:ml-68',
+          mobileNavigation: 'lg:hidden',
+          navigation:
+            'hidden lg:absolute lg:inset-y-0 lg:left-0 lg:block lg:w-60 lg:shrink-0 lg:overflow-y-auto',
+          row: 'lg:flex-row lg:items-start',
+          rootScroll: 'lg:overflow-hidden',
+          scrollableContent:
+            'lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-6 lg:overflow-y-auto lg:space-y-0',
+          boundedContent:
+            'lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-6 lg:overflow-hidden lg:space-y-0',
+        };
+
   return (
     <div
       className={cn(
-        'relative flex h-full min-h-0 w-full flex-1 flex-col gap-6 overflow-x-hidden overflow-y-auto px-4 py-6 md:py-8 lg:flex-row lg:items-start',
+        'relative flex h-full min-h-0 w-full flex-1 flex-col gap-6 overflow-x-hidden overflow-y-auto px-4 py-6 md:py-8',
+        desktopLayoutClasses.row,
+        desktopContentScrollOnDesktop && desktopLayoutClasses.rootScroll,
+        desktopContentScrollOnDesktop && 'md:pb-0',
         boundedContentOnDesktop && 'md:overflow-y-hidden md:pb-0',
       )}
     >
       {!hideNavigation && (
-        <aside className="hidden lg:absolute lg:inset-y-0 lg:left-0 lg:block lg:w-60 lg:shrink-0 lg:overflow-y-auto">
+        <aside className={desktopLayoutClasses.navigation}>
           <nav className="space-y-1 pl-3">
             {items.map((item) => {
               const Icon = item.icon;
@@ -101,13 +135,19 @@ export function PageNavigationShell<T extends string = string>({
       <div
         className={cn(
           'min-w-0 flex-1 space-y-6 max-w-6xl',
-          !hideNavigation && 'lg:ml-68',
-          boundedContentOnDesktop &&
-            'md:flex md:h-full md:min-h-0 md:flex-col md:gap-6 md:space-y-0',
+          !hideNavigation && desktopLayoutClasses.content,
+          desktopContentScrollOnDesktop
+            ? boundedContentOnDesktop
+              ? desktopLayoutClasses.boundedContent
+              : desktopLayoutClasses.scrollableContent
+            : boundedContentOnDesktop &&
+                'md:flex md:h-full md:min-h-0 md:flex-col md:gap-6 md:space-y-0',
         )}
       >
         {!hideNavigation && (
-          <div className="space-y-4 lg:hidden">
+          <div
+            className={cn('space-y-4', desktopLayoutClasses.mobileNavigation)}
+          >
             <Select
               value={activeItemId}
               onValueChange={(value) => onItemSelect(value as T)}
