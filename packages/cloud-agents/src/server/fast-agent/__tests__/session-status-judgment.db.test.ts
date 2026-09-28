@@ -25,7 +25,10 @@ vi.mock('../../typesafe-judgment', async (importOriginal) => {
   return { ...actual, evaluateTypeSafeJudgments: evaluateMock };
 });
 
-import { processSessionStatusJudgmentBatch } from '../session-status-judgment';
+import {
+  processSessionStatusJudgmentBatch,
+  SESSION_STATUS_INACTIVITY_MS,
+} from '../session-status-judgment';
 
 const sessionIds: string[] = [];
 const conversationIds: string[] = [];
@@ -81,9 +84,27 @@ function highConfidenceDone() {
   });
 }
 
+function highConfidenceNeedsInput() {
+  evaluateMock.mockResolvedValue({
+    outcome: {
+      type: 'choice',
+      choice: 'needs_input',
+      confidence: 0.97,
+      probabilities: {
+        open: 0.01,
+        done: 0.01,
+        blocked: 0.01,
+        needs_input: 0.97,
+        unclear: 0,
+      },
+    },
+  });
+}
+
 describe('processSessionStatusJudgmentBatch', () => {
   it('judges only visible transcript text and leaves cached runtime state unchanged', async () => {
     await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
+    const visibleUserTs = Date.now();
     const user = await userFactory.create();
     userIds.push(user.id);
     const [conversation] = await db
@@ -110,7 +131,7 @@ describe('processSessionStatusJudgmentBatch', () => {
         eventId: 'visible-user-event',
         turnId: 'visible-user-turn',
         turnSeq: 1,
-        ts: Date.now(),
+        ts: visibleUserTs,
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
         contentBlocks: [{ type: 'text', text: 'What does this service do?' }],
@@ -144,8 +165,12 @@ describe('processSessionStatusJudgmentBatch', () => {
       expect.objectContaining({ decision: 'session-status-judgment' }),
     );
     const state = evaluateMock.mock.calls[0]?.[0].state as {
+      latestVisibleUserMessageAt: string | null;
       recentMessages: Array<{ text: string }>;
     };
+    expect(state.latestVisibleUserMessageAt).toBe(
+      new Date(visibleUserTs).toISOString(),
+    );
     expect(state.recentMessages.map((message) => message.text)).toEqual([
       'What does this service do?',
     ]);
@@ -203,6 +228,60 @@ describe('processSessionStatusJudgmentBatch', () => {
       state: 'ignored',
       outcome: 'done',
       errorCode: 'live_work',
+    });
+  });
+
+  it('applies inactivity done precedence over a needs-input judgment', async () => {
+    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    conversationIds.push(conversation!.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: user.id,
+      cachedStatus: 'ready',
+      fastConversationId: conversation!.id,
+    });
+    sessionIds.push(session.id);
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'inactive-user-event',
+      turnId: 'inactive-user-turn',
+      turnSeq: 1,
+      ts: Date.now() - SESSION_STATUS_INACTIVITY_MS,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'Please investigate this.' }],
+      metadata: { visibleInTranscript: true, userId: user.id },
+    });
+    await db.insert(sessionStatusJudgments).values({
+      sessionId: session.id,
+      sourceEventId: 'inactive-turn',
+      generation: 1,
+      sourceKind: 'fast_turn',
+      state: 'pending',
+    });
+    highConfidenceNeedsInput();
+
+    await processSessionStatusJudgmentBatch();
+
+    const [judgment] = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(eq(sessionStatusJudgments.sessionId, session.id));
+    expect(judgment).toMatchObject({
+      state: 'applied',
+      outcome: 'done',
+      confidence: 1,
     });
   });
 

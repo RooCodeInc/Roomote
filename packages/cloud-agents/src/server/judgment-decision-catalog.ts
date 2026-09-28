@@ -170,6 +170,9 @@ export const JUDGMENT_DECISION_DEFINITIONS = {
       'After Session activity, whether the user’s request is open, done, blocked, waiting for input, or unclear.',
     questions: SESSION_STATUS_JUDGMENT_QUESTIONS,
     sampleState: {
+      evaluationTime: '2026-09-28T00:00:00.000Z',
+      latestVisibleUserMessageAt: '2026-09-28T00:00:00.000Z',
+      manualStatusChangedAt: null,
       objective: 'Fix the flaky checkout test and open a pull request.',
       recentMessages: [
         {

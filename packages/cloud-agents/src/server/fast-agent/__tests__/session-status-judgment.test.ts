@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { chooseApplicableSessionStatusJudgment } from '../session-status-judgment';
+import {
+  chooseApplicableSessionStatusJudgment,
+  resolveSessionStatusJudgmentPrecedence,
+  SESSION_STATUS_INACTIVITY_MS,
+} from '../session-status-judgment';
 
 const clearDone = {
   choice: 'done' as const,
@@ -61,5 +65,70 @@ describe('chooseApplicableSessionStatusJudgment', () => {
         probabilities: { open: Number.NaN },
       }),
     ).toBeNull();
+  });
+});
+
+describe('resolveSessionStatusJudgmentPrecedence', () => {
+  const evaluationTime = '2026-09-28T12:00:00.000Z';
+  const timestampAtAge = (ageMs: number) =>
+    new Date(Date.parse(evaluationTime) - ageMs).toISOString();
+
+  it('uses inactivity done precedence at exactly four days', () => {
+    expect(
+      resolveSessionStatusJudgmentPrecedence({
+        evaluationTime,
+        latestVisibleUserMessageAt: timestampAtAge(
+          SESSION_STATUS_INACTIVITY_MS,
+        ),
+        manualStatusChangedAt: null,
+      }),
+    ).toBe('inactivity');
+  });
+
+  it('does not use inactivity precedence before four days', () => {
+    expect(
+      resolveSessionStatusJudgmentPrecedence({
+        evaluationTime,
+        latestVisibleUserMessageAt: timestampAtAge(
+          SESSION_STATUS_INACTIVITY_MS - 1,
+        ),
+        manualStatusChangedAt: null,
+      }),
+    ).toBeNull();
+  });
+
+  it('preserves manual status when no newer visible user message exists', () => {
+    const manualStatusChangedAt = timestampAtAge(2 * 24 * 60 * 60 * 1_000);
+    expect(
+      resolveSessionStatusJudgmentPrecedence({
+        evaluationTime,
+        latestVisibleUserMessageAt: manualStatusChangedAt,
+        manualStatusChangedAt,
+      }),
+    ).toBe('manual');
+  });
+
+  it('releases manual status after a strictly newer visible user message', () => {
+    const manualStatusChangedAt = timestampAtAge(2 * 24 * 60 * 60 * 1_000);
+    expect(
+      resolveSessionStatusJudgmentPrecedence({
+        evaluationTime,
+        latestVisibleUserMessageAt: new Date(
+          Date.parse(manualStatusChangedAt) + 1,
+        ).toISOString(),
+        manualStatusChangedAt,
+      }),
+    ).toBeNull();
+  });
+
+  it('lets manual status beat inactivity even after four inactive days', () => {
+    const manualStatusChangedAt = timestampAtAge(5 * 24 * 60 * 60 * 1_000);
+    expect(
+      resolveSessionStatusJudgmentPrecedence({
+        evaluationTime,
+        latestVisibleUserMessageAt: timestampAtAge(6 * 24 * 60 * 60 * 1_000),
+        manualStatusChangedAt,
+      }),
+    ).toBe('manual');
   });
 });
