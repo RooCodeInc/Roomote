@@ -125,6 +125,8 @@ describe('processDiscordAttachments', () => {
   it('returns actionable model and size warnings for audio', async () => {
     transcribeAudioAttachmentMock.mockResolvedValue({
       status: 'unsupported_model',
+      message:
+        "The Audio and video model (GPT 5.6 Terra) doesn't support audio. Select a model that supports audio in Settings > Models > Audio and video model.",
     });
     const fetchImpl = vi
       .fn()
@@ -145,8 +147,9 @@ describe('processDiscordAttachments', () => {
       { fetch: fetchImpl },
     );
 
+    expect(unsupported.attachmentTexts[0]).toContain('GPT 5.6 Terra');
     expect(unsupported.attachmentTexts[0]).toContain(
-      'no configured model supports audio input',
+      'Settings > Models > Audio and video model',
     );
     expect(oversized.attachmentTexts[0]).toContain('20 MiB limit');
   });

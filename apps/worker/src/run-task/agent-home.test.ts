@@ -1364,6 +1364,35 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(models?.['text-model']).not.toHaveProperty('modalities');
   });
 
+  it('registers the configured Audio and video model with its media modalities', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/text-model',
+        R_VISION_MODEL: 'openai-compatible/vision-model',
+        R_AUDIO_VIDEO_MODEL: 'openai-compatible/media-model',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_COMPATIBLE_API_KEY: 'compat-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, Record<string, unknown>> }
+      >;
+    };
+    const models = config.provider['openai-compatible']?.models;
+
+    expect(models?.['vision-model']).toMatchObject({
+      modalities: { input: ['text', 'image', 'video'] },
+    });
+    expect(models?.['media-model']).toMatchObject({
+      attachment: true,
+      modalities: { input: ['text', 'audio', 'video'] },
+    });
+    expect(models?.['text-model']).not.toHaveProperty('attachment');
+  });
+
   it('falls back to the OpenAI-compatible coding model when no vision model is configured', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

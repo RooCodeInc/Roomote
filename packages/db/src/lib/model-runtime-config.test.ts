@@ -66,7 +66,9 @@ vi.mock('./xai-subscription', () => ({
 }));
 
 vi.mock('../schema', () => ({
-  deploymentSettings: { id: 'deploymentSettings.id' },
+  deploymentSettings: {
+    id: 'deploymentSettings.id',
+  },
   eq: vi.fn(),
 }));
 

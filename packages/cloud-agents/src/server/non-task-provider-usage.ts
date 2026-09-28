@@ -7,11 +7,18 @@ import {
   type PermissionRuleset,
 } from '@opencode-ai/sdk/v2/client';
 import {
+  and,
+  db,
+  desc,
+  eq,
   recordLlmUsage,
   resolveEffectiveModelRuntimeEnv,
+  taskRuns,
 } from '@roomote/db/server';
 import {
+  formatErrorForLog,
   getOpenAiCompatibleRuntimeConfigs,
+  getTaskModelDisplayName,
   isInferenceCreditsExhaustedError,
   isOpenRouterInFlightBudgetError,
   isReasoningEffort,
@@ -175,7 +182,7 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   prompt: string;
   system?: string;
   model?: string;
-  modelRole?: 'primary' | 'small' | 'orchestration';
+  modelRole?: 'primary' | 'small' | 'orchestration' | 'audioVideo';
   /** Explicit reasoning-effort override applied to the resolved model. */
   reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
@@ -200,6 +207,8 @@ export type NonTaskProviderRetryEvent = {
 
 export interface GenerateTrackedNonTaskTextParams extends GenerateTrackedNonTaskBaseParams {
   files?: NonTaskPromptFile[];
+  /** Exact execution attempt for run-token-backed model role overrides. */
+  taskRunId?: number;
   requiredInputModality?: NonTaskInputModality;
 }
 
@@ -212,10 +221,34 @@ export type NonTaskPromptFile = {
 };
 
 export class NonTaskInputModalityUnsupportedError extends Error {
-  constructor(public readonly modality: NonTaskInputModality) {
-    super(`No configured model supports ${modality} input and text output.`);
+  constructor(
+    public readonly modality: NonTaskInputModality,
+    public readonly modelName?: string,
+  ) {
+    super(
+      modality === 'audio'
+        ? `The Audio and video model${modelName ? ` (${modelName})` : ''} doesn't support audio. Select a model that supports audio in Settings > Models > Audio and video model.`
+        : modality === 'video'
+          ? `The Audio and video model${modelName ? ` (${modelName})` : ''} doesn't support video. Select a model that supports video in Settings > Models > Audio and video model.`
+          : `No configured model supports ${modality} input and text output.`,
+    );
     this.name = 'NonTaskInputModalityUnsupportedError';
   }
+}
+
+export function isNonTaskAudioVideoCapabilityError(
+  error: unknown,
+  modality: 'audio' | 'video',
+): boolean {
+  const detail = formatErrorForLog(error).toLowerCase();
+  const modalityPattern = modality === 'audio' ? '(?:audio|sound)' : 'video';
+  const rejectionPattern =
+    '(?:not supported|unsupported|does not support|doesn.t support|cannot accept|cannot process|cannot handle|unable to process)';
+
+  return new RegExp(
+    `(?:${modalityPattern}).{0,100}${rejectionPattern}|${rejectionPattern}.{0,100}(?:${modalityPattern})`,
+    'u',
+  ).test(detail);
 }
 
 export interface GenerateTrackedNonTaskObjectParams<
@@ -958,10 +991,12 @@ function isOpenCodeSessionInvalid(error: unknown): boolean {
 
 async function resolveNonTaskModelRuntime(
   model?: string,
-  modelRole: 'primary' | 'small' | 'orchestration' = 'small',
+  modelRole: 'primary' | 'small' | 'orchestration' | 'audioVideo' = 'small',
 ): Promise<{
   model: string;
   catalogModelId: string;
+  visionModel: string | undefined;
+  audioVideoModel: string | undefined;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
 }> {
   const requestedModel = model?.trim();
@@ -996,9 +1031,14 @@ async function resolveNonTaskModelRuntime(
         resolvedModelRuntimeEnv.R_MODEL
       : modelRole === 'primary'
         ? resolvedModelRuntimeEnv.R_MODEL
-        : resolvedModelRuntimeEnv.R_SMALL_MODEL ||
-          resolvedModelRuntimeEnv.R_MODEL) ||
-    (modelRole === 'primary' || modelRole === 'orchestration'
+        : modelRole === 'audioVideo'
+          ? resolvedModelRuntimeEnv.R_AUDIO_VIDEO_MODEL ||
+            resolvedModelRuntimeEnv.R_MODEL
+          : resolvedModelRuntimeEnv.R_SMALL_MODEL ||
+            resolvedModelRuntimeEnv.R_MODEL) ||
+    (modelRole === 'primary' ||
+    modelRole === 'orchestration' ||
+    modelRole === 'audioVideo'
       ? asString(parseOpenCodeConfigJson(readOpenCodeDebugConfig()).model)
       : resolveOpenCodeSmallModel());
 
@@ -1040,6 +1080,14 @@ async function resolveNonTaskModelRuntime(
     // `bedrock-mantle-openai`), mirroring the task worker's rewrite.
     model: toBedrockMantleRuntimeModelId(resolvedModel),
     catalogModelId: resolvedModel,
+    // Keep the deployment coding fallback before an orchestration or explicit
+    // session model temporarily takes over R_MODEL in selectedRuntimeEnv.
+    visionModel:
+      resolvedModelRuntimeEnv.R_VISION_MODEL ?? resolvedModelRuntimeEnv.R_MODEL,
+    audioVideoModel:
+      resolvedModelRuntimeEnv.R_AUDIO_VIDEO_MODEL ??
+      resolvedModelRuntimeEnv.R_MODEL ??
+      asString(parseOpenCodeConfigJson(readOpenCodeDebugConfig()).model),
     // An explicit model rides into the server lease env as the primary role
     // model so the config builder registers its provider — the deployment's
     // role models may not include it, and an unregistered Bedrock (or
@@ -1204,6 +1252,8 @@ async function resolveModelForInputModality(
   params: GenerateTrackedNonTaskTextParams,
   runtime: {
     model: string;
+    visionModel: string | undefined;
+    audioVideoModel: string | undefined;
     resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
   },
 ): Promise<string> {
@@ -1212,32 +1262,61 @@ async function resolveModelForInputModality(
     return runtime.model;
   }
 
-  const modalityModels =
-    modality === 'image' || modality === 'video'
-      ? [
-          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
-          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
-        ]
-      : [
-          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
-          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
-        ];
+  const requiresAudioVideoModel = modality === 'audio' || modality === 'video';
+  const audioVideoModel = params.model ?? runtime.audioVideoModel;
+  const modalityModels = requiresAudioVideoModel
+    ? [audioVideoModel]
+    : [
+        runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+        runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+      ];
   const model = await findModelSupportingInputModality({
     env: runtime.resolvedModelRuntimeEnv,
     modality,
-    candidates: [
-      params.model,
-      ...modalityModels,
-      runtime.resolvedModelRuntimeEnv.R_MODEL,
-      runtime.model,
-    ],
+    candidates: requiresAudioVideoModel
+      ? modalityModels
+      : [
+          params.model,
+          ...modalityModels,
+          runtime.resolvedModelRuntimeEnv.R_MODEL,
+          runtime.model,
+        ],
     allowUnknownModalityFallback: true,
     timeoutMs: params.timeoutMs,
   });
   if (!model) {
-    throw new NonTaskInputModalityUnsupportedError(modality);
+    throw new NonTaskInputModalityUnsupportedError(
+      modality,
+      requiresAudioVideoModel
+        ? audioVideoModel
+          ? getTaskModelDisplayName(audioVideoModel)
+          : undefined
+        : undefined,
+    );
   }
   return model;
+}
+
+async function resolveTaskAudioVideoModelOverride(
+  taskId?: string | null,
+  taskRunId?: number,
+) {
+  if (!taskId?.trim()) {
+    return undefined;
+  }
+
+  const taskRun = taskRunId
+    ? await db.query.taskRuns.findFirst({
+        where: and(eq(taskRuns.id, taskRunId), eq(taskRuns.taskId, taskId)),
+        columns: { payload: true },
+      })
+    : await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.taskId, taskId),
+        orderBy: desc(taskRuns.id),
+        columns: { payload: true },
+      });
+
+  return taskRun?.payload.modelRoleOverrides?.audioVideo;
 }
 
 /**
@@ -1245,11 +1324,12 @@ async function resolveModelForInputModality(
  *
  * `direct`: the session model accepts the modality itself, so the files ride
  * along as prompt parts. `helper`: the session model cannot read the input;
- * the session keeps running on its own model and a separate helper model
- * (the deployment vision model, then the helper model, then the coding model)
- * inspects the files on request. The session model is never swapped for the
- * modality. This is the same split tasks use, where a hidden visual subagent
- * reads images for a coding model that cannot.
+ * the session keeps running on its own model while a helper inspects the
+ * files. Image helpers use the deployment Vision model, then the helper model,
+ * then the coding model. Audio and video use only the Audio and video model.
+ * The session model is never swapped for the modality. This is the same
+ * split tasks use, where a hidden visual subagent reads images for a coding
+ * model that cannot.
  */
 export type NonTaskInputModalityDelivery =
   | { delivery: 'direct'; model: string }
@@ -1263,7 +1343,7 @@ export type NonTaskInputModalityDelivery =
 export async function resolveNonTaskInputModalityDelivery(params: {
   modality: NonTaskInputModality;
   model?: string;
-  modelRole?: 'primary' | 'small' | 'orchestration';
+  modelRole?: 'primary' | 'small' | 'orchestration' | 'audioVideo';
   reasoningEffort?: ReasoningEffort;
   /** Exclude a session model that has already rejected this modality. */
   skipSessionModel?: boolean;
@@ -1275,25 +1355,44 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   );
   const env = runtime.resolvedModelRuntimeEnv;
   const sessionModel = runtime.model;
-  const helperCandidates = [env.R_VISION_MODEL, env.R_SMALL_MODEL, env.R_MODEL]
+  const modality = params.modality;
+  const usesAudioVideoModel = modality === 'audio' || modality === 'video';
+  const visionModel = runtime.visionModel;
+  const helperCandidates = (
+    usesAudioVideoModel
+      ? [runtime.audioVideoModel]
+      : [env.R_VISION_MODEL, env.R_SMALL_MODEL, env.R_MODEL]
+  )
     .map((candidate) =>
       candidate ? toBedrockMantleRuntimeModelId(candidate) : candidate,
     )
     .filter(
       (candidate): candidate is string =>
-        Boolean(candidate) && candidate !== sessionModel,
+        Boolean(candidate) &&
+        (candidate !== sessionModel ||
+          (usesAudioVideoModel && !params.skipSessionModel)),
     );
   const model = await findModelSupportingInputModality({
     env,
-    modality: params.modality,
-    candidates: params.skipSessionModel
-      ? helperCandidates
-      : [sessionModel, ...helperCandidates],
-    defaultFirstCandidateOnUnknown: !params.skipSessionModel,
+    modality,
+    candidates:
+      usesAudioVideoModel || params.skipSessionModel
+        ? helperCandidates
+        : [sessionModel, ...helperCandidates],
+    defaultFirstCandidateOnUnknown: usesAudioVideoModel
+      ? true
+      : !params.skipSessionModel,
     timeoutMs: params.timeoutMs,
   });
   if (!model) {
-    throw new NonTaskInputModalityUnsupportedError(params.modality);
+    throw new NonTaskInputModalityUnsupportedError(
+      params.modality,
+      usesAudioVideoModel
+        ? runtime.audioVideoModel
+          ? getTaskModelDisplayName(runtime.audioVideoModel)
+          : undefined
+        : undefined,
+    );
   }
   if (model === sessionModel) {
     return { delivery: 'direct', model: sessionModel };
@@ -1301,8 +1400,11 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   const runtimeModelId = (candidate: string | undefined) =>
     candidate ? toBedrockMantleRuntimeModelId(candidate) : undefined;
   const helperReasoningEffort =
-    model === runtimeModelId(env.R_VISION_MODEL)
-      ? env.R_VISION_MODEL_REASONING_EFFORT
+    model ===
+    runtimeModelId(usesAudioVideoModel ? runtime.audioVideoModel : visionModel)
+      ? usesAudioVideoModel
+        ? env.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT
+        : env.R_VISION_MODEL_REASONING_EFFORT
       : model === runtimeModelId(env.R_SMALL_MODEL)
         ? env.R_SMALL_MODEL_REASONING_EFFORT
         : undefined;
@@ -2112,35 +2214,75 @@ async function runNonTaskSdkPrompt(
 export async function generateTrackedNonTaskText(
   params: GenerateTrackedNonTaskTextParams,
 ): Promise<string> {
+  const audioVideoModality =
+    params.requiredInputModality === 'audio' ||
+    params.requiredInputModality === 'video'
+      ? params.requiredInputModality
+      : undefined;
+  const taskAudioVideoOverride =
+    audioVideoModality && !params.model
+      ? await resolveTaskAudioVideoModelOverride(
+          params.taskId,
+          params.taskRunId,
+        )
+      : undefined;
+  const audioVideoModelOverride = params.model ?? taskAudioVideoOverride?.model;
+  const modalityParams = audioVideoModelOverride
+    ? { ...params, model: audioVideoModelOverride }
+    : params;
   const runtime = await resolveNonTaskModelRuntime(
-    params.model,
+    audioVideoModelOverride,
     params.modelRole,
   );
-  const model = await resolveModelForInputModality(params, runtime);
+  const model = await resolveModelForInputModality(modalityParams, runtime);
+  const audioVideoReasoningEffort =
+    params.reasoningEffort ??
+    taskAudioVideoOverride?.reasoningEffort ??
+    runtime.resolvedModelRuntimeEnv.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT;
+  const promptParams =
+    audioVideoModality &&
+    !modalityParams.reasoningEffort &&
+    isReasoningEffort(audioVideoReasoningEffort)
+      ? { ...modalityParams, reasoningEffort: audioVideoReasoningEffort }
+      : modalityParams;
 
-  const data = await runNonTaskSdkPrompt(
-    params,
-    { ...runtime, model },
-    {
-      system: params.system,
-      parts: [
-        {
-          type: 'text',
-          text: buildOpenCodePrompt({
-            prompt: params.prompt,
-            maxOutputTokens: params.maxOutputTokens,
-          }),
-        },
-        ...(params.files ?? []).map((file) => ({
-          type: 'file' as const,
-          mime: file.mime,
-          ...(file.filename ? { filename: file.filename } : {}),
-          url: file.url,
-        })),
-      ],
-    },
-    { promptErrorLabel: 'OpenCode text prompt failed' },
-  );
+  let data: Awaited<ReturnType<typeof runNonTaskSdkPrompt>>;
+  try {
+    data = await runNonTaskSdkPrompt(
+      promptParams,
+      { ...runtime, model },
+      {
+        system: params.system,
+        parts: [
+          {
+            type: 'text',
+            text: buildOpenCodePrompt({
+              prompt: params.prompt,
+              maxOutputTokens: params.maxOutputTokens,
+            }),
+          },
+          ...(params.files ?? []).map((file) => ({
+            type: 'file' as const,
+            mime: file.mime,
+            ...(file.filename ? { filename: file.filename } : {}),
+            url: file.url,
+          })),
+        ],
+      },
+      { promptErrorLabel: 'OpenCode text prompt failed' },
+    );
+  } catch (error) {
+    if (
+      audioVideoModality &&
+      isNonTaskAudioVideoCapabilityError(error, audioVideoModality)
+    ) {
+      throw new NonTaskInputModalityUnsupportedError(
+        audioVideoModality,
+        getTaskModelDisplayName(model),
+      );
+    }
+    throw error;
+  }
 
   const text = data.parts
     .filter(

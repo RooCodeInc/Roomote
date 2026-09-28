@@ -9,6 +9,7 @@ vi.mock('../non-task-provider-usage', async (importOriginal) => ({
 
 import {
   AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
+  formatAudioAttachmentWarning,
   formatAudioTranscriptionResult,
   isAudioTranscriptionSupportedMimeType,
   resolveAudioTranscriptionMimeType,
@@ -26,7 +27,7 @@ describe('audio transcription', () => {
     vi.restoreAllMocks();
   });
 
-  it('transcribes Telegram OGG audio without spending the response on reasoning', async () => {
+  it('transcribes Telegram OGG audio through the Audio and video model role', async () => {
     generateTrackedNonTaskTextMock.mockResolvedValue('Deploy the fix.');
 
     const result = await transcribeAudioAttachment({
@@ -43,7 +44,6 @@ describe('audio transcription', () => {
     expect(generateTrackedNonTaskTextMock).toHaveBeenCalledWith(
       expect.objectContaining({
         requiredInputModality: 'audio',
-        reasoningEffort: 'low',
         files: [
           {
             mime: 'audio/ogg',
@@ -57,7 +57,7 @@ describe('audio transcription', () => {
 
   it('reports when configured models do not support audio', async () => {
     generateTrackedNonTaskTextMock.mockRejectedValue(
-      new NonTaskInputModalityUnsupportedError('audio'),
+      new NonTaskInputModalityUnsupportedError('audio', 'GPT 5.6 Terra'),
     );
 
     await expect(
@@ -65,7 +65,25 @@ describe('audio transcription', () => {
         audioBytes: Buffer.from('audio'),
         mimeType: 'audio/mp4',
       }),
-    ).resolves.toEqual({ status: 'unsupported_model' });
+    ).resolves.toEqual({
+      status: 'unsupported_model',
+      message:
+        "The Audio and video model (GPT 5.6 Terra) doesn't support audio. Select a model that supports audio in Settings > Models > Audio and video model.",
+    });
+  });
+
+  it('returns provider errors as failures after capability errors are normalized centrally', async () => {
+    generateTrackedNonTaskTextMock.mockRejectedValue(
+      new Error('This model does not support audio input.'),
+    );
+
+    const result = await transcribeAudioAttachment({
+      audioBytes: Buffer.from('audio'),
+      mimeType: 'audio/ogg',
+      filename: 'voice-message.ogg',
+    });
+
+    expect(result).toEqual({ status: 'failed' });
   });
 
   it('rejects unsupported and oversized audio without inference', async () => {
@@ -102,7 +120,22 @@ describe('audio transcription', () => {
     expect(
       formatAudioTranscriptionResult('voice.ogg', {
         status: 'unsupported_model',
+        message:
+          "The Audio and video model (GPT 5.6 Terra) doesn't support audio. Select a model that supports audio in Settings > Models > Audio and video model.",
       }),
-    ).toContain('no configured model supports audio input');
+    ).toBe(
+      '[Audio attachment "voice.ogg" could not be transcribed: The Audio and video model (GPT 5.6 Terra) doesn\'t support audio. Select a model that supports audio in Settings > Models > Audio and video model.]',
+    );
+  });
+
+  it('removes only trailing periods from untrusted warning text', () => {
+    expect(formatAudioAttachmentWarning('voice.ogg', 'Failed...')).toBe(
+      '[Audio attachment "voice.ogg" Failed.]',
+    );
+    const repeatedDots = '.'.repeat(20_000);
+    const reason = `${repeatedDots}not trailing`;
+    expect(formatAudioAttachmentWarning('voice.ogg', reason)).toBe(
+      `[Audio attachment "voice.ogg" ${reason}.]`,
+    );
   });
 });
