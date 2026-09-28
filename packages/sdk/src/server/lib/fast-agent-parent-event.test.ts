@@ -1886,6 +1886,71 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.bindConversation).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      surface: 'discord' as const,
+      workspaceId: 'guild-1',
+      targetKind: 'discord_channel' as const,
+      replyTarget: { channelId: 'channel-1' },
+    },
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      targetKind: 'teams_channel' as const,
+      replyTarget: {
+        channelId: 'teams-channel-1',
+        serviceUrl: 'https://smba.example.com/amer/',
+      },
+    },
+  ])(
+    'materializes a deferred $surface automation root for a meaningful closeout',
+    async ({ surface, workspaceId, targetKind, replyTarget }) => {
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'A finding needs attention.',
+        });
+      });
+
+      await deliverFastAgentParentEvent({
+        parent: {
+          sessionId: parent.sessionId,
+          conversation: {
+            surface,
+            workspaceId,
+            conversationId: `${surface}-deferred-occurrence`,
+            replyTarget,
+          },
+        },
+        event: {
+          type: 'automation_triggered',
+          eventId: `${surface}-deferred-occurrence`,
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          targetKind,
+          trigger: 'schedule',
+        },
+      });
+
+      if (surface === 'discord') {
+        expect(mocks.createDiscordThread).toHaveBeenCalledWith(
+          expect.objectContaining({
+            channelId: 'channel-1',
+            initialText: 'Weekly scan is running.',
+          }),
+        );
+      } else {
+        expect(mocks.teamsPostMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            channelId: 'teams-channel-1',
+            text: 'Weekly scan is running.',
+          }),
+        );
+      }
+    },
+  );
+
   it('creates the delayed Slack root for a meaningful artifact closeout', async () => {
     const pendingParent = {
       sessionId: parent.sessionId,
@@ -2257,6 +2322,7 @@ describe('deliverFastAgentParentEvent', () => {
         replyTarget: { channelId: 'telegram-dm-1' },
       },
     };
+    mocks.answerQuestion.mockResolvedValueOnce('');
 
     await deliverFastAgentParentEvent({
       parent: pendingParent,

@@ -3100,6 +3100,21 @@ export async function deliverFastAgentParentEventWithLock(
         replyPosted = true;
       },
     });
+    const prepareAutomationDestinationRoot = async (
+      launchEvent: Extract<
+        FastAgentParentEvent,
+        { type: 'automation_triggered' }
+      >,
+    ) => {
+      const conversation = await prepareFastAutomationDestinationRoot({
+        event: launchEvent,
+        sessionId: params.parent.sessionId,
+        userId: parentTurn.userId,
+        conversation: parentTurn.conversation,
+      });
+      parentTurn.conversation = conversation;
+      return conversation;
+    };
     if (
       params.event.type === 'automation_triggered' &&
       Boolean(params.event.launchCriteria?.trim() || params.event.runWhen)
@@ -3211,16 +3226,23 @@ export async function deliverFastAgentParentEventWithLock(
               return { decision: 'continue' as const };
             }
           },
-          prepareAutomationLaunch: async () => {
-            const conversation = await prepareFastAutomationDestinationRoot({
-              event: launchEvent,
-              sessionId: params.parent.sessionId,
-              userId: parentTurn.userId,
-              conversation: parentTurn.conversation,
-            });
-            parentTurn.conversation = conversation;
-            return conversation;
-          },
+          prepareAutomationLaunch: () =>
+            prepareAutomationDestinationRoot(launchEvent),
+        },
+      };
+    }
+    if (
+      params.event.type === 'automation_triggered' &&
+      !parentTurn.adapter.prepareAutomationLaunch
+    ) {
+      const launchEvent = params.event;
+      const baseAdapter = parentTurn.adapter;
+      parentTurn = {
+        ...parentTurn,
+        adapter: {
+          ...baseAdapter,
+          prepareAutomationLaunch: () =>
+            prepareAutomationDestinationRoot(launchEvent),
         },
       };
     }
@@ -3237,6 +3259,15 @@ export async function deliverFastAgentParentEventWithLock(
           ...baseAdapter,
           postReply: async (reply) => {
             if (reply.kickoff) return;
+            if (
+              reportEvent.type === 'automation_triggered' &&
+              reportEvent.targetKind &&
+              !reportEvent.rootMessageId &&
+              (reply.purpose === 'closeout' ||
+                reply.purpose === 'clarification')
+            ) {
+              await baseAdapter.prepareAutomationLaunch?.();
+            }
             const posted = await baseAdapter.postReply(reply);
             if (
               reply.purpose !== 'closeout' &&
