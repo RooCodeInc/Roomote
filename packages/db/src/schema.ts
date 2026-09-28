@@ -3841,6 +3841,19 @@ export const fastAgentMessages = pgTable(
       table.ts,
       table.turnSeq,
     ),
+    index('fast_agent_messages_visible_user_order_idx').on(
+      table.conversationId,
+      table.ts.desc(),
+    ).where(sql`
+        ${table.role} = 'user'
+        AND (
+          ${table.metadata} ->> 'visibleInTranscript' = 'true'
+          OR (
+            ${table.metadata} ->> 'visibleInTranscript' IS NULL
+            AND ${table.eventType} <> 'roomote_runtime.user_prompt'
+          )
+        )
+      `),
   ],
 );
 
@@ -4475,6 +4488,8 @@ export const sessions = pgTable(
     // Optional user-selected status. When present, runtime reconciliation
     // preserves it while cached_status remains the effective Session status.
     manualStatus: text('manual_status').$type<SessionStatus>(),
+    manualStatusSetAt: timestamp('manual_status_set_at'),
+    inactivityDueAt: timestamp('inactivity_due_at'),
     // Fast-conversation responding lease: while this is in the future, status
     // recomputation treats the conversation as actively responding. TTL-based
     // so a crashed turn self-heals instead of pinning the session 'active'.
@@ -4489,6 +4504,11 @@ export const sessions = pgTable(
       table.activityAt.desc(),
       table.id.desc(),
     ),
+    index('sessions_inactivity_due_idx')
+      .on(table.visibility, table.inactivityDueAt, table.id)
+      .where(
+        sql`${table.inactivityDueAt} IS NOT NULL AND ${table.manualStatus} IS NULL`,
+      ),
     index('sessions_owner_user_id_idx').on(table.ownerUserId),
     uniqueIndex('sessions_fast_conversation_id_unique')
       .on(table.fastConversationId)

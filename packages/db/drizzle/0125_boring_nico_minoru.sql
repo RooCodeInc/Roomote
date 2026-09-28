@@ -1,0 +1,2 @@
+DROP INDEX "sessions_inactivity_due_idx";--> statement-breakpoint
+CREATE INDEX "sessions_inactivity_due_idx" ON "sessions" USING btree ("visibility","inactivity_due_at","id") WHERE "sessions"."inactivity_due_at" IS NOT NULL AND "sessions"."manual_status" IS NULL;

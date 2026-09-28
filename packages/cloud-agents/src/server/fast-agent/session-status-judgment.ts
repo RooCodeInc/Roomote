@@ -2,6 +2,7 @@ import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   and,
   claimSessionStatusJudgmentRequests,
+  clearManualStatusAfterNewerUserMessage,
   completeSessionStatusJudgment,
   desc,
   db,
@@ -33,6 +34,7 @@ const MAX_JUDGMENTS_PER_TICK = 4;
 const MAX_CONTEXT_CHARS = 10_000;
 const MAX_RECENT_MESSAGES = 8;
 const MAX_TASKS = 12;
+export const SESSION_STATUS_INACTIVITY_MS = 4 * 24 * 60 * 60 * 1_000;
 
 const confidenceThreshold: Record<SessionStatusJudgmentOutcome, number> = {
   open: 0.7,
@@ -43,6 +45,9 @@ const confidenceThreshold: Record<SessionStatusJudgmentOutcome, number> = {
 };
 
 type JudgmentState = {
+  evaluationTime: string;
+  latestVisibleUserMessageAt: string | null;
+  manualStatusChangedAt: string | null;
   objective: string;
   recentMessages: Array<{ role: 'user' | 'assistant'; text: string }>;
   childTasks: Array<{
@@ -53,6 +58,35 @@ type JudgmentState = {
   }>;
   goalStatus: string | null;
 };
+
+export function resolveSessionStatusJudgmentPrecedence(input: {
+  evaluationTime: string;
+  latestVisibleUserMessageAt: string | null;
+  manualStatusChangedAt: string | null;
+}): 'manual' | 'inactivity' | null {
+  const latestVisibleUserMessageAt = input.latestVisibleUserMessageAt
+    ? Date.parse(input.latestVisibleUserMessageAt)
+    : Number.NaN;
+  const manualStatusChangedAt = input.manualStatusChangedAt
+    ? Date.parse(input.manualStatusChangedAt)
+    : Number.NaN;
+
+  if (
+    Number.isFinite(manualStatusChangedAt) &&
+    (!Number.isFinite(latestVisibleUserMessageAt) ||
+      latestVisibleUserMessageAt <= manualStatusChangedAt)
+  ) {
+    return 'manual';
+  }
+
+  if (!Number.isFinite(latestVisibleUserMessageAt)) return null;
+  const evaluationTime = Date.parse(input.evaluationTime);
+  if (!Number.isFinite(evaluationTime)) return null;
+  return evaluationTime - latestVisibleUserMessageAt >=
+    SESSION_STATUS_INACTIVITY_MS
+    ? 'inactivity'
+    : null;
+}
 
 function boundedText(value: unknown, limit: number): string | null {
   if (typeof value !== 'string') return null;
@@ -110,6 +144,7 @@ async function loadJudgmentState(sessionId: string): Promise<{
     .select({
       title: sessions.title,
       fastConversationId: sessions.fastConversationId,
+      manualStatusSetAt: sessions.manualStatusSetAt,
       respondingUntil: sessions.respondingUntil,
       goalObjective: sessionGoals.objective,
       goalStatus: sessionGoals.status,
@@ -120,65 +155,94 @@ async function loadJudgmentState(sessionId: string): Promise<{
     .limit(1);
   if (!session) return null;
 
-  const [messages, taskRows, activeTaskRows] = await Promise.all([
-    session.fastConversationId
-      ? db
-          .select({
-            role: fastAgentMessages.role,
-            contentBlocks: fastAgentMessages.contentBlocks,
-          })
-          .from(fastAgentMessages)
-          .where(
-            and(
-              eq(fastAgentMessages.conversationId, session.fastConversationId),
-              inArray(fastAgentMessages.role, ['user', 'assistant']),
-              sql`case
+  const [messages, taskRows, activeTaskRows, latestVisibleUserMessageRows] =
+    await Promise.all([
+      session.fastConversationId
+        ? db
+            .select({
+              role: fastAgentMessages.role,
+              contentBlocks: fastAgentMessages.contentBlocks,
+            })
+            .from(fastAgentMessages)
+            .where(
+              and(
+                eq(
+                  fastAgentMessages.conversationId,
+                  session.fastConversationId,
+                ),
+                inArray(fastAgentMessages.role, ['user', 'assistant']),
+                sql`case
                 when ${fastAgentMessages.metadata} ->> 'visibleInTranscript' is not null
                   then ${fastAgentMessages.metadata} ->> 'visibleInTranscript' = 'true'
                 else ${fastAgentMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
               end`,
-            ),
-          )
-          .orderBy(
-            desc(fastAgentMessages.ts),
-            desc(fastAgentMessages.turnSeq),
-            desc(fastAgentMessages.createdAt),
-          )
-          .limit(MAX_RECENT_MESSAGES)
-      : Promise.resolve([]),
-    db
-      .selectDistinctOn([tasks.id], {
-        title: tasks.title,
-        state: tasks.state,
-        payload: taskRuns.payload,
-        result: taskRuns.result,
-      })
-      .from(sessionTasks)
-      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
-      .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
-      .where(
-        and(
-          eq(sessionTasks.sessionId, sessionId),
-          isNull(tasks.deletedAt),
-          eq(tasks.visibility, 'visible'),
-        ),
-      )
-      .orderBy(tasks.id, desc(taskRuns.id))
-      .limit(MAX_TASKS),
-    db
-      .select({ id: tasks.id })
-      .from(sessionTasks)
-      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
-      .where(
-        and(
-          eq(sessionTasks.sessionId, sessionId),
-          isNull(tasks.deletedAt),
-          eq(tasks.visibility, 'visible'),
-          eq(tasks.state, 'active'),
-        ),
-      )
-      .limit(1),
-  ]);
+              ),
+            )
+            .orderBy(
+              desc(fastAgentMessages.ts),
+              desc(fastAgentMessages.turnSeq),
+              desc(fastAgentMessages.createdAt),
+            )
+            .limit(MAX_RECENT_MESSAGES)
+        : Promise.resolve([]),
+      db
+        .selectDistinctOn([tasks.id], {
+          title: tasks.title,
+          state: tasks.state,
+          payload: taskRuns.payload,
+          result: taskRuns.result,
+        })
+        .from(sessionTasks)
+        .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+        .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+        .where(
+          and(
+            eq(sessionTasks.sessionId, sessionId),
+            isNull(tasks.deletedAt),
+            eq(tasks.visibility, 'visible'),
+          ),
+        )
+        .orderBy(tasks.id, desc(taskRuns.id))
+        .limit(MAX_TASKS),
+      db
+        .select({ id: tasks.id })
+        .from(sessionTasks)
+        .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+        .where(
+          and(
+            eq(sessionTasks.sessionId, sessionId),
+            isNull(tasks.deletedAt),
+            eq(tasks.visibility, 'visible'),
+            eq(tasks.state, 'active'),
+          ),
+        )
+        .limit(1),
+      session.fastConversationId
+        ? db
+            .select({ ts: fastAgentMessages.ts })
+            .from(fastAgentMessages)
+            .where(
+              and(
+                eq(
+                  fastAgentMessages.conversationId,
+                  session.fastConversationId,
+                ),
+                eq(fastAgentMessages.role, 'user'),
+                sql`case
+                when ${fastAgentMessages.metadata} ->> 'visibleInTranscript' is not null
+                  then ${fastAgentMessages.metadata} ->> 'visibleInTranscript' = 'true'
+                else ${fastAgentMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+              end`,
+              ),
+            )
+            .orderBy(
+              desc(fastAgentMessages.ts),
+              desc(fastAgentMessages.turnSeq),
+              desc(fastAgentMessages.createdAt),
+            )
+            .limit(1)
+        : Promise.resolve([]),
+    ]);
 
   const recentMessages = messages.reverse().flatMap((message) => {
     const text = visibleMessageText(message.contentBlocks);
@@ -193,7 +257,16 @@ async function loadJudgmentState(sessionId: string): Promise<{
     request: taskRequest(task.payload),
     result: taskResult(task.result),
   }));
+  const evaluationTime = new Date().toISOString();
+  const latestVisibleUserMessageAt = latestVisibleUserMessageRows[0]?.ts
+    ? new Date(latestVisibleUserMessageRows[0].ts).toISOString()
+    : null;
   const state: JudgmentState = {
+    evaluationTime,
+    latestVisibleUserMessageAt,
+    // The current develop baseline has no persisted manual-status contract;
+    // keep the model-state slot explicit for the separate status source.
+    manualStatusChangedAt: session.manualStatusSetAt?.toISOString() ?? null,
     objective:
       boundedText(session.goalObjective, 1_500) ??
       boundedText(session.title, 500) ??
@@ -271,6 +344,7 @@ export async function processSessionStatusJudgmentBatch(
   const requests = await claimSessionStatusJudgmentRequests(db, limit);
   for (const request of requests) {
     try {
+      await clearManualStatusAfterNewerUserMessage(db, request.sessionId);
       const snapshot = await loadJudgmentState(request.sessionId);
       if (!snapshot) {
         await completeSessionStatusJudgment(db, {
@@ -279,6 +353,41 @@ export async function processSessionStatusJudgmentBatch(
           generation: request.generation,
           state: 'ignored',
           errorCode: 'session_missing',
+        });
+        continue;
+      }
+
+      const precedence = resolveSessionStatusJudgmentPrecedence({
+        evaluationTime: snapshot.state.evaluationTime,
+        latestVisibleUserMessageAt: snapshot.state.latestVisibleUserMessageAt,
+        manualStatusChangedAt: snapshot.state.manualStatusChangedAt,
+      });
+      if (precedence === 'manual') {
+        await completeSessionStatusJudgment(db, {
+          id: request.id,
+          sessionId: request.sessionId,
+          generation: request.generation,
+          state: 'ignored',
+          errorCode: 'manual_status',
+        });
+        continue;
+      }
+
+      const liveTurn =
+        snapshot.respondingUntil !== null &&
+        snapshot.respondingUntil.getTime() > Date.now();
+      const goalStillActive = snapshot.state.goalStatus === 'active';
+      if (precedence === 'inactivity') {
+        const liveWork = liveTurn || snapshot.hasActiveTask || goalStillActive;
+        await completeSessionStatusJudgment(db, {
+          id: request.id,
+          sessionId: request.sessionId,
+          generation: request.generation,
+          state: liveWork ? 'ignored' : 'applied',
+          outcome: 'done',
+          confidence: 1,
+          probabilities: { done: 1 },
+          errorCode: liveWork ? 'live_work' : undefined,
         });
         continue;
       }
@@ -314,16 +423,12 @@ export async function processSessionStatusJudgmentBatch(
         continue;
       }
 
-      const liveTurn =
-        snapshot.respondingUntil !== null &&
-        snapshot.respondingUntil.getTime() > Date.now();
-      const goalStillActive = snapshot.state.goalStatus === 'active';
       if (
         decision.outcome === 'done' &&
         (liveTurn ||
           snapshot.hasActiveTask ||
-          snapshot.pendingUserInput ||
-          goalStillActive)
+          goalStillActive ||
+          snapshot.pendingUserInput)
       ) {
         await completeSessionStatusJudgment(db, {
           id: request.id,
