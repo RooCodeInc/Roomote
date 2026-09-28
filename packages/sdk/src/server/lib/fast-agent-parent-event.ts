@@ -3387,7 +3387,6 @@ export async function deliverFastAgentParentEventWithLock(
         humanFollowUp?.platformEventVisibility ??
         (params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected' ||
-        params.event.type === 'automation_triggered' ||
         params.event.type === 'task_turn_provider_error' ||
         (params.event.type === 'task_settled' &&
           params.parent.conversation.surface === 'web' &&
