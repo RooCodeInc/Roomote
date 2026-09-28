@@ -106,6 +106,12 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
+vi.mock('../../commands/utils/scrub-sandbox-secrets', () => ({
+  scrubSandboxSecretsBeforeSnapshot: vi
+    .fn()
+    .mockResolvedValue({ failedSteps: [] }),
+}));
+
 vi.mock('@roomote/cloud-agents', () => ({
   FAST_ONLY_PACKAGED_SKILL_INVOCATIONS: ['doctor'],
   PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS: ['implement-changes'],

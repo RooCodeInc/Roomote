@@ -125,6 +125,12 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
+vi.mock('../../commands/utils/scrub-sandbox-secrets', () => ({
+  scrubSandboxSecretsBeforeSnapshot: vi
+    .fn()
+    .mockResolvedValue({ failedSteps: [] }),
+}));
+
 vi.mock('../../mcp/roomote-mcp-server/chat-reply-satisfaction', () => ({
   recordChatTurnStart: recordChatTurnStartMock,
 }));
