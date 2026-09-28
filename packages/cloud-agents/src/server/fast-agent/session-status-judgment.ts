@@ -143,6 +143,7 @@ async function loadJudgmentState(sessionId: string): Promise<{
     .select({
       title: sessions.title,
       fastConversationId: sessions.fastConversationId,
+      manualStatusSetAt: sessions.manualStatusSetAt,
       respondingUntil: sessions.respondingUntil,
       goalObjective: sessionGoals.objective,
       goalStatus: sessionGoals.status,
@@ -264,7 +265,7 @@ async function loadJudgmentState(sessionId: string): Promise<{
     latestVisibleUserMessageAt,
     // The current develop baseline has no persisted manual-status contract;
     // keep the model-state slot explicit for the separate status source.
-    manualStatusChangedAt: null,
+    manualStatusChangedAt: session.manualStatusSetAt?.toISOString() ?? null,
     objective:
       boundedText(session.goalObjective, 1_500) ??
       boundedText(session.title, 500) ??

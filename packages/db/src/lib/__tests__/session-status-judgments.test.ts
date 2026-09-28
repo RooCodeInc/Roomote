@@ -1,5 +1,6 @@
 import {
   claimSessionStatusJudgmentRequests,
+  clearManualStatusAfterNewerUserMessage,
   completeSessionStatusJudgment,
   createSessionStatusJudgmentRequest,
   db,
@@ -199,6 +200,56 @@ describe('Session status judgment requests', () => {
       sourceEventId: `inactivity-due:${latestVisibleUserTs + 4 * 24 * 60 * 60 * 1_000}`,
       sourceKind: 'fast_turn',
       state: 'pending',
+    });
+  });
+
+  it('clears a manual status when a newer visible user message exists', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    conversationIds.push(conversation!.id);
+    const manualStatusSetAt = new Date(Date.now() - 60_000);
+    const session = await sessionFactory.create({
+      fastConversationId: conversation!.id,
+      cachedStatus: 'blocked',
+      manualStatus: 'blocked',
+      manualStatusSetAt,
+    });
+    sessionIds.push(session.id);
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'manual-status-newer-user',
+      turnId: 'manual-status-newer-turn',
+      turnSeq: 1,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'Continue automatically.' }],
+      metadata: { visibleInTranscript: true, userId: user.id },
+    });
+
+    await clearManualStatusAfterNewerUserMessage(db, session.id);
+
+    const [updated] = await db
+      .select({
+        cachedStatus: sessions.cachedStatus,
+        manualStatus: sessions.manualStatus,
+        manualStatusSetAt: sessions.manualStatusSetAt,
+      })
+      .from(sessions)
+      .where(eq(sessions.id, session.id));
+    expect(updated).toEqual({
+      cachedStatus: null,
+      manualStatus: null,
+      manualStatusSetAt: null,
     });
   });
 

@@ -7,5 +7,6 @@ export default defineConfig({
     environment: 'node',
     globalSetup: './vitest.setup.server.ts',
     reporters: ['dot'],
+    fileParallelism: false,
   },
 });

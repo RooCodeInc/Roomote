@@ -4488,6 +4488,7 @@ export const sessions = pgTable(
     // Optional user-selected status. When present, runtime reconciliation
     // preserves it while cached_status remains the effective Session status.
     manualStatus: text('manual_status').$type<SessionStatus>(),
+    manualStatusSetAt: timestamp('manual_status_set_at'),
     inactivityDueAt: timestamp('inactivity_due_at'),
     // Fast-conversation responding lease: while this is in the future, status
     // recomputation treats the conversation as actively responding. TTL-based

@@ -51,6 +51,37 @@ export async function refreshSessionInactivityDueAt(
   `);
 }
 
+/** Release a manual status once a newer visible user message exists. */
+export async function clearManualStatusAfterNewerUserMessage(
+  database: DatabaseOrTransaction,
+  sessionId: string,
+): Promise<void> {
+  await database.execute(sql`
+    UPDATE sessions AS session
+    SET manual_status = NULL,
+        manual_status_set_at = NULL,
+        cached_status = NULL,
+        updated_at = now()
+    WHERE session.id = ${sessionId}
+      AND session.manual_status IS NOT NULL
+      AND session.manual_status_set_at IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM fast_agent_messages AS fam
+        WHERE fam.conversation_id = session.fast_conversation_id
+          AND fam.role = 'user'
+          AND to_timestamp(fam.ts / 1000.0) > session.manual_status_set_at
+          AND (
+            fam.metadata ->> 'visibleInTranscript' = 'true'
+            OR (
+              fam.metadata ->> 'visibleInTranscript' IS NULL
+              AND fam.event_type <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+            )
+          )
+      )
+  `);
+}
+
 /**
  * Queue one fresh judgment when the latest visible user message has crossed
  * the inactivity boundary. The source event is timestamped so repeated
@@ -176,6 +207,7 @@ export async function settleSessionStatusJudgmentTurn(
   database: DatabaseOrTransaction,
   input: { sessionId: string; sourceEventId: string; visible: boolean },
 ): Promise<void> {
+  await clearManualStatusAfterNewerUserMessage(database, input.sessionId);
   await refreshSessionInactivityDueAt(database, input.sessionId);
   if (
     !(await isDeploymentExperimentEnabled('sessionStatusJudgment', database))

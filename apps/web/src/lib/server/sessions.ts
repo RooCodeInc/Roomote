@@ -547,6 +547,8 @@ const baseSelection = {
   activityAt: sessions.activityAt,
   cachedStatus: sessions.cachedStatus,
   manualStatus: sessions.manualStatus,
+  manualStatusSetAt: sessions.manualStatusSetAt,
+  inactivityDueAt: sessions.inactivityDueAt,
   respondingUntil: sessions.respondingUntil,
   archivedAt: sessions.archivedAt,
   createdAt: sessions.createdAt,
@@ -1353,7 +1355,11 @@ export async function updateSessionMetadata(
         ...changes,
         ...(changes.manualStatus === undefined
           ? {}
-          : { cachedStatus: changes.manualStatus }),
+          : {
+              cachedStatus: changes.manualStatus,
+              manualStatusSetAt:
+                changes.manualStatus === null ? null : updatedAt,
+            }),
         ...(changes.title === undefined
           ? {}
           : { titleEditedByUserAt: updatedAt }),
