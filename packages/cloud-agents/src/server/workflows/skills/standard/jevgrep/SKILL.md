@@ -18,6 +18,14 @@ limits the search. Use direct reads or `rg` for known paths and exact symbols.
 Read returned excerpts before doing more discovery; avoid repeating searches
 when you already have the context needed to make the change.
 
+Start with the smallest plausible package or folder. Repository-wide searches
+can take several minutes, and the CLI prints results only when retrieval
+finishes. Use the shell tool's longer timeout or background execution and poll
+the same process. If a search times out, check whether it is still running
+before retrying; avoid leaving duplicate searches consuming sandbox resources.
+Run `jg doctor` to distinguish connectivity failures from a slow search, then
+narrow the root when possible.
+
 The summary and ranked files precede verbatim source excerpts with line
 references. Paths without excerpts are reading leads. Output ends with
 `End context.`; retrieve the remaining shell output if it is truncated. Results

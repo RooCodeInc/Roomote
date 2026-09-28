@@ -12,6 +12,29 @@ import { resolveNpmInstallCommand } from '../commands/setup/npm-install-command'
 
 const JEVGREP_VERSION = '0.4.1';
 
+/** Share task-scoped CLI access without exposing the rest of the harness env. */
+export function buildJevgrepTerminalEnv(
+  userEnv: Record<string, string>,
+  runtimeEnv: Record<string, string>,
+  homeDir: string,
+): Record<string, string> {
+  if (!runtimeEnv.R_JEVGREP_GATEWAY_URL) return userEnv;
+  const env = { ...userEnv };
+  for (const key of [
+    'R_JEVGREP_GATEWAY_URL',
+    'ROOMOTE_CLOUD_TOKEN',
+    'ROOMOTE_AUTH_BYPASS_HEADER_NAME',
+    'ROOMOTE_AUTH_BYPASS_VALUE',
+  ]) {
+    delete env[key];
+    if (runtimeEnv[key]) env[key] = runtimeEnv[key];
+  }
+  env.PATH = [path.join(homeDir, '.roomote/jevgrep/bin'), userEnv.PATH]
+    .filter(Boolean)
+    .join(path.delimiter);
+  return env;
+}
+
 /** This adapter runs only inside jg, never in the worker or other task tools.
  * Upstream has no endpoint override. Its saved key is a dummy value; only the
  * exact TypeSafe evaluation endpoint is replaced with our run-authenticated

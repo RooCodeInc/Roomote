@@ -1,4 +1,5 @@
-vi.mock('../jevgrep', () => ({
+vi.mock('../jevgrep', async (original) => ({
+  ...(await original<typeof import('../jevgrep')>()),
   setupJevgrep: vi.fn().mockResolvedValue(false),
 }));
 
@@ -83,9 +84,11 @@ const {
     taskFinishedAt: undefined,
     taskAbortedAt: undefined,
   })),
-  createServerMock: vi.fn(() => ({
-    close: vi.fn().mockResolvedValue(undefined),
-  })),
+  createServerMock: vi.fn(
+    (_options: { userEnv: () => Record<string, string> }) => ({
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  ),
   drainSlackMessagesMock: vi
     .fn()
     .mockResolvedValue({ resumed: false, reason: 'no_pending_messages' }),
@@ -309,6 +312,7 @@ import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import { resolveWorkerReleaseMetadata } from '../../monitoring/worker-release-metadata';
 import type { HarnessManagerCallbacks } from '../../sandbox-server/lib/harness-manager';
 import { getDefaultKeepaliveMs } from '../completion';
+import { setupJevgrep } from '../jevgrep';
 import { runTask } from '../run-task';
 import type { EnvironmentSetupSettledOutcome } from '../types';
 
@@ -653,6 +657,10 @@ describe('runTask', () => {
   });
 
   it('always enables the terminal runtime env and sandbox server', async () => {
+    vi.mocked(setupJevgrep).mockImplementationOnce(async ({ runtimeEnv }) => {
+      runtimeEnv.R_JEVGREP_GATEWAY_URL = 'https://api.example.test/jevgrep';
+      return true;
+    });
     await runTask({
       taskRun: {
         id: 110,
@@ -700,6 +708,14 @@ describe('runTask', () => {
         allowTerminal: true,
       }),
     );
+    const terminalEnv = createServerMock.mock.calls.at(-1)?.[0].userEnv();
+    expect(terminalEnv).toEqual(
+      expect.objectContaining({
+        R_JEVGREP_GATEWAY_URL: 'https://api.example.test/jevgrep',
+        ROOMOTE_CLOUD_TOKEN: 'cloud-token',
+      }),
+    );
+    expect(terminalEnv?.PATH).toContain('/.roomote/jevgrep/bin:');
   });
 
   it('keeps the task terminal enabled while clearing only reserved reply context env vars', async () => {

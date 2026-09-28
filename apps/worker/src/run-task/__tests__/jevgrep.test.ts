@@ -20,7 +20,7 @@ vi.mock('../../commands/setup/npm-install-command', () => ({
   resolveNpmInstallCommand: async () => ({ command: 'npm', argsPrefix: [] }),
 }));
 
-import { setupJevgrep } from '../jevgrep';
+import { buildJevgrepTerminalEnv, setupJevgrep } from '../jevgrep';
 
 let homeDir: string;
 let runtimeEnv: Record<string, string>;
@@ -85,11 +85,17 @@ it('installs and routes the CLI through the gateway with run auth and auth bypas
   };`,
   );
   const result = JSON.parse(
-    execFileSync(path.join(root, 'bin/jg'), ['question'], {
+    execFileSync('/bin/bash', ['-c', 'exec jg question'], {
       env: {
-        ...runtimeEnv,
+        ...buildJevgrepTerminalEnv(
+          { PATH: '/usr/bin' },
+          {
+            ...runtimeEnv,
+            ROOMOTE_AUTH_BYPASS_VALUE: 'bypass',
+          },
+          homeDir,
+        ),
         NODE_OPTIONS: `--import ${JSON.stringify(bootstrap)}`,
-        ROOMOTE_AUTH_BYPASS_VALUE: 'bypass',
       },
       encoding: 'utf8',
     }),
@@ -103,6 +109,31 @@ it('installs and routes the CLI through the gateway with run auth and auth bypas
   expect(result.redirect).toBe('error');
   expect(await setup()).toBe(true);
   expect(mocks.install).toHaveBeenCalledTimes(1);
+});
+
+it('shares only Jevgrep access with terminals and preserves fresh user env', () => {
+  const base = { PATH: '/usr/bin', PROJECT_SETTING: 'updated' };
+  expect(buildJevgrepTerminalEnv(base, {}, homeDir)).toBe(base);
+  const env = buildJevgrepTerminalEnv(
+    base,
+    {
+      R_JEVGREP_GATEWAY_URL:
+        'https://roomote.example/api/inference/jevgrep/v1/systemone',
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_AUTH_BYPASS_VALUE: 'bypass',
+      WORKER_PRIVATE_KEY: 'private',
+      PATH: '/harness-only',
+    },
+    homeDir,
+  );
+  expect(env).toEqual({
+    ...base,
+    PATH: `${homeDir}/.roomote/jevgrep/bin:/usr/bin`,
+    R_JEVGREP_GATEWAY_URL:
+      'https://roomote.example/api/inference/jevgrep/v1/systemone',
+    ROOMOTE_CLOUD_TOKEN: 'run-token',
+    ROOMOTE_AUTH_BYPASS_VALUE: 'bypass',
+  });
 });
 
 it('removes stale setup and does not install when Jev is disabled', async () => {

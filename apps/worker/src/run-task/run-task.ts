@@ -84,7 +84,7 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { installZeroCli } from '../commands/setup/agent-clis';
-import { setupJevgrep } from './jevgrep';
+import { buildJevgrepTerminalEnv, setupJevgrep } from './jevgrep';
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
@@ -2243,7 +2243,12 @@ export const runTask = async ({
       port: SANDBOX_SERVER_PORT,
       workingDirectory: workspacePath,
       harnessLogger: logger,
-      userEnv: () => workerEnv.buildUserFacingEnv(),
+      userEnv: () =>
+        buildJevgrepTerminalEnv(
+          workerEnv.buildUserFacingEnv(),
+          runtimeEnv,
+          homeDir,
+        ),
       harness,
       harnessManager,
       runId: taskRun.id,
