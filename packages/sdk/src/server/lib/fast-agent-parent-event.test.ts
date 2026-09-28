@@ -1951,6 +1951,51 @@ describe('deliverFastAgentParentEvent', () => {
     },
   );
 
+  it('materializes a deferred automation root before delegated work launches', async () => {
+    const postKickoff = vi.fn().mockResolvedValue(undefined);
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+      await adapter.launchTask({
+        prompt: 'Investigate the regression.',
+        environmentId: null,
+        model: null,
+        parentSessionId: parent.sessionId,
+        postKickoff,
+      });
+    });
+
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'discord-deferred-launch',
+          replyTarget: { channelId: 'channel-1' },
+        },
+      },
+      event: {
+        type: 'automation_triggered',
+        eventId: 'discord-deferred-launch',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find actionable regressions.',
+        targetKind: 'discord_channel',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.createDiscordThread).toHaveBeenNthCalledWith(1, {
+      channelId: 'channel-1',
+      name: 'Weekly scan',
+      initialText: 'Weekly scan is running.',
+    });
+    expect(mocks.enqueueTask).toHaveBeenCalledOnce();
+    expect(postKickoff).toHaveBeenCalledWith({
+      taskId: 'child-task-1',
+      taskUrl: 'https://roomote.example/task/child-task-1',
+    });
+  });
+
   it('creates the delayed Slack root for a meaningful artifact closeout', async () => {
     const pendingParent = {
       sessionId: parent.sessionId,

@@ -3257,6 +3257,16 @@ export async function deliverFastAgentParentEventWithLock(
         ...parentTurn,
         adapter: {
           ...baseAdapter,
+          launchTask: async (input) => {
+            if (
+              reportEvent.type === 'automation_triggered' &&
+              reportEvent.targetKind &&
+              !reportEvent.rootMessageId
+            ) {
+              await baseAdapter.prepareAutomationLaunch?.();
+            }
+            return baseAdapter.launchTask(input);
+          },
           postReply: async (reply) => {
             if (reply.kickoff) return;
             if (
