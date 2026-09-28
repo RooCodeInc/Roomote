@@ -183,6 +183,16 @@ function destinationSummary(
   const providerLabel =
     DESTINATION_OPTIONS.find((option) => option.value === form.targetProvider)
       ?.label ?? form.targetProvider;
+  if (form.targetProvider === 'email') {
+    const identity = emailOptions.find(
+      (option) => option.id === form.targetChannelId,
+    );
+    const identityLabel =
+      identity?.name === 'Email'
+        ? identity.label
+        : (identity?.name ?? identity?.label ?? 'Email address');
+    return `${providerLabel} ${identityLabel}`;
+  }
   if (form.targetMode === 'direct_message') {
     return `${providerLabel} DM me`;
   }
@@ -192,9 +202,7 @@ function destinationSummary(
       ? slackOptions
       : form.targetProvider === 'discord'
         ? discordOptions
-        : form.targetProvider === 'email'
-          ? emailOptions
-          : [];
+        : [];
   const targetLabel = options.find(
     (option) => option.id === form.targetChannelId,
   )?.label;
@@ -1016,6 +1024,7 @@ export function CustomAutomationsSection({
 
     if (!form.environmentId) {
       const environmentError = 'Choose an environment.';
+      setEditingField('environment');
       setFieldErrors((current) => ({
         ...current,
         environment: environmentError,
@@ -1026,6 +1035,7 @@ export function CustomAutomationsSection({
       return;
     }
     if (form.scheduleMode === 'cron' && !effectiveResolvedCron) {
+      setEditingField('schedule');
       setFieldErrors((current) => ({
         ...current,
         schedule:
@@ -1295,7 +1305,20 @@ export function CustomAutomationsSection({
                 variant="link"
                 size="sm"
                 className="h-auto p-0"
-                onClick={() => setEditingField(null)}
+                onClick={() => {
+                  if (fieldErrors.schedule || !effectiveResolvedCron) {
+                    setFieldErrors((current) => ({
+                      ...current,
+                      schedule:
+                        current.schedule ??
+                        (resolveScheduleMutation.isPending
+                          ? 'Still interpreting the schedule, try again in a moment.'
+                          : 'Enter a valid schedule first.'),
+                    }));
+                    return;
+                  }
+                  setEditingField(null);
+                }}
               >
                 Done
               </Button>
@@ -1511,7 +1534,7 @@ export function CustomAutomationsSection({
               form,
               slackOptions,
               discordOptions,
-              emailOptions,
+              visibleEmailOptions,
             )}
             onEdit={() => setEditingField('destination')}
           />

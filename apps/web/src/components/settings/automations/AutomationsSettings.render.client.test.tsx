@@ -1748,6 +1748,51 @@ describe('AutomationsSettings', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('reopens a collapsed invalid custom schedule when saving', async () => {
+    setRunnableCustomAutomation();
+    state.customAutomations[0]!.scheduleMode = 'cron';
+    state.customAutomations[0]!.cronExpression = null;
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Daily scan' }),
+    );
+    mutations.updateSettings.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('textbox', { name: 'Custom schedule' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Enter a valid schedule first.')).toHaveAttribute(
+      'role',
+      'alert',
+    );
+  });
+
+  it('reopens the environment editor when the saved environment is deleted', async () => {
+    setRunnableCustomAutomation();
+    state.customAutomations[0]!.environmentId = null as never;
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Daily scan' }),
+    );
+    mutations.updateSettings.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('combobox', { name: 'Environment' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Choose an environment.')).toHaveAttribute(
+      'role',
+      'alert',
+    );
+  });
+
   it('disables a scheduled automation directly', async () => {
     state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
     render(<AutomationsSettings />);
@@ -2951,5 +2996,49 @@ describe('AutomationsSettings', () => {
         name: 'Group suggestions and post them in different channels',
       }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows the selected Email identity in the collapsed destination summary', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-email-summary',
+        name: 'Weekly Email summary',
+        prompt: 'Summarize the week.',
+        enabled: true,
+        scheduleMode: 'weekly',
+        cronExpression: null,
+        model: null,
+        environmentId: '__fast__',
+        target: {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: 'user-admin',
+          metadata: { emailIdentityId: 'verified:user-admin:account' },
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Weekly Email summary',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog', {
+      name: 'Edit custom automation',
+    });
+    expect(
+      within(dialog).getByText('Email admin@example.com'),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText('Email DM me')).not.toBeInTheDocument();
   });
 });
