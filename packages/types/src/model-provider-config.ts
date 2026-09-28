@@ -657,7 +657,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           codeReview: {
-            modelId: 'openrouter/anthropic/claude-sonnet-5',
+            modelId: 'openrouter/anthropic/claude-sonnet-5.5',
             reasoningEffort: 'medium',
           },
           explore: {
@@ -683,7 +683,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           codeReview: {
-            modelId: 'openrouter/anthropic/claude-sonnet-5',
+            modelId: 'openrouter/anthropic/claude-sonnet-5.5',
             reasoningEffort: 'medium',
           },
           explore: {
@@ -710,7 +710,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-fable-5': 'vercel/anthropic/claude-fable-5',
       'claude-haiku-4-5': 'vercel/anthropic/claude-haiku-4.5',
       'claude-opus-5-5': 'vercel/anthropic/claude-opus-5.5',
-      'claude-sonnet-5': 'vercel/anthropic/claude-sonnet-5',
+      'claude-sonnet-5-5': 'vercel/anthropic/claude-sonnet-5.5',
       'gpt-6-astra': 'vercel/openai/gpt-6-astra',
       'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-6-sol': 'vercel/openai/gpt-6-sol',
@@ -733,7 +733,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       recommendedCodingModelId: 'vercel/openai/gpt-5.6-terra',
       recommendedRoleModels: {
         helper: 'vercel/google/gemini-3.8-flash',
-        codeReview: 'vercel/anthropic/claude-sonnet-5',
+        codeReview: 'vercel/anthropic/claude-sonnet-5.5',
         explore: 'vercel/google/gemini-3.8-flash',
         planning: 'vercel/anthropic/claude-opus-5.5',
       },
@@ -752,7 +752,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-fable-5': 'requesty/claude-fable-5',
       'claude-haiku-4-5': 'requesty/claude-haiku-4-5',
       'claude-opus-5-5': 'requesty/anthropic/claude-opus-5-5',
-      'claude-sonnet-5': 'requesty/claude-sonnet-5',
+      'claude-sonnet-5-5': 'requesty/anthropic/claude-sonnet-5-5',
       'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
       'gpt-6-sol': 'requesty/gpt-6-sol@eu',
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
@@ -766,10 +766,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
     recommendedPresets: buildDefaultAndRecommendedModelPresets({
       defaultModelId: 'requesty/gpt-5.6-luna@eu',
-      recommendedCodingModelId: 'requesty/claude-sonnet-5',
+      recommendedCodingModelId: 'requesty/anthropic/claude-sonnet-5-5',
       recommendedRoleModels: {
         helper: 'requesty/gemini-3.8-flash',
-        codeReview: 'requesty/claude-sonnet-5',
+        codeReview: 'requesty/anthropic/claude-sonnet-5-5',
         explore: 'requesty/gemini-3.8-flash',
         planning: 'requesty/anthropic/claude-opus-5-5',
       },
@@ -872,6 +872,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-luna': 'azure/gpt-5.6-luna',
       'gpt-6-luna': 'azure/gpt-6-luna',
       'claude-opus-5-5': 'azure/claude-opus-5-5',
+      'claude-sonnet-5-5': 'azure/claude-sonnet-5-5',
     }),
     recommendedPresets: buildDefaultAndRecommendedModelPresets({
       defaultModelId: 'azure/gpt-5.6-luna',
@@ -911,6 +912,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-luna': 'azure-cognitive-services/gpt-5.6-luna',
       'gpt-6-luna': 'azure-cognitive-services/gpt-6-luna',
       'claude-opus-5-5': 'azure-cognitive-services/claude-opus-5-5',
+      'claude-sonnet-5-5': 'azure-cognitive-services/claude-sonnet-5-5',
     }),
     recommendedPresets: buildDefaultAndRecommendedModelPresets({
       defaultModelId: 'azure-cognitive-services/gpt-5.6-luna',
@@ -927,18 +929,18 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'anthropic',
     label: 'Anthropic',
     envVarName: 'ANTHROPIC_API_KEY',
-    defaultRoomoteModel: 'anthropic/claude-sonnet-5',
+    defaultRoomoteModel: 'anthropic/claude-sonnet-5-5',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5-1': 'anthropic/claude-fable-5-1',
       'claude-fable-5': 'anthropic/claude-fable-5',
       'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
       'claude-opus-5-5': 'anthropic/claude-opus-5-5',
-      'claude-sonnet-5': 'anthropic/claude-sonnet-5',
+      'claude-sonnet-5-5': 'anthropic/claude-sonnet-5-5',
     }),
     recommendedRoleModels: {
       helper: 'anthropic/claude-haiku-4-5',
-      codeReview: 'anthropic/claude-sonnet-5',
+      codeReview: 'anthropic/claude-sonnet-5-5',
       explore: 'anthropic/claude-haiku-4-5',
       planning: 'anthropic/claude-opus-5-5',
     },
@@ -1014,7 +1016,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-fable-5': 'opencode/claude-fable-5',
       'claude-haiku-4-5': 'opencode/claude-haiku-4-5',
       'claude-opus-5-5': 'opencode/claude-opus-5-5',
-      'claude-sonnet-5': 'opencode/claude-sonnet-5',
+      'claude-sonnet-5-5': 'opencode/claude-sonnet-5-5',
       'gpt-6-astra': 'opencode/gpt-6-astra',
       'gpt-5-6-sol': 'opencode/gpt-5.6-sol',
       'gpt-6-sol': 'opencode/gpt-6-sol',
@@ -1034,8 +1036,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       recommendedCodingModelId: 'opencode/big-pickle',
       recommendedRoleModels: {
         helper: 'opencode/gemini-3.8-flash',
-        vision: 'opencode/claude-sonnet-5',
-        codeReview: 'opencode/claude-sonnet-5',
+        vision: 'opencode/claude-sonnet-5-5',
+        codeReview: 'opencode/claude-sonnet-5-5',
         explore: 'opencode/gemini-3.8-flash',
         planning: 'opencode/claude-opus-5-5',
       },
@@ -1109,7 +1111,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-fable-5': 'bedrock-mantle/anthropic.claude-fable-5',
       'claude-haiku-4-5': 'bedrock-mantle/anthropic.claude-haiku-4-5',
       'claude-opus-5-5': 'bedrock-mantle/anthropic.claude-opus-5-5',
-      'claude-sonnet-5': 'bedrock-mantle/anthropic.claude-sonnet-5',
+      'claude-sonnet-5-5': 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       'gpt-5-6-sol': 'bedrock-mantle/openai.gpt-5.6-sol',
       'gpt-6-sol': 'bedrock-mantle/openai.gpt-6-sol',
       'gpt-5-6-terra': 'bedrock-mantle/openai.gpt-5.6-terra',
@@ -1118,10 +1120,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
     recommendedPresets: buildDefaultAndRecommendedModelPresets({
       defaultModelId: 'bedrock-mantle/openai.gpt-5.6-luna',
-      recommendedCodingModelId: 'bedrock-mantle/anthropic.claude-sonnet-5',
+      recommendedCodingModelId:
+        'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       recommendedRoleModels: {
         helper: 'bedrock-mantle/anthropic.claude-haiku-4-5',
-        codeReview: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        codeReview: 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
         explore: 'bedrock-mantle/anthropic.claude-haiku-4-5',
         planning: 'bedrock-mantle/anthropic.claude-opus-5-5',
       },
@@ -1234,7 +1237,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-fable-5': 'github-copilot/claude-fable-5',
       'claude-haiku-4-5': 'github-copilot/claude-haiku-4.5',
       'claude-opus-5-5': 'github-copilot/claude-opus-5.5',
-      'claude-sonnet-5': 'github-copilot/claude-sonnet-5',
       'gpt-6-astra': 'github-copilot/gpt-6-astra',
       'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
       'gpt-6-sol': 'github-copilot/gpt-6-sol',
