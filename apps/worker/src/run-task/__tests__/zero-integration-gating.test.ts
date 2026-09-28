@@ -95,10 +95,21 @@ const {
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('node:fs', () => ({
-  existsSync: existsSyncMock,
-  mkdirSync: mkdirSyncMock,
-  writeFileSync: writeFileSyncMock,
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+
+  return {
+    ...actual,
+    existsSync: existsSyncMock,
+    mkdirSync: mkdirSyncMock,
+    writeFileSync: writeFileSyncMock,
+  };
+});
+
+vi.mock('../../commands/utils/scrub-sandbox-secrets', () => ({
+  scrubSandboxSecretsBeforeSnapshot: vi
+    .fn()
+    .mockResolvedValue({ failedSteps: [] }),
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({

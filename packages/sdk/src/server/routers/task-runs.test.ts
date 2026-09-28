@@ -2,8 +2,14 @@ const jevgrepMocks = vi.hoisted(() => ({
   experiment: vi.fn(),
   backend: vi.fn(),
 }));
+const judgeFileMocks = vi.hoisted(() => ({
+  evaluate: vi.fn(),
+}));
 vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
   resolveJudgmentBackend: jevgrepMocks.backend,
+}));
+vi.mock('@roomote/cloud-agents/server/judge-file', () => ({
+  evaluateJudgeFileCriteria: judgeFileMocks.evaluate,
 }));
 vi.mock('@roomote/db/server', async (original) => ({
   ...(await original<typeof import('@roomote/db/server')>()),
@@ -250,6 +256,46 @@ describe('taskRunsRouter queue message guards', () => {
     jevgrepMocks.experiment.mockResolvedValue(false);
     expect(await createRunCaller().isJevgrepEnabled({ runId: 42 })).toBe(false);
     expect(jevgrepMocks.backend).not.toHaveBeenCalled();
+  });
+
+  it('evaluates repository judge criteria through the run-token procedure', async () => {
+    judgeFileMocks.evaluate.mockResolvedValue([
+      {
+        id: 'criterion_0',
+        outcome: 'rewrite',
+        confidence: 0.94,
+        probabilities: { pass: 0.02, rewrite: 0.94, unclear: 0.04 },
+      },
+    ]);
+
+    await expect(
+      createRunCaller().evaluateJudgeFileCriteria({
+        runId: 42,
+        state: {
+          path: 'Example.tsx',
+          patch: '+changed',
+          patchTruncated: false,
+          finalContent: 'changed',
+          finalContentTruncated: false,
+        },
+        criteria: [{ id: 'criterion_0', rule: 'Use sentence case.' }],
+      }),
+    ).resolves.toEqual({
+      kind: 'answered',
+      evaluations: [
+        {
+          id: 'criterion_0',
+          outcome: 'rewrite',
+          confidence: 0.94,
+          probabilities: { pass: 0.02, rewrite: 0.94, unclear: 0.04 },
+        },
+      ],
+    });
+    expect(judgeFileMocks.evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({ path: 'Example.tsx' }),
+      }),
+    );
   });
 
   it('strips actingUserId from run-token update input (confused-deputy guard)', async () => {

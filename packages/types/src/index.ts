@@ -62,6 +62,7 @@ export * from './catalog-provider-credentials';
 export * from './kimi-for-coding-opencode-provider';
 export * from './inference-gateway';
 export * from './judgment-model';
+export * from './judge-policy';
 export * from './sandbox-preview-inference';
 export * from './inference-provider-retry';
 export * from './inference-credits-exhaustion';
