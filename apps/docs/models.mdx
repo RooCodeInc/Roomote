@@ -351,6 +351,10 @@ Jev provider. If setup or evaluation is unavailable, the agent can use ordinary
 code search. Jevgrep is currently available with the three Jev routes above;
 selecting **Off** or the **Roomote judgment model** disables it for new task runs.
 Turning off the experiment also stops new evaluations from existing tasks.
+The agent, including OpenCode's explore subagent, is instructed to make at most
+one narrowly scoped attempt during task discovery, stop after 30 seconds, and
+fall back to ordinary search. Exact symbols and known paths use ordinary search
+directly. Jevgrep evaluations do not use the Roomote shadow evaluator.
 
 The **Roomote judgment model** is an open-weight model served on
 Roomote-operated infrastructure, where its decision text is processed. It

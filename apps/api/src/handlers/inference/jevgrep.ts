@@ -40,6 +40,7 @@ export async function evaluateJevgrepRequest(body: unknown): Promise<Response> {
       questions: parsed.data.questions,
       excludeRoomoteModel: true,
       bypassBackendCache: true,
+      skipShadow: true,
       timeoutMs: 15_000,
     });
     if (!answers) {

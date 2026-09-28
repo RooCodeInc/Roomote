@@ -1001,6 +1001,8 @@ export async function evaluateTypeSafeJudgments<
   excludeRoomoteModel?: boolean;
   /** Read the current provider before sending source, ignoring the hot-path cache. */
   bypassBackendCache?: boolean;
+  /** Disable secondary evaluation for source-retrieval requests. */
+  skipShadow?: boolean;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {
   const excludeRoomoteModel = decisionModelExcludesRoomoteModel(params);
   const backend = await resolveJudgmentBackend({
@@ -1049,7 +1051,11 @@ export async function evaluateTypeSafeJudgments<
     throw error;
   }
 
-  if (backend.provider !== 'roomote' && Env.R_JUDGMENT_SHADOW === 'on') {
+  if (
+    !params.skipShadow &&
+    backend.provider !== 'roomote' &&
+    Env.R_JUDGMENT_SHADOW === 'on'
+  ) {
     void shadowRoomoteJudgment(backend.provider, requestId, params, answers);
   }
 

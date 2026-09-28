@@ -734,6 +734,7 @@ export const runTask = async ({
     logger,
     getResult: () => taskRun.result,
   };
+  let closeJevgrepProxy: (() => Promise<void>) | undefined;
 
   try {
     const harnessType = resolveWorkerCodingHarness(taskRun.harness);
@@ -954,6 +955,9 @@ export const runTask = async ({
       trpcUrl: workerEnv.trpcUrl,
       runtimeEnv,
       logger,
+      registerCleanup: (close) => {
+        closeJevgrepProxy = close;
+      },
     });
 
     // Admin opt-in for Zero: only install the CLI / activate the skill when
@@ -2582,6 +2586,7 @@ export const runTask = async ({
       : resolvedResult;
   } finally {
     activeWorkerCrashContext = null;
+    await closeJevgrepProxy?.();
   }
 };
 

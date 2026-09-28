@@ -24,6 +24,7 @@ import { buildJevgrepTerminalEnv, setupJevgrep } from '../jevgrep';
 
 let homeDir: string;
 let runtimeEnv: Record<string, string>;
+const cleanups: Array<() => Promise<void>> = [];
 const logger = { warn: vi.fn() };
 const setup = () =>
   setupJevgrep({
@@ -32,6 +33,7 @@ const setup = () =>
     runtimeEnv,
     logger,
     trpcUrl: 'https://roomote.example',
+    registerCleanup: (close) => cleanups.push(close),
   });
 
 beforeEach(() => {
@@ -64,9 +66,12 @@ beforeEach(() => {
     );
   });
 });
-afterEach(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((close) => close()));
+  fs.rmSync(homeDir, { recursive: true, force: true });
+});
 
-it('installs and routes the CLI through the gateway with run auth and auth bypass', async () => {
+it('installs and routes the CLI through the local proxy without run credentials', async () => {
   expect(await setup()).toBe(true);
   expect(mocks.enabled).toHaveBeenCalledWith({ runId: 42 });
   expect(mocks.install.mock.calls[0]?.[1]).toContain('@dzhng/jevgrep@0.4.3');
@@ -88,7 +93,7 @@ it('installs and routes the CLI through the gateway with run auth and auth bypas
     execFileSync('/bin/bash', ['-c', 'exec jg question'], {
       env: {
         ...buildJevgrepTerminalEnv(
-          { PATH: '/usr/bin' },
+          { PATH: '/usr/bin:/bin' },
           {
             ...runtimeEnv,
             ROOMOTE_AUTH_BYPASS_VALUE: 'bypass',
@@ -100,11 +105,10 @@ it('installs and routes the CLI through the gateway with run auth and auth bypas
       encoding: 'utf8',
     }),
   );
-  expect(result.url).toBe(
-    'https://roomote.example/api/inference/jevgrep/v1/systemone',
-  );
-  expect(result.headers.authorization).toBe('Bearer run-token');
-  expect(result.headers['x-bypass-roomote-auth']).toBe('bypass');
+  expect(result.url).toBe(runtimeEnv.R_JEVGREP_GATEWAY_URL);
+  expect(result.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/v1\/systemone$/);
+  expect(result.headers.authorization).toBeUndefined();
+  expect(result.headers['x-bypass-roomote-auth']).toBeUndefined();
   expect(JSON.parse(result.body).state).toBe('source');
   expect(result.redirect).toBe('error');
   expect(await setup()).toBe(true);
@@ -113,7 +117,7 @@ it('installs and routes the CLI through the gateway with run auth and auth bypas
 
 it('shares only Jevgrep access with terminals and preserves fresh user env', () => {
   const base = { PATH: '/usr/bin', PROJECT_SETTING: 'updated' };
-  expect(buildJevgrepTerminalEnv(base, {}, homeDir)).toBe(base);
+  expect(buildJevgrepTerminalEnv(base, {}, homeDir)).toEqual(base);
   const env = buildJevgrepTerminalEnv(
     base,
     {
@@ -131,8 +135,6 @@ it('shares only Jevgrep access with terminals and preserves fresh user env', () 
     PATH: `${homeDir}/.roomote/jevgrep/bin:/usr/bin`,
     R_JEVGREP_GATEWAY_URL:
       'https://roomote.example/api/inference/jevgrep/v1/systemone',
-    ROOMOTE_CLOUD_TOKEN: 'run-token',
-    ROOMOTE_AUTH_BYPASS_VALUE: 'bypass',
   });
 });
 

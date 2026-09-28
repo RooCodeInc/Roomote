@@ -809,6 +809,22 @@ describe('evaluateTypeSafeJudgments', () => {
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     });
 
+    it('keeps source retrieval on Jev when shadowing is enabled', async () => {
+      mockEnv.R_JUDGMENT_SHADOW = 'on';
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+      const answers = { urgent: { type: 'noul', noul: 0.92 } };
+      const fetchMock = mockFetchResponse({ answers });
+      await expect(
+        evaluateTypeSafeJudgments({
+          state: 'repository source',
+          questions: { urgent: questions.urgent },
+          excludeRoomoteModel: true,
+          skipShadow: true,
+        }),
+      ).resolves.toEqual(answers);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('does not fall back to the helper model', async () => {
       mockKeys({});
       mockGetJudgmentSelection.mockResolvedValue('off');

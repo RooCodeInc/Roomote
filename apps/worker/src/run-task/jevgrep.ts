@@ -4,11 +4,11 @@ import { pathToFileURL } from 'node:url';
 import { execa } from 'execa';
 import {
   buildInferenceGatewayUrl,
-  DEFAULT_AUTH_BYPASS_HEADER_NAME,
   resolveWorkerRuntimePaths,
 } from '@roomote/types';
 import { sdk } from '@roomote/sdk/client';
 import { resolveNpmInstallCommand } from '../commands/setup/npm-install-command';
+import { startJevgrepProxy } from './jevgrep-proxy';
 
 const JEVGREP_VERSION = '0.4.3';
 
@@ -18,17 +18,17 @@ export function buildJevgrepTerminalEnv(
   runtimeEnv: Record<string, string>,
   homeDir: string,
 ): Record<string, string> {
-  if (!runtimeEnv.R_JEVGREP_GATEWAY_URL) return userEnv;
   const env = { ...userEnv };
   for (const key of [
-    'R_JEVGREP_GATEWAY_URL',
     'ROOMOTE_CLOUD_TOKEN',
     'ROOMOTE_AUTH_BYPASS_HEADER_NAME',
     'ROOMOTE_AUTH_BYPASS_VALUE',
   ]) {
     delete env[key];
-    if (runtimeEnv[key]) env[key] = runtimeEnv[key];
   }
+  delete env.R_JEVGREP_GATEWAY_URL;
+  if (!runtimeEnv.R_JEVGREP_GATEWAY_URL) return env;
+  env.R_JEVGREP_GATEWAY_URL = runtimeEnv.R_JEVGREP_GATEWAY_URL;
   env.PATH = [path.join(homeDir, '.roomote/jevgrep/bin'), userEnv.PATH]
     .filter(Boolean)
     .join(path.delimiter);
@@ -46,8 +46,7 @@ function buildJevgrepLauncher(binaryPath: string, configHome: string): string {
   return `#!${process.execPath}
 const upstreamFetch = globalThis.fetch;
 const endpoint = process.env.R_JEVGREP_GATEWAY_URL;
-const token = process.env.ROOMOTE_CLOUD_TOKEN;
-if (!endpoint || !token) throw new Error('Jevgrep is not enabled for this task.');
+if (!endpoint) throw new Error('Jevgrep is not enabled for this task.');
 if (['auth', 'skill'].includes(process.argv[2])) {
   console.error('Roomote manages Jevgrep setup through Settings > Models.');
   process.exit(1);
@@ -58,9 +57,7 @@ globalThis.fetch = (input, init) => {
   if (url !== 'https://api.typesafe.ai/v1/systemone') return upstreamFetch(input, init);
   const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
   headers.delete('x-api-key');
-  headers.set('authorization', 'Bearer ' + token);
-  const bypass = process.env.ROOMOTE_AUTH_BYPASS_VALUE;
-  if (bypass) headers.set(process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME || ${JSON.stringify(DEFAULT_AUTH_BYPASS_HEADER_NAME)}, bypass);
+  headers.delete('authorization');
   return upstreamFetch(endpoint, { ...init, headers, redirect: 'error' });
 };
 await import(${JSON.stringify(pathToFileURL(binaryPath).href)});
@@ -109,6 +106,7 @@ export async function setupJevgrep(options: {
   trpcUrl: string;
   runtimeEnv: Record<string, string>;
   logger: Pick<Console, 'warn'>;
+  registerCleanup: (close: () => Promise<void>) => void;
 }): Promise<boolean> {
   const { runtimeEnv, homeDir } = options;
   delete runtimeEnv.R_JEVGREP_GATEWAY_URL;
@@ -140,7 +138,15 @@ export async function setupJevgrep(options: {
       mode: 0o755,
     });
     fs.symlinkSync(launcher, path.join(binDir, 'jg'));
-    runtimeEnv.R_JEVGREP_GATEWAY_URL = `${buildInferenceGatewayUrl(options.trpcUrl)}/jevgrep/v1/systemone`;
+    if (!runtimeEnv.ROOMOTE_CLOUD_TOKEN) throw new Error('Missing run auth');
+    const proxy = await startJevgrepProxy({
+      endpoint: `${buildInferenceGatewayUrl(options.trpcUrl)}/jevgrep/v1/systemone`,
+      token: runtimeEnv.ROOMOTE_CLOUD_TOKEN,
+      bypassHeader: runtimeEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME,
+      bypassValue: runtimeEnv.ROOMOTE_AUTH_BYPASS_VALUE,
+    });
+    options.registerCleanup(proxy.close);
+    runtimeEnv.R_JEVGREP_GATEWAY_URL = proxy.endpoint;
     runtimeEnv.PATH = [binDir, runtimeEnv.PATH]
       .filter(Boolean)
       .join(path.delimiter);

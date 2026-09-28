@@ -712,10 +712,10 @@ describe('runTask', () => {
     expect(terminalEnv).toEqual(
       expect.objectContaining({
         R_JEVGREP_GATEWAY_URL: 'https://api.example.test/jevgrep',
-        ROOMOTE_CLOUD_TOKEN: 'cloud-token',
       }),
     );
     expect(terminalEnv?.PATH).toContain('/.roomote/jevgrep/bin:');
+    expect(terminalEnv).not.toHaveProperty('ROOMOTE_CLOUD_TOKEN');
   });
 
   it('keeps the task terminal enabled while clearing only reserved reply context env vars', async () => {
