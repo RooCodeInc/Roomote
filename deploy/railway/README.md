@@ -447,7 +447,7 @@ Roomote asks a decision model small typed questions: whether a turn is worth
 saving to Memory, who an unmentioned thread reply is for, when a running task
 has news for the user, which model a delegated task should use. With a
 TypeSafe key in **Settings → Models**, Jev answers them. Without one, the
-`judgment` service can: it runs `roomote/roomote-judgment-gliner`, a public
+`judgment` service runs `roomote/roomote-judgment-gliner`, a public
 GLiNER 2.5 model fine-tuned on Roomote's decisions, on CPU inside the project.
 
 The service is part of the template and idles without loading its model. To
