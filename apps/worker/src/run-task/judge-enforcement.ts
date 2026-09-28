@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { lstat, readFile, unlink, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import {
+  lstat,
+  open,
+  readFile,
+  unlink,
+  writeFile,
+  type FileHandle,
+} from 'node:fs/promises';
 import * as path from 'node:path';
 
 import ignore from 'ignore';
@@ -91,6 +98,38 @@ function parseNullSeparatedPaths(value: string): string[] {
   return value.split('\0').filter((entry) => entry.length > 0);
 }
 
+const SAFE_READ_FLAGS =
+  fsConstants.O_RDONLY |
+  (fsConstants.O_NOFOLLOW ?? 0) |
+  (fsConstants.O_NONBLOCK ?? 0);
+
+async function openRegularFile(filePath: string): Promise<FileHandle | null> {
+  let handle: FileHandle;
+
+  try {
+    handle = await open(filePath, SAFE_READ_FLAGS);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ELOOP' || code === 'ENXIO') {
+      return null;
+    }
+
+    throw error;
+  }
+
+  try {
+    if (!(await handle.stat()).isFile()) {
+      await handle.close();
+      return null;
+    }
+
+    return handle;
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
+}
+
 async function runGit(root: string, args: string[]): Promise<string> {
   const result = await execa('git', args, {
     cwd: root,
@@ -116,26 +155,22 @@ async function getDirtyPaths(root: string): Promise<string[]> {
 }
 
 async function hashFile(filePath: string): Promise<string | null> {
-  try {
-    const stats = await lstat(filePath);
-    if (stats.isSymbolicLink() || !stats.isFile()) {
-      return null;
-    }
+  const handle = await openRegularFile(filePath);
+  if (!handle) {
+    return null;
+  }
 
+  try {
     const hash = createHash('sha256');
-    const stream = createReadStream(filePath);
+    const stream = handle.createReadStream({ autoClose: false });
 
     for await (const chunk of stream) {
       hash.update(chunk as Buffer);
     }
 
     return hash.digest('hex');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
-    }
-
-    throw error;
+  } finally {
+    await handle.close().catch(() => undefined);
   }
 }
 
@@ -166,13 +201,16 @@ function boundedText(
 }
 
 async function readFileContext(filePath: string): Promise<FileContext | null> {
-  try {
-    const stats = await lstat(filePath);
-    if (stats.isSymbolicLink() || !stats.isFile()) {
-      return null;
-    }
+  const handle = await openRegularFile(filePath);
+  if (!handle) {
+    return null;
+  }
 
-    const stream = createReadStream(filePath, { highWaterMark: 64 * 1024 });
+  try {
+    const stream = handle.createReadStream({
+      autoClose: false,
+      highWaterMark: 64 * 1024,
+    });
     const hash = createHash('sha256');
     const firstChunks: Buffer[] = [];
     let firstBytes = 0;
@@ -218,12 +256,8 @@ async function readFileContext(filePath: string): Promise<FileContext | null> {
       content: bounded.text,
       contentTruncated: totalBytes > JUDGE_MAX_FILE_CONTEXT_BYTES,
     };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
-    }
-
-    throw error;
+  } finally {
+    await handle.close().catch(() => undefined);
   }
 }
 
