@@ -1,6 +1,7 @@
 import {
   processSessionStatusJudgmentBatch,
   reconcileExpiredFastAgentInferenceRetryNotices,
+  SESSION_STATUS_INACTIVITY_MS,
 } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -9,6 +10,7 @@ import {
   ensureSessionForFastConversation,
   ensureSessionForTask,
   eq,
+  enqueueInactiveSessionStatusJudgmentRequests,
   fastAgentConversations,
   gt,
   inArray,
@@ -214,6 +216,12 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
   let orphanFailures = 0;
   const reconciledRetryNotices =
     await reconcileExpiredFastAgentInferenceRetryNotices(BATCH_SIZE);
+  const enqueuedInactiveStatusJudgments =
+    await enqueueInactiveSessionStatusJudgmentRequests(
+      db,
+      SESSION_STATUS_INACTIVITY_MS,
+      BATCH_SIZE,
+    );
   const processedStatusJudgments = await processSessionStatusJudgmentBatch();
   const prunedStatusJudgments = await pruneSessionStatusJudgmentHistory(db);
 
@@ -369,6 +377,7 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     refreshedSessions: recent.length,
     healedExpiredLeases: expiredLeases.length,
     reconciledRetryNotices,
+    enqueuedInactiveStatusJudgments,
     processedStatusJudgments,
     prunedStatusJudgments,
   });

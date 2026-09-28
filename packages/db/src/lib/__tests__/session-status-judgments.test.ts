@@ -4,20 +4,36 @@ import {
   createSessionStatusJudgmentRequest,
   db,
   eq,
+  enqueueInactiveSessionStatusJudgmentRequests,
+  fastAgentConversations,
+  fastAgentMessages,
   pruneSessionStatusJudgmentHistory,
   sessionFactory,
   sessionStatusJudgments,
   sessions,
   setDeploymentExperimentEnabled,
   settleSessionStatusJudgmentTurn,
+  userFactory,
+  users,
 } from '../../server';
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 const sessionIds: string[] = [];
+const userIds: string[] = [];
+const conversationIds: string[] = [];
 
 afterEach(async () => {
   await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
   while (sessionIds.length > 0) {
     await db.delete(sessions).where(eq(sessions.id, sessionIds.pop()!));
+  }
+  while (conversationIds.length > 0) {
+    await db
+      .delete(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, conversationIds.pop()!));
+  }
+  while (userIds.length > 0) {
+    await db.delete(users).where(eq(users.id, userIds.pop()!));
   }
 });
 
@@ -120,6 +136,74 @@ describe('Session status judgment requests', () => {
       .from(sessions)
       .where(eq(sessions.id, session.id));
     expect(updated?.cachedStatus).toBe('ready');
+  });
+
+  it('queues one inactivity request after the latest visible user message crosses the boundary', async () => {
+    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    conversationIds.push(conversation!.id);
+    const session = await sessionFactory.create({
+      fastConversationId: conversation!.id,
+    });
+    sessionIds.push(session.id);
+    const latestVisibleUserTs = Date.now() - 4 * 24 * 60 * 60 * 1_000;
+    await db.insert(fastAgentMessages).values([
+      {
+        conversationId: conversation!.id,
+        eventId: 'inactivity-visible-user',
+        turnId: 'inactivity-visible-turn',
+        turnSeq: 1,
+        ts: latestVisibleUserTs,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Please investigate this.' }],
+        metadata: { visibleInTranscript: true, userId: user.id },
+      },
+      {
+        conversationId: conversation!.id,
+        eventId: 'inactivity-hidden-user',
+        turnId: 'inactivity-hidden-turn',
+        turnSeq: 2,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'hidden later message' }],
+        metadata: { visibleInTranscript: false, userId: user.id },
+      },
+    ]);
+
+    await expect(
+      enqueueInactiveSessionStatusJudgmentRequests(
+        db,
+        4 * 24 * 60 * 60 * 1_000,
+      ),
+    ).resolves.toBe(1);
+    await expect(
+      enqueueInactiveSessionStatusJudgmentRequests(
+        db,
+        4 * 24 * 60 * 60 * 1_000,
+      ),
+    ).resolves.toBe(0);
+
+    const [request] = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(eq(sessionStatusJudgments.sessionId, session.id));
+    expect(request).toMatchObject({
+      sourceEventId: `inactivity:${latestVisibleUserTs}`,
+      sourceKind: 'fast_turn',
+      state: 'pending',
+    });
   });
 
   it('discards a result if the deployment experiment is disabled mid-flight', async () => {

@@ -84,23 +84,6 @@ function highConfidenceDone() {
   });
 }
 
-function highConfidenceNeedsInput() {
-  evaluateMock.mockResolvedValue({
-    outcome: {
-      type: 'choice',
-      choice: 'needs_input',
-      confidence: 0.97,
-      probabilities: {
-        open: 0.01,
-        done: 0.01,
-        blocked: 0.01,
-        needs_input: 0.97,
-        unclear: 0,
-      },
-    },
-  });
-}
-
 describe('processSessionStatusJudgmentBatch', () => {
   it('judges only visible transcript text and leaves cached runtime state unchanged', async () => {
     await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
@@ -231,7 +214,7 @@ describe('processSessionStatusJudgmentBatch', () => {
     });
   });
 
-  it('applies inactivity done precedence over a needs-input judgment', async () => {
+  it('applies inactivity done precedence without a configured judgment backend', async () => {
     await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const user = await userFactory.create();
     userIds.push(user.id);
@@ -270,9 +253,11 @@ describe('processSessionStatusJudgmentBatch', () => {
       sourceKind: 'fast_turn',
       state: 'pending',
     });
-    highConfidenceNeedsInput();
+    evaluateMock.mockResolvedValue(null);
 
     await processSessionStatusJudgmentBatch();
+
+    expect(evaluateMock).not.toHaveBeenCalled();
 
     const [judgment] = await db
       .select()

@@ -370,6 +370,25 @@ export async function processSessionStatusJudgmentBatch(
         continue;
       }
 
+      const liveTurn =
+        snapshot.respondingUntil !== null &&
+        snapshot.respondingUntil.getTime() > Date.now();
+      const goalStillActive = snapshot.state.goalStatus === 'active';
+      if (precedence === 'inactivity') {
+        const liveWork = liveTurn || snapshot.hasActiveTask || goalStillActive;
+        await completeSessionStatusJudgment(db, {
+          id: request.id,
+          sessionId: request.sessionId,
+          generation: request.generation,
+          state: liveWork ? 'ignored' : 'applied',
+          outcome: 'done',
+          confidence: 1,
+          probabilities: { done: 1 },
+          errorCode: liveWork ? 'live_work' : undefined,
+        });
+        continue;
+      }
+
       const answers = await evaluateTypeSafeJudgments({
         decision: 'session-status-judgment',
         state: snapshot.state,
@@ -386,14 +405,7 @@ export async function processSessionStatusJudgmentBatch(
         continue;
       }
 
-      const decision =
-        precedence === 'inactivity'
-          ? {
-              outcome: 'done' as const,
-              confidence: 1,
-              probabilities: { done: 1 },
-            }
-          : chooseApplicableSessionStatusJudgment(answers.outcome);
+      const decision = chooseApplicableSessionStatusJudgment(answers.outcome);
       if (!decision) {
         await completeSessionStatusJudgment(db, {
           id: request.id,
@@ -408,16 +420,12 @@ export async function processSessionStatusJudgmentBatch(
         continue;
       }
 
-      const liveTurn =
-        snapshot.respondingUntil !== null &&
-        snapshot.respondingUntil.getTime() > Date.now();
-      const goalStillActive = snapshot.state.goalStatus === 'active';
       if (
         decision.outcome === 'done' &&
         (liveTurn ||
           snapshot.hasActiveTask ||
           goalStillActive ||
-          (precedence !== 'inactivity' && snapshot.pendingUserInput))
+          snapshot.pendingUserInput)
       ) {
         await completeSessionStatusJudgment(db, {
           id: request.id,

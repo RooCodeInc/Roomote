@@ -1,9 +1,13 @@
 import { and, desc, eq, inArray, lt, max, or, sql } from 'drizzle-orm';
 
-import type { SessionStatusJudgmentOutcome } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  type SessionStatusJudgmentOutcome,
+} from '@roomote/types';
 
 import type { DatabaseOrTransaction } from '../db';
 import {
+  fastAgentMessages,
   sessionStatusJudgments,
   sessions,
   type SessionStatusJudgmentSourceKind,
@@ -14,6 +18,72 @@ import { isDeploymentExperimentEnabled } from './deployment-experiments';
 
 const CLAIM_LEASE_MS = 2 * 60 * 1_000;
 export const MAX_SESSION_STATUS_JUDGMENT_ATTEMPTS = 5;
+
+/**
+ * Queue one fresh judgment when the latest visible user message has crossed
+ * the inactivity boundary. The source event is timestamped so repeated
+ * reconcile ticks remain idempotent until a newer user message appears.
+ */
+export async function enqueueInactiveSessionStatusJudgmentRequests(
+  database: DatabaseOrTransaction,
+  inactivityMs: number,
+  limit = 100,
+): Promise<number> {
+  if (
+    !(await isDeploymentExperimentEnabled('sessionStatusJudgment', database))
+  ) {
+    return 0;
+  }
+
+  const cutoff = Date.now() - inactivityMs;
+  const candidates = await database.execute<{
+    session_id: string;
+    source_event_id: string;
+  }>(sql`
+    WITH latest_visible_user_messages AS (
+      SELECT
+        s.id AS session_id,
+        max(fam.ts) AS latest_ts
+      FROM sessions AS s
+      INNER JOIN fast_agent_messages AS fam
+        ON fam.conversation_id = s.fast_conversation_id
+      WHERE s.visibility = 'visible'
+        AND fam.role = 'user'
+        AND CASE
+          WHEN fam.metadata ->> 'visibleInTranscript' IS NOT NULL
+            THEN fam.metadata ->> 'visibleInTranscript' = 'true'
+          ELSE fam.event_type <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+        END
+      GROUP BY s.id
+    )
+    SELECT
+      session_id,
+      'inactivity:' || latest_ts::text AS source_event_id
+    FROM latest_visible_user_messages
+    WHERE latest_ts <= ${cutoff}
+      AND NOT EXISTS (
+        SELECT 1
+        FROM session_status_judgments AS judgment
+        WHERE judgment.session_id = latest_visible_user_messages.session_id
+          AND judgment.source_event_id = 'inactivity:' || latest_ts::text
+      )
+    ORDER BY latest_ts, session_id
+    LIMIT ${limit}
+  `);
+
+  let created = 0;
+  for (const candidate of candidates) {
+    const request = await createSessionStatusJudgmentRequest(database, {
+      sessionId: candidate.session_id,
+      sourceEventId: candidate.source_event_id,
+      // The inactivity clock is anchored to the Fast user transcript.
+      sourceKind: 'fast_turn',
+      state: 'pending',
+    });
+    if (request) created += 1;
+  }
+  return created;
+}
 
 export async function createSessionStatusJudgmentRequest(
   database: DatabaseOrTransaction,
