@@ -77,5 +77,27 @@ describe('Slack references in assistant Markdown', () => {
     expect(markdown).toContain('`<#C456>`');
     expect(markdown).toContain('```text\n<@U123>\n```');
     expect(markdown).toContain('[#ops](https://acme.slack.com/archives/C456)');
+
+    const quotedMarkdown = renderSlackMessageMarkdown(
+      '> ```text\n> <@U123>\n> ```\n\n<#C456>',
+      {
+        users: {
+          U123: {
+            name: 'Maya',
+            profileUrl: 'https://acme.slack.com/team/U123',
+          },
+        },
+        channels: {
+          C456: {
+            name: 'ops',
+            url: 'https://acme.slack.com/archives/C456',
+          },
+        },
+      },
+    );
+    expect(quotedMarkdown).toContain('> <@U123>');
+    expect(quotedMarkdown).toContain(
+      '[#ops](https://acme.slack.com/archives/C456)',
+    );
   });
 });

@@ -25,6 +25,7 @@ export type ResolvedSlackReferences = {
 };
 
 type SlackTranscriptTextSource = {
+  kind?: string;
   role?: string | null;
   text?: string | null;
   visibleInTranscript?: boolean;
@@ -50,6 +51,7 @@ export function buildSlackTranscriptMentionText(params: {
     if (
       message.visibleInTranscript === false ||
       (message.role !== 'assistant' && message.role !== 'user') ||
+      (message.kind !== undefined && message.kind !== 'text') ||
       !message.text
     ) {
       continue;
@@ -213,6 +215,7 @@ export function renderSlackMessageMarkdown(
 ): string {
   let fenceChar: '`' | '~' | null = null;
   let fenceLength = 0;
+  let fencePrefix = '';
 
   return text
     .split(/(\r?\n)/)
@@ -220,20 +223,27 @@ export function renderSlackMessageMarkdown(
       if (part.endsWith('\n')) return part;
 
       if (fenceChar) {
+        const escapedPrefix = fencePrefix.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          '\\$&',
+        );
         const closingFence = new RegExp(
-          `^\\s{0,3}${fenceChar}{${fenceLength},}\\s*$`,
+          `^${escapedPrefix}${fenceChar}{${fenceLength},}\\s*$`,
         );
         if (closingFence.test(part)) {
           fenceChar = null;
           fenceLength = 0;
+          fencePrefix = '';
         }
         return part;
       }
 
-      const openingFence = part.match(/^\s{0,3}(`{3,}|~{3,})/);
-      if (openingFence?.[1]) {
-        fenceChar = openingFence[1][0] as '`' | '~';
-        fenceLength = openingFence[1].length;
+      const openingFence = part.match(/^((?:\s{0,3}>[ \t]?)*)(`{3,}|~{3,})/);
+      if (openingFence?.[2]) {
+        fencePrefix = openingFence[1] ?? '';
+        const fence = openingFence[2]!;
+        fenceChar = fence[0] as '`' | '~';
+        fenceLength = fence.length;
         return part;
       }
 

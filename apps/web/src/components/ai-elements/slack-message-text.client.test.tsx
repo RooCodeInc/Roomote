@@ -246,11 +246,12 @@ describe('SlackMessageText', () => {
         },
         messages: [
           {
+            kind: 'reasoning',
             role: 'assistant',
             text: 'Hidden row <@Uhidden-row>.',
             visibleInTranscript: false,
           },
-          { role: 'assistant', text: 'Visible row <@Uvisible>.' },
+          { kind: 'text', role: 'assistant', text: 'Visible row <@Uvisible>.' },
         ],
       }),
     ).toBe('Visible row <@Uvisible>.');
