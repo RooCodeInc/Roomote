@@ -21,13 +21,21 @@ vi.mock('@/components/tasks', () => ({
   TaskFilters: ({
     showTimePeriod,
     showUser = true,
+    showRepository = true,
+    showPullRequest = true,
     userId,
     onUserChange,
+    onRepositoryChange,
+    onPullRequestChange,
   }: {
     showTimePeriod?: boolean;
     showUser?: boolean;
+    showRepository?: boolean;
+    showPullRequest?: boolean;
     userId: string | null;
     onUserChange: (value: string | null) => void;
+    onRepositoryChange: (value: string | null) => void;
+    onPullRequestChange: (value: string | null) => void;
   }) => (
     <div
       data-testid={
@@ -39,6 +47,16 @@ vi.mock('@/components/tasks', () => ({
       <button onClick={() => onUserChange('automation:sentry_triage')}>
         Choose automation
       </button>
+      {showRepository ? (
+        <button onClick={() => onRepositoryChange('env:fixture-environment')}>
+          Choose environment
+        </button>
+      ) : null}
+      {showPullRequest ? (
+        <button onClick={() => onPullRequestChange('__has_pr__')}>
+          Choose Has PR
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -90,6 +108,34 @@ describe('SessionsFilters', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Choose automation' }));
     expect(replaceMock).toHaveBeenCalledWith(
       '/sessions?user=automation%3Asentry_triage',
+    );
+  });
+
+  it('preserves environment and Has PR values in the shared URL contract', async () => {
+    localStorage.setItem('roomote-sessions-advanced-filters-visible', 'true');
+    const { rerender } = render(<SessionsFilters {...baseProps} />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Choose environment' }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose environment' }));
+    expect(replaceMock).toHaveBeenCalledWith(
+      '/sessions?repository=env%3Afixture-environment',
+    );
+
+    replaceMock.mockReset();
+    searchParamsMock.current = new URLSearchParams(
+      'repository=env%3Afixture-environment',
+    );
+    rerender(
+      <SessionsFilters {...baseProps} repository="env:fixture-environment" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose Has PR' }));
+
+    expect(replaceMock).toHaveBeenCalledWith(
+      '/sessions?repository=env%3Afixture-environment&pullRequest=__has_pr__',
     );
   });
 
