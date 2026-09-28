@@ -5,7 +5,9 @@ import {
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
+  hasMalformedReviewSummaryMarker,
   isReviewSummaryInProgress,
+  parseReviewSummaryMarkerSha,
 } from '@roomote/cloud-agents/server';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
@@ -345,11 +347,7 @@ function sanitizeReviewSummaryStatus(statusContent: string): string {
  * compatibility with older webhook consumers.
  */
 function getReviewSummaryMarkerSha(body: string): string | null {
-  const match = body.match(
-    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i,
-  );
-
-  return match?.[1] ?? null;
+  return parseReviewSummaryMarkerSha(body) ?? null;
 }
 
 function getReviewSummaryMarkerMode(body: string): 'initial' | 'sync' | null {
@@ -455,6 +453,10 @@ function buildPrReviewSummaryLifecycle(
   const body = comment.body ?? '';
 
   if (!body.trimStart().startsWith(REVIEW_SUMMARY_MARKER)) {
+    return null;
+  }
+
+  if (hasMalformedReviewSummaryMarker(body)) {
     return null;
   }
 

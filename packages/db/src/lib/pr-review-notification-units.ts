@@ -118,8 +118,8 @@ type UnitInput = {
   reviewHeadSha?: string | null;
   roomoteAuthored?: boolean;
   isSummary?: boolean;
-  /** True when a terminal summary arrived without a provider batch id. */
-  summaryWithoutBatchId?: boolean;
+  /** True when a terminal summary had neither a provider batch nor open cycle. */
+  summaryWithoutCycle?: boolean;
 };
 
 type PrLinkIdentity = {
@@ -520,7 +520,7 @@ export async function assignPrReviewNotificationUnit(
   if (
     !targetUnit &&
     input.isSummary &&
-    input.summaryWithoutBatchId &&
+    input.summaryWithoutCycle &&
     input.reviewHeadSha
   ) {
     // A terminal issue-comment summary can lack the review webhook's batch id.

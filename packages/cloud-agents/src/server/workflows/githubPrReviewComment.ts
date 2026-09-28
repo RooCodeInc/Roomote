@@ -208,7 +208,7 @@ export function parseReviewSummaryMarkerSha(
   markerOrBody: string,
 ): string | undefined {
   const sha = getReviewSummaryMarkerAttribute(markerOrBody, 'sha');
-  if (!sha || sha.length < 7) {
+  if (!sha || sha.length < 7 || (sha.length > 40 && sha.length !== 64)) {
     return undefined;
   }
 
@@ -218,6 +218,15 @@ export function parseReviewSummaryMarkerSha(
     }
   }
   return sha;
+}
+
+export function hasMalformedReviewSummaryMarker(body: string): boolean {
+  const markerSha = body.match(
+    /<!--\s*roomote-review-summary\s+[^>]*\bsha=([^\s>]+)/i,
+  )?.[1];
+  return (
+    markerSha !== undefined && parseReviewSummaryMarkerSha(body) === undefined
+  );
 }
 
 export function buildGithubCommitHref({

@@ -397,7 +397,15 @@ export async function persistPrReviewEventInTransaction(
           batchId: input.batchId,
         })
       : null;
-  const batchId = cycle?.cycleId ?? automatedBatchId ?? input.batchId;
+  const summaryFallbackBatchId =
+    input.isSummary && !cycle && !input.batchId
+      ? `summary:${typeof input.event.providerEventId === 'string' ? input.event.providerEventId : input.eventKey}`
+      : null;
+  const batchId =
+    cycle?.cycleId ??
+    automatedBatchId ??
+    input.batchId ??
+    summaryFallbackBatchId;
   const eventPayload = batchId ? { ...input.event, batchId } : input.event;
 
   const [inserted] = await executor
@@ -510,7 +518,7 @@ export async function persistPrReviewEventInTransaction(
       ...input,
       batchId,
       event: eventPayload,
-      summaryWithoutBatchId: input.isSummary === true && !input.batchId,
+      summaryWithoutCycle: input.isSummary === true && !input.batchId && !cycle,
     },
     stored.id,
   );

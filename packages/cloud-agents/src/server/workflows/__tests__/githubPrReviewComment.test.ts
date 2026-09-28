@@ -20,6 +20,7 @@ import {
   buildReviewSummaryBody,
   getReviewFooterPhase,
   getReviewSummaryMarkerPhase,
+  hasMalformedReviewSummaryMarker,
   isReviewSummaryInProgress,
   parseReviewSummaryMarkerSha,
   REVIEW_STATUS_START_MARKER,
@@ -92,6 +93,13 @@ describe('review meta footer', () => {
     expect(parseReviewSummaryMarkerSha(MARKER('abcdef0123'))).toBe(
       'abcdef0123',
     );
+  });
+
+  it('rejects malformed commit identities instead of accepting arbitrary hex', () => {
+    const body = MARKER('a'.repeat(49));
+
+    expect(parseReviewSummaryMarkerSha(body)).toBeUndefined();
+    expect(hasMalformedReviewSummaryMarker(body)).toBe(true);
   });
 
   it('uses the footer phase instead of relying on status prose', () => {

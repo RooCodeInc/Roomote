@@ -59,6 +59,20 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
     return content.slice(start + startMarker.length, end);
   },
+  parseReviewSummaryMarkerSha: (body: string) => {
+    const sha = body.match(
+      /<!--\s*roomote-review-summary\s+[^>]*\bsha=([^\s>]+)/i,
+    )?.[1];
+    if (
+      !sha ||
+      sha.length < 7 ||
+      (sha.length > 40 && sha.length !== 64) ||
+      !/^[0-9a-f]+$/i.test(sha)
+    ) {
+      return undefined;
+    }
+    return sha;
+  },
   isReviewSummaryInProgress: (body: string) =>
     body.includes('version=2 phase=reviewing') ||
     /<!-- roomote-review-status:start -->\s*(?:Self-reviewing|Reviewing|Re-reviewing)/i.test(

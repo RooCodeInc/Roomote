@@ -67,6 +67,31 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
     return content.slice(afterStart, endIndex).trim();
   },
+  parseReviewSummaryMarkerSha: (body: string) => {
+    const sha = body.match(
+      /<!--\s*roomote-review-summary\s+[^>]*\bsha=([^\s>]+)/i,
+    )?.[1];
+    if (
+      !sha ||
+      sha.length < 7 ||
+      (sha.length > 40 && sha.length !== 64) ||
+      !/^[0-9a-f]+$/i.test(sha)
+    ) {
+      return undefined;
+    }
+    return sha;
+  },
+  hasMalformedReviewSummaryMarker: (body: string) => {
+    const sha = body.match(
+      /<!--\s*roomote-review-summary\s+[^>]*\bsha=([^\s>]+)/i,
+    )?.[1];
+    return (
+      sha !== undefined &&
+      (sha.length < 7 ||
+        (sha.length > 40 && sha.length !== 64) ||
+        !/^[0-9a-f]+$/i.test(sha))
+    );
+  },
   isReviewSummaryInProgress: (body: string) => {
     const marker = body.match(/<!--\s*roomote-review-summary\b[^>]*-->/i)?.[0];
     const markerVersion = marker?.match(/\bversion=(\d+)\b/i)?.[1];
@@ -805,6 +830,17 @@ describe('buildPrReviewSummaryNotification', () => {
       buildPrReviewSummaryNotification(
         summaryPayload({ body: 'Just a regular bot comment' }),
       ),
+    ).toBeNull();
+  });
+
+  it('skips terminal summaries with malformed commit markers', () => {
+    const malformedBody = TERMINAL_SUMMARY_BODY.replace(
+      'sha=f0c89ce4',
+      `sha=${'a'.repeat(49)}`,
+    );
+
+    expect(
+      buildPrReviewSummaryNotification(summaryPayload({ body: malformedBody })),
     ).toBeNull();
   });
 

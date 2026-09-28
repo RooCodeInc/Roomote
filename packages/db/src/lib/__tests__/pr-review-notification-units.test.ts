@@ -340,6 +340,16 @@ describe('canonical PR review notification ownership', () => {
         },
       }),
     );
+    await expect(
+      db
+        .select({ batchId: prReviewEvents.batchId })
+        .from(prReviewEvents)
+        .where(eq(prReviewEvents.eventKey, 'terminal-summary')),
+    ).resolves.toEqual([
+      {
+        batchId: 'summary:terminal-summary',
+      },
+    ]);
 
     const [claim] = await claimForRepository(repository);
     expect(claim).toMatchObject({ ownershipVersion: 'canonical' });
@@ -435,6 +445,56 @@ describe('canonical PR review notification ownership', () => {
         .from(prReviewNotificationUnits)
         .where(eq(prReviewNotificationUnits.repository, repository)),
     ).resolves.toHaveLength(2);
+  });
+
+  it('does not merge a batchless summary into ambiguous same-head cycles', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/ambiguous-summary-${task.id}`;
+    await associate(task.id, repository, 18);
+
+    for (const batchId of ['github-review:cycle-a', 'github-review:cycle-b']) {
+      await persistPrReviewEvent(
+        eventInput({
+          repository,
+          prNumber: 18,
+          eventKey: batchId,
+          kind: 'review_comment',
+          batchId,
+          headSha: 'same-head',
+          roomoteAuthored: true,
+          observedAt: new Date('2026-08-26T05:10:00.000Z'),
+        }),
+      );
+    }
+
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 18,
+        eventKey: 'terminal-summary',
+        kind: 'review_summary',
+        headSha: 'same-head',
+        roomoteAuthored: true,
+        isSummary: true,
+        observedAt: new Date('2026-08-26T05:10:30.000Z'),
+        eventFields: {
+          reviewResult: { outcome: 'findings_remain', findingCount: 1 },
+        },
+      }),
+    );
+
+    const units = await db
+      .select({ episodeId: prReviewNotificationUnits.episodeId })
+      .from(prReviewNotificationUnits)
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    expect(units).toHaveLength(3);
+    expect(units).toEqual(
+      expect.arrayContaining([
+        { episodeId: 'github-review:cycle-a' },
+        { episodeId: 'github-review:cycle-b' },
+        { episodeId: 'summary:terminal-summary' },
+      ]),
+    );
   });
 
   it('keeps the same episode id separate across head SHAs', async () => {

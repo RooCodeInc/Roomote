@@ -6,6 +6,7 @@ import {
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
   isReviewSummaryInProgress,
+  parseReviewSummaryMarkerSha,
 } from '@roomote/cloud-agents/server';
 import {
   generateTrackedNonTaskObject,
@@ -873,10 +874,7 @@ function sanitizeReviewStatus(status: string): string {
 }
 
 function getReviewSummaryHeadSha(body: string): string | null {
-  return (
-    body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i)?.[1] ??
-    null
-  );
+  return parseReviewSummaryMarkerSha(body) ?? null;
 }
 
 async function fetchPrDiscussionSignals({
