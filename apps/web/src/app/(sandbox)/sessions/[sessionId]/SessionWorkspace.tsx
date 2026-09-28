@@ -21,6 +21,7 @@ import {
   type ReasoningEffort,
   type RunStatus,
   type SessionGoal,
+  type SessionStatus,
 } from '@roomote/types';
 
 import {
@@ -183,6 +184,7 @@ type SessionTaskPreview = {
 export type SessionInfo = {
   id: string;
   canDelete: boolean;
+  sessionStatusExperimentEnabled: boolean;
   ownerName: string | null;
   ownerEmail: string | null;
   ownerImageUrl: string | null;
@@ -200,6 +202,7 @@ export type SessionInfo = {
   };
   createdAt: Date;
   status: string | null;
+  cachedStatus: SessionStatus | null;
   goal?: SessionGoal | null;
   tasks: SessionTaskSummary[];
   artifacts?: SessionArtifact[];
@@ -1135,7 +1138,15 @@ export function SessionWorkspace({
                 onShowMain={showMain}
                 footer={
                   session.canDelete ? (
-                    <SessionActions sessionId={session.id} />
+                    <SessionActions
+                      sessionId={session.id}
+                      status={
+                        currentSession?.cachedStatus ?? session.cachedStatus
+                      }
+                      sessionStatusExperimentEnabled={
+                        session.sessionStatusExperimentEnabled
+                      }
+                    />
                   ) : null
                 }
               >

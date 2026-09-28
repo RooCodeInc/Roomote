@@ -44,4 +44,14 @@ describe('getSessionBoardColumn', () => {
       }),
     ).toBe('ready');
   });
+
+  it('keeps a manually selected status ahead of semantic judgment', () => {
+    expect(
+      getSessionBoardColumn({
+        cachedStatus: 'ready',
+        manualStatus: 'ready',
+        judgmentStatus: 'done',
+      }),
+    ).toBe('ready');
+  });
 });

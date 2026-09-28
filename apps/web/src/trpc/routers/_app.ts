@@ -36,6 +36,7 @@ import {
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
   sessionGoalInputSchema,
+  SESSION_STATUSES,
   codingModelRoutingRuleSchema,
   integrationToolAutoSettingsSchema,
   integrationToolPolicyUpsertSchema,
@@ -82,6 +83,7 @@ import {
   getSessionTimeline,
   archiveSessionCommand,
   deleteSessionCommand,
+  setSessionStatusCommand,
   stopSessionTasksCommand,
   listSessionPins,
   markSessionReadCommand,
@@ -3498,6 +3500,11 @@ export const appRouter = createRouter({
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
+      ),
+    setStatus: protectedProcedure
+      .input(sessionIdInputSchema.extend({ status: z.enum(SESSION_STATUSES) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setSessionStatusCommand(auth, input.sessionId, input.status),
       ),
     stopTasks: protectedProcedure
       .input(sessionIdInputSchema)

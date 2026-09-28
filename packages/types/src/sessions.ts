@@ -35,8 +35,11 @@ export type SessionBoardColumn = (typeof SESSION_BOARD_COLUMNS)[number];
 
 export function getSessionBoardColumn(input: {
   cachedStatus: SessionStatus | null;
+  manualStatus?: SessionStatus | null;
   judgmentStatus?: SessionStatusJudgmentOutcome | null;
 }): SessionBoardColumn {
+  if (input.manualStatus) return input.manualStatus;
+
   // Runtime status remains authoritative when work or a structured request is
   // still live. Model judgment only refines a settled, otherwise-ready row.
   if (input.cachedStatus === 'needs_input') return 'needs_input';
