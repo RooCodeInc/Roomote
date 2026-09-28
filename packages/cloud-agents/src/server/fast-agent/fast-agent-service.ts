@@ -2113,24 +2113,6 @@ export async function answerFastAgentQuestion({
     platformEventKind === 'automation' &&
     automationLaunchCriteriaExperimentEnabled &&
     automationLaunchCriteriaRequired;
-  // A queued event may still carry criteria after the deployment switch is
-  // turned off. That snapshot also tells us its Discord/Teams root was
-  // deferred; automationLaunchRootRequired separately marks Telegram's
-  // stricter threaded-delivery contract.
-  if (
-    platformEvent &&
-    platformEventKind === 'automation' &&
-    !automationLaunchCriteriaExperimentEnabled &&
-    (automationLaunchCriteriaRequired || automationLaunchRootRequired)
-  ) {
-    if (!adapter.prepareAutomationLaunch) {
-      throw new Error(
-        'The deferred automation destination root cannot be prepared.',
-      );
-    }
-    const updatedConversation = await adapter.prepareAutomationLaunch();
-    if (updatedConversation) conversation = updatedConversation;
-  }
   let automationLaunchGateState: 'pending' | 'continued' | 'stopped' =
     automationLaunchGateRequired ? 'pending' : 'continued';
   let automationLaunchGateStopped = false;

@@ -1902,9 +1902,24 @@ describe('deliverFastAgentParentEvent', () => {
         serviceUrl: 'https://smba.example.com/amer/',
       },
     },
+    {
+      surface: 'telegram' as const,
+      workspaceId: 'telegram-dm-1',
+      targetKind: 'telegram_user' as const,
+      replyTarget: { channelId: 'telegram-dm-1' },
+    },
   ])(
     'materializes a deferred $surface automation root for a meaningful closeout',
     async ({ surface, workspaceId, targetKind, replyTarget }) => {
+      const createForumTopic = vi
+        .fn()
+        .mockResolvedValue({ messageThreadId: 'telegram-topic-1' });
+      if (surface === 'telegram') {
+        mocks.createTelegramProvider.mockResolvedValue({
+          ...(await mocks.createTelegramProvider()),
+          createForumTopic,
+        });
+      }
       mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
         await adapter.postReply({
           purpose: 'closeout',
@@ -1940,11 +1955,22 @@ describe('deliverFastAgentParentEvent', () => {
             initialText: 'Weekly scan is running.',
           }),
         );
-      } else {
+      } else if (surface === 'teams') {
         expect(mocks.teamsPostMessage).toHaveBeenCalledWith(
           expect.objectContaining({
             channelId: 'teams-channel-1',
             text: 'Weekly scan is running.',
+          }),
+        );
+      } else {
+        expect(createForumTopic).toHaveBeenCalledWith({
+          channelId: 'telegram-dm-1',
+          name: 'Weekly scan',
+        });
+        expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            channelId: 'telegram-dm-1',
+            threadId: 'telegram-topic-1',
           }),
         );
       }
