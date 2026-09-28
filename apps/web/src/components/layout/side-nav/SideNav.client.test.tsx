@@ -198,6 +198,7 @@ vi.mock('./SideNavItem', () => ({
     label,
     expanded,
     disabled,
+    active,
     description,
     'aria-label': ariaLabel,
     badgeCount,
@@ -208,6 +209,7 @@ vi.mock('./SideNavItem', () => ({
     label?: string;
     expanded?: boolean;
     disabled?: boolean;
+    active?: boolean;
     description?: ReactNode;
     'aria-label'?: string;
     badgeCount?: number;
@@ -219,6 +221,7 @@ vi.mock('./SideNavItem', () => ({
         data-testid={`nav-${href}`}
         data-expanded={String(expanded)}
         data-disabled={String(disabled ?? false)}
+        data-active={String(active)}
         data-description={typeof description === 'string' ? description : ''}
         data-tooltip={typeof tooltip === 'string' ? tooltip : ''}
         data-badge-count={badgeCount ?? 0}
@@ -625,6 +628,31 @@ describe('SideNav recent sessions', () => {
       'data-badge-count',
       '2',
     );
+  });
+
+  it('matches primary navigation routes consistently', () => {
+    state.pathname = '/';
+    const view = render(<SideNav />);
+
+    expect(screen.getByTestId('nav-/')).toHaveAttribute('data-active', 'true');
+
+    state.pathname = '/automations/runs';
+    view.rerender(<SideNav />);
+    expect(screen.getByTestId('nav-/automations')).toHaveAttribute(
+      'data-active',
+      'true',
+    );
+
+    state.pathname = '/analytics/costs';
+    view.rerender(<SideNav />);
+    expect(screen.getByTestId('nav-/analytics')).toHaveAttribute(
+      'data-active',
+      'true',
+    );
+
+    state.user.isAdmin = false;
+    view.rerender(<SideNav />);
+    expect(screen.queryByTestId('nav-/analytics')).not.toBeInTheDocument();
   });
 
   it('keeps the expanded wordmark linked to Home', () => {
