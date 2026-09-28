@@ -22,6 +22,19 @@ describe('convertMarkdownInlineToRichText', () => {
     ]);
   });
 
+  it('renders known Slack emoji shortcodes without changing Unicode or custom names', () => {
+    expect(
+      convertMarkdownInlineToRichText(
+        'Ready :white_check_mark: :thumbsup::skin-tone-6: ✅ :ship_it:',
+      ),
+    ).toEqual([
+      {
+        type: 'text',
+        text: 'Ready ✅ 👍🏿 ✅ :ship_it:',
+      },
+    ]);
+  });
+
   it('nests styles and converts markdown, Slack, and bare links', () => {
     expect(
       convertMarkdownInlineToRichText(
@@ -39,6 +52,26 @@ describe('convertMarkdownInlineToRichText', () => {
       { type: 'link', url: 'https://a.io', text: 'A' },
       { type: 'text', text: ' or ' },
       { type: 'link', url: 'https://b.io/path' },
+    ]);
+  });
+
+  it('renders known emoji shortcodes in Markdown and Slack link labels', () => {
+    expect(
+      convertMarkdownInlineToRichText(
+        '[Passed :white_check_mark:](https://example.com/report) and <https://example.com/report|Passed :thumbsup::skin-tone-6:>',
+      ),
+    ).toEqual([
+      {
+        type: 'link',
+        url: 'https://example.com/report',
+        text: 'Passed ✅',
+      },
+      { type: 'text', text: ' and ' },
+      {
+        type: 'link',
+        url: 'https://example.com/report',
+        text: 'Passed 👍🏿',
+      },
     ]);
   });
 
