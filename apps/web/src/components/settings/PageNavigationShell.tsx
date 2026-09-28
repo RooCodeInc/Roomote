@@ -58,7 +58,7 @@ export function PageNavigationShell<T extends string = string>({
           content: 'md:ml-68',
           mobileNavigation: 'md:hidden',
           navigation:
-            'hidden md:absolute md:top-8 md:left-0 md:block md:w-60 md:shrink-0 md:overflow-visible',
+            'hidden md:absolute md:top-8 md:left-0 md:block md:max-h-[calc(100%_-_2rem)] md:w-60 md:shrink-0 md:overflow-y-auto',
           row: 'md:flex-row md:items-start',
           rootScroll: 'md:overflow-hidden',
           scrollableContent:

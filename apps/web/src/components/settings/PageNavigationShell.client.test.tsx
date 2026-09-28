@@ -76,7 +76,7 @@ describe('PageNavigationShell', () => {
     expect(screen.getByText('content')).toBeInTheDocument();
   });
 
-  it('aligns the md desktop rail with the content and keeps it non-scrollable', () => {
+  it('aligns the md desktop rail and bounds over-height navigation', () => {
     const { container } = render(
       <PageNavigationShell
         items={[
@@ -105,9 +105,7 @@ describe('PageNavigationShell', () => {
     );
     expect(container.querySelector('aside')).toHaveClass(
       'md:top-8',
-      'md:overflow-visible',
-    );
-    expect(container.querySelector('aside')).not.toHaveClass(
+      'md:max-h-[calc(100%_-_2rem)]',
       'md:overflow-y-auto',
     );
     expect(container.querySelector('aside + div')).toHaveClass('md:ml-68');
