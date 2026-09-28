@@ -29,6 +29,7 @@ export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
   'implement-changes',
   'implement-repo-change',
   'issue-fixer',
+  'jevgrep',
   'plan-repo-implementation',
   'push',
   'refactor-code',

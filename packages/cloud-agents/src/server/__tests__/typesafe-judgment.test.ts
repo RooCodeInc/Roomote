@@ -51,6 +51,7 @@ import {
   resetDecisionModelCache,
   resolveDecisionModel,
   resetJudgmentBackendCache,
+  resolveJudgmentBackend,
   testJudgmentBackend,
 } from '../typesafe-judgment';
 import type { JudgmentDecisionId } from '../judgment-decision-catalog';
@@ -127,6 +128,53 @@ describe('evaluateTypeSafeJudgments', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it.each(['off', 'roomote'])(
+    'fresh source evaluations stop after switching a cached Jev backend to %s',
+    async (selection) => {
+      mockGetJudgmentSelection.mockResolvedValue('typesafe');
+      expect((await resolveJudgmentBackend())?.provider).toBe('typesafe');
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+      mockGetJudgmentSelection.mockResolvedValue(selection);
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      // The ordinary cache is still warm, as on another API process.
+      expect((await resolveJudgmentBackend())?.provider).toBe('typesafe');
+      expect(
+        (await resolveJudgmentBackend({ bypassCache: true }))?.provider,
+      ).toBe(selection === 'roomote' ? 'roomote' : undefined);
+      expect(
+        await evaluateTypeSafeJudgments({
+          state: 'repository source',
+          questions,
+          excludeRoomoteModel: true,
+          bypassBackendCache: true,
+        }),
+      ).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fresh source evaluations use the newly selected provider and its current key', async () => {
+    mockKeys({ R_TYPESAFE_API_KEY: 'old-key', OPENROUTER_API_KEY: 'new-key' });
+    mockGetJudgmentSelection.mockResolvedValue('typesafe');
+    await resolveJudgmentBackend();
+    mockGetJudgmentSelection.mockResolvedValue('openrouter');
+    const fetchMock = mockFetchResponse({ answers: directAnswers });
+    await evaluateTypeSafeJudgments({
+      state: 'repository source',
+      questions,
+      excludeRoomoteModel: true,
+      bypassBackendCache: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/alpha/decisions',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer new-key' }),
+      }),
+    );
   });
 
   describe('Roomote judgment upstream', () => {
@@ -759,6 +807,22 @@ describe('evaluateTypeSafeJudgments', () => {
       ).resolves.toEqual(answers);
       expect(mockCaptureJudgment).toHaveBeenCalled();
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    });
+
+    it('keeps source retrieval on Jev when shadowing is enabled', async () => {
+      mockEnv.R_JUDGMENT_SHADOW = 'on';
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+      const answers = { urgent: { type: 'noul', noul: 0.92 } };
+      const fetchMock = mockFetchResponse({ answers });
+      await expect(
+        evaluateTypeSafeJudgments({
+          state: 'repository source',
+          questions: { urgent: questions.urgent },
+          excludeRoomoteModel: true,
+          skipShadow: true,
+        }),
+      ).resolves.toEqual(answers);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it('does not fall back to the helper model', async () => {

@@ -1630,6 +1630,28 @@ describe('opencode-server bootstrap', () => {
     expect(runtimeEnv).not.toHaveProperty('R_EXPLORE_MODEL_REASONING_EFFORT');
   });
 
+  it('teaches the explore agent to load Jevgrep guidance when enabled without a separate explore model', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+    const homeDir = createTempHome();
+    await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        R_JEVGREP_GATEWAY_URL: 'http://127.0.0.1:1234/v1/systemone',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+    const config = JSON.parse(readOpenCodeConfig(homeDir));
+    expect(config.agent.explore.prompt).toContain(
+      `${homeDir}/.agents/skills/jevgrep/SKILL.md`,
+    );
+    expect(config.agent.explore.prompt).toContain(
+      'If the parent already tried it',
+    );
+    expect(config.agent.explore.prompt).toContain('grep for exact symbols');
+  });
+
   it('configures a visual subagent when the vision model differs from a task model override', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');

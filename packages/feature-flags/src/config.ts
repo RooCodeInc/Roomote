@@ -1,6 +1,7 @@
 import type { MetadataBooleanDescriptor } from './types';
 
 export const DEPLOYMENT_EXPERIMENT_IDS = [
+  'jevgrep',
   'privateSessions',
   'browserNotifications',
   'integrationToolAutoApprovals',
@@ -33,6 +34,10 @@ export type DeploymentExperimentDescriptor = {
 };
 
 export const DEPLOYMENT_EXPERIMENT_CONFIG = {
+  jevgrep: {
+    audience: 'customer-preview',
+    metadataKey: 'jevgrep_experiment_enabled',
+  },
   privateSessions: {
     audience: 'customer-preview',
     metadataKey: 'private_sessions_experiment_enabled',
@@ -90,6 +95,12 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
   string,
   MetadataBooleanDescriptor
 > = {
+  [DEPLOYMENT_EXPERIMENT_CONFIG.jevgrep.metadataKey]: {
+    kind: 'deployment-control',
+    group: null,
+    description:
+      'Use Jevgrep to collect code context in coding tasks when Jev is configured. Disabled by default; absent means disabled.',
+  },
   deployment_disabled: {
     kind: 'deployment-control',
     group: null,
