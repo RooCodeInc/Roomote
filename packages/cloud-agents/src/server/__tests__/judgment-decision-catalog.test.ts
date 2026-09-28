@@ -38,6 +38,19 @@ describe('JUDGMENT_DECISION_CATALOG', () => {
     );
   });
 
+  it('keeps session status outcome boundaries explicit', () => {
+    expect(SESSION_STATUS_JUDGMENT_QUESTIONS.outcome.criteria).toEqual({
+      open: 'The request is still being worked on, and Roomote can continue without a concrete answer, decision, or action from the user. It can remain open while the user independently verifies an artifact or reviews a PR; use needs_input only when a user answer, decision, or action is required before Roomote can continue.',
+      done: 'The requested answer or work was actually delivered, with no unfinished promise or active child task.',
+      blocked:
+        'The requested work cannot continue because of a real external dependency or failure that needs follow-up; use needs_input instead when a user answer, decision, or action is required.',
+      needs_input:
+        'Roomote is waiting for a concrete answer, decision, or action from the user before it can continue.',
+      unclear:
+        'The visible request and results do not provide enough evidence to choose another outcome confidently.',
+    });
+  });
+
   it('derives the tester catalog from the production decision registry', () => {
     expect(JUDGMENT_DECISION_CATALOG).toEqual(
       Object.values(JUDGMENT_DECISION_DEFINITIONS),
