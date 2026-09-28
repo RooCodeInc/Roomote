@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  link,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -354,6 +361,38 @@ describe('createJudgeEnforcement', () => {
     await execa('mkdir', ['directory.tsx'], { cwd: root });
 
     await expect(enforcement.beforeTaskCompletion()).resolves.toBe('finalize');
+  });
+
+  it('skips hard-linked changed files and never truncates a hard-linked policy target', async () => {
+    const root = await createRepo({
+      criteria: [{ rule: 'Use sentence case.', files: ['*.tsx'] }],
+    });
+    const outsideRoot = await mkdtemp(
+      join(tmpdir(), 'roomote-judge-hardlink-'),
+    );
+    roots.push(root, outsideRoot);
+    const outsidePath = join(outsideRoot, 'target.txt');
+    await writeFile(outsidePath, 'must remain unchanged\n');
+    const enforcement = await createEnforcement(root, vi.fn());
+    await link(outsidePath, join(root, 'linked.tsx'));
+
+    await expect(enforcement.beforeTaskCompletion()).resolves.toBe('finalize');
+    await expect(readFile(outsidePath, 'utf8')).resolves.toBe(
+      'must remain unchanged\n',
+    );
+
+    const policyOutsidePath = join(outsideRoot, 'policy-target.txt');
+    await writeFile(policyOutsidePath, 'policy target must remain unchanged\n');
+    await execa('rm', ['JUDGE.json'], { cwd: root });
+    await link(policyOutsidePath, join(root, 'JUDGE.json'));
+    await writeFile(join(root, 'Example.tsx'), 'changed\n');
+
+    await expect(enforcement.beforeTaskCompletion()).resolves.toMatchObject({
+      disposition: 'fail',
+    });
+    await expect(readFile(policyOutsidePath, 'utf8')).resolves.toBe(
+      'policy target must remain unchanged\n',
+    );
   });
 
   it('does not follow a replacement symlink while restoring JUDGE.json', async () => {

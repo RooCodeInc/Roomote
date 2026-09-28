@@ -102,6 +102,13 @@ const SAFE_READ_FLAGS =
   (fsConstants.O_NOFOLLOW ?? 0) |
   (fsConstants.O_NONBLOCK ?? 0);
 
+function isSafeRegularFile(stats: {
+  isFile(): boolean;
+  nlink: number;
+}): boolean {
+  return stats.isFile() && stats.nlink === 1;
+}
+
 async function openRegularFile(filePath: string): Promise<FileHandle | null> {
   let handle: FileHandle;
 
@@ -117,7 +124,7 @@ async function openRegularFile(filePath: string): Promise<FileHandle | null> {
   }
 
   try {
-    if (!(await handle.stat()).isFile()) {
+    if (!isSafeRegularFile(await handle.stat())) {
       await handle.close();
       return null;
     }
@@ -135,7 +142,6 @@ async function openWritableRegularFile(
 ): Promise<FileHandle | null> {
   const existingFlags =
     fsConstants.O_WRONLY |
-    fsConstants.O_TRUNC |
     (fsConstants.O_NOFOLLOW ?? 0) |
     (fsConstants.O_NONBLOCK ?? 0);
   let handle: FileHandle;
@@ -176,7 +182,7 @@ async function openWritableRegularFile(
   }
 
   try {
-    if (!(await handle.stat()).isFile()) {
+    if (!isSafeRegularFile(await handle.stat())) {
       await handle.close();
       return null;
     }
@@ -353,7 +359,7 @@ async function readPolicySnapshot(
   let policyBytes: Buffer;
   try {
     const stats = await lstat(policyPath);
-    if (stats.isSymbolicLink() || !stats.isFile()) {
+    if (stats.isSymbolicLink() || !isSafeRegularFile(stats)) {
       throw new Error('JUDGE.json is not a regular file');
     }
     policyBytes = await readFile(policyPath);
@@ -504,6 +510,11 @@ async function restorePolicySnapshot(
     }
 
     try {
+      if (!isSafeRegularFile(await handle.stat())) {
+        return false;
+      }
+
+      await handle.truncate(0);
       await handle.writeFile(snapshot.policyBytes);
       return true;
     } finally {
