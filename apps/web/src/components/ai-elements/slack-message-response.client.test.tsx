@@ -99,5 +99,27 @@ describe('Slack references in assistant Markdown', () => {
     expect(quotedMarkdown).toContain(
       '[#ops](https://acme.slack.com/archives/C456)',
     );
+
+    const differentlySpacedQuote = renderSlackMessageMarkdown(
+      '> ```text\n> <@U123>\n>```\n\n<#C456>',
+      {
+        users: {
+          U123: {
+            name: 'Maya',
+            profileUrl: 'https://acme.slack.com/team/U123',
+          },
+        },
+        channels: {
+          C456: {
+            name: 'ops',
+            url: 'https://acme.slack.com/archives/C456',
+          },
+        },
+      },
+    );
+    expect(differentlySpacedQuote).toContain('> <@U123>');
+    expect(differentlySpacedQuote).toContain(
+      '[#ops](https://acme.slack.com/archives/C456)',
+    );
   });
 });

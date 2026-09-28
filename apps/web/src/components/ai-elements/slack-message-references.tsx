@@ -215,7 +215,7 @@ export function renderSlackMessageMarkdown(
 ): string {
   let fenceChar: '`' | '~' | null = null;
   let fenceLength = 0;
-  let fencePrefix = '';
+  let fenceQuoteDepth = 0;
 
   return text
     .split(/(\r?\n)/)
@@ -223,24 +223,24 @@ export function renderSlackMessageMarkdown(
       if (part.endsWith('\n')) return part;
 
       if (fenceChar) {
-        const escapedPrefix = fencePrefix.replace(
-          /[.*+?^${}()|[\]\\]/g,
-          '\\$&',
-        );
+        const fencePrefix =
+          fenceQuoteDepth > 0
+            ? `(?:\\s{0,3}>[ \\t]?){${fenceQuoteDepth}}`
+            : '\\s{0,3}';
         const closingFence = new RegExp(
-          `^${escapedPrefix}${fenceChar}{${fenceLength},}\\s*$`,
+          `^${fencePrefix}${fenceChar}{${fenceLength},}\\s*$`,
         );
         if (closingFence.test(part)) {
           fenceChar = null;
           fenceLength = 0;
-          fencePrefix = '';
+          fenceQuoteDepth = 0;
         }
         return part;
       }
 
       const openingFence = part.match(/^((?:\s{0,3}>[ \t]?)*)(`{3,}|~{3,})/);
       if (openingFence?.[2]) {
-        fencePrefix = openingFence[1] ?? '';
+        fenceQuoteDepth = (openingFence[1]?.match(/>/g) ?? []).length;
         const fence = openingFence[2]!;
         fenceChar = fence[0] as '`' | '~';
         fenceLength = fence.length;
