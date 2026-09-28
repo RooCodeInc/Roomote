@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
+import { SlackMentionProvider } from '@/components/ai-elements/slack-mention-context';
+
 const transcriptVisibilityState = vi.hoisted(() => ({
   enabled: false,
 }));
@@ -90,8 +92,19 @@ vi.mock('@/components/ai-elements', () => ({
   MessagePlainText: ({ children }: { children: ReactNode }) => (
     <div data-testid="message-plain-text">{children}</div>
   ),
-  MessageResponse: ({ children }: { children: ReactNode }) => (
-    <div data-testid="message-response">{children}</div>
+  MessageResponse: ({
+    children,
+    additionalRemarkPlugins,
+  }: {
+    children: ReactNode;
+    additionalRemarkPlugins?: unknown[];
+  }) => (
+    <div
+      data-testid="message-response"
+      data-slack-references={additionalRemarkPlugins ? 'enabled' : 'disabled'}
+    >
+      {children}
+    </div>
   ),
   MessageTimestamp: ({ ts, anchorId }: { ts: number; anchorId?: string }) => (
     <time data-anchor-id={anchorId}>{String(ts)}</time>
@@ -250,6 +263,31 @@ describe('AcpTextMessage', () => {
     expect(
       screen.getByRole('button', { name: 'new-task:Done!' }),
     ).toBeVisible();
+  });
+
+  it('uses the Slack-aware Markdown renderer for assistant references', () => {
+    render(
+      <SlackMentionProvider scope={{ kind: 'task', taskId: 'task-1' }}>
+        <AcpTextMessage
+          msg={{
+            id: 'assistant-slack-references',
+            ts: 123,
+            role: 'assistant',
+            kind: 'text',
+            partial: false,
+            sessionId: 'session-1',
+            updateType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            text: 'Post in <#C456> and ask <@U123>.',
+            data: {},
+          }}
+        />
+      </SlackMentionProvider>,
+    );
+
+    expect(screen.getByTestId('message-response')).toHaveAttribute(
+      'data-slack-references',
+      'enabled',
+    );
   });
 
   it.each([

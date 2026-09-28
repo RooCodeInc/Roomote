@@ -494,6 +494,7 @@ type MessageResponseProps = Omit<
   'remarkPlugins'
 > & {
   pullRequestRepositoryUrl?: string | null;
+  additionalRemarkPlugins?: ComponentProps<typeof Streamdown>['remarkPlugins'];
 };
 
 type MessagePlainTextProps = ComponentProps<'div'>;
@@ -535,7 +536,12 @@ export const MessagePlainText = ({
 );
 
 export const MessageResponse = memo(
-  ({ className, pullRequestRepositoryUrl, ...props }: MessageResponseProps) => (
+  ({
+    className,
+    pullRequestRepositoryUrl,
+    additionalRemarkPlugins,
+    ...props
+  }: MessageResponseProps) => (
     <Streamdown
       key={pullRequestRepositoryUrl ?? 'no-pull-request-repository'}
       className={cn(
@@ -550,6 +556,7 @@ export const MessageResponse = memo(
         ...(pullRequestRepositoryUrl
           ? [remarkPullRequestLinks(pullRequestRepositoryUrl)]
           : []),
+        ...(additionalRemarkPlugins ?? []),
       ]}
       plugins={streamdownPlugins}
       components={{ a: CustomLink, p: CustomParagraph }}
@@ -558,7 +565,8 @@ export const MessageResponse = memo(
   ),
   (previous, next) =>
     previous.children === next.children &&
-    previous.pullRequestRepositoryUrl === next.pullRequestRepositoryUrl,
+    previous.pullRequestRepositoryUrl === next.pullRequestRepositoryUrl &&
+    previous.additionalRemarkPlugins === next.additionalRemarkPlugins,
 );
 
 MessageResponse.displayName = 'MessageResponse';

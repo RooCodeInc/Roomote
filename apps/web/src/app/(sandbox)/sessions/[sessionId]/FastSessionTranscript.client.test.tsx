@@ -2,6 +2,7 @@ import {
   act,
   createEvent,
   fireEvent,
+  cleanup,
   render,
   screen,
   within,
@@ -64,6 +65,7 @@ const {
   openTasksPanel,
   narrationState,
   composerSuggestionState,
+  slackReferencesState,
   voiceStatusQuery,
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
@@ -84,6 +86,14 @@ const {
   narrationState: { enabled: false },
   composerSuggestionState: {
     data: undefined as { suggestion: string; messageCount: number } | undefined,
+  },
+  slackReferencesState: {
+    data: undefined as
+      | {
+          users: Record<string, { name: string; profileUrl: string | null }>;
+          channels: Record<string, { name: string; url: string | null }>;
+        }
+      | undefined,
   },
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
@@ -244,7 +254,12 @@ vi.mock('@/trpc/client', () => ({
 // these tests exercise the transcript, not suggestions.
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: () => ({ data: composerSuggestionState.data }),
+  useQuery: (options: { queryKey?: readonly unknown[] }) => ({
+    data:
+      options.queryKey?.[0] === 'slack.resolveUsers'
+        ? slackReferencesState.data
+        : composerSuggestionState.data,
+  }),
   useQueryClient: () => ({ invalidateQueries }),
 }));
 
@@ -434,6 +449,7 @@ beforeEach(() => {
   );
   narrationState.enabled = false;
   composerSuggestionState.data = undefined;
+  slackReferencesState.data = undefined;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
   invalidateQueries.mockReset();
@@ -471,6 +487,48 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  it('renders resolved Slack references in assistant output', async () => {
+    cleanup();
+    slackReferencesState.data = {
+      users: {
+        U123: {
+          name: 'Maya',
+          profileUrl: 'https://acme.slack.com/team/U123',
+        },
+      },
+      channels: {
+        C456: {
+          name: 'ops',
+          url: 'https://acme.slack.com/archives/C456',
+        },
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="fast-session"
+        initialMessages={[
+          textMessage({
+            id: 'assistant-slack-references',
+            role: 'assistant',
+            text: 'Post in <#C456> and ask <@U123>.',
+            ts: 1,
+          }),
+        ]}
+      />,
+    );
+
+    expect(await screen.findByRole('link', { name: '#ops' })).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/archives/C456',
+    );
+    expect(await screen.findByRole('link', { name: '@Maya' })).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/team/U123',
+    );
+    cleanup();
+  });
+
   /**
    * A completed `prepare_integration_key` call at `ts` that created
    * `pendingRef`, persisted as the tool returns it or under a result wrapper.

@@ -1,19 +1,10 @@
 'use client';
 
-import { Fragment, useMemo, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import {
-  SLACK_RESOLVE_CHANNELS_MAX_IDS,
-  SLACK_RESOLVE_USERS_MAX_IDS,
-  extractSlackChannelMentionIds,
-  extractSlackUserMentionIds,
-  parseSlackMessageTokens,
-  type SlackMessageToken,
-} from '@roomote/types';
+import { Fragment, type ReactNode } from 'react';
+import type { SlackMessageToken } from '@roomote/types';
 
-import { useTRPC } from '@/trpc/client';
-
-import { useSlackMentionContext } from './slack-mention-context';
+import type { ResolvedSlackReferences } from './slack-message-references';
+import { useSlackMessageReferences } from './slack-message-references';
 
 const MENTION_CLASS_NAME = 'font-medium text-primary';
 const MENTION_LINK_CLASS_NAME = `${MENTION_CLASS_NAME} no-underline hover:underline`;
@@ -118,11 +109,6 @@ function renderTextWithBareUrls(text: string, keyPrefix: number): ReactNode[] {
   return nodes;
 }
 
-type ResolvedSlackReferences = {
-  users: Record<string, { name: string; profileUrl: string | null }>;
-  channels: Record<string, { name: string; url: string | null }>;
-};
-
 function renderToken(
   token: SlackMessageToken,
   index: number,
@@ -182,39 +168,9 @@ function renderToken(
  * channel; the stored text is never rewritten.
  */
 export function SlackMessageText({ text }: { text: string }) {
-  const tokens = useMemo(() => parseSlackMessageTokens(text), [text]);
-  // Resolve at most the first N distinct users; any overflow stays as the
-  // raw token rather than failing the whole lookup.
-  const userIds = useMemo(
-    () =>
-      extractSlackUserMentionIds(text).slice(0, SLACK_RESOLVE_USERS_MAX_IDS),
-    [text],
-  );
-  const channelIds = useMemo(
-    () =>
-      extractSlackChannelMentionIds(text).slice(
-        0,
-        SLACK_RESOLVE_CHANNELS_MAX_IDS,
-      ),
-    [text],
-  );
-  const { scope } = useSlackMentionContext();
-  const trpc = useTRPC();
-  const { data } = useQuery({
-    ...trpc.slack.resolveUsers.queryOptions({
-      scope: scope ?? { kind: 'task', taskId: '' },
-      userIds,
-      channelIds,
-    }),
-    enabled: scope !== null && (userIds.length > 0 || channelIds.length > 0),
-    staleTime: 10 * 60 * 1000,
-  });
-  const resolved: ResolvedSlackReferences = {
-    users: data?.users ?? {},
-    channels: data?.channels ?? {},
-  };
+  const { tokens, references } = useSlackMessageReferences(text);
 
   return (
-    <>{tokens.map((token, index) => renderToken(token, index, resolved))}</>
+    <>{tokens.map((token, index) => renderToken(token, index, references))}</>
   );
 }
