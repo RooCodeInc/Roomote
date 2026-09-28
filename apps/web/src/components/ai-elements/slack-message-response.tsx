@@ -6,13 +6,14 @@ import {
   createElement,
   isValidElement,
   type ComponentProps,
+  type JSX,
   type ReactNode,
 } from 'react';
 
 import { cn } from '@/lib/utils';
 
 import { CustomLink } from './custom-link';
-import { CustomParagraph, MessageResponse } from './message';
+import { MessageResponse } from './message';
 import { SlackMessageText } from './slack-message-text';
 
 const PROTECTED_ELEMENTS = new Set(['a', 'code', 'pre', 'img', 'button']);
@@ -23,16 +24,6 @@ const RECURSIVE_ELEMENTS = new Set([
   's',
   'span',
   'strong',
-]);
-const TEXT_CONTAINER_TAGS = new Set([
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-  'li',
-  'p',
 ]);
 
 function renderSlackTextChildren(children: ReactNode): ReactNode {
@@ -65,25 +56,38 @@ function renderSlackTextChildren(children: ReactNode): ReactNode {
   });
 }
 
-function SlackMarkdownTextContainer({
-  children,
-  node,
-  ...props
-}: ComponentProps<typeof CustomParagraph>) {
-  const tagName = TEXT_CONTAINER_TAGS.has(node?.tagName ?? '')
-    ? node?.tagName
-    : 'p';
-  const className =
-    tagName === 'p'
-      ? cn('min-w-0 [overflow-wrap:anywhere]', props.className)
-      : props.className;
+type MarkdownNodeProps = {
+  node?: { tagName?: string; position?: unknown };
+};
 
-  return createElement(
-    tagName,
-    { ...props, className },
-    renderSlackTextChildren(children),
-  );
+function createSlackMarkdownElement<Tag extends keyof JSX.IntrinsicElements>(
+  tag: Tag,
+) {
+  return function SlackMarkdownElement(
+    props: ComponentProps<Tag> & MarkdownNodeProps,
+  ) {
+    const { children, node: _node, ...rest } = props;
+    const className =
+      tag === 'p'
+        ? cn('min-w-0 [overflow-wrap:anywhere]', rest.className)
+        : rest.className;
+
+    return createElement(
+      tag,
+      { ...rest, className } as Record<string, unknown>,
+      renderSlackTextChildren(children),
+    );
+  };
 }
+
+const SlackMarkdownHeading1 = createSlackMarkdownElement('h1');
+const SlackMarkdownHeading2 = createSlackMarkdownElement('h2');
+const SlackMarkdownHeading3 = createSlackMarkdownElement('h3');
+const SlackMarkdownHeading4 = createSlackMarkdownElement('h4');
+const SlackMarkdownHeading5 = createSlackMarkdownElement('h5');
+const SlackMarkdownHeading6 = createSlackMarkdownElement('h6');
+const SlackMarkdownListItem = createSlackMarkdownElement('li');
+const SlackMarkdownParagraph = createSlackMarkdownElement('p');
 
 /** Renders assistant Markdown with Slack references at the parsed-node boundary. */
 export function SlackMessageResponse({ text }: { text: string }) {
@@ -92,14 +96,14 @@ export function SlackMessageResponse({ text }: { text: string }) {
       components={{
         a: CustomLink,
         code: 'code',
-        h1: SlackMarkdownTextContainer,
-        h2: SlackMarkdownTextContainer,
-        h3: SlackMarkdownTextContainer,
-        h4: SlackMarkdownTextContainer,
-        h5: SlackMarkdownTextContainer,
-        h6: SlackMarkdownTextContainer,
-        li: SlackMarkdownTextContainer,
-        p: SlackMarkdownTextContainer,
+        h1: SlackMarkdownHeading1,
+        h2: SlackMarkdownHeading2,
+        h3: SlackMarkdownHeading3,
+        h4: SlackMarkdownHeading4,
+        h5: SlackMarkdownHeading5,
+        h6: SlackMarkdownHeading6,
+        li: SlackMarkdownListItem,
+        p: SlackMarkdownParagraph,
         pre: 'pre',
       }}
     >
