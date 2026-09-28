@@ -24,7 +24,7 @@ export type ResolvedSlackReferences = {
   channels: Record<string, { name: string; url: string | null }>;
 };
 
-export type SlackTranscriptTextSource = {
+type SlackTranscriptTextSource = {
   role?: string | null;
   text?: string | null;
   visibleInTranscript?: boolean;
@@ -36,12 +36,14 @@ export function buildSlackTranscriptMentionText(params: {
   includeSessionPrompt?: boolean;
 }): string {
   const texts: string[] = [];
+  const sessionPrompt = params.sessionPrompt;
   if (
     params.includeSessionPrompt &&
-    params.sessionPrompt?.visibleInTranscript !== false &&
-    params.sessionPrompt.text
+    sessionPrompt &&
+    sessionPrompt.visibleInTranscript !== false &&
+    sessionPrompt.text
   ) {
-    texts.push(params.sessionPrompt.text);
+    texts.push(sessionPrompt.text);
   }
 
   for (const message of params.messages) {
