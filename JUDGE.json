@@ -1,0 +1,47 @@
+{
+  "criteria": [
+    {
+      "rule": "Do not add real secrets, credentials, session tokens, private keys, customer or PII data, private deployment details, or full environment dumps to repository files. Use placeholders, redaction, or server-side/environment-managed access instead. Tests, fixtures, examples, and documentation may contain only unmistakably synthetic, non-sensitive values that cannot authenticate, identify a private person or customer, or reveal private deployment data; public identifiers and non-sensitive configuration are allowed.",
+      "files": ["**/*"],
+      "threshold": 0.96
+    },
+    {
+      "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+      "files": [
+        "apps/worker/src/env/**/*.ts",
+        "apps/worker/src/run-task/**/*.ts",
+        "apps/worker/src/sandbox-server/**/*.ts"
+      ],
+      "threshold": 0.95
+    },
+    {
+      "rule": "User-facing or API responses must not expose raw exception messages, stack traces, SQL queries, config or environment values, file paths, credentials, or other server internals; return an intentionally sanitized error while logging only bounded diagnostics server-side. Intentionally safe validation, not-found, authentication, provider, or health messages, authenticated operator diagnostics designed for that audience, redacted or sanitized errors, and test or fixture assertions are allowed; do not pass through raw exception objects or unsanitized internal details.",
+      "files": [
+        "apps/api/src/handlers/**/*.ts",
+        "apps/api/src/middleware/**/*.ts",
+        "packages/sdk/src/server/**/*.ts"
+      ],
+      "threshold": 0.95
+    },
+    {
+      "rule": "In user-visible setup or agent prose, state the user's goal, needed capability, outcome, or decision in ordinary language; do not name, locate, or instruct the user to interact with internal cards, rails, dialogs, panels, buttons, presets, setup steps, or state labels, and do not ask the user to paste credentials in chat. Trusted UI descriptions, internal tool schemas, comments, tests or fixtures, and trusted public documentation that needs to explain controls are allowed, but user-facing setup prose must not expose those control mechanics.",
+      "files": [
+        "packages/cloud-agents/src/server/fast-agent/**/*.ts",
+        "packages/cloud-agents/src/server/*prompt*.ts",
+        "packages/cloud-agents/src/system-prompt.ts",
+        "apps/worker/src/run-task/**/*prompt*.ts"
+      ],
+      "threshold": 0.94
+    },
+    {
+      "rule": "When async operations are independent, start them before awaiting and await them together; defer awaits needed only after a branch or early return, and do not serialize independent network or database work. Truly dependent, ordered, rate-limited, transactionally coupled, or error-semantics-sensitive steps may remain sequential, as may intentional small operations and test or fixture code.",
+      "files": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"],
+      "threshold": 0.97
+    },
+    {
+      "rule": "In user-facing UI, task, and setup copy, communicate user value, current state, or available actions rather than implementation details or feature mechanics. Avoid labels or descriptions such as 'default off' and detailed explanations of how a feature works in descriptive task or setup text. Necessary control labels, status, accessibility, error or recovery, permission, configuration-consequence, and security copy are allowed, as are tests or fixtures and trusted public documentation.",
+      "files": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"],
+      "threshold": 0.95
+    }
+  ]
+}
