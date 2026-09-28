@@ -129,6 +129,42 @@ Generated HTML artifacts open in a sandboxed **Preview** by default. Switch to
 **Code** to inspect the saved HTML source without executing it in the page that
 runs the Roomote dashboard.
 
+## Repository judge policies
+
+Repositories can opt into a completion-time semantic check by adding a root
+`JUDGE.json`. Without this file, tasks keep their normal completion behavior.
+
+```json
+{
+  "criteria": [
+    {
+      "rule": "Do not include descriptions of functionality in UI text.",
+      "files": ["apps/web/**/*.tsx"],
+      "threshold": 0.8
+    }
+  ]
+}
+```
+
+`criteria` must be non-empty. Each `rule` is required. `files` is an optional
+array of repository-relative globs; when omitted, the criterion applies to all
+changed text files. `threshold` is optional and ranges from `0` to `1`; the
+default is `0.85`.
+
+Roomote checks the final repository diff, including files created by shell
+commands, and evaluates each matching criterion independently with the
+configured judgment model. A confident `rewrite` result at or above the
+criterion threshold sends the agent deterministic repair feedback containing
+the path, exact rule, and confidence. `pass`, `unclear`, and below-threshold
+results do not interrupt completion. The policy is snapshotted when the task
+starts, so changes to `JUDGE.json` apply to the next task.
+
+The judge skips binary and deleted files. Oversized files are judged with
+explicitly marked bounded context. Invalid policy files and unavailable or
+erroring judgment models produce a visible warning and fail open. After three
+unsuccessful repair rounds for one file and criterion, the task fails instead of
+reporting successful completion.
+
 CSV and TSV artifacts use abstract table thumbnails in the gallery and open as
 tables by default. The preview keeps the first row as data unless you turn on
 **First row is a header**, preserves quoted fields and line breaks, and reports

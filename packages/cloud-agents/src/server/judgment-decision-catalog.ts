@@ -19,6 +19,7 @@ import { INTEGRATION_TOOL_AUTO_QUESTIONS } from './integration-tool-auto-evaluat
 import {
   AGENTMAIL_AUTO_REPLY_QUESTION,
   CUSTOM_AUTOMATION_LAUNCH_CRITERIA_QUESTION,
+  JUDGE_FILE_CRITERION_QUESTION,
   REPLY_ADDRESSEE_QUESTION,
   SESSION_STATUS_JUDGMENT_QUESTIONS,
 } from './judgment-questions';
@@ -263,6 +264,25 @@ export const JUDGMENT_DECISION_DEFINITIONS = {
       recentResults: [],
     },
     note: 'Additional `run_when_*` questions are generated from each automation’s saved criteria.',
+  },
+  'judge-file-criterion': {
+    id: 'judge-file-criterion',
+    label: 'Repository file judge',
+    description: 'Whether a changed file violates one repository-defined rule.',
+    questions: { outcome: JUDGE_FILE_CRITERION_QUESTION },
+    sampleState: {
+      path: 'apps/web/src/components/Example.tsx',
+      patch: '+<p>Click here to save your work.</p>',
+      patchTruncated: false,
+      finalContent: '<p>Click here to save your work.</p>',
+      finalContentTruncated: false,
+      criteria: [
+        {
+          id: 'criterion_0',
+          rule: 'Do not include descriptions of functionality in UI text.',
+        },
+      ],
+    },
   },
   'requested-work-kind': {
     id: 'requested-work-kind',

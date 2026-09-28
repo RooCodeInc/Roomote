@@ -147,6 +147,7 @@ interface HarnessFollowUpPromptOptions {
 export type HarnessManagerCompletionDecision =
   | 'finalize'
   | 'ignore'
+  | { disposition: 'fail'; error: string }
   | {
       disposition: 'continue';
       prompt: HarnessFollowUpPromptOptions;
@@ -982,7 +983,10 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     void decide(completionId)
       .then(async (disposition) => {
         if (decisionSequence !== this.completionDecisionSequence) {
-          if (typeof disposition === 'object') {
+          if (
+            typeof disposition === 'object' &&
+            disposition.disposition === 'continue'
+          ) {
             try {
               await disposition.onRejected?.();
             } catch (error) {
@@ -1003,6 +1007,12 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
           return;
         }
         if (typeof disposition === 'object') {
+          if (disposition.disposition === 'fail') {
+            this.state.lastErrorMessage = disposition.error;
+            this.triggerShutdown();
+            return;
+          }
+
           this.continuationStartPending = true;
           this.clearTurnSettlementState();
           if (this.phase !== 'running') {
