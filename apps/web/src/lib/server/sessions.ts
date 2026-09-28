@@ -38,6 +38,7 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  HAS_PULL_REQUEST_FILTER_VALUE,
   LINEAR_SESSION_ACTOR_PREFIX,
   type SessionStatus,
   type BackgroundAutomationKey,
@@ -168,6 +169,23 @@ function taskExistsCondition(
           eq(sessionTasks.sessionId, sessions.id),
           isNull(tasks.deletedAt),
           condition,
+        ),
+      ),
+  );
+}
+
+function taskEnvironmentExistsCondition(environmentId: string) {
+  return exists(
+    db
+      .select({ one: sql`1` })
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .innerJoin(taskRuns, eq(taskRuns.taskId, sessionTasks.taskId))
+      .where(
+        and(
+          eq(sessionTasks.sessionId, sessions.id),
+          isNull(tasks.deletedAt),
+          sql`${taskRuns.payload}->>'environmentId' = ${environmentId}`,
         ),
       ),
   );
@@ -416,6 +434,33 @@ function listConditions(
   const pullRequest = input.pullRequest
     ? parsePullRequestFilterValue(input.pullRequest)
     : null;
+  const repositoryFilter = input.repository
+    ? input.repository.startsWith('env:')
+      ? taskEnvironmentExistsCondition(input.repository.slice(4))
+      : taskExistsCondition(eq(tasks.repositoryName, input.repository))
+    : undefined;
+  const hasPullRequestFilter =
+    input.pullRequest === HAS_PULL_REQUEST_FILTER_VALUE;
+  const hasPullRequestCondition = hasPullRequestFilter
+    ? exists(
+        db
+          .select({ one: sql`1` })
+          .from(sessionTasks)
+          .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+          .innerJoin(
+            taskPullRequests,
+            eq(taskPullRequests.taskId, sessionTasks.taskId),
+          )
+          .where(
+            and(
+              eq(sessionTasks.sessionId, sessions.id),
+              isNull(tasks.deletedAt),
+              isNotNull(taskPullRequests.repository),
+              isNotNull(taskPullRequests.prNumber),
+            ),
+          ),
+      )
+    : undefined;
 
   return and(
     sessionListScope(auth),
@@ -466,10 +511,9 @@ function listConditions(
       ? taskExistsCondition(eq(tasks.workflow, 'pr_review'))
       : undefined,
     scope === 'automations' ? eq(sessions.ownerKind, 'automation') : undefined,
-    input.repository
-      ? taskExistsCondition(eq(tasks.repositoryName, input.repository))
-      : undefined,
+    repositoryFilter,
     input.model ? taskExistsCondition(eq(tasks.model, input.model)) : undefined,
+    hasPullRequestCondition,
     pullRequest
       ? exists(
           db
