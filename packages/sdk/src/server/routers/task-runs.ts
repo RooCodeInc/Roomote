@@ -11,6 +11,7 @@ import {
 
 import {
   RunStatus,
+  JUDGE_MAX_CRITERIA_PER_REQUEST,
   runEventSources,
   runEventTypes,
   communicationProviderSchema,
@@ -189,7 +190,10 @@ const judgeFileCriteriaInputSchema = z
   .object({
     runId: z.number(),
     state: judgeFileStateSchema,
-    criteria: z.array(judgeFileCriterionInputSchema).min(1).max(64),
+    criteria: z
+      .array(judgeFileCriterionInputSchema)
+      .min(1)
+      .max(JUDGE_MAX_CRITERIA_PER_REQUEST),
   })
   .strict();
 

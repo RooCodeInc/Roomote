@@ -8,6 +8,7 @@ import { execa } from 'execa';
 
 import {
   JUDGE_DEFAULT_THRESHOLD,
+  JUDGE_MAX_CRITERIA_PER_REQUEST,
   JUDGE_MAX_FILE_CONTEXT_BYTES,
   JUDGE_MAX_PATCH_CONTEXT_BYTES,
   JUDGE_POLICY_FILE_NAME,
@@ -116,6 +117,11 @@ async function getDirtyPaths(root: string): Promise<string[]> {
 
 async function hashFile(filePath: string): Promise<string | null> {
   try {
+    const stats = await lstat(filePath);
+    if (stats.isSymbolicLink() || !stats.isFile()) {
+      return null;
+    }
+
     const hash = createHash('sha256');
     const stream = createReadStream(filePath);
 
@@ -161,6 +167,11 @@ function boundedText(
 
 async function readFileContext(filePath: string): Promise<FileContext | null> {
   try {
+    const stats = await lstat(filePath);
+    if (stats.isSymbolicLink() || !stats.isFile()) {
+      return null;
+    }
+
     const stream = createReadStream(filePath, { highWaterMark: 64 * 1024 });
     const hash = createHash('sha256');
     const firstChunks: Buffer[] = [];
@@ -454,7 +465,6 @@ export async function createJudgeEnforcement(options: {
 
   const repositories: JudgeRepository[] = [];
   const policySnapshots: JudgePolicySnapshot[] = [];
-  let invalidPolicy = false;
 
   for (const [name, root] of Object.entries(options.repoPaths ?? {})) {
     const policyPath = path.join(root, JUDGE_POLICY_FILE_NAME);
@@ -477,13 +487,12 @@ export async function createJudgeEnforcement(options: {
         });
       }
     } catch {
-      invalidPolicy = true;
       await recordWarning(POLICY_WARNING_MESSAGE, 'judge_policy_invalid');
-      break;
+      continue;
     }
   }
 
-  if (invalidPolicy || policySnapshots.length === 0) {
+  if (policySnapshots.length === 0) {
     return {
       beforeTaskCompletion: async () => 'finalize',
     };
@@ -556,7 +565,15 @@ export async function createJudgeEnforcement(options: {
             return !judgmentCache.has(cacheKey);
           });
 
-          if (pendingCriteria.length > 0) {
+          for (
+            let offset = 0;
+            offset < pendingCriteria.length;
+            offset += JUDGE_MAX_CRITERIA_PER_REQUEST
+          ) {
+            const criteriaBatch = pendingCriteria.slice(
+              offset,
+              offset + JUDGE_MAX_CRITERIA_PER_REQUEST,
+            );
             let result:
               | { kind: 'answered'; evaluations: JudgeEvaluation[] }
               | { kind: 'unavailable' }
@@ -572,7 +589,7 @@ export async function createJudgeEnforcement(options: {
                   finalContent: file.finalContent,
                   finalContentTruncated: file.finalContentTruncated,
                 },
-                criteria: pendingCriteria.map(({ index, criterion }) => ({
+                criteria: criteriaBatch.map(({ index, criterion }) => ({
                   id: `criterion_${index}`,
                   rule: criterion.rule,
                 })),
@@ -604,7 +621,7 @@ export async function createJudgeEnforcement(options: {
             }
 
             if (
-              pendingCriteria.some(
+              criteriaBatch.some(
                 ({ index }) =>
                   !judgmentCache.has(
                     `${repository.policyHash}:${index}:${file.relativePath}:${file.contentHash}`,
@@ -617,6 +634,21 @@ export async function createJudgeEnforcement(options: {
               );
               return 'finalize';
             }
+          }
+
+          if (
+            pendingCriteria.some(
+              ({ index }) =>
+                !judgmentCache.has(
+                  `${repository.policyHash}:${index}:${file.relativePath}:${file.contentHash}`,
+                ),
+            )
+          ) {
+            await recordModelWarning(
+              MODEL_ERROR_WARNING_MESSAGE,
+              'judge_model_error',
+            );
+            return 'finalize';
           }
 
           for (const { criterion, index } of applicableCriteria) {

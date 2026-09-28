@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -292,6 +292,68 @@ describe('createJudgeEnforcement', () => {
       );
       expect(logger.warn).toHaveBeenCalledOnce();
     }
+  });
+
+  it('keeps valid repository enforcement when another repository policy is malformed', async () => {
+    const invalidRoot = await createRepo({ criteria: [] });
+    const validRoot = await createRepo({
+      criteria: [{ rule: 'Use sentence case.' }],
+    });
+    roots.push(invalidRoot, validRoot);
+    const logger = createLogger();
+    const evaluate = vi.fn(async ({ criteria }) =>
+      answered(criteria, 'rewrite'),
+    );
+    const enforcement = await createJudgeEnforcement({
+      runId: 1,
+      repoPaths: { invalid: invalidRoot, valid: validRoot },
+      logger,
+      evaluate,
+    });
+
+    await writeFile(join(validRoot, 'Example.tsx'), 'changed\n');
+
+    await expect(enforcement.beforeTaskCompletion()).resolves.toMatchObject({
+      disposition: 'continue',
+    });
+    expect(evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({ path: 'Example.tsx' }),
+      }),
+    );
+    expect(logger.warn).toHaveBeenCalledOnce();
+  });
+
+  it('batches policies larger than the judgment RPC limit', async () => {
+    const root = await createRepo({
+      criteria: Array.from({ length: 65 }, (_, index) => ({
+        rule: `Rule ${index}`,
+      })),
+    });
+    roots.push(root);
+    const evaluate = vi.fn(async ({ criteria }) => answered(criteria, 'pass'));
+    const enforcement = await createEnforcement(root, evaluate);
+
+    await writeFile(join(root, 'Example.tsx'), 'changed\n');
+
+    await expect(enforcement.beforeTaskCompletion()).resolves.toBe('finalize');
+    expect(evaluate).toHaveBeenCalledTimes(2);
+    expect(evaluate.mock.calls.map(([input]) => input.criteria.length)).toEqual(
+      [64, 1],
+    );
+  });
+
+  it('skips changed symlinks and FIFOs before hashing or reading them', async () => {
+    const root = await createRepo({
+      criteria: [{ rule: 'Use sentence case.', files: ['*.tsx'] }],
+    });
+    roots.push(root);
+    await writeFile(join(root, 'outside.txt'), 'outside checkout content\n');
+    const enforcement = await createEnforcement(root, vi.fn());
+    await symlink('outside.txt', join(root, 'link.tsx'));
+    await execa('mkfifo', ['pipe.tsx'], { cwd: root });
+
+    await expect(enforcement.beforeTaskCompletion()).resolves.toBe('finalize');
   });
 
   it('restores immutable JUDGE.json, allows successful repair, and blocks after three failed rounds', async () => {

@@ -4,6 +4,7 @@ export const JUDGE_POLICY_FILE_NAME = 'JUDGE.json';
 export const JUDGE_DEFAULT_THRESHOLD = 0.85;
 export const JUDGE_MAX_FILE_CONTEXT_BYTES = 48_000;
 export const JUDGE_MAX_PATCH_CONTEXT_BYTES = 32_000;
+export const JUDGE_MAX_CRITERIA_PER_REQUEST = 64;
 
 export const JUDGE_OUTCOMES = ['pass', 'rewrite', 'unclear'] as const;
 
