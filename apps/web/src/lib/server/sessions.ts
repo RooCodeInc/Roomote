@@ -39,6 +39,7 @@ import {
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   LINEAR_SESSION_ACTOR_PREFIX,
+  type SessionStatus,
   type BackgroundAutomationKey,
 } from '@roomote/types';
 import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
@@ -545,6 +546,7 @@ const baseSelection = {
   visibility: sessions.visibility,
   activityAt: sessions.activityAt,
   cachedStatus: sessions.cachedStatus,
+  manualStatus: sessions.manualStatus,
   respondingUntil: sessions.respondingUntil,
   archivedAt: sessions.archivedAt,
   createdAt: sessions.createdAt,
@@ -1337,7 +1339,11 @@ export async function getSessionForTask(auth: SessionAuth, taskId: string) {
 export async function updateSessionMetadata(
   auth: SessionAuth,
   sessionId: string,
-  changes: { title?: string; archivedAt?: Date | null },
+  changes: {
+    title?: string;
+    archivedAt?: Date | null;
+    manualStatus?: SessionStatus | null;
+  },
 ) {
   const updatedAt = new Date();
   const updated = await db.transaction(async (tx) => {
@@ -1345,6 +1351,9 @@ export async function updateSessionMetadata(
       .update(sessions)
       .set({
         ...changes,
+        ...(changes.manualStatus === undefined
+          ? {}
+          : { cachedStatus: changes.manualStatus }),
         ...(changes.title === undefined
           ? {}
           : { titleEditedByUserAt: updatedAt }),

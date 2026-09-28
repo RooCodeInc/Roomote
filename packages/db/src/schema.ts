@@ -4472,6 +4472,9 @@ export const sessions = pgTable(
       .$type<TaskVisibility>(),
     activityAt: bigint('activity_at', { mode: 'number' }).notNull(),
     cachedStatus: text('cached_status').$type<SessionStatus>(),
+    // Optional user-selected status. When present, runtime reconciliation
+    // preserves it while cached_status remains the effective Session status.
+    manualStatus: text('manual_status').$type<SessionStatus>(),
     // Fast-conversation responding lease: while this is in the future, status
     // recomputation treats the conversation as actively responding. TTL-based
     // so a crashed turn self-heals instead of pinning the session 'active'.
@@ -4524,6 +4527,10 @@ export const sessions = pgTable(
     check(
       'sessions_cached_status_check',
       sql`${table.cachedStatus} IS NULL OR ${table.cachedStatus} in ('active', 'needs_input', 'blocked', 'ready')`,
+    ),
+    check(
+      'sessions_manual_status_check',
+      sql`${table.manualStatus} IS NULL OR ${table.manualStatus} in ('active', 'needs_input', 'blocked', 'ready')`,
     ),
   ],
 );

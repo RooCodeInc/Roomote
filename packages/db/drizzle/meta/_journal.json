@@ -841,6 +841,13 @@
       "when": 1790331860594,
       "tag": "0119_sticky_pestilence",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1790592315185,
+      "tag": "0120_condemned_sunfire",
+      "breakpoints": true
     }
   ]
 }

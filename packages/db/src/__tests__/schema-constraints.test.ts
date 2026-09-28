@@ -192,6 +192,7 @@ describe('sessions CHECK and uniqueness constraints', () => {
     ['sourceTrigger', 'sessions_source_trigger_check'],
     ['visibility', 'sessions_visibility_check'],
     ['cachedStatus', 'sessions_cached_status_check'],
+    ['manualStatus', 'sessions_manual_status_check'],
   ] as const)(
     'rejects an unknown %s value via %s',
     async (field, constraintName) => {
