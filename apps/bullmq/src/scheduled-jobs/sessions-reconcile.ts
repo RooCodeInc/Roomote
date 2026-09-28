@@ -1,7 +1,6 @@
 import {
   processSessionStatusJudgmentBatch,
   reconcileExpiredFastAgentInferenceRetryNotices,
-  SESSION_STATUS_INACTIVITY_MS,
 } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -217,11 +216,7 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
   const reconciledRetryNotices =
     await reconcileExpiredFastAgentInferenceRetryNotices(BATCH_SIZE);
   const enqueuedInactiveStatusJudgments =
-    await enqueueInactiveSessionStatusJudgmentRequests(
-      db,
-      SESSION_STATUS_INACTIVITY_MS,
-      BATCH_SIZE,
-    );
+    await enqueueInactiveSessionStatusJudgmentRequests(db, BATCH_SIZE);
   const processedStatusJudgments = await processSessionStatusJudgmentBatch();
   const prunedStatusJudgments = await pruneSessionStatusJudgmentHistory(db);
 

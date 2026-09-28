@@ -16,7 +16,40 @@ import { runInTransactionIfAvailable } from './transaction-utils';
 import { isDeploymentExperimentEnabled } from './deployment-experiments';
 
 const CLAIM_LEASE_MS = 2 * 60 * 1_000;
+const SESSION_STATUS_INACTIVITY_MS = 4 * 24 * 60 * 60 * 1_000;
 export const MAX_SESSION_STATUS_JUDGMENT_ATTEMPTS = 5;
+
+const latestVisibleUserMessageSql = (sessionReference: unknown) => sql`
+  SELECT fam.ts
+  FROM fast_agent_messages AS fam
+  WHERE fam.conversation_id = ${sessionReference}
+    AND fam.role = 'user'
+    AND (
+      fam.metadata ->> 'visibleInTranscript' = 'true'
+      OR (
+        fam.metadata ->> 'visibleInTranscript' IS NULL
+        AND fam.event_type <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+      )
+    )
+  ORDER BY fam.ts DESC
+  LIMIT 1
+`;
+
+/** Persist the next inactivity boundary from the canonical visible user clock. */
+export async function refreshSessionInactivityDueAt(
+  database: DatabaseOrTransaction,
+  sessionId: string,
+): Promise<void> {
+  await database.execute(sql`
+    UPDATE sessions AS session
+    SET inactivity_due_at = (
+      SELECT to_timestamp(latest.ts / 1000.0)
+        + (${SESSION_STATUS_INACTIVITY_MS} * interval '1 millisecond')
+      FROM (${latestVisibleUserMessageSql(sql`session.fast_conversation_id`)}) AS latest
+    )
+    WHERE session.id = ${sessionId}
+  `);
+}
 
 /**
  * Queue one fresh judgment when the latest visible user message has crossed
@@ -25,7 +58,6 @@ export const MAX_SESSION_STATUS_JUDGMENT_ATTEMPTS = 5;
  */
 export async function enqueueInactiveSessionStatusJudgmentRequests(
   database: DatabaseOrTransaction,
-  inactivityMs: number,
   limit = 100,
 ): Promise<number> {
   if (
@@ -34,47 +66,25 @@ export async function enqueueInactiveSessionStatusJudgmentRequests(
     return 0;
   }
 
-  const cutoff = Date.now() - inactivityMs;
   const candidates = await database.execute<{
     session_id: string;
-    source_event_id: string;
+    due_ms: string | number;
   }>(sql`
-    WITH latest_visible_user_messages AS (
-      SELECT
-        s.id AS session_id,
-        latest.latest_ts
-      FROM sessions AS s
-      CROSS JOIN LATERAL (
-        -- The partial conversation-order index lets this lookup stop at the
-        -- newest visible user message instead of aggregating the transcript.
-        SELECT fam.ts AS latest_ts
-        FROM fast_agent_messages AS fam
-        WHERE fam.conversation_id = s.fast_conversation_id
-          AND fam.role = 'user'
-          AND (
-            fam.metadata ->> 'visibleInTranscript' = 'true'
-            OR (
-              fam.metadata ->> 'visibleInTranscript' IS NULL
-              AND fam.event_type <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
-            )
-          )
-        ORDER BY fam.ts DESC
-        LIMIT 1
-      ) AS latest
-      WHERE s.visibility = 'visible'
-    )
     SELECT
-      session_id,
-      'inactivity:' || latest_ts::text AS source_event_id
-    FROM latest_visible_user_messages
-    WHERE latest_ts <= ${cutoff}
+      session.id AS session_id,
+      floor(extract(epoch FROM session.inactivity_due_at) * 1000)::bigint AS due_ms
+    FROM sessions AS session
+    WHERE session.visibility = 'visible'
+      AND session.manual_status IS NULL
+      AND session.inactivity_due_at <= now()
       AND NOT EXISTS (
         SELECT 1
         FROM session_status_judgments AS judgment
-        WHERE judgment.session_id = latest_visible_user_messages.session_id
-          AND judgment.source_event_id = 'inactivity:' || latest_ts::text
+        WHERE judgment.session_id = session.id
+          AND judgment.source_event_id = 'inactivity-due:'
+            || floor(extract(epoch FROM session.inactivity_due_at) * 1000)::bigint::text
       )
-    ORDER BY latest_ts, session_id
+    ORDER BY session.inactivity_due_at, session.id
     LIMIT ${limit}
   `);
 
@@ -82,7 +92,7 @@ export async function enqueueInactiveSessionStatusJudgmentRequests(
   for (const candidate of candidates) {
     const request = await createSessionStatusJudgmentRequest(database, {
       sessionId: candidate.session_id,
-      sourceEventId: candidate.source_event_id,
+      sourceEventId: `inactivity-due:${candidate.due_ms}`,
       // The inactivity clock is anchored to the Fast user transcript.
       sourceKind: 'fast_turn',
       state: 'pending',
@@ -166,6 +176,7 @@ export async function settleSessionStatusJudgmentTurn(
   database: DatabaseOrTransaction,
   input: { sessionId: string; sourceEventId: string; visible: boolean },
 ): Promise<void> {
+  await refreshSessionInactivityDueAt(database, input.sessionId);
   if (
     !(await isDeploymentExperimentEnabled('sessionStatusJudgment', database))
   ) {

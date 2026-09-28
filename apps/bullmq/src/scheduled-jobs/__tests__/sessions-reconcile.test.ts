@@ -10,6 +10,7 @@ import {
   sessionStatusJudgments,
   sessionTasks,
   sessions,
+  refreshSessionInactivityDueAt,
   setDeploymentExperimentEnabled,
   taskFactory,
   userFactory,
@@ -340,6 +341,7 @@ describe('sessionsReconcileJob', () => {
       contentBlocks: [{ type: 'text', text: 'Please investigate this.' }],
       metadata: { visibleInTranscript: true, userId: user.id },
     });
+    await refreshSessionInactivityDueAt(db, session.id);
 
     try {
       await sessionsReconcileJob();
@@ -349,7 +351,7 @@ describe('sessionsReconcileJob', () => {
         .from(sessionStatusJudgments)
         .where(eq(sessionStatusJudgments.sessionId, session.id));
       expect(judgment).toMatchObject({
-        sourceEventId: `inactivity:${latestVisibleUserTs}`,
+        sourceEventId: `inactivity-due:${latestVisibleUserTs + 4 * 24 * 60 * 60 * 1_000}`,
       });
     } finally {
       await setDeploymentExperimentEnabled('sessionStatusJudgment', false);

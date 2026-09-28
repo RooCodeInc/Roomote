@@ -8,6 +8,7 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   pruneSessionStatusJudgmentHistory,
+  refreshSessionInactivityDueAt,
   sessionFactory,
   sessionStatusJudgments,
   sessions,
@@ -181,18 +182,13 @@ describe('Session status judgment requests', () => {
         metadata: { visibleInTranscript: false, userId: user.id },
       },
     ]);
+    await refreshSessionInactivityDueAt(db, session.id);
 
     await expect(
-      enqueueInactiveSessionStatusJudgmentRequests(
-        db,
-        4 * 24 * 60 * 60 * 1_000,
-      ),
+      enqueueInactiveSessionStatusJudgmentRequests(db),
     ).resolves.toBe(1);
     await expect(
-      enqueueInactiveSessionStatusJudgmentRequests(
-        db,
-        4 * 24 * 60 * 60 * 1_000,
-      ),
+      enqueueInactiveSessionStatusJudgmentRequests(db),
     ).resolves.toBe(0);
 
     const [request] = await db
@@ -200,7 +196,7 @@ describe('Session status judgment requests', () => {
       .from(sessionStatusJudgments)
       .where(eq(sessionStatusJudgments.sessionId, session.id));
     expect(request).toMatchObject({
-      sourceEventId: `inactivity:${latestVisibleUserTs}`,
+      sourceEventId: `inactivity-due:${latestVisibleUserTs + 4 * 24 * 60 * 60 * 1_000}`,
       sourceKind: 'fast_turn',
       state: 'pending',
     });
