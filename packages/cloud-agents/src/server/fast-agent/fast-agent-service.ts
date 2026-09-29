@@ -3831,7 +3831,12 @@ export async function answerFastAgentQuestion({
       const unifiedSession = await getSessionForFastConversation(
         db,
         session.id,
-      );
+      ).catch((error) => {
+        console.warn(
+          `[sessions] Failed to resolve Session for manual status release: ${formatErrorForLog(error)}`,
+        );
+        return null;
+      });
       if (unifiedSession) {
         await clearManualStatusAfterNewerUserMessage(
           db,

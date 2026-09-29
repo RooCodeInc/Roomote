@@ -884,6 +884,26 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).toBeGreaterThan(mocks.upsertMessage.mock.invocationCallOrder[0]!);
   });
 
+  it('continues the turn when the unified Session lookup fails during status release', async () => {
+    mocks.getUnifiedSession.mockRejectedValueOnce(
+      new Error('transient session lookup failure'),
+    );
+    mocks.getUnifiedSession.mockResolvedValueOnce({
+      id: 'unified-session-1',
+    });
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter: callbacks() }),
+    ).resolves.toBe('It coordinates incoming requests.');
+    expect(mocks.clearManualStatusAfterNewerUserMessage).not.toHaveBeenCalled();
+    expect(mocks.touchSessionActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      'unified-session-1',
+      expect.any(Number),
+      { respondingUntil: expect.any(Date) },
+    );
+  });
+
   it('reuses each participant personalization snapshot while current instructions stay in history', async () => {
     const current = new Map([
       [
