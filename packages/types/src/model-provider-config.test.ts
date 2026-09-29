@@ -704,6 +704,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         providerIds: pairedGpt6ProviderIds,
       },
       {
+        displayName: 'GPT-6.1 Sol',
+        modelId: 'gpt-6.1-sol',
+        providerIds: pairedGpt6ProviderIds,
+      },
+      {
         displayName: 'GPT 5.6 Terra',
         modelId: 'gpt-5.6-terra',
         providerIds: pairedGpt6ProviderIds,
@@ -1149,6 +1154,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/anthropic/claude-sonnet-5-5',
       'requesty/gpt-5.6-sol@eu',
       'requesty/gpt-6-sol@eu',
+      'requesty/gpt-6.1-sol@eu',
       'requesty/gpt-5.6-terra@eu',
       'requesty/gpt-5.6-luna@eu',
       'requesty/gpt-6-luna@eu',

@@ -15,6 +15,7 @@ const CHATGPT_GATEWAY_ENV_VAR = ${JSON.stringify(INFERENCE_GATEWAY_CHATGPT_ENV_V
 const ALLOWED_MODELS = new Set([
   'gpt-6-astra',
   'gpt-6-sol',
+  'gpt-6.1-sol',
   'gpt-6-luna',
   'gpt-5.5',
   'gpt-5.3-codex-spark',
