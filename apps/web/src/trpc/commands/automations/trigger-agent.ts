@@ -38,6 +38,10 @@ async function assertManualTriggerIsRunnable(
     throw new Error(`Unsupported automation: ${String(automationKey)}`);
   }
 
+  if (automationKey === 'manager_stats') {
+    throw new Error('Manager Stats does not support on-demand runs.');
+  }
+
   const runtime = await getAutomationRuntime(automationKey);
   let hasAdditionalRules = false;
   let rulesDestination: ResolvedAutomationDestination | null = null;

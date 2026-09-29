@@ -1,6 +1,7 @@
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
+  isBuiltInWebhookAutomationKey,
   TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS,
 } from '../background-automation-registry';
 
@@ -32,6 +33,27 @@ describe('background automation registry', () => {
     ]);
   });
 
+  it('derives webhook eligibility from the scheduled built-in catalog', () => {
+    expect(
+      TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS.filter(
+        (descriptor) => 'supportsWebhook' in descriptor,
+      ).map((descriptor) => descriptor.automationKey),
+    ).toEqual([
+      'conflict_resolver',
+      'suggester',
+      'announcer',
+      'manager_stats',
+      'provider_usage_limit',
+      'sentry_triage',
+      'dependabot_triage',
+      'codeql_triage',
+      'security_auditor',
+      'code_quality_auditor',
+    ]);
+    expect(isBuiltInWebhookAutomationKey('review_code')).toBe(false);
+    expect(isBuiltInWebhookAutomationKey('manager_stats')).toBe(true);
+  });
+
   it('registers provider usage alerts as a cross-provider deterministic automation', () => {
     const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
       'provider_usage_limit',
@@ -40,7 +62,7 @@ describe('background automation registry', () => {
     expect(descriptor).toMatchObject({
       label: 'Inference Provider Usage Alerts',
       slackIcon: 'battery-warning',
-      scheduleModes: ['off', 'every_hour'],
+      scheduleModes: ['off', 'on_demand', 'every_hour'],
       usesManagerChannel: true,
       supportedCommunicationProviders: [
         'slack',
@@ -53,6 +75,16 @@ describe('background automation registry', () => {
     expect(
       getTriggerableBackgroundAutomationSettingsHash('provider_usage_limit'),
     ).toBe('provider-usage-limit');
+  });
+
+  it('uses calendar frequency options for Manager Stats without on-demand', () => {
+    expect(
+      getTriggerableBackgroundAutomationDescriptorByKey('manager_stats'),
+    ).toMatchObject({
+      label: 'Manager Stats',
+      scheduleModes: ['off', 'daily', 'weekly', 'monthly'],
+      supportsWebhook: true,
+    });
   });
 
   it('registers installed release announcements for manual cross-provider tests', () => {

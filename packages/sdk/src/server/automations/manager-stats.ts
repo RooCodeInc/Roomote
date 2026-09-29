@@ -35,7 +35,7 @@ import {
 } from './destination';
 import { hasAnyActiveRepository } from './github-deployment-scope';
 import { resolveDeploymentTimeZone } from './custom-automation-schedule';
-import { isWeeklyRunDueOnLocalDay } from './scheduling-utils';
+import { isManagerStatsRunDueOnLocalPeriod } from './scheduling-utils';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -43,8 +43,6 @@ import {
 } from './types';
 
 const LOG_PREFIX = '[managerStats]';
-const SCHEDULE_DAY_LOCAL = 5; // Friday.
-const SCHEDULE_HOUR_LOCAL = 16;
 const numberFormatter = new Intl.NumberFormat('en-US');
 
 function formatNumber(value: number) {
@@ -68,8 +66,10 @@ function buildAnalyticsUrl() {
 
 function formatManagerStatsText({
   stats,
+  frequency = 'weekly',
 }: {
   stats: Awaited<ReturnType<typeof buildManagerStatsDigest>>;
+  frequency?: 'daily' | 'weekly' | 'monthly';
 }) {
   const topUsers =
     stats.topUsers.length === 0
@@ -80,7 +80,7 @@ function formatManagerStatsText({
           )
           .join(', ');
   const lines = [
-    '*My weekly stats*',
+    `*My ${frequency} stats*`,
     `· Active users: *${formatNumber(stats.activeUsers)}*`,
     `· PRs opened with me: *${formatNumber(stats.roomotePullRequests)} (${formatNumber(Math.round(stats.roomotePullRequestPercentage))}% of ${formatNumber(stats.totalPullRequests)})* — ${formatNumber(stats.authoredPullRequests)} authored, ${formatNumber(stats.reviewedPullRequests)} reviewed`,
     `· PR merged with me: *${formatNumber(stats.mergedRoomotePullRequests)} (${formatNumber(Math.round(stats.mergedRoomotePullRequestPercentage))}% of ${formatNumber(stats.authoredPullRequests)} authored)*`,
@@ -110,10 +110,12 @@ function formatManagerStatsText({
 
 export function formatManagerStatsMessage({
   stats,
+  frequency = 'weekly',
 }: {
   stats: Awaited<ReturnType<typeof buildManagerStatsDigest>>;
+  frequency?: 'daily' | 'weekly' | 'monthly';
 }): Pick<SlackMessage, 'text' | 'blocks'> {
-  const text = formatManagerStatsText({ stats });
+  const text = formatManagerStatsText({ stats, frequency });
   const categories = stats.dailyPullRequestActivity.map((day) => day.label);
   const chartBlocks = buildDataVisualizationBlocks([
     {
@@ -231,6 +233,7 @@ async function findEligibleDeployments(
 async function postManagerStatsViaCommunicationAdapter(params: {
   destination: ResolvedAutomationDestination;
   stats: Awaited<ReturnType<typeof buildManagerStatsDigest>>;
+  frequency: 'daily' | 'weekly' | 'monthly';
 }): Promise<void> {
   const { destination } = params;
   if (destination.provider === 'email') {
@@ -248,7 +251,10 @@ async function postManagerStatsViaCommunicationAdapter(params: {
     channelId: destination.channelId,
     ...(destination.serviceUrl ? { serviceUrl: destination.serviceUrl } : {}),
     text: degradeSlackMrkdwnToMarkdown(
-      formatManagerStatsText({ stats: params.stats }),
+      formatManagerStatsText({
+        stats: params.stats,
+        frequency: params.frequency,
+      }),
     ),
     textFormat: 'markdown',
     buttons: [
@@ -284,7 +290,11 @@ export async function managerStatsJob(
     try {
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
-      if (!frequency || frequency === 'off') {
+      if (
+        !frequency ||
+        frequency === 'off' ||
+        !['daily', 'weekly', 'monthly'].includes(frequency)
+      ) {
         result.skippedReason = 'Automation is disabled.';
         skipped++;
         continue;
@@ -317,12 +327,11 @@ export async function managerStatsJob(
 
       if (
         !opts.manualTrigger &&
-        !isWeeklyRunDueOnLocalDay({
+        !isManagerStatsRunDueOnLocalPeriod({
           now,
           timeZone: timezone,
           lastRunAt: runtime.lastRunAt,
-          scheduleDayLocal: SCHEDULE_DAY_LOCAL,
-          scheduleHourLocal: SCHEDULE_HOUR_LOCAL,
+          frequency: frequency as 'daily' | 'weekly' | 'monthly',
         })
       ) {
         result.skippedReason = 'Not due yet.';
@@ -330,7 +339,11 @@ export async function managerStatsJob(
         continue;
       }
 
-      const since = getManagerStatsWindowStart(now, timezone);
+      const since = getManagerStatsWindowStart(
+        now,
+        timezone,
+        frequency as 'daily' | 'weekly' | 'monthly',
+      );
       const stats = await buildManagerStatsDigest({
         actorUserId: deployment.actorUserId,
         since,
@@ -351,10 +364,13 @@ export async function managerStatsJob(
 
       if (destination.provider === 'email') {
         const text = degradeSlackMrkdwnToMarkdown(
-          formatManagerStatsText({ stats }),
+          formatManagerStatsText({
+            stats,
+            frequency: frequency as 'daily' | 'weekly' | 'monthly',
+          }),
         );
         await sendAutomationEmailReport(destination, {
-          subject: `Roomote weekly manager summary - ${now.toISOString().slice(0, 10)}`,
+          subject: `Roomote ${frequency} manager summary - ${now.toISOString().slice(0, 10)}`,
           conversationKey: `builtin-automation:manager_stats:${now.toISOString()}`,
           text,
           idempotencyKey: `manager-stats:${now.toISOString()}`,
@@ -374,14 +390,21 @@ export async function managerStatsJob(
         const slack = new SlackNotifier(deployment.slackBotToken);
         const messageTs = await slack.postMessage({
           channel: channelId,
-          ...formatManagerStatsMessage({ stats }),
+          ...formatManagerStatsMessage({
+            stats,
+            frequency: frequency as 'daily' | 'weekly' | 'monthly',
+          }),
         });
 
         if (!messageTs) {
-          throw new Error('Failed to post weekly manager stats');
+          throw new Error('Failed to post manager stats');
         }
       } else {
-        await postManagerStatsViaCommunicationAdapter({ destination, stats });
+        await postManagerStatsViaCommunicationAdapter({
+          destination,
+          stats,
+          frequency: frequency as 'daily' | 'weekly' | 'monthly',
+        });
       }
 
       await recordAutomationRunOutcome(db, {

@@ -384,7 +384,9 @@ export async function suggesterJob(
               ),
           ),
           repositoryPartitions: [...partitions.values()],
-          triggerKind: opts.manualTrigger ? 'manual' : 'scheduled',
+          triggerKind:
+            opts.trigger ?? (opts.manualTrigger ? 'manual' : 'scheduled'),
+          webhookInputJson: opts.webhookInputJson,
           destinationPayloadFields:
             buildDestinationTaskPayloadFields(reportDestination),
         });

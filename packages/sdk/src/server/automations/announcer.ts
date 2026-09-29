@@ -42,6 +42,7 @@ import { resolveDeploymentTimeZone } from './custom-automation-schedule';
 import { isRunDue } from './scheduling-utils';
 import { resolveAutomationRepositoryDestination } from './ci-failure-triage-routing';
 import {
+  appendAutomationWebhookInput,
   emptyJobResult,
   type AutomationJobResult,
   type AutomationRunOpts,
@@ -498,13 +499,16 @@ export async function announcerJob(
               ...(firstPullRequest.repositoryHost
                 ? { sourceControlHost: firstPullRequest.repositoryHost }
                 : {}),
-              description: buildAnnouncerTaskDescription({
-                destination,
-                mergedPullRequests: group.pullRequests,
-                instructions: runtime.instructions,
-                recentThreadFeedback,
-                routingInstructions: rules?.instructions,
-              }),
+              description: appendAutomationWebhookInput(
+                buildAnnouncerTaskDescription({
+                  destination,
+                  mergedPullRequests: group.pullRequests,
+                  instructions: runtime.instructions,
+                  recentThreadFeedback,
+                  routingInstructions: rules?.instructions,
+                }),
+                opts.webhookInputJson,
+              ),
               ...buildDestinationTaskPayloadFields(destination),
               backgroundAutomationKey: 'announcer',
               ...(destination.provider === 'slack'
@@ -519,7 +523,7 @@ export async function announcerJob(
           initiator: { kind: 'automation', key: 'announcer' },
           workflow: 'standard',
           surface: 'system',
-          trigger: opts.manualTrigger ? 'manual' : 'schedule',
+          trigger: opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
           ...(destination.provider === 'slack'
             ? { channels: { slackChannelId: channelId } }
             : {}),

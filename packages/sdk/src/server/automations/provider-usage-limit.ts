@@ -340,6 +340,11 @@ export async function providerUsageLimitJob(
     return result;
   }
 
+  if (!opts.manualTrigger && runtime.scheduleMode === 'on_demand') {
+    result.skippedReason = 'Automation has no scheduled run.';
+    return result;
+  }
+
   const now = dependencies.now();
   let slackBotToken = await dependencies.getSlackBotToken();
   const destination =

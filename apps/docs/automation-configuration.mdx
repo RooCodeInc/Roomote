@@ -123,7 +123,7 @@ facing updates and suggestions.
 | Automation | What it posts | Typical cadence |
 | --- | --- | --- |
 | **Automation output** | The shared Manager Channel destination. | Configure once. |
-| **Weekly Manager Stats** | A weekly summary of Roomote activity. | Weekly. |
+| **Manager Stats** | A summary of Roomote activity for the selected period. | Daily, weekly, or monthly. |
 | **Inference Provider Usage Alerts** | Warnings when an inference-provider quota approaches exhaustion. | Hourly. |
 | **Triage Sentry Issues** | Prioritized Sentry follow-up work. | Daily or weekly. |
 | **Triage Dependabot Alerts** | Suggested follow-up tasks for open dependency alerts. | Daily or weekly. |
@@ -147,6 +147,17 @@ Microsoft Teams, Telegram, or Email where that automation supports it. Email
 uses the exact account identity selected by the admin and remains a private,
 replyable thread. Delivery stops if that identity becomes unavailable rather
 than switching to another address or provider.
+
+The schedule-capable built-ins also expose **On-demand** and **Webhooks** when
+those triggers apply. Manager Stats intentionally keeps only **Daily**,
+**Weekly**, and **Monthly** frequency choices; it can use a webhook but not an
+On-demand schedule. Event-driven automations such as Review Code, CI Failure
+Triage, Triage Issues, and Merge announcer keep their provider-native triggers.
+
+Manager Stats runs at 5:00 PM in the configured scheduling timezone: daily at
+the end of each local day, weekly on Friday, or monthly on the local month's
+last day. Month length and daylight-saving changes are handled by the
+calendar-aware scheduler.
 
 **Inference Provider Usage Alerts** is deterministic. New deployments start it
 hourly at an 85% threshold; admins can choose a threshold from 5% through 95%,

@@ -49,6 +49,9 @@ const handler = async (req: Request) => {
             'automations.getCustomAutomationWebhook',
             'automations.setCustomAutomationWebhookEnabled',
             'automations.rotateCustomAutomationWebhook',
+            'automations.getBuiltInAutomationWebhook',
+            'automations.setBuiltInAutomationWebhookEnabled',
+            'automations.rotateBuiltInAutomationWebhook',
           ].includes(path),
         )
       ) {

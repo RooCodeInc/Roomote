@@ -14,7 +14,7 @@ import {
 import { runCustomAutomationNow } from '@roomote/sdk/server';
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
-const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
 type WebhookInputReadResult =
   | { ok: true; promptInputJson: string | null }
@@ -80,7 +80,7 @@ function encodeUntrustedJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 
-async function readWebhookInput(
+export async function readWebhookInput(
   request: Request,
 ): Promise<WebhookInputReadResult> {
   let body: Uint8Array;

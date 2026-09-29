@@ -198,7 +198,7 @@ export async function conflictScanJob(
   const runtime = await getAutomationRuntime('conflict_resolver');
   const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
-  if (!frequency || frequency === 'off') {
+  if (!frequency || frequency === 'off' || frequency === 'on_demand') {
     result.skippedReason = 'Automation is disabled.';
     return result;
   }
@@ -404,7 +404,8 @@ export async function conflictScanJob(
                 },
                 workflow: 'pr_conflict_resolve',
                 surface: 'github',
-                trigger: opts.manualTrigger ? 'manual' : 'schedule',
+                trigger:
+                  opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
                 prLinkage: {
                   provider: 'github',
                   host: repo.host ?? 'github.com',

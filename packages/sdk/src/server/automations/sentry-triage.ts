@@ -34,7 +34,10 @@ import {
   type TriageScanBuild,
 } from './scheduled-triage-runner';
 
-const WINDOW_DAYS: Record<Exclude<SentryTriageFrequency, 'off'>, number> = {
+const WINDOW_DAYS: Record<
+  Exclude<SentryTriageFrequency, 'off' | 'on_demand'>,
+  number
+> = {
   daily: 1,
   weekly: 7,
 };
@@ -80,7 +83,7 @@ function buildSentryTriagePrompt({
 }: {
   channelId: string;
   destination: ResolvedAutomationDestination;
-  frequency: Exclude<SentryTriageFrequency, 'off'>;
+  frequency: Exclude<SentryTriageFrequency, 'off' | 'on_demand'>;
   projectSlugs: string[];
   repositoryFullNames: string[];
   repositoryCoverage: RepositoryCoverage[];
