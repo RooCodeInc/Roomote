@@ -311,6 +311,7 @@ export type {
   SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,
+  SessionManualStatus,
   SessionOwnerKind,
   SessionSourceSurface,
   SessionStatus,

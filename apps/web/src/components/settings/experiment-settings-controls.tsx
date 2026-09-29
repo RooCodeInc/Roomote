@@ -9,6 +9,7 @@ import type {
 import { getDeploymentExperimentAudience } from '@roomote/feature-flags';
 
 import { BrowserNotificationsExperimentalSetting } from './BrowserNotificationsExperimentalSetting';
+import { JevgrepExperimentalSetting } from './JevgrepExperimentalSetting';
 import { AutomationLaunchCriteriaExperimentalSetting } from './AutomationLaunchCriteriaExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from './PrivateSessionsExperimentalSetting';
 import { SessionTaskCommunicationTriageExperimentalSetting } from './SessionTaskCommunicationTriageExperimentalSetting';
@@ -19,6 +20,7 @@ const DEPLOYMENT_EXPERIMENT_SETTINGS: Record<
   DeploymentExperimentId,
   ComponentType | null
 > = {
+  jevgrep: JevgrepExperimentalSetting,
   privateSessions: PrivateSessionsExperimentalSetting,
   sessionTaskCommunicationTriage:
     SessionTaskCommunicationTriageExperimentalSetting,

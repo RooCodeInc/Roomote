@@ -539,6 +539,7 @@ describe('customAutomationsJob', () => {
         launchClaimedAt: claimAt.toISOString(),
         occurrenceAt: claimAt.toISOString(),
         prompt: automation.prompt,
+        targetKind: 'slack_channel',
         trigger: 'schedule',
         preferredEnvironmentId: automation.environmentId,
       },
@@ -654,7 +655,7 @@ describe('customAutomationsJob', () => {
     });
   });
 
-  it('preserves Discord channel thread delivery for Fast automations', async () => {
+  it('defers Discord channel roots for Fast automations', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,
@@ -675,23 +676,23 @@ describe('customAutomationsJob', () => {
     const result = await customAutomationsJob();
 
     expect(result).toMatchObject({ queued: true, completed: false });
-    expect(fastMocks.createDiscordThread).toHaveBeenCalledWith({
-      channelId: 'discord-channel-1',
-      name: 'Flaky tests',
-      initialText: 'Flaky tests is running.',
-    });
+    expect(fastMocks.createDiscordThread).not.toHaveBeenCalled();
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
       conversation: {
         surface: 'discord',
         workspaceId: 'guild-1',
-        conversationId: 'discord-thread-1',
+        conversationId: expect.stringContaining(`${automation.id}:`),
         replyTarget: {
           channelId: 'discord-channel-1',
-          threadId: 'discord-thread-1',
         },
       },
     });
+    expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ targetKind: 'discord_channel' }),
+      }),
+    );
   });
 
   it('defers a criteria-bearing Discord root until the session continues', async () => {
@@ -737,7 +738,7 @@ describe('customAutomationsJob', () => {
     );
   });
 
-  it('ignores saved custom launch criteria and starts the destination root while disabled', async () => {
+  it('keeps saved launch criteria private while deferring the root when disabled', async () => {
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(false);
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
@@ -760,15 +761,11 @@ describe('customAutomationsJob', () => {
 
     await customAutomationsJob();
 
-    expect(fastMocks.createDiscordThread).toHaveBeenCalledWith({
-      channelId: 'discord-channel-1',
-      name: 'Flaky tests',
-      initialText: 'Flaky tests is running.',
-    });
+    expect(fastMocks.createDiscordThread).not.toHaveBeenCalled();
     const event = fastMocks.enqueueParentEvent.mock.calls[0]?.[0]?.event;
     expect(event).not.toHaveProperty('launchCriteria');
     expect(event).not.toHaveProperty('runWhen');
-    expect(event).not.toHaveProperty('targetKind');
+    expect(event).toMatchObject({ targetKind: 'discord_channel' });
   });
 
   it('fails closed when a configured Discord channel is unavailable', async () => {
@@ -1085,7 +1082,6 @@ describe('customAutomationsJob', () => {
       channelId: 'discord-dm-1',
       surface: 'discord',
       workspaceId: 'dm',
-      rootMessageId: 'discord-message-1',
     },
     {
       provider: 'teams',
@@ -1093,8 +1089,6 @@ describe('customAutomationsJob', () => {
       channelId: 'teams-conversation-1',
       surface: 'teams',
       workspaceId: 'tenant-1',
-      threadId: 'teams-message-1',
-      rootMessageId: 'teams-message-1',
     },
     {
       provider: 'teams',
@@ -1102,7 +1096,6 @@ describe('customAutomationsJob', () => {
       channelId: 'teams-dm-1',
       surface: 'teams',
       workspaceId: 'tenant-1',
-      rootMessageId: 'teams-message-1',
     },
     {
       provider: 'telegram',
@@ -1117,19 +1110,10 @@ describe('customAutomationsJob', () => {
       channelId: 'telegram-dm-1',
       surface: 'telegram',
       workspaceId: 'telegram-dm-1',
-      threadId: 'telegram-topic-1',
-      rootMessageId: 'telegram-topic-1',
     },
   ] as const)(
-    'delivers a $targetKind Fast automation through the $provider surface',
-    async ({
-      provider,
-      targetKind,
-      channelId,
-      surface,
-      workspaceId,
-      ...expected
-    }) => {
+    'defers the $targetKind Fast automation root on the $provider surface',
+    async ({ provider, targetKind, channelId, surface, workspaceId }) => {
       vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
         {
           ...automation,
@@ -1169,7 +1153,6 @@ describe('customAutomationsJob', () => {
           workspaceId,
           replyTarget: {
             channelId,
-            ...('threadId' in expected ? { threadId: expected.threadId } : {}),
             ...(provider === 'teams'
               ? { serviceUrl: 'https://smba.example.com/amer/' }
               : {}),
@@ -1179,31 +1162,26 @@ describe('customAutomationsJob', () => {
       expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           event: expect.objectContaining({
-            ...('rootMessageId' in expected
-              ? { rootMessageId: expected.rootMessageId }
-              : {}),
+            targetKind,
           }),
         }),
       );
-      if ('rootMessageId' in expected) {
-        expect(fastMocks.recordProviderMessage).toHaveBeenCalledWith({
-          sessionId: '33333333-3333-4333-8333-333333333333',
-          conversation: expect.objectContaining({ surface, workspaceId }),
-          messageId: expected.rootMessageId,
-        });
-      }
-      if (targetKind === 'telegram_user') {
-        expect(fastMocks.telegramCreateForumTopic).toHaveBeenCalledWith({
-          channelId,
-          name: automation.name,
-        });
-      } else if (provider === 'telegram') {
+      expect(
+        fastMocks.enqueueParentEvent.mock.calls[0]?.[0]?.event,
+      ).not.toHaveProperty('rootMessageId');
+      expect(fastMocks.recordProviderMessage).not.toHaveBeenCalled();
+      if (provider === 'discord') {
+        expect(fastMocks.createDiscordThread).not.toHaveBeenCalled();
+        expect(fastMocks.discordPostMessage).not.toHaveBeenCalled();
+      } else if (provider === 'teams') {
+        expect(fastMocks.teamsPostMessage).not.toHaveBeenCalled();
+      } else {
         expect(fastMocks.telegramCreateForumTopic).not.toHaveBeenCalled();
       }
     },
   );
 
-  it('fails a Telegram DM run instead of falling back to an unthreaded report', async () => {
+  it('defers a Telegram DM topic until a meaningful report', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,
@@ -1229,8 +1207,17 @@ describe('customAutomationsJob', () => {
 
     const result = await customAutomationsJob();
 
-    expect(result.errors).toEqual(['Flaky tests: Threaded Mode is disabled']);
-    expect(fastMocks.getSession).not.toHaveBeenCalled();
+    expect(result.errors).toEqual([]);
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: 'telegram-dm-1',
+        conversationId: expect.stringContaining(`${automation.id}:`),
+        replyTarget: { channelId: 'telegram-dm-1' },
+      },
+    });
+    expect(fastMocks.telegramCreateForumTopic).not.toHaveBeenCalled();
     expect(fastMocks.telegramPostMessage).not.toHaveBeenCalled();
   });
 
@@ -1295,13 +1282,13 @@ describe('customAutomationsJob', () => {
       'teams-dm-1',
       'tenant-1',
     );
-    expect(fastMocks.teamsUpdateMessage).toHaveBeenCalledWith({
+    expect(fastMocks.teamsPostMessage).toHaveBeenCalledWith({
       channelId: 'teams-dm-1',
-      messageId: 'teams-message-1',
       serviceUrl: 'https://persisted.example.com/amer/',
       text: 'Flaky tests failed: parent event admission failed',
       textFormat: 'markdown',
     });
+    expect(fastMocks.teamsUpdateMessage).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1433,7 +1420,7 @@ describe('customAutomationsJob', () => {
     );
   });
 
-  it('reports a Telegram DM startup failure inside its managed topic', async () => {
+  it('reports a Telegram DM startup failure without a deferred topic', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,
@@ -1458,10 +1445,10 @@ describe('customAutomationsJob', () => {
     expect(fastMocks.telegramPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: 'telegram-dm-1',
-        threadId: 'telegram-topic-1',
         text: 'Flaky tests failed: queue down',
       }),
     );
+    expect(fastMocks.telegramCreateForumTopic).not.toHaveBeenCalled();
   });
 
   it('resolves a Slack DM target for the automation owner', async () => {
@@ -1679,19 +1666,13 @@ describe('customAutomationsJob', () => {
     expect(findTeamsConversationRoute).toHaveBeenCalledWith(
       '19:abc@thread.tacv2',
     );
-    expect(fastMocks.teamsPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '19:abc@thread.tacv2',
-        serviceUrl: 'https://smba.trafficmanager.net/amer/',
-      }),
-    );
+    expect(fastMocks.teamsPostMessage).not.toHaveBeenCalled();
     expect(fastMocks.getSession).toHaveBeenCalledWith(
       expect.objectContaining({
         conversation: expect.objectContaining({
           surface: 'teams',
           replyTarget: expect.objectContaining({
             channelId: '19:abc@thread.tacv2',
-            threadId: 'teams-message-1',
             serviceUrl: 'https://smba.trafficmanager.net/amer/',
           }),
         }),

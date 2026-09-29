@@ -565,6 +565,45 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
+  it('recommends Claude Sonnet 5.5 from every supported provider route', () => {
+    const sonnet55ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'Claude Sonnet 5.5',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(sonnet55ByProvider).toEqual([
+      {
+        providerId: 'roomote',
+        modelId: 'roomote/anthropic/claude-sonnet-5.5',
+      },
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/anthropic/claude-sonnet-5.5',
+      },
+      { providerId: 'vercel', modelId: 'vercel/anthropic/claude-sonnet-5.5' },
+      {
+        providerId: 'requesty',
+        modelId: 'requesty/anthropic/claude-sonnet-5-5',
+      },
+      { providerId: 'azure', modelId: 'azure/claude-sonnet-5-5' },
+      {
+        providerId: 'azure-cognitive-services',
+        modelId: 'azure-cognitive-services/claude-sonnet-5-5',
+      },
+      { providerId: 'anthropic', modelId: 'anthropic/claude-sonnet-5-5' },
+      { providerId: 'opencode', modelId: 'opencode/claude-sonnet-5-5' },
+      {
+        providerId: 'amazon-bedrock',
+        modelId: 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
+      },
+    ]);
+  });
+
   it('uses GPT 5.6 Luna for OpenCode Go coding and retains GPT-6 Luna', () => {
     const provider = getSetupModelProvider('opencode-go');
 
@@ -767,7 +806,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   it.each([
     ['openrouter', 'balanced', 'openrouter/openai/gpt-5.6-terra'],
     ['vercel', 'default', 'vercel/openai/gpt-5.6-terra'],
-    ['requesty', 'default', 'requesty/claude-sonnet-5'],
+    ['requesty', 'default', 'requesty/anthropic/claude-sonnet-5-5'],
     ['azure', 'default', 'azure/gpt-5.6-terra'],
     [
       'azure-cognitive-services',
@@ -776,10 +815,14 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ],
     ['opencode', 'default', 'opencode/big-pickle'],
     ['opencode-go', 'default', 'opencode-go/glm-5.3'],
-    ['amazon-bedrock', 'default', 'bedrock-mantle/anthropic.claude-sonnet-5'],
+    [
+      'amazon-bedrock',
+      'default',
+      'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
+    ],
     ['github-copilot', 'default', 'github-copilot/gpt-6-luna'],
   ] as const)(
-    'keeps the historical coding model in the %s %s alternative',
+    'uses the configured coding model in the %s %s alternative',
     (providerId, presetId, codingModelId) => {
       expect(
         getRecommendedModelPresets(getSetupModelProvider(providerId)).find(
@@ -1103,7 +1146,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/claude-fable-5',
       'requesty/claude-haiku-4-5',
       'requesty/anthropic/claude-opus-5-5',
-      'requesty/claude-sonnet-5',
+      'requesty/anthropic/claude-sonnet-5-5',
       'requesty/gpt-5.6-sol@eu',
       'requesty/gpt-6-sol@eu',
       'requesty/gpt-5.6-terra@eu',
@@ -1343,11 +1386,11 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     expect(
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),
     ).toEqual({
-      roomoteModel: 'anthropic/claude-sonnet-5',
+      roomoteModel: 'anthropic/claude-sonnet-5-5',
       roomoteOrchestrationModel: null,
       roomoteSmallModel: 'anthropic/claude-haiku-4-5',
       roomoteVisionModel: null,
-      roomoteCodeReviewModel: 'anthropic/claude-sonnet-5',
+      roomoteCodeReviewModel: 'anthropic/claude-sonnet-5-5',
       roomoteExploreModel: 'anthropic/claude-haiku-4-5',
       roomotePlanningModel: 'anthropic/claude-opus-5-5',
       roomoteModelReasoningEffort: null,
@@ -1400,7 +1443,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       'openrouter/openai/gpt-5.6-terra',
       'medium',
       'openrouter/google/gemini-3.8-flash',
-      'openrouter/anthropic/claude-sonnet-5',
+      'openrouter/anthropic/claude-sonnet-5.5',
       'openrouter/anthropic/claude-opus-5.5',
       'high',
     ],
@@ -1409,7 +1452,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       'openrouter/google/gemini-3.8-flash',
       'low',
       'openrouter/google/gemini-3.8-flash',
-      'openrouter/anthropic/claude-sonnet-5',
+      'openrouter/anthropic/claude-sonnet-5.5',
       'openrouter/anthropic/claude-opus-5.5',
       'medium',
     ],

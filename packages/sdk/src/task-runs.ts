@@ -403,6 +403,14 @@ export const getResolvedRuntimeEnvVars = (
   options: AppRouterInput['taskRuns']['getResolvedRuntimeEnvVars'],
 ) => client.taskRuns.getResolvedRuntimeEnvVars.query(options);
 
+export const isJevgrepEnabled = (
+  options: AppRouterInput['taskRuns']['isJevgrepEnabled'],
+) => client.taskRuns.isJevgrepEnabled.query(options);
+
+export const evaluateJudgeFileCriteria = (
+  options: AppRouterInput['taskRuns']['evaluateJudgeFileCriteria'],
+) => client.taskRuns.evaluateJudgeFileCriteria.mutate(options);
+
 export const refreshGitHubTokenWithMetadata = (
   options: AppRouterInput['taskRuns']['refreshGitHubTokenWithMetadata'],
 ) => client.taskRuns.refreshGitHubTokenWithMetadata.mutate(options);

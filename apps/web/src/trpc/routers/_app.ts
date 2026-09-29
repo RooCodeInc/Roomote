@@ -82,6 +82,8 @@ import {
   getSessionTimeline,
   archiveSessionCommand,
   deleteSessionCommand,
+  setSessionStatusCommand,
+  sessionStatusInputSchema,
   stopSessionTasksCommand,
   listSessionPins,
   markSessionReadCommand,
@@ -3498,6 +3500,11 @@ export const appRouter = createRouter({
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
+      ),
+    setStatus: protectedProcedure
+      .input(sessionStatusInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setSessionStatusCommand(auth, input.sessionId, input.status),
       ),
     stopTasks: protectedProcedure
       .input(sessionIdInputSchema)

@@ -1,6 +1,9 @@
 import { and, desc, eq, inArray, lt, max, or, sql } from 'drizzle-orm';
 
-import type { SessionStatusJudgmentOutcome } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  type SessionStatusJudgmentOutcome,
+} from '@roomote/types';
 
 import type { DatabaseOrTransaction } from '../db';
 import {
@@ -13,7 +16,122 @@ import { runInTransactionIfAvailable } from './transaction-utils';
 import { isDeploymentExperimentEnabled } from './deployment-experiments';
 
 const CLAIM_LEASE_MS = 2 * 60 * 1_000;
+const SESSION_STATUS_INACTIVITY_MS = 4 * 24 * 60 * 60 * 1_000;
 export const MAX_SESSION_STATUS_JUDGMENT_ATTEMPTS = 5;
+
+const latestVisibleUserMessageSql = (sessionReference: unknown) => sql`
+  SELECT fam.ts
+  FROM fast_agent_messages AS fam
+  WHERE fam.conversation_id = ${sessionReference}
+    AND fam.role = 'user'
+    AND (
+      fam.metadata ->> 'visibleInTranscript' = 'true'
+      OR (
+        fam.metadata ->> 'visibleInTranscript' IS NULL
+        AND fam.event_type <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+      )
+    )
+  ORDER BY fam.ts DESC
+  LIMIT 1
+`;
+
+/** Persist the next inactivity boundary from the canonical visible user clock. */
+export async function refreshSessionInactivityDueAt(
+  database: DatabaseOrTransaction,
+  sessionId: string,
+): Promise<void> {
+  await database.execute(sql`
+    UPDATE sessions AS session
+    SET inactivity_due_at = (
+      SELECT to_timestamp(latest.ts / 1000.0)
+        + (${SESSION_STATUS_INACTIVITY_MS} * interval '1 millisecond')
+      FROM (${latestVisibleUserMessageSql(sql`session.fast_conversation_id`)}) AS latest
+    )
+    WHERE session.id = ${sessionId}
+  `);
+}
+
+/** Release a manual status once a newer visible user message exists. */
+export async function clearManualStatusAfterNewerUserMessage(
+  database: DatabaseOrTransaction,
+  sessionId: string,
+): Promise<void> {
+  await database.execute(sql`
+    UPDATE sessions AS session
+    SET manual_status = NULL,
+        manual_status_set_at = NULL,
+        cached_status = NULL,
+        updated_at = now()
+    WHERE session.id = ${sessionId}
+      AND session.manual_status IS NOT NULL
+      AND session.manual_status_set_at IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM fast_agent_messages AS fam
+        WHERE fam.conversation_id = session.fast_conversation_id
+          AND fam.role = 'user'
+          AND to_timestamp(fam.ts / 1000.0) > session.manual_status_set_at
+          AND (
+            fam.metadata ->> 'visibleInTranscript' = 'true'
+            OR (
+              fam.metadata ->> 'visibleInTranscript' IS NULL
+              AND fam.event_type <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+            )
+          )
+      )
+  `);
+}
+
+/**
+ * Queue one fresh judgment when the latest visible user message has crossed
+ * the inactivity boundary. The source event is timestamped so repeated
+ * reconcile ticks remain idempotent until a newer user message appears.
+ */
+export async function enqueueInactiveSessionStatusJudgmentRequests(
+  database: DatabaseOrTransaction,
+  limit = 100,
+): Promise<number> {
+  if (
+    !(await isDeploymentExperimentEnabled('sessionStatusJudgment', database))
+  ) {
+    return 0;
+  }
+
+  const candidates = await database.execute<{
+    session_id: string;
+    due_ms: string | number;
+  }>(sql`
+    SELECT
+      session.id AS session_id,
+      floor(extract(epoch FROM session.inactivity_due_at) * 1000)::bigint AS due_ms
+    FROM sessions AS session
+    WHERE session.visibility = 'visible'
+      AND session.manual_status IS NULL
+      AND session.inactivity_due_at <= now()
+      AND NOT EXISTS (
+        SELECT 1
+        FROM session_status_judgments AS judgment
+        WHERE judgment.session_id = session.id
+          AND judgment.source_event_id = 'inactivity-due:'
+            || floor(extract(epoch FROM session.inactivity_due_at) * 1000)::bigint::text
+      )
+    ORDER BY session.inactivity_due_at, session.id
+    LIMIT ${limit}
+  `);
+
+  let created = 0;
+  for (const candidate of candidates) {
+    const request = await createSessionStatusJudgmentRequest(database, {
+      sessionId: candidate.session_id,
+      sourceEventId: `inactivity-due:${candidate.due_ms}`,
+      // The inactivity clock is anchored to the Fast user transcript.
+      sourceKind: 'fast_turn',
+      state: 'pending',
+    });
+    if (request) created += 1;
+  }
+  return created;
+}
 
 export async function createSessionStatusJudgmentRequest(
   database: DatabaseOrTransaction,
@@ -89,6 +207,8 @@ export async function settleSessionStatusJudgmentTurn(
   database: DatabaseOrTransaction,
   input: { sessionId: string; sourceEventId: string; visible: boolean },
 ): Promise<void> {
+  await clearManualStatusAfterNewerUserMessage(database, input.sessionId);
+  await refreshSessionInactivityDueAt(database, input.sessionId);
   if (
     !(await isDeploymentExperimentEnabled('sessionStatusJudgment', database))
   ) {

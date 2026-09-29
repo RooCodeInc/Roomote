@@ -46,14 +46,6 @@ export function resolveSafeTailFilePath(filePath: string): string {
   return resolved;
 }
 
-/**
- * Validate only (does not rewrite the path). Prefer
- * `resolveSafeTailFilePath` when the resolved path will be passed to `tail`.
- */
-export function assertSafeTailFilePath(filePath: string): void {
-  resolveSafeTailFilePath(filePath);
-}
-
 function assertCommonPathRules(filePath: string): void {
   if (!filePath || filePath.trim() === '') {
     throw new Error('Path cannot be empty');

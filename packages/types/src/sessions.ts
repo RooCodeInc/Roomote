@@ -1,6 +1,4 @@
-/** Unified Session lifecycle statuses, mirrored by the sessions table's
- * cached_status check constraint. Derive UI option lists, board columns, and
- * validation from this array rather than re-declaring the literals. */
+/** Deterministic Session lifecycle statuses mirrored by cached_status. */
 export const SESSION_STATUSES = [
   'active',
   'needs_input',
@@ -9,6 +7,16 @@ export const SESSION_STATUSES = [
 ] as const;
 
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
+
+/** User-selectable statuses, kept separate from the deterministic lifecycle. */
+export const SESSION_MANUAL_STATUSES = [
+  'needs_input',
+  'blocked',
+  'ready',
+  'done',
+] as const;
+
+export type SessionManualStatus = (typeof SESSION_MANUAL_STATUSES)[number];
 
 /** Semantic status judgment kept separate from the deterministic lifecycle. */
 export const SESSION_STATUS_JUDGMENT_OUTCOMES = [
@@ -35,8 +43,11 @@ export type SessionBoardColumn = (typeof SESSION_BOARD_COLUMNS)[number];
 
 export function getSessionBoardColumn(input: {
   cachedStatus: SessionStatus | null;
+  manualStatus?: SessionManualStatus | null;
   judgmentStatus?: SessionStatusJudgmentOutcome | null;
 }): SessionBoardColumn {
+  if (input.manualStatus) return input.manualStatus;
+
   // Runtime status remains authoritative when work or a structured request is
   // still live. Model judgment only refines a settled, otherwise-ready row.
   if (input.cachedStatus === 'needs_input') return 'needs_input';

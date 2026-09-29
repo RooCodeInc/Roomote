@@ -2,6 +2,7 @@ import {
   automations,
   customAutomations,
   db,
+  environmentFactory,
   eq,
   ensureSessionForFastConversation,
   ensureSessionForTask,
@@ -28,6 +29,7 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  HAS_PULL_REQUEST_FILTER_VALUE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   RunStatus,
 } from '@roomote/types';
@@ -956,6 +958,147 @@ describe('unified Session queries', () => {
       sessions: [expect.objectContaining({ id: matchingSession.id })],
     });
     expect((await getSessions(auth, { ids })).sessions).toHaveLength(7);
+  });
+
+  it('filters Sessions by task-run environments and the Has PR sentinel', async () => {
+    const owner = await userFactory.create();
+    const environment = await environmentFactory.create({
+      createdByUserId: owner.id,
+      name: `Session filter environment ${crypto.randomUUID()}`,
+    });
+    const otherEnvironment = await environmentFactory.create({
+      createdByUserId: owner.id,
+      name: `Session filter other environment ${crypto.randomUUID()}`,
+    });
+    const matchingSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 400,
+    });
+    const environmentOnlySession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 300,
+    });
+    const otherEnvironmentSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 200,
+    });
+    const noTaskSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 100,
+    });
+    const [matchingTask, environmentOnlyTask, otherEnvironmentTask] =
+      await Promise.all([
+        taskFactory.create({
+          initiatorUserId: owner.id,
+          repositoryName: 'sessions-filter/environment-repository',
+          state: 'completed',
+        }),
+        taskFactory.create({
+          initiatorUserId: owner.id,
+          repositoryName: 'sessions-filter/environment-repository',
+          state: 'completed',
+        }),
+        taskFactory.create({
+          initiatorUserId: owner.id,
+          repositoryName: 'sessions-filter/other-environment-repository',
+          state: 'completed',
+        }),
+      ]);
+    await db.insert(sessionTasks).values([
+      {
+        sessionId: matchingSession.id,
+        taskId: matchingTask.id,
+        origin: 'direct_launch',
+      },
+      {
+        sessionId: environmentOnlySession.id,
+        taskId: environmentOnlyTask.id,
+        origin: 'direct_launch',
+      },
+      {
+        sessionId: otherEnvironmentSession.id,
+        taskId: otherEnvironmentTask.id,
+        origin: 'direct_launch',
+      },
+    ]);
+    await Promise.all([
+      runFactory.create({
+        taskId: matchingTask.id,
+        status: RunStatus.Completed,
+        payload: {
+          repo: 'sessions-filter/environment-repository',
+          description: 'Matching environment task',
+          environmentId: environment.id,
+        },
+      }),
+      runFactory.create({
+        taskId: environmentOnlyTask.id,
+        status: RunStatus.Completed,
+        payload: {
+          repo: 'sessions-filter/environment-repository',
+          description: 'Environment-only task',
+          environmentId: environment.id,
+        },
+      }),
+      runFactory.create({
+        taskId: otherEnvironmentTask.id,
+        status: RunStatus.Completed,
+        payload: {
+          repo: 'sessions-filter/other-environment-repository',
+          description: 'Other environment task',
+          environmentId: otherEnvironment.id,
+        },
+      }),
+    ]);
+    await db.insert(taskPullRequests).values({
+      taskId: matchingTask.id,
+      prUrl: 'https://github.com/sessions-filter/environment-repository/pull/1',
+      prNumber: 1,
+      repository: 'sessions-filter/environment-repository',
+      sourceControlProvider: 'github',
+      host: 'github.com',
+      status: 'open',
+    });
+
+    const auth = { userId: owner.id, isAdmin: false };
+    const ids = [
+      matchingSession.id,
+      environmentOnlySession.id,
+      otherEnvironmentSession.id,
+      noTaskSession.id,
+    ];
+    await expect(
+      getSessions(auth, {
+        ids,
+        repository: `env:${environment.id}`,
+      }),
+    ).resolves.toMatchObject({
+      sessions: [
+        expect.objectContaining({ id: matchingSession.id }),
+        expect.objectContaining({ id: environmentOnlySession.id }),
+      ],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: HAS_PULL_REQUEST_FILTER_VALUE,
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: matchingSession.id })],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        repository: `env:${environment.id}`,
+        pullRequest: HAS_PULL_REQUEST_FILTER_VALUE,
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: matchingSession.id })],
+    });
   });
 
   it('lists only distinct visible sources within the list scope', async () => {

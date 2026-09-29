@@ -1785,7 +1785,7 @@ describe('task model provider commands', () => {
     // recommended list joins the catalog as disabled, metadata-less rows.
     expect(anthropicModels.map((model) => model.id)).toEqual(
       expect.arrayContaining([
-        'anthropic/claude-sonnet-5',
+        'anthropic/claude-sonnet-5-5',
         'anthropic/claude-opus-5-5',
         'anthropic/claude-haiku-4-5',
       ]),
@@ -1984,7 +1984,7 @@ describe('task model provider commands', () => {
         provider: expect.objectContaining({ id: 'anthropic' }),
         apiKey: '  sk-ant-test  ',
         action: 'save it',
-        modelId: 'anthropic/claude-sonnet-5',
+        modelId: 'anthropic/claude-sonnet-5-5',
       }),
     );
 
@@ -2027,16 +2027,16 @@ describe('task model provider commands', () => {
       'anthropic/claude-fable-5-1',
       'anthropic/claude-haiku-4-5',
       'anthropic/claude-opus-5-5',
-      'anthropic/claude-sonnet-5',
+      'anthropic/claude-sonnet-5-5',
     ]);
     expect([...seededSettings.allowedModelIds].sort()).toEqual([
       'anthropic/claude-fable-5',
       'anthropic/claude-fable-5-1',
       'anthropic/claude-haiku-4-5',
       'anthropic/claude-opus-5-5',
-      'anthropic/claude-sonnet-5',
+      'anthropic/claude-sonnet-5-5',
     ]);
-    expect(seededSettings?.defaultModelId).toBe('anthropic/claude-sonnet-5');
+    expect(seededSettings?.defaultModelId).toBe('anthropic/claude-sonnet-5-5');
     expect(result.addedRecommendedModelCount).toBe(5);
 
     expect(
@@ -2190,7 +2190,7 @@ describe('task model provider commands', () => {
     // The default catalog's OpenRouter models stay (that provider is
     // connected via runtime env) and keep the effective default model.
     expect(modelIds).toContain('openrouter/openai/gpt-5.6-terra');
-    expect(modelIds).toContain('anthropic/claude-sonnet-5');
+    expect(modelIds).toContain('anthropic/claude-sonnet-5-5');
     expect(seededSettings?.defaultModelId).toBe(DEFAULT_TASK_MODEL_ID);
     expect(result.addedRecommendedModelCount).toBe(5);
   });

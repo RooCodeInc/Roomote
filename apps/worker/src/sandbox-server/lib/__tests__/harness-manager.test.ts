@@ -2479,6 +2479,50 @@ describe('HarnessManager touchKeepalive', () => {
     }
   });
 
+  it('uses the failed-run shutdown path when completion enforcement blocks', async () => {
+    const { harness, manager } = createManager({
+      onBeforeTaskCompletion: vi.fn(async () => ({
+        disposition: 'fail' as const,
+        error: 'judge exhausted repair rounds',
+      })),
+    });
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-judge-failed'],
+      } as TaskEvent);
+
+      const shutdown = manager.waitForShutdown();
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskCompleted,
+        payload: [
+          'task-judge-failed',
+          {
+            totalTokensIn: 0,
+            totalTokensOut: 0,
+            totalCost: 0,
+            contextTokens: 0,
+          },
+          {},
+          { isSubtask: false, completionId: 'judge-completion' },
+        ],
+      } as TaskEvent);
+
+      await expect(shutdown).resolves.toMatchObject({
+        lastErrorMessage: 'judge exhausted repair rounds',
+        taskFinishedAt: undefined,
+        taskAbortedAt: undefined,
+      });
+      expect(manager.getStatus().phase).toBe('shutting_down');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
   it('finalizes each completed turn once when duplicate terminal events arrive', () => {
     const onExit = vi.fn();
     const onTaskUpdate = vi.fn();

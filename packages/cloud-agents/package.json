@@ -37,6 +37,11 @@
       "import": "./src/server/judgment-questions.ts",
       "require": "./src/server/judgment-questions.ts"
     },
+    "./server/judge-file": {
+      "types": "./src/server/judge-file.ts",
+      "import": "./src/server/judge-file.ts",
+      "require": "./src/server/judge-file.ts"
+    },
     "./server/judgment-decision-catalog": {
       "types": "./src/server/judgment-decision-catalog.ts",
       "import": "./src/server/judgment-decision-catalog.ts",
@@ -65,6 +70,9 @@
       ],
       "server/non-task-provider-usage": [
         "./src/server/non-task-provider-usage.ts"
+      ],
+      "server/judge-file": [
+        "./src/server/judge-file.ts"
       ],
       "show-widget": [
         "./src/server/show-widget.ts"

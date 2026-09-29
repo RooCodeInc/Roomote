@@ -84,6 +84,7 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { installZeroCli } from '../commands/setup/agent-clis';
+import { buildJevgrepTerminalEnv, setupJevgrep } from './jevgrep';
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
@@ -114,6 +115,7 @@ import {
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
+import { createJudgeEnforcement } from './judge-enforcement';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -733,6 +735,7 @@ export const runTask = async ({
     logger,
     getResult: () => taskRun.result,
   };
+  let closeJevgrepProxy: (() => Promise<void>) | undefined;
 
   try {
     const harnessType = resolveWorkerCodingHarness(taskRun.harness);
@@ -947,6 +950,17 @@ export const runTask = async ({
 
     const homeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
+    const jevgrepEnabled = await setupJevgrep({
+      runId: taskRun.id,
+      homeDir,
+      trpcUrl: workerEnv.trpcUrl,
+      runtimeEnv,
+      logger,
+      registerCleanup: (close) => {
+        closeJevgrepProxy = close;
+      },
+    });
+
     // Admin opt-in for Zero: only install the CLI / activate the skill when
     // the Integrations page has Zero enabled for the deployment.
     let zeroIntegrationEnabled = false;
@@ -988,6 +1002,7 @@ export const runTask = async ({
       excludeSkillNames: [
         ...FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
         ...(zeroIntegrationEnabled ? [] : ['zero']),
+        ...(jevgrepEnabled ? [] : ['jevgrep']),
       ],
     });
 
@@ -1146,6 +1161,12 @@ export const runTask = async ({
     const recordWorkerRuntimeEvent = createWorkerRuntimeEventRecorder({
       runId: taskRun.id,
       logger,
+    });
+    const judgeEnforcement = await createJudgeEnforcement({
+      runId: taskRun.id,
+      repoPaths,
+      logger,
+      recordWorkerRuntimeEvent,
     });
     const persistRuntimeState = createRuntimeStatePersister(
       taskRun.id,
@@ -1482,6 +1503,8 @@ export const runTask = async ({
       taskId: taskRun.taskId,
       logger,
       callbacks: {
+        onBeforeTaskCompletion: async () =>
+          await judgeEnforcement.beforeTaskCompletion(),
         onTaskCompletionSettled: async (completionId: string) => {
           await settleMissingChatCloseoutFallback(context, completionId);
           if (userAttentionNotificationsEnabled) {
@@ -2233,7 +2256,12 @@ export const runTask = async ({
       port: SANDBOX_SERVER_PORT,
       workingDirectory: workspacePath,
       harnessLogger: logger,
-      userEnv: () => workerEnv.buildUserFacingEnv(),
+      userEnv: () =>
+        buildJevgrepTerminalEnv(
+          workerEnv.buildUserFacingEnv(),
+          runtimeEnv,
+          homeDir,
+        ),
       harness,
       harnessManager,
       runId: taskRun.id,
@@ -2567,6 +2595,7 @@ export const runTask = async ({
       : resolvedResult;
   } finally {
     activeWorkerCrashContext = null;
+    await closeJevgrepProxy?.();
   }
 };
 

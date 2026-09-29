@@ -3100,6 +3100,21 @@ export async function deliverFastAgentParentEventWithLock(
         replyPosted = true;
       },
     });
+    const prepareAutomationDestinationRoot = async (
+      launchEvent: Extract<
+        FastAgentParentEvent,
+        { type: 'automation_triggered' }
+      >,
+    ) => {
+      const conversation = await prepareFastAutomationDestinationRoot({
+        event: launchEvent,
+        sessionId: params.parent.sessionId,
+        userId: parentTurn.userId,
+        conversation: parentTurn.conversation,
+      });
+      parentTurn.conversation = conversation;
+      return conversation;
+    };
     if (
       params.event.type === 'automation_triggered' &&
       Boolean(params.event.launchCriteria?.trim() || params.event.runWhen)
@@ -3211,16 +3226,23 @@ export async function deliverFastAgentParentEventWithLock(
               return { decision: 'continue' as const };
             }
           },
-          prepareAutomationLaunch: async () => {
-            const conversation = await prepareFastAutomationDestinationRoot({
-              event: launchEvent,
-              sessionId: params.parent.sessionId,
-              userId: parentTurn.userId,
-              conversation: parentTurn.conversation,
-            });
-            parentTurn.conversation = conversation;
-            return conversation;
-          },
+          prepareAutomationLaunch: () =>
+            prepareAutomationDestinationRoot(launchEvent),
+        },
+      };
+    }
+    if (
+      params.event.type === 'automation_triggered' &&
+      !parentTurn.adapter.prepareAutomationLaunch
+    ) {
+      const launchEvent = params.event;
+      const baseAdapter = parentTurn.adapter;
+      parentTurn = {
+        ...parentTurn,
+        adapter: {
+          ...baseAdapter,
+          prepareAutomationLaunch: () =>
+            prepareAutomationDestinationRoot(launchEvent),
         },
       };
     }
@@ -3235,8 +3257,27 @@ export async function deliverFastAgentParentEventWithLock(
         ...parentTurn,
         adapter: {
           ...baseAdapter,
+          launchTask: async (input) => {
+            if (
+              reportEvent.type === 'automation_triggered' &&
+              reportEvent.targetKind &&
+              !reportEvent.rootMessageId
+            ) {
+              await baseAdapter.prepareAutomationLaunch?.();
+            }
+            return baseAdapter.launchTask(input);
+          },
           postReply: async (reply) => {
             if (reply.kickoff) return;
+            if (
+              reportEvent.type === 'automation_triggered' &&
+              reportEvent.targetKind &&
+              !reportEvent.rootMessageId &&
+              (reply.purpose === 'closeout' ||
+                reply.purpose === 'clarification')
+            ) {
+              await baseAdapter.prepareAutomationLaunch?.();
+            }
             const posted = await baseAdapter.postReply(reply);
             if (
               reply.purpose !== 'closeout' &&
@@ -3387,7 +3428,6 @@ export async function deliverFastAgentParentEventWithLock(
         humanFollowUp?.platformEventVisibility ??
         (params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected' ||
-        params.event.type === 'automation_triggered' ||
         params.event.type === 'task_turn_provider_error' ||
         (params.event.type === 'task_settled' &&
           params.parent.conversation.surface === 'web' &&

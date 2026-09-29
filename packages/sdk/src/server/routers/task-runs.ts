@@ -1,9 +1,17 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { db, eq, slackInstallations } from '@roomote/db/server';
+import { evaluateJudgeFileCriteria } from '@roomote/cloud-agents/server/judge-file';
+import { resolveJudgmentBackend } from '@roomote/cloud-agents/server/typesafe-judgment';
+import {
+  db,
+  eq,
+  isDeploymentExperimentEnabled,
+  slackInstallations,
+} from '@roomote/db/server';
 
 import {
   RunStatus,
+  JUDGE_MAX_CRITERIA_PER_REQUEST,
   runEventSources,
   runEventTypes,
   communicationProviderSchema,
@@ -160,6 +168,34 @@ const workerReleaseMetadataSchema = z.object({
   workerVersion: z.string().optional(),
   workerCommit: z.string().optional(),
 });
+
+const judgeFileCriterionInputSchema = z
+  .object({
+    id: z.string().min(1),
+    rule: z.string().min(1),
+  })
+  .strict();
+
+const judgeFileStateSchema = z
+  .object({
+    path: z.string().min(1),
+    patch: z.string().max(100_000),
+    patchTruncated: z.boolean(),
+    finalContent: z.string().max(100_000),
+    finalContentTruncated: z.boolean(),
+  })
+  .strict();
+
+const judgeFileCriteriaInputSchema = z
+  .object({
+    runId: z.number(),
+    state: judgeFileStateSchema,
+    criteria: z
+      .array(judgeFileCriterionInputSchema)
+      .min(1)
+      .max(JUDGE_MAX_CRITERIA_PER_REQUEST),
+  })
+  .strict();
 
 function runTokenOnlyScoped<T extends z.ZodType>(
   schema: T,
@@ -1013,6 +1049,34 @@ export const taskRunsRouter = router({
     z.object({ runId: z.number() }),
     'runId',
   ).query(({ ctx, input }) => getResolvedRuntimeEnvVars(ctx.auth, input)),
+
+  isJevgrepEnabled: runScoped(z.object({ runId: z.number() }), 'runId').query(
+    async () => {
+      if (!(await isDeploymentExperimentEnabled('jevgrep'))) return false;
+      const backend = await resolveJudgmentBackend({ bypassCache: true });
+      return Boolean(backend && backend.provider !== 'roomote');
+    },
+  ),
+
+  evaluateJudgeFileCriteria: runTokenOnlyScoped(
+    judgeFileCriteriaInputSchema,
+    'runId',
+  ).mutation(async ({ input }) => {
+    try {
+      const evaluations = await evaluateJudgeFileCriteria({
+        state: input.state,
+        criteria: input.criteria,
+      });
+
+      return evaluations
+        ? { kind: 'answered' as const, evaluations }
+        : { kind: 'unavailable' as const };
+    } catch {
+      // The worker turns this into a privacy-safe visible warning and keeps
+      // task completion fail-open, matching other optional judgment surfaces.
+      return { kind: 'error' as const };
+    }
+  }),
 
   refreshGitHubTokenWithMetadata: runScoped(
     z.object({ runId: z.number() }),

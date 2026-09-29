@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { format, formatDistanceToNow, isSameDay, isSameYear } from 'date-fns';
+import type { SessionManualStatus } from '@roomote/types';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import {
@@ -35,6 +36,7 @@ type SessionCardData = {
   sourceSurface: string;
   activityAt: number;
   cachedStatus: 'active' | 'needs_input' | 'blocked' | 'ready' | null;
+  manualStatus?: SessionManualStatus | null;
   executionCount: number;
   inferenceCostMicroUsd: number;
   directInferenceCostMicroUsd: number;
@@ -72,11 +74,13 @@ export function SessionCard({
   viewerUserId,
   query = '',
   hideBlockedBadge = false,
+  sessionStatusExperimentEnabled = false,
 }: {
   session: SessionCardData;
   viewerUserId: string;
   query?: string;
   hideBlockedBadge?: boolean;
+  sessionStatusExperimentEnabled?: boolean;
 }) {
   const ownerDisplayName =
     getUserDisplayName({
@@ -220,7 +224,12 @@ export function SessionCard({
       </div>
       {session.canManage ? (
         <div className="pointer-events-auto relative -top-2 z-20 shrink-0 self-start">
-          <SessionActions sessionId={session.id} listRow />
+          <SessionActions
+            sessionId={session.id}
+            listRow
+            status={session.manualStatus ?? session.cachedStatus}
+            sessionStatusExperimentEnabled={sessionStatusExperimentEnabled}
+          />
         </div>
       ) : null}
     </div>

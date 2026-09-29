@@ -89,6 +89,7 @@ import type {
   FastAgentParent,
   FastAgentSurface,
   ReasoningEffort,
+  SessionManualStatus,
   SessionStatus,
   SessionPrivacy,
   SessionWakeupReportPolicy,
@@ -3841,6 +3842,19 @@ export const fastAgentMessages = pgTable(
       table.ts,
       table.turnSeq,
     ),
+    index('fast_agent_messages_visible_user_order_idx').on(
+      table.conversationId,
+      table.ts.desc(),
+    ).where(sql`
+        ${table.role} = 'user'
+        AND (
+          ${table.metadata} ->> 'visibleInTranscript' = 'true'
+          OR (
+            ${table.metadata} ->> 'visibleInTranscript' IS NULL
+            AND ${table.eventType} <> 'roomote_runtime.user_prompt'
+          )
+        )
+      `),
   ],
 );
 
@@ -4407,7 +4421,7 @@ export const automationsRelations = relations(automations, ({ many }) => ({
 
 export type SessionOwnerKind = 'user' | 'automation' | 'system';
 export type SessionSourceSurface = TaskSurface | FastAgentSurface;
-export type { SessionPrivacy, SessionStatus };
+export type { SessionManualStatus, SessionPrivacy, SessionStatus };
 export type SessionTaskOrigin =
   | 'direct_launch'
   | 'fast_delegation'
@@ -4472,6 +4486,14 @@ export const sessions = pgTable(
       .$type<TaskVisibility>(),
     activityAt: bigint('activity_at', { mode: 'number' }).notNull(),
     cachedStatus: text('cached_status').$type<SessionStatus>(),
+    // Optional user-selected status. When present, runtime reconciliation
+    // preserves it while cached_status remains the deterministic lifecycle
+    // status. 'done' is intentionally valid here but not in cached_status.
+    // Keep 'active' in the database vocabulary for N-1 rollback compatibility;
+    // the current API and UI reject it as a new manual selection.
+    manualStatus: text('manual_status').$type<SessionManualStatus>(),
+    manualStatusSetAt: timestamp('manual_status_set_at'),
+    inactivityDueAt: timestamp('inactivity_due_at'),
     // Fast-conversation responding lease: while this is in the future, status
     // recomputation treats the conversation as actively responding. TTL-based
     // so a crashed turn self-heals instead of pinning the session 'active'.
@@ -4486,6 +4508,11 @@ export const sessions = pgTable(
       table.activityAt.desc(),
       table.id.desc(),
     ),
+    index('sessions_inactivity_due_idx')
+      .on(table.visibility, table.inactivityDueAt, table.id)
+      .where(
+        sql`${table.inactivityDueAt} IS NOT NULL AND ${table.manualStatus} IS NULL`,
+      ),
     index('sessions_owner_user_id_idx').on(table.ownerUserId),
     uniqueIndex('sessions_fast_conversation_id_unique')
       .on(table.fastConversationId)
@@ -4524,6 +4551,10 @@ export const sessions = pgTable(
     check(
       'sessions_cached_status_check',
       sql`${table.cachedStatus} IS NULL OR ${table.cachedStatus} in ('active', 'needs_input', 'blocked', 'ready')`,
+    ),
+    check(
+      'sessions_manual_status_check',
+      sql`${table.manualStatus} IS NULL OR ${table.manualStatus} in ('active', 'needs_input', 'blocked', 'ready', 'done')`,
     ),
   ],
 );

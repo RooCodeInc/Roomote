@@ -77,6 +77,10 @@ vi.mock(
   }),
 );
 
+vi.mock('@/components/settings/JevgrepExperimentalSetting', () => ({
+  JevgrepExperimentalSetting: () => <div>Jevgrep code search setting</div>,
+}));
+
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
 describe('ExperimentalSettingsPage', () => {
@@ -94,6 +98,7 @@ describe('ExperimentalSettingsPage', () => {
       'data-admin-only',
       'true',
     );
+    expect(screen.getByText('Jevgrep code search setting')).toBeInTheDocument();
     expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(
       screen.getByText('Browser notifications setting'),

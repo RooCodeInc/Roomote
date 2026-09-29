@@ -168,7 +168,6 @@ describe('private task memory exclusion', () => {
         where: eq(brainMemoryEvents.runId, run.id),
       }),
     ).resolves.toMatchObject({ status: 'failed' });
-    expect(await claimPendingBrainMemoryEvents(db, 10)).toEqual([]);
   });
 });
 

@@ -241,6 +241,7 @@ vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
 const session: SessionInfo = {
   id: 'session-1',
   canDelete: false,
+  sessionStatusExperimentEnabled: false,
   ownerName: 'Test User',
   ownerEmail: 'test@example.com',
   ownerImageUrl: null,
@@ -255,6 +256,8 @@ const session: SessionInfo = {
   },
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   status: 'needs_input',
+  cachedStatus: 'needs_input',
+  manualStatus: null,
   tasks: [],
 };
 

@@ -285,8 +285,8 @@ describe('buildAutoAddedTaskModelSettings', () => {
     const bedrock = getSetupModelProvider('amazon-bedrock');
     const metadataCatalog: ModelsDevCatalog = {
       models: {
-        'anthropic/claude-sonnet-5': {
-          name: 'Claude Sonnet 5',
+        'anthropic/claude-sonnet-5-5': {
+          name: 'Claude Sonnet 5.5',
           limit: { context: 205_000 },
           cost: { input: 1, output: 3.2 },
         },
@@ -304,7 +304,8 @@ describe('buildAutoAddedTaskModelSettings', () => {
 
     expect(
       result?.addedModels.find(
-        (model) => model.id === 'bedrock-mantle/anthropic.claude-sonnet-5',
+        (model) =>
+          model.id === 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       )?.metadata,
     ).toMatchObject({
       contextWindow: 205_000,
@@ -418,7 +419,7 @@ describe('appendRecommendedTaskModels', () => {
       connectedProviderIds: new Set(['amazon-bedrock']),
       metadataCatalog: {
         models: {
-          'anthropic/claude-sonnet-5': {
+          'anthropic/claude-sonnet-5-5': {
             limit: { context: 205_000 },
             cost: { input: 1, output: 3.2 },
           },
@@ -430,7 +431,8 @@ describe('appendRecommendedTaskModels', () => {
 
     expect(
       result.find(
-        (model) => model.id === 'bedrock-mantle/anthropic.claude-sonnet-5',
+        (model) =>
+          model.id === 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       )?.metadata,
     ).toMatchObject({
       contextWindow: 205_000,

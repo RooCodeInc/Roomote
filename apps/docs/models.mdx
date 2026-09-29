@@ -136,6 +136,11 @@ off, and they cannot be deleted while their provider stays connected — turn a
 model off to stop using it. To go beyond the recommended set, add any model by
 its slug from the add-model field.
 
+**Claude Sonnet 5.5** is the current curated Claude recommendation where a
+connected provider exposes its verified route. New connections can discover it
+through supported direct and gateway providers, while existing Claude Sonnet 5
+selections remain usable until you choose to switch.
+
 **GPT-6 Astra** is also recommended through [Vercel AI Gateway](/providers/inference/vercel-ai-gateway),
 [GitHub Copilot](/providers/inference/github-copilot), and
 [OpenCode Zen](/providers/inference/opencode). Connect the provider, enable Astra
@@ -341,6 +346,20 @@ model, select Jev and set `R_JUDGMENT_SHADOW=on`; the Roomote model scores the
 same decisions for calibration while Jev remains the selected route. Many
 deployments already have OpenRouter or Vercel AI Gateway keys for task
 inference, and selecting those routes sends decision text to that provider.
+
+Enable **Jevgrep code search** under **Settings → Experimental** to give coding tasks
+[Jevgrep](https://github.com/dzhng/jevgrep) (`jg`) and its agent skill for finding
+relevant code from natural-language questions. This experiment is off by default
+and requires Jev to be selected with its provider key configured. Roomote sets it up on the next task run;
+no separate login is needed. Searches send selected source excerpts to the selected
+Jev provider. If setup or evaluation is unavailable, the agent can use ordinary
+code search. Jevgrep is currently available with the three Jev routes above;
+selecting **Off** or the **Roomote judgment model** disables it for new task runs.
+Turning off the experiment also stops new evaluations from existing tasks.
+The agent, including OpenCode's explore subagent, is instructed to make at most
+one narrowly scoped attempt during task discovery, stop after 30 seconds, and
+fall back to ordinary search. Exact symbols and known paths use ordinary search
+directly. Jevgrep evaluations do not use the Roomote shadow evaluator.
 
 The **Roomote judgment model** is an open-weight model served on
 Roomote-operated infrastructure, where its decision text is processed. It

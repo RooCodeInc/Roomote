@@ -292,12 +292,15 @@ async function buildFastAutomationConversation(params: {
   destination: CustomAutomationDestination | null;
   target: AutomationTarget | null;
   deferDestinationRoots?: boolean;
+  reuseExistingDestinationRoot?: boolean;
 }): Promise<{
   conversation: FastAgentConversation;
   rootMessageId?: string;
 }> {
   const { automation, destination, eventId, target } = params;
   const deferDestinationRoots = params.deferDestinationRoots === true;
+  const reuseExistingDestinationRoot =
+    params.reuseExistingDestinationRoot === true;
   if (!destination) {
     return { conversation: buildAutomationConversation(automation, eventId) };
   }
@@ -478,7 +481,7 @@ async function buildFastAutomationConversation(params: {
     if (!provider) {
       throw new Error('Telegram is not connected.');
     }
-    if (deferDestinationRoots) {
+    if (deferDestinationRoots && !reuseExistingDestinationRoot) {
       return {
         conversation: {
           surface: 'telegram',
@@ -490,18 +493,32 @@ async function buildFastAutomationConversation(params: {
     }
     const managedThreadId =
       target?.targetKind === 'telegram_user'
-        ? ((await findManagedTelegramAutomationTopic({
-            channelId: destination.channelId,
-            eventId,
-            userId: automation.createdByUserId!,
-          })) ??
-          (
-            await provider.createForumTopic({
-              channelId: destination.channelId,
-              name: buildCommunicationTaskThreadName(automation.name),
-            })
-          ).messageThreadId)
+        ? ((reuseExistingDestinationRoot
+            ? await findManagedTelegramAutomationTopic({
+                channelId: destination.channelId,
+                eventId,
+                userId: automation.createdByUserId!,
+              })
+            : null) ??
+          (deferDestinationRoots
+            ? null
+            : (
+                await provider.createForumTopic({
+                  channelId: destination.channelId,
+                  name: buildCommunicationTaskThreadName(automation.name),
+                })
+              ).messageThreadId))
         : null;
+    if (deferDestinationRoots && !managedThreadId) {
+      return {
+        conversation: {
+          surface: 'telegram',
+          workspaceId: destination.channelId,
+          conversationId: eventId,
+          replyTarget: { channelId: destination.channelId },
+        },
+      };
+    }
     return {
       ...(managedThreadId ? { rootMessageId: managedThreadId } : {}),
       conversation: {
@@ -527,6 +544,7 @@ async function runFastCustomAutomation(params: {
   occurrenceAt: Date;
   launchClaimedAt: Date | null;
   trigger: 'schedule' | 'manual' | 'webhook';
+  reuseExistingDestinationRoot: boolean;
   /** Environment the automation was configured for, offered to the turn as a hint. */
   preferredEnvironmentId: string | null;
 }): Promise<void> {
@@ -555,7 +573,8 @@ async function runFastCustomAutomation(params: {
       eventId: params.eventId,
       destination: params.destination,
       target,
-      deferDestinationRoots: launchCriteriaRequired,
+      deferDestinationRoots: launchCriteriaRequired || Boolean(target),
+      reuseExistingDestinationRoot: params.reuseExistingDestinationRoot,
     },
   );
   try {
@@ -588,9 +607,7 @@ async function runFastCustomAutomation(params: {
       ...(launchCriteriaEnabled && params.automation.runWhen
         ? { runWhen: params.automation.runWhen }
         : {}),
-      ...(launchCriteriaRequired && target
-        ? { targetKind: target.targetKind }
-        : {}),
+      ...(target ? { targetKind: target.targetKind } : {}),
       trigger: params.trigger,
       ...(params.preferredEnvironmentId
         ? { preferredEnvironmentId: params.preferredEnvironmentId }
@@ -929,7 +946,7 @@ async function launchCustomAutomationRow(
 
   const isManualRetry =
     !webhookTrigger &&
-    opts.manualTrigger &&
+    opts.manualTrigger === true &&
     Boolean(automation.lastError && automation.lastRunAt);
   const eventClaimedAt = webhookTrigger
     ? new Date()
@@ -964,6 +981,7 @@ async function launchCustomAutomationRow(
       occurrenceAt,
       launchClaimedAt,
       trigger: opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
+      reuseExistingDestinationRoot: isManualRetry,
       preferredEnvironmentId,
     });
     result.queued = true;
