@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { prepareExamples, question } from '@roo-code/judgement';
+import { prepareExamples } from '@roo-code/judgement';
 
 const cwd = fileURLToPath(new URL('../../..', import.meta.url));
 const destination = new URL(
@@ -10,16 +10,12 @@ const destination = new URL(
   import.meta.url,
 );
 const prepared = await prepareExamples({ cwd });
-// Shared questions occur in every packet; store each variant once.
+// Shared questions occur in every packet; store each distinct question once.
 const questionSets = [];
 const indexes = new Map();
 const examples = prepared.examples.map((example) => ({
   ...example,
-  packets: example.packets.map(({ state, stage, questions: baseline }) => {
-    const questions = {
-      standard: baseline,
-      combined: { result: question(state, { combineAcceptedOutcomes: true }) },
-    };
+  packets: example.packets.map(({ state, stage, questions }) => {
     const key = JSON.stringify(questions);
     if (!indexes.has(key)) {
       indexes.set(key, questionSets.length);

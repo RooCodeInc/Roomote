@@ -1,0 +1,47 @@
+{
+  "ruleId": "criterion_8",
+  "examples": [
+    {
+      "name": "Describe unnecessary removed path",
+      "path": "docs/setup.md",
+      "before": "Write logs to output/.\n",
+      "after": "Write logs to output/, unlike the previous logs/ directory.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Unnecessary exclusive wording",
+      "path": "docs/setup.md",
+      "before": "Store themes in themes/.\n",
+      "after": "Store themes in themes/, the sole theme storage location.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Document authentication requirement",
+      "path": "docs/setup.md",
+      "before": "Configure authentication.\n",
+      "after": "Only requests with a valid signature may update account settings.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Necessary compatibility restriction",
+      "path": "docs/setup.md",
+      "before": "Install a supported runtime.\n",
+      "after": "Only Node 22 and newer support the APIs this package uses.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Describe a change in release notes",
+      "path": "docs/setup.md",
+      "before": "## Release notes\nMaintenance changes.\n",
+      "after": "## Release notes\nThemes now live in themes/ instead of customizations/.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Compare supported choices",
+      "path": "docs/setup.md",
+      "before": "Choose a storage backend.\n",
+      "after": "Choose local storage for a single server or object storage when several servers share uploads.\n",
+      "expected": "pass"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "ruleId": "criterion_7",
+  "examples": [
+    {
+      "name": "Mid-sentence plural task",
+      "path": "docs/tasks.md",
+      "before": "Review the remaining work.\n",
+      "after": "Review the remaining Tasks before continuing.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Mid-sentence singular session",
+      "path": "docs/tasks.md",
+      "before": "Open the work history.\n",
+      "after": "Open the Session history.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Task at the beginning of a sentence",
+      "path": "docs/tasks.md",
+      "before": "View the result here.\n",
+      "after": "Task results appear here.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Quoted visible UI text",
+      "path": "docs/tasks.md",
+      "before": "Choose the history view.\n",
+      "after": "Choose \"Session History\" from the menu.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Heading in title case",
+      "path": "docs/tasks.md",
+      "before": "## History\nDetails are below.\n",
+      "after": "## Task History\nDetails are below.\n",
+      "expected": "pass"
+    }
+  ]
+}

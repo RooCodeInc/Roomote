@@ -100,7 +100,7 @@
     "@aws-sdk/client-s3": "3.1000.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opencode-ai/sdk": "1.18.30",
-    "@roo-code/judgement": "github:RooCodeInc/judgement#60f066988fa8aee7e893aa185e2161527164af8c",
+    "@roo-code/judgement": "github:RooCodeInc/judgement#354078180dccc3912f9324106bfcb1edb854cde1",
     "@roomote/ado": "workspace:^",
     "@roomote/auth": "workspace:^",
     "@roomote/bitbucket": "workspace:^",

@@ -453,9 +453,9 @@ export function JudgmentDecisionTesterPage() {
                   </Select>
                   {selectedRun?.example && (
                     <p className="text-xs text-muted-foreground">
-                      Expected: {selectedRun.example.expected} · Threshold:{' '}
-                      {Math.round(selectedRun.example.threshold * 100)}% ·{' '}
-                      {selectedRun.example.stage}
+                      Expected: {selectedRun.example.expected} · Violation
+                      cutoff: {Math.round(selectedRun.example.threshold * 100)}%
+                      · {selectedRun.example.stage}
                       {selectedRun.edited ? ' · edited input' : ''}. This is a
                       packet answer; verify final status with a full check.
                     </p>
@@ -521,9 +521,20 @@ export function JudgmentDecisionTesterPage() {
                         </span>
                         {answeredTargets.map((target) => {
                           const result = results[target];
-                          const pick = result?.ok
-                            ? pickOf(question, result.answers[questionId])
+                          const answer = result?.ok
+                            ? result.answers[questionId]
                             : undefined;
+                          const violationProbability =
+                            selectedRun?.example && question.type === 'noul'
+                              ? answer?.noul
+                              : undefined;
+                          const pick =
+                            violationProbability !== undefined
+                              ? violationProbability >=
+                                selectedRun!.example!.threshold
+                                ? 'flagged'
+                                : 'below cutoff'
+                              : pickOf(question, answer);
                           const invalid =
                             result?.ok && result.invalid.includes(questionId);
                           return pick !== undefined || invalid ? (
@@ -532,6 +543,13 @@ export function JudgmentDecisionTesterPage() {
                               <strong>
                                 {invalid ? 'invalid answer' : pick}
                               </strong>
+                              {violationProbability !== undefined && (
+                                <span>
+                                  {' '}
+                                  · violation probability{' '}
+                                  {Math.round(violationProbability * 100)}%
+                                </span>
+                              )}
                               {result?.ok &&
                                 result.answers[questionId]?.confidence !==
                                   undefined && (
@@ -566,7 +584,11 @@ export function JudgmentDecisionTesterPage() {
                               className="truncate font-mono"
                               title={optionDescription(question, option.key)}
                             >
-                              {option.label}
+                              {selectedRun?.example && question.type === 'noul'
+                                ? option.key === 'yes'
+                                  ? 'violation'
+                                  : 'no violation'
+                                : option.label}
                             </span>
                             {answeredTargets.map((target, index) => {
                               const result = results[target];

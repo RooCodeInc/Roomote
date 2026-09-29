@@ -1,0 +1,47 @@
+{
+  "ruleId": "criterion_7",
+  "examples": [
+    {
+      "name": "Task in ordinary middle prose",
+      "path": "docs/confirmation.md",
+      "before": "Check your progress.\n",
+      "after": "Check your Task progress.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Session in ordinary middle prose",
+      "path": "docs/confirmation.md",
+      "before": "Inspect the current output.\n",
+      "after": "Inspect the current Session output.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Task after a full stop",
+      "path": "docs/confirmation.md",
+      "before": "Processing finished. Results follow.\n",
+      "after": "Processing finished. Task results follow.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Title with both ordinary nouns",
+      "path": "docs/confirmation.md",
+      "before": "## History\n",
+      "after": "## Session and Task History\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Explicit quoted control label",
+      "path": "docs/confirmation.md",
+      "before": "Open settings.\n",
+      "after": "Select the \"New Session\" control.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Lowercase normal plural",
+      "path": "docs/confirmation.md",
+      "before": "Review work.\n",
+      "after": "Review the open sessions and tasks.\n",
+      "expected": "pass"
+    }
+  ]
+}

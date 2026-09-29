@@ -1,0 +1,33 @@
+{
+  "ruleId": "criterion_2",
+  "examples": [
+    {
+      "name": "Clone inherited environment",
+      "path": "apps/worker/src/command-executor/execute.ts",
+      "before": "export const environment = { PATH: process.env.PATH };\n",
+      "after": "export const environment = Object.assign({}, process.env);\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Pass proxy authentication to subprocess",
+      "path": "apps/worker/src/command-executor/execute.ts",
+      "before": "export function run(exec) { return exec(\"task\", {env:{PATH: process.env.PATH}}); }\n",
+      "after": "export function run(exec) { return exec(\"task\", {env:{PATH: process.env.PATH, WORKER_PROXY_TOKEN: process.env.WORKER_PROXY_TOKEN}}); }\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Allow named locale variable",
+      "path": "apps/worker/src/command-executor/execute.ts",
+      "before": "export const childEnv = {};\n",
+      "after": "export const childEnv = { PATH: process.env.PATH, LC_ALL: \"C.UTF-8\" };\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Strip secret while retaining explicit runtime contract",
+      "path": "apps/worker/src/command-executor/execute.ts",
+      "before": "export function env() { return {}; }\n",
+      "after": "// The nested service requires this non-sensitive timezone setting.\nexport function env() { return { PATH: process.env.PATH, TZ: \"UTC\" }; }\n",
+      "expected": "pass"
+    }
+  ]
+}

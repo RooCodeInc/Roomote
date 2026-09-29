@@ -37,11 +37,8 @@ it('keeps bundled tester inputs synchronized with rules, fixtures, generator, an
       expect(packet.state).not.toHaveProperty('expected');
       expect(packet.state).not.toHaveProperty('name');
       const request = packet.state as Parameters<typeof question>[0];
-      expect(presets.questionSets[packet.questionSet]!.standard.result).toEqual(
+      expect(presets.questionSets[packet.questionSet]!.result).toEqual(
         question(request),
-      );
-      expect(presets.questionSets[packet.questionSet]!.combined.result).toEqual(
-        question(request, { combineAcceptedOutcomes: true }),
       );
     }
   }

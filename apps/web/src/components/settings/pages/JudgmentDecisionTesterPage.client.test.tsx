@@ -149,7 +149,7 @@ function selectOption(label: string, option: string) {
   fireEvent.click(screen.getByRole('option', { name: option }));
 }
 
-it('loads exact packets and experimental questions, keeps labels out of requests, and preserves repeated results', async () => {
+it('loads exact packets and production questions, keeps labels out of requests, and preserves repeated results', async () => {
   const initial = {
     rule: 'Use lowercase session.',
     complete: true,
@@ -161,24 +161,9 @@ it('loads exact packets and experimental questions, keeps labels out of requests
   };
   const standard = {
     result: {
-      type: 'choice',
-      instructions: 'Judge the change',
-      criteria: {
-        pass: 'valid',
-        violation: 'invalid',
-        unclear: 'unknown',
-        not_applicable: 'irrelevant',
-      },
-    },
-  };
-  const combined = {
-    result: {
-      ...standard.result,
-      criteria: {
-        pass: 'valid or irrelevant',
-        violation: 'invalid',
-        unclear: 'unknown',
-      },
+      type: 'noul',
+      instructions: 'Does this change violate the rule?',
+      criteria: { true: 'violates', false: 'complies or is inapplicable' },
     },
   };
   state.presets = {
@@ -195,7 +180,7 @@ it('loads exact packets and experimental questions, keeps labels out of requests
         ],
       },
     ],
-    questionSets: [{ standard, combined }],
+    questionSets: [standard],
   };
   state.mutate.mockResolvedValue({
     configured: {
@@ -204,10 +189,8 @@ it('loads exact packets and experimental questions, keeps labels out of requests
       model: 'jev',
       answers: {
         result: {
-          type: 'choice',
-          choice: 'violation',
-          confidence: 0.82,
-          probabilities: { violation: 0.9, pass: 0.08, unclear: 0.02 },
+          type: 'noul',
+          noul: 0.82,
         },
       },
       invalid: [],
@@ -228,7 +211,9 @@ it('loads exact packets and experimental questions, keeps labels out of requests
     ),
   ).toEqual(standard);
   selectOption('Evidence', '2 · expanded');
-  selectOption('Question variant', 'Combined acceptable outcomes');
+  expect(
+    screen.queryByRole('combobox', { name: 'Question variant' }),
+  ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Load example' }));
   selectOption('Repetitions', 'Three runs');
   fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
@@ -236,27 +221,22 @@ it('loads exact packets and experimental questions, keeps labels out of requests
   for (const [input] of state.mutate.mock.calls) {
     expect(input).toEqual({
       state: expanded,
-      questions: combined,
+      questions: standard,
       targets: ['configured'],
     });
   }
   await waitFor(() =>
-    expect(
-      screen.getByText(/confidence 82%.*below threshold/),
-    ).toBeInTheDocument(),
+    expect(screen.getByText(/violation probability 82%/)).toBeInTheDocument(),
   );
-  expect(screen.getByText('90%')).toBeInTheDocument();
+  expect(screen.getByText('82%')).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('State (JSON)'), {
     target: { value: '{"custom":true}' },
   });
   expect(screen.getByText(/Loaded:.*edited/)).toBeInTheDocument();
   // Results retain the original packet metadata after editing the next request.
   expect(
-    screen.getByText(/Expected: violation · Threshold: 85% · expanded/),
+    screen.getByText(/Expected: violation · Violation cutoff: 85% · expanded/),
   ).toBeInTheDocument();
-  selectOption(
-    'Recent runs',
-    '3 · wording · Capitalization · combined · run 1',
-  );
-  expect(screen.getByText(/confidence 82%/)).toBeInTheDocument();
+  selectOption('Recent runs', '3 · wording · Capitalization · run 1');
+  expect(screen.getByText(/violation probability 82%/)).toBeInTheDocument();
 });

@@ -407,17 +407,15 @@ model is also configured, it can ask both side by side. Test decisions go to
 the same judgment model as real ones but are not captured or shadowed.
 
 For **Repository Judgement**, choose a rule and labeled example, select its initial
-or expanded evidence, and click **Load example**. Compare the standard question
-with the experimental combined acceptable-outcome question, edit the inputs, or
-ask for three repeated runs. Recent runs retain their original input labels;
-confidence is shown separately from answer probabilities. Expected labels are
-never sent to the model.
+or expanded evidence, and click **Load example**. Edit the inputs or ask for three
+repeated runs. Each answer shows the probability of a rule violation and whether
+it reaches the rule's cutoff. Recent runs retain their original inputs and labels.
+Expected labels are never sent to the model.
 
 These are individual evidence requests. A partial screen cannot approve a file,
 and the tester's 20-second timeout does not measure the commit hook's three-second
 budget. Confirm a proposed improvement through the full Judgement checker before
-changing a rule or its confidence threshold.
-
+changing a rule or its violation cutoff.
 
 ## Reasoning settings
 

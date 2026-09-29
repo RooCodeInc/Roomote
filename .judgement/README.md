@@ -1,6 +1,6 @@
 # Roomote rule calibration
 
-These are labeled changes for each of the eight repository rules. Labels describe
+These are labeled changes for each of the seven repository rules. Labels describe
 what the rule requires, not what the model happened to answer. Keep cases that
 fail: they are regression examples, not reasons to change the expected label.
 
@@ -10,12 +10,11 @@ fail: they are regression examples, not reasons to change the expected label.
 | `criterion_2` | Worker subprocess environments          |        6 |
 | `criterion_3` | Sanitized API errors                    |        6 |
 | `criterion_4` | Agent setup prose                       |        6 |
-| `criterion_5` | Independent async operations            |        6 |
 | `criterion_6` | UI and setup copy                       |        6 |
 | `criterion_7` | Lowercase ordinary nouns                |       11 |
 | `criterion_8` | Direct descriptions of current behavior |       10 |
 
-IDs currently follow the order in `.judgement/rules.json`. Preserve those IDs explicitly if
+IDs are explicit in `.judgement/rules.json`. Keep them stable when removing or
 reordering rules, and update examples when changing the intended rule behavior.
 The `path` in each example matches the real rule's file globs. Before/after strings
 are synthetic source files; they are judged as diffs and are never executed.
@@ -57,17 +56,18 @@ successful violation detection or complete approval of a valid edit.
 ## Inspect examples in the decision tester
 
 Admins can open **Settings → Models → Test decisions**, choose **Repository
-Judgement**, and select a rule, example, evidence packet, and question variant.
+Judgement**, and select a rule, example, and evidence packet.
 Click **Load example**, then **Ask**. The state and questions remain editable.
 Select three runs to inspect variation; the last ten runs remain available while
-the page is open, with their original labels and confidence thresholds.
+the page is open, with their original labels and violation cutoffs.
 
-Expected labels stay outside model input. Confidence and answer probabilities
-are displayed separately. A packet answer does not establish a full checker
-result: partial screens cannot approve a file, unresolved evidence still matters,
-and the tester has a 20-second request timeout compared with the hook's
-three-second budget. The combined acceptable-outcome question is an explicit
-experiment. Normal hooks retain the standard question.
+Expected labels stay outside model input. The model returns the probability that
+an edit violates the rule. A probability at or above the rule's cutoff produces
+a finding; lower probabilities produce no finding. A low score does not prove
+that the edit is correct. Missing evidence and inference failures can still make
+a check incomplete. The tester has a 20-second request timeout compared with the
+hook's three-second budget, and a single packet does not establish a full checker
+result.
 
 `pnpm judgement:presets` uses Judgement's `prepareExamples` API to bundle synthetic
 request inputs for the deployed tester. Run it after changing rules, fixtures,
@@ -76,3 +76,22 @@ needed. `pnpm judgement:presets --check` verifies exact preparation; the focused
 `judgement-presets.test.ts` test detects stale source hashes and question drift.
 Generated inputs are checked in so the web server does not need Git or a checkout.
 Observed scores and calibration reports belong in local output or CI artifacts.
+
+## Choosing cutoffs
+
+Use repeated runs of the labeled examples to compare missed violations and false
+blocks. Check a candidate cutoff against additional examples under
+`examples/validation/`; the prose rules also have confirmation examples under
+`examples/confirmation/`. Preserve failing examples and their intended labels.
+If valid and violating scores overlap, improve the rule or evidence before
+lowering the cutoff. Recalibrate after changing the rule, model, or question.
+
+```sh
+pnpm judgement test --examples-dir .judgement/examples/validation --repeats 5
+pnpm judgement test --examples-dir .judgement/examples/confirmation --rule criterion_7 --repeats 5
+pnpm judgement test --examples-dir .judgement/examples/confirmation --rule criterion_8 --repeats 5
+```
+
+Keep rules focused on contextual requirements and exceptions that are difficult
+to express as deterministic checks. General performance advice belongs in code
+review. Keep observed calibration scores in local reports or CI artifacts.

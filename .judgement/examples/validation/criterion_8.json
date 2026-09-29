@@ -1,0 +1,40 @@
+{
+  "ruleId": "criterion_8",
+  "examples": [
+    {
+      "name": "Historical aside in an ordinary instruction",
+      "path": "docs/setup.md",
+      "before": "Save your filter in preferences.json.\n",
+      "after": "Save your filter in preferences.json, replacing the earlier filters.yaml convention.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Unnecessary sole-location aside",
+      "path": "docs/setup.md",
+      "before": "Put templates under templates/.\n",
+      "after": "Put templates under templates/, the only directory for templates.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "An actionable security restriction",
+      "path": "docs/setup.md",
+      "before": "Configure the integration.\n",
+      "after": "Only signed webhook requests are accepted.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "An explicit migration guide",
+      "path": "docs/setup.md",
+      "before": "## Migration to version 4\nUpdate configuration.\n",
+      "after": "## Migration to version 4\nMove filters from filters.yaml to preferences.json before upgrading.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Clearly quoted writing examples",
+      "path": "docs/setup.md",
+      "before": "## Writing guidance\nKeep instructions direct.\n",
+      "after": "## Writing guidance\nAvoid: \"templates/ is the only directory for templates.\"\nPrefer: \"Put templates under templates/.\"\n",
+      "expected": "pass"
+    }
+  ]
+}

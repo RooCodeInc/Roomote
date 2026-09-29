@@ -35,7 +35,6 @@ export function JudgmentExamplePresets({
   const [ruleId, setRuleId] = useState<string>();
   const [exampleName, setExampleName] = useState<string>();
   const [packetIndex, setPacketIndex] = useState(0);
-  const [variant, setVariant] = useState<'standard' | 'combined'>('standard');
   const data = query.data;
   if (query.isPending) return <Skeleton className="h-40 w-full" />;
   if (!data)
@@ -65,13 +64,13 @@ export function JudgmentExamplePresets({
     );
   const load = () =>
     onLoad({
-      label: `${example.ruleId} · ${example.name} · ${variant}`,
+      label: `${example.ruleId} · ${example.name}`,
       expected: example.expected,
       threshold: example.threshold,
       stage: packet.stage,
       stateText: JSON.stringify(packet.state, null, 2),
       questionsText: JSON.stringify(
-        data.questionSets[packet.questionSet]![variant],
+        data.questionSets[packet.questionSet]!,
         null,
         2,
       ),
@@ -122,45 +121,26 @@ export function JudgmentExamplePresets({
           </SelectContent>
         </Select>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor="judgment-packet">Evidence</Label>
-          <Select
-            value={String(packetIndex)}
-            onValueChange={(value) => setPacketIndex(Number(value))}
-          >
-            <SelectTrigger id="judgment-packet" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {example.packets.map((item, index) => (
-                <SelectItem key={index} value={String(index)}>
-                  {index + 1} · {item.stage}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="judgment-variant">Question variant</Label>
-          <Select
-            value={variant}
-            onValueChange={(value) => setVariant(value as typeof variant)}
-          >
-            <SelectTrigger id="judgment-variant" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="standard">Standard</SelectItem>
-              <SelectItem value="combined">
-                Combined acceptable outcomes
+      <div className="space-y-1.5">
+        <Label htmlFor="judgment-packet">Evidence</Label>
+        <Select
+          value={String(packetIndex)}
+          onValueChange={(value) => setPacketIndex(Number(value))}
+        >
+          <SelectTrigger id="judgment-packet" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {example.packets.map((item, index) => (
+              <SelectItem key={index} value={String(index)}>
+                {index + 1} · {item.stage}
               </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <p className="text-xs text-muted-foreground">
-        Expected: {example.expected} · Confidence threshold:{' '}
+        Expected: {example.expected} · Violation cutoff:{' '}
         {Math.round(example.threshold * 100)}%. Labels stay outside model input.
       </p>
       <Button variant="outline" onClick={load}>
@@ -169,7 +149,9 @@ export function JudgmentExamplePresets({
       <p className="text-xs text-muted-foreground">
         Each request tests one evidence packet. Partial screens cannot approve a
         file. This tester allows 20 seconds per request; the commit hook has a
-        three-second budget. The combined variant is an experiment.
+        three-second budget. Flag a violation when its probability meets the
+        cutoff. Lower scores produce no finding, including uncertain scores near
+        50%.
       </p>
     </div>
   );
