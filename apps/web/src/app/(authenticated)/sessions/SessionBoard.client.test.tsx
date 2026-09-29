@@ -66,6 +66,7 @@ import {
   SessionBoardCard,
   SessionBoardColumn,
 } from './SessionBoard';
+import { announceSessionBoardMove } from '@/components/sessions/session-board-motion';
 
 function renderBoard(columns: Record<string, string[]>) {
   return (
@@ -167,6 +168,21 @@ describe('SessionBoard motion', () => {
       y: 0,
       scale: 1,
       boxShadow: '0 0 0 0 rgba(0, 0, 0, 0)',
+    });
+  });
+
+  it('consumes a status-move intent after the board shell remounts', async () => {
+    const firstBoard = render(renderBoard({ active: ['moving'] }));
+    announceSessionBoardMove('moving', 'ready');
+    firstBoard.unmount();
+
+    const { container } = render(renderBoard({ ready: ['moving'] }));
+
+    await waitFor(() => {
+      expect(getFlightLayer(getCard(container, 'moving'))).toHaveAttribute(
+        'data-session-board-flight',
+        'active',
+      );
     });
   });
 });

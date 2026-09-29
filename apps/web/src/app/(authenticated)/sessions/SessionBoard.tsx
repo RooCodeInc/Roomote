@@ -18,6 +18,11 @@ import {
   useReducedMotion,
 } from 'motion/react';
 
+import {
+  consumeSessionBoardMove,
+  registerSessionBoard,
+} from '@/components/sessions/session-board-motion';
+
 const BOARD_LAYOUT_TRANSITION = {
   type: 'spring' as const,
   stiffness: 500,
@@ -88,6 +93,8 @@ export function SessionBoard({ children }: { children: ReactNode }) {
       FLIGHT_TRANSITION.duration * 2 * 1000,
     );
   }, []);
+
+  useLayoutEffect(() => registerSessionBoard(), []);
 
   return (
     <MotionConfig reducedMotion="user">
@@ -166,7 +173,8 @@ export function SessionBoardCard({
 
   useLayoutEffect(() => {
     const moved = registry?.register(sessionId, column) ?? false;
-    if (moved && !reducedMotion) setIsFlying(true);
+    const announcedMove = consumeSessionBoardMove(sessionId, column);
+    if ((moved || announcedMove) && !reducedMotion) setIsFlying(true);
 
     return () => registry?.unregister(sessionId, column);
   }, [column, reducedMotion, registry, sessionId]);

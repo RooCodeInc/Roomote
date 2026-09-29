@@ -12,6 +12,7 @@ import {
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
+import { announceSessionBoardMove } from '@/components/sessions/session-board-motion';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
   Activity,
@@ -125,6 +126,7 @@ export function SessionActions({
         }
         const nextStatus = (variables as { status: SessionManualStatus })
           .status;
+        announceSessionBoardMove(sessionId, nextStatus);
         toast.success(
           `Session marked as ${getSessionStatusLabel(nextStatus)}.`,
         );
