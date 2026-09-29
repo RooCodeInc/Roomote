@@ -2,10 +2,10 @@
   "ruleId": "criterion_2",
   "examples": [
     {
-      "name": "Clone inherited environment",
+      "name": "Clone credentials into task environment",
       "path": "apps/worker/src/command-executor/execute.ts",
-      "before": "export const environment = { PATH: process.env.PATH };\n",
-      "after": "export const environment = Object.assign({}, process.env);\n",
+      "before": "const workerEnv = { PATH: process.env.PATH, WORKER_PROXY_TOKEN: process.env.WORKER_PROXY_TOKEN };\nexport function run(exec) { return exec(\"task\", { env: { PATH: workerEnv.PATH } }); }\n",
+      "after": "const workerEnv = { PATH: process.env.PATH, WORKER_PROXY_TOKEN: process.env.WORKER_PROXY_TOKEN };\nexport function run(exec) { return exec(\"task\", { env: Object.assign({}, workerEnv) }); }\n",
       "expected": "violation"
     },
     {
@@ -28,6 +28,20 @@
       "before": "export function env() { return {}; }\n",
       "after": "// The nested service requires this non-sensitive timezone setting.\nexport function env() { return { PATH: process.env.PATH, TZ: \"UTC\" }; }\n",
       "expected": "pass"
+    },
+    {
+      "name": "Forward explicitly task-scoped credential",
+      "path": "apps/worker/src/run-task/launch.ts",
+      "before": "export function taskEnv(taskCredentials) { return {}; }\n",
+      "after": "// This API key was issued for the task and is intended for its subprocesses.\nexport function taskEnv(taskCredentials) { return { API_KEY: taskCredentials.apiKey }; }\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Rename worker credential while forwarding to task",
+      "path": "apps/worker/src/run-task/launch.ts",
+      "before": "export function taskEnv() { return { PATH: process.env.PATH }; }\n",
+      "after": "export function taskEnv() { const token = process.env.WORKER_AUTH_TOKEN; return { PATH: process.env.PATH, SERVICE_TOKEN: token }; }\n",
+      "expected": "violation"
     }
   ]
 }

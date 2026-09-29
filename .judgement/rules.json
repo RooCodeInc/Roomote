@@ -1,7 +1,7 @@
 {
   "criteria": [
     {
-      "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+      "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
       "files": [
         "apps/worker/src/env/**/*.ts",
         "apps/worker/src/run-task/**/*.ts",

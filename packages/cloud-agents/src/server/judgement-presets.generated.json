@@ -1,8 +1,8 @@
 {
   "protocolVersion": 6,
-  "policySha256": "eeef8be01f2faf80e0c9407d7d206b5a9256cd300eafcd5aeeeddc351f649d4a",
+  "policySha256": "23644b4ef4630722f7cc7dc2170986b111e28d44db07863175166c4dbb6845a7",
   "fixtureSha256": {
-    "criterion_2": "4eb6c64fd430c2db7fa1304e2b46dcbc97e12ffeff1dacf97557f903e8618c26",
+    "criterion_2": "79661eb7cf6e7a191e612586128cd556829ec9f39956c3e895697741a0ded8f7",
     "criterion_3": "e191d6f16469540b24cef73a96074efd10cd81a3f37e709d39f5c6f9d8aee7c5",
     "criterion_4": "822eebb548f3c53ca1d00362ac566bc6b7fbe1631d2938b1d46039ab08bfc011",
     "criterion_6": "756078d02a1b1b7f0546dab6a1fe54d86df04a32383c74711a5f9793466cb7e8",
@@ -12,21 +12,21 @@
   "examples": [
     {
       "ruleId": "criterion_2",
-      "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+      "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
       "threshold": 0.75,
-      "name": "Spread all launcher variables",
+      "name": "Spread credential-bearing worker environment",
       "expected": "violation",
       "packets": [
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.ts",
                 "kind": "patch",
                 "line": 1,
-                "text": "diff --git a/apps/worker/src/run-task/launch.ts b/apps/worker/src/run-task/launch.ts\nindex caaaf05..b683400 100644\n--- a/apps/worker/src/run-task/launch.ts\n+++ b/apps/worker/src/run-task/launch.ts\n@@ -1 +1 @@\n-export function taskEnv() { return { PATH: process.env.PATH }; }\n+export function taskEnv() { return { ...process.env }; }\n"
+                "text": "diff --git a/apps/worker/src/run-task/launch.ts b/apps/worker/src/run-task/launch.ts\nindex c081692..1b493c6 100644\n--- a/apps/worker/src/run-task/launch.ts\n+++ b/apps/worker/src/run-task/launch.ts\n@@ -1 +1 @@\n-export function taskEnv(workerEnv: { PATH: string; WORKER_AUTH_TOKEN: string }) { return { PATH: workerEnv.PATH }; }\n+export function taskEnv(workerEnv: { PATH: string; WORKER_AUTH_TOKEN: string }) { return { ...workerEnv }; }\n"
               }
             ],
             "focusPaths": ["apps/worker/src/run-task/launch.ts"],
@@ -39,20 +39,20 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.ts",
                 "kind": "patch",
                 "line": 1,
-                "text": "diff --git a/apps/worker/src/run-task/launch.ts b/apps/worker/src/run-task/launch.ts\nindex caaaf05..b683400 100644\n--- a/apps/worker/src/run-task/launch.ts\n+++ b/apps/worker/src/run-task/launch.ts\n@@ -1 +1 @@\n-export function taskEnv() { return { PATH: process.env.PATH }; }\n+export function taskEnv() { return { ...process.env }; }\n"
+                "text": "diff --git a/apps/worker/src/run-task/launch.ts b/apps/worker/src/run-task/launch.ts\nindex c081692..1b493c6 100644\n--- a/apps/worker/src/run-task/launch.ts\n+++ b/apps/worker/src/run-task/launch.ts\n@@ -1 +1 @@\n-export function taskEnv(workerEnv: { PATH: string; WORKER_AUTH_TOKEN: string }) { return { PATH: workerEnv.PATH }; }\n+export function taskEnv(workerEnv: { PATH: string; WORKER_AUTH_TOKEN: string }) { return { ...workerEnv }; }\n"
               },
               {
                 "path": "apps/worker/src/run-task/launch.ts",
-                "oid": "b683400b8205af6c721a7c543ae07222458831e0",
+                "oid": "1b493c63c12c6a8ead63a929af0986a518159db6",
                 "kind": "after",
                 "line": 1,
-                "text": "export function taskEnv() { return { ...process.env }; }\n"
+                "text": "export function taskEnv(workerEnv: { PATH: string; WORKER_AUTH_TOKEN: string }) { return { ...workerEnv }; }\n"
               }
             ],
             "focusPaths": ["apps/worker/src/run-task/launch.ts"],
@@ -66,7 +66,7 @@
     },
     {
       "ruleId": "criterion_2",
-      "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+      "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
       "threshold": 0.75,
       "name": "Forward worker authentication to task",
       "expected": "violation",
@@ -74,7 +74,7 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.ts",
@@ -93,7 +93,7 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.ts",
@@ -120,7 +120,7 @@
     },
     {
       "ruleId": "criterion_2",
-      "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+      "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
       "threshold": 0.75,
       "name": "Explicit non-sensitive allowlist",
       "expected": "pass",
@@ -128,7 +128,7 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.ts",
@@ -147,7 +147,7 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.ts",
@@ -174,7 +174,7 @@
     },
     {
       "ruleId": "criterion_2",
-      "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+      "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
       "threshold": 0.75,
       "name": "Named nested runtime contract",
       "expected": "pass",
@@ -182,7 +182,7 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.ts",
@@ -201,7 +201,7 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.ts",
@@ -228,7 +228,7 @@
     },
     {
       "ruleId": "criterion_2",
-      "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+      "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
       "threshold": 0.75,
       "name": "Scrub captured worker token before launch",
       "expected": "pass",
@@ -236,7 +236,7 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.ts",
@@ -255,7 +255,7 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.ts",
@@ -282,7 +282,7 @@
     },
     {
       "ruleId": "criterion_2",
-      "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+      "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
       "threshold": 0.75,
       "name": "Synthetic fixture with no inherited environment",
       "expected": "pass",
@@ -290,7 +290,7 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.test.ts",
@@ -309,7 +309,7 @@
         {
           "state": {
             "kind": "judge",
-            "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
             "evidence": [
               {
                 "path": "apps/worker/src/run-task/launch.test.ts",
@@ -326,6 +326,114 @@
               }
             ],
             "focusPaths": ["apps/worker/src/run-task/launch.test.ts"],
+            "complete": true,
+            "unresolved": []
+          },
+          "stage": "expanded",
+          "questionSet": 0
+        }
+      ]
+    },
+    {
+      "ruleId": "criterion_2",
+      "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
+      "threshold": 0.75,
+      "name": "Spread an already safe environment",
+      "expected": "pass",
+      "packets": [
+        {
+          "state": {
+            "kind": "judge",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
+            "evidence": [
+              {
+                "path": "apps/worker/src/run-task/launch.ts",
+                "kind": "patch",
+                "line": 1,
+                "text": "diff --git a/apps/worker/src/run-task/launch.ts b/apps/worker/src/run-task/launch.ts\nindex caaaf05..58a0757 100644\n--- a/apps/worker/src/run-task/launch.ts\n+++ b/apps/worker/src/run-task/launch.ts\n@@ -1 +1 @@\n-export function taskEnv() { return { PATH: process.env.PATH }; }\n+export function taskEnv() { const runtime = { PATH: process.env.PATH, LANG: \"C.UTF-8\" }; return { ...runtime }; }\n"
+              }
+            ],
+            "focusPaths": ["apps/worker/src/run-task/launch.ts"],
+            "complete": true,
+            "unresolved": []
+          },
+          "stage": "initial",
+          "questionSet": 0
+        },
+        {
+          "state": {
+            "kind": "judge",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
+            "evidence": [
+              {
+                "path": "apps/worker/src/run-task/launch.ts",
+                "kind": "patch",
+                "line": 1,
+                "text": "diff --git a/apps/worker/src/run-task/launch.ts b/apps/worker/src/run-task/launch.ts\nindex caaaf05..58a0757 100644\n--- a/apps/worker/src/run-task/launch.ts\n+++ b/apps/worker/src/run-task/launch.ts\n@@ -1 +1 @@\n-export function taskEnv() { return { PATH: process.env.PATH }; }\n+export function taskEnv() { const runtime = { PATH: process.env.PATH, LANG: \"C.UTF-8\" }; return { ...runtime }; }\n"
+              },
+              {
+                "path": "apps/worker/src/run-task/launch.ts",
+                "oid": "58a0757f72d6f2b6c07ceedf16edc2b782f0c575",
+                "kind": "after",
+                "line": 1,
+                "text": "export function taskEnv() { const runtime = { PATH: process.env.PATH, LANG: \"C.UTF-8\" }; return { ...runtime }; }\n"
+              }
+            ],
+            "focusPaths": ["apps/worker/src/run-task/launch.ts"],
+            "complete": true,
+            "unresolved": []
+          },
+          "stage": "expanded",
+          "questionSet": 0
+        }
+      ]
+    },
+    {
+      "ruleId": "criterion_2",
+      "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
+      "threshold": 0.75,
+      "name": "Use worker credential only for trusted control-plane request",
+      "expected": "pass",
+      "packets": [
+        {
+          "state": {
+            "kind": "judge",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
+            "evidence": [
+              {
+                "path": "apps/worker/src/run-task/launch.ts",
+                "kind": "patch",
+                "line": 1,
+                "text": "diff --git a/apps/worker/src/run-task/launch.ts b/apps/worker/src/run-task/launch.ts\nindex 3306f2b..db725e8 100644\n--- a/apps/worker/src/run-task/launch.ts\n+++ b/apps/worker/src/run-task/launch.ts\n@@ -1 +1 @@\n-export async function report(fetch) { return fetch(\"https://control.example.test/status\"); }\n+export async function report(fetch) { return fetch(\"https://control.example.test/status\", { headers: { Authorization: `Bearer ${process.env.WORKER_AUTH_TOKEN}` } }); }\n"
+              }
+            ],
+            "focusPaths": ["apps/worker/src/run-task/launch.ts"],
+            "complete": true,
+            "unresolved": []
+          },
+          "stage": "initial",
+          "questionSet": 0
+        },
+        {
+          "state": {
+            "kind": "judge",
+            "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
+            "evidence": [
+              {
+                "path": "apps/worker/src/run-task/launch.ts",
+                "kind": "patch",
+                "line": 1,
+                "text": "diff --git a/apps/worker/src/run-task/launch.ts b/apps/worker/src/run-task/launch.ts\nindex 3306f2b..db725e8 100644\n--- a/apps/worker/src/run-task/launch.ts\n+++ b/apps/worker/src/run-task/launch.ts\n@@ -1 +1 @@\n-export async function report(fetch) { return fetch(\"https://control.example.test/status\"); }\n+export async function report(fetch) { return fetch(\"https://control.example.test/status\", { headers: { Authorization: `Bearer ${process.env.WORKER_AUTH_TOKEN}` } }); }\n"
+              },
+              {
+                "path": "apps/worker/src/run-task/launch.ts",
+                "oid": "db725e8ce5553ddac3ddafd2ade94bfac0c4eef3",
+                "kind": "after",
+                "line": 1,
+                "text": "export async function report(fetch) { return fetch(\"https://control.example.test/status\", { headers: { Authorization: `Bearer ${process.env.WORKER_AUTH_TOKEN}` } }); }\n"
+              }
+            ],
+            "focusPaths": ["apps/worker/src/run-task/launch.ts"],
             "complete": true,
             "unresolved": []
           },
@@ -2442,8 +2550,8 @@
     }
   ],
   "sourceHashes": {
-    ".judgement/rules.json": "b13f0b616b1cb445e4d7f10e58e01a1efad25aa759dd95a9b7bfb564255c06b4",
-    ".judgement/examples/criterion_2.json": "4eb6c64fd430c2db7fa1304e2b46dcbc97e12ffeff1dacf97557f903e8618c26",
+    ".judgement/rules.json": "6d91e24ec11ae51ae3dec26b004917dad244873cb15779868ff29ca01a520529",
+    ".judgement/examples/criterion_2.json": "79661eb7cf6e7a191e612586128cd556829ec9f39956c3e895697741a0ded8f7",
     ".judgement/examples/criterion_3.json": "e191d6f16469540b24cef73a96074efd10cd81a3f37e709d39f5c6f9d8aee7c5",
     ".judgement/examples/criterion_4.json": "822eebb548f3c53ca1d00362ac566bc6b7fbe1631d2938b1d46039ab08bfc011",
     ".judgement/examples/criterion_6.json": "756078d02a1b1b7f0546dab6a1fe54d86df04a32383c74711a5f9793466cb7e8",

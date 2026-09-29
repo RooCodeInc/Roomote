@@ -6,7 +6,7 @@ fail: they are regression examples, not reasons to change the expected label.
 
 | ID            | Rule                                    | Examples |
 | ------------- | --------------------------------------- | -------: |
-| `criterion_2` | Worker subprocess environments          |        6 |
+| `criterion_2` | Worker credentials crossing into tasks  |        8 |
 | `criterion_3` | Sanitized API errors                    |        6 |
 | `criterion_4` | Agent setup prose                       |        6 |
 | `criterion_6` | UI and setup copy                       |        6 |
