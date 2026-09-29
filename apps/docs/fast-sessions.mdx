@@ -406,3 +406,33 @@ grant those permissions. Replies are attributed to the teammate who sent them.
 The sessions list and filter options remain scoped to the member's existing
 visibility permissions. Direct-link viewing does not make other members' custom
 automations discoverable in those lists.
+
+## Private sessions
+
+Private sessions are an experimental, owner-only boundary for work that uses a
+personal or otherwise private integration. They are disabled by default. An
+administrator can enable **Private Sessions** under **Settings > Experimental**;
+members can then choose **Private** when starting a new session. A private
+integration is available only in a private session owned by the member whose
+account is connected.
+
+Roomote carries the owner and privacy state into delegated tasks, retries, and
+snapshot resumes. Normal Roomote APIs limit the session, transcript, logs,
+artifacts, search, and status to the owner, and private content is excluded
+from shared memory and ordinary tool audits. Turning the experiment off blocks
+new private sessions and private integration calls, but owners can still access
+and delete existing private sessions. Starting a new private session is
+required; Roomote does not convert an existing shared session into a private
+one.
+
+Private sessions keep the agent's normal tools and permissions. Roomote asks the
+owner before publishing private content to a pull request, chat channel, shared
+integration, automation, or skill, but that instruction is guidance rather than
+a technical block. Review the proposed destination before approving it.
+
+The boundary is enforced through Roomote's normal UI and APIs. It does not hide
+content from deployment operators with direct infrastructure access, upstream
+integration providers, configured inference providers, native agent-session
+infrastructure, or retained backups. Deleting a private session stops active
+linked tasks and removes Roomote-managed records and artifacts; provider-side
+history deletion depends on the provider's capabilities and retention terms.

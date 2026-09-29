@@ -53,19 +53,27 @@
           "live-previews",
           "goal-mode",
           "fast-sessions",
-          "private-sessions",
           "integration-keys",
           "memory",
           "file-attachments",
-          "voice"
+          "voice",
+          "privacy"
         ]
       },
       {
-        "group": "Cookbook",
-        "pages": ["cookbook/index", "cookbook/template"]
+        "group": "Automating Work",
+        "pages": [
+          "automations",
+          "automation-configuration",
+          "custom-automations",
+          "automation-webhooks",
+          "automation-results",
+          "cookbook/index",
+          "cookbook/template"
+        ]
       },
       {
-        "group": "Provider configuration",
+        "group": "Configuring Providers",
         "pages": [
           {
             "group": "Models and inference",
@@ -183,12 +191,9 @@
         ]
       },
       {
-        "group": "Roomote configuration",
+        "group": "Configuring Roomote",
         "pages": [
           "agent-guidance",
-          "anonymous-analytics",
-          "automations",
-          "cost-analytics",
           "environment-variables",
           "environments",
           "environments/definition",
@@ -198,11 +203,25 @@
         ]
       },
       {
+        "group": "Analytics",
+        "pages": ["cost-analytics"]
+      },
+      {
         "group": "Development",
         "pages": ["local-development", "architecture"]
       }
     ]
   },
+  "redirects": [
+    {
+      "source": "/anonymous-analytics",
+      "destination": "/privacy"
+    },
+    {
+      "source": "/private-sessions",
+      "destination": "/fast-sessions#private-sessions"
+    }
+  ],
   "navbar": {
     "links": [
       {

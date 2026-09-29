@@ -1,0 +1,281 @@
+---
+title: Configure automations
+icon: settings-2
+description: Configure built-in automation controls, destinations, event triggers, and noise boundaries.
+---
+
+The **Automations** page combines built-in and custom automations in one
+searchable list. This guide covers deployment-wide and built-in controls. For
+saved prompts, schedules, environments, and ownership, see [Custom
+automations](/custom-automations).
+
+## Before you turn them on
+
+Make sure the basics are in place:
+
+- source control is connected for pull request and repository automations
+- a communications provider is connected for automations that post updates to
+  channels or direct messages
+- Roomote has a healthy environment for repositories that require workspace
+  execution
+- the team knows where output will appear and who should review it
+
+During setup, Roomote can check connected repositories for recurring work that
+an automation could handle. Admins review the recommendations, turn individual
+automations on or off, and apply the selected set. Skipping the review does not
+enable anything. Recommendations are a starting point: use the **Automations**
+page to change schedules, destinations, workspace targets, prompts, or models.
+
+## Pull request automations
+
+These automations react to pull requests, issues, and repository state.
+
+| Automation | What it does | Good first use |
+| --- | --- | --- |
+| **Review Code** | Reviews pull requests automatically or on demand. | Add another reviewer for regressions, risky changes, and missed tests. |
+| **Triage Issues** | Posts clarifying questions or an implementation plan when an issue is opened or reopened on GitHub, GitLab, or Gitea. | Get a grounded plan without opening a PR automatically. |
+| **Resolve PR Conflicts** | Looks for merge conflicts and helps fix them on open pull requests. | Keep long-running branches from getting stuck. |
+| **Merge announcer** | Summarizes commits pushed to active repositories' default branches and names the pusher. | Keep the team aware of changes that land outside pull requests. |
+
+For **Review Code**, choose whether Roomote reviews new commits automatically and
+whether draft pull requests are included. You can also publish each GitHub
+review as a **Roomote code review** check on the reviewed commit. Roomote
+controls whether it publishes the check; GitHub branch protection or rulesets
+control whether the check is required before merging. The GitHub App
+installation needs **Checks: Read and write**.
+
+For **Triage Issues**, connect GitHub, GitLab, or Gitea and configure the
+repositories in Roomote environments. Roomote starts a task when an issue is
+opened or reopened and posts a concrete plan or clarifying questions as an
+issue comment. It does not need a Manager Channel, does not post Slack digests,
+does not implement the fix, and does not open a pull request automatically.
+Azure DevOps work items and Bitbucket issues are not covered.
+
+For **Resolve PR Conflicts**, choose a schedule, pull request age cap, and
+label. The label is the team-controlled opt-in boundary: add it only where
+Roomote should attempt resolution and remove it when a human should handle the
+conflict. Roomote skips pull requests older than the configured age cap.
+
+For **Merge announcer**, connect a source-control provider and choose Slack,
+Microsoft Teams, Telegram, or Discord, then select a channel or **DM me**.
+**Default** uses the shared Manager Channel or normal primary-conversation
+fallback. Roomote reacts to provider-deduplicated push webhooks for active
+repositories' current default branches. Feature-branch pushes and branch
+deletions are ignored. GitHub, GitLab, Azure DevOps, Bitbucket, and Gitea are
+supported.
+
+## Call Roomote via emoji
+
+**Call Roomote via emoji** lets teammates summon Roomote by reacting to a
+message in Slack, Discord, or Microsoft Teams. An admin chooses the emoji name,
+such as `:white_check_mark:`, and optional instructions that apply to every
+request started this way.
+
+The reaction acts like a teammate replying in the thread with `@Roomote Act on
+this`. Existing Roomote task threads continue the active task; other threads
+start a task with the thread's context. The teammate adding the reaction must
+have a linked Roomote account.
+
+Provider support differs slightly:
+
+- Slack supports standard and workspace custom emoji reactions.
+- Discord supports standard and server custom emoji reactions.
+- Microsoft Teams sends reaction activities only for messages posted by Roomote
+  and supports its native `like`, `heart`, `laugh`, `surprised`, `sad`, and
+  `angry` reactions.
+- Telegram reactions on Roomote replies are supported, but Telegram is not
+  available for this feature on arbitrary messages.
+
+## Channel automations
+
+**Auto-respond to channels** starts a session from new top-level messages in
+selected Slack or Discord channels, even when nobody mentions Roomote directly.
+Roomote can answer or delegate the work to a task. If the session cannot accept
+an automated entry, Roomote falls back to a direct task launch so the request is
+not dropped. Each channel can have its own optional instructions and launch
+criteria.
+
+Start with a low-risk channel such as `#ask-engineering`, `#bugs`,
+`#support-inbound`, or `#ops-requests`. Invite Roomote to every Slack channel
+before saving it. For Discord, choose text or announcement channels the bot can
+already see.
+
+Messages from other bots or webhooks can also start sessions. Roomote uses the
+deployment's automation identity for these entries, so use launch criteria to
+keep noisy feeds in check. On Discord, a person who has not linked their
+Discord account does not start a task; Roomote sends them a direct message
+explaining how to link instead.
+
+If Roomote cannot determine whether to start a task or encounters an unexpected
+startup error, it notifies human users but stays silent for bot and webhook
+messages. Launch criteria are evaluated by the helper model. A configured
+[judgment model](/models#judgment-model) can decide clear-cut messages faster;
+unclear messages still go to the helper model.
+
+See the [vendor outage triage](/cookbook/vendor-outage-triage) and [support
+channel](/cookbook/support-channel) recipes for complete channel examples.
+
+## Manager automations
+
+Manager automations control the shared Manager Channel plus recurring manager-
+facing updates and suggestions.
+
+| Automation | What it posts | Typical cadence |
+| --- | --- | --- |
+| **Automation output** | The shared Manager Channel destination. | Configure once. |
+| **Weekly Manager Stats** | A weekly summary of Roomote activity. | Weekly. |
+| **Inference Provider Usage Alerts** | Warnings when an inference-provider quota approaches exhaustion. | Hourly. |
+| **Triage Sentry Issues** | Prioritized Sentry follow-up work. | Daily or weekly. |
+| **Triage Dependabot Alerts** | Suggested follow-up tasks for open dependency alerts. | Daily or weekly. |
+| **Triage CodeQL Alerts** | Remediation follow-up tasks for code-scanning alerts. | Daily or weekly. |
+| **Security Auditor** | Security follow-up work from recently merged pull requests. | Every hour, every 6 hours, daily, or weekly. |
+| **Code Quality Auditor** | High-confidence maintainability follow-up work from recently merged pull requests. | Every hour, every 6 hours, daily, or weekly. |
+| **Suggest Ideas** | Useful coding work Roomote thinks the team could do. | Daily or weekly. |
+| **CI Failure Triage** | Reproduction and fix tasks for failing default-branch CI runs. | Immediate via webhook. |
+| **Platform Issue Alerts** | Configuration and access issues reported by Roomote tasks. | When an issue is reported. |
+| **Announce Roomote Updates** | Highlights after a qualifying Roomote update installs. | After a qualifying deployment update. |
+| **Summarize Merged PRs** | A digest of recently merged pull requests. | Daily or weekly. |
+
+Set **Automation output** first. It is the shared Slack or Discord Manager
+Channel for manager-facing posts, suggestions, summaries, and setup alerts.
+Make sure the Roomote app can access the channel before saving it. A Slack
+connection can create public `#roomote-managers` when no Manager Channel exists;
+this does not enable other automations.
+
+Built-in automations with a **Destination** control can use Slack, Discord,
+Microsoft Teams, Telegram, or Email where that automation supports it. Email
+uses the exact account identity selected by the admin and remains a private,
+replyable thread. Delivery stops if that identity becomes unavailable rather
+than switching to another address or provider.
+
+**Inference Provider Usage Alerts** is deterministic. New deployments start it
+hourly at an 85% threshold; admins can choose a threshold from 5% through 95%,
+run it immediately, or disable it. It never starts a task or session.
+
+**Platform Issue Alerts** are enabled by default. Their own destination wins,
+followed by the Manager Channel and then direct delivery to reachable active
+admins. A failed delivery remains pending for retry, and an admin must confirm
+the **Send to Roomote** action before a platform issue report leaves the
+deployment.
+
+The automation-specific destination wins over the shared Manager Channel. If no
+usable Slack destination exists, Roomote checks the primary Microsoft Teams
+conversation, configured Telegram chat, and default Discord channel in that
+order. An unavailable explicit Email destination fails closed and does not enter
+this fallback sequence.
+
+Provider support varies. Dependabot and CodeQL triage are GitHub-only. CI
+Failure Triage supports GitHub Actions, GitLab Pipelines, Azure DevOps builds,
+Bitbucket Pipelines, and Gitea Actions. Triage Issues supports GitHub, GitLab,
+and Gitea. Resolve PR Conflicts supports GitHub, GitLab, Azure DevOps, and
+Gitea, but not Bitbucket because its API does not expose the required
+mergeability and label signals.
+
+## Scan and update behavior
+
+**Code Quality Auditor** inspects recently merged pull request diffs and posts
+only high-confidence maintainability issues worth a real follow-up task. It is
+for confusing abstractions, file bloat, brittle branching, and similar quality
+regressions, not correctness bugs or security issues. **Security Auditor**
+reviews recently merged pull requests for concrete security issues and
+secure-by-default gaps.
+
+**Triage Sentry Issues** scans connected Sentry projects for issues worth
+engineering follow-up. Leave project slugs blank to scan everything available to
+the configured token, or scope the scan to named projects.
+
+**Triage Dependabot Alerts** scans open GitHub Dependabot alerts across active
+repositories and suggests tightly scoped update tasks. It does not open pull
+requests directly from the scheduled scan. Follow-up remediation preserves the
+repository's dependency minimum-age and exclusion policies. When a matching
+Dependabot update entry or Renovate rule names reviewers or assignees, the
+remediation pull request requests those reviewers and assigns those owners;
+Roomote does not infer dependency owners from `CODEOWNERS`. If every repository
+is scanned successfully and no alerts are open, the automation stays silent.
+
+**Triage CodeQL Alerts** scans open GitHub code-scanning alerts and launches
+tightly scoped remediation follow-up tasks. It does not open pull requests
+directly from the scheduled scan.
+
+**CI Failure Triage** reacts when the default branch fails: GitHub Actions,
+GitLab Pipelines, Azure DevOps builds, Bitbucket Pipelines, and Gitea Actions are
+supported. When the failure persists and is not fixed by a newer run or a
+one-off flake, Roomote reproduces it in the repository's configured environment,
+finds the cause, opens a pull request, and posts one summary when it finishes.
+Only repositories in a configured Roomote environment are repaired. GitLab
+needs Pipeline Hooks, Azure DevOps uses the project-scoped `build.complete`
+service hook, Bitbucket needs commit-status webhook events and the Pipelines
+OAuth scope, and Gitea needs the `workflow_run` webhook event. CI Failure Triage
+is webhook-driven; a scheduled check does not scan repositories.
+
+**Announce Roomote Updates** posts only after the deployment finishes readiness
+checks for a newer installed release. The first observation establishes a
+silent baseline, restarts and rollbacks do not repost, and patch-only changes
+remain a baseline until a major or minor boundary is crossed. If several
+releases are skipped, the message selects up to three authored highlights and
+links to the full release notes. A missing or unreadable release record remains
+retryable.
+
+Repositories still need an active source-control connection. CI Failure Triage
+also needs a matching environment. Security and code-quality scans can inspect
+connected repositories without an environment, but a launchable remediation
+needs one.
+
+## Additional rules and noise control
+
+**Suggest Ideas**, **Summarize Merged PRs**, **Security Auditor**, **Code
+Quality Auditor**, **CI Failure Triage**, and **Merge announcer** support
+**Additional rules**. Use them to describe repository scope, per-repository
+destinations, or report-writing guidance, for example:
+
+```text
+Only triage backend and platform. Send platform failures to #platform-ci in our Engineering Slack workspace.
+```
+
+Roomote checks rules against accessible repositories and connected destinations
+when you save. Include the source-control provider or host, or the
+communication workspace, when names could be ambiguous. Unclear, contradictory,
+unavailable, or unsupported rules cannot be saved; a failed save leaves the
+previous configuration intact.
+
+Repository restrictions apply to scheduled runs, **Run now**, and webhook runs.
+Explicit restrictions select matching repositories at save time, so save revised
+rules when newly added repositories should be included. Destination-only rules
+do not limit repository scope. Pre-run workflow, job, branch, and time
+conditions are not supported in Additional rules.
+
+Use specific **Additional instructions** for team signal:
+
+```text
+Prioritize changes that reduce repeated support escalations.
+Skip suggestions that require product approval before engineering can start.
+For merged PR summaries, call out customer-visible changes first.
+```
+
+Avoid broad instructions such as "only send good ideas." If an automation is
+event-driven, use the provider's event workflow for the trigger and keep the
+Roomote prompt focused on the reviewable outcome. For scheduled fixed prompts,
+prefer [custom automations](/custom-automations).
+
+## Scheduling timezone
+
+The admin-only **Scheduling timezone** setting is available on the Automations
+and Deployment settings pages. It applies to all scheduled automations and to
+natural-language schedule interpretation. Existing deployments keep their Slack
+workspace timezone, or UTC when unavailable, until an admin pins an explicit
+IANA timezone.
+
+## Troubleshooting
+
+- **Nothing posts to chat.** Check that the provider is connected, Roomote can
+  access the destination, and the automation is enabled.
+- **Suggestions are too broad.** Add narrower Additional rules or instructions
+  about what to prioritize and ignore.
+- **Review Code comments on too much.** Turn off draft pull request review or
+  adjust when automatic reviews run.
+- **Conflict resolution starts on the wrong pull requests.** Use the configured
+  label as the opt-in boundary and remove it from pull requests that need human
+  handling.
+- **A built-in scan is silent.** Check its supported providers, repository
+  eligibility, configured environment requirements, and latest run state. Some
+  automations intentionally stay silent when there is no actionable result.

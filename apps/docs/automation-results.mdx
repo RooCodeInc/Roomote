@@ -1,0 +1,69 @@
+---
+title: Automation results
+icon: notepad-text
+description: Review automation reports and turn the useful ones into deliberate Roomote follow-up work.
+---
+
+The **Results** inbox is available to deployment members from the main
+navigation. It collects durable automation reports and structured follow-ups in
+one review queue. Items are ordered by priority and recency, with critical and
+high-priority findings before normal results.
+
+Results complements configured chat and Email destinations; it does not replace
+them. Automation runs keep their normal sessions and delivery behavior. Eligible
+output also appears in Results so teammates can review it when they are ready.
+
+## What appears in Results
+
+Results is shared across the deployment only for output Roomote can prove is
+safe to share:
+
+- destinationless automation output
+- reports sent to confirmed public Slack channels
+
+Email, direct messages, private Slack channels, and providers without
+authoritative public/private destination metadata stay out of Results. Older
+results without a saved visibility decision remain private.
+
+The inbox contains a report and, when the automation asked for launchable
+follow-ups, a prepared suggestion. A report can link to its automation, session,
+task, pull request, or artifacts so you can inspect the evidence rather than
+making a decision from a summary alone.
+
+## A practical review workflow
+
+Use Results as an action inbox, not as an automatic approval queue:
+
+1. Open the result and read the report's conclusion, scope, and uncertainty.
+2. Follow the linked session or task and check the transcript, logs, diffs,
+   previews, artifacts, and final summary that support the claim.
+3. Decide whether the finding needs a follow-up, is already handled, or is noise.
+4. For a prepared follow-up, edit the prompt so the desired outcome and
+   constraints are explicit, choose the model when needed, and start it as a
+   normal session.
+5. Treat the result as accepted only after the follow-up session starts. Use
+   **Clear** when no follow-up is needed, or **Clear all** to dismiss the current
+   queue.
+
+Starting a follow-up creates normal Roomote work with the session and execution
+permissions that apply to the member who starts it. It does not silently reuse
+the automation's next scheduled run or change the automation configuration.
+
+## Destinations and reply paths
+
+If an automation reports to Slack, Discord, Microsoft Teams, Telegram, or Email,
+continue the session from the configured conversation when the report needs
+clarification. Results is a second review surface for eligible output; clearing
+an inbox item does not delete the original session or report.
+
+For a report with no external destination, open its linked session in the web
+app. Without a destination, the automation runs silently and its complete
+result remains in that stored session, including any delegated task cards.
+
+## If a result is missing
+
+Check the automation's configured destination and the visibility rules above.
+Reports sent to a private destination are intentionally not copied into the
+shared inbox. A run that was queued may still be running, may have stayed quiet
+because it had no actionable result, or may have failed before producing a
+report; follow its session and latest run state to distinguish those cases.
