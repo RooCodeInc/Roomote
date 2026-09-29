@@ -197,16 +197,22 @@ export async function conflictScanJob(
 
   const runtime = await getAutomationRuntime('conflict_resolver');
   const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
+  const intervalMs =
+    frequency === 'on_demand'
+      ? opts.manualTrigger
+        ? 0
+        : undefined
+      : frequency
+        ? CONFLICT_RESOLVER_INTERVAL_MS[frequency]
+        : undefined;
 
-  if (!frequency || frequency === 'off' || frequency === 'on_demand') {
+  if (!frequency || frequency === 'off' || intervalMs === undefined) {
     result.skippedReason = 'Automation is disabled.';
     return result;
   }
 
   // Frequency gating: skip if last run was too recent for the configured
   // frequency.
-  const intervalMs = CONFLICT_RESOLVER_INTERVAL_MS[frequency];
-
   if (
     !opts.manualTrigger &&
     intervalMs &&

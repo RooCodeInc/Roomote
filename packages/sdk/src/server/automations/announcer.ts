@@ -344,12 +344,21 @@ export async function announcerJob(
   for (const deployment of eligibleDeployments) {
     try {
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
+      const isManualOnDemandRun =
+        opts.manualTrigger === true && frequency === 'on_demand';
 
-      if (!frequency || frequency === 'off' || !(frequency in WINDOW_DAYS)) {
+      if (
+        !frequency ||
+        frequency === 'off' ||
+        (!isManualOnDemandRun && !(frequency in WINDOW_DAYS))
+      ) {
         result.skippedReason = 'Automation is disabled.';
         skipped++;
         continue;
       }
+
+      const scanFrequency: AnnouncerFrequency =
+        frequency === 'on_demand' ? 'daily' : (frequency as AnnouncerFrequency);
 
       const defaultDestination =
         opts.destination ??
@@ -389,7 +398,7 @@ export async function announcerJob(
         !isRunDue({
           now,
           timeZone: timezone,
-          frequency: frequency as AnnouncerFrequency,
+          frequency: scanFrequency,
           lastRunAt: runtime.lastRunAt,
           scheduleHourLocal: SCHEDULE_HOUR_LOCAL,
           windowDays: WINDOW_DAYS,
@@ -400,7 +409,7 @@ export async function announcerJob(
         continue;
       }
 
-      const windowDays = WINDOW_DAYS[frequency as AnnouncerFrequency];
+      const windowDays = WINDOW_DAYS[scanFrequency];
       const since = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
       const mergedPullRequests = await getMergedPullRequests(since);
 

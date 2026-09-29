@@ -9,7 +9,7 @@ import {
   isTriggerableBackgroundAutomationKey,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
-import { runAutomationNow } from '@roomote/sdk/server';
+import { enqueueBuiltInAutomationWebhook } from '@roomote/sdk/server';
 
 import {
   MAX_REQUEST_BODY_BYTES,
@@ -73,16 +73,16 @@ builtInAutomationWebhooks.all('/:automationKey/:token', async (c) => {
     return respond(c, webhookInput.status, { error: webhookInput.error });
   }
 
-  const result = await runAutomationNow(
-    automationKey as TriggerableBackgroundAutomationKey,
-    {
-      trigger: 'webhook',
-      ...(webhookInput.promptInputJson
-        ? { webhookInputJson: webhookInput.promptInputJson }
-        : {}),
-    },
-  );
-  if (result.outcome === 'failed' || result.outcome === 'skipped') {
+  try {
+    await enqueueBuiltInAutomationWebhook({
+      automationKey: automationKey as TriggerableBackgroundAutomationKey,
+      webhookInputJson: webhookInput.promptInputJson,
+    });
+  } catch (error) {
+    console.error(
+      `[built-in-automation-webhooks] Failed to admit ${automationKey}:`,
+      error instanceof Error ? error.message : error,
+    );
     return respond(c, 503, { error: 'trigger_failed' });
   }
 

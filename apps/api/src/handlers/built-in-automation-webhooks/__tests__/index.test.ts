@@ -4,7 +4,7 @@ import { builtInAutomationWebhooks } from '..';
 
 const mocks = vi.hoisted(() => ({
   getWebhookState: vi.fn(),
-  runAutomation: vi.fn(),
+  enqueueWebhook: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -18,7 +18,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  runAutomationNow: mocks.runAutomation,
+  enqueueBuiltInAutomationWebhook: mocks.enqueueWebhook,
   runCustomAutomationNow: vi.fn(),
 }));
 
@@ -38,7 +38,7 @@ describe('built-in automation webhook trigger', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getWebhookState.mockResolvedValue({ enabled: true, token: TOKEN });
-    mocks.runAutomation.mockResolvedValue({ outcome: 'queued' });
+    mocks.enqueueWebhook.mockResolvedValue(undefined);
   });
 
   it('runs a catalog-eligible automation and forwards bounded input', async () => {
@@ -50,8 +50,8 @@ describe('built-in automation webhook trigger', () => {
 
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ accepted: true });
-    expect(mocks.runAutomation).toHaveBeenCalledWith('suggester', {
-      trigger: 'webhook',
+    expect(mocks.enqueueWebhook).toHaveBeenCalledWith({
+      automationKey: 'suggester',
       webhookInputJson: JSON.stringify({
         issue: 'Review the failing workflow.',
       }),
@@ -70,7 +70,18 @@ describe('built-in automation webhook trigger', () => {
     expect(
       (await createApp().request(webhookUrl(), { method: 'POST' })).status,
     ).toBe(404);
-    expect(mocks.runAutomation).not.toHaveBeenCalled();
+    expect(mocks.enqueueWebhook).not.toHaveBeenCalled();
+  });
+
+  it('returns a retryable error when webhook admission fails', async () => {
+    mocks.enqueueWebhook.mockRejectedValue(new Error('Redis unavailable'));
+
+    const response = await createApp().request(webhookUrl(), {
+      method: 'POST',
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'trigger_failed' });
   });
 
   it('is POST-only and enforces the shared body limits', async () => {

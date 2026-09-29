@@ -126,7 +126,11 @@ export function createScheduledTriageJob(
       try {
         const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
-        if (!frequency || frequency === 'off' || frequency === 'on_demand') {
+        if (
+          !frequency ||
+          frequency === 'off' ||
+          (frequency === 'on_demand' && !opts.manualTrigger)
+        ) {
           result.skippedReason = 'Automation is disabled.';
           skipped++;
           continue;

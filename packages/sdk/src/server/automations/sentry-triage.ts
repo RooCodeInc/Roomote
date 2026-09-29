@@ -151,7 +151,13 @@ export const sentryTriageJob = createScheduledTriageJob({
       } satisfies TriageScanBuild;
     }
 
-    const frequency = runtime.scheduleMode as SentryTriageFrequency;
+    const frequency: Exclude<SentryTriageFrequency, 'off' | 'on_demand'> =
+      runtime.scheduleMode === 'on_demand'
+        ? 'daily'
+        : (runtime.scheduleMode as Exclude<
+            SentryTriageFrequency,
+            'off' | 'on_demand'
+          >);
 
     if (frequency !== 'daily' && frequency !== 'weekly') {
       return { kind: 'skip', reason: 'frequency is off' };

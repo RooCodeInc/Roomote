@@ -452,11 +452,13 @@ async function processDeployment(
     const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
     const lastRunAt = runtime.lastRunAt;
     const scanCursor = runtime.scanCursor;
+    const isManualOnDemandRun =
+      opts.manualTrigger === true && frequency === 'on_demand';
 
     if (
       !frequency ||
       frequency === 'off' ||
-      !(frequency in FREQUENCY_INTERVAL_MS)
+      (!isManualOnDemandRun && !(frequency in FREQUENCY_INTERVAL_MS))
     ) {
       return { kind: 'skipped', reason: 'Automation is disabled.' };
     }
@@ -476,8 +478,9 @@ async function processDeployment(
       return { kind: 'skipped', reason: 'Manager channel is not configured.' };
     }
 
-    const intervalMs =
-      FREQUENCY_INTERVAL_MS[frequency as keyof typeof FREQUENCY_INTERVAL_MS];
+    const intervalMs = isManualOnDemandRun
+      ? FREQUENCY_INTERVAL_MS.daily
+      : FREQUENCY_INTERVAL_MS[frequency as keyof typeof FREQUENCY_INTERVAL_MS];
 
     if (
       !opts.manualTrigger &&
