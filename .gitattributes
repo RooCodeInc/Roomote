@@ -8,3 +8,5 @@ packages/db/drizzle/meta/*_snapshot.json linguist-generated=true
 *.sh text eol=lf
 deploy/host/roomote text eol=lf
 deploy/scripts/roomote-deploy text eol=lf
+
+packages/cloud-agents/src/server/judgement-presets.generated.json linguist-generated=true

@@ -53,3 +53,26 @@ constraints.
 
 Incomplete checks allow hook commits but fail strict checks. They do not count as
 successful violation detection or complete approval of a valid edit.
+
+## Inspect examples in the decision tester
+
+Admins can open **Settings → Models → Test decisions**, choose **Repository
+Judgement**, and select a rule, example, evidence packet, and question variant.
+Click **Load example**, then **Ask**. The state and questions remain editable.
+Select three runs to inspect variation; the last ten runs remain available while
+the page is open, with their original labels and confidence thresholds.
+
+Expected labels stay outside model input. Confidence and answer probabilities
+are displayed separately. A packet answer does not establish a full checker
+result: partial screens cannot approve a file, unresolved evidence still matters,
+and the tester has a 20-second request timeout compared with the hook's
+three-second budget. The combined acceptable-outcome question is an explicit
+experiment. Normal hooks retain the standard question.
+
+`pnpm judgement:presets` uses Judgement's `prepareExamples` API to bundle synthetic
+request inputs for the deployed tester. Run it after changing rules, fixtures,
+the preparation script, or the pinned library. No credentials or inference are
+needed. `pnpm judgement:presets --check` verifies exact preparation; the focused
+`judgement-presets.test.ts` test detects stale source hashes and question drift.
+Generated inputs are checked in so the web server does not need Git or a checkout.
+Observed scores and calibration reports belong in local output or CI artifacts.

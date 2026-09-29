@@ -140,3 +140,11 @@ export async function testJudgmentDecisionCommand(
     targets.map((target, index) => [target, results[index]]),
   );
 }
+
+/** Static synthetic inputs: runtime needs neither Git nor access to a checkout. */
+export async function getJudgmentExamplePresetsCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  const { default: presets } =
+    await import('@roomote/cloud-agents/server/judgement-presets.generated.json');
+  return presets;
+}

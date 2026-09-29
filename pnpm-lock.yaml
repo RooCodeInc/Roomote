@@ -942,8 +942,8 @@ importers:
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
       '@roo-code/judgement':
-        specifier: 0.2.0
-        version: 0.2.0
+        specifier: github:RooCodeInc/judgement#60f066988fa8aee7e893aa185e2161527164af8c
+        version: https://codeload.github.com/RooCodeInc/judgement/tar.gz/60f066988fa8aee7e893aa185e2161527164af8c
       '@roomote/auth':
         specifier: workspace:^
         version: link:../../packages/auth
@@ -1147,8 +1147,8 @@ importers:
         specifier: 1.18.30
         version: 1.18.30
       '@roo-code/judgement':
-        specifier: 0.2.0
-        version: 0.2.0
+        specifier: github:RooCodeInc/judgement#60f066988fa8aee7e893aa185e2161527164af8c
+        version: https://codeload.github.com/RooCodeInc/judgement/tar.gz/60f066988fa8aee7e893aa185e2161527164af8c
       '@roomote/ado':
         specifier: workspace:^
         version: link:../ado
@@ -5101,8 +5101,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@roo-code/judgement@0.2.0':
-    resolution: {integrity: sha512-DXPbL+pEcY0DnSBdUIcB+8+5wDdiuZzQa1C+eH1I7YfliKtGL39S5KxMkrFO3u6gpmzDaqVXAD+18DEhA0UTAQ==}
+  '@roo-code/judgement@https://codeload.github.com/RooCodeInc/judgement/tar.gz/60f066988fa8aee7e893aa185e2161527164af8c':
+    resolution: {tarball: https://codeload.github.com/RooCodeInc/judgement/tar.gz/60f066988fa8aee7e893aa185e2161527164af8c}
+    version: 0.3.0
     engines: {node: '>=22.20.0'}
     hasBin: true
 
@@ -15587,7 +15588,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.61.1':
     optional: true
 
-  '@roo-code/judgement@0.2.0':
+  '@roo-code/judgement@https://codeload.github.com/RooCodeInc/judgement/tar.gz/60f066988fa8aee7e893aa185e2161527164af8c':
     dependencies:
       picomatch: 4.0.7
 
