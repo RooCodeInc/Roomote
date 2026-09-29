@@ -120,7 +120,7 @@ type CustomAutomationEditorField =
 
 type EditorStateUpdate<T> = T | ((current: T) => T);
 
-export type CustomAutomationEditorState = {
+type CustomAutomationEditorState = {
   editingId: string | null;
   isCreating: boolean;
   form: CustomAutomationFormState;
@@ -133,7 +133,7 @@ export type CustomAutomationEditorState = {
   scheduleSummary: string | null;
 };
 
-export type CustomAutomationEditorAction =
+type CustomAutomationEditorAction =
   | { type: 'open-create'; form: CustomAutomationFormState }
   | {
       type: 'open-edit';
