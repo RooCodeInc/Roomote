@@ -4300,6 +4300,7 @@ export function AutomationsSettings({
                   <Button
                     variant="ghost"
                     size="icon"
+                    aria-label={`Run ${AUTOMATION_DEFINITIONS.managerStats.label} now`}
                     onClick={() =>
                       triggerMutation.mutate({
                         automationKey: 'manager_stats',
@@ -4394,6 +4395,7 @@ export function AutomationsSettings({
                   <Button
                     variant="ghost"
                     size="icon"
+                    aria-label={`Run ${AUTOMATION_DEFINITIONS.providerUsageLimit.label} now`}
                     onClick={() =>
                       triggerMutation.mutate({
                         automationKey: 'provider_usage_limit',

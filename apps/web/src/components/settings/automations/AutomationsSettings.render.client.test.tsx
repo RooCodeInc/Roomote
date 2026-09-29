@@ -1473,6 +1473,20 @@ describe('AutomationsSettings', () => {
     ).toBeEnabled();
   });
 
+  it('gives scheduled built-in run-now actions contextual accessible names', async () => {
+    state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Run Inference Provider Usage Alerts now',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Run Weekly Manager Stats now' }),
+    ).toBeInTheDocument();
+  });
+
   it('shows provider support as plain text instead of badges', async () => {
     render(<AutomationsSettings />);
 
