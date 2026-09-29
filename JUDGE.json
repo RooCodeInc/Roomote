@@ -43,6 +43,11 @@
       "rule": "In user-facing UI, task, and setup copy, communicate user value, current state, or available actions rather than implementation details or feature mechanics. Avoid labels or descriptions such as 'default off' and detailed explanations of how a feature works in descriptive task or setup text. Necessary control labels, status, accessibility, error or recovery, permission, configuration-consequence, and security copy are allowed, as are tests or fixtures and trusted public documentation.",
       "files": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"],
       "threshold": 0.95
+    },
+    {
+      "rule": "In user-facing prose, treat \"session\" as an ordinary noun rather than a proper noun; use lowercase \"session\" except at sentence beginnings, in title case, or when quoting an exact UI label.",
+      "files": ["**/*"],
+      "threshold": 0.96
     }
   ]
 }
