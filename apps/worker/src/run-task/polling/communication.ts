@@ -1,4 +1,3 @@
-import { prependCommunicationMessages } from '@roomote/communication/messages';
 import { prependCommunicationRequestUserInputAnswers } from '@roomote/communication/request-user-input';
 import type {
   CommunicationProvider,
@@ -31,7 +30,11 @@ async function requeueCommunicationMessages(
   startIndex: number,
 ): Promise<void> {
   const remainingQueueOrder = [...deliveryOrder.slice(startIndex)].reverse();
-  await prependCommunicationMessages(provider, runId, remainingQueueOrder);
+  await sdk.taskRuns.prependCommunicationMessages({
+    provider,
+    runId,
+    messages: remainingQueueOrder,
+  });
 }
 
 async function requeueCommunicationRequestUserInputAnswers(

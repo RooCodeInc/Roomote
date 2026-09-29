@@ -31,6 +31,7 @@ const {
   mockGetCommunicationMessages,
   mockQueueSlackMessage,
   mockQueueCommunicationMessage,
+  mockPrependCommunicationMessages,
   mockPeekTaskFollowUps,
   mockRemoveTaskFollowUp,
   mockQueueLinearMessage,
@@ -53,6 +54,7 @@ const {
   mockGetCommunicationMessages: vi.fn(),
   mockQueueSlackMessage: vi.fn(),
   mockQueueCommunicationMessage: vi.fn(),
+  mockPrependCommunicationMessages: vi.fn(),
   mockPeekTaskFollowUps: vi.fn(),
   mockRemoveTaskFollowUp: vi.fn(),
   mockQueueLinearMessage: vi.fn(),
@@ -78,6 +80,7 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('@roomote/communication/messages', () => ({
   getCommunicationMessages: mockGetCommunicationMessages,
   peekTaskFollowUps: mockPeekTaskFollowUps,
+  prependCommunicationMessages: mockPrependCommunicationMessages,
   queueCommunicationMessage: mockQueueCommunicationMessage,
   removeTaskFollowUp: mockRemoveTaskFollowUp,
 }));
@@ -504,6 +507,41 @@ describe('taskRunsRouter queue message guards', () => {
       tokenType: 'run',
       version: 1,
     });
+  });
+
+  it('allows only the matching run token to prepend communication messages', async () => {
+    const messages = [
+      {
+        provider: 'teams' as const,
+        text: 'retry this message',
+        user: '29:user',
+        ts: 'activity-2',
+        channel: '19:channel',
+        threadTs: 'root-activity',
+      },
+    ];
+
+    await expect(
+      createRunCaller().prependCommunicationMessages({
+        runId: 42,
+        provider: 'teams',
+        messages,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockPrependCommunicationMessages).toHaveBeenCalledWith(
+      'teams',
+      42,
+      messages,
+    );
+
+    await expect(
+      createAuthCaller().prependCommunicationMessages({
+        runId: 42,
+        provider: 'teams',
+        messages,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('lets the matching run token drain queued task follow-ups', async () => {

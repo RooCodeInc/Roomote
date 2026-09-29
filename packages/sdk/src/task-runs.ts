@@ -294,6 +294,10 @@ export const queueCommunicationMessage = (
   options: AppRouterInput['taskRuns']['queueCommunicationMessage'],
 ) => client.taskRuns.queueCommunicationMessage.mutate(options);
 
+export const prependCommunicationMessages = (
+  options: AppRouterInput['taskRuns']['prependCommunicationMessages'],
+) => client.taskRuns.prependCommunicationMessages.mutate(options);
+
 export const peekTaskFollowUps = (
   options: AppRouterInput['taskRuns']['peekTaskFollowUps'],
 ) => client.taskRuns.peekTaskFollowUps.query(options);
