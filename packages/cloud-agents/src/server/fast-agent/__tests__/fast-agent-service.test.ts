@@ -874,7 +874,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(mocks.clearManualStatusAfterNewerUserMessage).toHaveBeenCalledWith(
       expect.anything(),
-      'conversation-1',
+      'unified-session-1',
     );
     expect(
       mocks.clearManualStatusAfterNewerUserMessage.mock.invocationCallOrder[0],

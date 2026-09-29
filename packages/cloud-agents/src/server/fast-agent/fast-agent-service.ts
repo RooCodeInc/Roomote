@@ -3828,13 +3828,20 @@ export async function answerFastAgentQuestion({
       substantiveHumanInput ? userMessageResult?.initialHumanTurn : false,
     );
     if (substantiveHumanInput) {
-      await clearManualStatusAfterNewerUserMessage(db, session.id).catch(
-        (error) => {
+      const unifiedSession = await getSessionForFastConversation(
+        db,
+        session.id,
+      );
+      if (unifiedSession) {
+        await clearManualStatusAfterNewerUserMessage(
+          db,
+          unifiedSession.id,
+        ).catch((error) => {
           console.warn(
             `[sessions] Failed to release manual status on new user message: ${formatErrorForLog(error)}`,
           );
-        },
-      );
+        });
+      }
     }
     await setFastSessionResponding(
       session.id,
