@@ -42,6 +42,76 @@
       "before": "Choose a storage backend.\n",
       "after": "Choose local storage for a single server or object storage when several servers share uploads.\n",
       "expected": "pass"
+    },
+    {
+      "name": "Old path aside",
+      "path": "docs/usage.md",
+      "before": "Save exports under exports/.\n",
+      "after": "Save exports under exports/, unlike the former downloads/ directory.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Historical format aside",
+      "path": "docs/usage.md",
+      "before": "Write preferences to prefs.json.\n",
+      "after": "Write preferences to prefs.json, replacing the older prefs.yaml approach.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Exclusive path aside",
+      "path": "docs/usage.md",
+      "before": "Put saved views in views/.\n",
+      "after": "Put saved views in views/, the only location for saved views.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Removed option aside",
+      "path": "docs/usage.md",
+      "before": "Configure the listener in listeners.json.\n",
+      "after": "Configure the listener in listeners.json; the retired listener.ini alternative is no longer used.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Necessary upgrade migration",
+      "path": "docs/usage.md",
+      "before": "Upgrade the service.\n",
+      "after": "Before upgrading from version 1 to version 2, convert prefs.yaml to prefs.json so saved preferences remain available.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Supported alternatives",
+      "path": "docs/usage.md",
+      "before": "Choose an output format.\n",
+      "after": "Use JSON for structured processing or CSV for spreadsheet imports.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Security requirement",
+      "path": "docs/usage.md",
+      "before": "Configure access.\n",
+      "after": "Only repository administrators may change credential settings.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Compatibility requirement",
+      "path": "docs/usage.md",
+      "before": "Choose a runtime.\n",
+      "after": "Only Node 22 or newer provides the required API.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Release notes",
+      "path": "docs/usage.md",
+      "before": "## Release notes\nMaintenance release.\n",
+      "after": "## Release notes\nExports now use exports/ instead of downloads/.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Unchanged historical aside",
+      "path": "docs/usage.md",
+      "before": "Save reports in reports/, unlike the former output/ directory.\nRun the report daily.\n",
+      "after": "Save reports in reports/, unlike the former output/ directory.\nRun the report weekly.\n",
+      "expected": "pass"
     }
   ]
 }

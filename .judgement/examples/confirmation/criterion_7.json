@@ -42,6 +42,76 @@
       "before": "Review work.\n",
       "after": "Review the open sessions and tasks.\n",
       "expected": "pass"
+    },
+    {
+      "name": "Ordinary session status",
+      "path": "docs/usage.md",
+      "before": "Check the current session status.\n",
+      "after": "Check the current Session status.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Ordinary tasks list",
+      "path": "docs/usage.md",
+      "before": "Remove completed tasks from this list.\n",
+      "after": "Remove completed Tasks from this list.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Task in UI description",
+      "path": "apps/web/src/task-hint.ts",
+      "before": "export const hint = \"Review task details here.\";\n",
+      "after": "export const hint = \"Review Task details here.\";\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Ordinary sessions search",
+      "path": "docs/usage.md",
+      "before": "Search recent sessions by project.\n",
+      "after": "Search recent Sessions by project.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Capital after question mark",
+      "path": "docs/usage.md",
+      "before": "Ready? Results are available.\n",
+      "after": "Ready? Task results are available.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Capital after full stop",
+      "path": "docs/usage.md",
+      "before": "Review finished. Results are available.\n",
+      "after": "Review finished. Session results are available.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Quoted exact button",
+      "path": "docs/usage.md",
+      "before": "Choose the launch control.\n",
+      "after": "Choose the button labeled \"New Task\".\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Heading",
+      "path": "docs/usage.md",
+      "before": "## Work history\n",
+      "after": "## Session History\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Identifier outside prose",
+      "path": "apps/web/src/task-count.ts",
+      "before": "export const taskCount = 1;\n",
+      "after": "export const TaskCount = 1;\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Unchanged capital",
+      "path": "docs/usage.md",
+      "before": "View Session details.\nRefresh every minute.\n",
+      "after": "View Session details.\nRefresh every five minutes.\n",
+      "expected": "pass"
     }
   ]
 }

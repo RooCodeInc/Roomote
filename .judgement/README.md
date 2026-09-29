@@ -61,9 +61,10 @@ Click **Load example**, then **Ask**. The state and questions remain editable.
 Select three runs to inspect variation; the last ten runs remain available while
 the page is open, with their original labels and violation cutoffs.
 
-Expected labels stay outside model input. The model returns the probability that
-an edit violates the rule. A probability at or above the rule's cutoff produces
-a finding; lower probabilities produce no finding. A low score does not prove
+Expected labels stay outside model input. The model asks whether changed lines
+need correction to satisfy the rule and returns the probability of a violation.
+A probability at or above the rule's cutoff produces a finding; lower
+probabilities produce no finding. A low score does not prove
 that the edit is correct. Missing evidence and inference failures can still make
 a check incomplete. The tester has a 20-second request timeout compared with the
 hook's three-second budget, and a single packet does not establish a full checker
@@ -95,3 +96,8 @@ pnpm judgement test --examples-dir .judgement/examples/confirmation --rule crite
 Keep rules focused on contextual requirements and exceptions that are difficult
 to express as deterministic checks. General performance advice belongs in code
 review. Keep observed calibration scores in local reports or CI artifacts.
+
+Rules 7 and 8 use a violation cutoff of 0.75. Validate the capitalization and prose
+rules together with sentence starts, quoted UI labels, headings, migration and
+security requirements, and edits near unchanged violations. Difficult examples
+remain in the validation fixtures even when their scores fall below the cutoff.
