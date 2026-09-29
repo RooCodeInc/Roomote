@@ -2,6 +2,29 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.13.4 (2026-09-29)
+
+Roomote 1.13.4 keeps automation and Session workflows quiet and controllable while expanding optional code search, model availability, and repository safeguards.
+
+### Highlights
+
+- Use optional Jevgrep code search to find relevant repository code from natural-language questions, with ordinary search fallback.
+- Set Session statuses directly and let inactivity settle completed Sessions without disrupting active work.
+- Use Claude Sonnet 5.5 on supported providers and opt repositories into bounded, fail-open JUDGE.json policies.
+- Keep automation reports focused, no-op runs quiet, and Slack emoji shortcodes rendering correctly.
+
+### Patch changes
+
+- Prevent automation reports from including earlier progress narration when posting their final result.
+- Custom automation settings are easier to scan and validate, while no-op runs stay silent until a meaningful report, clarification, delegated task, or failure needs delivery.
+- New provider connections can discover Claude Sonnet 5.5 through supported catalog-backed routes while existing Claude Sonnet 5 selections remain usable.
+- Add optional Jevgrep code search under Settings > Experimental. When enabled with a configured Jev judgment model, coding tasks receive the `jg` CLI and its agent skill for finding relevant source from natural-language questions. Provider credentials stay on the server. The experiment is off by default and falls back to ordinary code search when setup or evaluation is unavailable.
+- Repositories can opt into completion-time JUDGE.json policies that evaluate the final diff and provide bounded repair feedback while keeping invalid or unavailable judgment models fail-open.
+- Authorized Session managers can set manual statuses across the Sessions board, list, and workspace, while Done remains informational and inactivity handling releases manual status overrides when newer user work arrives.
+- Session filters now honor selected environments and the Has PR option, so filtered lists no longer include unrelated Sessions without the requested scope or pull request.
+- Slack automation reports now render recognized emoji shortcodes in prose and link labels instead of leaving the shortcode text visible.
+- Web app pages can be zoomed by users who need larger content without changing the remaining viewport behavior.
+
 ## 1.13.3 (2026-09-27)
 
 Roomote 1.13.3 restores differentiated model choices and keeps Fast event delivery reliable when generated context contains invalid characters.
