@@ -72,6 +72,8 @@ export {
   BUILT_IN_AUTOMATION_WEBHOOK_QUEUE_NAME,
   builtInAutomationWebhookJobSchema,
   enqueueBuiltInAutomationWebhook,
+  hashBuiltInAutomationWebhookToken,
+  matchesBuiltInAutomationWebhookToken,
   type BuiltInAutomationWebhookJob,
 } from './lib/built-in-automation-webhook';
 export {

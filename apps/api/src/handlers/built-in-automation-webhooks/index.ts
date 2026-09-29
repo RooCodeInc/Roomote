@@ -77,6 +77,7 @@ builtInAutomationWebhooks.all('/:automationKey/:token', async (c) => {
     await enqueueBuiltInAutomationWebhook({
       automationKey: automationKey as TriggerableBackgroundAutomationKey,
       webhookInputJson: webhookInput.promptInputJson,
+      webhookToken: webhook.token,
     });
   } catch (error) {
     console.error(

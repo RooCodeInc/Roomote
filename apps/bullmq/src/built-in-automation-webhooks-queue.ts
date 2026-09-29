@@ -1,30 +1,49 @@
 import { Queue, Worker, type Job } from 'bullmq';
 
+import { getBackgroundAutomationWebhookState } from '@roomote/db/server';
 import {
   BUILT_IN_AUTOMATION_WEBHOOK_QUEUE_NAME,
+  builtInAutomationWebhookJobSchema,
+  matchesBuiltInAutomationWebhookToken,
   runAutomationNow,
   type BuiltInAutomationWebhookJob,
 } from '@roomote/sdk/server';
 
 import { getRedis } from './redis';
 
-async function processBuiltInAutomationWebhookJob(
+export async function processBuiltInAutomationWebhookJob(
   job: Job<BuiltInAutomationWebhookJob>,
 ): Promise<void> {
-  const result = await runAutomationNow(job.data.automationKey, {
+  const data = builtInAutomationWebhookJobSchema.parse(job.data);
+  const webhook = await getBackgroundAutomationWebhookState(data.automationKey);
+  if (
+    !webhook?.enabled ||
+    !webhook.token ||
+    !matchesBuiltInAutomationWebhookToken(
+      data.webhookTokenDigest,
+      webhook.token,
+    )
+  ) {
+    console.warn(
+      `[BuiltInAutomationWebhookQueue] Dropping revoked ${data.automationKey} webhook job ${job.id}`,
+    );
+    return;
+  }
+
+  const result = await runAutomationNow(data.automationKey, {
     trigger: 'webhook',
-    ...(job.data.webhookInputJson
-      ? { webhookInputJson: job.data.webhookInputJson }
+    ...(data.webhookInputJson
+      ? { webhookInputJson: data.webhookInputJson }
       : {}),
   });
 
   if (result.outcome === 'failed') {
     console.error(
-      `[BuiltInAutomationWebhookQueue] ${job.data.automationKey} failed: ${result.error}`,
+      `[BuiltInAutomationWebhookQueue] ${data.automationKey} failed: ${result.error}`,
     );
   } else if (result.outcome === 'skipped') {
     console.warn(
-      `[BuiltInAutomationWebhookQueue] ${job.data.automationKey} skipped: ${result.reason}`,
+      `[BuiltInAutomationWebhookQueue] ${data.automationKey} skipped: ${result.reason}`,
     );
   }
 }

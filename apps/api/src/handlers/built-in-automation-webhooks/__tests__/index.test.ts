@@ -55,6 +55,7 @@ describe('built-in automation webhook trigger', () => {
       webhookInputJson: JSON.stringify({
         issue: 'Review the failing workflow.',
       }),
+      webhookToken: TOKEN,
     });
   });
 

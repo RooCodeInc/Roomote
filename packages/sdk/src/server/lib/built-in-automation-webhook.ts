@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
+
 import { Queue } from 'bullmq';
 import { z } from 'zod';
 
@@ -16,6 +18,7 @@ export const builtInAutomationWebhookJobSchema = z.object({
       typeof value === 'string' && isBuiltInWebhookAutomationKey(value),
   ),
   webhookInputJson: z.string().nullable(),
+  webhookTokenDigest: z.string().regex(/^[a-f0-9]{64}$/u),
 });
 
 export type BuiltInAutomationWebhookJob = z.infer<
@@ -42,9 +45,34 @@ function getBuiltInAutomationWebhookQueue(): Queue<BuiltInAutomationWebhookJob> 
   return builtInAutomationWebhookQueue;
 }
 
+export function hashBuiltInAutomationWebhookToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+export function matchesBuiltInAutomationWebhookToken(
+  tokenDigest: string,
+  token: string,
+): boolean {
+  const expectedDigest = Buffer.from(tokenDigest, 'hex');
+  const actualDigest = Buffer.from(
+    hashBuiltInAutomationWebhookToken(token),
+    'hex',
+  );
+  return (
+    expectedDigest.length === actualDigest.length &&
+    timingSafeEqual(expectedDigest, actualDigest)
+  );
+}
+
 export async function enqueueBuiltInAutomationWebhook(
-  input: BuiltInAutomationWebhookJob,
+  input: Omit<BuiltInAutomationWebhookJob, 'webhookTokenDigest'> & {
+    webhookToken: string;
+  },
 ): Promise<void> {
-  const job = builtInAutomationWebhookJobSchema.parse(input);
+  const { webhookToken, ...jobInput } = input;
+  const job = builtInAutomationWebhookJobSchema.parse({
+    ...jobInput,
+    webhookTokenDigest: hashBuiltInAutomationWebhookToken(webhookToken),
+  });
   await getBuiltInAutomationWebhookQueue().add('run', job);
 }

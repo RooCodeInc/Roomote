@@ -15,6 +15,7 @@ vi.mock('@roomote/redis', () => ({
 import {
   BUILT_IN_AUTOMATION_WEBHOOK_QUEUE_NAME,
   enqueueBuiltInAutomationWebhook,
+  hashBuiltInAutomationWebhookToken,
 } from '../built-in-automation-webhook';
 
 describe('enqueueBuiltInAutomationWebhook', () => {
@@ -27,11 +28,13 @@ describe('enqueueBuiltInAutomationWebhook', () => {
     await enqueueBuiltInAutomationWebhook({
       automationKey: 'suggester',
       webhookInputJson: '{"issue":"test"}',
+      webhookToken: 'A'.repeat(43),
     });
 
     expect(mockQueueAdd).toHaveBeenCalledWith('run', {
       automationKey: 'suggester',
       webhookInputJson: '{"issue":"test"}',
+      webhookTokenDigest: hashBuiltInAutomationWebhookToken('A'.repeat(43)),
     });
   });
 
@@ -40,6 +43,7 @@ describe('enqueueBuiltInAutomationWebhook', () => {
       enqueueBuiltInAutomationWebhook({
         automationKey: 'review_code' as never,
         webhookInputJson: null,
+        webhookToken: 'A'.repeat(43),
       }),
     ).rejects.toThrow();
     expect(mockQueueAdd).not.toHaveBeenCalled();
