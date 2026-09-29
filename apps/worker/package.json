@@ -20,7 +20,7 @@
   "dependencies": {
     "@hono/node-server": "2.0.10",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@roo-code/judgement": "github:RooCodeInc/judgement#7313a93bdd5ca79747abd004d847f4b6d9966a1d",
+    "@roo-code/judgement": "0.3.1",
     "@roomote/auth": "workspace:^",
     "@roomote/cloud-agents": "workspace:^",
     "@roomote/communication": "workspace:^",
