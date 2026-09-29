@@ -148,10 +148,19 @@ in **Available Models**, and assign it to a role or select it for a session or
 task. Adding these routes does not change existing model defaults; access still
 depends on the connected provider account or plan.
 
-**GPT-6.1 Sol** is available through the same curated provider routes as GPT-6
-Sol. OpenAI describes it as near-Astra performance at a lower cost. Existing
-defaults and saved mappings stay unchanged; differentiated recommendations that
-previously used GPT-6 Sol now use GPT-6.1 Sol.
+**GPT-6.1 Sol** is recommended through OpenAI, OpenRouter, Vercel AI Gateway,
+OpenCode Zen, Azure OpenAI / Azure AI Foundry, Requesty, and ChatGPT subscription.
+Requesty's recommendation uses its Azure Sweden Central route,
+`requesty/azure/gpt-6.1-sol@swedencentral`. OpenCode Go does not list Sol in its
+model catalog. GitHub documents GPT-6.1 Sol as available in Copilot, but access
+depends on your plan and enabled models. Roomote also has a Bedrock Mantle
+mapping; its GPT-6.1 Sol availability has not been verified against a live
+authenticated AWS catalog, so check your region's model list before selecting it.
+
+OpenAI describes GPT-6.1 Sol as near-Astra performance at a lower cost.
+Differentiated recommendations that previously used GPT-6 Sol now use GPT-6.1
+Sol. Existing defaults stay unchanged. Saved selections of Requesty's earlier
+`requesty/gpt-6.1-sol@eu` recommendation resolve to the Sweden Central route.
 
 **DeepSeek V4.1 Flash** is recommended through
 [DeepSeek](/providers/inference/deepseek),

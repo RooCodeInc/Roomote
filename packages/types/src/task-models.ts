@@ -270,6 +270,7 @@ const TASK_MODEL_ID_ALIASES: Readonly<Record<string, string>> = {
     'vercel/deepseek/deepseek-v4.1-flash',
   'requesty/claude-fable-5-1': 'requesty/claude-fable-5.1',
   'requesty/vertex/gemini-3.8-flash': 'requesty/gemini-3.8-flash',
+  'requesty/gpt-6.1-sol@eu': 'requesty/azure/gpt-6.1-sol@swedencentral',
   'opencode-go/deepseek-flash': 'opencode-go/deepseek-v4.1-flash',
   'openrouter/qwen/qwen3.8-max': 'openrouter/qwen/qwen3.8-max-0902',
   'zai-coding-plan/glm-5v-turbo': 'zai-coding-plan/glm-5.3-flash',

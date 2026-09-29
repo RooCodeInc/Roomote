@@ -38,6 +38,13 @@ describe('applyImplicitLiteLlmModelPrefix', () => {
 });
 
 describe('normalizeTaskModelId', () => {
+  it('corrects the old Requesty Sol recommendation while preserving EU inference', () => {
+    const modelId = 'requesty/azure/gpt-6.1-sol@swedencentral';
+    expect(normalizeTaskModelId('requesty/gpt-6.1-sol@eu')).toBe(modelId);
+    expect(normalizeTaskModelId(modelId)).toBe(modelId);
+    expect(getTaskModelProviderId(modelId)).toBe('requesty');
+  });
+
   it('prefixes bare author/model slugs with openrouter', () => {
     expect(normalizeTaskModelId('z-ai/glm-5.2')).toBe(
       'openrouter/z-ai/glm-5.2',

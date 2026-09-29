@@ -26,6 +26,13 @@ Roomote exposes its recommended Requesty models under the `requesty/<model>`
 prefix. Some model IDs include a region suffix such as `@eu`. Apply the
 recommended mapping or select models individually for each role.
 
+For **GPT-6.1 Sol**, the recommended slug is
+`requesty/azure/gpt-6.1-sol@swedencentral`, which uses Requesty's Azure route in
+Sweden Central. Roomote resolves the earlier `requesty/gpt-6.1-sol@eu` slug to
+this route. Other existing model selections stay unchanged. Check Requesty's
+[live model catalog](https://router.requesty.ai/v1/models) for exact provider and
+region IDs when adding a custom model.
+
 ## Cost behavior
 
 Requesty bills routed model usage according to the account's plan, provider

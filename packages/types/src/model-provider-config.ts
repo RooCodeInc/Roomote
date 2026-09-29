@@ -756,7 +756,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-sonnet-5-5': 'requesty/anthropic/claude-sonnet-5-5',
       'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
       'gpt-6-sol': 'requesty/gpt-6-sol@eu',
-      'gpt-6-1-sol': 'requesty/gpt-6.1-sol@eu',
+      'gpt-6-1-sol': 'requesty/azure/gpt-6.1-sol@swedencentral',
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
       'gpt-6-luna': 'requesty/gpt-6-luna@eu',

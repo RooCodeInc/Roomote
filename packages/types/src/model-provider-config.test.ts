@@ -738,7 +738,13 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         { providerId: 'roomote', modelId: `roomote/openai/${modelId}` },
         { providerId: 'openrouter', modelId: `openrouter/openai/${modelId}` },
         { providerId: 'vercel', modelId: `vercel/openai/${modelId}` },
-        { providerId: 'requesty', modelId: `requesty/${modelId}@eu` },
+        {
+          providerId: 'requesty',
+          modelId:
+            modelId === 'gpt-6.1-sol'
+              ? 'requesty/azure/gpt-6.1-sol@swedencentral'
+              : `requesty/${modelId}@eu`,
+        },
         { providerId: 'openai', modelId: `openai/${modelId}` },
         { providerId: 'azure', modelId: `azure/${modelId}` },
         {
@@ -1154,7 +1160,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/anthropic/claude-sonnet-5-5',
       'requesty/gpt-5.6-sol@eu',
       'requesty/gpt-6-sol@eu',
-      'requesty/gpt-6.1-sol@eu',
+      'requesty/azure/gpt-6.1-sol@swedencentral',
       'requesty/gpt-5.6-terra@eu',
       'requesty/gpt-5.6-luna@eu',
       'requesty/gpt-6-luna@eu',
