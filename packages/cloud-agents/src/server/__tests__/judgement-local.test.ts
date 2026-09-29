@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -15,8 +15,9 @@ beforeEach(async () => {
     .mockResolvedValue({ outcome: 'violation', confidence: 0.99 });
   cwd = await mkdtemp(join(tmpdir(), 'judgement-local-'));
   await exec('git', ['init', '-q'], { cwd });
+  await mkdir(join(cwd, '.judgement'));
   await writeFile(
-    join(cwd, 'JUDGE.json'),
+    join(cwd, '.judgement/rules.json'),
     JSON.stringify({ criteria: [{ rule: 'Use lowercase session.' }] }),
   );
   await writeFile(join(cwd, 'example.md'), 'new Session checks');
@@ -53,4 +54,63 @@ it('sanitizes provider failures', async () => {
 it('does not load inference for a dry run', async () => {
   await checkLocalRepositoryJudgement({ cwd, dryRun: true });
   expect(evaluate).not.toHaveBeenCalled();
+});
+
+it('uses the same Roomote evaluator for the shared rule example suite', async () => {
+  const { testRules } = await import('@roo-code/judgement');
+  const { evaluateLocalRepositoryJudgement } =
+    await import('../judgement-local');
+  await mkdir(join(cwd, '.judgement/examples'));
+  await writeFile(
+    join(cwd, '.judgement/examples/criterion_1.json'),
+    JSON.stringify({
+      ruleId: 'criterion_1',
+      examples: [
+        {
+          name: 'capital',
+          before: 'session',
+          after: 'Session',
+          expected: 'violation',
+        },
+      ],
+    }),
+  );
+  const report = await testRules({
+    cwd,
+    repeats: 1,
+    evaluate: evaluateLocalRepositoryJudgement,
+  });
+  expect(report.status).toBe('pass');
+  expect(evaluate).toHaveBeenCalled();
+  expect(report.reports[0]?.results[0]?.answers[0]?.confidence).toBe(0.99);
+});
+
+it('does not expose backend errors in example suite reports', async () => {
+  const { testRules } = await import('@roo-code/judgement');
+  const { evaluateLocalRepositoryJudgement } =
+    await import('../judgement-local');
+  await mkdir(join(cwd, '.judgement/examples'));
+  await writeFile(
+    join(cwd, '.judgement/examples/criterion_1.json'),
+    JSON.stringify({
+      ruleId: 'criterion_1',
+      examples: [
+        {
+          name: 'capital',
+          before: 'session',
+          after: 'Session',
+          expected: 'violation',
+        },
+      ],
+    }),
+  );
+  evaluate.mockRejectedValue(new Error('secret provider details'));
+  const report = await testRules({
+    cwd,
+    repeats: 1,
+    evaluate: evaluateLocalRepositoryJudgement,
+  });
+  expect(report.status).toBe('fail');
+  expect(report.reports[0]?.results[0]?.operationalFailure).toBe(true);
+  expect(JSON.stringify(report)).not.toContain('secret provider details');
 });

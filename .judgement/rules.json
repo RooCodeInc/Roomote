@@ -48,6 +48,11 @@
       "rule": "In user-facing prose, treat \"session\" and \"task\" as ordinary nouns rather than proper nouns; use lowercase \"session\" and \"task\" except at sentence beginnings, in title case, or when quoting an exact UI label.",
       "files": ["**/*"],
       "threshold": 0.85
+    },
+    {
+      "rule": "Release notes, migration instructions, security or compatibility requirements, and quoted writing examples are exempt from this rule. In ordinary explanatory and instructional prose, state the current location, behavior, or action directly. Do not add unnecessary asides about previous iterations or removed alternatives, or unnecessary exclusivity such as \"the only policy location\". Comparisons between supported options are allowed when they help the reader choose.",
+      "files": ["**/*"],
+      "threshold": 0.85
     }
   ]
 }
