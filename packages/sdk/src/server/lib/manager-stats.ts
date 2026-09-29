@@ -4,6 +4,7 @@ import {
   formatAutomationLabel,
   normalizeExternalActorId,
   type SourceControlProvider,
+  type ManagerStatsFrequency,
 } from '@roomote/types';
 
 import {
@@ -343,10 +344,20 @@ function formatLocalDateKey(date: Date, timeZone: string) {
 }
 
 /** Start of the seven-day reporting window in the deployment timezone. */
-export function getManagerStatsWindowStart(until: Date, timeZone: string) {
+export function getManagerStatsWindowStart(
+  until: Date,
+  timeZone: string,
+  frequency: Exclude<ManagerStatsFrequency, 'off'> = 'weekly',
+) {
   const localToday = getLocalDateParts(until, timeZone);
+  const targetDay =
+    frequency === 'daily'
+      ? localToday.day
+      : frequency === 'monthly'
+        ? 1
+        : localToday.day - 6;
   const targetDate = new Date(
-    Date.UTC(localToday.year, localToday.month - 1, localToday.day - 6),
+    Date.UTC(localToday.year, localToday.month - 1, targetDay),
   );
   const targetTimestamp = targetDate.getTime();
   let candidate = new Date(targetTimestamp);

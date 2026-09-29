@@ -4390,6 +4390,8 @@ export const automations = pgTable('automations', {
   key: text('key').primaryKey().$type<BackgroundAutomationKey>(),
   enabled: boolean('enabled').notNull().default(false),
   internal: boolean('internal').notNull().default(false),
+  /** Encrypted opaque bearer token for an optional built-in webhook trigger. */
+  webhookSecret: encryptedText('webhook_secret'),
   schedule: jsonb('schedule')
     .notNull()
     .default({})

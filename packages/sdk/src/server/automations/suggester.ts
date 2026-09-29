@@ -183,8 +183,14 @@ export async function suggesterJob(
         }));
       const channelId = destination?.channelId;
       const rules = getAutomationAdditionalRules(runtime.settings);
+      const isManualOnDemandRun =
+        opts.manualTrigger === true && frequency === 'on_demand';
 
-      if (!frequency || frequency === 'off' || !(frequency in WINDOW_DAYS)) {
+      if (
+        !frequency ||
+        frequency === 'off' ||
+        (!isManualOnDemandRun && !(frequency in WINDOW_DAYS))
+      ) {
         result.skippedReason = 'Automation is disabled.';
         skipped++;
         continue;
@@ -384,7 +390,9 @@ export async function suggesterJob(
               ),
           ),
           repositoryPartitions: [...partitions.values()],
-          triggerKind: opts.manualTrigger ? 'manual' : 'scheduled',
+          triggerKind:
+            opts.trigger ?? (opts.manualTrigger ? 'manual' : 'scheduled'),
+          webhookInputJson: opts.webhookInputJson,
           destinationPayloadFields:
             buildDestinationTaskPayloadFields(reportDestination),
         });

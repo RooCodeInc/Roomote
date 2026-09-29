@@ -109,7 +109,7 @@ describe('suggesterJob repository routing', () => {
     mockGetAutomationRuntime.mockResolvedValue({
       key: 'suggester',
       enabled: true,
-      scheduleMode: 'daily',
+      scheduleMode: 'on_demand',
       lastRunAt: null,
       instructions: null,
       settings: {

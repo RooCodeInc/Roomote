@@ -16,6 +16,7 @@ export { teams } from './teams';
 export { telegram } from './telegram';
 export { agentmail } from './agentmail';
 export { customAutomationWebhooks } from './custom-automation-webhooks';
+export { builtInAutomationWebhooks } from './built-in-automation-webhooks';
 export { discord } from './discord';
 export { cloudDeploymentAccess } from './cloud-deployment-access';
 

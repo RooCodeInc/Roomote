@@ -10,7 +10,7 @@
     "check-types:fast": "tsgo --noEmit",
     "test": "dotenvx run -f ../../.env.test -- pnpm run --parallel \"/^test:(server|client)$/\"",
     "test:server": "vitest run --project server",
-    "test:client": "vitest run --project client",
+    "test:client": "for shard in $(seq 1 64); do vitest run --project client --shard=$shard/64 --maxWorkers=2 || exit 1; done",
     "automation:icons": "node ./scripts/generate-automation-icons.mjs",
     "task-robot:icons": "node ./scripts/generate-task-robot-icons.mjs",
     "docs:assets": "node ./scripts/sync-docs-assets.mjs",

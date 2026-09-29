@@ -1,32 +1,42 @@
 ---
 title: Automation webhooks
 icon: webhook
-description: Trigger an enabled custom automation over HTTP without changing its saved prompt.
+description: Trigger an eligible enabled automation over HTTP without changing its saved configuration.
 ---
 
-An automation webhook is a private URL that starts one run of an enabled custom
-automation. It is useful when another system can send an HTTP request but does
-not have a Roomote conversation or native provider integration.
+An automation webhook is a private URL that starts one run of an eligible
+enabled automation. It is useful when another system can send an HTTP request
+but does not have a Roomote conversation or native provider integration. Custom
+automations and eligible built-ins use the same bounded request body and
+per-run untrusted-input semantics.
 
-Enable webhooks while editing a custom automation on the **Automations** page.
+Enable webhooks while editing an eligible automation on the **Automations** page.
 Roomote shows the complete URL after it creates the token. The URL is the
 credential: anyone who has it can attempt to trigger the automation, so treat it
 like a password.
 
 ## Eligibility and ownership
 
-Webhook management follows custom automation management:
+Webhook management follows custom automation management for custom rows, while
+built-in webhook controls are administrator-only:
 
 - members can enable and manage webhooks for custom automations they own
-- administrators can manage webhooks for any custom automation
+- administrators can manage webhooks for any custom automation or eligible
+  built-in automation
 - the automation must be enabled before its webhook can be enabled
-- the automation must have an active creator; an ownerless automation cannot
-  accept webhook runs
+- custom automations must have an active creator; built-in automations run as
+  the deployment automation and do not have a human owner
 
-The request checks the saved webhook state, the token, and the creator's active
-account before reading the body or starting a run. Disabling the automation,
-deleting it, deactivating its owner, or disabling the webhook makes the URL
-unusable and returns `404` for later requests.
+Generic built-in webhooks are available for Resolve PR Conflicts, Suggest Ideas,
+Summarize Merged PRs, Manager Stats, Inference Provider Usage Alerts, Triage
+Sentry Issues, Triage Dependabot Alerts, Triage CodeQL Alerts, Security Auditor,
+and Code Quality Auditor. Review Code and provider-event automations keep their
+native event paths.
+
+The request checks the saved webhook state and token before reading the body or
+starting a run. Disabling the automation or webhook makes the URL unusable and
+returns `404` for later requests; deleting a custom row or deactivating its
+owner does the same.
 
 ## Request contract
 
@@ -35,6 +45,12 @@ than constructing it by hand:
 
 ```text
 https://<your-roomote-origin>/api/webhooks/custom-automations/<automation-id>/<token>
+```
+
+For a built-in automation, the copied URL uses its automation key:
+
+```text
+https://<your-roomote-origin>/api/webhooks/built-in-automations/<automation-key>/<token>
 ```
 
 The token is a 43-character URL-safe value. Roomote accepts these body forms:
@@ -99,7 +115,7 @@ events when your upstream retries requests.
 
 ## Rotate or revoke a URL
 
-Use the webhook controls on the custom automation card:
+Use the webhook controls on the automation card:
 
 - **Rotate** creates a new URL and invalidates the previous token immediately.
 - **Disable webhook** removes the stored token and returns no URL until you
