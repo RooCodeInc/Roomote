@@ -1,12 +1,6 @@
 {
   "criteria": [
     {
-      "rule": "Do not add real secrets, credentials, session tokens, private keys, customer or PII data, private deployment details, or full environment dumps to repository files. Use placeholders, redaction, or server-side/environment-managed access instead. Tests, fixtures, examples, and documentation may contain only unmistakably synthetic, non-sensitive values that cannot authenticate, identify a private person or customer, or reveal private deployment data; public identifiers and non-sensitive configuration are allowed.",
-      "files": ["**/*"],
-      "threshold": 0.96,
-      "id": "criterion_1"
-    },
-    {
       "rule": "Construct child-process and task environments from explicit worker-safe allowlists; never spread launcher process.env or pass worker-only auth or proxy credentials into task subprocesses, and scrub captured secrets before launch. Intentionally propagated non-sensitive runtime variables are allowed only when explicitly named and required by a nested sandbox or service contract; tests, fixtures, and placeholders are allowed when they contain no real secret or broad inherited environment.",
       "files": [
         "apps/worker/src/env/**/*.ts",

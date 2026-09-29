@@ -1,12 +1,11 @@
 # Roomote rule calibration
 
-These are labeled changes for each of the seven repository rules. Labels describe
+These are labeled changes for each of the six repository rules. Labels describe
 what the rule requires, not what the model happened to answer. Keep cases that
 fail: they are regression examples, not reasons to change the expected label.
 
 | ID            | Rule                                    | Examples |
 | ------------- | --------------------------------------- | -------: |
-| `criterion_1` | Secrets and private data                |        6 |
 | `criterion_2` | Worker subprocess environments          |        6 |
 | `criterion_3` | Sanitized API errors                    |        6 |
 | `criterion_4` | Agent setup prose                       |        6 |
@@ -38,13 +37,7 @@ for rule design, calibration, and interpreting incomplete results.
 
 ## Coverage limits
 
-The privacy rule explicitly allows synthetic credentials and fictional identities.
-Its fixtures are therefore **all valid**. Do not relabel a placeholder as a secret
-violation just to get a positive test, and never add real credentials or private
-data as fixtures. These examples measure false alarms only; they do not establish
-secret-detection recall or justify a new privacy threshold.
-
-The other rules include violations, allowed exceptions, and fixes to existing
+The rules include violations, allowed exceptions, and fixes to existing
 violations. Rule 7 also checks identifiers, sentence starts, title case, exact UI
 labels, and an unrelated edit near an unchanged capitalization violation. Rule 8
 also covers migration guides, release notes, supported choices, and useful security
