@@ -4,6 +4,7 @@ import {
   getNewTelegramMessageReactions,
   getTelegramGoalCommand,
   getTelegramNewTaskCommand,
+  getTelegramStopCommand,
   getTelegramUpdateCallbackQuery,
   getTelegramUpdateCommunicationMetadata,
   getTelegramUpdateMessageReaction,
@@ -880,6 +881,67 @@ describe('Telegram update helpers', () => {
       expect(
         getTelegramGoalCommand(
           parse('please /goal ship it', 'private', [
+            { type: 'bot_command', offset: 7, length: 5 },
+          ]),
+        ),
+      ).toBeNull();
+    });
+  });
+
+  describe('getTelegramStopCommand', () => {
+    const parse = (
+      text: string,
+      chatType: 'private' | 'group' = 'private',
+      entities: Array<{ type: string; offset: number; length: number }> = [],
+    ) =>
+      parseTelegramUpdate({
+        update_id: 2003,
+        message: {
+          message_id: 44,
+          chat: { id: chatType === 'private' ? 6 : -1008, type: chatType },
+          text,
+          entities,
+        },
+      }).data!;
+
+    it('recognizes a private command and only accepts group commands addressed to this bot', () => {
+      expect(
+        getTelegramStopCommand(
+          parse('/stop', 'private', [
+            { type: 'bot_command', offset: 0, length: 5 },
+          ]),
+        ),
+      ).toEqual({ command: 'stop' });
+      expect(
+        getTelegramStopCommand(
+          parse('/stop@roomote_bot', 'group', [
+            { type: 'bot_command', offset: 0, length: 17 },
+          ]),
+          { botUsername: 'roomote_bot' },
+        ),
+      ).toEqual({ command: 'stop' });
+      expect(
+        getTelegramStopCommand(
+          parse('/stop', 'group', [
+            { type: 'bot_command', offset: 0, length: 5 },
+          ]),
+          { botUsername: 'roomote_bot' },
+        ),
+      ).toBeNull();
+    });
+
+    it('ignores commands for another bot and commands mentioned in ordinary text', () => {
+      expect(
+        getTelegramStopCommand(
+          parse('/stop@other_bot', 'group', [
+            { type: 'bot_command', offset: 0, length: 15 },
+          ]),
+          { botUsername: 'roomote_bot' },
+        ),
+      ).toBeNull();
+      expect(
+        getTelegramStopCommand(
+          parse('please /stop', 'private', [
             { type: 'bot_command', offset: 7, length: 5 },
           ]),
         ),

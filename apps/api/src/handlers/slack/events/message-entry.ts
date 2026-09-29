@@ -33,10 +33,12 @@ import {
   type TaskInitiator,
   isDeploymentReadOnlyError,
 } from '@roomote/types';
+import { isStopSessionCommandText } from '@roomote/communication';
 import { findSessionAttentionNotificationReply } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../../logging.js';
 import { continueSessionAttentionReply } from '../../tasks/continue-session-attention-reply.js';
+import { stopChatSessionTasks } from '../../tasks/session-stop-command.js';
 import {
   ROUTING_LOCK_TTL_SECONDS,
   SLACK_ROUTING_LOCK_PREFIX,
@@ -1165,6 +1167,8 @@ async function handleSlackEntryEvent(params: {
   slackInstallation: SlackInstallation;
   slack: SlackNotifier;
   teamId: string;
+  stopSessionCommand?: boolean;
+  silentStopWhenUnavailable?: boolean;
   skipThreadFollowupHandling?: boolean;
   threadTaskId?: string;
   peerConversationsEnabled?: boolean;
@@ -1180,6 +1184,8 @@ async function handleSlackEntryEvent(params: {
     slackInstallation,
     slack,
     teamId,
+    stopSessionCommand = false,
+    silentStopWhenUnavailable = false,
     skipThreadFollowupHandling = false,
     threadTaskId,
     peerConversationsEnabled,
@@ -1213,6 +1219,28 @@ async function handleSlackEntryEvent(params: {
     }
 
     await showConnectAccount(event, slackInstallation, slack);
+    return;
+  }
+
+  if (stopSessionCommand) {
+    const stopResult = await stopChatSessionTasks({
+      provider: 'slack',
+      workspaceId: teamId,
+      channelId: event.channel,
+      conversationId: event.thread_ts || event.ts,
+      threadId: event.thread_ts || event.ts,
+      ...(event.thread_ts ? { replyToMessageId: event.thread_ts } : {}),
+      userId: userMapping.userId,
+    });
+    if (silentStopWhenUnavailable && stopResult.kind === 'unavailable') {
+      return;
+    }
+    await slack.postMessage({
+      channel: event.channel,
+      thread_ts: event.thread_ts || event.ts,
+      text: stopResult.text,
+      blocks: [{ type: 'markdown', text: stopResult.text }],
+    });
     return;
   }
 
@@ -1345,6 +1373,41 @@ export async function handleMessageOrAppMentionEvent(params: {
 }): Promise<void> {
   const { event, context } = params;
   enrichSlackMessageEvent(event);
+  const isStopCommand = isStopSessionCommandText(
+    event.authoredText ?? event.text,
+  );
+  const isHumanSlackMessage =
+    Boolean(event.user) &&
+    !event.bot_id &&
+    !event.subtype &&
+    event.user !== context.slackInstallation.botUserId;
+  const isStopCommandAddressedToRoomote =
+    isHumanSlackMessage &&
+    (event.type === 'app_mention' ||
+      event.channel_type === 'im' ||
+      event.channel_type === 'mpim' ||
+      mentionsSlackBot(event, context.slackInstallation.botUserId));
+  const isUnmentionedStopInSessionThread =
+    isHumanSlackMessage &&
+    event.type === 'message' &&
+    event.channel_type !== 'im' &&
+    event.channel_type !== 'mpim' &&
+    Boolean(event.thread_ts) &&
+    !mentionsSlackBot(event, context.slackInstallation.botUserId);
+  if (
+    isStopCommand &&
+    (isStopCommandAddressedToRoomote || isUnmentionedStopInSessionThread)
+  ) {
+    await handleSlackEntryEvent({
+      event,
+      slackInstallation: context.slackInstallation,
+      slack: context.slack,
+      teamId: context.teamId,
+      stopSessionCommand: true,
+      silentStopWhenUnavailable: isUnmentionedStopInSessionThread,
+    });
+    return;
+  }
   const automatedAppMentionEvent = isRoutableAutomatedSlackAppMention(
     event,
     context.slackInstallation,

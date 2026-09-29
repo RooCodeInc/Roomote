@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { db, fastAgentConversations, userFactory } from '@roomote/db/server';
 
 import {
+  findFastAgentSessionForProviderConversation,
   findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
   isFastAgentProviderMessage,
@@ -32,6 +33,50 @@ async function createFastConversation(input: {
 }
 
 describe('Fast provider message bindings', () => {
+  it('resolves a stop-command route to its linked owner and exact conversation', async () => {
+    const suffix = crypto.randomUUID();
+    const { user, conversation } = await createFastConversation({
+      surface: 'slack',
+      workspaceId: `team:${suffix}`,
+      conversationId: `thread:${suffix}`,
+      channelId: `channel:${suffix}`,
+      threadId: `thread:${suffix}`,
+    });
+
+    await expect(
+      findFastAgentSessionForProviderConversation({
+        provider: 'slack',
+        workspaceId: `team:${suffix}`,
+        channelId: `channel:${suffix}`,
+        threadId: `thread:${suffix}`,
+        conversationId: `thread:${suffix}`,
+        userId: user.id,
+      }),
+    ).resolves.toMatchObject({ id: conversation.id, userId: user.id });
+
+    await expect(
+      findFastAgentSessionForProviderConversation({
+        provider: 'slack',
+        workspaceId: `team:${suffix}`,
+        channelId: `other-channel:${suffix}`,
+        threadId: `thread:${suffix}`,
+        conversationId: `thread:${suffix}`,
+        userId: user.id,
+      }),
+    ).resolves.toBeNull();
+
+    await expect(
+      findFastAgentSessionForProviderConversation({
+        provider: 'slack',
+        workspaceId: `team:${suffix}`,
+        channelId: `channel:${suffix}`,
+        threadId: `thread:${suffix}`,
+        conversationId: `thread:${suffix}`,
+        userId: 'another-user',
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('resolves an explicitly owned cross-surface notification reply', async () => {
     const suffix = crypto.randomUUID();
     const user = await userFactory.create();
@@ -70,6 +115,17 @@ describe('Fast provider message bindings', () => {
         userId: 'another-user',
       }),
     ).resolves.toBeNull();
+
+    await expect(
+      findFastAgentSessionForProviderConversation({
+        provider: 'slack',
+        workspaceId: `team:${suffix}`,
+        channelId: `dm:${suffix}`,
+        conversationId: `command:${suffix}`,
+        replyToMessageId: `message:${suffix}`,
+        userId: user.id,
+      }),
+    ).resolves.toMatchObject({ id: conversation!.id, userId: user.id });
   });
 
   it('resolves a Slack reaction target to its bound session owner', async () => {

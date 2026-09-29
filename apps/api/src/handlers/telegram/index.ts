@@ -22,6 +22,7 @@ import {
   getNewTelegramMessageReactions,
   getTelegramGoalCommand,
   getTelegramNewTaskCommand,
+  getTelegramStopCommand,
   isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
   isTelegramStartCommand,
@@ -81,6 +82,7 @@ const TELEGRAM_COMMAND_HELP = [
   '`/start` — show this welcome message.',
   '`/help` — show command help.',
   '`/new <request>` — start a fresh conversation instead of continuing the current one; when topics are available, it opens a new topic.',
+  '`/stop` — resumably stop this session’s active tasks; send another message here to continue later.',
   '`/goal <objective>` — keep this session working toward an objective.',
 ].join('\n');
 
@@ -134,6 +136,7 @@ import {
 } from './webhook-gate.js';
 import { appendAccountLinkHelpText } from '../account-link-help.js';
 import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
+import { stopChatSessionTasks } from '../tasks/session-stop-command.js';
 
 // Deep-link payload used by the group "link account" button: tapping
 // https://t.me/<bot>?start=link opens the bot's DM with "/start link".
@@ -672,8 +675,11 @@ telegram.post('/', async (c) => {
   const goalCommand = getTelegramGoalCommand(update, {
     botUsername: botUsername ?? undefined,
   });
+  const stopCommand = getTelegramStopCommand(update, {
+    botUsername: botUsername ?? undefined,
+  });
 
-  if (!queuedMessage && !newTaskCommand && !goalCommand) {
+  if (!queuedMessage && !newTaskCommand && !goalCommand && !stopCommand) {
     return c.json({ ok: true, ignored: 'unsupported_update' });
   }
 
@@ -683,15 +689,49 @@ telegram.post('/', async (c) => {
     'message_id' in message.reply_to_message
       ? message.reply_to_message.message_id
       : undefined;
+  const replyToMessageId = repliedToReportRootId
+    ? String(repliedToReportRootId)
+    : undefined;
+
+  if (stopCommand) {
+    const stopResult = await stopChatSessionTasks({
+      provider: 'telegram',
+      workspaceId: metadata.communicationChannelId,
+      channelId: metadata.communicationChannelId,
+      conversationId: `${metadata.communicationThreadId ?? (isTelegramPrivateChat(message) ? metadata.communicationChannelId : (metadata.communicationMessageId ?? update.update_id))}:user:${senderUserId}`,
+      ...(metadata.communicationThreadId
+        ? { threadId: metadata.communicationThreadId }
+        : {}),
+      ...(replyToMessageId ? { replyToMessageId } : {}),
+      userId: senderUserId,
+      displayName:
+        [message.from?.first_name, message.from?.last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim() ||
+        message.from?.username ||
+        null,
+    });
+    await postTelegramMessageBestEffort({
+      chatId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+      replyToMessageId: metadata.communicationMessageId,
+      text: stopResult.text,
+      textFormat: 'markdown',
+    });
+    return c.json({
+      ok: true,
+      stopRequested: true,
+      outcome: stopResult.kind,
+    });
+  }
+
   const repliedToAutomationReport = repliedToReportRootId
     ? await findTelegramAutomationReportRun({
         chatId: metadata.communicationChannelId,
         messageId: String(repliedToReportRootId),
       })
     : null;
-  const replyToMessageId = repliedToReportRootId
-    ? String(repliedToReportRootId)
-    : undefined;
   const hasMedia = Boolean(
     message.photo?.length || message.document || message.audio || message.voice,
   );

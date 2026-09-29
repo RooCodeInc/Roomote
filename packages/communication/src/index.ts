@@ -11,6 +11,7 @@ export * from './messages';
 export * from './provider';
 export * from './reaction-emoji';
 export * from './request-user-input';
+export * from './session-command';
 export * from './task-thread-title';
 export * from './teams-activity';
 export * from './teams-bot-framework-client';

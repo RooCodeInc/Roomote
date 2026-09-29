@@ -33,6 +33,7 @@ const {
   redisSetMock,
   setLatestInboundMessageIdMock,
   startFastSessionGoalMock,
+  stopChatSessionTasksMock,
   setTrustedRunActingUserMock,
   setTrustedRunActingUserOnSuccessMock,
   stopTaskRunMock,
@@ -92,6 +93,7 @@ const {
   redisSetMock: vi.fn(),
   setLatestInboundMessageIdMock: vi.fn(),
   startFastSessionGoalMock: vi.fn(),
+  stopChatSessionTasksMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
   setTrustedRunActingUserOnSuccessMock: vi.fn(),
   stopTaskRunMock: vi.fn(),
@@ -345,6 +347,9 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('../../tasks/continue-session-attention-reply', () => ({
   continueSessionAttentionReply: vi.fn(async () => false),
 }));
+vi.mock('../../tasks/session-stop-command.js', () => ({
+  stopChatSessionTasks: stopChatSessionTasksMock,
+}));
 
 vi.mock('@roomote/communication/telegram-provider', () => ({
   TelegramCommunicationProvider: vi.fn().mockImplementation(function () {
@@ -503,6 +508,11 @@ describe('Telegram webhook handler', () => {
       async ({ operation }) => operation(),
     );
     startFastSessionGoalMock.mockResolvedValue({ success: true, goal: {} });
+    stopChatSessionTasksMock.mockResolvedValue({
+      kind: 'stopped',
+      stoppedCount: 2,
+      text: 'Stopped 2 active tasks. The work remains resumable; send another message here to continue.',
+    });
     authUsersFindFirstMock.mockResolvedValue(null);
     usersFindFirstMock.mockResolvedValue(null);
     taskRunsFindFirstMock.mockResolvedValue(null);
@@ -1641,6 +1651,42 @@ describe('Telegram webhook handler', () => {
     });
     expect(redisDelMock).not.toHaveBeenCalled();
     expect(getFastSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('stops the linked Session tasks resumably without queueing the command', async () => {
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/stop',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      stopRequested: true,
+      outcome: 'stopped',
+    });
+    expect(stopChatSessionTasksMock).toHaveBeenCalledWith({
+      provider: 'telegram',
+      workspaceId: '222',
+      channelId: '222',
+      conversationId: '222:user:launch-owner-1',
+      userId: 'launch-owner-1',
+      displayName: 'Ada Lovelace',
+    });
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '222',
+        replyToMessageId: '456',
+        text: 'Stopped 2 active tasks. The work remains resumable; send another message here to continue.',
+      }),
+    );
+    expect(queueCommunicationMessageOnceMock).not.toHaveBeenCalled();
+    expect(startFastSessionGoalMock).not.toHaveBeenCalled();
   });
 
   it('starts a session goal and acknowledges the objective literally', async () => {

@@ -232,6 +232,12 @@ for example `@Roomote summarize this thread` or `@Roomote fix the failing CI
 job`. Replies in a Roomote-owned Slack thread continue that session; replies
 in an existing task-only thread continue the task.
 
+To stop work without discarding it, reply with `stop` in the existing session
+thread; in a channel, mention the app with `stop`. Roomote soft-stops every
+active task linked to that session, including delegated tasks; the work remains
+resumable by sending another message. Only the linked session owner can stop its
+tasks.
+
 Roomote can read a bounded history from the current Slack channel, discover other
 channels in the same workspace, and post standalone updates to channels where
 the Roomote app is authorized. From another session surface, such as Telegram, you

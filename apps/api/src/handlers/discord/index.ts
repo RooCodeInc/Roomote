@@ -50,6 +50,7 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
+import { stopChatSessionTasks } from '../tasks/session-stop-command.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import {
@@ -152,6 +153,7 @@ const DISCORD_HELP_MESSAGE = [
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
   '`/goal objective:<objective>` — keep this session working toward an objective across multiple turns.',
+  '`/stop` — resumably stop every active task in this session; send another message here to continue later.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
@@ -582,6 +584,8 @@ async function processDiscordGatewayEvent(
   if (command && command.name !== 'new') {
     if (command.name === 'goal') {
       // Handled after resolving the current conversation and linked user.
+    } else if (command.name === 'stop') {
+      // Handled after resolving the linked sender and conversation below.
     } else if (command.name === 'skills') {
       const registrations = [
         resolved.provider.registerCommands({
@@ -883,6 +887,35 @@ async function processDiscordGatewayEvent(
       : {}),
     userId: senderUserId,
   });
+
+  if (command?.name === 'stop') {
+    const stopResult = await stopChatSessionTasks({
+      provider: 'discord',
+      workspaceId: channel.guildId ?? 'dm',
+      channelId: metadata.communicationChannelId,
+      conversationId: getDiscordFastConversationId(
+        channel,
+        interaction?.id ?? event.eventId,
+      ),
+      ...(metadata.communicationThreadId
+        ? { threadId: metadata.communicationThreadId }
+        : {}),
+      ...(message?.message_reference?.message_id
+        ? { replyToMessageId: message.message_reference.message_id }
+        : {}),
+      userId: senderUserId,
+      displayName: sender.global_name ?? sender.username,
+    });
+    await replyToDiscordEvent({
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      channel,
+      interaction: interactionReplyContext(event),
+      text: stopResult.text,
+      ephemeral: true,
+    });
+    return { ok: true, stopRequested: true, outcome: stopResult.kind };
+  }
 
   // Fast mode is unconditional for ordinary linked-human messages, including
   // reaction summons: a configured emoji synthesizes a bot mention that enters
