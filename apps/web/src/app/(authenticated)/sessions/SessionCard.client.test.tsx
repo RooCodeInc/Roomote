@@ -205,6 +205,14 @@ describe('SessionCard', () => {
 
     rerender(
       <SessionCard
+        session={{ ...session, manualStatus: 'blocked' }}
+        viewerUserId="user-1"
+      />,
+    );
+    expect(screen.getByText('blocked')).toHaveClass('capitalize');
+
+    rerender(
+      <SessionCard
         session={{ ...session, cachedStatus: 'ready' }}
         viewerUserId="user-1"
       />,
