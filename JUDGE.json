@@ -45,7 +45,7 @@
       "threshold": 0.95
     },
     {
-      "rule": "In user-facing prose, treat \"session\" as an ordinary noun rather than a proper noun; use lowercase \"session\" except at sentence beginnings, in title case, or when quoting an exact UI label.",
+      "rule": "In user-facing prose, treat \"session\" and \"task\" as ordinary nouns rather than proper nouns; use lowercase \"session\" and \"task\" except at sentence beginnings, in title case, or when quoting an exact UI label.",
       "files": ["**/*"],
       "threshold": 0.96
     }
