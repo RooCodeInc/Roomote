@@ -10,22 +10,9 @@ import {
 } from '@roomote/db/server';
 import type { UserAuthSuccess } from '@/types';
 
-const getDeploymentExperimentsMock = vi.hoisted(() => vi.fn());
-
-vi.mock('@roomote/db/server', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@roomote/db/server')>()),
-  getDeploymentExperiments: getDeploymentExperimentsMock,
-}));
-
 import { sessionStatusInputSchema, setSessionStatusCommand } from './index';
 
 describe('setSessionStatusCommand', () => {
-  beforeEach(() => {
-    getDeploymentExperimentsMock.mockReset().mockResolvedValue({
-      sessionStatusJudgment: true,
-    });
-  });
-
   async function fixture() {
     const owner = await userFactory.create();
     const session = await sessionFactory.create({
@@ -76,21 +63,6 @@ describe('setSessionStatusCommand', () => {
       ),
     ).resolves.toBeNull();
     expect(owner.id).not.toBe(stranger.id);
-    expect(getDeploymentExperimentsMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('rejects status changes while the experiment is disabled', async () => {
-    const { auth, session } = await fixture();
-    getDeploymentExperimentsMock.mockResolvedValueOnce({
-      sessionStatusJudgment: false,
-    });
-
-    await expect(
-      setSessionStatusCommand(auth, session.id, 'done'),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(
-      db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
-    ).resolves.toMatchObject({ cachedStatus: 'ready' });
   });
 
   it('validates the manual status vocabulary and excludes active', async () => {

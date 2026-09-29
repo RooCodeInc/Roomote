@@ -643,7 +643,7 @@ async function hydrateSessionRows(
   options: {
     /** Skip the linked-tasks query when the caller already fetched them. */
     preloadedLinkedTasks?: HydratedLinkedTask[];
-    /** Board judgments remain hidden while the board experiment is disabled. */
+    /** Board judgments are only loaded when the board view needs them. */
     includeJudgedStatus?: boolean;
   } = {},
 ) {

@@ -45,12 +45,10 @@ export function SessionActions({
   sessionId,
   listRow = false,
   status,
-  sessionStatusExperimentEnabled = false,
 }: {
   sessionId: string;
   listRow?: boolean;
   status?: SessionStatus | SessionManualStatus | null;
-  sessionStatusExperimentEnabled?: boolean;
 }) {
   const trpc = useTRPC();
   const router = useRouter();
@@ -190,37 +188,35 @@ export function SessionActions({
             <Square className="size-4" />
             Stop all tasks
           </DropdownMenuItem>
-          {sessionStatusExperimentEnabled ? (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="flex cursor-pointer items-center gap-2">
-                <Activity className="size-4" />
-                Mark session as...
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                <DropdownMenuRadioGroup
-                  value={currentStatus}
-                  onValueChange={(value) => {
-                    if (value === currentStatus) return;
-                    setStatus.mutate({
-                      sessionId,
-                      status: value as SessionManualStatus,
-                    });
-                  }}
-                >
-                  {SESSION_MANUAL_STATUSES.map((nextStatus) => (
-                    <DropdownMenuRadioItem
-                      key={nextStatus}
-                      value={nextStatus}
-                      disabled={isPending || nextStatus === currentStatus}
-                      className="capitalize"
-                    >
-                      {getSessionStatusLabel(nextStatus)}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          ) : null}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="flex cursor-pointer items-center gap-2">
+              <Activity className="size-4" />
+              Mark session as...
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup
+                value={currentStatus}
+                onValueChange={(value) => {
+                  if (value === currentStatus) return;
+                  setStatus.mutate({
+                    sessionId,
+                    status: value as SessionManualStatus,
+                  });
+                }}
+              >
+                {SESSION_MANUAL_STATUSES.map((nextStatus) => (
+                  <DropdownMenuRadioItem
+                    key={nextStatus}
+                    value={nextStatus}
+                    disabled={isPending || nextStatus === currentStatus}
+                    className="capitalize"
+                  >
+                    {getSessionStatusLabel(nextStatus)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuItem
             onClick={() => archiveSession.mutate({ sessionId })}
             disabled={isPending}

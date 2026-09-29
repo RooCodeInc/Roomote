@@ -6,7 +6,6 @@ import {
   sessionFactory,
   sessionStatusJudgments,
   sessions,
-  setDeploymentExperimentEnabled,
   taskFactory,
   sessionTasks,
   userFactory,
@@ -36,7 +35,6 @@ const taskIds: string[] = [];
 const userIds: string[] = [];
 
 afterEach(async () => {
-  await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
   evaluateMock.mockReset();
   while (sessionIds.length > 0) {
     await db.delete(sessions).where(eq(sessions.id, sessionIds.pop()!));
@@ -86,7 +84,6 @@ function highConfidenceDone() {
 
 describe('processSessionStatusJudgmentBatch', () => {
   it('judges only visible transcript text and leaves cached runtime state unchanged', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const visibleUserTs = Date.now();
     const user = await userFactory.create();
     userIds.push(user.id);
@@ -170,7 +167,6 @@ describe('processSessionStatusJudgmentBatch', () => {
   });
 
   it('does not apply a done result while a linked task is active', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const { session } = await createSession();
     const childTasks = [];
     for (let index = 0; index < 13; index += 1) {
@@ -215,7 +211,6 @@ describe('processSessionStatusJudgmentBatch', () => {
   });
 
   it('applies inactivity done precedence without a configured judgment backend', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const user = await userFactory.create();
     userIds.push(user.id);
     const [conversation] = await db
@@ -271,7 +266,6 @@ describe('processSessionStatusJudgmentBatch', () => {
   });
 
   it('marks an unconfigured judgment backend ignored without applying a status', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const { session } = await createSession();
     await db.insert(sessionStatusJudgments).values({
       sessionId: session.id,

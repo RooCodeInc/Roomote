@@ -13,7 +13,6 @@ import {
   sessionFactory,
   sessionStatusJudgments,
   sessions,
-  setDeploymentExperimentEnabled,
   settleSessionStatusJudgmentTurn,
   userFactory,
   users,
@@ -25,7 +24,6 @@ const userIds: string[] = [];
 const conversationIds: string[] = [];
 
 afterEach(async () => {
-  await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
   while (sessionIds.length > 0) {
     await db.delete(sessions).where(eq(sessions.id, sessionIds.pop()!));
   }
@@ -47,7 +45,6 @@ async function createSession() {
 
 describe('Session status judgment requests', () => {
   it('deduplicates source events and marks an older generation stale', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const session = await createSession();
     const first = await createSessionStatusJudgmentRequest(db, {
       sessionId: session.id,
@@ -91,7 +88,6 @@ describe('Session status judgment requests', () => {
   });
 
   it('claims only settled current requests and rejects an old model response', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const session = await createSession();
     const first = await createSessionStatusJudgmentRequest(db, {
       sessionId: session.id,
@@ -141,7 +137,6 @@ describe('Session status judgment requests', () => {
   });
 
   it('queues one inactivity request after the latest visible user message crosses the boundary', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const user = await userFactory.create();
     userIds.push(user.id);
     const [conversation] = await db
@@ -204,7 +199,6 @@ describe('Session status judgment requests', () => {
   });
 
   it('clears a manual status when a newer visible user message exists', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const user = await userFactory.create();
     userIds.push(user.id);
     const [conversation] = await db
@@ -264,8 +258,7 @@ describe('Session status judgment requests', () => {
     ).resolves.toBe(1);
   });
 
-  it('discards a result if the deployment experiment is disabled mid-flight', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
+  it('completes a result without a deployment experiment gate', async () => {
     const session = await createSession();
     const [request] = await db
       .insert(sessionStatusJudgments)
@@ -279,7 +272,6 @@ describe('Session status judgment requests', () => {
       })
       .returning();
 
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
     await expect(
       completeSessionStatusJudgment(db, {
         id: request!.id,
@@ -290,18 +282,16 @@ describe('Session status judgment requests', () => {
         confidence: 0.99,
         probabilities: { done: 1 },
       }),
-    ).resolves.toBe('disabled');
+    ).resolves.toBe('applied');
 
     const [updatedRequest] = await db
       .select()
       .from(sessionStatusJudgments)
       .where(eq(sessionStatusJudgments.id, request!.id));
-    expect(updatedRequest?.state).toBe('ignored');
-    const [updatedSession] = await db
-      .select({ cachedStatus: sessions.cachedStatus })
-      .from(sessions)
-      .where(eq(sessions.id, session.id));
-    expect(updatedSession?.cachedStatus).toBe('ready');
+    expect(updatedRequest).toMatchObject({
+      state: 'applied',
+      outcome: 'done',
+    });
   });
 
   it('prunes old terminal history while retaining the latest board projection', async () => {

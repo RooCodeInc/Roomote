@@ -8,7 +8,6 @@ import {
   SESSION_STATUSES,
   type SessionStatus,
 } from '@roomote/types';
-import { getDeploymentExperiments } from '@roomote/db/server';
 
 import { parseTimePeriodParam } from '@/types';
 import { authorize } from '@/lib/server/auth-context';
@@ -44,22 +43,15 @@ export default async function SessionsPage({
     model?: string;
   }>;
 }) {
-  const [authorizedUser, params = {}, experiments] = await Promise.all([
+  const [authorizedUser, params = {}] = await Promise.all([
     authorize(),
     searchParams,
-    getDeploymentExperiments().catch(() => {
-      console.error(
-        '[Sessions] Failed to load deployment experiments; showing the list view.',
-      );
-      return { sessionStatusJudgment: false, sessionsBoard: false };
-    }),
   ]);
   if (!authorizedUser.success) {
     notFound();
   }
   const { before, user, period, q } = params;
-  const boardEnabled = experiments.sessionsBoard;
-  const view = boardEnabled && params.view === 'board' ? 'board' : 'list';
+  const view = params.view === 'board' ? 'board' : 'list';
   const scope = ['all', 'tasks', 'reviews', 'automations'].includes(
     params.scope ?? '',
   )
@@ -83,7 +75,7 @@ export default async function SessionsPage({
       pullRequest: params.pullRequest,
       source: params.source,
       model: params.model,
-      includeJudgedStatus: boardEnabled && experiments.sessionStatusJudgment,
+      includeJudgedStatus: view === 'board',
     }),
     getSessionSources(authorizedUser),
   ]);
@@ -96,9 +88,7 @@ export default async function SessionsPage({
               getSessionBoardColumn({
                 cachedStatus: session.cachedStatus ?? null,
                 manualStatus: session.manualStatus ?? null,
-                judgmentStatus: experiments.sessionStatusJudgment
-                  ? session.judgedStatus
-                  : null,
+                judgmentStatus: session.judgedStatus,
               }) === column,
           ),
         })).filter(({ sessions }) => sessions.length > 0)
@@ -108,7 +98,7 @@ export default async function SessionsPage({
     if (value && key !== 'before' && key !== 'view')
       olderParams.set(key, value);
   });
-  if (boardEnabled && view === 'board') olderParams.set('view', 'board');
+  if (view === 'board') olderParams.set('view', 'board');
   if (result.nextCursor) olderParams.set('before', result.nextCursor);
 
   return (
@@ -120,7 +110,6 @@ export default async function SessionsPage({
           scope={scope}
           status={status ?? 'all'}
           view={view}
-          boardEnabled={boardEnabled}
           query={q ?? ''}
           repository={params.repository ?? null}
           pullRequest={params.pullRequest ?? null}
@@ -156,9 +145,6 @@ export default async function SessionsPage({
                       viewerUserId={authorizedUser.userId}
                       query={q}
                       hideBlockedBadge
-                      sessionStatusExperimentEnabled={
-                        experiments.sessionStatusJudgment
-                      }
                     />
                   </SessionBoardCard>
                 ))}
@@ -173,9 +159,6 @@ export default async function SessionsPage({
                 session={session}
                 viewerUserId={authorizedUser.userId}
                 query={q}
-                sessionStatusExperimentEnabled={
-                  experiments.sessionStatusJudgment
-                }
               />
             ))}
           </div>

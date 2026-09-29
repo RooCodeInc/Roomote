@@ -27,6 +27,8 @@ describe('metadata descriptions', () => {
     'code_mode_integrations_experiment_enabled',
     'integration_tool_approvals_experiment_enabled',
     'results_page_enabled',
+    'session_status_judgment_experiment_enabled',
+    'sessions_board_experiment_enabled',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
@@ -58,6 +60,8 @@ describe('metadata descriptions', () => {
         results_page_enabled: true,
         private_sessions_experiment_enabled: true,
         dizzy_experiment_enabled: true,
+        session_status_judgment_experiment_enabled: true,
+        sessions_board_experiment_enabled: true,
         automation_launch_criteria_experiment_enabled: true,
         integration_keys_enabled: 'true',
       }),
@@ -67,8 +71,6 @@ describe('metadata descriptions', () => {
       browserNotifications: false,
       integrationToolAutoApprovals: false,
       sessionTaskCommunicationTriage: false,
-      sessionStatusJudgment: false,
-      sessionsBoard: false,
       automationLaunchCriteria: true,
     });
   });

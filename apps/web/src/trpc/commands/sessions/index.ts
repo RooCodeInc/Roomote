@@ -22,7 +22,6 @@ import {
   db,
   eq,
   fastAgentConversations,
-  getDeploymentExperiments,
   getSessionGoal,
   inArray,
   markSessionGoal,
@@ -141,14 +140,6 @@ export async function setSessionStatusCommand(
 ) {
   const session = await findAccessibleSession(auth, sessionId);
   if (!canManageSession(auth, session)) return null;
-
-  const experiments = await getDeploymentExperiments();
-  if (!experiments.sessionStatusJudgment) {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: 'Session status changes are not enabled.',
-    });
-  }
 
   return updateSessionMetadata(auth, sessionId, { manualStatus: status });
 }

@@ -841,10 +841,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('invalidates and settles a semantic status request around the visible Fast turn', async () => {
-    mocks.deploymentExperimentEnabled.mockImplementation(
-      async (experimentId: string) => experimentId === 'sessionStatusJudgment',
-    );
+  it('creates and settles a semantic status request around the visible Fast turn', async () => {
     mocks.getUnifiedSession.mockResolvedValue({
       id: 'unified-session-1',
     });

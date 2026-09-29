@@ -6,12 +6,10 @@ import {
   completeSessionStatusJudgment,
   desc,
   db,
-  discardPendingSessionStatusJudgments,
   eq,
   fastAgentMessages,
   hasFastConversationPendingUserInput,
   inArray,
-  isDeploymentExperimentEnabled,
   isNull,
   retryOrFailSessionStatusJudgment,
   sessionGoals,
@@ -336,11 +334,6 @@ export function chooseApplicableSessionStatusJudgment(answer: {
 export async function processSessionStatusJudgmentBatch(
   limit = MAX_JUDGMENTS_PER_TICK,
 ): Promise<number> {
-  if (!(await isDeploymentExperimentEnabled('sessionStatusJudgment'))) {
-    await discardPendingSessionStatusJudgments(db);
-    return 0;
-  }
-
   const requests = await claimSessionStatusJudgmentRequests(db, limit);
   for (const request of requests) {
     try {
