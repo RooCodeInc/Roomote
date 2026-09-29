@@ -231,19 +231,27 @@ export async function settleSessionStatusJudgmentTurn(
 export async function claimSessionStatusJudgmentRequests(
   database: DatabaseOrTransaction,
   limit: number,
+  options: { sessionIds?: string[] } = {},
 ): Promise<(typeof sessionStatusJudgments.$inferSelect)[]> {
+  if (options.sessionIds?.length === 0) return [];
+
   return runInTransactionIfAvailable(database, async (tx) => {
     const expiredClaim = new Date(Date.now() - CLAIM_LEASE_MS);
     const candidates = await tx
       .select()
       .from(sessionStatusJudgments)
       .where(
-        or(
-          eq(sessionStatusJudgments.state, 'pending'),
-          and(
-            eq(sessionStatusJudgments.state, 'processing'),
-            lt(sessionStatusJudgments.claimedAt, expiredClaim),
+        and(
+          or(
+            eq(sessionStatusJudgments.state, 'pending'),
+            and(
+              eq(sessionStatusJudgments.state, 'processing'),
+              lt(sessionStatusJudgments.claimedAt, expiredClaim),
+            ),
           ),
+          options.sessionIds
+            ? inArray(sessionStatusJudgments.sessionId, options.sessionIds)
+            : undefined,
         ),
       )
       .orderBy(sessionStatusJudgments.createdAt, sessionStatusJudgments.id)

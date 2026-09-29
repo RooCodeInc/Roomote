@@ -96,13 +96,19 @@ describe('Session status judgment requests', () => {
       state: 'awaiting_settlement',
     });
 
-    expect(await claimSessionStatusJudgmentRequests(db, 10)).toEqual([]);
+    expect(
+      await claimSessionStatusJudgmentRequests(db, 10, {
+        sessionIds: [session.id],
+      }),
+    ).toEqual([]);
     await settleSessionStatusJudgmentTurn(db, {
       sessionId: session.id,
       sourceEventId: 'turn-1',
       visible: true,
     });
-    const [claimed] = await claimSessionStatusJudgmentRequests(db, 10);
+    const [claimed] = await claimSessionStatusJudgmentRequests(db, 10, {
+      sessionIds: [session.id],
+    });
     expect(claimed).toEqual(
       expect.objectContaining({
         id: first?.id,

@@ -333,8 +333,9 @@ export function chooseApplicableSessionStatusJudgment(answer: {
 
 export async function processSessionStatusJudgmentBatch(
   limit = MAX_JUDGMENTS_PER_TICK,
+  options: { sessionIds?: string[] } = {},
 ): Promise<number> {
-  const requests = await claimSessionStatusJudgmentRequests(db, limit);
+  const requests = await claimSessionStatusJudgmentRequests(db, limit, options);
   for (const request of requests) {
     try {
       await clearManualStatusAfterNewerUserMessage(db, request.sessionId);

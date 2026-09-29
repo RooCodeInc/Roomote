@@ -2,6 +2,7 @@ import {
   db,
   eq,
   fastAgentConversations,
+  inArray,
   fastAgentMessages,
   sessionFactory,
   sessionStatusJudgments,
@@ -138,9 +139,9 @@ describe('processSessionStatusJudgmentBatch', () => {
     });
     highConfidenceDone();
 
-    // The batch claims all pending requests, including work from concurrent
-    // database tests. Assert this fixture's request instead of a global count.
-    await processSessionStatusJudgmentBatch();
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
 
     const evaluation = evaluateMock.mock.calls.find(([input]) => {
       const state = input.state as {
@@ -210,7 +211,9 @@ describe('processSessionStatusJudgmentBatch', () => {
     });
     highConfidenceDone();
 
-    await processSessionStatusJudgmentBatch();
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
 
     const [judgment] = await db
       .select()
@@ -263,7 +266,9 @@ describe('processSessionStatusJudgmentBatch', () => {
     });
     evaluateMock.mockResolvedValue(null);
 
-    await processSessionStatusJudgmentBatch();
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
 
     expect(evaluateMock).not.toHaveBeenCalled();
 
@@ -289,7 +294,9 @@ describe('processSessionStatusJudgmentBatch', () => {
     });
     evaluateMock.mockResolvedValue(null);
 
-    await processSessionStatusJudgmentBatch();
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
 
     const [judgment] = await db
       .select()
@@ -299,5 +306,60 @@ describe('processSessionStatusJudgmentBatch', () => {
       state: 'ignored',
       errorCode: 'judgment_unconfigured',
     });
+  });
+
+  it('does not let unrelated pending rows displace a scoped fixture', async () => {
+    const { session: target } = await createSession();
+    const competitors = await Promise.all(
+      Array.from({ length: 4 }, () => createSession()),
+    );
+    const competitorIds = competitors.map(({ session }) => session.id);
+    await db.insert(sessionStatusJudgments).values(
+      competitorIds.map((sessionId, index) => ({
+        sessionId,
+        sourceEventId: `competitor-${index}`,
+        generation: 1,
+        sourceKind: 'fast_turn' as const,
+        state: 'pending' as const,
+      })),
+    );
+    await db.insert(sessionStatusJudgments).values({
+      sessionId: target.id,
+      sourceEventId: 'target',
+      generation: 1,
+      sourceKind: 'fast_turn',
+      state: 'pending',
+    });
+    evaluateMock.mockResolvedValue({
+      outcome: {
+        type: 'choice',
+        choice: 'done',
+        confidence: 0.97,
+        probabilities: { done: 0.97 },
+      },
+    });
+
+    await Promise.all([
+      processSessionStatusJudgmentBatch(undefined, {
+        sessionIds: [target.id],
+      }),
+      processSessionStatusJudgmentBatch(undefined, {
+        sessionIds: competitorIds,
+      }),
+    ]);
+
+    const [targetJudgment] = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(eq(sessionStatusJudgments.sessionId, target.id));
+    const competitorJudgments = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(inArray(sessionStatusJudgments.sessionId, competitorIds));
+    expect(targetJudgment).toMatchObject({ state: 'applied', outcome: 'done' });
+    expect(competitorJudgments).toHaveLength(4);
+    expect(competitorJudgments.every(({ state }) => state === 'applied')).toBe(
+      true,
+    );
   });
 });
