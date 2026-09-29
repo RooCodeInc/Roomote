@@ -15,6 +15,7 @@ const {
   mockUpdate,
   mockUpdateSet,
   mockUpdateWhere,
+  mockRecordPrReviewCycleStateInTransaction,
 } = vi.hoisted(() => ({
   mockAcquireGithubPrReviewLifecycleLock: vi.fn(),
   mockEnqueueActivePrReviewFollowUp: vi.fn(),
@@ -30,6 +31,9 @@ const {
   mockUpdate: vi.fn(),
   mockUpdateSet: vi.fn(),
   mockUpdateWhere: vi.fn(),
+  mockRecordPrReviewCycleStateInTransaction: vi
+    .fn()
+    .mockResolvedValue(undefined),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -58,6 +62,8 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
+    recordPrReviewCycleStateInTransaction:
+      mockRecordPrReviewCycleStateInTransaction,
     db: {
       select: (...args: unknown[]) => mockSelect(...args),
       update: (...args: unknown[]) => mockUpdate(...args),
@@ -275,6 +281,7 @@ describe('handlePrSynchronize', () => {
       repository: 'owner/repo',
       prNumber: 42,
       headSha: 'new-head',
+      reviewCycleId: expect.any(String),
       taskId: 'task-100',
       runId: 100,
       status: 'in_progress',
@@ -407,6 +414,7 @@ describe('handlePrSynchronize', () => {
       headSha: 'new-head',
       taskId: 'task-100',
       runId: 200,
+      reviewCycleId: expect.any(String),
       signal: mockReleaseLock.signal,
     });
     expect(mockReleaseLock).toHaveBeenCalledOnce();

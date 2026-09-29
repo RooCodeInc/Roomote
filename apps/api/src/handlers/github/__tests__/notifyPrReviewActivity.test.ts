@@ -67,6 +67,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
     return content.slice(afterStart, endIndex).trim();
   },
+  parseReviewCycleId: (body: string) => body.match(/\bcycle=([^\s>]+)/i)?.[1],
   isReviewSummaryInProgress: (body: string) => {
     const marker = body.match(/<!--\s*roomote-review-summary\b[^>]*-->/i)?.[0];
     const markerVersion = marker?.match(/\bversion=(\d+)\b/i)?.[1];
@@ -597,7 +598,7 @@ describe('queuePrReviewActivityNotification', () => {
 });
 
 const TERMINAL_SUMMARY_BODY = [
-  '<!-- roomote-review-summary sha=f0c89ce4 mode=initial -->',
+  '<!-- roomote-review-summary sha=f0c89ce4 mode=initial cycle=cycle-1 -->',
   '<!-- roomote-review-status:start -->',
   '1 minor doc note; no blocking issues. [See task](https://roomote.dev/task/x)',
   '<!-- roomote-review-status:end -->',
@@ -607,14 +608,14 @@ const TERMINAL_SUMMARY_BODY = [
 ].join('\n');
 
 const IN_PROGRESS_SUMMARY_BODY = [
-  '<!-- roomote-review-summary sha=f0c89ce4 mode=initial -->',
+  '<!-- roomote-review-summary sha=f0c89ce4 mode=initial cycle=cycle-1 -->',
   '<!-- roomote-review-status:start -->',
   'Reviewing the PR now. [See task](https://roomote.dev/task/x)',
   '<!-- roomote-review-status:end -->',
 ].join('\n');
 
 const NATURAL_IN_PROGRESS_SUMMARY_BODY = [
-  '<!-- roomote-review-summary sha=f0c89ce4 mode=sync version=2 phase=reviewing -->',
+  '<!-- roomote-review-summary sha=f0c89ce4 mode=sync cycle=cycle-1 version=2 phase=reviewing -->',
   '<!-- roomote-review-status:start -->',
   'I am reviewing the updated PR head now. [See task](https://roomote.dev/task/x)',
   '<!-- roomote-review-status:end -->',
@@ -622,7 +623,7 @@ const NATURAL_IN_PROGRESS_SUMMARY_BODY = [
 ].join('\n');
 
 const ALL_ADDRESSED_SUMMARY_BODY = [
-  '<!-- roomote-review-summary sha=abcdef01 mode=initial -->',
+  '<!-- roomote-review-summary sha=abcdef01 mode=initial cycle=cycle-1 -->',
   '<!-- roomote-review-status:start -->',
   '**All 1 issue addressed.** [See task](https://roomote.dev/task/x)',
   '<!-- roomote-review-status:end -->',
@@ -632,7 +633,7 @@ const ALL_ADDRESSED_SUMMARY_BODY = [
 ].join('\n');
 
 const CHECKLIST_ONLY_EDIT_BODY = [
-  '<!-- roomote-review-summary sha=f0c89ce4 mode=initial -->',
+  '<!-- roomote-review-summary sha=f0c89ce4 mode=initial cycle=cycle-1 -->',
   '<!-- roomote-review-status:start -->',
   '1 minor doc note; no blocking issues. [See task](https://roomote.dev/task/x)',
   '<!-- roomote-review-status:end -->',
@@ -706,6 +707,8 @@ describe('buildPrReviewSummaryNotification', () => {
         providerEventId: 'github-review-summary:99:2026-08-10T19:30:00.000Z',
         sourceDeliveryId: 'github-summary-delivery-1',
         authorLogin: 'roomote[bot]',
+        reviewCycleId: 'cycle-1',
+        batchId: 'cycle-1',
         reviewHeadSha,
         reviewTaskId: 'x',
         reviewResult: {
@@ -923,19 +926,13 @@ describe('queuePrReviewSummaryNotification', () => {
     mockCompleteGithubPrReviewCheckFromSummary.mockResolvedValue(undefined);
   });
 
-  it('opens an explicit cycle when the Roomote summary enters in-progress state', async () => {
+  it('does not create a cycle from a summary webhook', async () => {
     queuePrReviewSummaryNotification(
       summaryPayload({ body: IN_PROGRESS_SUMMARY_BODY }),
     );
 
     await vi.waitFor(() =>
-      expect(mockStartPrReviewNotificationCycle).toHaveBeenCalledWith({
-        repository: 'owner/repo',
-        prNumber: 42,
-        reviewHeadSha,
-        cycleId: `github-summary:99:${createdAt}`,
-        observedAt,
-      }),
+      expect(mockStartPrReviewNotificationCycle).not.toHaveBeenCalled(),
     );
     expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
   });
@@ -1007,7 +1004,7 @@ describe('queuePrReviewSummaryNotification', () => {
       }),
     );
 
-    expect(mockStartPrReviewNotificationCycle).toHaveBeenCalledOnce();
+    expect(mockStartPrReviewNotificationCycle).not.toHaveBeenCalled();
     expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
@@ -1018,7 +1015,7 @@ describe('queuePrReviewSummaryNotification', () => {
     );
   });
 
-  it('opens a distinct cycle when the same SHA is reviewed again', async () => {
+  it('does not create a second cycle when the same SHA is reviewed again', async () => {
     const nextUpdatedAt = '2026-08-10T20:30:00.000Z';
 
     await queuePrReviewSummaryNotification(
@@ -1032,20 +1029,7 @@ describe('queuePrReviewSummaryNotification', () => {
       }),
     );
 
-    expect(mockStartPrReviewNotificationCycle).toHaveBeenNthCalledWith(1, {
-      repository: 'owner/repo',
-      prNumber: 42,
-      reviewHeadSha,
-      cycleId: `github-summary:99:${createdAt}`,
-      observedAt,
-    });
-    expect(mockStartPrReviewNotificationCycle).toHaveBeenNthCalledWith(2, {
-      repository: 'owner/repo',
-      prNumber: 42,
-      reviewHeadSha,
-      cycleId: `github-summary:99:${nextUpdatedAt}`,
-      observedAt: Date.parse(nextUpdatedAt),
-    });
+    expect(mockStartPrReviewNotificationCycle).not.toHaveBeenCalled();
   });
 
   it('closes a timestamp-less summary edit against its exact open cycle', async () => {
@@ -1057,8 +1041,6 @@ describe('queuePrReviewSummaryNotification', () => {
       }),
       'delivery-start',
     );
-    const openedCycle = mockStartPrReviewNotificationCycle.mock.calls[0]?.[0];
-
     await queuePrReviewSummaryNotification(
       summaryPayload({
         body: TERMINAL_SUMMARY_BODY,
@@ -1068,11 +1050,12 @@ describe('queuePrReviewSummaryNotification', () => {
       'delivery-complete',
     );
 
-    expect(openedCycle?.cycleId).toMatch(/^github-summary:99:body:/);
+    expect(mockStartPrReviewNotificationCycle).not.toHaveBeenCalled();
     expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
-          batchId: openedCycle?.cycleId,
+          batchId: 'cycle-1',
+          reviewCycleId: 'cycle-1',
           providerEventId:
             'github-review-summary:99:delivery:delivery-complete',
         }),

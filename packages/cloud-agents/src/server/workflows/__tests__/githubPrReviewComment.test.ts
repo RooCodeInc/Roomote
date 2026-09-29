@@ -21,6 +21,7 @@ import {
   getReviewFooterPhase,
   getReviewSummaryMarkerPhase,
   isReviewSummaryInProgress,
+  parseReviewCycleId,
   parseReviewSummaryMarkerSha,
   REVIEW_STATUS_START_MARKER,
   REVIEW_STATUS_END_MARKER,
@@ -92,6 +93,17 @@ describe('review meta footer', () => {
     expect(parseReviewSummaryMarkerSha(MARKER('abcdef0123'))).toBe(
       'abcdef0123',
     );
+  });
+
+  it('parses the admitted cycle from summary and inline markers', () => {
+    expect(
+      parseReviewCycleId(
+        MARKER('abcdef0123').replace('-->', 'cycle=cycle-123 -->'),
+      ),
+    ).toBe('cycle-123');
+    expect(
+      parseReviewCycleId('<!-- roomote-review-cycle id=cycle-123 -->\nFinding'),
+    ).toBe('cycle-123');
   });
 
   it('uses the footer phase instead of relying on status prose', () => {

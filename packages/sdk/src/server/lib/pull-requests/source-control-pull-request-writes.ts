@@ -325,7 +325,8 @@ export async function writeSourceControlPullRequestForTaskRun({
 }): Promise<SourceControlPullRequestWriteResult> {
   // Defense in depth: blank/whitespace optional ids must never look "present"
   // even if a caller skips sourceControlPullRequestWriteInputSchema.
-  const input = normalizeOptionalWriteIds(rawInput);
+  const normalizedInput = normalizeOptionalWriteIds(rawInput);
+  const input = stampGithubReviewCycleContext(taskRun, normalizedInput);
   assertWriteInputFields(input);
 
   const payloadRecord = getPayloadRecord(taskRun.payload);
@@ -529,6 +530,71 @@ function normalizeOptionalWriteIds(
     title: blankToUndefined(input.title),
     path: blankToUndefined(input.path),
   };
+}
+
+const REVIEW_SUMMARY_MARKER = '<!-- roomote-review-summary';
+const REVIEW_CYCLE_MARKER = '<!-- roomote-review-cycle';
+
+function stampGithubReviewCycleContext(
+  taskRun: TaskRun,
+  input: SourceControlPullRequestWriteInput,
+): SourceControlPullRequestWriteInput {
+  if (
+    ![
+      'create_pull_request_comment',
+      'create_pull_request_review_comment',
+      'reply_to_pull_request_comment',
+      'submit_pull_request_review',
+      'update_pull_request_comment',
+    ].includes(input.action) ||
+    input.body === undefined ||
+    (taskRun.payloadKind !== TaskPayloadKind.GithubPrReview &&
+      taskRun.payloadKind !== TaskPayloadKind.GithubPrReviewSync)
+  ) {
+    return input;
+  }
+
+  const payload = getPayloadRecord(taskRun.payload);
+  const reviewCycleId =
+    typeof payload.reviewCycleId === 'string' ? payload.reviewCycleId : null;
+  if (!reviewCycleId) return input;
+
+  return {
+    ...input,
+    body: stampGithubReviewCycleBody(input.body, reviewCycleId),
+  };
+}
+
+function stampGithubReviewCycleBody(
+  body: string,
+  reviewCycleId: string,
+): string {
+  const cycleMarker = `${REVIEW_CYCLE_MARKER} id=${reviewCycleId} -->`;
+  const trimmed = body.trimStart();
+  if (trimmed.includes(cycleMarker)) return body;
+
+  if (trimmed.startsWith(REVIEW_SUMMARY_MARKER)) {
+    const newlineIndex = trimmed.indexOf('\n');
+    const firstLine =
+      newlineIndex === -1 ? trimmed : trimmed.slice(0, newlineIndex);
+    const markerEnd = firstLine.indexOf('-->');
+    if (markerEnd !== -1) {
+      const attributes = firstLine
+        .slice(REVIEW_SUMMARY_MARKER.length, markerEnd)
+        .trim()
+        .split(/\s+/)
+        .filter((token) => !token.startsWith('cycle='));
+      const marker = `${REVIEW_SUMMARY_MARKER} ${[
+        ...attributes,
+        `cycle=${reviewCycleId}`,
+      ].join(' ')} -->`;
+      return newlineIndex === -1
+        ? marker
+        : `${marker}${trimmed.slice(newlineIndex)}`;
+    }
+  }
+
+  return `${cycleMarker}\n${body}`;
 }
 
 function blankToUndefined(value: string | undefined): string | undefined {

@@ -1,18 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gt,
-  gte,
-  inArray,
-  lt,
-  lte,
-  or,
-  sql,
-} from 'drizzle-orm';
+import { and, eq, gt, gte, inArray, sql } from 'drizzle-orm';
 
 import type { SourceControlProvider } from '@roomote/types';
 
@@ -168,29 +156,9 @@ async function suppressRoomoteActivity(
     sourceControlProvider: SourceControlProvider;
     repository: string;
     prNumber: number;
-    reviewHeadSha: string;
     cycleId: string;
-    startedAt: Date;
-    observedAt: Date;
   },
 ): Promise<void> {
-  const nextCycle = await executor.query.prReviewCycles.findFirst({
-    where: and(
-      cycleHeadReference(input),
-      gt(prReviewCycles.startedAt, input.startedAt),
-    ),
-    orderBy: [asc(prReviewCycles.startedAt)],
-    columns: { startedAt: true },
-  });
-  const cycleWindow = nextCycle
-    ? and(
-        gte(prReviewEvents.observedAt, input.startedAt),
-        lt(prReviewEvents.observedAt, nextCycle.startedAt),
-      )
-    : and(
-        gte(prReviewEvents.observedAt, input.startedAt),
-        lte(prReviewEvents.observedAt, input.observedAt),
-      );
   const events = await executor
     .update(prReviewEvents)
     .set({ superseded: true })
@@ -198,9 +166,8 @@ async function suppressRoomoteActivity(
       and(
         reviewReference(input),
         eq(prReviewEvents.batchKind, 'roomote'),
-        eq(prReviewEvents.reviewHeadSha, input.reviewHeadSha),
         eq(prReviewEvents.superseded, false),
-        or(eq(prReviewEvents.batchId, input.cycleId), cycleWindow),
+        eq(prReviewEvents.batchId, input.cycleId),
         sql`${prReviewEvents.event}->>'kind' <> 'review_summary'`,
       ),
     )
@@ -340,7 +307,10 @@ export async function persistPrReviewEventInTransaction(
 ): Promise<{
   projectedTaskCount: number;
   event: Record<string, unknown>;
-  reason?: 'review_cycle_completed' | 'stale_review_cycle';
+  reason?:
+    | 'review_cycle_completed'
+    | 'stale_review_cycle'
+    | 'review_cycle_identity_missing';
 }> {
   await lockPrReviewReference(
     executor,
@@ -349,37 +319,39 @@ export async function persistPrReviewEventInTransaction(
     input.prNumber,
   );
 
-  let cycle = null;
-  if (input.roomoteAuthored && input.reviewHeadSha) {
-    if (input.isSummary && input.batchId) {
-      cycle = await executor.query.prReviewCycles.findFirst({
-        where: cycleIdentity({
-          ...input,
-          reviewHeadSha: input.reviewHeadSha,
-          cycleId: input.batchId,
-        }),
-      });
-    }
-    if (!(input.isSummary && input.batchId)) {
-      cycle ??= await executor.query.prReviewCycles.findFirst({
-        where: and(
-          cycleHeadReference({ ...input, reviewHeadSha: input.reviewHeadSha }),
-          lte(prReviewCycles.startedAt, input.observedAt),
-        ),
-        orderBy: [desc(prReviewCycles.startedAt)],
-      });
-    }
-  }
-  const superseded = Boolean(
+  const reviewCycleId =
+    typeof input.event.reviewCycleId === 'string'
+      ? input.event.reviewCycleId
+      : null;
+  const cycle =
+    input.roomoteAuthored && input.reviewHeadSha && reviewCycleId
+      ? await executor.query.prReviewCycles.findFirst({
+          where: cycleIdentity({
+            ...input,
+            reviewHeadSha: input.reviewHeadSha,
+            cycleId: reviewCycleId,
+          }),
+        })
+      : null;
+  const missingReviewCycleIdentity = Boolean(
+    input.sourceControlProvider === 'github' &&
     input.roomoteAuthored &&
-    !input.isSummary &&
-    cycle?.completedAt &&
-    input.observedAt <= cycle.completedAt,
+    !input.legacyOwnership &&
+    (!reviewCycleId || !cycle),
   );
+  const superseded =
+    Boolean(
+      input.roomoteAuthored &&
+      !input.isSummary &&
+      !input.legacyOwnership &&
+      cycle?.completedAt &&
+      cycle.completedAt,
+    ) || missingReviewCycleIdentity;
   const staleSummary = Boolean(
     input.isSummary &&
+    !input.legacyOwnership &&
     cycle?.completedAt &&
-    cycle.completedAt > input.observedAt,
+    cycle.completedAt <= input.observedAt,
   );
   const automatedBatchId =
     input.automatedAuthorId && input.batchId
@@ -389,7 +361,8 @@ export async function persistPrReviewEventInTransaction(
           batchId: input.batchId,
         })
       : null;
-  const batchId = cycle?.cycleId ?? automatedBatchId ?? input.batchId;
+  const batchId =
+    cycle?.cycleId ?? reviewCycleId ?? automatedBatchId ?? input.batchId;
   const eventPayload = batchId ? { ...input.event, batchId } : input.event;
 
   const [inserted] = await executor
@@ -422,8 +395,14 @@ export async function persistPrReviewEventInTransaction(
 
   if (!stored) throw new Error('Failed to persist PR review event');
 
-  if (inserted && input.isSummary && !staleSummary && input.reviewHeadSha) {
-    const cycleId = batchId ?? `head:${input.reviewHeadSha}`;
+  if (
+    inserted &&
+    input.isSummary &&
+    !staleSummary &&
+    !missingReviewCycleIdentity &&
+    input.reviewHeadSha
+  ) {
+    const cycleId = batchId!;
     await executor
       .insert(prReviewCycles)
       .values({
@@ -446,10 +425,10 @@ export async function persistPrReviewEventInTransaction(
         set: { completedAt: input.observedAt },
       });
     await suppressRoomoteActivity(executor, {
-      ...input,
-      reviewHeadSha: input.reviewHeadSha,
+      sourceControlProvider: input.sourceControlProvider,
+      repository: input.repository,
+      prNumber: input.prNumber,
       cycleId,
-      startedAt: cycle?.startedAt ?? new Date(0),
     });
   }
 
@@ -462,6 +441,9 @@ export async function persistPrReviewEventInTransaction(
       projectedTaskCount: 0,
       event: eventPayload,
       ...(superseded ? { reason: 'review_cycle_completed' as const } : {}),
+      ...(missingReviewCycleIdentity
+        ? { reason: 'review_cycle_identity_missing' as const }
+        : {}),
       ...(staleSummary ? { reason: 'stale_review_cycle' as const } : {}),
     };
   }
@@ -506,7 +488,7 @@ export async function persistPrReviewEvent(input: DurablePrReviewEvent) {
   return db.transaction((tx) => persistPrReviewEventInTransaction(tx, input));
 }
 
-export async function recordPrReviewCycleState(input: {
+export type PrReviewCycleStateInput = {
   sourceControlProvider: SourceControlProvider;
   repository: string;
   prNumber: number;
@@ -514,58 +496,69 @@ export async function recordPrReviewCycleState(input: {
   cycleId: string;
   phase: 'open' | 'completed';
   observedAt: Date;
-}): Promise<void> {
-  await db.transaction(async (tx) => {
-    await lockPrReviewReference(
-      tx,
-      input.sourceControlProvider,
-      input.repository,
-      input.prNumber,
-    );
-    const existing = await tx.query.prReviewCycles.findFirst({
-      where: cycleIdentity(input),
-    });
-    if (input.phase === 'open') {
-      if (existing) return;
-      await tx.insert(prReviewCycles).values({
-        sourceControlProvider: input.sourceControlProvider,
-        repository: input.repository,
-        prNumber: input.prNumber,
-        reviewHeadSha: input.reviewHeadSha,
-        cycleId: input.cycleId,
-        startedAt: input.observedAt,
-      });
-      return;
-    }
+};
 
-    if (existing?.completedAt && existing.completedAt >= input.observedAt) {
-      return;
-    }
-    await tx
-      .insert(prReviewCycles)
-      .values({
-        sourceControlProvider: input.sourceControlProvider,
-        repository: input.repository,
-        prNumber: input.prNumber,
-        reviewHeadSha: input.reviewHeadSha,
-        cycleId: input.cycleId,
-        // Legacy completed-cycle state has no recorded start. Treat its lower
-        // bound as unknown so older findings from that completed pass cannot
-        // be projected during migration.
-        startedAt: existing?.startedAt ?? new Date(0),
-        completedAt: input.observedAt,
-      })
-      .onConflictDoUpdate({
-        target: [
-          prReviewCycles.sourceControlProvider,
-          prReviewCycles.repository,
-          prReviewCycles.prNumber,
-          prReviewCycles.reviewHeadSha,
-          prReviewCycles.cycleId,
-        ],
-        set: { completedAt: input.observedAt },
-      });
+export async function recordPrReviewCycleStateInTransaction(
+  tx: DatabaseOrTransaction,
+  input: PrReviewCycleStateInput,
+): Promise<void> {
+  await lockPrReviewReference(
+    tx,
+    input.sourceControlProvider,
+    input.repository,
+    input.prNumber,
+  );
+  const existing = await tx.query.prReviewCycles.findFirst({
+    where: cycleIdentity(input),
   });
+  if (input.phase === 'open') {
+    if (existing) return;
+    await tx.insert(prReviewCycles).values({
+      sourceControlProvider: input.sourceControlProvider,
+      repository: input.repository,
+      prNumber: input.prNumber,
+      reviewHeadSha: input.reviewHeadSha,
+      cycleId: input.cycleId,
+      startedAt: input.observedAt,
+    });
+    return;
+  }
+
+  if (existing?.completedAt && existing.completedAt >= input.observedAt) {
+    return;
+  }
+  await tx
+    .insert(prReviewCycles)
+    .values({
+      sourceControlProvider: input.sourceControlProvider,
+      repository: input.repository,
+      prNumber: input.prNumber,
+      reviewHeadSha: input.reviewHeadSha,
+      cycleId: input.cycleId,
+      // Legacy completed-cycle state has no recorded start. Treat its lower
+      // bound as unknown so older findings from that completed pass cannot
+      // be projected during migration.
+      startedAt: existing?.startedAt ?? new Date(0),
+      completedAt: input.observedAt,
+    })
+    .onConflictDoUpdate({
+      target: [
+        prReviewCycles.sourceControlProvider,
+        prReviewCycles.repository,
+        prReviewCycles.prNumber,
+        prReviewCycles.reviewHeadSha,
+        prReviewCycles.cycleId,
+      ],
+      set: { completedAt: input.observedAt },
+    });
+}
+
+export async function recordPrReviewCycleState(
+  input: PrReviewCycleStateInput,
+): Promise<void> {
+  await db.transaction((tx) =>
+    recordPrReviewCycleStateInTransaction(tx, input),
+  );
 }
 
 export async function projectPendingPrReviewEventsForAssociation(

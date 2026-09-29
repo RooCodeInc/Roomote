@@ -1,4 +1,5 @@
 import { getInstallationOctokit } from '@roomote/github';
+import { db, eq, taskRuns } from '@roomote/db/server';
 import {
   enqueuePrReviewNotification,
   type EnqueuePrReviewNotificationInput,
@@ -23,6 +24,7 @@ export function buildPrCiFailureNotificationInputs(
   pullRequestNumbers = payload.check_run.pull_requests.map(
     (pullRequest) => pullRequest.number,
   ),
+  options: { reviewCycleId?: string; roomoteAuthored?: boolean } = {},
 ): EnqueuePrReviewNotificationInput[] {
   const checkRun = payload.check_run;
 
@@ -46,10 +48,44 @@ export function buildPrCiFailureNotificationInputs(
       authorLogin: checkRun.app?.slug ?? checkRun.app?.name ?? 'GitHub Checks',
       checkName: checkRun.name,
       reviewHeadSha: checkRun.head_sha,
+      ...(options.roomoteAuthored ? { roomoteAuthored: true } : {}),
+      ...(options.reviewCycleId
+        ? {
+            reviewCycleId: options.reviewCycleId,
+            batchId: options.reviewCycleId,
+          }
+        : {}),
       url: checkRun.details_url || checkRun.html_url,
       observedAt: getObservedAt(checkRun.completed_at),
     },
   }));
+}
+
+async function resolveRoomoteReviewCycleId(
+  payload: WebhookCheckRunCompleted,
+): Promise<string | undefined> {
+  if (payload.check_run.name !== 'Roomote code review') return undefined;
+  const externalId = (payload.check_run as { external_id?: string })
+    .external_id;
+  const embeddedCycleId = /^roomote-review:\d+:(.+)$/.exec(
+    externalId ?? '',
+  )?.[1];
+  if (embeddedCycleId) return embeddedCycleId;
+  const runId = Number(
+    /^roomote-review:(\d+)$/.exec(
+      (payload.check_run as { external_id?: string }).external_id ?? '',
+    )?.[1],
+  );
+  if (!Number.isSafeInteger(runId) || runId <= 0) return undefined;
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
+    columns: { payload: true },
+  });
+  const reviewCycleId = (run?.payload as { reviewCycleId?: unknown } | null)
+    ?.reviewCycleId;
+  return typeof reviewCycleId === 'string' && reviewCycleId.length > 0
+    ? reviewCycleId
+    : undefined;
 }
 
 async function resolvePullRequestNumbers(
@@ -104,9 +140,14 @@ export async function queuePrCiFailureNotification(
   }
 
   const pullRequestNumbers = await resolvePullRequestNumbers(payload);
+  const reviewCycleId = await resolveRoomoteReviewCycleId(payload);
   const inputs = buildPrCiFailureNotificationInputs(
     payload,
     pullRequestNumbers,
+    {
+      reviewCycleId,
+      roomoteAuthored: payload.check_run.name === 'Roomote code review',
+    },
   );
 
   await Promise.all(

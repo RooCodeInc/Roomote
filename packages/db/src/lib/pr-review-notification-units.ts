@@ -60,7 +60,6 @@ const LIVE_DELIVERY_STATES: CanonicalPrReviewDeliveryState[] = [
   'prompt_posting',
   'auto_dispatch_pending',
 ];
-const ROOMOTE_CI_COALESCE_WINDOW_MS = 15 * 60 * 1000;
 
 export type CanonicalPrReviewDeliveryState =
   | 'pending'
@@ -131,9 +130,14 @@ function episodeIdentity(input: UnitInput): {
   id: string;
 } {
   if (input.roomoteAuthored) {
+    if (!input.batchId) {
+      throw new Error(
+        `Cannot assign Roomote PR review event ${input.eventKey} without a review cycle id.`,
+      );
+    }
     return {
       kind: 'roomote_cycle',
-      id: input.batchId ?? `event:${input.eventKey}`,
+      id: input.batchId,
     };
   }
   if (input.automatedAuthorId) {
@@ -398,86 +402,6 @@ async function projectUnitToLinks(
   }
 }
 
-async function matchingOpenRoomoteUnits(
-  executor: DatabaseOrTransaction,
-  input: UnitInput,
-  repositoryKey: string,
-) {
-  if (!input.reviewHeadSha) return [];
-  const start = new Date(
-    input.observedAt.getTime() - ROOMOTE_CI_COALESCE_WINDOW_MS,
-  );
-  const end = new Date(
-    input.observedAt.getTime() + ROOMOTE_CI_COALESCE_WINDOW_MS,
-  );
-  return executor.query.prReviewNotificationUnits.findMany({
-    where: and(
-      eq(
-        prReviewNotificationUnits.sourceControlProvider,
-        input.sourceControlProvider,
-      ),
-      eq(prReviewNotificationUnits.repositoryIdentityKey, repositoryKey),
-      eq(prReviewNotificationUnits.prNumber, input.prNumber),
-      eq(prReviewNotificationUnits.headSha, input.reviewHeadSha),
-      eq(prReviewNotificationUnits.episodeKind, 'roomote_cycle'),
-      isNull(prReviewNotificationUnits.sealedAt),
-      gt(prReviewNotificationUnits.lastObservedAt, start),
-      lte(prReviewNotificationUnits.firstObservedAt, end),
-    ),
-    columns: { id: true },
-  });
-}
-
-async function mergeProvisionalCiUnits(
-  executor: DatabaseOrTransaction,
-  input: UnitInput,
-  roomoteUnitId: string,
-  repositoryKey: string,
-): Promise<void> {
-  if (!input.reviewHeadSha) return;
-  const roomoteUnits = await matchingOpenRoomoteUnits(
-    executor,
-    input,
-    repositoryKey,
-  );
-  if (roomoteUnits.length !== 1 || roomoteUnits[0]?.id !== roomoteUnitId) {
-    return;
-  }
-
-  const start = new Date(
-    input.observedAt.getTime() - ROOMOTE_CI_COALESCE_WINDOW_MS,
-  );
-  const end = new Date(
-    input.observedAt.getTime() + ROOMOTE_CI_COALESCE_WINDOW_MS,
-  );
-  const ciUnits = await executor.query.prReviewNotificationUnits.findMany({
-    where: and(
-      eq(
-        prReviewNotificationUnits.sourceControlProvider,
-        input.sourceControlProvider,
-      ),
-      eq(prReviewNotificationUnits.repositoryIdentityKey, repositoryKey),
-      eq(prReviewNotificationUnits.prNumber, input.prNumber),
-      eq(prReviewNotificationUnits.headSha, input.reviewHeadSha),
-      eq(prReviewNotificationUnits.episodeKind, 'ci'),
-      isNull(prReviewNotificationUnits.sealedAt),
-      gt(prReviewNotificationUnits.lastObservedAt, start),
-      lte(prReviewNotificationUnits.firstObservedAt, end),
-    ),
-    columns: { id: true },
-  });
-  if (ciUnits.length === 0) return;
-
-  const ciUnitIds = ciUnits.map(({ id }) => id);
-  await executor
-    .update(prReviewNotificationUnitEvents)
-    .set({ unitId: roomoteUnitId, attachedAt: new Date() })
-    .where(inArray(prReviewNotificationUnitEvents.unitId, ciUnitIds));
-  await executor
-    .delete(prReviewNotificationUnits)
-    .where(inArray(prReviewNotificationUnits.id, ciUnitIds));
-}
-
 /** Assigns a newly persisted event to its canonical unsealed feedback unit. */
 export async function assignPrReviewNotificationUnit(
   executor: DatabaseOrTransaction,
@@ -506,14 +430,6 @@ export async function assignPrReviewNotificationUnit(
     input.isSummary === true && baseEpisode.kind === 'roomote_cycle';
 
   let targetUnit = null;
-  if (baseEpisode.kind === 'ci') {
-    const candidates = await matchingOpenRoomoteUnits(
-      executor,
-      input,
-      repositoryKey,
-    );
-    targetUnit = candidates.length === 1 ? candidates[0] : null;
-  }
 
   if (!targetUnit) {
     const identity = {
@@ -616,15 +532,6 @@ export async function assignPrReviewNotificationUnit(
     .insert(prReviewNotificationUnitEvents)
     .values({ unitId: targetUnit.id, eventId })
     .onConflictDoNothing();
-
-  if (input.isSummary && baseEpisode.kind === 'roomote_cycle') {
-    await mergeProvisionalCiUnits(
-      executor,
-      input,
-      targetUnit.id,
-      repositoryKey,
-    );
-  }
 
   await projectUnitToLinks(
     executor,

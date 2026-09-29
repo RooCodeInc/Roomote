@@ -243,6 +243,7 @@ export async function publishGithubPrReviewCheck(input: {
   headSha: string;
   taskId: string;
   runId: number;
+  reviewCycleId?: string;
   status?: 'queued' | 'in_progress';
   signal?: AbortSignal;
 }): Promise<void> {
@@ -269,7 +270,9 @@ export async function publishGithubPrReviewCheck(input: {
         ? { started_at: new Date().toISOString() }
         : {}),
       details_url: taskUrl,
-      external_id: `roomote-review:${input.runId}`,
+      external_id: input.reviewCycleId
+        ? `roomote-review:${input.runId}:${input.reviewCycleId}`
+        : `roomote-review:${input.runId}`,
       output: {
         title:
           status === 'in_progress'

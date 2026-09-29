@@ -102,11 +102,13 @@ export function buildGitHubPrSynchronizeFollowUpMessage({
   prNumber,
   previousHeadSha,
   eventHeadSha,
+  reviewCycleId,
 }: {
   repository: string;
   prNumber: number;
   previousHeadSha?: string | null;
   eventHeadSha: string;
+  reviewCycleId?: string;
 }): string {
   const requestedFollowUp =
     'New commits were pushed while this pull request review was active. Re-review the live pull request head before finalizing the current review.';
@@ -125,6 +127,7 @@ Execution rules:
 ${buildGitHubTaskContextBlock({
   repository,
   pull_request_number: prNumber,
+  ...(reviewCycleId ? { review_cycle_id: reviewCycleId } : {}),
   previous_review_head_sha: previousHeadSha,
   synchronize_event_head_sha: eventHeadSha,
 })}

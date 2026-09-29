@@ -1,20 +1,17 @@
-import { createHash } from 'node:crypto';
-
 import {
   REVIEW_STATUS_END_MARKER,
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
   isReviewSummaryInProgress,
+  parseReviewCycleId,
 } from '@roomote/cloud-agents/server';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
   completeGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification,
   markRoomotePullRequestReadyAfterCleanReview,
-  startPrReviewNotificationCycle,
   type EnqueuePrReviewNotificationInput,
-  type StartPrReviewNotificationCycleInput,
 } from '@roomote/sdk/server';
 import type { OperationalLogFields } from '@roomote/types';
 
@@ -126,16 +123,6 @@ function getIssueCommentRevision(
   return eventPayload.comment.created_at;
 }
 
-function getTimestampLessSummaryCycleId(
-  commentId: number,
-  inProgressBody: string,
-): string {
-  const bodyFingerprint = createHash('sha256')
-    .update(inProgressBody)
-    .digest('hex');
-  return `github-summary:${commentId}:body:${bodyFingerprint}`;
-}
-
 /**
  * Classifies a non-mention PR review webhook event into a review-activity
  * notification input for the owning task's originating conversation (Slack,
@@ -227,6 +214,7 @@ function decidePrReviewActivityNotification(
     const review = eventPayload.review;
     const authorLogin = review.user?.login;
     const body = getReviewBody(review.body);
+    const reviewCycleId = body ? parseReviewCycleId(body) : undefined;
 
     if (!authorLogin) {
       return { reason: 'author_missing' };
@@ -253,7 +241,9 @@ function decidePrReviewActivityNotification(
           ...getAutomatedAuthorMetadata(review.user),
           ...(body ? { body } : {}),
           ...(review.commit_id ? { reviewHeadSha: review.commit_id } : {}),
-          batchId: `github-review:${review.id}`,
+          ...(reviewCycleId
+            ? { reviewCycleId, batchId: reviewCycleId }
+            : { batchId: `github-review:${review.id}` }),
           reviewState: review.state,
           ...(review.html_url ? { url: review.html_url } : {}),
           ...(review.submitted_at
@@ -270,6 +260,7 @@ function decidePrReviewActivityNotification(
   const comment = eventPayload.comment;
   const authorLogin = comment.user?.login;
   const body = getReviewBody(comment.body);
+  const reviewCycleId = body ? parseReviewCycleId(body) : undefined;
 
   if (!authorLogin) {
     return { reason: 'author_missing' };
@@ -300,9 +291,11 @@ function decidePrReviewActivityNotification(
           : {}),
         ...(body ? { body } : {}),
         ...(comment.commit_id ? { reviewHeadSha: comment.commit_id } : {}),
-        ...(comment.pull_request_review_id
-          ? { batchId: `github-review:${comment.pull_request_review_id}` }
-          : {}),
+        ...(reviewCycleId
+          ? { reviewCycleId, batchId: reviewCycleId }
+          : comment.pull_request_review_id
+            ? { batchId: `github-review:${comment.pull_request_review_id}` }
+            : {}),
         ...(comment.html_url ? { url: comment.html_url } : {}),
         observedAt: getObservedAt(comment.created_at),
         ...(GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
@@ -399,7 +392,6 @@ type PrReviewSummaryNotification = {
 };
 
 type PrReviewSummaryLifecycle =
-  | { kind: 'started'; input: StartPrReviewNotificationCycleInput }
   | { kind: 'completed'; notification: PrReviewSummaryNotification }
   | {
       kind: 'reconciled';
@@ -453,6 +445,7 @@ function buildPrReviewSummaryLifecycle(
   }
 
   const body = comment.body ?? '';
+  const reviewCycleId = parseReviewCycleId(body);
 
   if (!body.trimStart().startsWith(REVIEW_SUMMARY_MARKER)) {
     return null;
@@ -485,22 +478,7 @@ function buildPrReviewSummaryLifecycle(
   const observedAt = getObservedAt(comment.updated_at ?? comment.created_at);
 
   if (currentInProgress) {
-    if (!markerSha || previousInProgress) {
-      return null;
-    }
-
-    return {
-      kind: 'started',
-      input: {
-        repository: eventPayload.repository.full_name,
-        prNumber: eventPayload.issue.number,
-        reviewHeadSha: markerSha,
-        cycleId: comment.updated_at
-          ? `github-summary:${comment.id}:${revision}`
-          : getTimestampLessSummaryCycleId(comment.id, body),
-        observedAt,
-      },
-    };
+    return null;
   }
 
   // Edited events only notify for an in-progress -> terminal transition.
@@ -509,7 +487,7 @@ function buildPrReviewSummaryLifecycle(
   // `changes` is only present on issue_comment.edited payloads.
   if ('changes' in eventPayload) {
     if (!previousInProgress) {
-      return markerSha && reviewTaskId
+      return markerSha && reviewTaskId && reviewCycleId
         ? {
             kind: 'reconciled',
             taskId: reviewTaskId,
@@ -545,6 +523,8 @@ function buildPrReviewSummaryLifecycle(
           authorLogin,
           ...(markerSha ? { reviewHeadSha: markerSha } : {}),
           ...(reviewTaskId ? { reviewTaskId } : {}),
+          reviewCycleId,
+          batchId: reviewCycleId,
           reviewResult: {
             reviewKind: getReviewSummaryMarkerMode(body),
             outcome: getReviewOutcome(summary, findingCount),
@@ -552,14 +532,6 @@ function buildPrReviewSummaryLifecycle(
             approvalStatus: getReviewApprovalStatus(summary),
             headSha: markerSha,
           },
-          ...(!comment.updated_at && typeof previousBody === 'string'
-            ? {
-                batchId: getTimestampLessSummaryCycleId(
-                  comment.id,
-                  previousBody,
-                ),
-              }
-            : {}),
           summary,
           ...(comment.html_url ? { url: comment.html_url } : {}),
           observedAt,
@@ -594,21 +566,14 @@ export async function queuePrReviewSummaryNotification(
   }
 
   const reference =
-    lifecycle.kind === 'started'
-      ? lifecycle.input
-      : lifecycle.kind === 'completed'
-        ? lifecycle.notification.input
-        : {
-            repository: eventPayload.repository.full_name,
-            prNumber: eventPayload.issue.number,
-          };
+    lifecycle.kind === 'completed'
+      ? lifecycle.notification.input
+      : {
+          repository: eventPayload.repository.full_name,
+          prNumber: eventPayload.issue.number,
+        };
 
   try {
-    if (lifecycle.kind === 'started') {
-      await startPrReviewNotificationCycle(lifecycle.input);
-      return;
-    }
-
     if (lifecycle.kind === 'reconciled') {
       if (!eventPayload.installation?.id) {
         console.warn(

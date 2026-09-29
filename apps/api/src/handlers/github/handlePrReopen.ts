@@ -5,6 +5,7 @@ import { handlePrOpen } from './handlePrOpen';
 
 export async function handlePrReopen(
   payload: WebhookPullRequestReopened,
+  options?: { admissionId?: string },
 ): Promise<WebhookResponse> {
-  return handlePrOpen(payload);
+  return handlePrOpen(payload, options);
 }

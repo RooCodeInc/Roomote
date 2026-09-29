@@ -6,7 +6,7 @@ import {
   db,
   deferPrReviewDeliveries,
   eq,
-  persistPrReviewEvent,
+  persistPrReviewEvent as persistDurablePrReviewEvent,
   persistPrReviewEventInTransaction,
   prReviewEventDeliveries,
   prReviewEvents,
@@ -18,6 +18,42 @@ import {
   taskFactory,
   taskPullRequests,
 } from '../../server';
+
+async function persistPrReviewEvent(
+  input: Parameters<typeof persistDurablePrReviewEvent>[0],
+) {
+  const event = input.event as Record<string, unknown>;
+  const reviewCycleId =
+    typeof event.reviewCycleId === 'string'
+      ? event.reviewCycleId
+      : input.roomoteAuthored && input.batchId;
+  const reviewHeadSha = input.reviewHeadSha;
+  if (
+    input.roomoteAuthored &&
+    !input.legacyOwnership &&
+    reviewCycleId &&
+    reviewHeadSha
+  ) {
+    await recordPrReviewCycleState({
+      sourceControlProvider: input.sourceControlProvider,
+      repository: input.repository,
+      prNumber: input.prNumber,
+      reviewHeadSha,
+      cycleId: reviewCycleId,
+      phase: 'open',
+      observedAt: input.observedAt,
+    });
+  }
+  return persistDurablePrReviewEvent({
+    ...input,
+    ...(reviewCycleId
+      ? {
+          batchId: reviewCycleId,
+          event: { ...event, reviewCycleId },
+        }
+      : {}),
+  });
+}
 
 function deferred() {
   let resolve!: () => void;
@@ -386,10 +422,26 @@ describe('durable PR review events', () => {
     );
   });
 
-  it('coalesces a Roomote review finding with a same-head CI failure', async () => {
+  it('keeps a Roomote review finding and same-cycle CI failure in one unit', async () => {
     const task = await taskFactory.create();
     const repository = `owner/cross-trigger-${task.id}`;
     await associate(task.id, repository, 1659);
+    await persistPrReviewEvent({
+      ...eventInput(repository, 1659, `check-run-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'ci_failure',
+        roomoteAuthored: true,
+        authorLogin: 'github-actions',
+        checkName: 'Test',
+        reviewHeadSha: 'reviewed-head',
+      },
+      batchKind: 'roomote',
+      batchId: 'review-cycle',
+      reviewHeadSha: 'reviewed-head',
+      roomoteAuthored: true,
+      observedAt: new Date('2026-08-25T18:26:03Z'),
+    });
     await persistPrReviewEvent({
       ...eventInput(repository, 1659, `summary-${task.id}`),
       legacyOwnership: false,
@@ -404,20 +456,6 @@ describe('durable PR review events', () => {
       reviewHeadSha: 'reviewed-head',
       roomoteAuthored: true,
       isSummary: true,
-      observedAt: new Date('2026-08-25T18:26:03Z'),
-    });
-    await persistPrReviewEvent({
-      ...eventInput(repository, 1659, `check-run-${task.id}`),
-      legacyOwnership: false,
-      event: {
-        kind: 'ci_failure',
-        authorLogin: 'github-actions',
-        checkName: 'Test',
-        reviewHeadSha: 'reviewed-head',
-      },
-      batchKind: 'human',
-      batchId: null,
-      reviewHeadSha: 'reviewed-head',
       observedAt: new Date('2026-08-25T18:29:28Z'),
     });
 
@@ -435,17 +473,34 @@ describe('durable PR review events', () => {
       batchKind: 'roomote',
       batchId: 'review-cycle',
       deliveryIds: [expect.any(String)],
-      events: expect.arrayContaining([
-        expect.objectContaining({ kind: 'review_summary' }),
-        expect.objectContaining({ kind: 'ci_failure', checkName: 'Test' }),
-      ]),
+      events: [expect.objectContaining({ kind: 'review_summary' })],
     });
+    await expect(
+      db
+        .select({ superseded: prReviewEvents.superseded })
+        .from(prReviewEvents)
+        .where(eq(prReviewEvents.eventKey, `check-run-${task.id}`)),
+    ).resolves.toEqual([{ superseded: true }]);
   });
 
-  it('keeps human feedback separate when coalescing a CI failure', async () => {
+  it('keeps human feedback separate from a Roomote cycle', async () => {
     const task = await taskFactory.create();
     const repository = `owner/cross-trigger-human-${task.id}`;
     await associate(task.id, repository, 1660);
+    await persistPrReviewEvent({
+      ...eventInput(repository, 1660, `check-run-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'ci_failure',
+        roomoteAuthored: true,
+        checkName: 'Test',
+        reviewHeadSha: 'reviewed-head',
+      },
+      batchKind: 'roomote',
+      batchId: 'review-cycle',
+      roomoteAuthored: true,
+      reviewHeadSha: 'reviewed-head',
+    });
     await persistPrReviewEvent({
       ...eventInput(repository, 1660, `summary-${task.id}`),
       legacyOwnership: false,
@@ -459,16 +514,6 @@ describe('durable PR review events', () => {
       reviewHeadSha: 'reviewed-head',
       roomoteAuthored: true,
       isSummary: true,
-    });
-    await persistPrReviewEvent({
-      ...eventInput(repository, 1660, `check-run-${task.id}`),
-      legacyOwnership: false,
-      event: {
-        kind: 'ci_failure',
-        checkName: 'Test',
-        reviewHeadSha: 'reviewed-head',
-      },
-      reviewHeadSha: 'reviewed-head',
     });
     await persistPrReviewEvent({
       ...eventInput(repository, 1660, `human-comment-${task.id}`),
@@ -488,12 +533,13 @@ describe('durable PR review events', () => {
     expect(claims).toHaveLength(2);
     expect(
       claims.find(({ batchKind }) => batchKind === 'roomote')?.events,
-    ).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'review_summary' }),
-        expect.objectContaining({ kind: 'ci_failure' }),
-      ]),
-    );
+    ).toEqual([expect.objectContaining({ kind: 'review_summary' })]);
+    await expect(
+      db
+        .select({ superseded: prReviewEvents.superseded })
+        .from(prReviewEvents)
+        .where(eq(prReviewEvents.eventKey, `check-run-${task.id}`)),
+    ).resolves.toEqual([{ superseded: true }]);
     expect(
       claims.find(({ batchKind }) => batchKind === 'human')?.events,
     ).toEqual([expect.objectContaining({ kind: 'review_comment' })]);
@@ -895,87 +941,68 @@ describe('durable PR review events', () => {
     ).toHaveLength(0);
   });
 
-  it('suppresses same-SHA Roomote activity by observation time, not batch id', async () => {
+  it('does not project a Roomote event without an admitted cycle identity', async () => {
     const task = await taskFactory.create();
-    const repository = `owner/cycle-${task.id}`;
+    const repository = `owner/missing-cycle-${task.id}`;
     await associate(task.id, repository, 9);
-    await recordPrReviewCycleState({
-      sourceControlProvider: 'github',
-      repository,
-      prNumber: 9,
-      reviewHeadSha: 'abc123',
-      cycleId: 'summary-batch',
-      phase: 'open',
-      observedAt: new Date(200),
-    });
-    await persistPrReviewEvent({
+
+    const result = await persistDurablePrReviewEvent({
       ...eventInput(repository, 9, `inline-${task.id}`),
+      legacyOwnership: false,
       event: {
         kind: 'review_comment',
         authorLogin: 'roomote[bot]',
         roomoteAuthored: true,
-        batchId: 'inline-batch',
+        reviewHeadSha: 'abc123',
       },
       batchKind: 'roomote',
-      batchId: 'inline-batch',
+      batchId: 'provider-review-id',
       reviewHeadSha: 'abc123',
       roomoteAuthored: true,
       observedAt: new Date(250),
     });
-    await persistPrReviewEvent({
-      ...eventInput(repository, 9, `summary-${task.id}`),
-      event: {
-        kind: 'review_summary',
-        authorLogin: 'roomote[bot]',
-        roomoteAuthored: true,
-        batchId: 'summary-batch',
-      },
-      batchKind: 'roomote',
-      batchId: 'summary-batch',
-      reviewHeadSha: 'abc123',
-      roomoteAuthored: true,
-      isSummary: true,
-      observedAt: new Date(300),
+
+    expect(result).toMatchObject({
+      projectedTaskCount: 0,
+      reason: 'review_cycle_identity_missing',
     });
-    await persistPrReviewEvent({
-      ...eventInput(repository, 9, `late-${task.id}`),
+  });
+
+  it('does not project a Roomote event with a mismatched cycle identity', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/mismatched-cycle-${task.id}`;
+    await associate(task.id, repository, 90);
+    await recordPrReviewCycleState({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber: 90,
+      reviewHeadSha: 'same-head',
+      cycleId: 'admitted-cycle',
+      phase: 'open',
+      observedAt: new Date(100),
+    });
+
+    const result = await persistDurablePrReviewEvent({
+      ...eventInput(repository, 90, `mismatched-${task.id}`),
+      legacyOwnership: false,
       event: {
         kind: 'review_comment',
         authorLogin: 'roomote[bot]',
         roomoteAuthored: true,
+        reviewCycleId: 'different-cycle',
+        reviewHeadSha: 'same-head',
       },
       batchKind: 'roomote',
-      batchId: null,
-      reviewHeadSha: 'abc123',
+      batchId: 'different-cycle',
+      reviewHeadSha: 'same-head',
       roomoteAuthored: true,
-      observedAt: new Date(350),
+      observedAt: new Date(200),
     });
 
-    const rows = await db
-      .select({
-        event: prReviewEvents.event,
-        superseded: prReviewEvents.superseded,
-      })
-      .from(prReviewEvents)
-      .where(eq(prReviewEvents.repository, repository));
-    expect(rows.filter(({ event }) => event.kind === 'review_summary')).toEqual(
-      [expect.objectContaining({ superseded: false })],
-    );
-    expect(
-      rows
-        .filter(({ event }) => event.kind === 'review_comment')
-        .map(({ superseded }) => superseded)
-        .sort(),
-    ).toEqual([false, true]);
-    const statuses = await db
-      .select({ status: prReviewEventDeliveries.status })
-      .from(prReviewEventDeliveries)
-      .where(eq(prReviewEventDeliveries.taskId, task.id));
-    expect(statuses.map(({ status }) => status).sort()).toEqual([
-      'pending',
-      'pending',
-      'suppressed',
-    ]);
+    expect(result).toMatchObject({
+      projectedTaskCount: 0,
+      reason: 'review_cycle_identity_missing',
+    });
   });
 
   it('completes the matching earlier review cycle after a newer same-SHA cycle opens', async () => {
@@ -993,8 +1020,9 @@ describe('durable PR review events', () => {
     });
     await persistPrReviewEvent({
       ...eventInput(repository, 58, `cycle-a-inline-${task.id}`),
+      event: { kind: 'review_comment', reviewCycleId: 'cycle-a' },
       batchKind: 'roomote',
-      batchId: null,
+      batchId: 'cycle-a',
       reviewHeadSha: 'same-head',
       roomoteAuthored: true,
       observedAt: new Date(150),
@@ -1010,17 +1038,22 @@ describe('durable PR review events', () => {
     });
     await persistPrReviewEvent({
       ...eventInput(repository, 58, `cycle-b-inline-${task.id}`),
+      event: { kind: 'review_comment', reviewCycleId: 'cycle-b' },
       batchKind: 'roomote',
-      batchId: null,
+      batchId: 'cycle-b',
       reviewHeadSha: 'same-head',
       roomoteAuthored: true,
       observedAt: new Date(225),
     });
     const summary = await persistPrReviewEvent({
       ...eventInput(repository, 58, `cycle-a-summary-${task.id}`),
-      event: { kind: 'review_summary', roomoteAuthored: true },
+      event: {
+        kind: 'review_summary',
+        roomoteAuthored: true,
+        reviewCycleId: 'cycle-a',
+      },
       batchKind: 'roomote',
-      batchId: null,
+      batchId: 'cycle-a',
       reviewHeadSha: 'same-head',
       roomoteAuthored: true,
       isSummary: true,
@@ -1028,8 +1061,10 @@ describe('durable PR review events', () => {
     });
     const lateCycleA = await persistPrReviewEvent({
       ...eventInput(repository, 58, `cycle-a-late-${task.id}`),
+      legacyOwnership: false,
+      event: { kind: 'review_comment', reviewCycleId: 'cycle-a' },
       batchKind: 'roomote',
-      batchId: null,
+      batchId: 'cycle-a',
       reviewHeadSha: 'same-head',
       roomoteAuthored: true,
       observedAt: new Date(160),
@@ -1087,10 +1122,12 @@ describe('durable PR review events', () => {
     await associate(task.id, repository, 10);
     await persistPrReviewEvent({
       ...eventInput(repository, 10, `summary-${task.id}`),
+      legacyOwnership: false,
       event: {
         kind: 'review_summary',
         authorLogin: 'roomote[bot]',
         roomoteAuthored: true,
+        reviewCycleId: 'cycle',
       },
       batchKind: 'roomote',
       batchId: 'cycle',
@@ -1101,19 +1138,40 @@ describe('durable PR review events', () => {
     });
     const result = await persistPrReviewEvent({
       ...eventInput(repository, 10, `old-inline-${task.id}`),
+      legacyOwnership: false,
       event: {
         kind: 'review_comment',
         authorLogin: 'roomote[bot]',
         roomoteAuthored: true,
+        reviewCycleId: 'cycle',
       },
       batchKind: 'roomote',
-      batchId: 'different-cycle',
+      batchId: 'cycle',
       reviewHeadSha: 'def456',
       roomoteAuthored: true,
       observedAt: new Date(450),
     });
+    const lateResult = await persistPrReviewEvent({
+      ...eventInput(repository, 10, `late-after-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewCycleId: 'cycle',
+      },
+      batchKind: 'roomote',
+      batchId: 'cycle',
+      reviewHeadSha: 'def456',
+      roomoteAuthored: true,
+      observedAt: new Date(600),
+    });
 
     expect(result).toMatchObject({
+      projectedTaskCount: 0,
+      reason: 'review_cycle_completed',
+    });
+    expect(lateResult).toMatchObject({
       projectedTaskCount: 0,
       reason: 'review_cycle_completed',
     });
@@ -1128,7 +1186,7 @@ describe('durable PR review events', () => {
         .select()
         .from(prReviewEventDeliveries)
         .where(eq(prReviewEventDeliveries.taskId, task.id)),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   it('suppresses older activity when materializing a legacy completed cycle', async () => {
@@ -1147,8 +1205,10 @@ describe('durable PR review events', () => {
 
     const result = await persistPrReviewEvent({
       ...eventInput(repository, 59, `legacy-inline-${task.id}`),
+      legacyOwnership: false,
       batchKind: 'roomote',
       batchId: 'legacy-inline-batch',
+      event: { kind: 'review_comment', reviewCycleId: 'legacy-cycle' },
       reviewHeadSha: 'legacy-head',
       roomoteAuthored: true,
       observedAt: new Date(450),

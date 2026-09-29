@@ -195,6 +195,7 @@ describe('GitHub PR review check lifecycle', () => {
       headSha: '789abcd',
       taskId: 'task-1',
       runId: 2,
+      reviewCycleId: 'cycle-1',
     });
 
     expect(mockCreateCheck).toHaveBeenCalledWith(
@@ -202,6 +203,7 @@ describe('GitHub PR review check lifecycle', () => {
         owner: 'owner',
         repo: 'repo',
         head_sha: '789abcd',
+        external_id: 'roomote-review:2:cycle-1',
         status: 'queued',
         details_url: 'https://roomote.test/task/task-1',
       }),

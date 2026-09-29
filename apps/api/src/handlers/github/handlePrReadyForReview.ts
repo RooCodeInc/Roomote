@@ -5,6 +5,10 @@ import { handlePrOpen } from './handlePrOpen';
 
 export async function handlePrReadyForReview(
   payload: WebhookPullRequestReadyForReview,
+  options?: { admissionId?: string },
 ): Promise<WebhookResponse> {
-  return handlePrOpen(payload, { isDraftToReady: true });
+  return handlePrOpen(payload, {
+    isDraftToReady: true,
+    admissionId: options?.admissionId,
+  });
 }

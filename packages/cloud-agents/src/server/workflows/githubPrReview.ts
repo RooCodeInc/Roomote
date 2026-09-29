@@ -393,6 +393,7 @@ export async function githubPrReview({
       prNumber,
       repo: fullName,
       branchName,
+      reviewCycleId,
       linkedWorkItems: payloadLinkedWorkItems,
       relayReviewResultsToTask: payloadRelayReviewResultsToTask,
       linkedTaskId: payloadLinkedTaskId,
@@ -450,7 +451,11 @@ export async function githubPrReview({
     ? 'Self-reviewing the PR with fresh eyes now.'
     : 'Reviewing the PR now.';
   const inProgressStatus = `${reviewStatus} ${followLink}`;
-  const summaryMarker = `<!-- roomote-review-summary sha=${pr.headRefOid} mode=initial -->`;
+  const summaryMarker = [
+    `<!-- roomote-review-summary sha=${pr.headRefOid} mode=initial`,
+    ...(reviewCycleId ? [`cycle=${reviewCycleId}`] : []),
+    '-->',
+  ].join(' ');
   const body = buildReviewSummaryBody({
     summaryMarker,
     statusContent: inProgressStatus,
@@ -515,6 +520,7 @@ export async function githubPrReview({
       workflow: 'pr_review',
       pull_request_base_sha: pr.baseRefOid,
       current_head_sha: pr.headRefOid,
+      ...(reviewCycleId ? { review_cycle_id: reviewCycleId } : {}),
       top_level_comment_id: topLevelCommentId,
       comment_header_starting: '',
       comment_header_completed: '',

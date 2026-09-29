@@ -3,6 +3,7 @@ const {
   mockGetInstallationOctokit,
   mockListPullRequestsAssociatedWithCommit,
   mockPaginate,
+  mockFindTaskRun,
 } = vi.hoisted(() => ({
   mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
     notifiedTaskCount: 1,
@@ -10,6 +11,7 @@ const {
   mockGetInstallationOctokit: vi.fn(),
   mockListPullRequestsAssociatedWithCommit: vi.fn(),
   mockPaginate: vi.fn(),
+  mockFindTaskRun: vi.fn(),
 }));
 
 vi.mock('@roomote/github', () => ({
@@ -18,6 +20,12 @@ vi.mock('@roomote/github', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   enqueuePrReviewNotification: mockEnqueuePrReviewNotification,
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  db: { query: { taskRuns: { findFirst: mockFindTaskRun } } },
+  eq: vi.fn(),
+  taskRuns: { id: 'task_runs.id' },
 }));
 
 import type { WebhookCheckRunCompleted } from '../types';
@@ -29,9 +37,13 @@ import {
 function checkRunPayload({
   conclusion = 'failure',
   pullRequestNumbers = [42],
+  name = 'CI / Tests',
+  externalId,
 }: {
   conclusion?: string;
   pullRequestNumbers?: number[];
+  name?: string;
+  externalId?: string;
 } = {}): WebhookCheckRunCompleted {
   return {
     action: 'completed',
@@ -42,7 +54,8 @@ function checkRunPayload({
     },
     check_run: {
       id: 9001,
-      name: 'CI / Tests',
+      name,
+      ...(externalId ? { external_id: externalId } : {}),
       conclusion,
       head_sha: 'abc123',
       completed_at: '2026-08-23T12:00:00.000Z',
@@ -121,6 +134,30 @@ describe('queuePrCiFailureNotification', () => {
       }),
     );
     expect(mockGetInstallationOctokit).not.toHaveBeenCalled();
+  });
+
+  it('maps the Roomote check to its admitted review cycle through external_id', async () => {
+    mockFindTaskRun.mockResolvedValue({
+      payload: { reviewCycleId: 'cycle-123' },
+    });
+
+    await queuePrCiFailureNotification(
+      checkRunPayload({
+        name: 'Roomote code review',
+        externalId: 'roomote-review:77:cycle-123',
+      }),
+    );
+
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          roomoteAuthored: true,
+          reviewCycleId: 'cycle-123',
+          batchId: 'cycle-123',
+        }),
+      }),
+    );
+    expect(mockFindTaskRun).not.toHaveBeenCalled();
   });
 
   it('paginates fork-based pull requests associated with the failed check head SHA', async () => {

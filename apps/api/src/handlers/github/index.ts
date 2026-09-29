@@ -415,7 +415,7 @@ github.post('/', async (c) => {
           };
         }
 
-        return handlePrOpen(payload);
+        return handlePrOpen(payload, { admissionId: id });
       }),
     );
 
@@ -455,7 +455,7 @@ github.post('/', async (c) => {
           };
         }
 
-        return handlePrReopen(payload);
+        return handlePrReopen(payload, { admissionId: id });
       }),
     );
 
@@ -490,7 +490,7 @@ github.post('/', async (c) => {
           };
         }
 
-        return handlePrSynchronize(payload);
+        return handlePrSynchronize(payload, { admissionId: id });
       }),
     );
 
@@ -546,7 +546,7 @@ github.post('/', async (c) => {
           };
         }
 
-        return handlePrReadyForReview(payload);
+        return handlePrReadyForReview(payload, { admissionId: id });
       }),
     );
 

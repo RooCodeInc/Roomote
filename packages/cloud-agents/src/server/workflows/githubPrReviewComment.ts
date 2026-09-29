@@ -7,6 +7,7 @@ import {
 } from './utils';
 
 export const REVIEW_SUMMARY_MARKER = '<!-- roomote-review-summary';
+export const REVIEW_CYCLE_MARKER = '<!-- roomote-review-cycle';
 export const REVIEW_STATUS_START_MARKER =
   '<!-- roomote-review-status:start -->';
 export const REVIEW_STATUS_END_MARKER = '<!-- roomote-review-status:end -->';
@@ -208,7 +209,7 @@ export function parseReviewSummaryMarkerSha(
   markerOrBody: string,
 ): string | undefined {
   const sha = getReviewSummaryMarkerAttribute(markerOrBody, 'sha');
-  if (!sha || sha.length < 7) {
+  if (!sha || sha.length < 7 || (sha.length > 40 && sha.length !== 64)) {
     return undefined;
   }
 
@@ -220,6 +221,41 @@ export function parseReviewSummaryMarkerSha(
   return sha;
 }
 
+export function hasMalformedReviewSummaryMarker(body: string): boolean {
+  if (!body.trimStart().startsWith(REVIEW_SUMMARY_MARKER)) {
+    return false;
+  }
+
+  const markerTokens = getReviewSummaryMarkerTokens(body);
+  if (!markerTokens) {
+    return true;
+  }
+
+  const hasShaToken = markerTokens?.some((token) => token.startsWith('sha='));
+  return (
+    hasShaToken === true && parseReviewSummaryMarkerSha(body) === undefined
+  );
+}
+
+export function parseReviewCycleId(body: string): string | undefined {
+  const summaryCycleId = getReviewSummaryMarkerAttribute(body, 'cycle');
+  if (summaryCycleId) return summaryCycleId;
+
+  const trimmed = body.trimStart();
+  if (!trimmed.startsWith(REVIEW_CYCLE_MARKER)) return undefined;
+  const newlineIndex = trimmed.indexOf('\n');
+  const firstLine =
+    newlineIndex === -1 ? trimmed : trimmed.slice(0, newlineIndex);
+  const markerEnd = firstLine.indexOf('-->');
+  if (markerEnd === -1) return undefined;
+
+  return firstLine
+    .slice(REVIEW_CYCLE_MARKER.length, markerEnd)
+    .trim()
+    .split(/\s+/)
+    .find((token) => token.startsWith('id='))
+    ?.slice('id='.length);
+}
 export function buildGithubCommitHref({
   repositoryFullName,
   sha,

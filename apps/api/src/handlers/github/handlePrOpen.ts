@@ -25,6 +25,7 @@ import { getGitHubAutomationTargets } from './getGitHubAutomationTargets';
 import { getBackgroundGithubTaskProperties } from './backgroundGithubTaskProperties';
 import { getCurrentGitHubPrHeadSha } from './currentPrHead';
 import { getReviewTaskRelayPayload } from './reviewTaskRelayPayload';
+import { buildGithubPrReviewCycleId } from './review-cycle';
 
 export async function handlePrOpen(
   {
@@ -41,6 +42,7 @@ export async function handlePrOpen(
     isExplicitReviewRequest?: boolean;
     expectedGithubCheckRunId?: number;
     expectedHeadSha?: string;
+    admissionId?: string;
   },
 ): Promise<WebhookResponse> {
   if (pr.locked) {
@@ -156,6 +158,13 @@ export async function handlePrOpen(
         return null;
       }
 
+      const reviewCycleId = buildGithubPrReviewCycleId({
+        repository: repository.full_name,
+        prNumber: pr.number,
+        headSha,
+        admissionId: options?.admissionId,
+      });
+
       const launch = await enqueueTask({
         task: {
           type: TaskPayloadKind.GithubPrReview,
@@ -166,6 +175,8 @@ export async function handlePrOpen(
             prTitle: pr.title,
             prUrl: pr.html_url,
             headSha,
+            reviewCycleId,
+            launchIdempotencyKey: reviewCycleId,
             branchName: pr.head.ref,
             ...relayPayload,
           } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>,
@@ -204,6 +215,7 @@ export async function handlePrOpen(
           headSha,
           taskId: launch.taskId,
           runId: launch.id,
+          reviewCycleId,
           signal: releaseLifecycleLock.signal,
         });
       }
