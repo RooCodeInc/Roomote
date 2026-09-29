@@ -47,6 +47,7 @@ vi.mock('../judgment-capture', () => ({
 
 import {
   evaluateTypeSafeJudgments,
+  evaluateTypeSafeJudgmentsWithUsage,
   evaluateDecisionModel,
   resetDecisionModelCache,
   resolveDecisionModel,
@@ -129,6 +130,63 @@ describe('evaluateTypeSafeJudgments', () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
+
+  it.each(['typesafe', 'openrouter', 'vercel'] as const)(
+    'returns only normalized token usage for %s evaluations',
+    async (provider) => {
+      mockGetJudgmentSelection.mockResolvedValue(provider);
+      mockKeys({
+        R_TYPESAFE_API_KEY: 'ts-key',
+        OPENROUTER_API_KEY: 'or-key',
+        AI_GATEWAY_API_KEY: 'gateway-key',
+      });
+      const answers = { urgent: { type: 'noul', noul: 0.8 } };
+      mockFetchResponse({
+        answers:
+          provider === 'vercel'
+            ? { urgent: { type: 'boolean', probability: 0.8 } }
+            : answers,
+        usage:
+          provider === 'vercel'
+            ? { inputTokens: 120, outputTokens: 8, totalTokens: 128 }
+            : { input_tokens: 120, output_tokens: 8, total_tokens: 128 },
+        privateMetadata: 'must not escape the judgment service',
+      });
+      expect(
+        await evaluateTypeSafeJudgmentsWithUsage({
+          state: 'source',
+          questions: { urgent: questions.urgent },
+          skipShadow: true,
+        }),
+      ).toEqual({
+        answers,
+        usage: { inputTokens: 120, outputTokens: 8, totalTokens: 128 },
+      });
+      expect(mockRecordLlmUsage).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    undefined,
+    {
+      input_tokens: -1,
+      output_tokens: 1.5,
+      total_tokens: Number.MAX_SAFE_INTEGER + 1,
+    },
+  ])(
+    'does not invent token counts for missing or invalid usage',
+    async (usage) => {
+      mockFetchResponse({ answers: directAnswers, usage });
+      const result = await evaluateTypeSafeJudgmentsWithUsage({
+        state: 'source',
+        questions,
+      });
+      expect(result?.answers).toEqual(directAnswers);
+      expect(result?.usage.inputTokens).toBeUndefined();
+      expect(result?.usage.outputTokens).toBeUndefined();
+      expect(result?.usage.totalTokens).toBeUndefined();
+    },
+  );
 
   it.each(['off', 'roomote'])(
     'fresh source evaluations stop after switching a cached Jev backend to %s',
