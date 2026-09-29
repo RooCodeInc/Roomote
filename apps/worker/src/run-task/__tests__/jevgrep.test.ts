@@ -50,7 +50,7 @@ beforeEach(() => {
     fs.mkdirSync(path.join(root, 'dist/bin'), { recursive: true });
     fs.writeFileSync(
       path.join(root, 'package.json'),
-      JSON.stringify({ version: '0.4.3', type: 'module' }),
+      JSON.stringify({ version: '0.5.0', type: 'module' }),
     );
     fs.writeFileSync(
       path.join(root, 'dist/bin/index.js'),
@@ -74,7 +74,7 @@ afterEach(async () => {
 it('installs and routes the CLI through the local proxy without run credentials', async () => {
   expect(await setup()).toBe(true);
   expect(mocks.enabled).toHaveBeenCalledWith({ runId: 42 });
-  expect(mocks.install.mock.calls[0]?.[1]).toContain('@dzhng/jevgrep@0.4.3');
+  expect(mocks.install.mock.calls[0]?.[1]).toContain('@dzhng/jevgrep@0.5.0');
   const root = path.join(homeDir, '.roomote/jevgrep');
   const credentials = fs.readFileSync(
     path.join(root, 'config/jevgrep/credentials.json'),
@@ -113,6 +113,21 @@ it('installs and routes the CLI through the local proxy without run credentials'
   expect(result.redirect).toBe('error');
   expect(await setup()).toBe(true);
   expect(mocks.install).toHaveBeenCalledTimes(1);
+});
+
+it('upgrades an older CLI restored from a sandbox snapshot', async () => {
+  await setup();
+  const manifest = path.join(
+    mocks.root,
+    'jevgrep-cli/node_modules/@dzhng/jevgrep/package.json',
+  );
+  fs.writeFileSync(
+    manifest,
+    JSON.stringify({ version: '0.4.3', type: 'module' }),
+  );
+  expect(await setup()).toBe(true);
+  expect(mocks.install).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(fs.readFileSync(manifest, 'utf8')).version).toBe('0.5.0');
 });
 
 it('shares only Jevgrep access with terminals and preserves fresh user env', () => {
