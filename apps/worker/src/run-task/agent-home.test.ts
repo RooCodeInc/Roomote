@@ -1192,6 +1192,37 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(runtimeEnv).not.toHaveProperty('R_CHATGPT_FAST_MODE');
   });
 
+  it('applies per-model service tiers without leaking options to other models', () => {
+    const runtimeEnv = {
+      R_MODEL: 'openai/gpt-6-astra',
+      R_MODEL_FAST_MODE_OPTIONS: JSON.stringify({
+        'openai/gpt-6-astra': 'default',
+        'openai/gpt-6-sol': 'priority',
+      }),
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models?: Record<string, { options?: Record<string, unknown> }> }
+      >;
+    };
+
+    expect(config.provider.openai?.models?.['gpt-6-astra']?.options).toEqual({
+      serviceTier: 'default',
+    });
+    expect(config.provider.openai?.models?.['gpt-6-sol']?.options).toEqual({
+      serviceTier: 'priority',
+    });
+    expect(
+      config.provider.openai?.models?.['gpt-6-luna']?.options,
+    ).toBeUndefined();
+    expect(runtimeEnv).not.toHaveProperty('R_MODEL_FAST_MODE_OPTIONS');
+  });
+
   it('rebases GitHub Copilot onto its OAuth-backed gateway segment', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

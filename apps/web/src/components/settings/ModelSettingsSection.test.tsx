@@ -23,6 +23,7 @@ const suggestionData = vi.hoisted(() => ({
 const suggestionQueryError = vi.hoisted(() => ({ current: false }));
 const lookupMutateAsyncMock = vi.hoisted(() => vi.fn());
 const updateMutateAsyncMock = vi.hoisted(() => vi.fn());
+const updateFastModeMutateAsyncMock = vi.hoisted(() => vi.fn());
 const refreshMutateAsyncMock = vi.hoisted(() => vi.fn());
 const createCustomPresetMutateAsyncMock = vi.hoisted(() => vi.fn());
 const deleteCustomPresetMutateAsyncMock = vi.hoisted(() => vi.fn());
@@ -68,6 +69,13 @@ vi.mock('@tanstack/react-query', () => ({
     if (mutationKey === 'customPresets.create') {
       return {
         mutateAsync: createCustomPresetMutateAsyncMock,
+        isPending: false,
+      };
+    }
+
+    if (mutationKey === 'updateFastMode') {
+      return {
+        mutateAsync: updateFastModeMutateAsyncMock,
         isPending: false,
       };
     }
@@ -128,6 +136,9 @@ vi.mock('@/trpc/client', () => ({
         mutationOptions: () => ({ mutationKey: ['refreshMetadata'] }),
       },
       update: { mutationOptions: () => ({ mutationKey: ['update'] }) },
+      updateFastMode: {
+        mutationOptions: () => ({ mutationKey: ['updateFastMode'] }),
+      },
     },
   }),
 }));
@@ -223,6 +234,7 @@ function buildSettingsData(
       reasoningEffort: ReasoningEffort | null;
       condition: string;
     }>;
+    fastModeOverrides?: Record<string, 'inherit' | 'normal' | 'fast'>;
   } = {},
 ) {
   return {
@@ -347,6 +359,7 @@ function buildSettingsData(
       },
     ],
     codingModelRoutingRules: overrides.codingModelRoutingRules ?? [],
+    fastModeOverrides: overrides.fastModeOverrides ?? {},
   };
 }
 
@@ -462,6 +475,7 @@ describe('ModelSettingsSection', () => {
     vi.clearAllMocks();
     lookupMutateAsyncMock.mockReset();
     updateMutateAsyncMock.mockReset();
+    updateFastModeMutateAsyncMock.mockReset();
     refreshMutateAsyncMock.mockReset();
     createCustomPresetMutateAsyncMock.mockReset();
     deleteCustomPresetMutateAsyncMock.mockReset();
@@ -482,6 +496,7 @@ describe('ModelSettingsSection', () => {
       metadata: null,
     });
     updateMutateAsyncMock.mockResolvedValue({ success: true });
+    updateFastModeMutateAsyncMock.mockResolvedValue({ success: true });
     createCustomPresetMutateAsyncMock.mockResolvedValue({
       id: 'created-preset',
       name: 'Created preset',
@@ -512,6 +527,57 @@ describe('ModelSettingsSection', () => {
       />,
     );
   };
+
+  it('separates ChatGPT OAuth and OpenAI API routes and saves a route choice', async () => {
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['chatgpt', 'openai'],
+    });
+    settingsData.current = buildSettingsData({
+      fastModeOverrides: {
+        'openai:chatgpt-oauth:gpt-6-astra:responses': 'normal',
+      },
+    });
+
+    renderModelSettingsSection();
+
+    expect(screen.getByText('ChatGPT subscription')).toBeInTheDocument();
+    expect(screen.getByText('OpenAI API key')).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/ChatGPT subscription currently takes precedence/u),
+    ).not.toHaveLength(0);
+
+    fireEvent.click(
+      screen.getByRole('combobox', {
+        name: 'Fast mode for GPT 6 Astra on ChatGPT subscription',
+      }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Fast' }));
+
+    await waitFor(() =>
+      expect(updateFastModeMutateAsyncMock).toHaveBeenCalledWith({
+        capabilityId: 'openai:chatgpt-oauth:gpt-6-astra:responses',
+        mode: 'fast',
+      }),
+    );
+  });
+
+  it('surfaces stale route overrides and lets admins clear them', async () => {
+    settingsData.current = buildSettingsData({
+      fastModeOverrides: { 'removed-provider:old-model:responses': 'fast' },
+    });
+
+    renderModelSettingsSection();
+
+    expect(screen.getByText(/Unsupported route/u)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+
+    await waitFor(() =>
+      expect(updateFastModeMutateAsyncMock).toHaveBeenCalledWith({
+        capabilityId: 'removed-provider:old-model:responses',
+        mode: 'inherit',
+      }),
+    );
+  });
 
   it('disables the runtime model selects when env-managed and omits the per-row Make default button', () => {
     settingsData.current = buildSettingsData({

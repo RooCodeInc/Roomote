@@ -27,6 +27,19 @@ When both OpenAI API and ChatGPT Subscription are connected, they expose the
 same model prefix and Roomote uses the subscription. Disconnect ChatGPT
 Subscription before using billed OpenAI API capacity.
 
+For models with confirmed OpenAI Fast mode support, **Settings > Models** can
+request **Inherit**, **Normal**, or **Fast** separately for the OpenAI API-key
+route. Inherit follows the OpenAI project's service-tier default. Fast currently
+has a model-specific per-token premium; check the [OpenAI pricing page](https://developers.openai.com/api/docs/pricing)
+for the current rate. OpenAI may serve a Fast request as Standard during a
+traffic ramp. For requests the gateway can inspect, Roomote checks the Responses
+API service-tier field and records reported downgrades in the inference gateway
+log. Very large request bodies or responses without a tier signal cannot be
+confirmed.
+
+Fast availability depends on project access and region. OpenAI currently limits
+Fast processing for GPT-6 Astra, Sol, and Luna when EU data residency is enabled.
+
 ## Cost behavior
 
 OpenAI API requests are billed to the API project by model and token usage; a

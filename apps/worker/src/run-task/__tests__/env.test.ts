@@ -8,6 +8,7 @@ describe('buildOpenCodeHarnessEnv', () => {
       R_MODEL_REASONING_EFFORT: 'medium',
       R_PLANNING_MODEL_REASONING_EFFORT: 'high',
       R_CHATGPT_FAST_MODE: '1',
+      R_MODEL_FAST_MODE_OPTIONS: '{"openai/gpt-6-astra":"priority"}',
       OPENROUTER_API_KEY: 'openrouter-key',
     });
 
@@ -17,6 +18,7 @@ describe('buildOpenCodeHarnessEnv', () => {
       R_MODEL_REASONING_EFFORT: 'medium',
       R_PLANNING_MODEL_REASONING_EFFORT: 'high',
       R_CHATGPT_FAST_MODE: '1',
+      R_MODEL_FAST_MODE_OPTIONS: '{"openai/gpt-6-astra":"priority"}',
       OPENROUTER_API_KEY: 'openrouter-key',
     });
   });

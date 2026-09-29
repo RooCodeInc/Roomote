@@ -31,6 +31,10 @@ import {
   resolveGatewayUpstream,
   type GatewayUpstreamResolution,
 } from './registry';
+import {
+  inspectOpenAiFastModeRequest,
+  observeOpenAiFastModeResponse,
+} from './openai-fast-mode';
 
 /**
  * Client headers never forwarded upstream. The client's own credential
@@ -479,6 +483,17 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
     useDuplexHalf = false;
   }
 
+  const openAiFastModeInspection =
+    providerId === 'openai' &&
+    method === 'POST' &&
+    upstreamPath === '/v1/responses'
+      ? await inspectOpenAiFastModeRequest(c.req.raw)
+      : undefined;
+
+  if (openAiFastModeInspection?.status === 'unsupported') {
+    return c.json({ error: openAiFastModeInspection.error }, 400);
+  }
+
   try {
     const upstreamResponse = await fetchWithLongLivedStreamDispatcher(
       upstreamUrl,
@@ -530,11 +545,19 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       }
     }
 
+    const observedUpstreamResponse =
+      openAiFastModeInspection?.status === 'fast'
+        ? observeOpenAiFastModeResponse(
+            upstreamResponse,
+            openAiFastModeInspection.context,
+            { requestId, runId: auth.runId },
+          )
+        : upstreamResponse;
     const responseHeaders = buildInferenceResponseHeaders(
       upstreamResponse.headers,
     );
     const loggedBody = createLoggedProxyResponseBody({
-      body: upstreamResponse.body,
+      body: observedUpstreamResponse.body,
       logPrefix: `${logPrefix} Upstream response stream failed`,
       getLogFields: () => ({
         requestId,

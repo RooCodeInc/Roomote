@@ -5,6 +5,7 @@ import {
   mapRecommendedTaskModels,
 } from './recommended-task-models';
 import { isOpenAiCompatibleProviderId } from './openai-compatible-providers';
+import { modelFastModeSchema } from './model-fast-mode';
 
 const TASK_MODEL_ID_PATTERN = /^[^/\s]+\/.+$/u;
 
@@ -208,6 +209,11 @@ export const taskModelSettingsSchema = z.object({
    * id remains recorded here, so the sync never re-adds it.
    */
   catalogSyncedModelIds: z.array(z.string().trim().min(1)).optional(),
+  /** Fast-mode choices keyed by an exact provider/model/auth/endpoint route. */
+  fastModeOverrides: z
+    .record(z.string().trim().min(1), modelFastModeSchema)
+    .optional()
+    .catch({}),
 });
 
 export type TaskModelSettings = z.infer<typeof taskModelSettingsSchema>;
@@ -557,6 +563,14 @@ export function normalizeTaskModelSettings(value: unknown): TaskModelSettings {
           ),
         ]
       : undefined;
+  const fastModeOverrides =
+    parsed.success && parsed.data.fastModeOverrides
+      ? Object.fromEntries(
+          Object.entries(parsed.data.fastModeOverrides).filter(
+            ([, mode]) => mode !== 'inherit',
+          ),
+        )
+      : undefined;
 
   return {
     models,
@@ -564,6 +578,9 @@ export function normalizeTaskModelSettings(value: unknown): TaskModelSettings {
     defaultModelId,
     ...(codingModelRoutingRules.length > 0 ? { codingModelRoutingRules } : {}),
     ...(catalogSyncedModelIds ? { catalogSyncedModelIds } : {}),
+    ...(fastModeOverrides && Object.keys(fastModeOverrides).length > 0
+      ? { fastModeOverrides }
+      : {}),
   };
 }
 

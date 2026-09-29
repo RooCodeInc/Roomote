@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import {
   collectOpenRouterVariantModelAlias,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
+  MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   isTaskModelIdDisabled,
   mergeAmazonBedrockProviderConfig,
@@ -19,8 +20,10 @@ import {
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
+  mergeOpenCodeModelFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  parseModelFastModeRequestOptions,
   SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES,
   stripOpenCodeModelReasoningOptions,
   toBedrockMantleRuntimeModelId,
@@ -156,14 +159,22 @@ function buildModelBackedOpenCodeConfigContent(
     );
   }
 
+  const modelFastModeRequestOptions = parseModelFastModeRequestOptions(
+    env[MODEL_FAST_MODE_OPTIONS_ENV_VAR_NAME],
+  );
   const providerModelConfig =
-    env[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1'
-      ? mergeOpenCodeChatGptFastModeOptions(providerReasoningConfig, [
-          model,
-          smallModel,
-          visionModel,
-        ])
-      : providerReasoningConfig;
+    Object.keys(modelFastModeRequestOptions).length > 0
+      ? mergeOpenCodeModelFastModeOptions(
+          providerReasoningConfig,
+          modelFastModeRequestOptions,
+        )
+      : env[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1'
+        ? mergeOpenCodeChatGptFastModeOptions(providerReasoningConfig, [
+            model,
+            smallModel,
+            visionModel,
+          ])
+        : providerReasoningConfig;
   const configuredModelIds = [model, smallModel, visionModel];
   // Same Bedrock provider registrations the task worker applies: OpenCode's
   // catalog knows neither Mantle endpoint, and the native provider does not

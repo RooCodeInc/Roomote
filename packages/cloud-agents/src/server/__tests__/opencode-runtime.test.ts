@@ -675,6 +675,31 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it('applies route-resolved Fast mode options to individual models', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'openai/gpt-6-astra',
+      R_MODEL_FAST_MODE_OPTIONS: JSON.stringify({
+        'openai/gpt-6-astra': 'default',
+        'openai/gpt-6-sol': 'priority',
+      }),
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toMatchObject({
+      model: 'openai/gpt-6-astra',
+      provider: {
+        openai: {
+          models: {
+            'gpt-6-astra': { options: { serviceTier: 'default' } },
+            'gpt-6-sol': { options: { serviceTier: 'priority' } },
+          },
+        },
+      },
+    });
+    expect(
+      JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}').provider.openai.models,
+    ).not.toHaveProperty('gpt-6-luna');
+  });
+
   it('rewrites OpenRouter variant models to catalog base models with per-model options', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'openrouter/z-ai/glm-5.2:nitro',

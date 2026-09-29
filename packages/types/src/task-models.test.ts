@@ -163,6 +163,24 @@ describe('task model settings', () => {
     expect('catalogSyncedModelIds' in settings).toBe(false);
   });
 
+  it('preserves route-keyed Fast overrides, including stale route IDs', () => {
+    const settings = normalizeTaskModelSettings({
+      models: DEFAULT_TASK_MODEL_SETTINGS.models,
+      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
+      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+      fastModeOverrides: {
+        'openai:chatgpt-oauth:gpt-6-astra:responses': 'normal',
+        'removed-provider:old-model:responses': 'fast',
+        'openai:openai-api-key:old-model:responses': 'inherit',
+      },
+    });
+
+    expect(settings.fastModeOverrides).toEqual({
+      'openai:chatgpt-oauth:gpt-6-astra:responses': 'normal',
+      'removed-provider:old-model:responses': 'fast',
+    });
+  });
+
   it('normalizes coding-model routing rules and drops disabled targets', () => {
     const settings = normalizeTaskModelSettings({
       models: DEFAULT_TASK_MODEL_SETTINGS.models,

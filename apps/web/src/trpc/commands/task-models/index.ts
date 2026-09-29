@@ -15,6 +15,8 @@ import {
 import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
+  getModelFastModeCapability,
+  MODEL_FAST_MODE_VALUES,
   rebaseRoomoteModelIdToUpstream,
   ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   ROOMOTE_INFERENCE_PROVIDER_ID,
@@ -54,6 +56,7 @@ import type {
   SetupModelStatus,
   TaskModelInputType,
   TaskModelMetadata,
+  ModelFastMode,
   TaskModelOption,
   TaskModelRole,
 } from '@roomote/types';
@@ -139,6 +142,7 @@ type TaskModelSettingsResult = {
     family: string;
   }>;
   codingModelRoutingRules: CodingModelRoutingRule[];
+  fastModeOverrides: Record<string, ModelFastMode>;
 };
 
 type TaskModelSuggestionResult = {
@@ -322,6 +326,7 @@ export async function getTaskModelSettingsCommand(
       family,
     })),
     codingModelRoutingRules: settings.codingModelRoutingRules ?? [],
+    fastModeOverrides: settings.fastModeOverrides ?? {},
   };
 }
 
@@ -1476,6 +1481,9 @@ export async function updateTaskModelSettingsCommand(
       catalogSyncedModelIds: normalizeTaskModelSettings(
         persisted?.taskModelSettings ?? null,
       ).catalogSyncedModelIds,
+      fastModeOverrides: normalizeTaskModelSettings(
+        persisted?.taskModelSettings ?? null,
+      ).fastModeOverrides,
     });
 
     await tx
@@ -1500,6 +1508,79 @@ export async function updateTaskModelSettingsCommand(
     success: true,
     settings: await getTaskModelSettingsCommand(auth),
   };
+}
+
+export async function updateTaskModelFastModeCommand(
+  auth: UserAuthSuccess,
+  input: { capabilityId: string; mode: ModelFastMode },
+): Promise<{ success: true }> {
+  assertAdmin(auth);
+
+  if (!MODEL_FAST_MODE_VALUES.includes(input.mode)) {
+    throw new Error('Choose Inherit, Normal, or Fast.');
+  }
+
+  const capability = getModelFastModeCapability(input.capabilityId);
+
+  if (input.mode !== 'inherit' && !capability) {
+    throw new Error(
+      'This Fast mode route is no longer supported. Choose Inherit to clear the saved setting.',
+    );
+  }
+
+  if (input.mode !== 'inherit' && capability?.authKind === 'chatgpt-oauth') {
+    if (!(await isChatGptSubscriptionConnected())) {
+      throw new Error(
+        'Connect a ChatGPT subscription before setting a model Fast mode.',
+      );
+    }
+  }
+
+  if (input.mode !== 'inherit' && capability?.authKind === 'openai-api-key') {
+    if (!(await resolveModelProviderEnvValue('OPENAI_API_KEY'))) {
+      throw new Error(
+        'Connect an OpenAI API key before setting a model Fast mode.',
+      );
+    }
+  }
+
+  await db.transaction(async (tx) => {
+    const [persisted] = await tx
+      .select({ taskModelSettings: deploymentSettings.taskModelSettings })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
+      .limit(1)
+      .for('update');
+    const currentSettings = normalizeTaskModelSettings(
+      persisted?.taskModelSettings ?? null,
+    );
+    const fastModeOverrides = { ...(currentSettings.fastModeOverrides ?? {}) };
+
+    if (input.mode === 'inherit') {
+      delete fastModeOverrides[input.capabilityId];
+    } else {
+      fastModeOverrides[input.capabilityId] = input.mode;
+    }
+
+    const taskModelSettings = normalizeTaskModelSettings({
+      ...currentSettings,
+      fastModeOverrides,
+    });
+
+    await tx
+      .insert(deploymentSettings)
+      .values({
+        id: DEFAULT_DEPLOYMENT_ID,
+        taskModelSettings,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: { taskModelSettings, updatedAt: new Date() },
+      });
+  });
+
+  return { success: true };
 }
 
 type OpenRouterModelLookupResponse = {
