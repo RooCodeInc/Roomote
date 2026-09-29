@@ -1,0 +1,174 @@
+---
+title: Automation webhooks
+icon: webhook
+description: Trigger an enabled custom automation over HTTP without changing its saved prompt.
+---
+
+An automation webhook is a private URL that starts one run of an enabled custom
+automation. It is useful when another system can send an HTTP request but does
+not have a Roomote conversation or native provider integration.
+
+Enable webhooks while editing a custom automation on the **Automations** page.
+Roomote shows the complete URL after it creates the token. The URL is the
+credential: anyone who has it can attempt to trigger the automation, so treat it
+like a password.
+
+## Eligibility and ownership
+
+Webhook management follows custom automation management:
+
+- members can enable and manage webhooks for custom automations they own
+- administrators can manage webhooks for any custom automation
+- the automation must be enabled before its webhook can be enabled
+- the automation must have an active creator; an ownerless automation cannot
+  accept webhook runs
+
+The request checks the saved webhook state, the token, and the creator's active
+account before reading the body or starting a run. Disabling the automation,
+deleting it, deactivating its owner, or disabling the webhook makes the URL
+unusable and returns `404` for later requests.
+
+## Request contract
+
+The endpoint is **POST-only**. Copy the URL from the automation settings rather
+than constructing it by hand:
+
+```text
+https://<your-roomote-origin>/api/webhooks/custom-automations/<automation-id>/<token>
+```
+
+The token is a 43-character URL-safe value. Roomote accepts these body forms:
+
+| Request | Behavior |
+| --- | --- |
+| Empty body | Starts a run with the saved prompt unchanged. |
+| `text/plain` with UTF-8 text | Passes the text to this run as one untrusted instruction. |
+| `application/json` with valid JSON | Passes the parsed JSON, serialized for the run, as one untrusted instruction. |
+| `application/*+json` with valid JSON | Accepts the same JSON behavior as `application/json`. |
+
+The request body is limited to **64 KiB (65,536 bytes)**. The limit applies to
+the raw request bytes, including chunked requests. Unsupported content types,
+non-UTF-8 text, non-identity content encodings, and invalid JSON are rejected.
+An empty body does not need a `Content-Type` header.
+
+The body is untrusted per-run input. Roomote appends it to the configured prompt
+for that run only, and the normal system, authorization, and safety rules still
+apply. It cannot edit the saved prompt, change the webhook token, change the
+automation's schedule or destination, or change the automation's owner.
+
+## Response behavior
+
+An accepted request returns immediately with HTTP `202`:
+
+```json
+{"accepted":true}
+```
+
+This confirms that Roomote accepted a session turn, not that the session or a
+delegated task completed. Each accepted POST starts an independent run, so
+concurrent requests do not reuse or overwrite one another's session context.
+Follow the automation's session or report destination for the result.
+
+The handler uses these responses for common request failures:
+
+| Status | Meaning |
+| --- | --- |
+| `400` | Invalid JSON, invalid UTF-8, or an invalid request body. |
+| `404` | Unknown, revoked, disabled, or ineligible webhook. |
+| `405` | Method was not `POST`; the response allows `POST`. |
+| `413` | The body is larger than 64 KiB. |
+| `415` | Unsupported content type, charset, or content encoding. |
+| `429` | A per-client or per-webhook rate limit was exceeded. |
+| `503` | Roomote accepted the endpoint but the automation run was skipped or failed to start. |
+
+Webhook responses use `no-store` and `private` cache controls, a `no-referrer`
+policy, `nosniff`, and `noindex` headers. Do not put the URL in a public issue,
+client-side bundle, browser referrer, or a log that other people can read.
+
+## Rate limits
+
+The route has two independent one-minute limits:
+
+- **60 requests per client**
+- **15 requests per webhook URL**
+
+When either bucket is exhausted, the route returns HTTP `429`. Space out retries
+and use exponential backoff. A retry after `429` can create another independent
+run, so make the automation prompt or the sending system tolerant of duplicate
+events when your upstream retries requests.
+
+## Rotate or revoke a URL
+
+Use the webhook controls on the custom automation card:
+
+- **Rotate** creates a new URL and invalidates the previous token immediately.
+- **Disable webhook** removes the stored token and returns no URL until you
+  enable it again.
+- disabling the automation prevents the URL from being eligible even if the
+  webhook setting has not yet been changed
+- deleting the automation or losing its active owner also prevents future runs
+
+After rotation or re-enabling the webhook, update every sender that used the old
+URL. Never publish the new URL in a pull request or report.
+
+## Practical curl examples
+
+Store the copied URL in a protected environment variable, not in shell history
+or a checked-in file:
+
+```bash
+export ROOMOTE_AUTOMATION_WEBHOOK_URL='https://<your-roomote-origin>/api/webhooks/custom-automations/<id>/<token>'
+```
+
+Trigger the saved prompt without extra input:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --request POST \
+  "$ROOMOTE_AUTOMATION_WEBHOOK_URL"
+```
+
+Send one plain-text instruction for this run:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --request POST \
+  --header 'Content-Type: text/plain; charset=utf-8' \
+  --data 'Review the latest failed deployment and summarize the likely cause.' \
+  "$ROOMOTE_AUTOMATION_WEBHOOK_URL"
+```
+
+Send structured JSON for this run:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --request POST \
+  --header 'Content-Type: application/json' \
+  --data '{"incident":"deploy-482","severity":"high"}' \
+  "$ROOMOTE_AUTOMATION_WEBHOOK_URL"
+```
+
+`--fail-with-body` treats `4xx` and `5xx` responses as failures while retaining
+the JSON error body. It does not turn a `202` into a completion signal.
+
+## Troubleshooting
+
+- **`404 not_found`**: confirm the URL is current, the webhook is enabled, the
+  automation is enabled, and its creator is still an active deployment member.
+  Rotate or re-enable the webhook if the URL was revoked.
+- **`405 method_not_allowed`**: send `POST`; `GET`, `PUT`, and browser link
+  checks are intentionally rejected.
+- **`413 payload_too_large`**: reduce the raw request body to 64 KiB or less.
+- **`415 unsupported_media_type`**: use an empty body, UTF-8 `text/plain`, or
+  valid `application/json`/`application/*+json`; do not send compressed input.
+- **`400 invalid_json`**: validate the JSON before sending it. The content type
+  determines whether Roomote parses the body as JSON.
+- **`429`**: wait for the one-minute client or URL bucket to recover and back off
+  retries. Check that an upstream retry loop is not sending duplicate requests.
+- **`503 trigger_failed`**: open the automation's latest run in Roomote and
+  check its configuration, preferred environment, provider connection, and
+  destination. A `202` only means the request was accepted; a `503` means the
+  launch was skipped or failed before a usable run started.
+- **The saved prompt changed**: webhook input cannot mutate saved configuration.
+  Check whether someone edited the automation separately and compare its
+  configuration history or current prompt in **Configure**.

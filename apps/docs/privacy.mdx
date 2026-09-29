@@ -1,13 +1,39 @@
 ---
-title: Anonymous telemetry
-icon: volleyball
-description: What anonymous usage data a Roomote deployment can share, how it is identified, and how admins turn it off.
+title: Privacy
+icon: shield-check
+description: Understand Roomote data handling, anonymous telemetry, and the controls available to deployment administrators.
 ---
 
-Roomote can share **anonymous telemetry** with the Roomote team to help
-improve the product. This is on by default, controlled entirely by
-deployment admins, and designed so that Roomote-generated identifiers and the
-default payload cannot identify your company, users, code, or repositories.
+Roomote keeps the data boundaries for a deployment explicit. Product content,
+credentials, prompts, code, and repository names are not part of the default
+anonymous telemetry payload. Deployment administrators control whether a
+self-hosted deployment shares that telemetry, while Roomote Cloud follows its
+own privacy policy.
+
+This page covers the telemetry payload, its identifiers, the controls that turn
+it off, and the separate version-availability check. It does not replace the
+privacy terms of the upstream inference, sandbox, communications, or
+integration providers you connect.
+
+## Privacy boundaries
+
+- session and task content stays in the deployment and the providers that the
+  work explicitly uses; it is not included in anonymous telemetry
+- provider credentials, access tokens, prompts, replies, code, repository names,
+  task contents, and user names are never sent in the default telemetry payload
+- cost analytics stays inside the deployment for members to review; it is
+  separate from anonymous telemetry
+- connected providers may receive the data required to perform their own
+  service, such as model context sent to an inference provider or a message sent
+  to a communications provider
+
+## Anonymous telemetry
+
+Roomote can share **anonymous telemetry** with the Roomote team to help improve
+the product. This is on by default for self-hosted deployments, controlled
+entirely by deployment admins, and designed so that Roomote-generated
+identifiers and the default payload cannot identify your company, users, code,
+or repositories.
 
 ## What gets sent
 
