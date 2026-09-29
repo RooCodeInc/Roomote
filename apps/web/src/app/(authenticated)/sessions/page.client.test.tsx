@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 
 const { experimentState, sessionStatusState } = vi.hoisted(() => ({
   experimentState: { boardEnabled: false, judgmentEnabled: false },
@@ -163,5 +163,54 @@ describe('Sessions list', () => {
     expect(
       within(blockedSection).getByRole('heading').parentElement,
     ).toHaveClass('cursor-default');
+  });
+
+  it('keeps populated card identity while board lanes appear and disappear', async () => {
+    experimentState.boardEnabled = true;
+    experimentState.judgmentEnabled = true;
+    sessionStatusState.current = ['active'];
+
+    const { container, rerender } = render(
+      await SessionsPage({
+        searchParams: Promise.resolve({ view: 'board' }),
+      }),
+    );
+    const activeCard = container.querySelector(
+      '[data-session-board-card-id="active"]',
+    );
+    expect(activeCard).not.toBeNull();
+    expect(
+      container.querySelector('[data-session-board-column="active"]'),
+    ).not.toBeNull();
+
+    sessionStatusState.current = ['active', 'ready'];
+    rerender(
+      await SessionsPage({
+        searchParams: Promise.resolve({ view: 'board' }),
+      }),
+    );
+
+    expect(
+      container.querySelector('[data-session-board-column="ready"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-session-board-card-id="active"]'),
+    ).toBe(activeCard);
+
+    sessionStatusState.current = ['active'];
+    rerender(
+      await SessionsPage({
+        searchParams: Promise.resolve({ view: 'board' }),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        container.querySelector('[data-session-board-column="ready"]'),
+      ).toBeNull();
+    });
+    expect(
+      container.querySelector('[data-session-board-card-id="active"]'),
+    ).toBe(activeCard);
   });
 });

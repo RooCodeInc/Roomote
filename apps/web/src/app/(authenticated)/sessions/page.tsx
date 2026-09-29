@@ -21,6 +21,11 @@ import { Empty, EmptyDescription, EmptyHeader } from '@/components/system';
 
 import { SessionsFilters } from './SessionsFilters';
 import { SessionCard } from './SessionCard';
+import {
+  SessionBoard,
+  SessionBoardCard,
+  SessionBoardColumn,
+} from './SessionBoard';
 
 export default async function SessionsPage({
   searchParams,
@@ -132,43 +137,34 @@ export default async function SessionsPage({
             </EmptyHeader>
           </Empty>
         ) : view === 'board' ? (
-          <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))] gap-3 p-4">
-            {boardColumns.map(({ column, sessions: columnSessions }) => {
-              return (
-                <section
-                  key={column}
-                  aria-labelledby={`session-board-${column}`}
-                  className="min-w-0"
-                >
-                  <header className="mb-2 flex cursor-default items-center justify-between gap-2">
-                    <h2
-                      id={`session-board-${column}`}
-                      className="text-sm font-medium capitalize"
-                    >
-                      {getSessionStatusLabel(column)}
-                    </h2>
-                    <span className="text-xs text-muted-foreground">
-                      {columnSessions.length}
-                    </span>
-                  </header>
-                  <div className="divide-y-2 divide-background bg-card">
-                    {columnSessions.map((session) => (
-                      <SessionCard
-                        key={session.id}
-                        session={session}
-                        viewerUserId={authorizedUser.userId}
-                        query={q}
-                        hideBlockedBadge
-                        sessionStatusExperimentEnabled={
-                          experiments.sessionStatusJudgment
-                        }
-                      />
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
+          <SessionBoard>
+            {boardColumns.map(({ column, sessions: columnSessions }) => (
+              <SessionBoardColumn
+                key={column}
+                column={column}
+                label={getSessionStatusLabel(column)}
+                count={columnSessions.length}
+              >
+                {columnSessions.map((session) => (
+                  <SessionBoardCard
+                    key={session.id}
+                    sessionId={session.id}
+                    column={column}
+                  >
+                    <SessionCard
+                      session={session}
+                      viewerUserId={authorizedUser.userId}
+                      query={q}
+                      hideBlockedBadge
+                      sessionStatusExperimentEnabled={
+                        experiments.sessionStatusJudgment
+                      }
+                    />
+                  </SessionBoardCard>
+                ))}
+              </SessionBoardColumn>
+            ))}
+          </SessionBoard>
         ) : (
           <div className="divide-y divide-card">
             {result.sessions.map((session) => (
