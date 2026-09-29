@@ -129,6 +129,35 @@ describe('convertMarkdownInlineToRichText', () => {
     ]);
   });
 
+  it('parses bracketed PR-title labels and entity-wrapped destinations', () => {
+    const url = 'https://github.com/RooCodeInc/Roomote/pull/3292';
+    const label = '[Docs] Document optional Done session status';
+
+    expect(
+      convertMarkdownInlineToRichText(
+        `Draft PR opened: [${label}](${url}) and [\\[Docs\\] Document optional Done session status](&lt;${url}&gt;).`,
+        {},
+        { angleBracketLinkDestinations: true },
+      ),
+    ).toEqual([
+      { type: 'text', text: 'Draft PR opened: ' },
+      { type: 'link', url, text: label },
+      { type: 'text', text: ' and ' },
+      { type: 'link', url, text: label },
+      { type: 'text', text: '.' },
+    ]);
+  });
+
+  it('bounds unmatched Markdown link label scans', () => {
+    const pathological = '['.repeat(50_000);
+    const start = performance.now();
+    const result = convertMarkdownInlineToRichText(pathological);
+    const elapsedMs = performance.now() - start;
+
+    expect(result).toEqual([{ type: 'text', text: pathological }]);
+    expect(elapsedMs).toBeLessThan(2_000);
+  });
+
   it('does not create links from one-sided angle-bracket destinations', () => {
     const elements = convertMarkdownInlineToRichText(
       '[Finding](<https://x.com/example/status/1)',
