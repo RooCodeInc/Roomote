@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { isDeploymentExperimentEnabled } from '@roomote/db/server';
-import { evaluateTypeSafeJudgments } from '@roomote/cloud-agents/server/typesafe-judgment';
+import { evaluateTypeSafeJudgmentsWithUsage } from '@roomote/cloud-agents/server/typesafe-judgment';
 
-// Jevgrep 0.4.3 asks boolean relevance questions using TypeSafe's native wire
+// Jevgrep 0.5.0 asks boolean relevance questions using TypeSafe's native wire
 // format. The server selects the configured Jev backend and model; callers
 // cannot select an upstream, supply credentials, or enable the Roomote model.
 const requestSchema = z.object({
@@ -35,7 +35,7 @@ export async function evaluateJevgrepRequest(body: unknown): Promise<Response> {
         { status: 403 },
       );
     }
-    const answers = await evaluateTypeSafeJudgments({
+    const result = await evaluateTypeSafeJudgmentsWithUsage({
       state: parsed.data.state,
       questions: parsed.data.questions,
       excludeRoomoteModel: true,
@@ -43,10 +43,19 @@ export async function evaluateJevgrepRequest(body: unknown): Promise<Response> {
       skipShadow: true,
       timeoutMs: 15_000,
     });
-    if (!answers) {
+    if (!result) {
       return Response.json({ error: 'Jev is not configured' }, { status: 503 });
     }
-    return Response.json({ answers });
+    // Jevgrep reconciles its conservative token reservations with these counts.
+    // Dropping usage keeps its local rate limiter artificially throttled.
+    return Response.json({
+      answers: result.answers,
+      usage: {
+        input_tokens: result.usage.inputTokens,
+        output_tokens: result.usage.outputTokens,
+        total_tokens: result.usage.totalTokens,
+      },
+    });
   } catch {
     // Upstream errors may contain submitted source or credentials.
     return Response.json(

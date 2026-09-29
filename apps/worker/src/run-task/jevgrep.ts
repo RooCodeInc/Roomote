@@ -10,7 +10,7 @@ import { sdk } from '@roomote/sdk/client';
 import { resolveNpmInstallCommand } from '../commands/setup/npm-install-command';
 import { startJevgrepProxy } from './jevgrep-proxy';
 
-const JEVGREP_VERSION = '0.4.3';
+const JEVGREP_VERSION = '0.5.0';
 
 /** Share task-scoped CLI access without exposing the rest of the harness env. */
 export function buildJevgrepTerminalEnv(
