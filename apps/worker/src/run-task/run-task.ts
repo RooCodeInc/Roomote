@@ -85,6 +85,7 @@ import {
 } from './agent-home';
 import { installZeroCli } from '../commands/setup/agent-clis';
 import { buildJevgrepTerminalEnv, setupJevgrep } from './jevgrep';
+import { buildJudgementTerminalEnv, setupJudgement } from './judgement-proxy';
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
@@ -735,6 +736,7 @@ export const runTask = async ({
     logger,
     getResult: () => taskRun.result,
   };
+  let closeJudgementProxy: (() => Promise<void>) | undefined;
   let closeJevgrepProxy: (() => Promise<void>) | undefined;
 
   try {
@@ -949,6 +951,14 @@ export const runTask = async ({
     const hasInitialImages = Boolean(images?.length);
 
     const homeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
+
+    await setupJudgement({
+      runtimeEnv,
+      logger,
+      registerCleanup: (close) => {
+        closeJudgementProxy = close;
+      },
+    });
 
     const jevgrepEnabled = await setupJevgrep({
       runId: taskRun.id,
@@ -2252,10 +2262,13 @@ export const runTask = async ({
       workingDirectory: workspacePath,
       harnessLogger: logger,
       userEnv: () =>
-        buildJevgrepTerminalEnv(
-          workerEnv.buildUserFacingEnv(),
+        buildJudgementTerminalEnv(
+          buildJevgrepTerminalEnv(
+            workerEnv.buildUserFacingEnv(),
+            runtimeEnv,
+            homeDir,
+          ),
           runtimeEnv,
-          homeDir,
         ),
       harness,
       harnessManager,
@@ -2590,6 +2603,7 @@ export const runTask = async ({
       : resolvedResult;
   } finally {
     activeWorkerCrashContext = null;
+    await closeJudgementProxy?.();
     await closeJevgrepProxy?.();
   }
 };

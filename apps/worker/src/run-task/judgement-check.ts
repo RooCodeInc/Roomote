@@ -1,46 +1,58 @@
 import { check } from '@roo-code/judgement';
 
-import { buildWorkerHeaders, createClient } from '@roomote/sdk/client';
-
-/** Use the task's scoped API credential, never the launcher's environment. */
+/** Use the worker's local proxy without requiring a task or provider key. */
 export async function checkRepositoryJudgement(
   env: NodeJS.ProcessEnv = process.env,
   cwd = process.cwd(),
 ) {
-  const runId = Number(env.ROOMOTE_TASK_RUN_ID);
-  const url = env.ROOMOTE_PLATFORM_API_URL;
-  const token = env.ROOMOTE_CLOUD_TOKEN;
-  const client =
-    url && token && Number.isSafeInteger(runId) && runId > 0
-      ? createClient({
-          url,
-          headers: () =>
-            buildWorkerHeaders({
-              AUTH_TOKEN: token,
-              ROOMOTE_AUTH_BYPASS_VALUE: env.ROOMOTE_AUTH_BYPASS_VALUE,
-              ROOMOTE_AUTH_BYPASS_HEADER_NAME:
-                env.ROOMOTE_AUTH_BYPASS_HEADER_NAME,
-            }),
-        })
-      : null;
-  return check({
+  const failures = new Set<string>();
+  const report = await check({
     cwd,
     env,
     hook: true,
     deadlineMs: 3000,
-    // Backend selection can change during a run. Do not reuse judgments without
-    // an immutable backend revision; the standalone fixed-model CLI caches them.
     cache: false,
     evaluate: async (request, signal) => {
-      if (!client)
-        throw new Error('Judgement requires a task runtime credential');
-      const result = await client.taskRuns.evaluateRepositoryJudgement.mutate(
-        { runId, request },
-        { signal },
-      );
-      if (result.kind !== 'answered')
-        throw new Error('Judgement backend unavailable');
-      return result.answer;
+      const endpoint = env.R_JUDGEMENT_GATEWAY_URL;
+      if (!endpoint) {
+        failures.add('Roomote Judgement proxy is unavailable for this task.');
+        throw new Error('Missing proxy');
+      }
+      const url = new URL(endpoint);
+      if (
+        url.protocol !== 'http:' ||
+        url.hostname !== '127.0.0.1' ||
+        url.pathname !== '/judge' ||
+        url.username ||
+        url.password
+      )
+        throw new Error('Invalid local proxy');
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(request),
+          signal,
+          redirect: 'error',
+        });
+        if (!response.ok) {
+          failures.add(
+            response.status === 503
+              ? 'Configure a supported Jev provider in Roomote Settings > Models.'
+              : 'Roomote Judgement evaluation failed or timed out.',
+          );
+          await response.body?.cancel();
+          throw new Error('Evaluation unavailable');
+        }
+        return await response.json();
+      } catch {
+        failures.add(
+          'Could not complete a judgment through the Roomote proxy.',
+        );
+        throw new Error('Proxy evaluation failed');
+      }
     },
   });
+  report.messages.push(...failures);
+  return report;
 }
