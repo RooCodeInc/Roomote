@@ -25,7 +25,7 @@ import {
   getTaskRunDisplayError,
   isSnapshotUnavailableError,
 } from '@/lib/task-run-errors';
-import { formatInferenceCost } from '@/lib/formatters';
+import { formatInferenceCost, formatTokens } from '@/lib/formatters';
 import { getUserDisplayName } from '@/lib/user-display-name';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
@@ -300,6 +300,7 @@ export function TaskInfoPanel({
   const inferenceCostLabel = formatInferenceCost(
     (session?.task ?? task).inferenceUsage?.costMicroUsd,
   );
+  const inferenceUsage = (session?.task ?? task).inferenceUsage;
   const showRuntimeRow = false;
   const participants = useMemo(
     () =>
@@ -422,6 +423,13 @@ export function TaskInfoPanel({
           <span className="inline-flex items-center gap-1.5">
             <DollarSign className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate">{inferenceCostLabel}</span>
+          </span>
+        </SandboxInfoRow>
+
+        <SandboxInfoRow label="Token Usage">
+          <span className="truncate">
+            {formatTokens(inferenceUsage?.totalTokens ?? 0)} total ·{' '}
+            {formatTokens(inferenceUsage?.peakContextTokens ?? 0)} peak context
           </span>
         </SandboxInfoRow>
 

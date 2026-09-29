@@ -52,6 +52,8 @@ type FastSessionTaskSummary = {
   taskId: string;
   title: string;
   inferenceCostMicroUsd: number;
+  inferenceTotalTokens: number;
+  peakContextTokens: number;
   artifacts: Array<{
     id: string;
     path: string;
@@ -514,6 +516,8 @@ export async function getFastSessionTasks(
       snapshotFailedAt: latestRunPerTask.snapshotFailedAt,
       snapshotId: latestRunPerTask.snapshotId,
       inferenceCostMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+      inferenceTotalTokens: sql<number>`coalesce(sum(${llmUsageEvents.totalTokens}), 0)::bigint`,
+      peakContextTokens: sql<number>`coalesce(max(${llmUsageEvents.contextTokens}), 0)::bigint`,
     })
     .from(latestRunPerTask)
     .leftJoin(
@@ -578,6 +582,8 @@ export async function getFastSessionTasks(
     taskId: row.taskId,
     title: row.title,
     inferenceCostMicroUsd: Number(row.inferenceCostMicroUsd),
+    inferenceTotalTokens: Number(row.inferenceTotalTokens),
+    peakContextTokens: Number(row.peakContextTokens),
     artifacts: artifactRows
       .filter((artifact) => artifact.taskId === row.taskId)
       .map(({ taskId: _taskId, ...artifact }) => artifact),
@@ -1050,6 +1056,8 @@ export async function getFastSessionById(
   const [directUsage] = await db
     .select({
       costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+      totalTokens: sql<number>`coalesce(sum(${llmUsageEvents.totalTokens}), 0)::bigint`,
+      peakContextTokens: sql<number>`coalesce(max(${llmUsageEvents.contextTokens}), 0)::bigint`,
     })
     .from(llmUsageEvents)
     .where(
@@ -1067,6 +1075,8 @@ export async function getFastSessionById(
     );
 
   const directInferenceCostMicroUsd = Number(directUsage?.costMicroUsd ?? 0);
+  const directInferenceTotalTokens = Number(directUsage?.totalTokens ?? 0);
+  const peakContextTokens = Number(directUsage?.peakContextTokens ?? 0);
 
   return {
     ...session,
@@ -1076,6 +1086,9 @@ export async function getFastSessionById(
     messagesCursor: transcriptPage.nextCursor,
     initialStreamCursor: Number(session.initialStreamCursorMs),
     directInferenceCostMicroUsd,
+    directInferenceTotalTokens,
+    inferenceTotalTokens: directInferenceTotalTokens,
+    peakContextTokens,
     inferenceCostMicroUsd: directInferenceCostMicroUsd,
   };
 }
