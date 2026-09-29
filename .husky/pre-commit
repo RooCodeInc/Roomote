@@ -5,7 +5,7 @@ if [ "$branch" = "main" ]; then
   exit 1
 fi
 
-npx lint-staged || exit $?
+pnpm lint:staged || exit $?
 # The managed wrapper runs Judgement after this hook, using task inference.
 if [ "${R_JUDGEMENT_MANAGED:-}" != "1" ]; then
   pnpm judgement --hook

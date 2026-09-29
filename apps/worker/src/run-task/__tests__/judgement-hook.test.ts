@@ -31,8 +31,7 @@ beforeEach(async () => {
     mode: 0o755,
   });
   for (const [name, body] of Object.entries({
-    npx: 'echo format >> "$TRACE"; exit "${FORMAT_EXIT:-0}"',
-    pnpm: 'echo local >> "$TRACE"; exit "${LOCAL_EXIT:-0}"',
+    pnpm: 'if [ "$1" = "lint:staged" ]; then echo format >> "$TRACE"; exit "${FORMAT_EXIT:-0}"; fi; echo local >> "$TRACE"; exit "${LOCAL_EXIT:-0}"',
   })) {
     await writeFile(join(cwd, 'bin', name), `#!/bin/sh\n${body}\n`);
     await chmod(join(cwd, 'bin', name), 0o755);
