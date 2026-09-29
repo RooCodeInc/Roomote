@@ -45,7 +45,8 @@
     "superjson": "^2.2.6",
     "ws": "^8.20.1",
     "yaml": "^2.9.0",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "@roocodeinc/judgement": "https://codeload.github.com/RooCodeInc/judgement/tar.gz/626c4e36bd54220666ffea5abd53558d04dafaf4"
   },
   "devDependencies": {
     "@roomote/config-eslint": "workspace:^",

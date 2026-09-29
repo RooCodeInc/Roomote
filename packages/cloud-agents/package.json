@@ -120,7 +120,8 @@
     "pdfjs-dist": "^6.2.108",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz",
     "zod": "^3.25.76",
-    "zod-to-json-schema": "3.25.1"
+    "zod-to-json-schema": "3.25.1",
+    "@roocodeinc/judgement": "https://codeload.github.com/RooCodeInc/judgement/tar.gz/626c4e36bd54220666ffea5abd53558d04dafaf4"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",

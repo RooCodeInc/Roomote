@@ -4,12 +4,14 @@ const jevgrepMocks = vi.hoisted(() => ({
 }));
 const judgeFileMocks = vi.hoisted(() => ({
   evaluate: vi.fn(),
+  repository: vi.fn(),
 }));
 vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
   resolveJudgmentBackend: jevgrepMocks.backend,
 }));
 vi.mock('@roomote/cloud-agents/server/judge-file', () => ({
   evaluateJudgeFileCriteria: judgeFileMocks.evaluate,
+  evaluateRepositoryJudgement: judgeFileMocks.repository,
 }));
 vi.mock('@roomote/db/server', async (original) => ({
   ...(await original<typeof import('@roomote/db/server')>()),
@@ -256,6 +258,63 @@ describe('taskRunsRouter queue message guards', () => {
     jevgrepMocks.experiment.mockResolvedValue(false);
     expect(await createRunCaller().isJevgrepEnabled({ runId: 42 })).toBe(false);
     expect(jevgrepMocks.backend).not.toHaveBeenCalled();
+  });
+
+  it('validates and authorizes bounded repository judgments', async () => {
+    const request = {
+      kind: 'judge' as const,
+      rule: 'Use sentence case',
+      evidence: [],
+      focusPaths: ['example.ts'],
+      complete: true,
+      unresolved: [],
+    };
+    judgeFileMocks.repository.mockResolvedValue({
+      outcome: 'pass',
+      confidence: 0.98,
+    });
+    await expect(
+      createRunCaller().evaluateRepositoryJudgement({ runId: 42, request }),
+    ).resolves.toEqual({
+      kind: 'answered',
+      answer: { outcome: 'pass', confidence: 0.98 },
+    });
+    expect(judgeFileMocks.repository).toHaveBeenCalledWith(request);
+    judgeFileMocks.repository.mockClear();
+    await expect(
+      createAuthCaller().evaluateRepositoryJudgement({ runId: 42, request }),
+    ).rejects.toThrow('only available to run tokens');
+    await expect(
+      createRunCaller().evaluateRepositoryJudgement({ runId: 43, request }),
+    ).rejects.toThrow();
+    await expect(
+      createRunCaller().evaluateRepositoryJudgement({
+        runId: 42,
+        request: { ...request, rule: 'x'.repeat(23001) },
+      }),
+    ).rejects.toThrow();
+    expect(judgeFileMocks.repository).not.toHaveBeenCalled();
+  });
+
+  it('reports unavailable and failed repository judgments without exposing backend errors', async () => {
+    const request = {
+      kind: 'judge' as const,
+      rule: 'Use sentence case',
+      evidence: [],
+      focusPaths: [],
+      complete: true,
+      unresolved: [],
+    };
+    judgeFileMocks.repository.mockResolvedValue(null);
+    await expect(
+      createRunCaller().evaluateRepositoryJudgement({ runId: 42, request }),
+    ).resolves.toEqual({ kind: 'unavailable' });
+    judgeFileMocks.repository.mockRejectedValue(
+      new Error('private backend details'),
+    );
+    await expect(
+      createRunCaller().evaluateRepositoryJudgement({ runId: 42, request }),
+    ).resolves.toEqual({ kind: 'error' });
   });
 
   it('evaluates repository judge criteria through the run-token procedure', async () => {

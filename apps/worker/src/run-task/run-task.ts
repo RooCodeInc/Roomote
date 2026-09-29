@@ -115,7 +115,7 @@ import {
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
-import { createJudgeEnforcement } from './judge-enforcement';
+import { installRepositoryJudgement } from './repository-judgement';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -1162,12 +1162,9 @@ export const runTask = async ({
       runId: taskRun.id,
       logger,
     });
-    const judgeEnforcement = await createJudgeEnforcement({
-      runId: taskRun.id,
-      repoPaths,
-      logger,
-      recordWorkerRuntimeEvent,
-    });
+    for (const repositoryPath of Object.values(repoPaths ?? {})) {
+      await installRepositoryJudgement(repositoryPath, logger);
+    }
     const persistRuntimeState = createRuntimeStatePersister(
       taskRun.id,
       recordWorkerRuntimeEvent,
@@ -1503,8 +1500,6 @@ export const runTask = async ({
       taskId: taskRun.taskId,
       logger,
       callbacks: {
-        onBeforeTaskCompletion: async () =>
-          await judgeEnforcement.beforeTaskCompletion(),
         onTaskCompletionSettled: async (completionId: string) => {
           await settleMissingChatCloseoutFallback(context, completionId);
           if (userAttentionNotificationsEnabled) {

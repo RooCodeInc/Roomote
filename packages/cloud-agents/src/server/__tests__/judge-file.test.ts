@@ -91,3 +91,62 @@ describe('evaluateJudgeFileCriteria', () => {
     ).resolves.toBeNull();
   });
 });
+
+describe('evaluateRepositoryJudgement', () => {
+  it('uses the shared rubric and validates answers', async () => {
+    const { evaluateRepositoryJudgement } = await import('../judge-file');
+    const request = {
+      kind: 'judge' as const,
+      rule: 'Use sentence case',
+      evidence: [],
+      focusPaths: ['example.ts'],
+      complete: true,
+      unresolved: [],
+    };
+    evaluateDecisionModelMock.mockResolvedValue({
+      result: { type: 'choice', choice: 'violation', confidence: 0.97 },
+    });
+    expect(await evaluateRepositoryJudgement(request)).toEqual({
+      outcome: 'violation',
+      confidence: 0.97,
+    });
+    expect(evaluateDecisionModelMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: request,
+        decision: 'repository-judgement',
+        timeoutMs: 2500,
+        skipShadow: true,
+        questions: { result: expect.objectContaining({ type: 'choice' }) },
+      }),
+    );
+    evaluateDecisionModelMock.mockResolvedValue({
+      result: { choice: 'invented', confidence: 1 },
+    });
+    await expect(evaluateRepositoryJudgement(request)).rejects.toThrow(
+      'Invalid judgment',
+    );
+  });
+  it('does not send oversized evidence and reports absent backends', async () => {
+    const { evaluateRepositoryJudgement } = await import('../judge-file');
+    const request = {
+      kind: 'judge' as const,
+      rule: 'x'.repeat(40000),
+      evidence: [],
+      focusPaths: [],
+      complete: true,
+      unresolved: [],
+    };
+    evaluateDecisionModelMock.mockClear();
+    await expect(evaluateRepositoryJudgement(request)).rejects.toThrow(
+      'budget',
+    );
+    expect(evaluateDecisionModelMock).not.toHaveBeenCalled();
+    evaluateDecisionModelMock.mockResolvedValue(null);
+    expect(
+      await evaluateRepositoryJudgement({
+        ...request,
+        rule: 'Use sentence case',
+      }),
+    ).toBeNull();
+  });
+});
