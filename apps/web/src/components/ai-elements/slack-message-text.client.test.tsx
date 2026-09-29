@@ -1,6 +1,10 @@
 import { render, screen } from '@testing-library/react';
 
 import { SlackMentionProvider } from './slack-mention-context';
+import {
+  buildSlackTranscriptMentionText,
+  SlackMentionResolutionProvider,
+} from './slack-message-references';
 import { SlackMessageText } from './slack-message-text';
 
 const resolveUsersState = vi.hoisted(() => ({
@@ -16,11 +20,16 @@ const resolveUsersState = vi.hoisted(() => ({
     channelIds: string[];
   } | null,
   lastEnabled: null as boolean | null,
+  queryCalls: [] as Array<{ enabled: boolean; input: unknown }>,
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: (options: { enabled?: boolean }) => {
+  useQuery: (options: { enabled?: boolean; input?: unknown }) => {
     resolveUsersState.lastEnabled = options.enabled ?? true;
+    resolveUsersState.queryCalls.push({
+      enabled: options.enabled ?? true,
+      input: options.input,
+    });
     return { data: resolveUsersState.data };
   },
 }));
@@ -35,7 +44,7 @@ vi.mock('@/trpc/client', () => ({
           channelIds: string[];
         }) => {
           resolveUsersState.lastInput = input;
-          return { queryKey: ['slack.resolveUsers', input] };
+          return { queryKey: ['slack.resolveUsers', input], input };
         },
       },
     },
@@ -47,6 +56,7 @@ describe('SlackMessageText', () => {
     resolveUsersState.data = undefined;
     resolveUsersState.lastInput = null;
     resolveUsersState.lastEnabled = null;
+    resolveUsersState.queryCalls = [];
   });
 
   it('renders plain text untouched without querying Slack', () => {
@@ -173,6 +183,53 @@ describe('SlackMessageText', () => {
 
     expect(resolveUsersState.lastInput?.userIds).toHaveLength(50);
     expect(screen.getAllByTestId('slack-mention')).toHaveLength(60);
+  });
+
+  it('shares one transcript-level bounded lookup across child messages', () => {
+    const transcript =
+      '<@U1> <@U2> <#C1> ' +
+      Array.from({ length: 60 }, (_, index) => `<@U${index + 3}>`).join(' ');
+
+    render(
+      <SlackMentionProvider scope={{ kind: 'session', sessionId: 'session-1' }}>
+        <SlackMentionResolutionProvider text={transcript}>
+          <SlackMessageText text="<@U1> in <#C1>" />
+          <SlackMessageText text="<@U2>" />
+        </SlackMentionResolutionProvider>
+      </SlackMentionProvider>,
+    );
+
+    const enabledCalls = resolveUsersState.queryCalls.filter(
+      (call) => call.enabled,
+    );
+    expect(enabledCalls).toHaveLength(1);
+    expect(enabledCalls[0]?.input).toEqual({
+      scope: { kind: 'session', sessionId: 'session-1' },
+      userIds: Array.from({ length: 50 }, (_, index) => `U${index + 1}`),
+      channelIds: ['C1'],
+    });
+  });
+
+  it('excludes hidden transcript rows and prompts from lookup text', () => {
+    expect(
+      buildSlackTranscriptMentionText({
+        includeSessionPrompt: true,
+        sessionPrompt: {
+          role: 'user',
+          text: 'Hidden prompt <@Uhidden-prompt>.',
+          visibleInTranscript: false,
+        },
+        messages: [
+          {
+            kind: 'reasoning',
+            role: 'assistant',
+            text: 'Hidden row <@Uhidden-row>.',
+            visibleInTranscript: false,
+          },
+          { kind: 'text', role: 'assistant', text: 'Visible row <@Uvisible>.' },
+        ],
+      }),
+    ).toBe('Visible row <@Uvisible>.');
   });
 
   it('falls back to the inline label or raw id while unresolved', () => {
