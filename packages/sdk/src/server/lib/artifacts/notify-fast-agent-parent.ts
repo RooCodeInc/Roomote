@@ -44,17 +44,22 @@ function buildArtifactViewUrl(input: {
   return `${baseUrl}/task/${encodeURIComponent(input.taskId)}/artifacts/${encodedPath}?v=${input.version}`;
 }
 
-/** Give one uploaded artifact version to its runless Fast orchestrator. */
+/** Give a user-facing uploaded artifact version to its runless Fast parent. */
 export async function notifyFastAgentParentOnArtifact(input: {
   id: string;
   taskId: string;
   runId: number | null;
+  artifactType: string;
   path: string;
   version: number;
   contentType: string;
   uploaded: boolean;
 }): Promise<FastArtifactNotificationResult> {
-  if (!input.runId || !input.uploaded) {
+  if (
+    !input.runId ||
+    !input.uploaded ||
+    input.artifactType === 'visual-proof'
+  ) {
     return 'not_applicable';
   }
 

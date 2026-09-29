@@ -57,6 +57,7 @@ export async function markArtifactUploadComplete(
     id: artifact.id,
     taskId: artifact.taskId!,
     runId: artifact.runId,
+    artifactType: artifact.artifactType,
     path: artifact.path,
     version: artifact.version,
     contentType: artifact.contentType,

@@ -52,6 +52,7 @@ describe('markArtifactUploadComplete', () => {
       id: 'artifact-1',
       taskId: 'task-1',
       runId: 200,
+      artifactType: 'general',
       path: 'reports/result.md',
       version: 1,
       uploaded: false,
@@ -67,6 +68,7 @@ describe('markArtifactUploadComplete', () => {
       id: 'artifact-1',
       taskId: 'task-1',
       runId: 200,
+      artifactType: 'general',
       path: 'reports/result.md',
       version: 1,
       uploaded: true,
@@ -89,5 +91,31 @@ describe('markArtifactUploadComplete', () => {
     const response = await markArtifactUploadComplete(context());
 
     expect(response.status).toBe(503);
+  });
+
+  it('passes the visual-proof type to the parent notifier', async () => {
+    mocks.getArtifact.mockResolvedValueOnce({
+      id: 'artifact-1',
+      taskId: 'task-1',
+      runId: 200,
+      artifactType: 'visual-proof',
+      path: 'proof/capture.png',
+      version: 1,
+      uploaded: false,
+    });
+    mocks.notifyParent.mockResolvedValueOnce('not_applicable');
+
+    const response = await markArtifactUploadComplete(context());
+
+    expect(response.status).toBe(200);
+    expect(mocks.notifyParent).toHaveBeenCalledWith({
+      id: 'artifact-1',
+      taskId: 'task-1',
+      runId: 200,
+      artifactType: 'visual-proof',
+      path: 'proof/capture.png',
+      version: 1,
+      uploaded: true,
+    });
   });
 });
