@@ -1329,12 +1329,12 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       expect(
         buildRecommendedDeploymentModelConfig(provider, 'default'),
       ).toMatchObject({
-        roomoteModel: 'openai/gpt-6-sol',
+        roomoteModel: 'openai/gpt-6.1-sol',
         roomoteSmallModel: 'openai/gpt-6-luna',
-        roomoteVisionModel: 'openai/gpt-6-sol',
+        roomoteVisionModel: 'openai/gpt-6.1-sol',
         roomoteCodeReviewModel: 'openai/gpt-5.6-terra',
         roomoteExploreModel: 'openai/gpt-6-luna',
-        roomotePlanningModel: 'openai/gpt-6-sol',
+        roomotePlanningModel: 'openai/gpt-6.1-sol',
       });
       expect(
         buildRecommendedDeploymentModelConfig(provider, 'luna-max'),
@@ -1342,10 +1342,10 @@ describe('buildRecommendedDeploymentModelConfig', () => {
         roomoteModel: 'openai/gpt-6-luna',
         roomoteModelReasoningEffort: 'max',
         roomoteSmallModel: 'openai/gpt-6-luna',
-        roomoteVisionModel: 'openai/gpt-6-sol',
+        roomoteVisionModel: 'openai/gpt-6.1-sol',
         roomoteCodeReviewModel: 'openai/gpt-5.6-terra',
         roomoteExploreModel: 'openai/gpt-6-luna',
-        roomotePlanningModel: 'openai/gpt-6-sol',
+        roomotePlanningModel: 'openai/gpt-6.1-sol',
       });
     },
   );
@@ -1384,6 +1384,24 @@ describe('buildRecommendedDeploymentModelConfig', () => {
         roomoteCodeReviewModel: `${modelPrefix}/gpt-5.6-luna`,
         roomoteExploreModel: `${modelPrefix}/gpt-5.6-luna`,
         roomotePlanningModel: `${modelPrefix}/gpt-5.6-luna`,
+      });
+    },
+  );
+
+  it.each([
+    ['azure', 'azure'],
+    ['azure-cognitive-services', 'azure-cognitive-services'],
+  ] as const)(
+    'uses GPT-6.1 Sol for the %s recommended Sol roles',
+    (providerId, modelPrefix) => {
+      expect(
+        buildRecommendedDeploymentModelConfig(
+          getSetupModelProvider(providerId),
+          'default',
+        ),
+      ).toMatchObject({
+        roomoteCodeReviewModel: `${modelPrefix}/gpt-6.1-sol`,
+        roomotePlanningModel: `${modelPrefix}/gpt-6.1-sol`,
       });
     },
   );
