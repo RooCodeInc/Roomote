@@ -1,3 +1,9 @@
+import {
+  question,
+  validateAnswer,
+  MAX_REQUEST_BYTES,
+  type JudgeRequest,
+} from '@roo-code/judgement';
 import type {
   JudgeCriterionInput,
   JudgeFileState,
@@ -85,4 +91,24 @@ export async function evaluateJudgeFileCriteria(input: {
       probabilities: answer.probabilities,
     };
   });
+}
+
+/** Shared Judgement protocol; credentials and model selection stay on the API. */
+export async function evaluateRepositoryJudgement(request: JudgeRequest) {
+  const questions = { result: question(request) };
+  if (
+    Buffer.byteLength(JSON.stringify({ state: request, questions })) >
+    MAX_REQUEST_BYTES
+  ) {
+    throw new Error('Judgement evidence exceeds the request budget');
+  }
+  const answers = await evaluateDecisionModel({
+    state: request,
+    questions,
+    timeoutMs: 2500,
+    decision: 'repository-judgement',
+    highVolume: true,
+    skipShadow: true,
+  });
+  return answers ? validateAnswer(answers.result, request) : null;
 }

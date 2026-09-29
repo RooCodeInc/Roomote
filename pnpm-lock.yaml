@@ -941,6 +941,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
+      '@roo-code/judgement':
+        specifier: 0.1.3
+        version: 0.1.3
       '@roomote/auth':
         specifier: workspace:^
         version: link:../../packages/auth
@@ -1143,6 +1146,9 @@ importers:
       '@opencode-ai/sdk':
         specifier: 1.18.30
         version: 1.18.30
+      '@roo-code/judgement':
+        specifier: 0.1.3
+        version: 0.1.3
       '@roomote/ado':
         specifier: workspace:^
         version: link:../ado
@@ -5094,6 +5100,11 @@ packages:
     resolution: {integrity: sha512-X+zaP2x+j4RXGfbp/seSoRHWnPxzApilDszisZxbYH5C/jTxFhCtDNdPGZb9lJyYPs24wGxruPF7Y+sIXt9Gzw==}
     cpu: [x64]
     os: [win32]
+
+  '@roo-code/judgement@0.1.3':
+    resolution: {integrity: sha512-qtwNHNHpOibBpjjQsFK0hvXzxsC3wUgtwbauWb9vzAjbKlXRSWwfjam8CuxXCN7I/HB/q55i7CWqwsU8O9x3QQ==}
+    engines: {node: '>=22.20.0'}
+    hasBin: true
 
   '@sapphire/async-queue@1.5.5':
     resolution: {integrity: sha512-cvGzxbba6sav2zZkH8GPf2oGk9yYoD5qrNWdu9fRehifgnFZJMV+nuy2nON2roRO4yQQ+v7MK/Pktl/HgfsUXg==}
@@ -15571,6 +15582,8 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.61.1':
     optional: true
+
+  '@roo-code/judgement@0.1.3': {}
 
   '@sapphire/async-queue@1.5.5': {}
 
