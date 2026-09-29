@@ -1680,6 +1680,8 @@ export const snapshotResumeSchema = sharedTaskSchema.extend({
      * Required to look up the source run's configuration (port, environmentId).
      */
     sourceRunId: z.number(),
+    /** Review cycle identity carried across a crash-resume of a PR review. */
+    reviewCycleId: z.string().trim().min(1).optional(),
     /**
      * Optional canonical Slack channel ID copied onto resumed Slack-linked runs.
      * Shared Slack routing consumers should prefer this field when present.
