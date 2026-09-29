@@ -138,13 +138,26 @@ describe('processSessionStatusJudgmentBatch', () => {
     });
     highConfidenceDone();
 
-    await expect(processSessionStatusJudgmentBatch()).resolves.toBe(1);
+    // The batch claims all pending requests, including work from concurrent
+    // database tests. Assert this fixture's request instead of a global count.
+    await processSessionStatusJudgmentBatch();
 
-    expect(evaluateMock).toHaveBeenCalledOnce();
-    expect(evaluateMock).toHaveBeenCalledWith(
+    const evaluation = evaluateMock.mock.calls.find(([input]) => {
+      const state = input.state as {
+        objective?: string;
+        recentMessages?: Array<{ text: string }>;
+      };
+      return (
+        state.objective === 'Answer the question' &&
+        state.recentMessages?.some(
+          (message) => message.text === 'What does this service do?',
+        )
+      );
+    });
+    expect(evaluation?.[0]).toEqual(
       expect.objectContaining({ decision: 'session-status-judgment' }),
     );
-    const state = evaluateMock.mock.calls[0]?.[0].state as {
+    const state = evaluation?.[0].state as {
       latestVisibleUserMessageAt: string | null;
       recentMessages: Array<{ text: string }>;
     };
