@@ -942,8 +942,8 @@ importers:
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
       '@roo-code/judgement':
-        specifier: 0.1.3
-        version: 0.1.3
+        specifier: 0.1.5
+        version: 0.1.5
       '@roomote/auth':
         specifier: workspace:^
         version: link:../../packages/auth
@@ -1147,8 +1147,8 @@ importers:
         specifier: 1.18.30
         version: 1.18.30
       '@roo-code/judgement':
-        specifier: 0.1.3
-        version: 0.1.3
+        specifier: 0.1.5
+        version: 0.1.5
       '@roomote/ado':
         specifier: workspace:^
         version: link:../ado
@@ -5101,8 +5101,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@roo-code/judgement@0.1.3':
-    resolution: {integrity: sha512-qtwNHNHpOibBpjjQsFK0hvXzxsC3wUgtwbauWb9vzAjbKlXRSWwfjam8CuxXCN7I/HB/q55i7CWqwsU8O9x3QQ==}
+  '@roo-code/judgement@0.1.5':
+    resolution: {integrity: sha512-1WB83Vw6MIn5v7vS1feuX5MefVzz/zKxLgt91gejhxuLWUv+spDB95a/s6BGETl0kfQg5dZOAUs9utQsdpkljA==}
     engines: {node: '>=22.20.0'}
     hasBin: true
 
@@ -10097,6 +10097,10 @@ packages:
 
   picomatch@4.0.4:
     resolution: {integrity: sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A==}
+    engines: {node: '>=12'}
+
+  picomatch@4.0.7:
+    resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
 
   pidtree@0.6.0:
@@ -15583,7 +15587,9 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.61.1':
     optional: true
 
-  '@roo-code/judgement@0.1.3': {}
+  '@roo-code/judgement@0.1.5':
+    dependencies:
+      picomatch: 4.0.7
 
   '@sapphire/async-queue@1.5.5': {}
 
@@ -21377,6 +21383,8 @@ snapshots:
   picomatch@2.3.2: {}
 
   picomatch@4.0.4: {}
+
+  picomatch@4.0.7: {}
 
   pidtree@0.6.0: {}
 
