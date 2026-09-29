@@ -2777,7 +2777,7 @@
     ".judgement/examples/criterion_8.json": "112b13c4f30ad1e79f5d082fe5ff6ee3911839f0632f7c70997db90fddd3265d",
     "packages/cloud-agents/scripts/prepare-judgement-presets.mjs": "aef362f4686e232a472ff9e2aaa816882f5b60a2c2cfbcea9840efff040bec4e"
   },
-  "library": "github:RooCodeInc/judgement#354078180dccc3912f9324106bfcb1edb854cde1",
+  "library": "0.3.0",
   "questionSets": [
     {
       "result": {
