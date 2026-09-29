@@ -13,7 +13,7 @@ import {
 import {
   DndContext,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
   closestCenter,
   useDraggable,
@@ -160,7 +160,7 @@ export function SessionBoard({ children }: { children: ReactNode }) {
   } | null>(null);
   const statusMutation = useSessionStatusMutation();
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, {
       activationConstraint: { delay: 250, tolerance: 5 },
     }),

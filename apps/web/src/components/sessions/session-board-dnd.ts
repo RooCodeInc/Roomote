@@ -34,7 +34,7 @@ export function canDropSessionBoardCard(
 }
 
 export function getSessionBoardKeyboardTarget(
-  sourceColumn: SessionBoardColumn,
+  currentColumn: SessionBoardColumn,
   code: string,
 ): SessionManualStatus | null {
   const direction =
@@ -46,7 +46,7 @@ export function getSessionBoardKeyboardTarget(
   if (direction === 0) return null;
 
   const sourceIndex = SESSION_MANUAL_STATUSES.indexOf(
-    sourceColumn as SessionManualStatus,
+    currentColumn as SessionManualStatus,
   );
   const targetIndex =
     sourceIndex === -1 ? (direction > 0 ? 0 : -1) : sourceIndex + direction;
@@ -63,7 +63,9 @@ export const sessionBoardKeyboardCoordinates: KeyboardCoordinateGetter = (
     | undefined;
   if (!data) return;
 
-  const targetColumn = getSessionBoardKeyboardTarget(data.column, event.code);
+  const currentColumn =
+    getSessionBoardDropStatus(context.over?.id) ?? data.column;
+  const targetColumn = getSessionBoardKeyboardTarget(currentColumn, event.code);
   if (!targetColumn) return;
 
   const targetRect = context.droppableRects.get(targetColumn);

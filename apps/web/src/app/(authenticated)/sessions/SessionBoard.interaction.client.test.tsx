@@ -6,6 +6,7 @@ type DndTestProps = {
   accessibility?: {
     screenReaderInstructions: { draggable: string };
   };
+  sensors?: unknown[];
   onDragStart?: (event: unknown) => void;
   onDragEnd?: (event: unknown) => void;
   onDragCancel?: (event: unknown) => void;
@@ -39,10 +40,13 @@ vi.mock('@dnd-kit/core', async () => {
       Up: 'ArrowUp',
     },
     KeyboardSensor: function KeyboardSensor() {},
-    PointerSensor: function PointerSensor() {},
+    MouseSensor: function MouseSensor() {},
     TouchSensor: function TouchSensor() {},
     closestCenter: vi.fn(),
-    useSensor: vi.fn(() => ({})),
+    useSensor: vi.fn((sensor: unknown, options: unknown) => ({
+      sensor,
+      options,
+    })),
     useSensors: vi.fn((...sensors: unknown[]) => sensors),
     useDraggable: ({ disabled }: { disabled?: boolean }) => ({
       attributes: {
@@ -176,6 +180,19 @@ describe('SessionBoard drag interaction', () => {
     expect(
       testState.dndProps?.accessibility?.screenReaderInstructions.draggable,
     ).toContain('arrow keys');
+    const configuredSensors = testState.dndProps?.sensors as Array<{
+      sensor: { name: string };
+      options: { activationConstraint?: unknown };
+    }>;
+    expect(configuredSensors.map(({ sensor }) => sensor.name)).toEqual([
+      'MouseSensor',
+      'TouchSensor',
+      'KeyboardSensor',
+    ]);
+    expect(configuredSensors[1]?.options.activationConstraint).toEqual({
+      delay: 250,
+      tolerance: 5,
+    });
     expect(
       screen.getByRole('link', { name: 'Build the board' }),
     ).toHaveAttribute('href', '/sessions/session-active');
