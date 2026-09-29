@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -44,8 +44,9 @@ beforeEach(async () => {
   env.R_JUDGEMENT_GATEWAY_URL = proxy.endpoint;
   cwd = await mkdtemp(join(tmpdir(), 'roomote-judgement-'));
   await exec('git', ['init', '-q'], { cwd });
+  await mkdir(join(cwd, '.judgement'));
   await writeFile(
-    join(cwd, 'JUDGE.json'),
+    join(cwd, '.judgement/rules.json'),
     JSON.stringify({ criteria: [{ rule: 'Use sentence case' }] }),
   );
   await writeFile(join(cwd, 'example.ts'), 'changed');
@@ -95,7 +96,7 @@ it('reports unavailable models and missing runtime credentials as incomplete', a
   expect(mutate).not.toHaveBeenCalled();
 });
 it('does not send a model request without a repository policy', async () => {
-  await exec('git', ['rm', '-f', 'JUDGE.json'], { cwd });
+  await exec('git', ['rm', '-f', '.judgement/rules.json'], { cwd });
   expect((await checkRepositoryJudgement(env, cwd)).status).toBe('pass');
   expect(mutate).not.toHaveBeenCalled();
 });
