@@ -160,7 +160,8 @@ the proposed change, so editing the policy cannot weaken that same check.
 
 Select Jev through [TypeSafe](/providers/inference/typesafe), OpenRouter, or
 Vercel AI Gateway in the judgment-model settings. Provider keys remain on the
-Roomote API. The Roomote judgment model is not eligible for these checks.
+Roomote API. Hooks work in agent commands and the task terminal without a
+provider key in the shell. The Roomote judgment model is not eligible for these checks.
 
 Judgement runs after existing pre-commit hooks and checks the exact staged
 snapshot. Unstaged fixes cannot hide a staged violation. Confirmed violations

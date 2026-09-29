@@ -291,3 +291,22 @@ curl -X GET "http://localhost:13001/trpc/auth.me" \
   -H "Authorization: Bearer $(pnpm --silent --filter @roomote/auth development:create-auth-token local@roomote.dev local 3600000)" \
   -H "Content-Type: application/json" | jq
 ```
+
+
+### Checking staged changes with Judgement
+
+Run `pnpm judgement --verbose` from the Roomote checkout to check staged changes
+against `JUDGE.json`. The command loads `.env.local` and uses the same deployment
+judgment-model settings and encrypted provider credentials as the local API.
+The local database must be running. Select Jev through TypeSafe, OpenRouter, or
+Vercel AI Gateway in **Settings → Models**; `R_JUDGMENT_MODEL` overrides that choice.
+You do not need the standalone CLI's `TYPESAFE_API_KEY` variable.
+
+`--verbose` shows model outcomes and confidence scores. An outcome below the
+rule's confidence threshold remains incomplete, including a low-confidence
+violation. The command exits unsuccessfully for violations or incomplete checks.
+Use `--dry-run` to inspect evidence planning without database or model access,
+or `--format json` for the report as JSON. Checks are not cached because the
+configured inference backend can change. Managed task hooks use the same API
+inference settings through a worker-owned local proxy and retain their
+three-second deadline.

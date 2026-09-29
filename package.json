@@ -14,7 +14,7 @@
     "lint": "pnpm format:check && pnpm exec oxlint --deny-warnings && pnpm exec turbo lint --log-order grouped --output-logs new-only",
     "lint:fast": "pnpm exec oxlint --deny-warnings && pnpm exec turbo lint --log-order grouped --output-logs new-only",
     "lint:pre-push": "node scripts/pre-push-checks.mjs",
-    "judgement": "pnpm --silent --filter @roomote/worker exec judgement check --staged",
+    "judgement": "dotenvx run --quiet -f .env.local -- pnpm --silent --filter @roomote/cloud-agents judgement",
     "check-types": "turbo check-types --log-order grouped --output-logs new-only",
     "check-types:fast": "turbo check-types:fast --log-order grouped --output-logs new-only",
     "test": "pnpm --silent --filter @roomote/db db:push:test && turbo test --concurrency=1 --log-order grouped --output-logs new-only",
