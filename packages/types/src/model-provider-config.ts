@@ -497,7 +497,7 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
     label: 'Recommended',
     roles: {
       coding: {
-        modelId: 'openai/gpt-6-sol',
+        modelId: 'openai/gpt-6.1-sol',
         reasoningEffort: 'medium',
       },
       helper: {
@@ -505,7 +505,7 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
         reasoningEffort: 'low',
       },
       vision: {
-        modelId: 'openai/gpt-6-sol',
+        modelId: 'openai/gpt-6.1-sol',
         reasoningEffort: 'low',
       },
       codeReview: {
@@ -517,7 +517,7 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
         reasoningEffort: 'low',
       },
       planning: {
-        modelId: 'openai/gpt-6-sol',
+        modelId: 'openai/gpt-6.1-sol',
         reasoningEffort: 'xhigh',
       },
     },
@@ -535,7 +535,7 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
         reasoningEffort: 'low',
       },
       vision: {
-        modelId: 'openai/gpt-6-sol',
+        modelId: 'openai/gpt-6.1-sol',
         reasoningEffort: 'low',
       },
       codeReview: {
@@ -547,7 +547,7 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
         reasoningEffort: 'low',
       },
       planning: {
-        modelId: 'openai/gpt-6-sol',
+        modelId: 'openai/gpt-6.1-sol',
         reasoningEffort: 'xhigh',
       },
     },
@@ -883,9 +883,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       recommendedCodingModelId: 'azure/gpt-5.6-terra',
       recommendedRoleModels: {
         helper: 'azure/gpt-6-luna',
-        codeReview: 'azure/gpt-6-sol',
+        codeReview: 'azure/gpt-6.1-sol',
         explore: 'azure/gpt-6-luna',
-        planning: 'azure/gpt-6-sol',
+        planning: 'azure/gpt-6.1-sol',
       },
     }),
   },
@@ -924,9 +924,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       recommendedCodingModelId: 'azure-cognitive-services/gpt-5.6-terra',
       recommendedRoleModels: {
         helper: 'azure-cognitive-services/gpt-6-luna',
-        codeReview: 'azure-cognitive-services/gpt-6-sol',
+        codeReview: 'azure-cognitive-services/gpt-6.1-sol',
         explore: 'azure-cognitive-services/gpt-6-luna',
-        planning: 'azure-cognitive-services/gpt-6-sol',
+        planning: 'azure-cognitive-services/gpt-6.1-sol',
       },
     }),
   },
