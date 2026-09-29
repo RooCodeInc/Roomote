@@ -1,0 +1,89 @@
+name: Judgement
+
+on:
+  pull_request_target:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: judgement-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  judgement:
+    name: Judgement runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      PR_BASE: ${{ github.event.pull_request.base.sha }}
+    steps:
+      # Publish on the PR head explicitly: pull_request_target runs on the base.
+      - name: Mark the PR check pending
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --silent "repos/$GITHUB_REPOSITORY/statuses/$PR_HEAD" \
+            -f state=pending -f context=Judgement \
+            -f description='Checking repository rules' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      # Only trusted base code is checked out. PR contents are read as Git objects.
+      - name: Checkout trusted base
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.13.1'
+      - name: Install trusted checker
+        # No PR package files, install scripts, actions, or caches are executed.
+        run: |
+          mkdir -p "$RUNNER_TEMP/judgement-tool"
+          cd "$RUNNER_TEMP/judgement-tool"
+          npm install --ignore-scripts --no-audit --no-fund \
+            'github:RooCodeInc/judgement#e4196715a2c0ce55fc41423704db077adb427215'
+      - name: Fetch PR objects
+        run: |
+          set -euo pipefail
+          [[ "$PR_HEAD" =~ ^[0-9a-f]{40}$ && "$PR_BASE" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin "$PR_HEAD"
+          base="$(git merge-base "$PR_BASE" "$PR_HEAD")"
+          git cat-file -e "$base:.judgement/rules.json"
+          echo "JUDGEMENT_BASE=$base" >> "$GITHUB_ENV"
+      - name: Run strict check
+        id: check
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          JUDGEMENT_MODEL: ${{ vars.JUDGEMENT_MODEL || 'jev-1.13.0' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TYPESAFE_API_KEY" ]; then
+            echo 'Configure the TYPESAFE_API_KEY repository secret for Judgement.' >&2
+            exit 2
+          fi
+          node "$RUNNER_TEMP/judgement-tool/node_modules/@roo-code/judgement/src/cli.js" \
+            check --base "$JUDGEMENT_BASE" --head "$PR_HEAD" \
+            --model "$JUDGEMENT_MODEL" --timeout-ms 120000 --no-cache
+      - name: Publish strict result
+        if: ${{ always() && !cancelled() && steps.pending.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_OUTCOME: ${{ steps.check.outcome }}
+        run: |
+          state=failure
+          description='Judgement failed or did not complete; inspect the run'
+          if [ "$CHECK_OUTCOME" = success ]; then
+            state=success
+            description='Repository rule check completed without findings'
+          fi
+          gh api --silent "repos/$GITHUB_REPOSITORY/statuses/$PR_HEAD" \
+            -f state="$state" -f context=Judgement -f description="$description" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

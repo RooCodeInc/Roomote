@@ -29,7 +29,9 @@ export async function evaluateLocalRepositoryJudgement(
   return answer;
 }
 
-export async function checkLocalRepositoryJudgement(options: CheckOptions) {
+export async function checkLocalRepositoryJudgement(
+  options: CheckOptions = {},
+) {
   const failures = new Set<string>();
   const report = await check({
     ...options,
