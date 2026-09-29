@@ -1,0 +1,47 @@
+{
+  "ruleId": "criterion_6",
+  "examples": [
+    {
+      "name": "Describe implementation in setup copy",
+      "path": "apps/web/src/components/setup-copy.ts",
+      "before": "export const description = \"Get updates when work is ready.\";\n",
+      "after": "export const description = \"This feature is default off and uses a polling worker to materialize event records in a Redis queue.\";\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Expose internal mechanism in task description",
+      "path": "apps/web/src/components/setup-copy.ts",
+      "before": "export const description = \"Review your latest code changes.\";\n",
+      "after": "export const description = \"This task hydrates the worker state, dispatches an internal tool schema, and serializes the result into our event envelope.\";\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Explain user value",
+      "path": "apps/web/src/components/setup-copy.ts",
+      "before": "export const description = \"Configure notifications.\";\n",
+      "after": "export const description = \"Get updates when your work is ready.\";\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Necessary permission consequence",
+      "path": "apps/web/src/components/setup-copy.ts",
+      "before": "export const permissionHelp = \"Connect your repository.\";\n",
+      "after": "export const permissionHelp = \"Allow read access so your agent can review code. It cannot push changes without write access.\";\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Actionable recovery message",
+      "path": "apps/web/src/components/setup-copy.ts",
+      "before": "export const errorMessage = \"Failed.\";\n",
+      "after": "export const errorMessage = \"Connection expired. Reconnect your account to continue.\";\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Necessary security copy",
+      "path": "apps/web/src/components/setup-copy.ts",
+      "before": "export const securityHelp = \"Account settings\";\n",
+      "after": "export const securityHelp = \"Revoking this token immediately stops access for apps that use it.\";\n",
+      "expected": "pass"
+    }
+  ]
+}

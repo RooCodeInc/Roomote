@@ -1,0 +1,47 @@
+{
+  "ruleId": "criterion_5",
+  "examples": [
+    {
+      "name": "Serialize independent read requests",
+      "path": "apps/web/src/server/dashboard.ts",
+      "before": "export async function load(db) {\n  return Promise.all([db.projects.findMany(), db.notifications.findMany()]);\n}\n",
+      "after": "export async function load(db) {\n  const projects = await db.projects.findMany();\n  const notifications = await db.notifications.findMany();\n  return [projects, notifications];\n}\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Await work before unrelated early return",
+      "path": "apps/web/src/server/dashboard.ts",
+      "before": "export async function load(fetchProjects, showProjects) {\n  if (!showProjects) return [];\n  return fetchProjects();\n}\n",
+      "after": "export async function load(fetchProjects, showProjects) {\n  const projects = await fetchProjects();\n  if (!showProjects) return [];\n  return projects;\n}\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Parallel independent reads",
+      "path": "apps/web/src/server/dashboard.ts",
+      "before": "export async function load(db) {\n  const projects = await db.projects.findMany();\n  const notifications = await db.notifications.findMany();\n  return [projects, notifications];\n}\n",
+      "after": "export async function load(db) {\n  return Promise.all([db.projects.findMany(), db.notifications.findMany()]);\n}\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Second query needs first result",
+      "path": "apps/web/src/server/dashboard.ts",
+      "before": "export async function load(db, slug) { return db.projects.findBySlug(slug); }\n",
+      "after": "export async function load(db, slug) {\n  const project = await db.projects.findBySlug(slug);\n  return db.tasks.findMany({ projectId: project.id });\n}\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Preserve transaction order",
+      "path": "apps/web/src/server/dashboard.ts",
+      "before": "export async function update(db, id) { return db.project.update(id); }\n",
+      "after": "export async function update(db, id) {\n  return db.transaction(async tx => {\n    await tx.project.lock(id);\n    return tx.project.update(id);\n  });\n}\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Explicit rate-limited operation",
+      "path": "apps/web/src/server/dashboard.ts",
+      "before": "export async function send(sendOne, ids) { return ids; }\n",
+      "after": "// Provider contract permits one outstanding request at a time.\nexport async function send(sendOne, ids) {\n  for (const id of ids) await sendOne(id);\n}\n",
+      "expected": "pass"
+    }
+  ]
+}

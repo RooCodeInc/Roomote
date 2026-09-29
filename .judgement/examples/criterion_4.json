@@ -1,0 +1,47 @@
+{
+  "ruleId": "criterion_4",
+  "examples": [
+    {
+      "name": "Tell user to operate an internal card",
+      "path": "packages/cloud-agents/src/server/setup-prompt.ts",
+      "before": "export const setupReply = \"Connect a repository so I can review your code.\";\n",
+      "after": "export const setupReply = \"Click the Configure button in the setup card on the right rail.\";\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Ask for credentials in chat",
+      "path": "packages/cloud-agents/src/server/setup-prompt.ts",
+      "before": "export const setupReply = \"Connect your account securely to continue.\";\n",
+      "after": "export const setupReply = \"Paste your API key into this chat so I can connect your account.\";\n",
+      "expected": "violation"
+    },
+    {
+      "name": "State needed capability",
+      "path": "packages/cloud-agents/src/server/setup-prompt.ts",
+      "before": "export const setupReply = \"I need access.\";\n",
+      "after": "export const setupReply = \"Connect a repository so I can review your code.\";\n",
+      "expected": "pass"
+    },
+    {
+      "name": "State user outcome",
+      "path": "packages/cloud-agents/src/server/setup-prompt.ts",
+      "before": "export const setupReply = \"Configuration complete.\";\n",
+      "after": "export const setupReply = \"I can now review pull requests in your repository.\";\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Internal tool schema may describe controls",
+      "path": "packages/cloud-agents/src/server/setup-prompt.ts",
+      "before": "export const toolDescription = \"Configure access.\";\n",
+      "after": "// Internal tool schema, never shown as agent prose.\nexport const toolDescription = \"Render the trusted repository configuration card with its Connect button.\";\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Trusted UI description may describe controls",
+      "path": "packages/cloud-agents/src/server/setup-prompt.ts",
+      "before": "export const trustedUiDescription = \"Connection settings\";\n",
+      "after": "// Trusted UI description for the setup renderer; not agent prose.\nexport const trustedUiDescription = \"The Connect button opens the repository permissions dialog.\";\n",
+      "expected": "pass"
+    }
+  ]
+}

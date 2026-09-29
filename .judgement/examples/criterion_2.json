@@ -1,0 +1,47 @@
+{
+  "ruleId": "criterion_2",
+  "examples": [
+    {
+      "name": "Spread all launcher variables",
+      "path": "apps/worker/src/run-task/launch.ts",
+      "before": "export function taskEnv() { return { PATH: process.env.PATH }; }\n",
+      "after": "export function taskEnv() { return { ...process.env }; }\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Forward worker authentication to task",
+      "path": "apps/worker/src/run-task/launch.ts",
+      "before": "export function taskEnv() { return { PATH: process.env.PATH }; }\n",
+      "after": "export function taskEnv() { return { PATH: process.env.PATH, WORKER_AUTH_TOKEN: process.env.WORKER_AUTH_TOKEN }; }\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Explicit non-sensitive allowlist",
+      "path": "apps/worker/src/run-task/launch.ts",
+      "before": "export function taskEnv() { return {}; }\n",
+      "after": "export function taskEnv() { return { PATH: process.env.PATH, LANG: process.env.LANG }; }\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Named nested runtime contract",
+      "path": "apps/worker/src/run-task/launch.ts",
+      "before": "export function taskEnv() { return { PATH: process.env.PATH }; }\n",
+      "after": "// The nested Node service requires NODE_OPTIONS to set its heap limit.\nexport function taskEnv() { return { PATH: process.env.PATH, NODE_OPTIONS: \"--max-old-space-size=512\" }; }\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Scrub captured worker token before launch",
+      "path": "apps/worker/src/run-task/launch.ts",
+      "before": "export function launch(spawn, binary, capturedEnv) { return spawn(binary, [], { env: capturedEnv }); }\n",
+      "after": "export function launch(spawn, binary, capturedEnv) {\n  const env = { PATH: capturedEnv.PATH, LANG: capturedEnv.LANG };\n  return spawn(binary, [], { env });\n}\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Synthetic fixture with no inherited environment",
+      "path": "apps/worker/src/run-task/launch.test.ts",
+      "before": "export const exampleEnv = {};\n",
+      "after": "export const exampleEnv = { PATH: \"/synthetic/bin\", WORKER_AUTH_TOKEN: \"NON_AUTHENTICATING_TEST_PLACEHOLDER\" };\n",
+      "expected": "pass"
+    }
+  ]
+}
