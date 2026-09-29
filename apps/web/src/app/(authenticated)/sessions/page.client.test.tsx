@@ -8,6 +8,10 @@ const { sessionStatusState } = vi.hoisted(() => ({
   },
 }));
 
+vi.mock('@/components/sessions/use-session-status-mutation', () => ({
+  useSessionStatusMutation: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
 import SessionsPage from './page';
 
 vi.mock('@/lib/server/auth-context', () => ({
