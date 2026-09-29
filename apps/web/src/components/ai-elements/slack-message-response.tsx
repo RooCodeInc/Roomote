@@ -1,124 +1,83 @@
 'use client';
 
-import {
-  Children,
-  cloneElement,
-  createElement,
-  isValidElement,
-  type ComponentProps,
-  type JSX,
-  type ReactNode,
-} from 'react';
-
-import { cn } from '@/lib/utils';
+import type { ComponentProps } from 'react';
+import type { Node } from 'unist';
+import { defaultRehypePlugins } from 'streamdown';
+import { parseSlackMessageTokens } from '@roomote/types';
 
 import { CustomLink } from './custom-link';
-import { MessageResponse } from './message';
+import { CustomParagraph, MessageResponse } from './message';
 import { SlackMessageText } from './slack-message-text';
 
-const PROTECTED_ELEMENTS = new Set(['a', 'code', 'pre', 'img', 'button']);
-const RECURSIVE_ELEMENTS = new Set([
-  'del',
-  'em',
-  'mark',
-  's',
-  'span',
-  'strong',
-]);
-
-function renderSlackTextChildren(children: ReactNode): ReactNode {
-  return Children.map(children, (child) => {
-    if (typeof child === 'string') {
-      return <SlackMessageText text={child} />;
-    }
-
-    if (!isValidElement<{ children?: ReactNode }>(child)) {
-      return child;
-    }
-
-    if (typeof child.type === 'string' && PROTECTED_ELEMENTS.has(child.type)) {
-      return child;
-    }
-
-    if (
-      typeof child.type !== 'string' ||
-      !RECURSIVE_ELEMENTS.has(child.type) ||
-      !('children' in child.props)
-    ) {
-      return child;
-    }
-
-    return cloneElement(
-      child,
-      undefined,
-      renderSlackTextChildren(child.props.children),
-    );
-  });
-}
-
-type MarkdownNodeProps = {
-  node?: { tagName?: string; position?: unknown };
+// The small structural subset shared by HAST root, element, and text nodes.
+type MarkdownNode = Node & {
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: MarkdownNode[];
 };
 
-function createSlackMarkdownElement<Tag extends keyof JSX.IntrinsicElements>(
-  tag: Tag,
-) {
-  return function SlackMarkdownElement(
-    props: ComponentProps<Tag> & MarkdownNodeProps,
-  ) {
-    const { children, node: _node, ...rest } = props;
-    const className =
-      tag === 'p'
-        ? cn('min-w-0 [overflow-wrap:anywhere]', rest.className)
-        : rest.className;
-    const streamdownTag =
-      tag === 'p'
-        ? 'paragraph'
-        : tag === 'li'
-          ? 'list-item'
-          : tag.startsWith('h')
-            ? `heading-${tag.slice(1)}`
-            : undefined;
+const PROTECTED_ELEMENTS = new Set(['a', 'code', 'pre', 'img', 'button']);
 
-    return createElement(
-      tag,
-      {
-        ...rest,
-        className,
-        ...(streamdownTag ? { 'data-streamdown': streamdownTag } : {}),
-      } as Record<string, unknown>,
-      renderSlackTextChildren(children),
-    );
+function rehypeSlackReferences() {
+  return (tree: MarkdownNode) => {
+    function transform(node: MarkdownNode) {
+      if (node.tagName && PROTECTED_ELEMENTS.has(node.tagName)) return;
+      if (!node.children) return;
+
+      node.children = node.children.map((child) => {
+        if (
+          child.type === 'text' &&
+          child.value &&
+          parseSlackMessageTokens(child.value).some(
+            (token) => token.type !== 'text',
+          )
+        ) {
+          return {
+            type: 'element',
+            tagName: 'span',
+            properties: { 'data-slack-reference': true },
+            children: [child],
+          };
+        }
+        transform(child);
+        return child;
+      });
+    }
+    transform(tree);
   };
 }
 
-const SlackMarkdownHeading1 = createSlackMarkdownElement('h1');
-const SlackMarkdownHeading2 = createSlackMarkdownElement('h2');
-const SlackMarkdownHeading3 = createSlackMarkdownElement('h3');
-const SlackMarkdownHeading4 = createSlackMarkdownElement('h4');
-const SlackMarkdownHeading5 = createSlackMarkdownElement('h5');
-const SlackMarkdownHeading6 = createSlackMarkdownElement('h6');
-const SlackMarkdownListItem = createSlackMarkdownElement('li');
-const SlackMarkdownParagraph = createSlackMarkdownElement('p');
+function SlackReferenceSpan({
+  children,
+  node: _node,
+  'data-slack-reference': isSlackReference,
+  ...props
+}: ComponentProps<'span'> & {
+  node?: Node;
+  'data-slack-reference'?: boolean;
+}) {
+  if (isSlackReference && typeof children === 'string') {
+    return <SlackMessageText text={children} />;
+  }
+  return <span {...props}>{children}</span>;
+}
 
-/** Renders assistant Markdown with Slack references at the parsed-node boundary. */
+// Run after Streamdown's sanitization, preserving its default renderers and
+// code/diagram plugins. Only eligible text leaves subscribe to Slack names.
+const rehypePlugins = [
+  ...Object.values(defaultRehypePlugins),
+  rehypeSlackReferences,
+];
+const components = {
+  a: CustomLink,
+  p: CustomParagraph,
+  span: SlackReferenceSpan,
+};
+
 export function SlackMessageResponse({ text }: { text: string }) {
   return (
-    <MessageResponse
-      components={{
-        a: CustomLink,
-        code: 'code',
-        h1: SlackMarkdownHeading1,
-        h2: SlackMarkdownHeading2,
-        h3: SlackMarkdownHeading3,
-        h4: SlackMarkdownHeading4,
-        h5: SlackMarkdownHeading5,
-        h6: SlackMarkdownHeading6,
-        li: SlackMarkdownListItem,
-        p: SlackMarkdownParagraph,
-        pre: 'pre',
-      }}
-    >
+    <MessageResponse components={components} rehypePlugins={rehypePlugins}>
       {text}
     </MessageResponse>
   );

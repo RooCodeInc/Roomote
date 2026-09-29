@@ -118,31 +118,6 @@ export function SlackMentionResolutionProvider({
   children: ReactNode;
   text: string;
 }) {
-  const { userIds, channelIds } = getReferenceIds(text);
-  if (userIds.length === 0 && channelIds.length === 0) {
-    return (
-      <SlackMessageReferencesContext.Provider
-        value={{ users: {}, channels: {} }}
-      >
-        {children}
-      </SlackMessageReferencesContext.Provider>
-    );
-  }
-
-  return (
-    <SlackMentionResolutionLookup text={text}>
-      {children}
-    </SlackMentionResolutionLookup>
-  );
-}
-
-function SlackMentionResolutionLookup({
-  children,
-  text,
-}: {
-  children: ReactNode;
-  text: string;
-}) {
   const references = useResolvedSlackReferences(text, true);
 
   return (

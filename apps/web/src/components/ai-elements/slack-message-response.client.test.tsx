@@ -1,5 +1,13 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 
+import { useState } from 'react';
+import { MessageResponse } from './message';
 import { SlackMentionProvider } from './slack-mention-context';
 import { SlackMentionResolutionProvider } from './slack-message-references';
 import { SlackMessageResponse } from './slack-message-response';
@@ -146,7 +154,70 @@ describe('Slack references in assistant Markdown', () => {
       await screen.findByRole('link', { name: '<@U123>' }),
     ).toHaveAttribute('href', 'https://example.com/');
     expect(screen.getByText('<#C456>')).toBeInTheDocument();
-    expect(screen.getAllByText('<@U123>')).toHaveLength(2);
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-streamdown="code-block-body"]'),
+      ).toHaveTextContent('<@U123>');
+    });
+    expect(
+      screen.queryByRole('link', { name: '@Maya' }),
+    ).not.toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: '#ops' })).toHaveLength(1);
+  });
+});
+
+describe('Markdown and transcript state regressions', () => {
+  it('preserves draft state when first reference arrives', () => {
+    function Draft() {
+      const [value, setValue] = useState('');
+      return (
+        <input
+          aria-label="draft"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+        />
+      );
+    }
+    function Tree({ text }: { text: string }) {
+      return (
+        <SlackMentionResolutionProvider text={text}>
+          <Draft />
+        </SlackMentionResolutionProvider>
+      );
+    }
+    const { rerender } = render(<Tree text="hello" />);
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'unsent reply' },
+    });
+    rerender(<Tree text="hello <@U123>" />);
+    expect(screen.getByRole('textbox')).toHaveValue('unsent reply');
+    rerender(<Tree text="hello again" />);
+    expect(screen.getByRole('textbox')).toHaveValue('unsent reply');
+  });
+
+  it('retains Streamdown code block UI', async () => {
+    const text = '```js\nconst answer = 42;\n```';
+    const baseline = render(<MessageResponse>{text}</MessageResponse>);
+    expect(
+      await screen.findByRole('button', { name: /copy/i }),
+    ).toBeInTheDocument();
+    baseline.unmount();
+    render(renderResponse(text));
+    expect(
+      await screen.findByRole('button', { name: /copy/i }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    '**<@U123>**',
+    '*<@U123>*',
+    '~~<@U123>~~',
+    '| Person |\n| --- |\n| <@U123> |',
+    '| <@U123> |\n| --- |\n| Person |',
+  ])('resolves mention in %s', async (text) => {
+    render(renderResponse(text));
+    expect(
+      await screen.findByRole('link', { name: '@Maya' }),
+    ).toBeInTheDocument();
   });
 });
