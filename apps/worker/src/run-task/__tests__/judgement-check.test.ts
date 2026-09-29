@@ -132,7 +132,10 @@ it('keeps private backend errors out of hook diagnostics', async () => {
 });
 
 it('clears stale endpoints and registers task cleanup', async () => {
-  const runtimeEnv = { ...env, R_JUDGEMENT_GATEWAY_URL: 'stale' };
+  const runtimeEnv: NodeJS.ProcessEnv = {
+    ...env,
+    R_JUDGEMENT_GATEWAY_URL: 'stale',
+  };
   let close: (() => Promise<void>) | undefined;
   await setupJudgement({
     runtimeEnv,
@@ -149,14 +152,15 @@ it('clears stale endpoints and registers task cleanup', async () => {
       ROOMOTE_CLOUD_TOKEN: 'private-token',
       ROOMOTE_AUTH_BYPASS_VALUE: 'private-bypass',
     },
-    runtimeEnv,
+    runtimeEnv as Record<string, string>,
   );
   expect(terminal).toEqual({
     PATH: '/bin',
     R_JUDGEMENT_GATEWAY_URL: runtimeEnv.R_JUDGEMENT_GATEWAY_URL,
+    R_JUDGEMENT_MANAGED: '1',
   });
   await close?.();
-  await expect(fetch(runtimeEnv.R_JUDGEMENT_GATEWAY_URL)).rejects.toThrow();
+  await expect(fetch(runtimeEnv.R_JUDGEMENT_GATEWAY_URL!)).rejects.toThrow();
   const warn = vi.fn();
   await setupJudgement({
     runtimeEnv: Object.assign(runtimeEnv, { ROOMOTE_CLOUD_TOKEN: '' }),
@@ -165,4 +169,11 @@ it('clears stale endpoints and registers task cleanup', async () => {
   });
   expect(runtimeEnv.R_JUDGEMENT_GATEWAY_URL).toBeUndefined();
   expect(warn).toHaveBeenCalled();
+  expect(runtimeEnv.R_JUDGEMENT_MANAGED).toBe('1');
+  expect(
+    buildJudgementTerminalEnv({}, runtimeEnv as Record<string, string>),
+  ).toEqual({ R_JUDGEMENT_MANAGED: '1' });
+  expect(buildJudgementTerminalEnv({ R_JUDGEMENT_MANAGED: '1' }, {})).toEqual(
+    {},
+  );
 });

@@ -88,6 +88,9 @@ export async function setupJudgement(options: {
   logger: Pick<Console, 'warn'>;
   registerCleanup: (close: () => Promise<void>) => void;
 }) {
+  // Keep this marker even if setup fails: chained repo hooks must not fall
+  // back to developer inference when the managed check is unavailable.
+  options.runtimeEnv.R_JUDGEMENT_MANAGED = '1';
   delete options.runtimeEnv.R_JUDGEMENT_GATEWAY_URL;
   try {
     const proxy = await startJudgementProxy(options.runtimeEnv);
@@ -109,6 +112,8 @@ export function buildJudgementTerminalEnv(
   delete env.ROOMOTE_AUTH_BYPASS_HEADER_NAME;
   delete env.ROOMOTE_AUTH_BYPASS_VALUE;
   delete env.R_JUDGEMENT_GATEWAY_URL;
+  delete env.R_JUDGEMENT_MANAGED;
+  if (runtimeEnv.R_JUDGEMENT_MANAGED === '1') env.R_JUDGEMENT_MANAGED = '1';
   if (runtimeEnv.R_JUDGEMENT_GATEWAY_URL)
     env.R_JUDGEMENT_GATEWAY_URL = runtimeEnv.R_JUDGEMENT_GATEWAY_URL;
   return env;

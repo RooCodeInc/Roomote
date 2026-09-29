@@ -298,7 +298,9 @@ curl -X GET "http://localhost:13001/trpc/auth.me" \
 The pre-commit hook runs Judgement after `lint-staged`, so it checks the formatted
 staged snapshot. Confirmed violations and invalid policies block the commit;
 incomplete checks report their status and allow the commit after a three-second
-check deadline.
+check deadline. In managed Roomote tasks, this repository hook only formats;
+the worker-installed wrapper runs Judgement once through task inference, even
+when the proxy is unavailable.
 
 Run `pnpm judgement --verbose` from the Roomote checkout to check staged changes
 against `JUDGE.json`. The command loads `.env.local` and uses the same deployment
