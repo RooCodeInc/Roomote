@@ -215,6 +215,16 @@ fall back to the existing status. A Done column is informational and never
 closes, cancels, or archives a session or task. Both experiments are off by
 default.
 
+When the status controls are enabled, an authorized Session manager can choose
+**Needs input**, **Blocked**, **Ready**, or **Done** from the shared overflow menu
+on the Sessions board, list, or workspace. **Active** remains a deterministic
+runtime state rather than a manual selection. Manual **Done** only changes the
+Session's displayed outcome; it does not stop tasks or archive the Session.
+After at least four days (96 hours) without a newer visible user message,
+inactivity reconciliation can move a settled Session to **Done** before model
+classification. A newer visible user message releases the manual override so
+the Session can be classified from its current work again.
+
 Session rows show who or which automation started the work, its source and
 cost, and links to accumulated active pull requests. In the session workspace,
 those pull requests remain available across delegated tasks. Selecting the live

@@ -151,6 +151,12 @@ array of repository-relative globs; when omitted, the criterion applies to all
 changed text files. `threshold` is optional and ranges from `0` to `1`; the
 default is `0.85`.
 
+Repository judge policies currently run through Jev. Select Jev through
+[TypeSafe](/providers/inference/typesafe), OpenRouter, or Vercel AI Gateway in
+the judgment-model settings before relying on a policy; the Roomote judgment
+model is not eligible for `JUDGE.json` criteria yet. If no eligible judgment
+backend is available, Roomote warns and allows the task to finish normally.
+
 Roomote checks the final repository diff, including files created by shell
 commands, and evaluates each matching criterion independently with the
 configured judgment model. A confident `rewrite` result at or above the
