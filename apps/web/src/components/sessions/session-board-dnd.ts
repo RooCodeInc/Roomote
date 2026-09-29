@@ -13,6 +13,7 @@ export type SessionBoardDragData = {
   column: SessionBoardColumn;
   canManage: boolean;
   title: string;
+  keyboardColumn?: SessionBoardColumn;
 };
 
 export function getSessionBoardDropStatus(
@@ -63,13 +64,17 @@ export const sessionBoardKeyboardCoordinates: KeyboardCoordinateGetter = (
     | undefined;
   if (!data) return;
 
-  const currentColumn =
-    getSessionBoardDropStatus(context.over?.id) ?? data.column;
+  // DndKit may report the nearest enabled lane before the first keyboard move.
+  // Keep the initial source column until an arrow key chooses a target, then
+  // continue from that chosen lane instead of the collision-derived `over`.
+  const currentColumn = data.keyboardColumn ?? data.column;
   const targetColumn = getSessionBoardKeyboardTarget(currentColumn, event.code);
   if (!targetColumn) return;
 
   const targetRect = context.droppableRects.get(targetColumn);
   if (!targetRect) return;
+
+  data.keyboardColumn = targetColumn;
 
   return {
     x: targetRect.left + targetRect.width / 2,

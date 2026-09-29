@@ -49,7 +49,8 @@ describe('session board drag-and-drop rules', () => {
         ['needs_input', { left: 10, top: 20, width: 100, height: 50 }],
         ['blocked', { left: 130, top: 20, width: 100, height: 50 }],
       ]),
-      over: null,
+      // Collision detection can report this before the first keyboard key.
+      over: { id: 'needs_input' },
     } as unknown as Parameters<
       typeof sessionBoardKeyboardCoordinates
     >[1]['context'];

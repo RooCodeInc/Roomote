@@ -22,6 +22,7 @@ import {
   useSensors,
   type Active,
   type Announcements,
+  type DragCancelEvent,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
@@ -188,12 +189,14 @@ export function SessionBoard({ children }: { children: ReactNode }) {
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const data = getDragData(event.active);
     if (!data?.canManage) return;
+    data.keyboardColumn = undefined;
     setActiveDrag({ column: data.column });
   }, []);
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const data = getDragData(event.active);
       const targetStatus = getSessionBoardDropStatus(event.over?.id);
+      if (data) data.keyboardColumn = undefined;
       setActiveDrag(null);
 
       if (
@@ -211,7 +214,11 @@ export function SessionBoard({ children }: { children: ReactNode }) {
     },
     [statusMutation],
   );
-  const handleDragCancel = useCallback(() => setActiveDrag(null), []);
+  const handleDragCancel = useCallback((event: DragCancelEvent) => {
+    const data = getDragData(event.active);
+    if (data) data.keyboardColumn = undefined;
+    setActiveDrag(null);
+  }, []);
   const isDropTarget = useCallback(
     (column: string) =>
       activeDrag !== null &&
@@ -375,9 +382,20 @@ export function SessionBoardCard({
   const registry = useContext(SessionBoardCardRegistryContext);
   const dnd = useContext(SessionBoardDndContext);
   const [isFlying, setIsFlying] = useState(false);
+  const dragData = useRef<SessionBoardDragData>({
+    column,
+    canManage,
+    title,
+  });
+  if (dragData.current.column !== column) {
+    dragData.current.keyboardColumn = undefined;
+  }
+  dragData.current.column = column;
+  dragData.current.canManage = canManage;
+  dragData.current.title = title;
   const draggable = useDraggable({
     id: sessionId,
-    data: { column, canManage, title } satisfies SessionBoardDragData,
+    data: dragData.current,
     disabled: !canManage || dnd?.statusMutationPending === true,
   });
 
