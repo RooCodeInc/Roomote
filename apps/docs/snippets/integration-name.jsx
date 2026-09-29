@@ -11,6 +11,7 @@ export function IntegrationName({ href, icon, name }) {
     monday: '/logo/integrations/monday.svg',
     rippling: '/logo/integrations/rippling.svg',
     typesafe: '/logo/integrations/typesafe.svg',
+    voice: '/logo/integrations/voice.svg',
   };
   const iconSrc =
     manualIcons[icon] ??
