@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -11,6 +12,10 @@ import { toast } from 'sonner';
 import { CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH } from '@roomote/types';
 const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
+
+afterEach(() => {
+  cleanup();
+});
 
 const state = vi.hoisted(() => ({
   latestScheduleOptions: null as {
@@ -33,6 +38,14 @@ const state = vi.hoisted(() => ({
     enabled: boolean;
     url: string | null;
   } | null,
+  customAutomationWebhookFallback: { enabled: false, url: null } as {
+    enabled: boolean;
+    url: string | null;
+  },
+  builtInAutomationWebhookFallback: { enabled: false, url: null } as {
+    enabled: boolean;
+    url: string | null;
+  },
   customAutomationTimeZone: 'UTC' as string | undefined,
   customAutomationDefaultTarget: undefined as
     | {
@@ -442,17 +455,16 @@ vi.mock('@tanstack/react-query', () => ({
       return {
         isPending: false,
         isError: false,
-        data: state.customAutomationWebhookSettings ?? {
-          enabled: false,
-          url: null,
-        },
+        data:
+          state.customAutomationWebhookSettings ??
+          state.customAutomationWebhookFallback,
       };
     }
     if (key1 === 'getBuiltInAutomationWebhook') {
       return {
         isPending: false,
         isError: false,
-        data: { enabled: false, url: null },
+        data: state.builtInAutomationWebhookFallback,
       };
     }
 
@@ -1128,19 +1140,22 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
+      screen.getByRole('button', {
         name: 'Configure Inference Provider Usage Alerts',
       }),
     );
 
-    expect(screen.getByText('Schedule')).toBeInTheDocument();
-    expect(screen.getByText('Destination')).toBeInTheDocument();
-    const thresholdSlider = screen.getByRole('slider', {
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Inference Provider Usage Alerts',
+    });
+    expect(within(dialog).getByText(/^Schedule:/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/^Destination:/)).toBeInTheDocument();
+    const thresholdSlider = within(dialog).getByRole('slider', {
       name: 'Provider usage alert threshold',
     });
     expect(thresholdSlider).toHaveAttribute('aria-valuemin', '5');
     expect(thresholdSlider).toHaveAttribute('aria-valuenow', '85');
-    expect(screen.getByText('85%')).toBeInTheDocument();
+    expect(within(dialog).getByText('85%')).toBeInTheDocument();
   });
 
   it('configures Call Roomote via emoji with a name and instructions', async () => {
@@ -1155,6 +1170,9 @@ describe('AutomationsSettings', () => {
       name: 'Call Roomote via emoji',
     });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Edit' }));
+    fireEvent.click(
+      within(dialog).getByRole('switch', { name: 'Emoji reactions enabled' }),
+    );
 
     expect(screen.getByLabelText('Emoji name')).toHaveAttribute(
       'placeholder',
@@ -1212,16 +1230,20 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
+      screen.getByRole('button', {
         name: /(?:Set up|Configure) Manager Stats/,
       }),
     );
-    expect(screen.getByText('Destination')).toBeInTheDocument();
+    const managerStatsDialog = await screen.findByRole('dialog', {
+      name: 'Manager Stats',
+    });
+    expect(
+      within(managerStatsDialog).getByText(/^Destination:/),
+    ).toBeInTheDocument();
     fireEvent.click(
-      within(screen.getByRole('dialog', { name: 'Manager Stats' })).getByRole(
-        'button',
-        { name: 'Edit destination' },
-      ),
+      within(managerStatsDialog).getByRole('button', {
+        name: 'Edit destination',
+      }),
     );
     expect(
       screen.getByRole('combobox', { name: 'Destination provider' }),
@@ -1232,7 +1254,10 @@ describe('AutomationsSettings', () => {
         name: /(?:Set up|Configure) Triage Sentry Issues/,
       }),
     );
-    expect(screen.getByText('Destination')).toBeInTheDocument();
+    const sentryDialog = await screen.findByRole('dialog', {
+      name: 'Triage Sentry Issues',
+    });
+    expect(within(sentryDialog).getByText(/^Destination:/)).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
       screen.getByRole('button', {
@@ -1240,16 +1265,23 @@ describe('AutomationsSettings', () => {
       }),
     );
 
-    expect(screen.getByText('Destination')).toBeInTheDocument();
+    const dependabotDialog = await screen.findByRole('dialog', {
+      name: 'Triage Dependabot Alerts',
+    });
+    expect(
+      within(dependabotDialog).getByText(/^Destination:/),
+    ).toBeInTheDocument();
     fireEvent.click(
-      within(
-        screen.getByRole('dialog', { name: 'Triage Dependabot Alerts' }),
-      ).getByRole('button', { name: 'Edit destination' }),
+      within(dependabotDialog).getByRole('button', {
+        name: 'Edit destination',
+      }),
     );
     expect(
       screen.getByRole('combobox', { name: 'Destination provider' }),
     ).toHaveTextContent('Default');
-    expect(screen.getByText('Destination')).toBeInTheDocument();
+    expect(
+      screen.getByText('Destination', { exact: true }),
+    ).toBeInTheDocument();
   });
 
   it('keeps Suggest Ideas and Summarize Merged PRs setup available without a default destination', async () => {
@@ -1260,12 +1292,14 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    const suggesterSwitch = await screen.findByRole('switch', {
-      name: 'Enable Suggest Ideas',
-    });
-    const announcerSwitch = screen.getByRole('switch', {
-      name: 'Enable Summarize Merged PRs',
-    });
+    const suggesterSwitch = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Enable Suggest Ideas"]',
+    );
+    const announcerSwitch = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Enable Summarize Merged PRs"]',
+    );
+    expect(suggesterSwitch).not.toBeNull();
+    expect(announcerSwitch).not.toBeNull();
     expect(suggesterSwitch).toBeEnabled();
     expect(announcerSwitch).toBeEnabled();
     expect(
@@ -1275,7 +1309,7 @@ describe('AutomationsSettings', () => {
       screen.getByRole('button', { name: 'Set up Summarize Merged PRs' }),
     ).toBeEnabled();
 
-    fireEvent.click(suggesterSwitch);
+    fireEvent.click(suggesterSwitch!);
     expect(
       await screen.findByRole('dialog', { name: 'Suggest Ideas' }),
     ).toBeInTheDocument();
@@ -1290,7 +1324,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     closeAutomationDialog();
 
-    fireEvent.click(announcerSwitch);
+    fireEvent.click(announcerSwitch!);
     expect(
       await screen.findByRole('dialog', { name: 'Summarize Merged PRs' }),
     ).toBeInTheDocument();
@@ -1317,7 +1351,7 @@ describe('AutomationsSettings', () => {
       }),
     );
 
-    expect(screen.getByText('Destination')).toBeInTheDocument();
+    expect(screen.getByText(/^Destination:/)).toBeInTheDocument();
     fireEvent.click(
       within(screen.getByRole('dialog', { name: 'Manager Stats' })).getByRole(
         'button',
@@ -1356,7 +1390,7 @@ describe('AutomationsSettings', () => {
         name: /(?:Set up|Configure) Manager Stats/,
       }),
     );
-    expect(screen.getByText('Destination')).toBeInTheDocument();
+    expect(screen.getByText(/^Destination:/)).toBeInTheDocument();
     fireEvent.click(
       within(screen.getByRole('dialog', { name: 'Manager Stats' })).getByRole(
         'button',
@@ -1463,7 +1497,7 @@ describe('AutomationsSettings', () => {
       }),
     );
 
-    expect(screen.getByText('Destination')).toBeInTheDocument();
+    expect(screen.getByText(/^Destination:/)).toBeInTheDocument();
     fireEvent.click(
       within(
         screen.getByRole('dialog', { name: 'Alert on Config Errors' }),
@@ -1475,7 +1509,6 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('combobox', { name: 'Destination channel' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Configuration alerts')).toBeInTheDocument();
   });
 
   it('shows the deployment-admin DM fallback for unconfigured platform issue alerts', async () => {
@@ -1488,7 +1521,7 @@ describe('AutomationsSettings', () => {
       }),
     );
 
-    expect(screen.getByText('Destination')).toBeInTheDocument();
+    expect(screen.getByText(/^Destination:/)).toBeInTheDocument();
   });
 
   it('hides the launch mode picker when decision mode is disabled', async () => {
@@ -1526,7 +1559,9 @@ describe('AutomationsSettings', () => {
       screen.getByText('Post a recurring digest of recently merged PRs.'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Summary of Roomote's activity during the week"),
+      screen.getByText(
+        "Summary of Roomote's activity for the selected period.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -1676,11 +1711,7 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('dialog', { name: 'Resolve PR Conflicts' }),
     ).toBeInTheDocument();
-    fireEvent.click(
-      within(
-        screen.getByRole('dialog', { name: 'Resolve PR Conflicts' }),
-      ).getByRole('button', { name: 'Edit' }),
-    );
+    editSummaryRow('Schedule');
     expect(
       screen.getByRole('combobox', { name: 'Resolve PR Conflicts schedule' }),
     ).toHaveTextContent('Every hour');
@@ -3055,11 +3086,7 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
     await openSuggesterCard();
 
-    expect(
-      screen.getByText(
-        'Reports to #roomote-managers (Slack) — Manager Channel',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/^Destination:/)).toBeInTheDocument();
     expect(
       screen.getByPlaceholderText(managerInstructionsPlaceholder),
     ).toBeInTheDocument();

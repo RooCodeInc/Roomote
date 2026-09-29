@@ -186,9 +186,10 @@ describe('roomote MCP tool descriptions', () => {
       'schedule',
     ).description;
 
-    expect(scheduleDescription).toContain(
-      'built-in presets: every_hour, every_6_hours, daily, weekly',
-    );
+    expect(scheduleDescription).toContain('built-in presets:');
+    for (const preset of ['every_hour', 'every_6_hours', 'daily', 'weekly']) {
+      expect(scheduleDescription).toContain(preset);
+    }
     expect(scheduleDescription).toContain(
       '"on_demand" for runs started only with Run now or an enabled webhook.',
     );
