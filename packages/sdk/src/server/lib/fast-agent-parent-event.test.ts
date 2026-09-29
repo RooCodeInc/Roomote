@@ -1452,8 +1452,17 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('carries child-selected images and charts into the Fast parent turn by default', async () => {
-    mocks.answerQuestion.mockResolvedValueOnce('Shared the proof.');
+  it('attaches uploaded images even when they belong to another task and run', async () => {
+    mocks.findArtifacts.mockResolvedValueOnce([
+      {
+        id: 'artifact-1',
+        taskId: 'another-task',
+        runId: 17,
+        path: 'proof/result.png',
+        contentType: 'image/png',
+        uploaded: true,
+      },
+    ]);
 
     await deliverFastAgentParentEvent({
       parent,
@@ -1489,6 +1498,41 @@ describe('deliverFastAgentParentEvent', () => {
             },
           },
         ],
+      }),
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: expect.arrayContaining([
+          {
+            type: 'image',
+            image_url:
+              'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            alt_text: 'result.png',
+          },
+        ]),
+      }),
+    );
+  });
+
+  it('keeps a text reply when selected image artifacts are unavailable', async () => {
+    mocks.findArtifacts.mockResolvedValueOnce([]);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'child_message',
+        taskId: 'task-1',
+        runId: 42,
+        messageId: '44444444-4444-4444-8444-444444444445',
+        purpose: 'closeout',
+        message: 'The visual comparison is ready.',
+        imageArtifactIds: ['artifact-missing'],
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('The proof is ready.'),
       }),
     );
   });

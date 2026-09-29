@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { basename } from 'node:path';
 
 import {
   acquireFastAgentTurnLock,
@@ -31,15 +30,12 @@ import {
   recordCustomAutomationResult,
   getSessionForFastConversation,
   getSessionWakeupById,
-  inArray,
   isNull,
   slackInstallations,
-  taskArtifacts,
   taskPullRequests,
   taskRuns,
   users,
 } from '@roomote/db/server';
-import { Env, getArtifactSigningKey } from '@roomote/env';
 import {
   acquireSlackFastRootBindingLock,
   buildSlackPrReviewActionBlocks,
@@ -123,10 +119,7 @@ import {
 } from './fast-automation-suggestions';
 import { requireFastSuggestionOriginSessionId } from './fast-suggestion-origin';
 
-import {
-  buildSignedArtifactRawUrl,
-  currentEpochSeconds,
-} from './artifacts/raw-url';
+import { resolveFastAgentReplyImages } from './fast-agent-reply-images';
 import {
   resolveFastAgentSessionImages,
   type FastAgentReplyImage,
@@ -399,58 +392,7 @@ async function buildSelectedImages(params: {
     });
   }
 
-  const eventIds = new Set(
-    params.event.type === 'artifact_published'
-      ? [params.event.artifact.id]
-      : params.event.type === 'child_message'
-        ? (params.event.imageArtifactIds ?? [])
-        : [],
-  );
-  if (eventIds.size === 0) {
-    return [];
-  }
-  const artifacts = await db.query.taskArtifacts.findMany({
-    where: inArray(taskArtifacts.id, artifactIds),
-    columns: {
-      id: true,
-      taskId: true,
-      runId: true,
-      path: true,
-      contentType: true,
-      uploaded: true,
-    },
-  });
-  const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
-  const ts = currentEpochSeconds();
-
-  return artifactIds.map((id) => {
-    const artifact = byId.get(id);
-    const belongsToCurrentEvent =
-      artifact &&
-      eventIds.has(id) &&
-      'taskId' in params.event &&
-      artifact.taskId === params.event.taskId &&
-      artifact.runId === params.event.runId;
-    if (
-      !artifact ||
-      !artifact.uploaded ||
-      !belongsToCurrentEvent ||
-      !artifact.contentType.startsWith('image/')
-    ) {
-      throw new Error(`Invalid Fast parent image artifact: ${id}`);
-    }
-
-    return {
-      url: buildSignedArtifactRawUrl({
-        artifactId: artifact.id,
-        ts,
-        apiBaseUrl: Env.R_APP_URL,
-        signingKey: getArtifactSigningKey(),
-      }),
-      altText: basename(artifact.path) || 'Task artifact',
-      contentType: artifact.contentType,
-    };
-  });
+  return resolveFastAgentReplyImages({ artifactIds });
 }
 
 export function buildEventClientMessageSeed(
