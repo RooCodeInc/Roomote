@@ -1168,6 +1168,7 @@ describe('generateOpenCodeConfig provider support', () => {
     const runtimeEnv = {
       R_MODEL: 'openai/gpt-6-sol',
       R_SMALL_MODEL: 'openai/gpt-6-luna',
+      R_VISION_MODEL: 'openai/gpt-6.1-sol',
       R_MODEL_REASONING_EFFORT: 'high',
       R_CHATGPT_FAST_MODE: '1',
     };
@@ -1187,6 +1188,9 @@ describe('generateOpenCodeConfig provider support', () => {
       serviceTier: 'priority',
     });
     expect(config.provider.openai?.models?.['gpt-6-luna']?.options).toEqual({
+      serviceTier: 'priority',
+    });
+    expect(config.provider.openai?.models?.['gpt-6.1-sol']?.options).toEqual({
       serviceTier: 'priority',
     });
     expect(runtimeEnv).not.toHaveProperty('R_CHATGPT_FAST_MODE');
