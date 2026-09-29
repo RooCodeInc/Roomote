@@ -468,7 +468,6 @@ async function beginFastTurnStatusJudgment(
   fastConversationId: string,
   turnId: string,
 ): Promise<void> {
-  if (!(await isDeploymentExperimentEnabled('sessionStatusJudgment'))) return;
   const session = await getSessionForFastConversation(db, fastConversationId);
   if (!session) return;
   await createSessionStatusJudgmentRequest(db, {

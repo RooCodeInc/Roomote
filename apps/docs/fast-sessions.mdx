@@ -201,25 +201,21 @@ include transcript matches and show a highlighted excerpt. **Ready** is not a
 terminal state: you can reply or start another execution in the same session
 later.
 
-The Sessions page shows the list by default. An administrator can enable the
-**Sessions board** under **Settings > Experimental** to add a board view with
-**Active**, **Needs input**, **Blocked**, **Ready**, and **Done** columns. The
-setting applies deployment-wide: members see the board only for sessions they
-can already access.
+The Sessions page shows the list by default and includes a board view with
+**Active**, **Needs input**, **Blocked**, **Ready**, and **Done** columns. Members
+see the board only for sessions they can already access.
 
-Admins can separately enable **Session status judgment** to let the deployment's
-configured judgment model classify settled session outcomes. The judgment uses
-recent visible conversation and child-task summaries. Active work and structured
-input requests continue to use their deterministic status; uncertain judgments
-fall back to the existing status. A Done column is informational and never
-closes, cancels, or archives a session or task. Both experiments are off by
-default.
+The deployment's configured judgment model classifies settled Session outcomes.
+The judgment uses recent visible conversation and child-task summaries. Active
+work and structured input requests continue to use their deterministic status;
+uncertain judgments fall back to the existing status. A Done column is
+informational and never closes, cancels, or archives a session or task.
 
-When the status controls are enabled, an authorized Session manager can choose
-**Needs input**, **Blocked**, **Ready**, or **Done** from the shared overflow menu
-on the Sessions board, list, or workspace. **Active** remains a deterministic
-runtime state rather than a manual selection. Manual **Done** only changes the
-Session's displayed outcome; it does not stop tasks or archive the Session.
+An authorized Session manager can choose **Needs input**, **Blocked**, **Ready**,
+or **Done** from the shared overflow menu on the Sessions board, list, or
+workspace. **Active** remains a deterministic runtime state rather than a
+manual selection. Manual **Done** only changes the Session's displayed outcome;
+it does not stop tasks or archive the Session.
 After at least four days (96 hours) without a newer visible user message,
 inactivity reconciliation can move a settled Session to **Done** before model
 classification. A newer visible user message releases the manual override so

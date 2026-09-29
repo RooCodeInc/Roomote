@@ -1,19 +1,11 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 
-const { experimentState, sessionStatusState } = vi.hoisted(() => ({
-  experimentState: { boardEnabled: false, judgmentEnabled: false },
+const { sessionStatusState } = vi.hoisted(() => ({
   sessionStatusState: {
     current: ['active', 'needs_input', 'blocked', 'ready', 'done'] as Array<
       'active' | 'needs_input' | 'blocked' | 'ready' | 'done'
     >,
   },
-}));
-
-vi.mock('@roomote/db/server', () => ({
-  getDeploymentExperiments: async () => ({
-    sessionsBoard: experimentState.boardEnabled,
-    sessionStatusJudgment: experimentState.judgmentEnabled,
-  }),
 }));
 
 import SessionsPage from './page';
@@ -58,8 +50,6 @@ vi.mock('@/lib/server/sessions', () => ({
 
 describe('Sessions list', () => {
   beforeEach(() => {
-    experimentState.boardEnabled = false;
-    experimentState.judgmentEnabled = false;
     sessionStatusState.current = [
       'active',
       'needs_input',
@@ -99,25 +89,20 @@ describe('Sessions list', () => {
     ).toHaveAttribute('href', '/sessions?before=older-cursor');
   });
 
-  it('does not expose the board from a direct URL until the deployment flag is enabled', async () => {
+  it('exposes the board from a direct URL without a deployment flag', async () => {
     render(
       await SessionsPage({
         searchParams: Promise.resolve({ view: 'board' }),
       }),
     );
 
-    expect(
-      screen.queryByRole('heading', { name: 'done' }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'done' })).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: 'Show older sessions' }),
-    ).toHaveAttribute('href', '/sessions?before=older-cursor');
+    ).toHaveAttribute('href', '/sessions?view=board&before=older-cursor');
   });
 
   it('shows deployment-wide board lanes while preserving each Session card', async () => {
-    experimentState.boardEnabled = true;
-    experimentState.judgmentEnabled = true;
-
     render(
       await SessionsPage({
         searchParams: Promise.resolve({ view: 'board' }),
@@ -137,8 +122,6 @@ describe('Sessions list', () => {
   });
 
   it('hides empty board lanes and blocked card badges', async () => {
-    experimentState.boardEnabled = true;
-    experimentState.judgmentEnabled = true;
     sessionStatusState.current = ['active', 'blocked', 'done'];
 
     render(
@@ -166,8 +149,6 @@ describe('Sessions list', () => {
   });
 
   it('keeps populated card identity while board lanes appear and disappear', async () => {
-    experimentState.boardEnabled = true;
-    experimentState.judgmentEnabled = true;
     sessionStatusState.current = ['active'];
 
     const { container, rerender } = render(

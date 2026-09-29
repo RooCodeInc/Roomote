@@ -11,7 +11,6 @@ import {
   sessionTasks,
   sessions,
   refreshSessionInactivityDueAt,
-  setDeploymentExperimentEnabled,
   taskFactory,
   userFactory,
   users,
@@ -314,8 +313,6 @@ describe('sessionsReconcileJob', () => {
   it('requeues an idle Session after it crosses the inactivity boundary', async () => {
     await sessionsReconcileJob();
     await sessionsReconcileJob();
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
-
     const user = await userFactory.create();
     const [conversation] = await db
       .insert(fastAgentConversations)
@@ -354,7 +351,6 @@ describe('sessionsReconcileJob', () => {
         sourceEventId: `inactivity-due:${latestVisibleUserTs + 4 * 24 * 60 * 60 * 1_000}`,
       });
     } finally {
-      await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
       await db.delete(sessions).where(eq(sessions.id, session.id));
       await db
         .delete(fastAgentConversations)

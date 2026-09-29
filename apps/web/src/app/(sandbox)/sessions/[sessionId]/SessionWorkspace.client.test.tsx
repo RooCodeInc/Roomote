@@ -241,7 +241,6 @@ vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
 const session: SessionInfo = {
   id: 'session-1',
   canDelete: false,
-  sessionStatusExperimentEnabled: false,
   ownerName: 'Test User',
   ownerEmail: 'test@example.com',
   ownerImageUrl: null,
