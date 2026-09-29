@@ -522,6 +522,7 @@ import {
 } from '../commands/task-models/judgment-model';
 import {
   getJudgmentDecisionCatalogCommand,
+  getJudgmentExamplePresetsCommand,
   judgmentDecisionTestSchema,
   testJudgmentDecisionCommand,
 } from '../commands/task-models/judgment-decision-tester';
@@ -2721,6 +2722,10 @@ export const appRouter = createRouter({
       // Settings > Models > Test decisions (admin only).
       decisionCatalog: protectedProcedure.query(({ ctx: { auth } }) =>
         getJudgmentDecisionCatalogCommand(auth),
+      ),
+
+      examplePresets: protectedProcedure.query(({ ctx: { auth } }) =>
+        getJudgmentExamplePresetsCommand(auth),
       ),
 
       testDecision: protectedProcedure

@@ -6,7 +6,7 @@ minimumReleaseAge: 10080
 # lockfile-affecting changes while it finishes maturing.
 minimumReleaseAgeExclude:
   # First-party release reviewed with the Judgement integration.
-  - "@roo-code/judgement@0.2.0"
+  - "@roo-code/judgement@0.3.1"
   - jose
   # Allow the patched releases while they finish maturing.
   - brace-expansion

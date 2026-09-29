@@ -104,11 +104,10 @@ describe('evaluateRepositoryJudgement', () => {
       unresolved: [],
     };
     evaluateDecisionModelMock.mockResolvedValue({
-      result: { type: 'choice', choice: 'violation', confidence: 0.97 },
+      result: { type: 'noul', noul: 0.97 },
     });
     expect(await evaluateRepositoryJudgement(request)).toEqual({
-      outcome: 'violation',
-      confidence: 0.97,
+      violationProbability: 0.97,
     });
     expect(evaluateDecisionModelMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -116,7 +115,7 @@ describe('evaluateRepositoryJudgement', () => {
         decision: 'repository-judgement',
         timeoutMs: 2500,
         skipShadow: true,
-        questions: { result: expect.objectContaining({ type: 'choice' }) },
+        questions: { result: expect.objectContaining({ type: 'noul' }) },
       }),
     );
     evaluateDecisionModelMock.mockResolvedValue({

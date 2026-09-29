@@ -82,7 +82,9 @@ it('uses the same Roomote evaluator for the shared rule example suite', async ()
   });
   expect(report.status).toBe('pass');
   expect(evaluate).toHaveBeenCalled();
-  expect(report.reports[0]?.results[0]?.answers[0]?.confidence).toBe(0.99);
+  expect(report.reports[0]?.results[0]?.answers[0]).toMatchObject({
+    confidence: 0.99,
+  });
 });
 
 it('does not expose backend errors in example suite reports', async () => {

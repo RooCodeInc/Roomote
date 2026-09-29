@@ -2,10 +2,10 @@
   "ruleId": "criterion_2",
   "examples": [
     {
-      "name": "Spread all launcher variables",
+      "name": "Spread credential-bearing worker environment",
       "path": "apps/worker/src/run-task/launch.ts",
-      "before": "export function taskEnv() { return { PATH: process.env.PATH }; }\n",
-      "after": "export function taskEnv() { return { ...process.env }; }\n",
+      "before": "export function taskEnv(workerEnv: { PATH: string; WORKER_AUTH_TOKEN: string }) { return { PATH: workerEnv.PATH }; }\n",
+      "after": "export function taskEnv(workerEnv: { PATH: string; WORKER_AUTH_TOKEN: string }) { return { ...workerEnv }; }\n",
       "expected": "violation"
     },
     {
@@ -41,6 +41,20 @@
       "path": "apps/worker/src/run-task/launch.test.ts",
       "before": "export const exampleEnv = {};\n",
       "after": "export const exampleEnv = { PATH: \"/synthetic/bin\", WORKER_AUTH_TOKEN: \"NON_AUTHENTICATING_TEST_PLACEHOLDER\" };\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Spread an already safe environment",
+      "path": "apps/worker/src/run-task/launch.ts",
+      "before": "export function taskEnv() { return { PATH: process.env.PATH }; }\n",
+      "after": "export function taskEnv() { const runtime = { PATH: process.env.PATH, LANG: \"C.UTF-8\" }; return { ...runtime }; }\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Use worker credential only for trusted control-plane request",
+      "path": "apps/worker/src/run-task/launch.ts",
+      "before": "export async function report(fetch) { return fetch(\"https://control.example.test/status\"); }\n",
+      "after": "export async function report(fetch) { return fetch(\"https://control.example.test/status\", { headers: { Authorization: `Bearer ${process.env.WORKER_AUTH_TOKEN}` } }); }\n",
       "expected": "pass"
     }
   ]

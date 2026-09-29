@@ -1,0 +1,117 @@
+{
+  "ruleId": "criterion_8",
+  "examples": [
+    {
+      "name": "Describe unnecessary removed path",
+      "path": "docs/setup.md",
+      "before": "Write logs to output/.\n",
+      "after": "Write logs to output/, unlike the previous logs/ directory.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Unnecessary exclusive wording",
+      "path": "docs/setup.md",
+      "before": "Store themes in themes/.\n",
+      "after": "Store themes in themes/, the sole theme storage location.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Document authentication requirement",
+      "path": "docs/setup.md",
+      "before": "Configure authentication.\n",
+      "after": "Only requests with a valid signature may update account settings.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Necessary compatibility restriction",
+      "path": "docs/setup.md",
+      "before": "Install a supported runtime.\n",
+      "after": "Only Node 22 and newer support the APIs this package uses.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Describe a change in release notes",
+      "path": "docs/setup.md",
+      "before": "## Release notes\nMaintenance changes.\n",
+      "after": "## Release notes\nThemes now live in themes/ instead of customizations/.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Compare supported choices",
+      "path": "docs/setup.md",
+      "before": "Choose a storage backend.\n",
+      "after": "Choose local storage for a single server or object storage when several servers share uploads.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Old path aside",
+      "path": "docs/usage.md",
+      "before": "Save exports under exports/.\n",
+      "after": "Save exports under exports/, unlike the former downloads/ directory.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Historical format aside",
+      "path": "docs/usage.md",
+      "before": "Write preferences to prefs.json.\n",
+      "after": "Write preferences to prefs.json, replacing the older prefs.yaml approach.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Exclusive path aside",
+      "path": "docs/usage.md",
+      "before": "Put saved views in views/.\n",
+      "after": "Put saved views in views/, the only location for saved views.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Removed option aside",
+      "path": "docs/usage.md",
+      "before": "Configure the listener in listeners.json.\n",
+      "after": "Configure the listener in listeners.json; the retired listener.ini alternative is no longer used.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Necessary upgrade migration",
+      "path": "docs/usage.md",
+      "before": "Upgrade the service.\n",
+      "after": "Before upgrading from version 1 to version 2, convert prefs.yaml to prefs.json so saved preferences remain available.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Supported alternatives",
+      "path": "docs/usage.md",
+      "before": "Choose an output format.\n",
+      "after": "Use JSON for structured processing or CSV for spreadsheet imports.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Security requirement",
+      "path": "docs/usage.md",
+      "before": "Configure access.\n",
+      "after": "Only repository administrators may change credential settings.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Compatibility requirement",
+      "path": "docs/usage.md",
+      "before": "Choose a runtime.\n",
+      "after": "Only Node 22 or newer provides the required API.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Release notes",
+      "path": "docs/usage.md",
+      "before": "## Release notes\nMaintenance release.\n",
+      "after": "## Release notes\nExports now use exports/ instead of downloads/.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Unchanged historical aside",
+      "path": "docs/usage.md",
+      "before": "Save reports in reports/, unlike the former output/ directory.\nRun the report daily.\n",
+      "after": "Save reports in reports/, unlike the former output/ directory.\nRun the report weekly.\n",
+      "expected": "pass"
+    }
+  ]
+}
