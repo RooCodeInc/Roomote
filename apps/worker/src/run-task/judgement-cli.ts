@@ -1,4 +1,4 @@
-import { exitCode, formatReport } from '@roocodeinc/judgement';
+import { exitCode, formatReport } from '@roo-code/judgement';
 
 import { checkRepositoryJudgement } from './judgement-check';
 

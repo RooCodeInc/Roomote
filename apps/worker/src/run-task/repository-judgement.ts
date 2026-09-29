@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { installGitHook } from '@roocodeinc/judgement';
+import { installGitHook } from '@roo-code/judgement';
 
 /** Install only executable paths; run credentials are inherited at commit time. */
 export async function installRepositoryJudgement(

@@ -3,7 +3,7 @@ import {
   validateAnswer,
   MAX_REQUEST_BYTES,
   type JudgeRequest,
-} from '@roocodeinc/judgement';
+} from '@roo-code/judgement';
 import type {
   JudgeCriterionInput,
   JudgeFileState,

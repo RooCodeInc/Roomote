@@ -1,4 +1,4 @@
-import { check } from '@roocodeinc/judgement';
+import { check } from '@roo-code/judgement';
 
 import { buildWorkerHeaders, createClient } from '@roomote/sdk/client';
 

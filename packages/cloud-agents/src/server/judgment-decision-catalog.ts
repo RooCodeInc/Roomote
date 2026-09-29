@@ -1,4 +1,4 @@
-import { question } from '@roocodeinc/judgement';
+import { question } from '@roo-code/judgement';
 import type { CodingModelRoutingRule, TaskModelOption } from '@roomote/types';
 
 import {
