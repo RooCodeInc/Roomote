@@ -146,7 +146,11 @@ export default async function SessionsPage({
                 count={columnSessions.length}
               >
                 {columnSessions.map((session) => (
-                  <SessionBoardCard key={session.id} sessionId={session.id}>
+                  <SessionBoardCard
+                    key={session.id}
+                    sessionId={session.id}
+                    column={column}
+                  >
                     <SessionCard
                       session={session}
                       viewerUserId={authorizedUser.userId}
