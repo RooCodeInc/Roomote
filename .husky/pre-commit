@@ -5,4 +5,5 @@ if [ "$branch" = "main" ]; then
   exit 1
 fi
 
-npx lint-staged
+npx lint-staged || exit $?
+pnpm judgement --hook

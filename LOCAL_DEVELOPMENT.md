@@ -295,6 +295,11 @@ curl -X GET "http://localhost:13001/trpc/auth.me" \
 
 ### Checking staged changes with Judgement
 
+The pre-commit hook runs Judgement after `lint-staged`, so it checks the formatted
+staged snapshot. Confirmed violations and invalid policies block the commit;
+incomplete checks report their status and allow the commit after a three-second
+check deadline.
+
 Run `pnpm judgement --verbose` from the Roomote checkout to check staged changes
 against `JUDGE.json`. The command loads `.env.local` and uses the same deployment
 judgment-model settings and encrypted provider credentials as the local API.
