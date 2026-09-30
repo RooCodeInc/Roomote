@@ -58,6 +58,8 @@ vi.mock('@roomote/db/server', () => ({
   })),
   insertIntegrationToolApproval: vi.fn(),
   isDeploymentExperimentEnabled: vi.fn(async () => true),
+  isIntegrationToolAutoSuspendedForSession: vi.fn(async () => false),
+  suspendIntegrationToolAutoForSession: vi.fn(async () => true),
   listIntegrationToolPolicies: vi.fn(async () => []),
   listRecentIntegrationToolApprovalOutcomes: vi.fn(
     async () => databaseMocks.recentApprovalOutcomes,
@@ -82,13 +84,16 @@ import {
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
+  isIntegrationToolAutoSuspendedForSession,
   listIntegrationToolPolicies,
   listRecentIntegrationToolApprovalOutcomes,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
+  suspendIntegrationToolAutoForSession,
 } from '@roomote/db/server';
 import {
+  INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
   redactIntegrationToolArgs,
   type IntegrationToolApprovalMetadata,
 } from '@roomote/types';
@@ -957,6 +962,9 @@ describe('tool approval bridge', () => {
     databaseMocks.recentApprovalOutcomes = [];
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(true);
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([]);
+    vi.mocked(isIntegrationToolAutoSuspendedForSession).mockResolvedValue(
+      false,
+    );
     redisMocks.isPresent.mockResolvedValue(true);
     vi.mocked(insertIntegrationToolApproval).mockResolvedValue({
       approvalId: 'approval-1',
@@ -1041,31 +1049,6 @@ describe('tool approval bridge', () => {
       expect.objectContaining({
         nativeRequestId: 'req-2',
         autoEvaluation: riskyEvaluation,
-      }),
-    );
-    expect(insertAutoRejectedIntegrationToolApproval).not.toHaveBeenCalled();
-
-    // An evaluation failure also asks while the owner is present.
-    vi.mocked(resolveIntegrationToolAutoDecision).mockRejectedValue(
-      new Error('settings unavailable'),
-    );
-    const failing = helpers();
-    autoBridge().handleAsk({ ...ask, requestId: 'req-3' }, failing);
-    await vi.waitFor(() =>
-      expect(failing.reply).toHaveBeenCalledWith(
-        'req-3',
-        'reject',
-        'The requester rejected this tool call.',
-      ),
-    );
-    expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
-      { sessionId: 'session-id', userId: 'user-id' },
-      expect.objectContaining({
-        nativeRequestId: 'req-3',
-        autoEvaluation: expect.objectContaining({
-          recommendation: 'ask',
-          unavailable: 'error',
-        }),
       }),
     );
     expect(insertAutoRejectedIntegrationToolApproval).not.toHaveBeenCalled();
@@ -1316,28 +1299,120 @@ describe('tool approval bridge', () => {
   });
 
   it.each([
+    ['present', true, new Error('settings unavailable')],
+    ['absent', false, null],
+  ] as const)(
+    'pauses Auto for the Session when a call cannot be assessed (owner %s)',
+    async (_label, present, failure) => {
+      vi.mocked(isSessionUserPresent).mockResolvedValue(present);
+      if (failure) {
+        vi.mocked(resolveIntegrationToolAutoDecision).mockRejectedValue(
+          failure,
+        );
+      } else {
+        vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+          action: 'ask',
+          mode: 'on',
+          evaluation: {
+            recommendation: 'ask',
+            unavailable: 'no_model',
+            evaluatedAt: '',
+          },
+        });
+      }
+      const onAutoSuspended = vi.fn(async () => undefined);
+      const turn = createFastAgentToolApprovalBridge({
+        sessionId: 'session-id',
+        userId: 'user-id',
+        surface: 'web',
+        integrations,
+        autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+        resolveUserRequest: () => 'Tell the team we shipped.',
+        onAutoSuspended,
+      });
+
+      const first = helpers();
+      turn.handleAsk({ ...ask, requestId: 'pause-1' }, first);
+      await vi.waitFor(() =>
+        expect(first.reply).toHaveBeenCalledWith(
+          'pause-1',
+          'reject',
+          INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
+        ),
+      );
+      expect(suspendIntegrationToolAutoForSession).toHaveBeenCalledWith(
+        'session-id',
+      );
+      expect(insertAutoRejectedIntegrationToolApproval).toHaveBeenCalledWith(
+        { sessionId: 'session-id', userId: 'user-id' },
+        expect.objectContaining({
+          nativeRequestId: 'pause-1',
+          autoEvaluation: expect.objectContaining({
+            unavailable: failure ? 'error' : 'no_model',
+          }),
+        }),
+      );
+      expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
+      await vi.waitFor(() =>
+        expect(onAutoSuspended).toHaveBeenCalledWith({
+          integrationId: 'mock-slack',
+          integrationName: expect.any(String),
+          toolName: 'post_message',
+        }),
+      );
+
+      // The turn is ending: another call in it is not assessed or carded.
+      vi.mocked(resolveIntegrationToolAutoDecision).mockClear();
+      const second = helpers();
+      turn.handleAsk({ ...ask, requestId: 'pause-2' }, second);
+      await vi.waitFor(() =>
+        expect(second.reply).toHaveBeenCalledWith(
+          'pause-2',
+          'reject',
+          INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
+        ),
+      );
+      expect(resolveIntegrationToolAutoDecision).not.toHaveBeenCalled();
+      expect(onAutoSuspended).toHaveBeenCalledTimes(1);
+
+      // A later turn in the suspended Session asks the owner with a card.
+      vi.mocked(isIntegrationToolAutoSuspendedForSession).mockResolvedValue(
+        true,
+      );
+      vi.mocked(isSessionUserPresent).mockResolvedValue(true);
+      vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+        status: 'rejected',
+      } as never);
+      const nextTurn = createFastAgentToolApprovalBridge({
+        sessionId: 'session-id',
+        userId: 'user-id',
+        surface: 'web',
+        integrations,
+        autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+        onAutoSuspended,
+      });
+      const later = helpers();
+      nextTurn.handleAsk({ ...ask, requestId: 'pause-3' }, later);
+      await vi.waitFor(() =>
+        expect(later.reply).toHaveBeenCalledWith(
+          'pause-3',
+          'reject',
+          'The requester rejected this tool call.',
+        ),
+      );
+      expect(resolveIntegrationToolAutoDecision).not.toHaveBeenCalled();
+      expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+        { sessionId: 'session-id', userId: 'user-id' },
+        expect.objectContaining({ nativeRequestId: 'pause-3' }),
+      );
+    },
+  );
+
+  it.each([
     [
       'risky',
       { recommendation: 'ask' as const, answers: {}, evaluatedAt: '' },
       'it was assessed as risky',
-    ],
-    [
-      'evaluation error',
-      {
-        recommendation: 'ask' as const,
-        unavailable: 'error' as const,
-        evaluatedAt: '',
-      },
-      'the automatic check failed',
-    ],
-    [
-      'no model',
-      {
-        recommendation: 'ask' as const,
-        unavailable: 'no_model' as const,
-        evaluatedAt: '',
-      },
-      'an automatic check is not available',
     ],
   ])(
     'denies an Auto %s call when the Session owner is absent',

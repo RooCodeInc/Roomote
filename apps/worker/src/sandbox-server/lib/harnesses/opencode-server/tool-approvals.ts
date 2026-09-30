@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import { sdk } from '@roomote/sdk/client';
 import {
+  INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
   toIntegrationToolUserRequest,
   type TaskIntegrationToolApprovals,
 } from '@roomote/types';
@@ -229,6 +230,10 @@ export function createTaskToolApprovalRelay(options: {
         'reject',
         `Auto mode blocked this tool call because ${result.reason} and the session owner was away. The call was not run. The session owner can allow this tool from its call in the transcript.`,
       );
+      return;
+    }
+    if (result.outcome === 'paused') {
+      await reply(ask, 'reject', INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE);
       return;
     }
     if (result.outcome === 'unavailable') {

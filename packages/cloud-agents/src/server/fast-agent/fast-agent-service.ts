@@ -1147,6 +1147,19 @@ function resolveFastAgentInferenceRetryDelayMs(
   );
 }
 
+/**
+ * Posted in the thread when Auto stops for a Session because a call could
+ * not be assessed. The turn ends here; the user's reply continues it, and
+ * from then on tools ask before running.
+ */
+function formatFastAgentAutoPausedNotice(tool: {
+  integrationName: string;
+  toolName: string;
+}): string {
+  const toolLabel = tool.toolName.replace(/[_-]+/g, ' ').trim();
+  return `Automatic approvals aren't available right now, so I paused Auto for this session and stopped before running ${toolLabel} from ${tool.integrationName}. Reply when you're ready to continue, and I'll ask you before running tools.`;
+}
+
 function formatFastAgentInferenceRetryNotice(
   notice: FastAgentInferenceRetryNotice,
 ): string {
@@ -3266,11 +3279,12 @@ export async function answerFastAgentQuestion({
   const postRecordedSystemCloseout = async (
     message: string,
     post: () => Promise<void>,
+    purpose: 'closeout' | 'clarification' = 'closeout',
   ) => {
     startSurfaceActivity();
     const call = await beginCanonicalToolEvent({
       title: FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
-      args: { purpose: 'closeout', message },
+      args: { purpose, message },
     });
     try {
       await post();
@@ -6746,6 +6760,22 @@ export async function answerFastAgentQuestion({
                           steeredHumanRequests,
                         }),
                       signal: promptSignal,
+                      // Auto stopped for this Session: say so in the thread
+                      // and end the turn. The notice closes the instruction,
+                      // so the model's next message is cut off as a
+                      // trailing one; the user's reply continues with cards.
+                      onAutoSuspended: async (tool) => {
+                        const message = formatFastAgentAutoPausedNotice(tool);
+                        await postRecordedSystemCloseout(
+                          message,
+                          () =>
+                            postReply(
+                              { purpose: 'clarification', message },
+                              true,
+                            ),
+                          'clarification',
+                        );
+                      },
                       ...(approvalNotificationSurface
                         ? {
                             notify: async (approval) => {

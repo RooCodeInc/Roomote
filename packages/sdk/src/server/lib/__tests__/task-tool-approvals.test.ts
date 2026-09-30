@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   getApproval: vi.fn(async () => undefined as unknown),
   expire: vi.fn(async () => undefined),
   isPresent: vi.fn(async () => true),
+  suspended: vi.fn(async () => false),
+  suspend: vi.fn(async () => true),
   latestUserRequest: vi.fn(async () => undefined as string | undefined),
   postMessage: vi.fn(async () => ({ messageId: 'provider-message-1' })),
   claimTracked: vi.fn(async () => [{ id: 'tracked-1' }]),
@@ -65,6 +67,8 @@ vi.mock('@roomote/db/server', () => ({
   expireIntegrationToolApproval: mocks.expire,
   fingerprintIntegrationToolCall: (input: unknown) => JSON.stringify(input),
   findLatestTaskUserRequest: mocks.latestUserRequest,
+  isIntegrationToolAutoSuspendedForSession: mocks.suspended,
+  suspendIntegrationToolAutoForSession: mocks.suspend,
 }));
 vi.mock('@roomote/redis', () => ({
   isSessionUserPresent: mocks.isPresent,
@@ -110,6 +114,7 @@ beforeEach(() => {
   mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
   mocks.autoState.mockResolvedValue({ mode: 'off' });
   mocks.isPresent.mockResolvedValue(true);
+  mocks.suspended.mockResolvedValue(false);
   mocks.latestUserRequest.mockResolvedValue(undefined);
   mocks.claimTracked.mockResolvedValue([{ id: 'tracked-1' }]);
   mocks.provider.mockResolvedValue({ postMessage: mocks.postMessage });
@@ -294,23 +299,58 @@ describe('requestTaskToolApproval', () => {
       }),
     );
     expect(mocks.insertAutoRejected).not.toHaveBeenCalled();
+  });
 
-    // Auto failing outright still asks a present owner.
-    mocks.resolveAuto.mockRejectedValue(new Error('settings unavailable'));
+  it.each([
+    ['present', true, new Error('settings unavailable')],
+    ['absent', false, null],
+  ] as const)(
+    'pauses Auto for the Session when a task call cannot be assessed (owner %s)',
+    async (_label, present, failure) => {
+      mocks.isPresent.mockResolvedValue(present);
+      if (failure) {
+        mocks.resolveAuto.mockRejectedValue(failure);
+      } else {
+        mocks.resolveAuto.mockResolvedValue({
+          action: 'ask',
+          mode: 'on',
+          evaluation: {
+            recommendation: 'ask',
+            unavailable: 'no_model',
+            evaluatedAt: '',
+          },
+        });
+      }
+      await expect(requestTaskToolApproval(ask)).resolves.toEqual({
+        outcome: 'paused',
+      });
+      expect(mocks.suspend).toHaveBeenCalledWith('session-1');
+      expect(mocks.insertAutoRejected).toHaveBeenCalledWith(
+        { sessionId: 'session-1', userId: 'owner-1' },
+        expect.objectContaining({
+          taskId: 'task-1',
+          autoEvaluation: expect.objectContaining({
+            unavailable: failure ? 'error' : 'no_model',
+          }),
+        }),
+      );
+      expect(mocks.insert).not.toHaveBeenCalled();
+    },
+  );
+
+  it('asks the owner once Auto stopped for the Session, unless Auto is off', async () => {
+    mocks.suspended.mockResolvedValue(true);
+    mocks.autoState.mockResolvedValue({ mode: 'on' });
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({
       outcome: 'pending',
       approvalId: 'approval-1',
     });
-    expect(mocks.insert).toHaveBeenLastCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        autoEvaluation: expect.objectContaining({
-          recommendation: 'ask',
-          unavailable: 'error',
-        }),
-      }),
-    );
-    expect(mocks.insertAutoRejected).not.toHaveBeenCalled();
+    expect(mocks.resolveAuto).not.toHaveBeenCalled();
+
+    mocks.autoState.mockResolvedValue({ mode: 'off' });
+    await expect(requestTaskToolApproval(ask)).resolves.toEqual({
+      outcome: 'not_required',
+    });
   });
 
   it('runs a default tool asked under a stale rule once Auto is off', async () => {
@@ -326,16 +366,6 @@ describe('requestTaskToolApproval', () => {
       'risky',
       { recommendation: 'ask', answers: { riskScore: 0.9 }, evaluatedAt: '' },
       'it was assessed as risky',
-    ],
-    [
-      'evaluation error',
-      { recommendation: 'ask', unavailable: 'error', evaluatedAt: '' },
-      'the automatic check failed',
-    ],
-    [
-      'no model',
-      { recommendation: 'ask', unavailable: 'no_model', evaluatedAt: '' },
-      'an automatic check is not available',
     ],
   ])(
     'denies an Auto %s call when the Session owner is absent',
