@@ -178,6 +178,11 @@ export type IntegrationToolAutoSessionContext = {
     /** The decided call's arguments, redacted like the approval card. */
     arguments?: unknown;
   }[];
+  /**
+   * The owner rejected a call to this tool somewhere in this Session, looked
+   * up separately so it holds after the rejection leaves the recent outcomes.
+   */
+  toolRejectedInSession?: boolean;
 };
 
 function boundSessionContext(
@@ -220,9 +225,11 @@ function boundSessionContext(
             }),
           }),
     }));
+  const toolRejectedInSession = context.toolRejectedInSession === true;
   if (
     recentUserMessages.length === 0 &&
-    explicitApprovalOutcomes.length === 0
+    explicitApprovalOutcomes.length === 0 &&
+    !toolRejectedInSession
   ) {
     return undefined;
   }
@@ -236,6 +243,7 @@ function boundSessionContext(
     recentUserMessages,
     explicitApprovalOutcomes,
     ...(agentMessageRepliedTo ? { agentMessageRepliedTo } : {}),
+    ...(toolRejectedInSession ? { toolRejectedInSession } : {}),
   };
 }
 
@@ -469,9 +477,9 @@ export async function evaluateIntegrationToolAutoDecision(input: {
     const sameToolApproved = sameToolOutcomes.some(
       (outcome) => outcome.outcome === 'approved',
     );
-    const sameToolRejected = sameToolOutcomes.some(
-      (outcome) => outcome.outcome === 'rejected',
-    );
+    const sameToolRejected =
+      sessionContext?.toolRejectedInSession === true ||
+      sameToolOutcomes.some((outcome) => outcome.outcome === 'rejected');
     const questions = {
       ...core,
       ...(hasRequest && !allowlistedInternalRead ? { matchesRequest } : {}),

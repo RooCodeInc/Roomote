@@ -14,6 +14,7 @@ import {
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
   listIntegrationToolPolicies,
+  hasRejectedIntegrationToolInSession,
   listRecentIntegrationToolApprovalOutcomes,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
@@ -710,27 +711,39 @@ export function createFastAgentToolApprovalBridge(input: {
         input.autoToolKeys?.has(
           integrationToolPolicyKey(tool.integrationId, tool.toolName),
         ) === true;
-      const [recentUserMessages, explicitApprovalOutcomes, agentMessage] =
-        autoAssessed
-          ? await Promise.all([
-              input.resolveSessionUserMessages?.() ?? [],
-              // This query is keyed to this Session and owner, and excludes
-              // task approvals and model decisions. A lookup failure removes
-              // historical context; it cannot authorize a call by itself.
-              listRecentIntegrationToolApprovalOutcomes({
-                sessionId: input.sessionId,
-                userId: input.userId,
-              }).catch(() => []),
-              // Context only: a lookup failure means "go ahead" covers nothing.
-              input.resolveAgentMessageRepliedTo?.().catch(() => undefined),
-            ])
-          : [[], [], undefined];
+      const [
+        recentUserMessages,
+        explicitApprovalOutcomes,
+        agentMessage,
+        toolRejectedInSession,
+      ] = autoAssessed
+        ? await Promise.all([
+            input.resolveSessionUserMessages?.() ?? [],
+            // This query is keyed to this Session and owner, and excludes
+            // task approvals and model decisions. A lookup failure removes
+            // historical context; it cannot authorize a call by itself.
+            listRecentIntegrationToolApprovalOutcomes({
+              sessionId: input.sessionId,
+              userId: input.userId,
+            }).catch(() => []),
+            // Context only: a lookup failure means "go ahead" covers nothing.
+            input.resolveAgentMessageRepliedTo?.().catch(() => undefined),
+            // A lookup failure counts as a rejection, so Auto asks.
+            hasRejectedIntegrationToolInSession({
+              sessionId: input.sessionId,
+              userId: input.userId,
+              integrationId: tool.integrationId,
+              toolName: tool.toolName,
+            }).catch(() => true),
+          ])
+        : [[], [], undefined, false];
       const sessionContext: IntegrationToolAutoSessionContext | undefined =
         autoAssessed
           ? {
               recentUserMessages,
               explicitApprovalOutcomes,
               ...(agentMessage ? { agentMessageRepliedTo: agentMessage } : {}),
+              ...(toolRejectedInSession ? { toolRejectedInSession } : {}),
             }
           : undefined;
       const assess = async (callArgs: unknown) =>

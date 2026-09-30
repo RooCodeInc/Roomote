@@ -23,6 +23,7 @@ import {
   IntegrationToolApprovalUnavailableError,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
+  hasRejectedIntegrationToolInSession,
   listRecentIntegrationToolApprovalOutcomes,
   listPendingIntegrationToolApprovals,
   markIntegrationToolApprovalConsumed,
@@ -849,6 +850,62 @@ describe('listRecentIntegrationToolApprovalOutcomes', () => {
         },
       ]),
     );
+  });
+});
+
+describe('hasRejectedIntegrationToolInSession', () => {
+  it('finds a rejection of the tool however many decisions came after it', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const tool = {
+      sessionId,
+      userId,
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+    };
+    expect(await hasRejectedIntegrationToolInSession(tool)).toBe(false);
+
+    const rejected = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: rejected.approvalId,
+      decision: 'rejected',
+    });
+    for (let index = 0; index < 7; index += 1) {
+      const approved = await insertIntegrationToolApproval(context, {
+        ...call,
+        toolName: 'other_tool',
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      });
+      await decideIntegrationToolApproval(context, {
+        approvalId: approved.approvalId,
+        decision: 'approved',
+      });
+      await markIntegrationToolApprovalConsumed({
+        approvalId: approved.approvalId,
+        requesterUserId: userId,
+      });
+    }
+
+    const recent = await listRecentIntegrationToolApprovalOutcomes(context);
+    expect(recent.some((outcome) => outcome.outcome === 'rejected')).toBe(
+      false,
+    );
+    expect(await hasRejectedIntegrationToolInSession(tool)).toBe(true);
+    expect(
+      await hasRejectedIntegrationToolInSession({
+        ...tool,
+        toolName: 'other_tool',
+      }),
+    ).toBe(false);
+    expect(
+      await hasRejectedIntegrationToolInSession({
+        ...tool,
+        sessionId: await ownedSession(userId),
+      }),
+    ).toBe(false);
   });
 });
 

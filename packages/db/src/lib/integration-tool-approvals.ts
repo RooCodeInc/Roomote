@@ -446,6 +446,38 @@ export async function listRecentIntegrationToolApprovalOutcomes(context: {
   }));
 }
 
+/**
+ * Whether the session owner rejected any call to this tool in the session.
+ * The recent outcomes above are bounded, so Auto checks this separately to
+ * keep a rejection in force for the rest of the session.
+ */
+export async function hasRejectedIntegrationToolInSession(context: {
+  sessionId: string;
+  userId: string;
+  integrationId: string;
+  toolName: string;
+}): Promise<boolean> {
+  const [row] = await db
+    .select({ id: integrationToolApprovalRequests.id })
+    .from(integrationToolApprovalRequests)
+    .where(
+      and(
+        eq(integrationToolApprovalRequests.sessionId, context.sessionId),
+        eq(integrationToolApprovalRequests.requesterUserId, context.userId),
+        eq(integrationToolApprovalRequests.decidedByUserId, context.userId),
+        isNull(integrationToolApprovalRequests.taskId),
+        eq(
+          integrationToolApprovalRequests.integrationId,
+          context.integrationId,
+        ),
+        eq(integrationToolApprovalRequests.toolName, context.toolName),
+        eq(integrationToolApprovalRequests.status, 'rejected'),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
 /** Executor-side read while waiting for the requester's decision. */
 export async function getIntegrationToolApproval(
   approvalId: string,

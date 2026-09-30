@@ -62,6 +62,7 @@ vi.mock('@roomote/db/server', () => ({
   listRecentIntegrationToolApprovalOutcomes: vi.fn(
     async () => databaseMocks.recentApprovalOutcomes,
   ),
+  hasRejectedIntegrationToolInSession: vi.fn(async () => false),
   listIntegrationToolSessionOverrides: vi.fn(async () => []),
   listIntegrationToolUserPolicies: vi.fn(async () => []),
   markIntegrationToolApprovalConsumed: vi.fn(async () => true),
@@ -78,6 +79,7 @@ import {
   expireIntegrationToolApproval,
   getIntegrationToolApproval,
   getSessionForFastConversation,
+  hasRejectedIntegrationToolInSession,
   insertAutoApprovedIntegrationToolApproval,
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
@@ -1878,6 +1880,35 @@ describe('tool approval bridge', () => {
       expect(insertAutoRejectedIntegrationToolApproval).not.toHaveBeenCalled();
     },
   );
+
+  it('tells Auto the owner rejected this tool when the session-wide lookup fails', async () => {
+    vi.mocked(hasRejectedIntegrationToolInSession).mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+    const helperMocks = helpers();
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+      resolveSessionUserMessages: () => ['Please post the release update.'],
+    }).handleAsk(ask, helperMocks);
+
+    await vi.waitFor(() =>
+      expect(resolveIntegrationToolAutoDecision).toHaveBeenCalled(),
+    );
+    expect(hasRejectedIntegrationToolInSession).toHaveBeenCalledWith({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      integrationId: 'mock-slack',
+      toolName: 'post_message',
+    });
+    expect(
+      vi.mocked(resolveIntegrationToolAutoDecision).mock.calls[0]![0]
+        .sessionContext,
+    ).toMatchObject({ toolRejectedInSession: true });
+  });
 
   it('never consults Auto for a tool the requester asked to decide themselves', async () => {
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([

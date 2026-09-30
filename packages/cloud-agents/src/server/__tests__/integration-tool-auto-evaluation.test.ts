@@ -311,6 +311,38 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     });
     expect(afterRejection).not.toContain('continuesApprovedCall');
     expect(afterRejection).not.toContain('agreedToPlan');
+
+    // So does a rejection older than the recent outcomes.
+    const afterOlderRejection = await ask({
+      agentMessageRepliedTo: 'Delete them?',
+      explicitApprovalOutcomes: [approvedSameTool],
+      toolRejectedInSession: true,
+    });
+    expect(afterOlderRejection).not.toContain('continuesApprovedCall');
+    expect(afterOlderRejection).not.toContain('agreedToPlan');
+  });
+
+  it('asks for a tool the owner rejected earlier in the session, even when they asked for it', async () => {
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({
+        ...routine,
+        risk: { score: 3.95, confidence: 0.96 },
+        onlyReads: 0.05,
+        userAuthorized: 0.96,
+        movesMoney: 0.02,
+      }),
+    );
+    const evaluation = await evaluateIntegrationToolAutoDecision({
+      ...call,
+      toolName: 'delete_issue',
+      args: { id: 'ENG-12' },
+      userRequest: 'ENG-12 duplicates ENG-11, delete it',
+      sessionContext: {
+        recentUserMessages: ['ENG-12 duplicates ENG-11, delete it'],
+        toolRejectedInSession: true,
+      },
+    });
+    expect(evaluation.recommendation).toBe('ask');
   });
 
   it('runs a deletion the owner asked for and records why', async () => {
