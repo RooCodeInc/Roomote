@@ -6,6 +6,12 @@ const motionState = vi.hoisted(() => ({
   statusMutation: { isPending: false, mutate: vi.fn() },
 }));
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/sessions',
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 vi.mock('@/components/sessions/use-session-status-mutation', () => ({
   useSessionStatusMutation: () => motionState.statusMutation,
 }));

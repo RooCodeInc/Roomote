@@ -409,7 +409,12 @@ export function SessionsFilters({
             aria-pressed={view === 'list'}
             title="List view"
             className="rounded-r-none"
-            onClick={() => updateParams((params) => params.delete('view'))}
+            onClick={() =>
+              updateParams((params) => {
+                params.delete('view');
+                if (params.get('status') === 'done') params.delete('status');
+              })
+            }
           >
             <List />
           </Button>

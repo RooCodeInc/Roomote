@@ -151,6 +151,24 @@ describe('SessionsFilters', () => {
     expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
   });
 
+  it('clears a board-only Done status when switching to list view', () => {
+    searchParamsMock.current = new URLSearchParams(
+      'view=board&status=done&archive=all&before=cursor',
+    );
+    render(
+      <SessionsFilters
+        {...baseProps}
+        view="board"
+        status="done"
+        archive="all"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'List view' }));
+
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?archive=all');
+  });
+
   it.each([false, true])(
     'keeps primary navigation available while a filter menu is open (mobile: %s)',
     async (isMobile) => {
