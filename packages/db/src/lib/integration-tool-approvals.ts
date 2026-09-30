@@ -617,7 +617,7 @@ export async function listIntegrationToolSessionOverrides(
 }
 
 /**
- * Stop Auto for one Session: from now on its default tools ask a person.
+ * Stop Auto for one session: from now on its default tools ask a person.
  * Returns true only for the call that stopped it, so the notice is posted
  * once even when several calls fail at the same time.
  */
@@ -637,7 +637,7 @@ export async function suspendIntegrationToolAutoForSession(
   return rows.length > 0;
 }
 
-/** Whether Auto has stopped for this Session; see `suspendIntegrationToolAutoForSession`. */
+/** Whether Auto has stopped for this session; see `suspendIntegrationToolAutoForSession`. */
 export async function isIntegrationToolAutoSuspendedForSession(
   sessionId: string,
 ): Promise<boolean> {

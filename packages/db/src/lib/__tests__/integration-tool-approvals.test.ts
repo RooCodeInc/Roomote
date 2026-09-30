@@ -828,7 +828,7 @@ describe('listRecentIntegrationToolApprovalOutcomes', () => {
   });
 });
 
-describe('Auto suspension for a Session', () => {
+describe('Auto suspension for a session', () => {
   it('suspends once, stays suspended, and leaves other Sessions alone', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);

@@ -118,7 +118,7 @@ export const integrationToolAutoSettingsSchema = z.object({
 });
 
 /**
- * What the agent is told when Auto stops for its Session because a call
+ * What the agent is told when Auto stops for its session because a call
  * could not be assessed. The call does not run, the owner is told in the
  * thread, and later calls ask them.
  */

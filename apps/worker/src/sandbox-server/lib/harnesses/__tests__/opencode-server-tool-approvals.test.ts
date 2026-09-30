@@ -156,7 +156,7 @@ describe('createTaskToolApprovalRelay', () => {
     );
   });
 
-  it('tells the agent to stop when Auto paused for the Session', async () => {
+  it('tells the agent to stop when Auto paused for the session', async () => {
     const { client, relay } = setup([], { outcome: 'paused' });
     relay.handleAsk(ask);
     await replied(client);

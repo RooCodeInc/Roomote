@@ -243,7 +243,7 @@ type TaskToolApprovalRequestResult =
   /** Auto mode blocked the call; the reason goes back to the model. */
   | { outcome: 'denied'; reason: string }
   /**
-   * The call could not be assessed, so Auto stopped for the Session; the
+   * The call could not be assessed, so Auto stopped for the session; the
    * call did not run and later calls ask the owner.
    */
   | { outcome: 'paused' }
@@ -305,7 +305,7 @@ export async function requestTaskToolApproval(input: {
     policyMode,
     sessionOverrideMode: overrideForSession,
   });
-  // After Auto stopped for the Session its default tools ask the owner,
+  // After Auto stopped for the session its default tools ask the owner,
   // unless Auto has since been turned off, when they run as they always have.
   const autoSuspended =
     autoCandidate &&
@@ -343,7 +343,7 @@ export async function requestTaskToolApproval(input: {
   // always has.
   if (auto?.mode === 'off') return { outcome: 'not_required' };
   if (auto?.evaluation.unavailable) {
-    // The call could not be assessed: stop Auto for the Session rather than
+    // The call could not be assessed: stop Auto for the session rather than
     // ask about (or deny) every call while assessment is down.
     await suspendIntegrationToolAutoForSession(session.sessionId);
     await insertAutoRejectedIntegrationToolApproval(context, {

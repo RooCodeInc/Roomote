@@ -305,7 +305,7 @@ describe('requestTaskToolApproval', () => {
     ['present', true, new Error('settings unavailable')],
     ['absent', false, null],
   ] as const)(
-    'pauses Auto for the Session when a task call cannot be assessed (owner %s)',
+    'pauses Auto for the session when a task call cannot be assessed (owner %s)',
     async (_label, present, failure) => {
       mocks.isPresent.mockResolvedValue(present);
       if (failure) {
@@ -338,7 +338,7 @@ describe('requestTaskToolApproval', () => {
     },
   );
 
-  it('asks the owner once Auto stopped for the Session, unless Auto is off', async () => {
+  it('asks the owner once Auto stopped for the session, unless Auto is off', async () => {
     mocks.suspended.mockResolvedValue(true);
     mocks.autoState.mockResolvedValue({ mode: 'on' });
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({

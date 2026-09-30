@@ -1302,7 +1302,7 @@ describe('tool approval bridge', () => {
     ['present', true, new Error('settings unavailable')],
     ['absent', false, null],
   ] as const)(
-    'pauses Auto for the Session when a call cannot be assessed (owner %s)',
+    'pauses Auto for the session when a call cannot be assessed (owner %s)',
     async (_label, present, failure) => {
       vi.mocked(isSessionUserPresent).mockResolvedValue(present);
       if (failure) {
@@ -1375,10 +1375,15 @@ describe('tool approval bridge', () => {
       expect(resolveIntegrationToolAutoDecision).not.toHaveBeenCalled();
       expect(onAutoSuspended).toHaveBeenCalledTimes(1);
 
-      // A later turn in the suspended Session asks the owner with a card.
+      // A later turn in the suspended session asks the owner with a card.
       vi.mocked(isIntegrationToolAutoSuspendedForSession).mockResolvedValue(
         true,
       );
+      vi.mocked(resolveIntegrationToolAutoState).mockResolvedValue({
+        mode: 'on',
+        settings: { mode: 'on', policy: '' },
+        model: 'judgment',
+      });
       vi.mocked(isSessionUserPresent).mockResolvedValue(true);
       vi.mocked(getIntegrationToolApproval).mockResolvedValue({
         status: 'rejected',
@@ -1405,8 +1410,58 @@ describe('tool approval bridge', () => {
         { sessionId: 'session-id', userId: 'user-id' },
         expect.objectContaining({ nativeRequestId: 'pause-3' }),
       );
+
+      // Auto turned off for the deployment: the tool runs as it always has.
+      vi.mocked(resolveIntegrationToolAutoState).mockResolvedValue({
+        mode: 'off',
+        settings: { mode: 'off', policy: '' },
+        model: null,
+      });
+      vi.mocked(insertIntegrationToolApproval).mockClear();
+      const afterOff = helpers();
+      nextTurn.handleAsk({ ...ask, requestId: 'pause-4' }, afterOff);
+      await vi.waitFor(() =>
+        expect(afterOff.reply).toHaveBeenCalledWith('pause-4', 'once'),
+      );
+      expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
     },
   );
+
+  it('posts one pause notice when calls in a turn fail at the same time', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'ask',
+      mode: 'on',
+      evaluation: {
+        recommendation: 'ask',
+        unavailable: 'error',
+        evaluatedAt: '',
+      },
+    });
+    const onAutoSuspended = vi.fn(async () => undefined);
+    const turn = createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+      onAutoSuspended,
+    });
+    const calls = ['c-1', 'c-2', 'c-3'].map((requestId) => {
+      const h = helpers();
+      turn.handleAsk({ ...ask, requestId }, h);
+      return { requestId, h };
+    });
+    for (const { requestId, h } of calls) {
+      await vi.waitFor(() =>
+        expect(h.reply).toHaveBeenCalledWith(
+          requestId,
+          'reject',
+          INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
+        ),
+      );
+    }
+    expect(onAutoSuspended).toHaveBeenCalledTimes(1);
+  });
 
   it.each([
     [

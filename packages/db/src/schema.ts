@@ -4494,7 +4494,7 @@ export const sessions = pgTable(
     manualStatus: text('manual_status').$type<SessionManualStatus>(),
     manualStatusSetAt: timestamp('manual_status_set_at'),
     /**
-     * When Auto tool approvals stopped for this Session because a call could
+     * When Auto tool approvals stopped for this session because a call could
      * not be assessed. From then on its default tools ask a person.
      */
     autoToolApprovalsSuspendedAt: timestamp('auto_tool_approvals_suspended_at'),

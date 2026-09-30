@@ -417,7 +417,7 @@ export function createFastAgentToolApprovalBridge(input: {
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   /**
-   * Auto stopped for this Session because a call could not be assessed:
+   * Auto stopped for this session because a call could not be assessed:
    * tell the owner in the thread and end the turn. Called once per turn.
    */
   onAutoSuspended?: (tool: {
@@ -589,10 +589,20 @@ export function createFastAgentToolApprovalBridge(input: {
         input.autoToolKeys?.has(
           integrationToolPolicyKey(tool.integrationId, tool.toolName),
         ) === true;
-      // After Auto stopped for this Session, its default tools ask a person.
-      const autoAssessed =
+      // After Auto stopped for this session, its default tools ask a person.
+      const autoSuspended =
         autoCandidate &&
-        !(await isIntegrationToolAutoSuspendedForSession(input.sessionId));
+        (await isIntegrationToolAutoSuspendedForSession(input.sessionId));
+      // Auto turned off for the deployment since then: the tool runs as it
+      // always has, like any default tool asked under a stale rule.
+      if (
+        autoSuspended &&
+        (await resolveIntegrationToolAutoState()).mode !== 'on'
+      ) {
+        await helpers.reply(ask.requestId, 'once');
+        return;
+      }
+      const autoAssessed = autoCandidate && !autoSuspended;
       const [recentUserMessages, explicitApprovalOutcomes] = autoAssessed
         ? await Promise.all([
             input.resolveSessionUserMessages?.() ?? [],
@@ -639,7 +649,10 @@ export function createFastAgentToolApprovalBridge(input: {
         return;
       }
       if (auto?.evaluation.unavailable) {
-        // The call could not be assessed: stop Auto for this Session rather
+        // Calls in one turn run concurrently; only the first to get here
+        // posts the notice. No await between the check and the set.
+        const firstToPause = !autoSuspendedThisTurn;
+        // The call could not be assessed: stop Auto for this session rather
         // than ask about (or deny) every call while assessment is down.
         autoSuspendedThisTurn = true;
         await suspendIntegrationToolAutoForSession(input.sessionId);
@@ -661,6 +674,7 @@ export function createFastAgentToolApprovalBridge(input: {
             INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
           )
           .catch(() => undefined);
+        if (!firstToPause) return;
         await input
           .onAutoSuspended?.({
             integrationId: tool.integrationId,
@@ -672,7 +686,7 @@ export function createFastAgentToolApprovalBridge(input: {
           })
           .catch((error: unknown) => {
             console.warn(
-              `[Fast Agent] Could not post the Auto pause notice for Session ${input.sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+              `[Fast Agent] Could not post the Auto pause notice for session ${input.sessionId}: ${error instanceof Error ? error.message : String(error)}`,
             );
           });
         return;

@@ -1148,7 +1148,7 @@ function resolveFastAgentInferenceRetryDelayMs(
 }
 
 /**
- * Posted in the thread when Auto stops for a Session because a call could
+ * Posted in the thread when Auto stops for a session because a call could
  * not be assessed. The turn ends here; the user's reply continues it, and
  * from then on tools ask before running.
  */
@@ -6760,7 +6760,7 @@ export async function answerFastAgentQuestion({
                           steeredHumanRequests,
                         }),
                       signal: promptSignal,
-                      // Auto stopped for this Session: say so in the thread
+                      // Auto stopped for this session: say so in the thread
                       // and end the turn. The notice closes the instruction,
                       // so the model's next message is cut off as a
                       // trailing one; the user's reply continues with cards.
