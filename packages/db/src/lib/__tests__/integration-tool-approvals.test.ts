@@ -259,6 +259,30 @@ describe('insertIntegrationToolApproval', () => {
     expect(Date.parse(approval.expiresAt)).toBeGreaterThan(Date.now());
   });
 
+  it('records a call made with no arguments', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const pending = await insertPending(context, null);
+    expect(pending.argsSummary).toEqual({});
+    const approved = await insertAutoApprovedIntegrationToolApproval(context, {
+      ...call,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(null),
+      argsSummary: null,
+      decidedBy: 'model',
+    });
+    expect(approved.approvalId).toBeTruthy();
+    const rejected = await insertAutoRejectedIntegrationToolApproval(context, {
+      ...call,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(null),
+      argsSummary: null,
+      autoEvaluation: { recommendation: 'ask', evaluatedAt: '' },
+    });
+    expect(rejected.approvalId).toBeTruthy();
+  });
+
   it('reuses the open row for the same native request instead of stacking', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);

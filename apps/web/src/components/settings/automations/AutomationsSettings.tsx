@@ -2240,10 +2240,11 @@ export function AutomationsSettings({
 
         switch (data.outcome) {
           case 'launched':
-            toast.success(`Running ${automationLabel} now`, {
+            toast.success(`Running ${automationLabel} now ·`, {
               action: {
-                label: 'View task',
-                onClick: () => window.open(`/task/${data.taskId}`, '_blank'),
+                label: 'Follow session',
+                onClick: () =>
+                  window.open(`/sessions/${data.sessionId}`, '_blank'),
               },
             });
             break;

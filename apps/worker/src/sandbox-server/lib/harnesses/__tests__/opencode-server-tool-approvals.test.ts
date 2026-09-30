@@ -154,6 +154,11 @@ describe('createTaskToolApprovalRelay', () => {
         ),
       }),
     );
+    expect(client.replyPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.not.stringContaining('transcript'),
+      }),
+    );
   });
 
   it('tells the agent to stop when Auto paused for the session', async () => {

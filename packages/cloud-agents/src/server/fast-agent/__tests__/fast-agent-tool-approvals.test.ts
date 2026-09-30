@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../integration-tool-auto-evaluation', () => ({
   describeIntegrationToolAutoDeny: vi.fn(
@@ -957,6 +957,10 @@ describe('tool approval bridge', () => {
     );
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     databaseMocks.recentApprovalOutcomes = [];
@@ -1472,6 +1476,7 @@ describe('tool approval bridge', () => {
   ])(
     'denies an Auto %s call when the Session owner is absent',
     async (_label, evaluation, reason) => {
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
       redisMocks.isPresent.mockResolvedValue(false);
       databaseMocks.recentApprovalOutcomes = [
         {
@@ -1497,6 +1502,10 @@ describe('tool approval bridge', () => {
           'Please post the release update once.',
         ],
       }).handleAsk({ ...ask, requestId: `absent-${_label}` }, helperMocks);
+      // Away only after a second lookup a full presence renewal later.
+      for (let second = 0; second < 12; second += 1) {
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
 
       await vi.waitFor(() =>
         expect(helperMocks.reply).toHaveBeenCalledWith(
@@ -1509,6 +1518,11 @@ describe('tool approval bridge', () => {
       expect(helperMocks.reply.mock.calls[0]![2]).toContain(
         'the session owner was away',
       );
+      // Nothing in the transcript can allow a denied call later.
+      expect(helperMocks.reply.mock.calls[0]![2]).toContain(
+        'they can ask for it again while they are in the session',
+      );
+      expect(helperMocks.reply.mock.calls[0]![2]).not.toContain('transcript');
       expect(isSessionUserPresent).toHaveBeenCalledWith({
         sessionId: 'session-id',
         userId: 'user-id',
@@ -1524,6 +1538,40 @@ describe('tool approval bridge', () => {
       });
     },
   );
+
+  it('asks when the owner is back by the second presence lookup', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    vi.mocked(isSessionUserPresent)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'ask',
+      mode: 'on',
+      evaluation: { recommendation: 'ask', evaluatedAt: '' },
+    });
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
+    const h = helpers();
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+    }).handleAsk({ ...ask, requestId: 'back-1' }, h);
+    for (let second = 0; second < 12; second += 1) {
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    await vi.waitFor(() =>
+      expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+        { sessionId: 'session-id', userId: 'user-id' },
+        expect.objectContaining({ nativeRequestId: 'back-1' }),
+      ),
+    );
+    expect(insertAutoRejectedIntegrationToolApproval).not.toHaveBeenCalled();
+    expect(isSessionUserPresent).toHaveBeenCalledTimes(2);
+  });
 
   it('asks when the Fast Session presence lookup fails', async () => {
     const evaluation = { recommendation: 'ask' as const, evaluatedAt: '' };

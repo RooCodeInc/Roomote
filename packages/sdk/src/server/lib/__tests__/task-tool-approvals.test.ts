@@ -370,6 +370,7 @@ describe('requestTaskToolApproval', () => {
   ])(
     'denies an Auto %s call when the Session owner is absent',
     async (_label, evaluation, reason) => {
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
       mocks.isPresent.mockResolvedValue(false);
       mocks.resolveAuto.mockResolvedValue({
         action: 'ask',
@@ -377,10 +378,15 @@ describe('requestTaskToolApproval', () => {
         evaluation,
       });
 
-      await expect(requestTaskToolApproval(ask)).resolves.toEqual({
+      const result = requestTaskToolApproval(ask);
+      // Away only after a second lookup a full presence renewal later.
+      await vi.advanceTimersByTimeAsync(11_000);
+      await expect(result).resolves.toEqual({
         outcome: 'denied',
         reason,
       });
+      vi.useRealTimers();
+      expect(isSessionUserPresent).toHaveBeenCalledTimes(2);
       expect(isSessionUserPresent).toHaveBeenCalledWith({
         sessionId: 'session-1',
         userId: 'owner-1',
@@ -395,6 +401,24 @@ describe('requestTaskToolApproval', () => {
       expect(mocks.insert).not.toHaveBeenCalled();
     },
   );
+
+  it('asks when the owner is back by the second presence lookup', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    mocks.isPresent.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    mocks.resolveAuto.mockResolvedValue({
+      action: 'ask',
+      mode: 'on',
+      evaluation: { recommendation: 'ask', evaluatedAt: '' },
+    });
+    const result = requestTaskToolApproval(ask);
+    await vi.advanceTimersByTimeAsync(11_000);
+    await expect(result).resolves.toEqual({
+      outcome: 'pending',
+      approvalId: 'approval-1',
+    });
+    vi.useRealTimers();
+    expect(mocks.insertAutoRejected).not.toHaveBeenCalled();
+  });
 
   it('asks when the task presence lookup fails', async () => {
     const evaluation = { recommendation: 'ask', evaluatedAt: '' };
