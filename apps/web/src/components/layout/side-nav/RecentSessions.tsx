@@ -1,6 +1,6 @@
 'use client';
 
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
@@ -19,6 +19,7 @@ export function RecentSessions({ enabled }: { enabled: boolean }) {
   const pathname = usePathname();
   const currentSessionId = getSessionIdFromPathname(pathname);
   const headingId = useId();
+  const [retryingAfterError, setRetryingAfterError] = useState(false);
   const trpc = useTRPC();
   const { data, isError, isFetching, refetch } = useQuery(
     trpc.sessions.list.queryOptions(
@@ -30,7 +31,8 @@ export function RecentSessions({ enabled }: { enabled: boolean }) {
     ),
   );
   const sessions = data?.sessions ?? [];
-  const initialLoadFailed = isError && data === undefined;
+  const initialLoadFailed =
+    data === undefined && (isError || retryingAfterError);
 
   if (!enabled || (!initialLoadFailed && sessions.length === 0)) return null;
 
@@ -49,10 +51,13 @@ export function RecentSessions({ enabled }: { enabled: boolean }) {
             variant="link"
             size="sm"
             className="h-auto p-0 text-xs"
-            disabled={isFetching}
-            onClick={() => void refetch()}
+            disabled={isFetching || retryingAfterError}
+            onClick={() => {
+              setRetryingAfterError(true);
+              void refetch().finally(() => setRetryingAfterError(false));
+            }}
           >
-            {isFetching ? 'Retrying...' : 'Retry'}
+            {isFetching || retryingAfterError ? 'Retrying...' : 'Retry'}
           </Button>
         </div>
       ) : (

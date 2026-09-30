@@ -150,6 +150,7 @@ describe('RecentSessions', () => {
   it('shows a retry action when recent sessions fail to load', () => {
     sessionsDataAvailable.value = false;
     sessionsError.value = true;
+    sessionsRefetch.mockReturnValue(new Promise(() => {}));
 
     render(
       <SessionNavigationStateProvider>
@@ -165,6 +166,8 @@ describe('RecentSessions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(sessionsRefetch).toHaveBeenCalledOnce();
+    expect(screen.getByText('Unable to load recent sessions.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Retrying...' })).toBeDisabled();
   });
 
   it('keeps cached recent sessions visible during a refetch failure', () => {
