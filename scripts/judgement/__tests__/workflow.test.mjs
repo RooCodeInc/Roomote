@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdtempSync,
@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import YAML from 'yaml';
-import { check, matches } from '@roo-code/judgement';
+import { check, exitCode, matches } from '@roo-code/judgement';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 const workflow = YAML.parse(
@@ -183,6 +183,58 @@ test('snapshot transfer preserves judgments and trusted policy without checking 
   assert.equal(copied.policySource, 'base');
   assert.deepEqual(copiedRequests, requests);
   assert.deepEqual(readdirSync(input), ['.git']);
+  const unavailable = await check({
+    cwd: input,
+    base,
+    head,
+    cache: false,
+    evaluate: async () => {
+      throw new Error('Synthetic provider outage');
+    },
+  });
+  assert.equal(unavailable.status, 'incomplete');
+  assert.equal(exitCode(unavailable), 3);
+});
+
+test('incomplete checker results pass with a warning; violations and execution errors fail', (t) => {
+  const dir = fixture(t);
+  writeFileSync(join(dir, 'node'), '#!/bin/sh\nexit "$CHECKER_EXIT"\n', {
+    mode: 0o755,
+  });
+  for (const code of [0, 1, 2, 3, 130]) {
+    const output = join(dir, 'outputs');
+    const summary = join(dir, 'summary');
+    writeFileSync(output, '');
+    writeFileSync(summary, '');
+    const result = spawnSync('bash', ['-c', script('judgement', 'check')], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        CHECKER_EXIT: String(code),
+        TYPESAFE_API_KEY: 'synthetic-test-key',
+        RUNNER_TEMP: dir,
+        PR_HEAD: 'a'.repeat(40),
+        JUDGEMENT_BASE: 'b'.repeat(40),
+        JUDGEMENT_MODEL: 'synthetic-model',
+        GITHUB_OUTPUT: output,
+        GITHUB_STEP_SUMMARY: summary,
+      },
+    });
+    assert.equal(result.status, code === 3 ? 0 : code);
+    assert.equal(
+      readFileSync(output, 'utf8'),
+      code === 0
+        ? 'coverage=complete\n'
+        : code === 3
+          ? 'coverage=incomplete\n'
+          : '',
+    );
+    if (code === 3) {
+      assert.match(result.stdout, /::warning::/);
+      assert.match(readFileSync(summary, 'utf8'), /coverage is incomplete/);
+    }
+  }
 });
 
 test('corrupt snapshot objects fail before inference', (t) => {
@@ -208,7 +260,13 @@ test('skipped and failed inference jobs publish failure, while successful checks
   const gh = join(dir, 'gh');
   writeFileSync(gh, '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
   const publish = workflow.jobs.report.steps[0].run;
-  for (const outcome of ['success', 'failure', 'skipped', 'cancelled']) {
+  for (const [outcome, coverage] of [
+    ['success', 'complete'],
+    ['success', 'incomplete'],
+    ['failure', ''],
+    ['skipped', ''],
+    ['cancelled', ''],
+  ]) {
     const output = execFileSync('bash', ['-c', publish], {
       cwd: dir,
       encoding: 'utf8',
@@ -216,6 +274,7 @@ test('skipped and failed inference jobs publish failure, while successful checks
         ...process.env,
         PATH: `${dir}:${process.env.PATH}`,
         CHECK_OUTCOME: outcome,
+        CHECK_COVERAGE: coverage,
         PR_HEAD: 'a'.repeat(40),
         GITHUB_REPOSITORY: 'example/repo',
       },
@@ -224,5 +283,6 @@ test('skipped and failed inference jobs publish failure, while successful checks
       output,
       new RegExp(`state=${outcome === 'success' ? 'success' : 'failure'}\\n`),
     );
+    if (coverage === 'incomplete') assert.match(output, /coverage incomplete/);
   }
 });
