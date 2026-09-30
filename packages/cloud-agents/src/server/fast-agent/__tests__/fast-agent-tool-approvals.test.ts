@@ -1388,6 +1388,11 @@ describe('tool approval bridge', () => {
       expect(helperMocks.reply.mock.calls[0]![2]).toContain(
         'the session owner was away',
       );
+      // Nothing in the transcript can allow a denied call later.
+      expect(helperMocks.reply.mock.calls[0]![2]).toContain(
+        'they can ask for it again while they are in the session',
+      );
+      expect(helperMocks.reply.mock.calls[0]![2]).not.toContain('transcript');
       expect(isSessionUserPresent).toHaveBeenCalledWith({
         sessionId: 'session-id',
         userId: 'user-id',

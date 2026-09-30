@@ -118,6 +118,17 @@ export const integrationToolAutoSettingsSchema = z.object({
 });
 
 /**
+ * What the agent is told when Auto denies a call because the session owner
+ * was away. A denied call leaves nothing in the transcript to allow later,
+ * so this points the agent at what the owner can actually do.
+ */
+export function describeIntegrationToolAutoAbsentDenial(
+  reason: string,
+): string {
+  return `Auto mode blocked this tool call because ${reason} and the session owner was away. The call was not run. Continue without it and tell the owner what was skipped; they can ask for it again while they are in the session and approve it when asked.`;
+}
+
+/**
  * A decision model's risk assessment of one Auto-gated call, recorded on the
  * call's audit row. In shadow mode it decides nothing. The assessment can
  * recommend running the call or asking its owner.
