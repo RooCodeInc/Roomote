@@ -9,6 +9,12 @@ const { getSessionsMock, sessionStatusState } = vi.hoisted(() => ({
   },
 }));
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/sessions',
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 vi.mock('@/components/sessions/use-session-status-mutation', () => ({
   useSessionStatusMutation: () => ({ isPending: false, mutate: vi.fn() }),
 }));
@@ -167,16 +173,16 @@ describe('Sessions list', () => {
       within(needsInputSection).getAllByText('needs input', { exact: true }),
     ).toHaveLength(1);
     expect(
-      within(blockedSection).getByRole('heading').parentElement,
+      within(blockedSection).getByRole('heading').closest('header'),
     ).toHaveClass('cursor-default', 'text-destructive', 'md:sticky');
     expect(
-      within(blockedSection).getByRole('heading').parentElement,
+      within(blockedSection).getByRole('heading').closest('header'),
     ).not.toHaveClass('bg-destructive');
     expect(
-      within(needsInputSection).getByRole('heading').parentElement,
+      within(needsInputSection).getByRole('heading').closest('header'),
     ).toHaveClass('text-warning', 'md:sticky');
     expect(
-      within(needsInputSection).getByRole('heading').parentElement,
+      within(needsInputSection).getByRole('heading').closest('header'),
     ).not.toHaveClass('bg-warning');
     expect(
       blockedSection.querySelector('[data-session-board-card-list="blocked"]'),

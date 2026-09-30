@@ -11,6 +11,7 @@ import {
   type ReactNode,
   type SyntheticEvent,
 } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   DndContext,
   KeyboardSensor,
@@ -38,6 +39,7 @@ import {
   useReducedMotion,
 } from 'motion/react';
 
+import { BasicTooltip, Button, Funnel } from '@/components/system';
 import { useSessionStatusMutation } from '@/components/sessions/use-session-status-mutation';
 import {
   canDropSessionBoardCard,
@@ -87,6 +89,14 @@ const FLIGHT_ANIMATION = {
     '0 8px 16px -12px rgba(0, 0, 0, 0.1)',
     '0 0 0 0 rgba(0, 0, 0, 0)',
   ],
+};
+
+const SESSION_BOARD_FILTER_LABELS: Record<SessionBoardColumnStatus, string> = {
+  active: 'Show only active sessions',
+  needs_input: 'Show only sessions needing input',
+  blocked: 'Show only blocked sessions',
+  ready: 'Show only ready sessions',
+  done: 'Show only completed sessions',
 };
 
 type SessionBoardCardRegistry = {
@@ -306,9 +316,16 @@ export const SessionBoardColumn = forwardRef<
     column: SessionBoardColumnStatus;
     label: string;
     count: number;
+    statusFilter?: SessionBoardColumnStatus;
     children: ReactNode;
   }
->(function SessionBoardColumn({ column, label, count, children }, ref) {
+>(function SessionBoardColumn(
+  { column, label, count, statusFilter, children },
+  ref,
+) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const reducedMotion = useReducedMotion() ?? false;
   const dnd = useContext(SessionBoardDndContext);
   const isDropTarget = dnd?.isDropTarget(column) ?? false;
@@ -347,6 +364,10 @@ export const SessionBoardColumn = forwardRef<
         : dropTargetState === 'unavailable'
           ? 'opacity-60'
           : '';
+  const filterActive = statusFilter === column;
+  const filterLabel = filterActive
+    ? 'Show all sessions'
+    : SESSION_BOARD_FILTER_LABELS[column];
 
   return (
     <motion.section
@@ -374,13 +395,34 @@ export const SessionBoardColumn = forwardRef<
         data-session-board-column-header={column}
         className={`mb-2 flex cursor-default items-center justify-between gap-2 px-2 py-1.5 md:sticky md:top-0 md:z-10 md:shrink-0 ${COLUMN_HEADER_CLASSES[column] ?? ''}`}
       >
-        <h2
-          id={`session-board-${column}`}
-          className="text-sm font-medium capitalize"
-        >
-          {label}
-        </h2>
-        <span className="text-xs text-current/70">{count}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <h2
+            id={`session-board-${column}`}
+            className="truncate text-sm font-medium capitalize"
+          >
+            {label}
+          </h2>
+          <span className="text-xs text-current/70">{count}</span>
+        </div>
+        <BasicTooltip content={filterLabel}>
+          <Button
+            variant={filterActive ? 'default' : 'ghost'}
+            size="icon"
+            className="size-6 shrink-0"
+            aria-label={filterLabel}
+            aria-pressed={filterActive}
+            onClick={() => {
+              const params = new URLSearchParams(searchParams);
+              if (filterActive) params.delete('status');
+              else params.set('status', column);
+              params.delete('before');
+              const nextQuery = params.toString();
+              router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+            }}
+          >
+            <Funnel className="size-3" />
+          </Button>
+        </BasicTooltip>
       </header>
       <div
         data-session-board-card-list={column}
