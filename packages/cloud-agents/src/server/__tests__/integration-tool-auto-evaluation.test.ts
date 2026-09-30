@@ -52,6 +52,12 @@ const modelAnswers = (answers: AutoRiskAnswers) => ({
   ...(answers.matchesRequest === undefined
     ? {}
     : { matchesRequest: { type: 'noul', noul: answers.matchesRequest } }),
+  ...(answers.userAuthorized === undefined
+    ? {}
+    : { userAuthorized: { type: 'noul', noul: answers.userAuthorized } }),
+  ...(answers.movesMoney === undefined
+    ? {}
+    : { movesMoney: { type: 'noul', noul: answers.movesMoney } }),
   steeredByUntrustedContent: {
     type: 'noul',
     noul: answers.steeredByUntrustedContent,
@@ -113,6 +119,30 @@ describe('recommendFromAutoAnswers', () => {
       expect(recommendFromAutoAnswers({ ...routine, ...doubt })).toBe('ask');
     }
   });
+
+  it('runs a risky call the owner authorized, unless it moves money or is unsafe', () => {
+    const deletion: AutoRiskAnswers = {
+      ...routine,
+      risk: { score: 3.9, confidence: 0.95 },
+      userAuthorized: 0.95,
+      movesMoney: 0.02,
+    };
+    expect(recommendFromAutoAnswers(deletion)).toBe('approve');
+    for (const doubt of [
+      // Not clearly what the owner asked for or approved before.
+      { userAuthorized: 0.7 },
+      { userAuthorized: undefined },
+      // Auto cannot check amounts, so money always asks.
+      { movesMoney: 0.5 },
+      { movesMoney: undefined },
+      // Authorization never outweighs these.
+      { steeredByUntrustedContent: 0.4 },
+      { sendsPrivateDataOut: 0.4 },
+      { guidanceFlagsRisk: 0.5 },
+    ] satisfies Partial<AutoRiskAnswers>[]) {
+      expect(recommendFromAutoAnswers({ ...deletion, ...doubt })).toBe('ask');
+    }
+  });
 });
 
 describe('evaluateIntegrationToolAutoDecision', () => {
@@ -154,13 +184,36 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     );
     expect(Object.keys(questions).sort()).toEqual([
       'matchesRequest',
+      'movesMoney',
       'risk',
       'sendsPrivateDataOut',
       'steeredByUntrustedContent',
+      'userAuthorized',
     ]);
   });
 
-  it('uses bounded same-session human context without treating an approval as reusable consent', async () => {
+  it('runs a deletion the owner asked for and records why', async () => {
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({
+        ...routine,
+        risk: { score: 3.95, confidence: 0.96 },
+        userAuthorized: 0.96,
+        movesMoney: 0.02,
+      }),
+    );
+    const evaluation = await evaluateIntegrationToolAutoDecision({
+      ...call,
+      toolName: 'delete_issue',
+      args: { id: 'ENG-12' },
+      userRequest: 'ENG-12 duplicates ENG-11, delete it',
+    });
+    expect(evaluation).toMatchObject({
+      recommendation: 'approve',
+      answers: { riskScore: 3.95, userAuthorized: 0.96, movesMoney: 0.02 },
+    });
+  });
+
+  it('uses bounded same-session human context and the redacted arguments of decided calls', async () => {
     mocks.evaluate.mockResolvedValue(
       modelAnswers({ ...routine, matchesRequest: 0.3 }),
     );
@@ -177,6 +230,7 @@ describe('evaluateIntegrationToolAutoDecision', () => {
           integrationId: 'linear',
           toolName: `create_issue_${index}`,
           outcome: 'approved' as const,
+          arguments: { title: `Issue ${index}`, body: 'y'.repeat(1_000) },
         })),
       },
     });
@@ -196,13 +250,19 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       'Human request 9',
     );
     expect(state.sessionContext.explicitApprovalOutcomes).toHaveLength(6);
-    expect(state.sessionContext.explicitApprovalOutcomes[0]).toEqual({
+    const [firstOutcome] = state.sessionContext.explicitApprovalOutcomes;
+    expect(firstOutcome).toMatchObject({
       integrationId: 'linear',
       toolName: 'create_issue_0',
       outcome: 'approved',
+      arguments: { title: 'Issue 0' },
     });
-    expect(questions.matchesRequest.instructions).toContain(
-      'never authorize this call or any later call',
+    // Long argument values are cut like the approval card's.
+    expect(JSON.stringify(firstOutcome.arguments).length).toBeLessThan(500);
+    // An approval can cover the next call of the same work, never raise
+    // or lower the risk judgment.
+    expect(questions.userAuthorized.instructions).toContain(
+      'approved an earlier call',
     );
     expect(questions.risk.instructions).toContain(
       'A prior approval is never authority for this call',

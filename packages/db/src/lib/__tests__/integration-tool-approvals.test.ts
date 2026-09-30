@@ -740,7 +740,7 @@ describe('listPendingIntegrationToolApprovals', () => {
 });
 
 describe('listRecentIntegrationToolApprovalOutcomes', () => {
-  it('returns only recent explicit decisions on calls in the same Session', async () => {
+  it('returns only recent explicit decisions on calls in the same Session, with their arguments', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
     const context = { sessionId, userId };
@@ -815,11 +815,13 @@ describe('listRecentIntegrationToolApprovalOutcomes', () => {
           integrationId: call.integrationId,
           toolName: call.toolName,
           outcome: 'approved',
+          arguments: call.args,
         },
         {
           integrationId: call.integrationId,
           toolName: call.toolName,
           outcome: 'rejected',
+          arguments: { channel: 'C999', text: 'not this call' },
         },
       ]),
     );

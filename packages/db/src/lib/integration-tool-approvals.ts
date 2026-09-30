@@ -396,10 +396,12 @@ export async function listPendingIntegrationToolApprovals(context: {
 }
 
 /**
- * Recent decisions made by the Session owner on that Session's own calls.
- * Task calls and model-generated Auto outcomes are deliberately excluded: a
- * human's decision about one paused call is context, never authorization for
- * another call.
+ * Recent decisions made by the Session owner on that Session's own calls,
+ * with the redacted arguments the owner saw. Auto reads an approval as
+ * covering a later call that plainly continues the same work (the next file
+ * of the same cleanup), and a rejection as a reason to ask again. Task calls
+ * and model-generated Auto outcomes are deliberately excluded: only a
+ * person's own decisions count.
  */
 export async function listRecentIntegrationToolApprovalOutcomes(context: {
   sessionId: string;
@@ -409,6 +411,8 @@ export async function listRecentIntegrationToolApprovalOutcomes(context: {
     integrationId: string;
     toolName: string;
     outcome: 'approved' | 'rejected';
+    /** The redacted arguments the owner saw on the card. */
+    arguments: unknown;
   }>
 > {
   const rows = await db
@@ -416,6 +420,7 @@ export async function listRecentIntegrationToolApprovalOutcomes(context: {
       integrationId: integrationToolApprovalRequests.integrationId,
       toolName: integrationToolApprovalRequests.toolName,
       status: integrationToolApprovalRequests.status,
+      argsSummary: integrationToolApprovalRequests.argsSummary,
     })
     .from(integrationToolApprovalRequests)
     .where(
@@ -437,6 +442,7 @@ export async function listRecentIntegrationToolApprovalOutcomes(context: {
     integrationId: row.integrationId,
     toolName: row.toolName,
     outcome: row.status === 'rejected' ? 'rejected' : 'approved',
+    arguments: row.argsSummary,
   }));
 }
 
