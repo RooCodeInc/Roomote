@@ -64,6 +64,12 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
  */
 const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
+/**
+ * An open session page renews its presence every 10 seconds, and a page that
+ * just opened can briefly drop it. The owner counts as away only when a
+ * second lookup, a full renewal later, still finds nobody.
+ */
+const SESSION_PRESENCE_RECHECK_MS = 11_000;
 
 async function isFastAgentLaunchedTask(
   sessionId: string,
@@ -427,6 +433,14 @@ export function createFastAgentToolApprovalBridge(input: {
 
   const ownerIsPresent = async (): Promise<boolean> => {
     if (isFastAgentApprovalChatSurface(input.surface)) return true;
+    if (await lookUpOwnerPresence()) return true;
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, SESSION_PRESENCE_RECHECK_MS);
+      timer.unref?.();
+    });
+    return lookUpOwnerPresence();
+  };
+  const lookUpOwnerPresence = async (): Promise<boolean> => {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
