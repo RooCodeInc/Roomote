@@ -363,15 +363,15 @@ const mutations = vi.hoisted(() => ({
   } | null,
   latestTriggerOptions: null as {
     onSuccess?: (
-      result: { outcome: 'launched'; taskId: string },
+      result: { outcome: 'launched'; taskId: string; sessionId?: string },
       variables: { automationKey: string },
     ) => void;
   } | null,
   latestCustomTriggerOptions: null as {
     onSuccess?: (
       result:
-        | { outcome: 'launched'; taskId: string }
-        | { outcome: 'queued' }
+        | { outcome: 'launched'; taskId: string; sessionId?: string }
+        | { outcome: 'queued'; sessionId?: string }
         | { outcome: 'completed' }
         | { outcome: 'skipped'; reason: string }
         | { outcome: 'failed'; error: string },
@@ -2288,25 +2288,37 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('names built-in automations in run-now task toasts', () => {
+  it('links built-in run-now toasts to the launched session', () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     render(<AutomationsSettings />);
 
     act(() => {
       mutations.latestTriggerOptions?.onSuccess?.(
-        { outcome: 'launched', taskId: 'task-built-in-1' },
+        {
+          outcome: 'launched',
+          taskId: 'task-built-in-1',
+          sessionId: 'session-built-in-1',
+        },
         { automationKey: 'suggester' },
       );
     });
 
     expect(toast.success).toHaveBeenCalledWith(
-      'Running Suggest Ideas now',
+      'Running Suggest Ideas now ·',
       expect.objectContaining({
-        action: expect.objectContaining({ label: 'View task' }),
+        action: expect.objectContaining({ label: 'Follow session' }),
       }),
+    );
+    const options = vi.mocked(toast.success).mock.calls.at(-1)?.[1];
+    (options?.action as unknown as { onClick: () => void }).onClick();
+    expect(openSpy).toHaveBeenCalledWith(
+      '/sessions/session-built-in-1',
+      '_blank',
     );
   });
 
   it('renders custom automations as a compact control list and honors their permalinks', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     state.environments = [{ id: 'env-1', name: 'Production' }];
     state.customAutomations = [
       {
@@ -2349,15 +2361,23 @@ describe('AutomationsSettings', () => {
     });
     act(() => {
       mutations.latestCustomTriggerOptions?.onSuccess?.({
-        outcome: 'launched',
-        taskId: 'task-custom-1',
+        outcome: 'queued',
+        sessionId: 'session-custom-1',
       });
     });
     expect(toast.success).toHaveBeenCalledWith(
-      'Running Weekly flaky-test scan now',
+      'Running Weekly flaky-test scan now ·',
       expect.objectContaining({
-        action: expect.objectContaining({ label: 'View task' }),
+        action: expect.objectContaining({ label: 'Follow session' }),
       }),
+    );
+    const customToastOptions = vi.mocked(toast.success).mock.calls.at(-1)?.[1];
+    (
+      customToastOptions?.action as unknown as { onClick: () => void }
+    ).onClick();
+    expect(openSpy).toHaveBeenCalledWith(
+      '/sessions/session-custom-1',
+      '_blank',
     );
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ['automations', 'listCustomAutomations'],

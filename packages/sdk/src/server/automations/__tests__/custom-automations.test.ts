@@ -1756,7 +1756,10 @@ describe('runCustomAutomationNow', () => {
       trigger: 'manual',
     });
 
-    expect(result).toEqual({ outcome: 'queued' });
+    expect(result).toEqual({
+      outcome: 'queued',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
     expect(fastMocks.getSession).toHaveBeenCalledWith(
       expect.objectContaining({
         initialModel: 'anthropic/claude-sonnet-5',
@@ -1856,7 +1859,10 @@ describe('runCustomAutomationNow', () => {
       trigger: 'manual',
     });
 
-    expect(result).toEqual({ outcome: 'queued' });
+    expect(result).toEqual({
+      outcome: 'queued',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
       conversation: expect.objectContaining({
@@ -1929,7 +1935,10 @@ describe('runCustomAutomationNow', () => {
       trigger: 'manual',
     });
 
-    expect(result).toEqual({ outcome: 'queued' });
+    expect(result).toEqual({
+      outcome: 'queued',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
       conversation: {
@@ -1978,7 +1987,10 @@ describe('runCustomAutomationNow', () => {
       trigger: 'manual',
     });
 
-    expect(result).toEqual({ outcome: 'queued' });
+    expect(result).toEqual({
+      outcome: 'queued',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
     expect(fastMocks.isManagedTelegramTopic).toHaveBeenCalledWith({
       sessionId: '33333333-3333-4333-8333-333333333333',
       workspaceId: 'telegram-dm-1',
@@ -2029,7 +2041,10 @@ describe('runCustomAutomationNow', () => {
       trigger: 'manual',
     });
 
-    expect(result).toEqual({ outcome: 'queued' });
+    expect(result).toEqual({
+      outcome: 'queued',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
