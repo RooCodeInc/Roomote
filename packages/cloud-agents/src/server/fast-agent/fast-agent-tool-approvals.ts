@@ -65,6 +65,11 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
  *   call with changed arguments is a new ask by construction.
  */
 const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
+/**
+ * The approval arguments of a batch of parallel calls. Namespaced so a tool
+ * argument of its own cannot be read as a batch.
+ */
+const PARALLEL_CALLS_ARGS_KEY = 'roomote.parallelCalls';
 
 type CardDecision = 'approved' | 'rejected' | 'expired' | 'invalid' | 'aborted';
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
@@ -604,7 +609,7 @@ export function createFastAgentToolApprovalBridge(input: {
       return 'candidates' in call
         ? {
             tool,
-            args: { parallelCalls: call.candidates },
+            args: { [PARALLEL_CALLS_ARGS_KEY]: call.candidates },
             parallel: call.candidates,
           }
         : { tool, args: call.args };
@@ -738,6 +743,9 @@ export function createFastAgentToolApprovalBridge(input: {
         if (!assessment) {
           assessment = assess(callArgs);
           sharedAssessments.set(key, assessment);
+          // Only calls waiting at the same time share it; a later call in
+          // the same script is assessed again, with whatever changed since.
+          void assessment.finally(() => sharedAssessments.delete(key));
         }
         return assessment;
       };
@@ -845,6 +853,8 @@ export function createFastAgentToolApprovalBridge(input: {
         if (!shared) {
           shared = awaitCardDecision(card);
           batchCards.set(batchKey, shared);
+          // A decided card never covers calls that start later.
+          void shared.finally(() => batchCards.delete(batchKey));
         }
         decision = await shared;
       } else {

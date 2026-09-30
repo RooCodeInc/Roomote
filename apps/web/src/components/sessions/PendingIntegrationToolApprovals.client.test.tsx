@@ -108,7 +108,7 @@ describe('PendingIntegrationToolApprovals', () => {
             {
               ...pending[0]!,
               argsSummary: {
-                parallelCalls: [{ channel: 'C1' }, { channel: 'C2' }],
+                'roomote.parallelCalls': [{ channel: 'C1' }, { channel: 'C2' }],
               },
             },
           ]}
@@ -124,6 +124,26 @@ describe('PendingIntegrationToolApprovals', () => {
       screen.getByText(/"channel": "C1"[\s\S]*"channel": "C2"/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/parallelCalls/)).not.toBeInTheDocument();
+  });
+
+  it('shows a tool argument named like a batch as one call', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <PendingIntegrationToolApprovals
+          sessionId="session-1"
+          pending={[
+            {
+              ...pending[0]!,
+              argsSummary: { parallelCalls: [{ id: 1 }, { id: 2 }] },
+            },
+          ]}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByText('Let Mock Slack use this tool?'),
+    ).toBeInTheDocument();
   });
 
   it('disables every decision while the request is being submitted', async () => {

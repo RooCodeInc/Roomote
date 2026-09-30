@@ -33,11 +33,18 @@ function integrationDisplayName(integrationId: string): string {
   return integrationNames.get(integrationId) ?? formatIdentifier(integrationId);
 }
 
-/** The calls of a batch card: several calls to one tool that ran together. */
+/**
+ * The calls of a batch card: several calls to one tool that ran together.
+ * The server records them under one namespaced key and nothing else.
+ */
 function parallelCalls(argsSummary: unknown): unknown[] | null {
   if (!argsSummary || typeof argsSummary !== 'object') return null;
-  const calls = (argsSummary as { parallelCalls?: unknown }).parallelCalls;
-  return Array.isArray(calls) ? calls : null;
+  const keys = Object.keys(argsSummary);
+  if (keys.length !== 1 || keys[0] !== 'roomote.parallelCalls') return null;
+  const calls = (argsSummary as Record<string, unknown>)[
+    'roomote.parallelCalls'
+  ];
+  return Array.isArray(calls) && calls.length > 1 ? calls : null;
 }
 
 function approvalPrompt(item: IntegrationToolApprovalMetadata): string {

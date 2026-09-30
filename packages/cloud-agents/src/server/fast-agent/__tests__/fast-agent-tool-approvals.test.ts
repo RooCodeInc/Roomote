@@ -888,7 +888,9 @@ describe('parallel calls in one script', () => {
       approvalId: 'batch-approval',
       integrationId: 'mock-slack',
       toolName: 'post_message',
-      argsSummary: { parallelCalls: [{ channel: 'C1' }, { channel: 'C2' }] },
+      argsSummary: {
+        'roomote.parallelCalls': [{ channel: 'C1' }, { channel: 'C2' }],
+      },
       status: 'pending',
       taskId: null,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -924,7 +926,7 @@ describe('parallel calls in one script', () => {
         expect.anything(),
         expect.objectContaining({
           argsSummary: {
-            parallelCalls: [{ channel: 'C1' }, { channel: 'C2' }],
+            'roomote.parallelCalls': [{ channel: 'C1' }, { channel: 'C2' }],
           },
         }),
       );
@@ -992,6 +994,40 @@ describe('parallel calls in one script', () => {
     expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledTimes(1);
   });
 
+  it('assesses a later identical call in the same script again', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    const single = () => ({
+      fetchCallArgs: vi.fn(async () => ({
+        input: { code: 'sequential' },
+        toolCalls: [
+          {
+            tool: 'mock-slack.post_message',
+            input: { channel: 'C1' },
+            status: 'running',
+          },
+        ],
+      })),
+      reply: vi.fn(async () => undefined),
+    });
+    const bridge = bridgeFor(true);
+    const first = single();
+    bridge.handleAsk({ ...ask, requestId: 'later-a' }, first);
+    await vi.waitFor(() =>
+      expect(first.reply).toHaveBeenCalledWith('later-a', 'once'),
+    );
+    // A steer may have changed things since; the settled decision is gone.
+    const second = single();
+    bridge.handleAsk({ ...ask, requestId: 'later-b' }, second);
+    await vi.waitFor(() =>
+      expect(second.reply).toHaveBeenCalledWith('later-b', 'once'),
+    );
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledTimes(2);
+  });
+
   it('runs them under Auto only when every one of them would run', async () => {
     vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
       action: 'approve',
@@ -1014,7 +1050,7 @@ describe('parallel calls in one script', () => {
       expect.anything(),
       expect.objectContaining({
         argsSummary: {
-          parallelCalls: [{ channel: 'C1' }, { channel: 'C2' }],
+          'roomote.parallelCalls': [{ channel: 'C1' }, { channel: 'C2' }],
         },
       }),
     );
@@ -1048,7 +1084,7 @@ describe('parallel calls in one script', () => {
       expect.anything(),
       expect.objectContaining({
         argsSummary: {
-          parallelCalls: [{ channel: 'C1' }, { channel: 'C2' }],
+          'roomote.parallelCalls': [{ channel: 'C1' }, { channel: 'C2' }],
         },
         autoEvaluation: expect.objectContaining({ recommendation: 'ask' }),
       }),
