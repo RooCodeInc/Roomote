@@ -232,11 +232,22 @@ describe('SessionCard', () => {
       <SessionCard
         session={{ ...session, cachedStatus: 'blocked' }}
         viewerUserId="user-1"
-        hideBlockedBadge
+        hideAttentionBadges
       />,
     );
     expect(
       screen.queryByText('blocked', { exact: true }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <SessionCard
+        session={{ ...session, cachedStatus: 'needs_input' }}
+        viewerUserId="user-1"
+        hideAttentionBadges
+      />,
+    );
+    expect(
+      screen.queryByText('needs input', { exact: true }),
     ).not.toBeInTheDocument();
   });
 

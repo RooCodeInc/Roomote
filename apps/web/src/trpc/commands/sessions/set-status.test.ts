@@ -65,15 +65,22 @@ describe('setSessionStatusCommand', () => {
     expect(owner.id).not.toBe(stranger.id);
   });
 
-  it('validates the manual status vocabulary and excludes active', async () => {
-    const { session } = await fixture();
+  it('validates every board status as a manual status', async () => {
+    const { auth, session } = await fixture();
 
     expect(
       sessionStatusInputSchema.safeParse({
         sessionId: session.id,
         status: 'active',
       }).success,
-    ).toBe(false);
+    ).toBe(true);
+    await expect(
+      setSessionStatusCommand(auth, session.id, 'active'),
+    ).resolves.toMatchObject({
+      id: session.id,
+      cachedStatus: 'active',
+      manualStatus: 'active',
+    });
     expect(
       sessionStatusInputSchema.safeParse({
         sessionId: session.id,

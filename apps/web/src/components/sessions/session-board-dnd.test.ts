@@ -2,6 +2,7 @@ import {
   canDropSessionBoardCard,
   getSessionBoardDropStatus,
   getSessionBoardKeyboardTarget,
+  sessionBoardCollisionDetection,
   sessionBoardKeyboardCoordinates,
 } from './session-board-dnd';
 
@@ -9,10 +10,10 @@ describe('session board drag-and-drop rules', () => {
   it('allows only managed cards to move between manual status columns', () => {
     expect(canDropSessionBoardCard('active', 'ready', true)).toBe(true);
     expect(canDropSessionBoardCard('ready', 'done', true)).toBe(true);
-    expect(canDropSessionBoardCard('ready', 'ready', true)).toBe(false);
-    expect(canDropSessionBoardCard('ready', 'active', true)).toBe(false);
+    expect(canDropSessionBoardCard('ready', 'ready', true)).toBe(true);
+    expect(canDropSessionBoardCard('ready', 'active', true)).toBe(true);
     expect(canDropSessionBoardCard('ready', 'done', false)).toBe(false);
-    expect(getSessionBoardDropStatus('active')).toBeNull();
+    expect(getSessionBoardDropStatus('active')).toBe('active');
     expect(getSessionBoardDropStatus('done')).toBe('done');
   });
 
@@ -27,6 +28,35 @@ describe('session board drag-and-drop rules', () => {
     expect(getSessionBoardKeyboardTarget('ready', 'ArrowUp')).toBe('blocked');
     expect(getSessionBoardKeyboardTarget('done', 'ArrowDown')).toBeNull();
     expect(getSessionBoardKeyboardTarget('ready', 'Enter')).toBeNull();
+  });
+
+  it('uses the pointer lane at populated and empty-lane edges', () => {
+    const rect = (left: number) => ({
+      bottom: 500,
+      height: 500,
+      left,
+      right: left + 100,
+      top: 0,
+      width: 100,
+    });
+    const args = {
+      droppableContainers: [{ id: 'active' }, { id: 'ready' }, { id: 'done' }],
+      droppableRects: new Map([
+        ['active', rect(0)],
+        ['ready', rect(120)],
+        ['done', rect(240)],
+      ]),
+      pointerCoordinates: { x: 1, y: 499 },
+    } as unknown as Parameters<typeof sessionBoardCollisionDetection>[0];
+
+    expect(sessionBoardCollisionDetection(args).map(({ id }) => id)).toEqual([
+      'active',
+    ]);
+
+    args.pointerCoordinates = { x: 339, y: 1 };
+    expect(sessionBoardCollisionDetection(args).map(({ id }) => id)).toEqual([
+      'done',
+    ]);
   });
 
   it('uses the current lane under the keyboard drag for repeated moves', () => {
