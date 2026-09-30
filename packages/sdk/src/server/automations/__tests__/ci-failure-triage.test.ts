@@ -270,6 +270,31 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     );
   });
 
+  it('preserves webhook provenance through the launched task', async () => {
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'teams',
+      channelId: '19:teams-channel@thread.tacv2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({
+      context: { trigger: 'webhook' },
+    });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockTryClaimCiFailureTriageInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({ marker: 'webhook:acme/api' }),
+    );
+    expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: 'webhook' }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: 'webhook' }),
+      { launchClass: 'automation' },
+    );
+  });
+
   it.each([false, true])(
     'limits manual runs by repository ID with destination override=%s',
     async (override) => {

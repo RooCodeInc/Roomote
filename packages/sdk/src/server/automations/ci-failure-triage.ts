@@ -84,8 +84,8 @@ export async function ciFailureTriageJob(
 
   const result = emptyJobResult();
 
-  const { isExplicitRun } = resolveAutomationRunContext(opts.context);
-  if (!isExplicitRun) {
+  const runContext = resolveAutomationRunContext(opts.context);
+  if (runContext.trigger === 'scheduled') {
     result.skippedReason =
       'CI failure triage is webhook-driven; only explicit runs are supported offline.';
     return result;
@@ -180,9 +180,9 @@ export async function ciFailureTriageJob(
 
       const sourceControlProvider = selectedRepository.sourceControlProvider;
       let triggeringRun: CiFailureTriageTriggeringRun | undefined;
-      let workflowName = 'manual-run-now';
+      let workflowName = `${runContext.trigger}-run-now`;
       let headBranch = 'default';
-      let claimMarker = `manual:${selectedRepository.fullName}`;
+      let claimMarker = `${runContext.trigger}:${selectedRepository.fullName}`;
 
       if (sourceControlProvider === 'gitlab') {
         try {
@@ -539,7 +539,7 @@ export async function ciFailureTriageJob(
           destination.provider === 'email'
             ? await prepareAutomationReportDestination(destination, {
                 subject: `Roomote CI failure triage: ${selectedRepository.fullName}`,
-                conversationKey: `builtin-automation:ci_failure_triage:manual:${sourceControlProvider}:${selectedRepository.fullName}:${claimMarker}`,
+                conversationKey: `builtin-automation:ci_failure_triage:${runContext.trigger}:${sourceControlProvider}:${selectedRepository.fullName}:${claimMarker}`,
               })
             : destination;
         const launchResult = await enqueueTask(
@@ -562,7 +562,7 @@ export async function ciFailureTriageJob(
                   channelId: reportDestination.channelId,
                   repositoryFullNames: [selectedRepository.fullName],
                   repositoryCoverage: coverageSlice,
-                  trigger: 'manual',
+                  trigger: runContext.trigger,
                   destinationProvider:
                     reportDestination.provider === 'email'
                       ? getAutomationDestinationCommunicationProvider(
@@ -579,7 +579,7 @@ export async function ciFailureTriageJob(
             initiator: { kind: 'automation', key: 'ci_failure_triage' },
             workflow: 'standard',
             surface: 'system',
-            trigger: 'manual',
+            trigger: runContext.taskTrigger,
             visibility: 'hidden',
             ...(reportDestination.provider === 'slack'
               ? {
