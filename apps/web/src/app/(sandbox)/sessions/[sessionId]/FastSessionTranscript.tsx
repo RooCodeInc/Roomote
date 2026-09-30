@@ -1154,6 +1154,22 @@ export function FastSessionTranscript({
     }
     return { messageCount, assistantCount };
   }, [serverMessages]);
+  const promptHistory = useMemo(
+    () =>
+      [...serverMessages.values()]
+        .sort(compareTranscriptMessages)
+        .flatMap((message) => {
+          const text = getTranscriptMessageText(message)?.trim();
+          return message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+            message.role === 'user' &&
+            message.metadata?.visibleInTranscript !== false &&
+            message.metadata?.turnSource === 'human' &&
+            text
+            ? [text]
+            : [];
+        }),
+    [serverMessages],
+  );
 
   const pendingInputRequest = useMemo(
     () => findPendingSessionInputRequest(messages),
@@ -2331,6 +2347,7 @@ export function FastSessionTranscript({
               onSend={sendReply}
               historyMessageCount={suggestionHistory.messageCount}
               assistantMessageCount={suggestionHistory.assistantCount}
+              promptHistory={promptHistory}
               taskStateRevision={taskStateRevision}
               agentWorking={agentWorking}
               queuedMessages={queuedMessages}

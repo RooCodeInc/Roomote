@@ -866,6 +866,7 @@ describe('FastSessionTranscript', () => {
     userName = null,
     userEmail = null,
     userImageUrl = null,
+    turnSource,
   }: {
     id: string;
     role: 'user' | 'assistant';
@@ -878,6 +879,7 @@ describe('FastSessionTranscript', () => {
     userName?: string | null;
     userEmail?: string | null;
     userImageUrl?: string | null;
+    turnSource?: 'human' | 'platform_event';
   }) => ({
     id,
     eventId: `${id}:event`,
@@ -894,6 +896,7 @@ describe('FastSessionTranscript', () => {
       visibleInTranscript: visible,
       ...(inputKind ? { inputKind } : {}),
       ...(userId ? { userId } : {}),
+      ...(turnSource ? { turnSource } : {}),
     },
     payload: {},
     source: 'web',
@@ -3712,6 +3715,59 @@ describe('FastSessionTranscript', () => {
       ).not.toBeInTheDocument();
     },
   );
+
+  it('recalls only visible persisted human prompts in transcript order', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First user prompt',
+            ts: 1,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Assistant reply',
+            ts: 2,
+          }),
+          textMessage({
+            id: 'platform-1',
+            role: 'user',
+            text: 'Platform event',
+            ts: 3,
+            turnSource: 'platform_event',
+          }),
+          textMessage({
+            id: 'user-2',
+            role: 'user',
+            text: 'Latest user prompt',
+            ts: 4,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'hidden-user',
+            role: 'user',
+            text: 'Hidden prompt',
+            ts: 5,
+            visible: false,
+            turnSource: 'human',
+          }),
+        ]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveValue('Latest user prompt');
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveValue('First user prompt');
+  });
 
   it('shows a later suggestion hint on the focused composer after a successful send', async () => {
     composerSuggestionState.data = {
