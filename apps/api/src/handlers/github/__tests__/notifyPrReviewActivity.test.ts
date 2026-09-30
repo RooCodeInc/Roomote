@@ -738,6 +738,27 @@ describe('buildPrReviewSummaryNotification', () => {
     });
   });
 
+  it.each([
+    'No code issues found.',
+    'No new issues found.',
+    'No new code issues found.',
+  ])('classifies the clean review status %j', (status) => {
+    const body = TERMINAL_SUMMARY_BODY.replace(
+      '1 minor doc note; no blocking issues. [See task](https://roomote.dev/task/x)',
+      status,
+    ).replace('- [ ] Update the doc comment', '');
+
+    expect(
+      buildPrReviewSummaryNotification(summaryPayload({ body }))?.input.event,
+    ).toMatchObject({
+      kind: 'review_summary',
+      reviewResult: {
+        outcome: 'clean',
+        findingCount: null,
+      },
+    });
+  });
+
   it('uses the review footer when in-progress status prose varies', () => {
     expect(
       buildPrReviewSummaryNotification(

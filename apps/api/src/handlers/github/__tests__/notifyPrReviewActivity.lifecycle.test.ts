@@ -164,7 +164,7 @@ describe('PR review-summary lifecycle replay', () => {
   it('promotes only after a durable clean terminal summary is recorded', async () => {
     const cleanBody = TERMINAL_BODY.replace(
       '1 issue outstanding.',
-      'No code issues found.',
+      'No new code issues found.',
     ).replace(
       '- [ ] Validate image values before they satisfy the empty-message guard.',
       '',

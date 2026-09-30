@@ -377,7 +377,7 @@ function getReviewOutcome(
     return 'findings_remain';
   }
   if (
-    /\bno (?:code|new) issues? found\b/i.test(summary) ||
+    /\bno (?:new )?(?:code )?issues? found\b/i.test(summary) ||
     /\ball \d+ issues? addressed\b/i.test(summary)
   ) {
     return 'clean';
