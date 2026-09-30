@@ -132,7 +132,6 @@ import {
   PackageCheck,
   RadioTower,
   RefreshCw,
-  RetryableLoadError,
   Rss,
   Skeleton,
   Slack,
@@ -1594,17 +1593,29 @@ function BuiltInWebhookSetting({
   return (
     <div className="space-y-3">
       {initialLoadFailed ? (
-        <RetryableLoadError
-          message="Failed to load webhook settings."
-          isRetrying={webhookQuery.isFetching || retryingAfterError}
-          onRetry={() => {
-            setRetryingAfterError(true);
-            void webhookQuery
-              .refetch()
-              .finally(() => setRetryingAfterError(false));
-          }}
-          className="py-3"
-        />
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1 text-sm"
+        >
+          <p className="text-muted-foreground">
+            Failed to load webhook settings.
+          </p>
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            disabled={webhookQuery.isFetching || retryingAfterError}
+            onClick={() => {
+              setRetryingAfterError(true);
+              void webhookQuery
+                .refetch()
+                .finally(() => setRetryingAfterError(false));
+            }}
+          >
+            Retry
+          </Button>
+        </div>
       ) : (
         <>
           <div className="flex items-center gap-3">
