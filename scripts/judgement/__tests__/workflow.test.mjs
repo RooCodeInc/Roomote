@@ -10,20 +10,16 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import YAML from 'yaml';
+import { check } from '@roo-code/judgement';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 const workflow = YAML.parse(
   readFileSync(join(root, '.github/workflows/judgement.yml'), 'utf8'),
-);
-const require = createRequire(join(root, 'packages/cloud-agents/package.json'));
-const { check } = await import(
-  pathToFileURL(require.resolve('@roo-code/judgement')).href
 );
 const script = (job, id) =>
   workflow.jobs[job].steps.find((step) => step.id === id).run;

@@ -47,6 +47,7 @@
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
     "@dotenvx/dotenvx": "^1.52.0",
+    "@roo-code/judgement": "github:RooCodeInc/judgement#e4196715a2c0ce55fc41423704db077adb427215",
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
     "@typescript/native-preview": "7.0.0-dev.20260614.1",
