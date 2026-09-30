@@ -136,7 +136,11 @@ custom inference adapter keeps caching disabled because backend settings can
 change without a stable cache fingerprint.
 
 The `Judgement` GitHub Actions workflow runs a strict check of the full PR diff.
-It reads trusted base rules and PR Git objects without executing PR code. Violations,
+A job with read-only permissions and no inference secret collects Git objects for
+the base and head snapshots. A separate job imports those objects into an empty
+repository and runs the pinned checker without checking out PR files. Git hooks,
+configuration, and repository history are not transferred. Status publication
+runs separately with repository status permission. Violations,
 missing inference credentials, timeouts, and incomplete checks fail the status.
 The workflow uses a dedicated `TYPESAFE_API_KEY` repository secret and the
 `JUDGEMENT_MODEL` repository variable (default `jev-1.13.0`). Keep that model aligned
