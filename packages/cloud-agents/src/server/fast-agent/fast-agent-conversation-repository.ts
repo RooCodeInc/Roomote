@@ -515,7 +515,14 @@ export async function listRecentFastAgentHumanUserPromptTexts(input: {
         sql`coalesce(${fastAgentMessages.metadata}->>'visibleInTranscript', 'true') <> 'false'`,
       ),
     )
-    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
+    // turnSeq restarts every turn, so same-millisecond prompts from different
+    // turns are ordered by when they were written.
+    .orderBy(
+      desc(fastAgentMessages.ts),
+      desc(fastAgentMessages.createdAt),
+      desc(fastAgentMessages.turnSeq),
+      desc(fastAgentMessages.id),
+    )
     .limit(FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT);
 
   return rows.reverse().flatMap((row) => {

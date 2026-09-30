@@ -1033,6 +1033,14 @@ describe('Fast conversation repository', () => {
       metadata: humanMetadata,
     });
     await persistEvent({
+      eventId: 'same-millisecond-latest-prompt',
+      ts: 1_000,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Latest earlier request in the same millisecond.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
       eventId: 'current-turn',
       ts: 1_000,
       eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -1063,6 +1071,7 @@ describe('Fast conversation repository', () => {
     ).resolves.toEqual([
       'Earlier trusted request.',
       'Earlier request in the same millisecond.',
+      'Latest earlier request in the same millisecond.',
     ]);
   });
 
