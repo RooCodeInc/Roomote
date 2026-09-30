@@ -55,15 +55,17 @@ type WorkerExitResult = {
 
 function formatWorkerExitLog(exitCode: number, result: WorkerExitResult) {
   const reason =
-    result.classification === 'routine'
-      ? result.shutdownReason
-        ? `routine shutdown: ${result.shutdownReason}`
-        : 'routine exit'
-      : result.classification === 'active_failure'
-        ? 'active run had no shutdown marker'
-        : result.shutdownReason === 'bootstrap_restart_pending'
-          ? 'bootstrap restart scheduled'
-          : 'bootstrap failure recorded';
+    result.shutdownReason === 'state_unavailable'
+      ? 'lifecycle state unavailable'
+      : result.classification === 'routine'
+        ? result.shutdownReason
+          ? `routine shutdown: ${result.shutdownReason}`
+          : 'routine exit'
+        : result.classification === 'active_failure'
+          ? 'active run had no shutdown marker'
+          : result.shutdownReason === 'bootstrap_restart_pending'
+            ? 'bootstrap restart scheduled'
+            : 'bootstrap failure recorded';
 
   return `worker exited with code ${exitCode}; ${reason}`;
 }

@@ -854,6 +854,31 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
     );
   });
 
+  it('reports unavailable lifecycle state when the exit-state read fails', async () => {
+    mockUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([]),
+    });
+    mockTaskRunsFindFirst.mockRejectedValueOnce(new Error('database offline'));
+
+    const result = await controller.testHandleWorkerExitBeforeStart(
+      makeTaskRun({ id: 42, status: RunStatus.Processing }),
+      137,
+    );
+
+    expect(result).toEqual({
+      disposition: 'ignore',
+      classification: 'routine',
+      shutdownReason: 'state_unavailable',
+    });
+    expect(mockCaptureControllerException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'database offline' }),
+      expect.objectContaining({
+        runId: 42,
+        phase: 'worker_exit_state_read',
+      }),
+    );
+  });
+
   it('alerts when a non-zero exit leaves an active run without a heartbeat', async () => {
     mockUpdateWhere.mockReturnValueOnce({
       returning: vi.fn().mockResolvedValue([]),

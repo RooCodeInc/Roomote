@@ -601,6 +601,47 @@ describe('spawnModalWorker', () => {
     );
   });
 
+  it('does not describe unavailable lifecycle state as a routine shutdown', async () => {
+    const onWorkerExit = vi.fn().mockResolvedValue({
+      disposition: 'ignore',
+      classification: 'routine',
+      shutdownReason: 'state_unavailable',
+    });
+
+    await spawnModalWorker(
+      mockTaskRun({
+        vendor: 'roomote',
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        vendor: 'roomote',
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+        onWorkerExit,
+      },
+    );
+
+    const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
+      onExit?: (event: { exitCode: number }) => Promise<void>;
+    };
+    await runCommandInput.onExit?.({ exitCode: 137 });
+
+    const retainedOutput = mockSql.mock.calls
+      .map((call) => call[2])
+      .filter((value): value is string => typeof value === 'string')
+      .join('');
+    expect(retainedOutput).toContain(
+      '[command] worker exited with code 137; lifecycle state unavailable\n',
+    );
+    expect(retainedOutput).not.toContain('routine shutdown: state_unavailable');
+  });
+
   it('retains an exit line when lifecycle classification fails', async () => {
     const onWorkerExit = vi
       .fn()
