@@ -1025,6 +1025,14 @@ describe('Fast conversation repository', () => {
       metadata: { ...humanMetadata, visibleInTranscript: false },
     });
     await persistEvent({
+      eventId: 'same-millisecond-prompt',
+      ts: 1_000,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Earlier request in the same millisecond.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
       eventId: 'current-turn',
       ts: 1_000,
       eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -1050,8 +1058,12 @@ describe('Fast conversation repository', () => {
       listRecentFastAgentHumanUserPromptTexts({
         conversationId: conversation.id,
         beforeTs: 1_000,
+        currentEventId: 'current-turn',
       }),
-    ).resolves.toEqual(['Earlier trusted request.']);
+    ).resolves.toEqual([
+      'Earlier trusted request.',
+      'Earlier request in the same millisecond.',
+    ]);
   });
 
   it('persists the canonical OpenCode session identity', async () => {

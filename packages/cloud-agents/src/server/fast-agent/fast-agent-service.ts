@@ -6708,6 +6708,7 @@ export async function answerFastAgentQuestion({
                     listRecentFastAgentHumanUserPromptTexts({
                       conversationId: session.id,
                       beforeTs: userPromptTs,
+                      currentEventId: userEvent.eventId,
                     }));
                 // Native per-tool approval bridge for gated code-mode
                 // integration calls. Web conversations surface the pending

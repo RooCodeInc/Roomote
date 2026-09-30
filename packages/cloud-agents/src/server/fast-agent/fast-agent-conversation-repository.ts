@@ -19,6 +19,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  lte,
   ne,
   or,
   sessions,
@@ -488,7 +489,8 @@ const FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT = 80;
 
 /**
  * Read the human-authored prompts that were already in the Session before its
- * current UserPrompt. The N-1 `compatibility_messages` mirror intentionally
+ * current UserPrompt. Timestamps are milliseconds and can tie, so the current
+ * prompt is excluded by its event id rather than by a strict time bound. The N-1 `compatibility_messages` mirror intentionally
  * omits event metadata, so `fast_agent_messages` is the trust source for
  * distinguishing human requests from platform events and other transcript
  * content.
@@ -496,6 +498,7 @@ const FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT = 80;
 export async function listRecentFastAgentHumanUserPromptTexts(input: {
   conversationId: string;
   beforeTs: number;
+  currentEventId: string;
 }): Promise<string[]> {
   const rows = await db
     .select({ contentBlocks: fastAgentMessages.contentBlocks })
@@ -503,7 +506,8 @@ export async function listRecentFastAgentHumanUserPromptTexts(input: {
     .where(
       and(
         eq(fastAgentMessages.conversationId, input.conversationId),
-        lt(fastAgentMessages.ts, input.beforeTs),
+        lte(fastAgentMessages.ts, input.beforeTs),
+        ne(fastAgentMessages.eventId, input.currentEventId),
         eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
         eq(fastAgentMessages.role, 'user'),
         sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
