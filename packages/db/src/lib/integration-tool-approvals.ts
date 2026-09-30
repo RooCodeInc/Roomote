@@ -396,7 +396,7 @@ export async function listPendingIntegrationToolApprovals(context: {
 }
 
 /**
- * Recent decisions made by the Session owner on that Session's own calls,
+ * Recent decisions made by the session owner on that session's own calls,
  * with the redacted arguments the owner saw. Auto reads an approval as
  * covering a later call that plainly continues the same work (the next file
  * of the same cleanup), and a rejection as a reason to ask again. Task calls

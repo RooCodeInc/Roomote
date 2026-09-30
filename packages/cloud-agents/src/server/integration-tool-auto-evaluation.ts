@@ -220,7 +220,7 @@ export type AutoRiskAnswers = {
  * it; anything else asks a person. Routine: it reads and changes nothing
  * (with confidence) and is what the user asked for when that is known.
  * Authorized: whatever its risk, the owner asked for exactly this call in
- * the Session or approved an earlier call it continues, and it moves no
+ * the session or approved an earlier call it continues, and it moves no
  * money (the model cannot check amounts reliably). Either way the call must
  * not be steered by instructions planted in content the agent read, carry
  * private data outside the workspace, or be flagged by the deployment's
@@ -373,12 +373,18 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       movesMoney,
       ...core
     } = INTEGRATION_TOOL_AUTO_QUESTIONS;
+    const hasRequest =
+      Boolean(input.userRequest) ||
+      (sessionContext?.recentUserMessages?.length ?? 0) > 0;
+    // An earlier decision can authorize a call that continues it even after
+    // the messages that asked for the work are out of the context window.
+    const hasApprovals =
+      (sessionContext?.explicitApprovalOutcomes?.length ?? 0) > 0;
     const questions = {
       ...core,
-      ...((input.userRequest ||
-        (sessionContext?.recentUserMessages?.length ?? 0) > 0) &&
-      !allowlistedInternalRead
-        ? { matchesRequest, userAuthorized, movesMoney }
+      ...(hasRequest && !allowlistedInternalRead ? { matchesRequest } : {}),
+      ...((hasRequest || hasApprovals) && !allowlistedInternalRead
+        ? { userAuthorized, movesMoney }
         : {}),
       ...(deploymentGuidance ? { guidanceFlagsRisk } : {}),
     };

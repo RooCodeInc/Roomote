@@ -740,7 +740,7 @@ describe('listPendingIntegrationToolApprovals', () => {
 });
 
 describe('listRecentIntegrationToolApprovalOutcomes', () => {
-  it('returns only recent explicit decisions on calls in the same Session, with their arguments', async () => {
+  it('returns only recent explicit decisions on calls in the same session, with their arguments', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
     const context = { sessionId, userId };

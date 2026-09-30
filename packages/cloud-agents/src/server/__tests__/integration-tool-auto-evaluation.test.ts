@@ -213,6 +213,40 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     });
   });
 
+  it('asks for authorization from an earlier approval alone, with no request to match', async () => {
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({
+        ...routine,
+        matchesRequest: undefined,
+        risk: { score: 3.9, confidence: 0.95 },
+        userAuthorized: 0.9,
+        movesMoney: 0.02,
+      }),
+    );
+    const evaluation = await evaluateIntegrationToolAutoDecision({
+      ...call,
+      toolName: 'delete_branch',
+      args: { branch: 'feature/b' },
+      userRequest: undefined,
+      sessionContext: {
+        explicitApprovalOutcomes: [
+          {
+            integrationId: 'linear',
+            toolName: 'delete_branch',
+            outcome: 'approved',
+            arguments: { branch: 'feature/a' },
+          },
+        ],
+      },
+    });
+    const { questions } = mocks.evaluate.mock.calls[0]![0];
+    expect(Object.keys(questions)).toEqual(
+      expect.arrayContaining(['userAuthorized', 'movesMoney']),
+    );
+    expect(questions).not.toHaveProperty('matchesRequest');
+    expect(evaluation.recommendation).toBe('approve');
+  });
+
   it('uses bounded same-session human context and the redacted arguments of decided calls', async () => {
     mocks.evaluate.mockResolvedValue(
       modelAnswers({ ...routine, matchesRequest: 0.3 }),
