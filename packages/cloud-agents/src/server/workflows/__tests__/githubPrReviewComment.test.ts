@@ -181,6 +181,7 @@ describe('review meta footer', () => {
   });
 
   it.each([
+    'version=3 version=2 phase=reviewed outcome=clean finding_count=0',
     'version=3 outcome=clean finding_count=0',
     'version=3 phase=reviewed outcome=clean',
     'version=3 phase=reviewed finding_count=0',

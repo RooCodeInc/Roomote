@@ -186,12 +186,14 @@ export function parseReviewSummaryResultMetadata(
   }
 
   const version = values.get('version');
+  if (duplicates.has('version')) {
+    return { format: 'structured', result: null };
+  }
   if (version === undefined || version === '1' || version === '2') {
     return { format: 'legacy' };
   }
   if (
     version !== REVIEW_SUMMARY_MARKER_VERSION ||
-    duplicates.has('version') ||
     duplicates.has('phase') ||
     duplicates.has('outcome') ||
     duplicates.has('finding_count') ||
