@@ -918,6 +918,46 @@ describe('parallel calls in one script', () => {
     expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledTimes(2);
   });
 
+  it('gives identical parallel calls one shared decision, and keeps tools apart', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision)
+      .mockResolvedValueOnce({
+        action: 'approve',
+        mode: 'on',
+        evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+      })
+      .mockResolvedValue({
+        action: 'ask',
+        mode: 'on',
+        evaluation: { recommendation: 'ask', answers: {}, evaluatedAt: '' },
+      });
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
+    const identical = () => ({
+      fetchCallArgs: vi.fn(async () => ({
+        input: { code: 'Promise.all' },
+        toolCalls: [1, 2].map(() => ({
+          tool: 'mock-slack.post_message',
+          input: { channel: 'C1' },
+          status: 'running',
+        })),
+      })),
+      reply: vi.fn(async () => undefined),
+    });
+    const bridge = bridgeFor(true);
+    const first = identical();
+    const second = identical();
+    bridge.handleAsk({ ...ask, requestId: 'same-a' }, first);
+    bridge.handleAsk({ ...ask, requestId: 'same-b' }, second);
+    await vi.waitFor(() => {
+      expect(first.reply).toHaveBeenCalledWith('same-a', 'once');
+      expect(second.reply).toHaveBeenCalledWith('same-b', 'once');
+    });
+    // One assessment for the one distinct call, even though a second
+    // assessment would have asked.
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledTimes(1);
+  });
+
   it('runs them under Auto only when every one of them would run', async () => {
     vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
       action: 'approve',

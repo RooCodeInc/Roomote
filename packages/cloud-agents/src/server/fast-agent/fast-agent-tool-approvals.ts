@@ -459,10 +459,11 @@ export function createFastAgentToolApprovalBridge(input: {
   }
   const handledRequestIds = new Set<string>();
   const notifiedApprovalIds = new Set<string>();
-  // Parallel calls in one script raise one ask each, and each ask could be
-  // any of them. Sharing one assessment per call keeps their decisions the
-  // same; otherwise one ask could refuse and fail the whole script.
-  const parallelAssessments = new Map<
+  // Calls running together in one script raise one ask each, and an ask may
+  // not say which of them it is. Sharing one assessment per call (script,
+  // tool, arguments) keeps their decisions the same; otherwise one ask could
+  // refuse and fail the whole script.
+  const sharedAssessments = new Map<
     string,
     ReturnType<typeof resolveIntegrationToolAutoDecision>
   >();
@@ -684,21 +685,25 @@ export function createFastAgentToolApprovalBridge(input: {
             evaluatedAt: new Date().toISOString(),
           },
         }));
+      const assessShared = (callArgs: unknown) => {
+        const key = JSON.stringify([
+          ask.callId ?? ask.requestId,
+          tool.integrationId,
+          tool.toolName,
+          callArgs ?? null,
+        ]);
+        let assessment = sharedAssessments.get(key);
+        if (!assessment) {
+          assessment = assess(callArgs);
+          sharedAssessments.set(key, assessment);
+        }
+        return assessment;
+      };
       let auto: Awaited<ReturnType<typeof assess>> | undefined;
       if (autoAssessed && parallel) {
         // This ask is one of these calls; it runs only if every one of them
         // would run on its own.
-        const results = await Promise.all(
-          parallel.map((candidate) => {
-            const key = `${ask.callId ?? ask.requestId}:${JSON.stringify(candidate ?? null)}`;
-            let assessment = parallelAssessments.get(key);
-            if (!assessment) {
-              assessment = assess(candidate);
-              parallelAssessments.set(key, assessment);
-            }
-            return assessment;
-          }),
-        );
+        const results = await Promise.all(parallel.map(assessShared));
         auto =
           results.find((result) => result.mode === 'off') ??
           (results.every((result) => result.action === 'approve')
@@ -709,7 +714,7 @@ export function createFastAgentToolApprovalBridge(input: {
           return;
         }
       } else if (autoAssessed) {
-        auto = await assess(args);
+        auto = await assessShared(args);
       }
       // A default tool asked under a rule compiled while Auto was on, after
       // Auto went off: it runs as it always has, and there is nothing to
