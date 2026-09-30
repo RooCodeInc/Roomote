@@ -342,6 +342,109 @@ describe('createTaskRunGitHubToken', () => {
     consoleWarnSpy.mockRestore();
   });
 
+  it('drops stamped GitHub repositories that are no longer available', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    mockFindEnvironmentFirst.mockResolvedValue({
+      id: 'environment-id',
+      config: buildEnvironmentConfig(['Roomote/example-app']),
+    });
+    const prepared = {
+      fullName: 'Roomote/example-app',
+      installationId: 'install-roomote',
+      githubRepoId: 201,
+      isActive: true,
+      sourceControlProvider: 'github',
+    };
+    const additional = {
+      ...prepared,
+      fullName: 'Roomote/additional-app',
+      githubRepoId: 202,
+    };
+    mockFindMappings.mockResolvedValue([{ repository: prepared }]);
+    // The deleted repository is inactive, so the active-row lookup omits it.
+    mockFindMany.mockResolvedValue([prepared, additional]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'Roomote/example-app',
+          environmentId: 'environment-id',
+          repositoryProviders: {
+            'Roomote/example-app': 'github',
+            'Roomote/additional-app': 'github',
+            'Roomote/deleted-app': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toBe('ghs_test_token');
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-roomote',
+        repositoryIds: [201, 202],
+      },
+      undefined,
+      undefined,
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('minting without them: Roomote/deleted-app'),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('drops unavailable stamped GitHub repositories without an environment', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'Roomote/example-app',
+        installationId: 'install-roomote',
+        githubRepoId: 201,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'Roomote/example-app',
+          repositoryProviders: {
+            'Roomote/example-app': 'github',
+            'Roomote/deleted-app': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toBe('ghs_test_token');
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-roomote',
+        repositoryIds: [201],
+      },
+      undefined,
+      undefined,
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('fails when no stamped GitHub repository is still available', async () => {
+    mockFindMany.mockResolvedValue([]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'Roomote/deleted-app',
+          repositoryProviders: { 'Roomote/deleted-app': 'github' },
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow(
+      'Stamped repositories not found for task run 123: Roomote/deleted-app',
+    );
+    expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
+  });
+
   it('fails closed when a GitLab environment stamp spans GitHub installations', async () => {
     mockFindEnvironmentFirst.mockResolvedValue({
       id: 'gitlab-environment',
