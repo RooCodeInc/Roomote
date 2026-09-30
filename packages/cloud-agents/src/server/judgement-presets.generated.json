@@ -1,6 +1,6 @@
 {
   "protocolVersion": 6,
-  "policySha256": "23644b4ef4630722f7cc7dc2170986b111e28d44db07863175166c4dbb6845a7",
+  "policySha256": "9cb631cd915a403ccca30044f27fb6b635c2a2730570a7ee3e0b6701173565ce",
   "fixtureSha256": {
     "criterion_2": "79661eb7cf6e7a191e612586128cd556829ec9f39956c3e895697741a0ded8f7",
     "criterion_3": "e191d6f16469540b24cef73a96074efd10cd81a3f37e709d39f5c6f9d8aee7c5",
@@ -2550,7 +2550,7 @@
     }
   ],
   "sourceHashes": {
-    ".judgement/rules.json": "6d91e24ec11ae51ae3dec26b004917dad244873cb15779868ff29ca01a520529",
+    ".judgement/rules.json": "f78ee2ae6a98a29108d231ca16225758f77a1cb2e6c78fb2284728d943ee683a",
     ".judgement/examples/criterion_2.json": "79661eb7cf6e7a191e612586128cd556829ec9f39956c3e895697741a0ded8f7",
     ".judgement/examples/criterion_3.json": "e191d6f16469540b24cef73a96074efd10cd81a3f37e709d39f5c6f9d8aee7c5",
     ".judgement/examples/criterion_4.json": "822eebb548f3c53ca1d00362ac566bc6b7fbe1631d2938b1d46039ab08bfc011",
