@@ -21,6 +21,7 @@ import {
   getReviewFooterPhase,
   getReviewSummaryMarkerPhase,
   isReviewSummaryInProgress,
+  parseReviewSummaryResultMetadata,
   parseReviewSummaryMarkerSha,
   REVIEW_STATUS_START_MARKER,
   REVIEW_STATUS_END_MARKER,
@@ -104,7 +105,7 @@ describe('review meta footer', () => {
     expect(getReviewFooterPhase(body)).toBe('Reviewing');
     expect(getReviewSummaryMarkerPhase(body)).toBe('Reviewing');
     expect(isReviewSummaryInProgress(body)).toBe(true);
-    expect(body).toContain('version=2 phase=reviewing');
+    expect(body).toContain('version=3 phase=reviewing');
   });
 
   it('trusts a Reviewed footer over terminal prose that starts with Reviewing', () => {
@@ -117,7 +118,9 @@ describe('review meta footer', () => {
     expect(getReviewFooterPhase(body)).toBe('Reviewed');
     expect(getReviewSummaryMarkerPhase(body)).toBe('Reviewed');
     expect(isReviewSummaryInProgress(body)).toBe(false);
-    expect(body).toContain('version=2 phase=reviewed');
+    expect(body).toContain(
+      'version=3 phase=reviewed outcome=incomplete finding_count=0',
+    );
   });
 
   it('trusts the hidden marker phase when presentation metadata disagrees', () => {
@@ -166,6 +169,40 @@ describe('review meta footer', () => {
     expect(isReviewSummaryInProgress(body)).toBe(true);
   });
 
+  it('parses authoritative v3 terminal result metadata', () => {
+    expect(
+      parseReviewSummaryResultMetadata(
+        '<!-- roomote-review-summary sha=abc1234 mode=sync version=3 phase=reviewed outcome=clean finding_count=0 -->',
+      ),
+    ).toEqual({
+      format: 'structured',
+      result: { outcome: 'clean', findingCount: 0 },
+    });
+  });
+
+  it.each([
+    'version=3 outcome=clean finding_count=0',
+    'version=3 phase=reviewed outcome=clean',
+    'version=3 phase=reviewed finding_count=0',
+    'version=3 phase=reviewed outcome=clean finding_count=1',
+    'version=3 phase=reviewed outcome=findings_remain finding_count=0',
+    'version=3 phase=reviewed outcome=unknown finding_count=0',
+  ])('fails closed for invalid structured metadata: %s', (attributes) => {
+    expect(
+      parseReviewSummaryResultMetadata(
+        `<!-- roomote-review-summary sha=abc1234 mode=sync ${attributes} -->`,
+      ),
+    ).toEqual({ format: 'structured', result: null });
+  });
+
+  it('identifies older markers as legacy format', () => {
+    expect(
+      parseReviewSummaryResultMetadata(
+        '<!-- roomote-review-summary sha=abc1234 mode=sync version=2 phase=reviewed -->',
+      ),
+    ).toEqual({ format: 'legacy' });
+  });
+
   it('appends the footer at the bottom of the summary body', () => {
     const body = buildReviewSummaryBody({
       summaryMarker: MARKER('abc1234deadbeef'),
@@ -204,7 +241,7 @@ describe('review meta footer', () => {
     });
 
     expect(updated).toContain(
-      'sha=aaa1111deadbeef mode=initial version=2 phase=reviewing',
+      'sha=aaa1111deadbeef mode=initial version=3 phase=reviewing',
     );
     expect(updated).toContain('>aaa1111</a>');
     expect(updated).toContain(
@@ -231,7 +268,7 @@ describe('buildTerminalReviewSummaryBody', () => {
 
     expect(updated).not.toBeNull();
     expect(updated).toContain(
-      'sha=abc123f mode=initial version=2 phase=reviewed',
+      'sha=abc123f mode=initial version=3 phase=reviewed outcome=incomplete finding_count=0',
     );
     expect(updated).toContain(
       `${REVIEW_STATUS_START_MARKER}\n${terminal}\n${REVIEW_STATUS_END_MARKER}`,
@@ -255,7 +292,9 @@ describe('buildTerminalReviewSummaryBody', () => {
     });
 
     expect(updated).not.toBeNull();
-    expect(updated).toContain('sha=def456f mode=sync version=2 phase=reviewed');
+    expect(updated).toContain(
+      'sha=def456f mode=sync version=3 phase=reviewed outcome=incomplete finding_count=0',
+    );
     expect(updated).toContain(terminal);
     expect(updated).not.toContain(IN_PROGRESS_SYNC);
     expect(updated).toContain('<sub>Reviewed def456f</sub>');
