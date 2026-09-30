@@ -6520,6 +6520,42 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it('records the config that successfully refreshed the warm OpenCode instance', async () => {
+    mocks.getSession.mockResolvedValue({
+      id: 'brain-toggle-success',
+      compatibilityMessages: [],
+      openCodeSessionId: 'persisted-session',
+    });
+    mocks.isBrainEnabled
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        if (options.disposeInstanceBeforeSession) {
+          options.disposeInstanceBeforeSession.completed = true;
+        }
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Done.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.generateText.mock.calls[1]?.[2]).toMatchObject({
+      disposeInstanceBeforeSession: { completed: true },
+    });
+    expect(mocks.generateText.mock.calls[2]?.[2]).not.toHaveProperty(
+      'disposeInstanceBeforeSession',
+    );
+  });
+
   it('surfaces a full conversation memory as a tool failure', async () => {
     mocks.isBrainEnabled.mockResolvedValue(true);
     mocks.appendMemory.mockResolvedValue({

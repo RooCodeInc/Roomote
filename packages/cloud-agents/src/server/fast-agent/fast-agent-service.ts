@@ -381,14 +381,16 @@ const FAST_AGENT_HUMAN_STEER_MAX_FILES = 16;
 const FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES = 24 * 1024 * 1024;
 
 /**
- * Process-local fingerprint of the tool exposure and approval config that a
- * per-conversation OpenCode instance last booted with. Entries die with the
- * process, exactly like the instances they describe: after a restart there is
- * no live instance, so an unknown record is fresh state, never stale. A
- * different fingerprint means the cached instance still holds last turn's
- * agent state and is disposed (sessions persist on disk) rather than rebuilt.
+ * Process-local tool-config state for each per-conversation OpenCode instance.
+ * Unconfirmed entries describe the tail of the queued config sequence until a
+ * successful disposal boots that config. Entries die with the process, exactly
+ * like the instances they describe: after a restart there is no live instance,
+ * so a missing record is fresh state, never stale.
  */
-const fastAgentToolConfigFingerprints = new Map<string, string>();
+const fastAgentToolConfigStates = new Map<
+  string,
+  { fingerprint: string; confirmed: boolean }
+>();
 
 function buildFastAgentNativeSteerMessageId(
   rowId: string,
@@ -6499,13 +6501,14 @@ export async function answerFastAgentQuestion({
       brainEnabled,
       toolApprovalRulesHash,
     });
-    const previousToolConfigFingerprint = fastAgentToolConfigFingerprints.has(
-      session.id,
-    )
-      ? fastAgentToolConfigFingerprints.get(session.id)
-      : undefined;
+    const previousToolConfigState = fastAgentToolConfigStates.get(session.id);
     const toolConfigDisposeInstance = shouldDisposeInstanceForToolConfig({
-      recordedHash: previousToolConfigFingerprint,
+      recordedHash:
+        previousToolConfigState === undefined
+          ? undefined
+          : previousToolConfigState.confirmed
+            ? previousToolConfigState.fingerprint
+            : null,
       currentHash: toolConfigFingerprint,
     });
     const toolConfigDisposeState = toolConfigDisposeInstance
@@ -6516,9 +6519,10 @@ export async function answerFastAgentQuestion({
         `[Fast Agent] Tool configuration changed for session ${session.id}; refreshing the OpenCode instance.`,
       );
     }
-    if (!toolConfigDisposeInstance) {
-      fastAgentToolConfigFingerprints.set(session.id, toolConfigFingerprint);
-    }
+    fastAgentToolConfigStates.set(session.id, {
+      fingerprint: toolConfigFingerprint,
+      confirmed: !toolConfigDisposeInstance,
+    });
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       persistedSessionId: session.openCodeSessionId,
@@ -7197,22 +7201,19 @@ export async function answerFastAgentQuestion({
       },
     });
     if (toolConfigDisposeState) {
-      // Advance the fingerprint only after disposal succeeds. If another turn
-      // changed it while this one was queued, leave that newer state intact.
+      // The map tracks the tail of the queued config sequence. Only confirm
+      // this turn when no later distinct config replaced it; failed disposal
+      // leaves the tail unconfirmed so matching queued turns still refresh.
       void promptTextPromise
         .catch(() => undefined)
         .then(() => {
           if (!toolConfigDisposeState.completed) return;
-          const recordedFingerprint = fastAgentToolConfigFingerprints.has(
-            session.id,
-          )
-            ? fastAgentToolConfigFingerprints.get(session.id)
-            : undefined;
-          if (recordedFingerprint !== previousToolConfigFingerprint) return;
-          fastAgentToolConfigFingerprints.set(
-            session.id,
-            toolConfigFingerprint,
-          );
+          const pendingState = fastAgentToolConfigStates.get(session.id);
+          if (pendingState?.fingerprint !== toolConfigFingerprint) return;
+          fastAgentToolConfigStates.set(session.id, {
+            fingerprint: toolConfigFingerprint,
+            confirmed: true,
+          });
         });
     }
     const promptText = await promptTextPromise.finally(() => {
