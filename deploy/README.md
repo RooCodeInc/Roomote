@@ -114,6 +114,10 @@ official installs therefore use
 `GBRAIN_IMAGE` only to pin a complete custom image reference. Installer reruns
 and upgrades preserve that explicit override.
 
+The optional CPU decision model works the same way: with the `judgment`
+profile enabled and `JUDGMENT_IMAGE` unset, production Compose pulls
+`${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/roomote-judgment:${ROOMOTE_VERSION}`.
+
 The file must include the required production values from
 `.env.production.example`, especially:
 

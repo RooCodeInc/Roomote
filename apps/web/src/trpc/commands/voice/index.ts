@@ -125,7 +125,7 @@ export async function previewVoiceCommand(
 /**
  * Turn a raw speech transcript into the text that enters the Session. The
  * spoken request is never lost: when cleanup fails the raw transcript is
- * returned so the Fast session still receives it.
+ * returned so the session still receives it.
  */
 export async function cleanVoiceTranscriptCommand(
   auth: UserAuthSuccess,

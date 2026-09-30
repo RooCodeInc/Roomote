@@ -24,6 +24,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   authUsers: { id: 'auth_users.id' },
   eq: vi.fn(),
+  isAgentMailCloudManaged: vi.fn(() => false),
   resolveAgentMailRuntimeCredentials: vi.fn(async () => ({
     apiKey: 'api-key',
     webhookSecret: 'webhook-secret',

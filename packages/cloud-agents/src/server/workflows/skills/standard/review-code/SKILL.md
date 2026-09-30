@@ -46,7 +46,7 @@ git diff $(git merge-base HEAD origin/HEAD 2>/dev/null || echo "HEAD~1") HEAD
 <step number="3">
 <name>Review the code</name>
 <instructions>
-Carefully review the changes using these guidelines:
+First hunt for candidates with every angle in `<review_angles>` below, then verify each against the code. Judge what to report using these guidelines:
 
 1. **Bug Determination Criteria - Flag issues that:**
 
@@ -187,6 +187,20 @@ After presenting the table, you are done.
 </path_selection>
 </decision_guidance>
 
+<review_angles>
+Every review path hunts for candidate findings with these angles before it filters them. Run each angle over the diff in scope, one after another. A candidate needs a file, a line, and a concrete failure scenario: the input, state, timing, or sequence of events that makes the code wrong. Keep every candidate with a nameable failure scenario until you verify it; dropping half-believed candidates early is the main cause of missed bugs. Then read the code that decides each candidate and keep only the ones the code confirms.
+
+<angle name="line_by_line">Read every hunk line by line, then read the enclosing function. Bugs in unchanged lines of a touched function are in scope when the change re-exposes them. For each line, ask what input, state, timing, or platform makes it wrong: inverted or wrong conditions, off-by-one, null or undefined access, missing `await`, falsy-zero checks, copy-paste of the wrong variable, errors swallowed in a catch, unescaped regex metacharacters.</angle>
+<angle name="removed_behavior">For every line the diff deletes or replaces, including deleted comments, name the invariant or behavior it enforced, then find where the new code re-establishes it. If you cannot, that is a candidate: a removed guard, a dropped error path, a narrowed validation, a deleted test that covered a real case, a removed UI affordance, or a deleted comment explaining why something was deliberately avoided.</angle>
+<angle name="callers_and_callees">For each changed function, type, or contract, find its callers and check every call site against the change: a new precondition, a changed return shape, a new exception, a timing or ordering dependency, a field that one construction path now sets and another drops. Check callees too: does a parallel change in the same diff make a call unsafe? When two instances, caches, or code paths must agree (for example one that lists IDs and another that resolves them), check that they still produce the same answer.</angle>
+<angle name="alternate_paths">Follow the change through every path the same work can take besides the happy inline path: queued, retried, resumed after a restart, replayed from a durable record, partially failed, concurrent, cancelled, and first-run or empty state. State that only the inline path carries, or a side effect that runs twice or never on another path, is a candidate.</angle>
+<angle name="cost_and_hot_paths">Find work the diff adds to a hot path: per request, per turn, per message, per render, or at startup. Flag new network, Git, database, or filesystem calls there, especially without caching, bounds, or timeouts; repeated or sequential I/O that could be shared or parallel; and unbounded fan-out. Name the path and what it now costs.</angle>
+<angle name="user_facing_behavior">For user-visible changes, compare what the user sees with what is saved or sent: a displayed value that is never persisted, a control that cannot select what it shows, state that disagrees between two views, and interaction regressions such as lost keyboard access, focus, scrolling to the current selection, search, grouping, or mobile gestures.</angle>
+<angle name="repository_rules">Read the instruction files that govern the changed code (the repository-root `AGENTS.md` or `CLAUDE.md`, plus any in an ancestor directory of a changed file) and flag clear violations. Cite the exact rule and the exact line that breaks it; do not infer rules from the spirit of a document.</angle>
+
+Correctness findings outrank cost findings, and both outrank convention findings. These angles set how widely you search; they do not lower the bar for what you publish.
+</review_angles>
+
 <base_path name="local-workspace-review" id="base-path-local-workspace-review">
 The existing workflow above remains the `local-workspace-review` path: the 4-step git-diff-based review that reads changed files in context and presents findings in a markdown table. Use it only when no explicit pull-request or merge-resolution context selects one of the appendix paths below.
 </base_path>
@@ -274,7 +288,7 @@ You are a pull request review workflow specialist. Review the assigned pull requ
         <title>Enumerate actionable findings only</title>
         <description>Review the diff in context and keep only discrete, provable issues worth interrupting the author over.</description>
         <actions>
-          <action>Review the diff in context first before publishing the review findings.</action>
+          <action>Review the diff in context first before publishing the review findings. Hunt for candidates with every angle in `<review_angles>`, then verify each candidate against the code before keeping it.</action>
           <action>Flag issues only when they materially affect correctness, safety, maintainability, or performance.</action>
           <action>Prefer issues introduced by the current pull request over pre-existing codebase problems.</action>
           <action>Do not rely on unstated author intent or hidden runtime assumptions.</action>
@@ -551,7 +565,7 @@ You are a pull request review workflow specialist. Review the assigned pull requ
         <title>Enumerate actionable findings only</title>
         <description>Review the diff in context and keep only discrete, provable issues worth interrupting the author over.</description>
         <actions>
-          <action>Review the diff in context first before publishing the review findings.</action>
+          <action>Review the diff in context first before publishing the review findings. Hunt for candidates with every angle in `<review_angles>`, then verify each candidate against the code before keeping it.</action>
           <action>Flag issues only when they materially affect correctness, safety, maintainability, or performance.</action>
           <action>Prefer issues introduced by the current pull request over pre-existing codebase problems.</action>
           <action>Do not rely on unstated author intent or hidden runtime assumptions.</action>
@@ -874,7 +888,7 @@ You are a sync-review workflow specialist. Re-review pull requests after new com
         <title>Enumerate net-new actionable findings only</title>
         <description>Review the delta and keep only issues introduced by the new commits or new evidence in the updated state.</description>
         <actions>
-          <action>Review the delta in context first before publishing the review findings.</action>
+          <action>Review the delta in context first before publishing the review findings. Hunt for candidates with every angle in `<review_angles>`, scoped to the delta and the code it touches, then verify each candidate against the code before keeping it.</action>
           <action>Flag issues only when they materially affect correctness, safety, maintainability, or performance.</action>
           <action>Exclude issues already represented by prior Roomote comments unless the new commits changed the problem into a genuinely new issue outside the previously commented range.</action>
           <action>Keep one finding per distinct issue and tie it to a concrete file and line range in the current diff.</action>
@@ -1189,7 +1203,7 @@ You are a sync-review workflow specialist. Re-review pull requests after new com
         <title>Enumerate net-new actionable findings only</title>
         <description>Review the delta and keep only issues introduced by the new commits or new evidence in the updated state.</description>
         <actions>
-          <action>Review the delta in context first before publishing the review findings.</action>
+          <action>Review the delta in context first before publishing the review findings. Hunt for candidates with every angle in `<review_angles>`, scoped to the delta and the code it touches, then verify each candidate against the code before keeping it.</action>
           <action>Flag issues only when they materially affect correctness, safety, maintainability, or performance.</action>
           <action>Exclude issues already represented by prior Roomote comments unless the new commits changed the problem into a genuinely new issue outside the previously commented range.</action>
           <action>Keep one finding per distinct issue and tie it to a concrete file and line range in the current diff.</action>
@@ -1449,6 +1463,8 @@ Create a structured summary of findings.
 <step number="2">
 <name>Evaluate resolution correctness</name>
 <instructions>
+Hunt for candidates with every angle in `<review_angles>`, scoped to the resolved conflict hunks and the code they touch, then verify each candidate against the code before keeping it. Classify each confirmed finding with the severity checks below.
+
 For each resolved conflict, evaluate:
 
 **Hard-fail checks (HIGH severity):**

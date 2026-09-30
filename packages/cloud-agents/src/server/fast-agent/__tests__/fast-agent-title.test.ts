@@ -415,7 +415,7 @@ describe('refreshFastAgentSessionTitle', () => {
     error.mockRestore();
   });
 
-  it('never overwrites a manually renamed unified Fast Session', async () => {
+  it('never overwrites a manually renamed unified session', async () => {
     const user = await userFactory.create();
     const conversation = await createConversation(
       user.id,

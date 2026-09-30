@@ -1,3 +1,4 @@
+import { distillTaskRunTurnMemory } from '@roomote/cloud-agents/server';
 import { redactBrainText } from '@roomote/communication/redact-brain-text';
 import {
   db,
@@ -809,6 +810,46 @@ export function requestHomeComposerPrecomputeAfterMemorySettlement(
   }
 }
 
+/**
+ * Only a run that just finished is distilled. A history backfill, or the
+ * re-put after a linked pull request settles, must not replay old runs
+ * through the decision and helper models.
+ */
+const DISTILLATION_MAX_RUN_AGE_MS = 24 * 60 * 60 * 1_000;
+
+/**
+ * Each settled turn is normally distilled when it settles. This is the
+ * durable fallback for a turn whose in-process pass was lost: the same check,
+ * which stands down for an agent-authored memory and for anything the run's
+ * memory already says. Returns the text to publish.
+ */
+async function distillUnrecordedTaskMemory(input: {
+  runId: number;
+  taskId: string;
+  userId: string | null;
+  workflow: TaskWorkflow;
+  completedAt: Date | null;
+  agentSummary: string | null;
+}): Promise<string | null> {
+  if (
+    !input.completedAt ||
+    Date.now() - input.completedAt.getTime() > DISTILLATION_MAX_RUN_AGE_MS
+  ) {
+    return input.agentSummary;
+  }
+
+  // Not requeued: this pass holds the row and publishes the text itself.
+  return (
+    (await distillTaskRunTurnMemory({
+      runId: input.runId,
+      taskId: input.taskId,
+      userId: input.userId,
+      workflow: input.workflow,
+      requeue: false,
+    })) ?? input.agentSummary
+  );
+}
+
 /** Returns false when no pending events remained to claim. */
 export async function drainOneBatch(connection: {
   baseUrl: string;
@@ -912,19 +953,29 @@ export async function drainOneBatch(connection: {
                 name: task.initiatorUser?.name ?? task.actorDisplayName,
               };
 
+        const request = resolveTaskMemoryRequest(
+          run.payload as Record<string, unknown>,
+          task.workflow,
+        );
+        const agentSummary = await distillUnrecordedTaskMemory({
+          runId: run.id,
+          taskId: run.taskId,
+          userId: task.initiatorUser?.id ?? null,
+          workflow: task.workflow,
+          completedAt: run.completedAt,
+          agentSummary: event.agentSummary,
+        });
+
         const page = buildMemoryPage({
           environmentName,
-          agentSummary: event.agentSummary,
+          agentSummary,
           runId: run.id,
           taskId: run.taskId,
           taskTitle: task.title,
           completedAt: run.completedAt,
           initiator,
           workflow: task.workflow,
-          request: resolveTaskMemoryRequest(
-            run.payload as Record<string, unknown>,
-            task.workflow,
-          ),
+          request,
           pullRequests: prRows.map((pr) => ({
             repository: pr.repository,
             prNumber: pr.prNumber,

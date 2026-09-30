@@ -1,0 +1,152 @@
+name: Judgement
+
+on:
+  pull_request_target:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions: {}
+
+concurrency:
+  group: judgement-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pending:
+    name: Mark Judgement pending
+    runs-on: ubuntu-24.04
+    permissions:
+      statuses: write
+    steps:
+      - name: Mark the PR check pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh api --silent "repos/$GITHUB_REPOSITORY/statuses/$PR_HEAD" \
+            -f state=pending -f context=Judgement \
+            -f description='Checking repository rules' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+  collect:
+    name: Collect Git evidence
+    needs: pending
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      base: ${{ steps.export.outputs.base }}
+    env:
+      PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      PR_BASE: ${{ github.event.pull_request.base.sha }}
+    steps:
+      # This job has no inference secret or repository write permission.
+      - name: Checkout trusted base
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export snapshot objects
+        id: export
+        run: |
+          set -euo pipefail
+          [[ "$PR_HEAD" =~ ^[0-9a-f]{40}$ && "$PR_BASE" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin "$PR_HEAD"
+          base="$(git merge-base "$PR_BASE" "$PR_HEAD")"
+          git cat-file -e "$base:.judgement/rules.json"
+          mkdir -p "$RUNNER_TEMP/judgement-evidence"
+          # Transfer objects only: no worktree, Git config, hooks, or full history.
+          {
+            printf '%s\n' "$base" "$PR_HEAD"
+            git rev-list --objects --no-object-names "$base^{tree}" "$PR_HEAD^{tree}"
+          } | sort -u | git pack-objects --stdout > "$RUNNER_TEMP/judgement-evidence/objects.pack"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+      - name: Upload snapshot objects
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: judgement-evidence
+          path: ${{ runner.temp }}/judgement-evidence/objects.pack
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  judgement:
+    name: Judge Git evidence
+    needs: collect
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {}
+    env:
+      PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      JUDGEMENT_BASE: ${{ needs.collect.outputs.base }}
+    steps:
+      # No repository checkout in this job. The checker is installed separately.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.13.1'
+      - name: Install trusted checker
+        run: |
+          mkdir -p "$RUNNER_TEMP/judgement-tool"
+          cd "$RUNNER_TEMP/judgement-tool"
+          npm install --ignore-scripts --no-audit --no-fund \
+            '@roo-code/judgement@0.4.0'
+      - name: Download snapshot objects
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: judgement-evidence
+          path: ${{ runner.temp }}/judgement-evidence
+      - name: Import snapshot objects without checkout
+        id: import
+        run: |
+          set -euo pipefail
+          [[ "$PR_HEAD" =~ ^[0-9a-f]{40}$ && "$JUDGEMENT_BASE" =~ ^[0-9a-f]{40}$ ]]
+          git init --quiet --template= "$RUNNER_TEMP/judgement-input"
+          cd "$RUNNER_TEMP/judgement-input"
+          git index-pack --stdin < "$RUNNER_TEMP/judgement-evidence/objects.pack"
+          git cat-file -e "$JUDGEMENT_BASE^{commit}"
+          git cat-file -e "$PR_HEAD^{commit}"
+          git cat-file -e "$JUDGEMENT_BASE:.judgement/rules.json"
+          git update-ref refs/heads/evidence "$JUDGEMENT_BASE"
+          git symbolic-ref HEAD refs/heads/evidence
+      - name: Run strict check
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          JUDGEMENT_MODEL: ${{ vars.JUDGEMENT_MODEL || 'jev-1.13.0' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TYPESAFE_API_KEY" ]; then
+            echo 'Configure the TYPESAFE_API_KEY repository secret for Judgement.' >&2
+            exit 2
+          fi
+          node "$RUNNER_TEMP/judgement-tool/node_modules/@roo-code/judgement/src/cli.js" \
+            check --cwd "$RUNNER_TEMP/judgement-input" \
+            --base "$JUDGEMENT_BASE" --head "$PR_HEAD" \
+            --model "$JUDGEMENT_MODEL" --timeout-ms 120000 --no-cache
+
+  report:
+    name: Publish Judgement result
+    needs: [pending, collect, judgement]
+    if: ${{ always() && !cancelled() && needs.pending.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      statuses: write
+    steps:
+      # This job receives only the job conclusion, never repository contents or secrets.
+      - name: Publish strict result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          CHECK_OUTCOME: ${{ needs.judgement.result }}
+        run: |
+          state=failure
+          description='Judgement failed or did not complete; inspect the run'
+          if [ "$CHECK_OUTCOME" = success ]; then
+            state=success
+            description='Repository rule check completed without findings'
+          fi
+          gh api --silent "repos/$GITHUB_REPOSITORY/statuses/$PR_HEAD" \
+            -f state="$state" -f context=Judgement -f description="$description" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

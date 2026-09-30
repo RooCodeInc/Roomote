@@ -226,7 +226,7 @@ export async function refreshTaskSessionTitle({
 }
 
 /**
- * Regenerate a Fast session title from its canonical transcript, gated by the
+ * Regenerate a session title from its canonical transcript, gated by the
  * same monotonic checkpoints tasks use. Best-effort: callers fire and forget.
  */
 export async function refreshFastAgentSessionTitle({

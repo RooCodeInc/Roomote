@@ -15,6 +15,10 @@ import {
   type BitbucketPullRequestDetails,
 } from '@roomote/bitbucket';
 import type { Variables } from '../../types';
+import {
+  readNativeMcpRequestBody,
+  resolveNativeToolApprovalGuard,
+} from './native-tool-approvals';
 import { McpProxyError, toMcpToolResult } from './proxy-utils';
 
 const repository = z.string().regex(/^[\w.-]+\/[\w.-]+$/);
@@ -400,13 +404,25 @@ function createServer(auth: Variables['authContext']) {
 export const bitbucketMcp = new Hono<{ Variables: Variables }>();
 bitbucketMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
   try {
-    await authorize(c.get('authContext'));
-    const server = createServer(c.get('authContext'));
+    const auth = c.get('authContext');
+    await authorize(auth);
+    const guard = await resolveNativeToolApprovalGuard({
+      auth: { userId: auth?.userId ?? null, tokenType: 'auth' },
+      integrationId: 'bitbucket',
+      requestHeaders: c.req.raw.headers,
+    });
+    const body = await readNativeMcpRequestBody(c.req.raw);
+    const refusal = await guard.checkCall(body);
+    if (refusal) return refusal;
+    const server = createServer(auth);
     const transport = new WebStandardStreamableHTTPServerTransport({
       enableJsonResponse: true,
     });
     await server.connect(transport);
-    return await transport.handleRequest(c.req.raw);
+    return guard.filterToolsList(
+      body,
+      await transport.handleRequest(c.req.raw),
+    );
   } catch (error) {
     return Response.json(
       {

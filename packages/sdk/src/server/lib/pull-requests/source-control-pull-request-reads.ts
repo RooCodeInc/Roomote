@@ -544,7 +544,7 @@ const gitHubReviewThreadSchema = z.object({
   originalLine: z.number().nullable().optional(),
   comments: z.object({
     nodes: z.array(gitHubReviewThreadCommentSchema),
-    pageInfo: gitHubPageInfoSchema.optional(),
+    pageInfo: gitHubPageInfoSchema,
   }),
 });
 const gitHubReviewThreadsQueryResponseSchema = z.object({
@@ -554,7 +554,7 @@ const gitHubReviewThreadsQueryResponseSchema = z.object({
         .object({
           reviewThreads: z.object({
             nodes: z.array(gitHubReviewThreadSchema),
-            pageInfo: gitHubPageInfoSchema.optional(),
+            pageInfo: gitHubPageInfoSchema,
           }),
         })
         .nullable(),
@@ -1138,6 +1138,35 @@ async function listGitHubPullRequestComments({
     threads = groupGitHubReviewCommentsIntoThreads(reviewComments);
   }
 
+  // GraphQL supplies resolution and thread ids, but REST is the authoritative
+  // comment inventory. A newly published comment can be present in REST before
+  // it appears in the reviewThreads connection; never silently drop it.
+  const threadByCommentId = new Map(
+    threads.flatMap((thread) =>
+      thread.comments.map((comment) => [comment.id, thread] as const),
+    ),
+  );
+  const missingReviewComments = reviewComments.filter(
+    (comment) => !threadByCommentId.has(String(comment.id)),
+  );
+  if (missingReviewComments.length > 0) {
+    const grouped = groupGitHubReviewCommentsIntoThreads(missingReviewComments);
+    for (const thread of grouped) {
+      const existing = threadByCommentId.get(thread.id);
+      if (existing) {
+        existing.comments.push(...thread.comments);
+      } else {
+        threads.push(thread);
+      }
+      for (const comment of thread.comments) {
+        threadByCommentId.set(comment.id, existing ?? thread);
+      }
+    }
+    warnings.push(
+      `${missingReviewComments.length} GitHub review comment(s) were absent from reviewThreads and included from REST. REST-only threads have numeric root comment ids and unknown resolution state; re-read before resolving them.`,
+    );
+  }
+
   return {
     success: true,
     provider,
@@ -1264,21 +1293,21 @@ async function fetchGitHubReviewThreadsViaGraphql({
     }
 
     threads.push(...pullRequest.reviewThreads.nodes);
-    cursor = pullRequest.reviewThreads.pageInfo?.hasNextPage
+    cursor = pullRequest.reviewThreads.pageInfo.hasNextPage
       ? pullRequest.reviewThreads.pageInfo.endCursor
       : null;
 
-    if (pullRequest.reviewThreads.pageInfo?.hasNextPage && !cursor) {
+    if (pullRequest.reviewThreads.pageInfo.hasNextPage && !cursor) {
       throw new Error('GitHub review thread pagination omitted its cursor.');
     }
   } while (cursor);
 
   for (const thread of threads) {
-    let commentCursor = thread.comments.pageInfo?.hasNextPage
+    let commentCursor = thread.comments.pageInfo.hasNextPage
       ? thread.comments.pageInfo.endCursor
       : null;
 
-    if (thread.comments.pageInfo?.hasNextPage && !commentCursor) {
+    if (thread.comments.pageInfo.hasNextPage && !commentCursor) {
       throw new Error('GitHub review comment pagination omitted its cursor.');
     }
 

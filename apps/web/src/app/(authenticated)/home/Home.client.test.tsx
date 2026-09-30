@@ -385,7 +385,7 @@ describe('Home', () => {
     });
   });
 
-  it('leaves an untouched Fast session on the orchestration default', async () => {
+  it('leaves an untouched session on the orchestration default', async () => {
     render(<Home initialHeading="Let's cook!" initialPlaceholderIndex={0} />);
 
     expect(screen.getByRole('heading', { name: "Let's cook!" })).toHaveClass(
@@ -474,7 +474,7 @@ describe('Home', () => {
     });
   });
 
-  it('starts a new Fast session with the selected non-default model', async () => {
+  it('starts a new session with the selected non-default model', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(
@@ -493,7 +493,7 @@ describe('Home', () => {
     });
   });
 
-  it('starts a new Fast session on the default after resetting the model', async () => {
+  it('starts a new session on the default after resetting the model', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(
@@ -541,7 +541,7 @@ describe('Home', () => {
     await waitFor(() => expect(onTaskStarted).toHaveBeenCalledOnce());
   });
 
-  it('starts a Fast session with an image-only prompt', async () => {
+  it('starts a session with an image-only prompt', async () => {
     mockPreparePromptAttachments.mockResolvedValueOnce({
       text: '',
       images: ['data:image/png;base64,image-1'],
@@ -564,7 +564,7 @@ describe('Home', () => {
     );
   });
 
-  it('hands off seeded presence for an attachment-only Fast session', async () => {
+  it('hands off seeded presence for an attachment-only session', async () => {
     mockPreparePromptAttachments.mockResolvedValueOnce({
       text: '',
       attachmentTexts: ['Attachment contents'],
@@ -879,7 +879,7 @@ describe('Home', () => {
     expect(screen.getByRole('textbox')).toHaveValue('Summarize this plan');
   });
 
-  it('starts a Fast session without an environment', async () => {
+  it('starts a session without an environment', async () => {
     currentEnvironments = [];
 
     render(<Home initialPlaceholderIndex={0} />);
@@ -902,7 +902,9 @@ describe('Home', () => {
 
   it('reuses the client conversation identity after an ambiguous start failure', async () => {
     mockStartFastSession
-      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockRejectedValueOnce(
+        new Error('Stream closed before head was received'),
+      )
       .mockResolvedValueOnce({
         sessionId: '11111111-1111-4111-8111-111111111111',
         fastConversationId: '22222222-2222-4222-8222-222222222222',
@@ -910,10 +912,21 @@ describe('Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t start this session.',
+    );
+    expect(
+      screen.queryByText('Stream closed before head was received'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // Editing the composer after the failure must not change what Retry sends.
+    fireEvent.change(screen.getByRole('textbox', { name: 'Task prompt' }), {
+      target: { value: 'Edited draft' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledTimes(2));
 
+    expect(mockStartFastSession.mock.calls[1]?.[0].text).toBe('Test prompt');
     expect(mockStartFastSession.mock.calls[0]?.[0].conversationId).toBe(
       mockStartFastSession.mock.calls[1]?.[0].conversationId,
     );
@@ -929,7 +942,9 @@ describe('Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t start this session.',
+    );
     submittedPromptText = 'Corrected prompt';
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
     await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledTimes(2));

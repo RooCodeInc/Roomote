@@ -1564,27 +1564,62 @@ export async function attachCanonicalPrReviewActionMessage(
           ne(prReviewNotificationDeliveries.id, deliveryId),
         ),
       )
-      .returning({ id: prReviewNotificationDeliveries.id });
+      .returning({
+        id: prReviewNotificationDeliveries.id,
+        taskId: prReviewNotificationDeliveries.taskId,
+      });
 
     if (retired.length > 0) {
-      // Session cards render from the cached message payload, so retiring
-      // the delivery rows alone would leave the old cards actionable.
-      await tx
-        .update(fastAgentMessages)
-        .set({
-          payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
-          updatedAt: sql`now()`,
-        })
-        .where(
-          inArray(
-            sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
-            retired.map(({ id }) => id),
-          ),
-        );
+      await dismissPrReviewActionTranscriptPayloads(tx, retired);
     }
 
     return true;
   });
+}
+
+async function dismissPrReviewActionTranscriptPayloads(
+  tx: DatabaseOrTransaction,
+  retired: Array<{ id: string; taskId: string | null }>,
+): Promise<void> {
+  const deliveryIds = retired.map(({ id }) => id);
+
+  // Retiring delivery rows alone would leave already-rendered transcript
+  // cards actionable. Update both transcript stores atomically with the
+  // canonical retirement.
+  await tx
+    .update(fastAgentMessages)
+    .set({
+      payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      inArray(
+        sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+        deliveryIds,
+      ),
+    );
+
+  const taskIds = [
+    ...new Set(retired.flatMap(({ taskId }) => (taskId ? [taskId] : []))),
+  ];
+  if (taskIds.length === 0) return;
+
+  // Scope by task so the update uses task_messages_task_id_ts_idx instead of
+  // scanning every transcript row for the payload match.
+  await tx
+    .update(taskMessages)
+    .set({
+      payload: sql`jsonb_set(coalesce(${taskMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
+    })
+    .where(
+      and(
+        inArray(taskMessages.taskId, taskIds),
+        inArray(
+          sql<string>`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+          deliveryIds,
+        ),
+      ),
+    );
 }
 
 export async function claimCanonicalPrReviewAction(input: {
@@ -1852,40 +1887,7 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
       });
 
     if (retired.length > 0) {
-      const deliveryIds = retired.map(({ id }) => id);
-      const taskIds = [
-        ...new Set(retired.flatMap(({ taskId }) => (taskId ? [taskId] : []))),
-      ];
-      await tx
-        .update(fastAgentMessages)
-        .set({
-          payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
-          updatedAt: sql`now()`,
-        })
-        .where(
-          inArray(
-            sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
-            deliveryIds,
-          ),
-        );
-      if (taskIds.length > 0) {
-        // Scope by task so the update uses task_messages_task_id_ts_idx
-        // instead of scanning every transcript row for the payload match.
-        await tx
-          .update(taskMessages)
-          .set({
-            payload: sql`jsonb_set(coalesce(${taskMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
-          })
-          .where(
-            and(
-              inArray(taskMessages.taskId, taskIds),
-              inArray(
-                sql<string>`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
-                deliveryIds,
-              ),
-            ),
-          );
-      }
+      await dismissPrReviewActionTranscriptPayloads(tx, retired);
     }
 
     return retired;

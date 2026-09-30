@@ -10,11 +10,11 @@ import {
   workItems,
 } from '@roomote/db/server';
 
-const experimentEnabled = vi.hoisted(() => ({ value: false }));
+const resultsExperimentEnabled = vi.hoisted(() => ({ value: false }));
 
 vi.mock('@roomote/db/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/db/server')>()),
-  isDeploymentExperimentEnabled: () => experimentEnabled.value,
+  isDeploymentExperimentEnabled: () => resultsExperimentEnabled.value,
 }));
 
 import type { UserAuthSuccess } from '@/types';
@@ -27,22 +27,53 @@ import {
 
 describe('Results commands', () => {
   beforeEach(() => {
-    experimentEnabled.value = false;
+    resultsExperimentEnabled.value = false;
   });
 
-  it('ignores a legacy per-user opt-in when the deployment experiment is off', async () => {
+  it('serves existing results when the retired deployment experiment is off', async () => {
     const user = await userFactory.create({
-      metadata: { results_page_enabled: true },
+      metadata: { results_page_enabled: false },
     });
+    const [report] = await db
+      .insert(automationResults)
+      .values({
+        userId: user.id,
+        resultVisibility: 'shared',
+        automationName: 'Daily report',
+        content: 'Report body',
+        priority: 'normal',
+        dedupeKey: `retired-results-experiment:${user.id}`,
+      })
+      .returning({ id: automationResults.id });
 
-    await expect(
-      listResultsCommand({ userId: user.id } as UserAuthSuccess),
-    ).rejects.toThrow('Results is not enabled.');
+    try {
+      const auth = { userId: user.id } as UserAuthSuccess;
+      await expect(listResultsCommand(auth)).resolves.toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: report!.id })]),
+      );
+      await expect(getUnreadResultCountCommand(auth)).resolves.toBeGreaterThan(
+        0,
+      );
+      await expect(
+        actOnResultCommand(auth, {
+          id: report!.id,
+          kind: 'report',
+          action: 'ignore',
+        }),
+      ).resolves.toMatchObject({ success: true });
+      await expect(listResultsCommand(auth)).resolves.not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: report!.id })]),
+      );
+    } finally {
+      await db
+        .delete(automationResults)
+        .where(eq(automationResults.id, report!.id));
+      await db.delete(users).where(eq(users.id, user.id));
+    }
   });
 
   it('sorts unread items by priority then recency and removes acted-on items', async () => {
     const user = await userFactory.create();
-    experimentEnabled.value = true;
     const auth = { userId: user.id } as UserAuthSuccess;
     const sourceTask = await taskFactory.create({
       repositoryName: 'RooCodeInc/Roomote',
@@ -58,6 +89,53 @@ describe('Results commands', () => {
         priority: 'normal',
         dedupeKey: `test:${user.id}:report`,
         sourceTaskId: sourceTask.id,
+      })
+      .returning({ id: automationResults.id });
+    const [skippedReport] = await db
+      .insert(automationResults)
+      .values({
+        userId: user.id,
+        resultVisibility: 'shared',
+        automationName: 'Daily report',
+        content: 'No matching report.',
+        priority: 'normal',
+        dedupeKey: `test:${user.id}:skipped-report`,
+        launchCriteriaSnapshot: {
+          runWhen: {
+            all: [
+              {
+                id: 'new_regression',
+                ask: 'Does `report` describe a new regression?',
+                type: 'yes_no',
+                criteria: {
+                  true: 'New regression.',
+                  false: 'No new regression.',
+                },
+                min: 0.75,
+              },
+            ],
+            onUncertain: 'skip',
+          },
+        },
+        launchCriteriaAnswers: {
+          runWhen: { new_regression: { type: 'noul', noul: 0.1 } },
+        },
+        launchCriteriaOutcome: { runWhen: 'skipped' },
+      })
+      .returning({ id: automationResults.id });
+    const [skippedCriteriaReport] = await db
+      .insert(automationResults)
+      .values({
+        userId: user.id,
+        resultVisibility: 'shared',
+        automationName: 'Daily report',
+        content: 'No qualifying regression was found.',
+        priority: 'normal',
+        dedupeKey: `test:${user.id}:skipped-criteria-report`,
+        launchCriteriaSnapshot: {
+          launchCriteria: 'Only investigate new regressions.',
+        },
+        launchCriteriaOutcome: { launchCriteria: 'skipped' },
       })
       .returning({ id: automationResults.id });
     const [suggestion] = await db
@@ -83,10 +161,17 @@ describe('Results commands', () => {
         suggestion!.id,
         report!.id,
       ]);
+      expect(results.some((result) => result.id === skippedReport!.id)).toBe(
+        false,
+      );
+      expect(
+        results.some((result) => result.id === skippedCriteriaReport!.id),
+      ).toBe(false);
       expect(results).toEqual([
         expect.objectContaining({
           id: suggestion!.id,
           headline: 'Patch the alert',
+          content: '',
           actions: [expect.objectContaining({ action: 'start_investigation' })],
         }),
         expect.objectContaining({
@@ -129,14 +214,19 @@ describe('Results commands', () => {
       await db.delete(workItems).where(eq(workItems.id, suggestion!.id));
       await db
         .delete(automationResults)
-        .where(eq(automationResults.id, report!.id));
+        .where(
+          inArray(automationResults.id, [
+            report!.id,
+            skippedReport!.id,
+            skippedCriteriaReport!.id,
+          ]),
+        );
       await db.delete(tasks).where(eq(tasks.id, sourceTask.id));
       await db.delete(users).where(eq(users.id, user.id));
     }
   });
 
   it('shares only output snapshotted as shared and applies the same boundary to actions', async () => {
-    experimentEnabled.value = true;
     const [creator, member] = await Promise.all([
       userFactory.create({ role: 'admin' }),
       userFactory.create({ role: 'member' }),

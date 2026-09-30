@@ -9,6 +9,7 @@ const {
   handleSlackPrReviewActionAutoMock,
   handleSlackPrReviewActionDismissMock,
   handleSlackPrReviewActionYesMock,
+  handleSlackToolApprovalActionMock,
   apiLoggerInfoMock,
   apiLoggerWarnMock,
 } = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ const {
   handleSlackPrReviewActionAutoMock: vi.fn(),
   handleSlackPrReviewActionDismissMock: vi.fn(),
   handleSlackPrReviewActionYesMock: vi.fn(),
+  handleSlackToolApprovalActionMock: vi.fn(),
   apiLoggerInfoMock: vi.fn(),
   apiLoggerWarnMock: vi.fn(),
 }));
@@ -64,6 +66,10 @@ vi.mock('../pr-review-action.js', () => ({
   handleSlackPrReviewActionAuto: handleSlackPrReviewActionAutoMock,
   handleSlackPrReviewActionDismiss: handleSlackPrReviewActionDismissMock,
   handleSlackPrReviewActionYes: handleSlackPrReviewActionYesMock,
+}));
+
+vi.mock('../tool-approval-action.js', () => ({
+  handleSlackToolApprovalAction: handleSlackToolApprovalActionMock,
 }));
 
 vi.mock('../thread-reply-details-toggle.js', () => ({
@@ -132,6 +138,11 @@ afterEach(() => {
 });
 
 describe('handleSlackInteractivePayload', () => {
+  it('routes a native tool approval click to the provider handler', async () => {
+    const payload = makePayload('integration_tool_approval');
+    await handleSlackInteractivePayload(payload);
+    expect(handleSlackToolApprovalActionMock).toHaveBeenCalledWith(payload);
+  });
   it('exports exactly the seven retired action ids', () => {
     expect([...RETIRED_SLACK_ACTION_IDS].sort()).toEqual(
       [...RETIRED_ACTION_IDS].sort(),

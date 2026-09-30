@@ -1207,7 +1207,7 @@ export async function skipSetupSourceControlCommand(
   assertAdmin(auth);
   const conversation = await findSetupSessionConversation(auth);
   if (!conversation || conversation.sessionId !== sessionId) {
-    throw new Error('This action does not belong to the setup Session.');
+    throw new Error('This action does not belong to the setup session.');
   }
 
   await db.transaction(async (tx) => {
@@ -1222,7 +1222,7 @@ export async function skipSetupSourceControlCommand(
     const state = normalizeSetupNewState(settings?.setupNewState ?? {});
     const setupSession = normalizeSetupNewSetupSession(state.setupSession);
     if (!setupSession || setupSession.sessionId !== sessionId) {
-      throw new Error('This action does not belong to the setup Session.');
+      throw new Error('This action does not belong to the setup session.');
     }
     if (setupSession.sourceControlSkippedAt) return;
     await tx
@@ -1317,7 +1317,7 @@ export async function getOrCreateSetupSessionCommand(
   const status = await getSetupNewStatusCommand(auth);
   if (!status.modelSetup.setupSatisfied) {
     throw new Error(
-      'Inference must be ready before setup can continue in a Session.',
+      'Inference must be ready before setup can continue in a session.',
     );
   }
 
@@ -1375,7 +1375,7 @@ export async function getOrCreateSetupSessionCommand(
         })
         .returning();
     }
-    if (!conversation) throw new Error('Failed to create the setup Session.');
+    if (!conversation) throw new Error('Failed to create the setup session.');
 
     const session = await ensureSessionForFastConversation(tx, conversation.id);
     await tx
@@ -1459,7 +1459,7 @@ async function persistSetupPresetResponse(input: {
       !setupSession ||
       session?.fastConversationId !== input.fastConversationId
     ) {
-      throw new Error('This request does not belong to the setup Session.');
+      throw new Error('This request does not belong to the setup session.');
     }
 
     const responseEventId = `${input.request.eventId}:response`;
@@ -1638,7 +1638,7 @@ export async function submitSetupSessionUserInputCommand(
     (input.sessionId !== setupConversation.sessionId &&
       input.sessionId !== setupConversation.fastConversationId)
   ) {
-    throw new Error('This input request does not belong to the setup Session.');
+    throw new Error('This input request does not belong to the setup session.');
   }
   const setupSnapshot = await resolveSetupSnapshot(auth, setupConversation);
   return submitFastSessionUserInputCommand(auth, input, {
@@ -1693,7 +1693,7 @@ export async function resolveSetupSessionTurnContext(
     setupSession?.sessionId === linkedSession.id &&
     linkedSession.ownerUserId !== auth.userId
   ) {
-    throw new Error('Only the setup Session owner can reply during setup.');
+    throw new Error('Only the setup session owner can reply during setup.');
   }
   let setupSnapshot: string;
   if (auth.isAdmin) {
@@ -1714,7 +1714,7 @@ export async function resolveSetupSessionTurnContext(
                 ...parsedAdminSetupSnapshot.capabilities.starter_work,
                 canOffer: false,
                 unavailableReason:
-                  'Starter work is only available in the setup Session.',
+                  'Starter work is only available in the setup session.',
               },
             },
           },

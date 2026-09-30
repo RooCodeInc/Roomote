@@ -192,7 +192,6 @@ vi.mock('@roomote/sdk/server', () => ({
     eventsTriaged: 0,
     triageInvoked: false,
     triageCacheHit: false,
-    triageJudgmentSkipped: false,
     triageInputChars: 0,
     triageInputTokenEstimate: 0,
   }),
@@ -2355,7 +2354,7 @@ describe('prReviewNotificationJob', () => {
     expect(mockFinalize).not.toHaveBeenCalled();
   });
 
-  it('dismisses a persisted Fast-session offer that loses its publish fence', async () => {
+  it('dismisses a persisted session offer that loses its publish fence', async () => {
     const deliveryId = '77777777-7777-4777-8777-777777777777';
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,

@@ -39,11 +39,26 @@ interface SnapshotOptions {
   sandboxId: string;
 }
 
+type SnapshotFailureStage =
+  | 'mark_preparing'
+  | 'fetch_snapshot_environment'
+  | 'initialize_worker_environment'
+  | 'inject_environment'
+  | 'load_environment'
+  | 'load_task_run'
+  | 'setup_environment'
+  | 'mark_running'
+  | 'scrub_secrets'
+  | 'enqueue_snapshot'
+  | 'poll_snapshot';
+
 export async function snapshot({
   runId,
   environmentId,
   sandboxId,
 }: SnapshotOptions): Promise<boolean> {
+  let failureStage: SnapshotFailureStage = 'mark_preparing';
+
   setWorkerRuntimeContext({
     runId,
     taskRunType: TaskPayloadKind.SnapshotEnvironment,
@@ -51,11 +66,13 @@ export async function snapshot({
   });
 
   try {
+    failureStage = 'mark_preparing';
     await sdk.taskRuns.update({
       id: runId,
       status: RunStatus.Preparing,
     });
 
+    failureStage = 'fetch_snapshot_environment';
     const {
       envVars: fetchedEnvVars,
       gitHubToken: GH_TOKEN,
@@ -75,20 +92,26 @@ export async function snapshot({
       taskId,
     });
 
+    failureStage = 'initialize_worker_environment';
     const workerEnv = WorkerEnv.fromProcessEnv(process.env);
     const startupLogger = createStartupLogger();
 
     // Write source-control tokens under ~/.roomote and set up shell env files
     // so file-backed credential helpers can authenticate git operations.
+    failureStage = 'inject_environment';
     await injectEnvVars(envVars, undefined, { sourceControlToken });
 
+    failureStage = 'load_environment';
     const environmentConfig = await findRuntimeEnvironmentConfig(environmentId);
+
+    failureStage = 'load_task_run';
     const taskRun = await sdk.taskRuns.findFirstById(runId);
 
     if (!environmentConfig) {
       throw new Error(`Environment not found`);
     }
 
+    failureStage = 'setup_environment';
     await setup({
       mode: 'full',
       workspace: {
@@ -109,6 +132,7 @@ export async function snapshot({
       workerEnv,
     });
 
+    failureStage = 'mark_running';
     await sdk.taskRuns.update({
       id: runId,
       status: RunStatus.Running,
@@ -118,9 +142,11 @@ export async function snapshot({
     // material (env.sh exports, git tokens, OpenCode auth files) now that
     // setup is done. Task runs launched from the snapshot re-inject env vars
     // and tokens at startup.
+    failureStage = 'scrub_secrets';
     await scrubSandboxSecretsBeforeSnapshot();
 
     // Enqueue snapshot request via SDK.
+    failureStage = 'enqueue_snapshot';
     const { enqueued } = await sdk.taskRuns.createSnapshot({
       runId,
       sandboxId,
@@ -130,6 +156,7 @@ export async function snapshot({
       enqueued ? 'Snapshotting workspace' : 'Workspace already snapshotting',
     );
 
+    failureStage = 'poll_snapshot';
     await pWaitFor(
       async () => {
         const updatedRun = await sdk.taskRuns.findRuntimeStateById(runId);
@@ -152,12 +179,26 @@ export async function snapshot({
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const diagnosticMessage = `Snapshot failed during ${failureStage}: ${message}`;
 
-    await sdk.taskRuns.done({
-      id: runId,
-      status: RunStatus.Failed,
-      error: message,
-    });
+    try {
+      await sdk.taskRuns.done({
+        id: runId,
+        status: RunStatus.Failed,
+        error: diagnosticMessage,
+      });
+    } catch (doneError) {
+      captureWorkerException(doneError, {
+        runId,
+        environmentId,
+        stage: 'snapshot.finalize',
+        snapshotFailureStage: failureStage,
+      });
+
+      console.error(
+        `Failed to finalize snapshot failure during ${failureStage}: ${doneError instanceof Error ? doneError.message : String(doneError)}`,
+      );
+    }
 
     // Mark the environment snapshot as failed so the UI stops showing "Snapshotting..."
     try {
@@ -170,6 +211,7 @@ export async function snapshot({
         runId,
         environmentId,
         stage: 'snapshot.updateSnapshotStatus',
+        snapshotFailureStage: failureStage,
       });
 
       console.error(
@@ -180,11 +222,12 @@ export async function snapshot({
     captureWorkerException(error, {
       runId,
       environmentId,
-      stage: 'snapshot',
+      stage: `snapshot.${failureStage}`,
+      snapshotFailureStage: failureStage,
     });
 
     console.error(
-      `Caught error when preparing and snapshotting workspace: ${message}`,
+      `Caught error when preparing and snapshotting workspace during ${failureStage}: ${message}`,
     );
 
     return false;

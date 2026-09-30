@@ -173,7 +173,7 @@ function buildIssueMentionContext({
 }
 
 /**
- * Every @mention on an issue enters the issue's Fast Session. The Session
+ * Every @mention on an issue enters the issue's session. The session
  * reads the issue, replies as a comment, and delegates work when the request
  * needs a task.
  */

@@ -1,8 +1,20 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import Link from 'next/link';
 
-const { replaceMock, searchParamsMock } = vi.hoisted(() => ({
+const { replaceMock, searchParamsMock, viewport } = vi.hoisted(() => ({
   replaceMock: vi.fn(),
   searchParamsMock: { current: new URLSearchParams() },
+  viewport: { isMobile: false },
+}));
+
+vi.mock('@/hooks/useIsMobile', () => ({
+  useIsMobile: () => viewport.isMobile,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -15,13 +27,21 @@ vi.mock('@/components/tasks', () => ({
   TaskFilters: ({
     showTimePeriod,
     showUser = true,
+    showRepository = true,
+    showPullRequest = true,
     userId,
     onUserChange,
+    onRepositoryChange,
+    onPullRequestChange,
   }: {
     showTimePeriod?: boolean;
     showUser?: boolean;
+    showRepository?: boolean;
+    showPullRequest?: boolean;
     userId: string | null;
     onUserChange: (value: string | null) => void;
+    onRepositoryChange: (value: string | null) => void;
+    onPullRequestChange: (value: string | null) => void;
   }) => (
     <div
       data-testid={
@@ -33,6 +53,16 @@ vi.mock('@/components/tasks', () => ({
       <button onClick={() => onUserChange('automation:sentry_triage')}>
         Choose automation
       </button>
+      {showRepository ? (
+        <button onClick={() => onRepositoryChange('env:fixture-environment')}>
+          Choose environment
+        </button>
+      ) : null}
+      {showPullRequest ? (
+        <button onClick={() => onPullRequestChange('__has_pr__')}>
+          Choose Has PR
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -47,12 +77,13 @@ const baseProps = {
 
 describe('SessionsFilters', () => {
   beforeEach(() => {
+    viewport.isMobile = false;
     replaceMock.mockReset();
     searchParamsMock.current = new URLSearchParams();
     localStorage.clear();
   });
 
-  it.each(['repository', 'pullRequest', 'model', 'source'])(
+  it.each(['repository', 'pullRequest', 'model', 'source', 'archive'])(
     'shows advanced filters when the URL supplies %s without changing the saved preference',
     (param) => {
       localStorage.setItem(
@@ -85,6 +116,82 @@ describe('SessionsFilters', () => {
       '/sessions?user=automation%3Asentry_triage',
     );
   });
+
+  it('preserves environment and Has PR values in the shared URL contract', async () => {
+    localStorage.setItem('roomote-sessions-advanced-filters-visible', 'true');
+    const { rerender } = render(<SessionsFilters {...baseProps} />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Choose environment' }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose environment' }));
+    expect(replaceMock).toHaveBeenCalledWith(
+      '/sessions?repository=env%3Afixture-environment',
+    );
+
+    replaceMock.mockReset();
+    searchParamsMock.current = new URLSearchParams(
+      'repository=env%3Afixture-environment',
+    );
+    rerender(
+      <SessionsFilters {...baseProps} repository="env:fixture-environment" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose Has PR' }));
+
+    expect(replaceMock).toHaveBeenCalledWith(
+      '/sessions?repository=env%3Afixture-environment&pullRequest=__has_pr__',
+    );
+  });
+
+  it('always exposes the board switch and preserves its URL', () => {
+    render(<SessionsFilters {...baseProps} view="list" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Board view' }));
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
+  });
+
+  it('clears a board-only Done status when switching to list view', () => {
+    searchParamsMock.current = new URLSearchParams(
+      'view=board&status=done&archive=all&before=cursor',
+    );
+    render(
+      <SessionsFilters
+        {...baseProps}
+        view="board"
+        status="done"
+        archive="all"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'List view' }));
+
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?archive=all');
+  });
+
+  it.each([false, true])(
+    'keeps primary navigation available while a filter menu is open (mobile: %s)',
+    async (isMobile) => {
+      viewport.isMobile = isMobile;
+      render(
+        <>
+          <Link href="/automations">Automations</Link>
+          <SessionsFilters {...baseProps} />
+        </>,
+      );
+
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Session scope' }), {
+        key: 'ArrowDown',
+      });
+
+      expect(
+        await screen.findByRole('menuitemcheckbox', { name: 'All sessions' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: 'Automations' }),
+      ).toBeInTheDocument();
+    },
+  );
 
   it('keeps a selected user filter in the primary controls', () => {
     searchParamsMock.current = new URLSearchParams('user=user-1');
@@ -127,6 +234,7 @@ describe('SessionsFilters', () => {
       screen.queryByTestId('advanced-task-filters'),
     ).not.toBeInTheDocument();
     expect(advancedFiltersButton).toHaveAttribute('aria-pressed', 'false');
+    expect(advancedFiltersButton).not.toHaveAttribute('title');
     fireEvent.click(advancedFiltersButton);
 
     expect(screen.getByTestId('advanced-task-filters')).toBeInTheDocument();
@@ -140,6 +248,52 @@ describe('SessionsFilters', () => {
     await waitFor(() =>
       expect(screen.getByTestId('advanced-task-filters')).toBeInTheDocument(),
     );
+  });
+
+  it('defaults archive filtering to non-archived and serializes non-default choices', async () => {
+    localStorage.setItem('roomote-sessions-advanced-filters-visible', 'true');
+    const { rerender } = render(<SessionsFilters {...baseProps} />);
+
+    const archiveButton = await screen.findByRole('button', {
+      name: 'Session archive state',
+    });
+    fireEvent.keyDown(archiveButton, { key: 'ArrowDown' });
+    const options = await screen.findAllByRole('menuitemcheckbox');
+    expect(options.map((option) => option.textContent)).toEqual([
+      'Archived',
+      'Non-Archived',
+      'All',
+    ]);
+    expect(
+      within(screen.getByRole('menu')).getByRole('menuitemcheckbox', {
+        name: 'Non-Archived',
+      }),
+    ).toHaveAttribute('data-state', 'checked');
+
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Archived' }));
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?archive=archived');
+
+    replaceMock.mockReset();
+    searchParamsMock.current = new URLSearchParams('archive=archived');
+    rerender(<SessionsFilters {...baseProps} archive="archived" />);
+    fireEvent.keyDown(
+      screen.getByRole('button', { name: 'Session archive state' }),
+      { key: 'ArrowDown' },
+    );
+    fireEvent.click(
+      screen.getByRole('menuitemcheckbox', { name: 'Non-Archived' }),
+    );
+    expect(replaceMock).toHaveBeenCalledWith('/sessions');
+  });
+
+  it('hides the status filter in board view while keeping advanced filters', async () => {
+    localStorage.setItem('roomote-sessions-advanced-filters-visible', 'true');
+    render(<SessionsFilters {...baseProps} view="board" />);
+
+    await screen.findByRole('button', { name: 'Session archive state' });
+    expect(
+      screen.queryByRole('button', { name: 'Session status' }),
+    ).not.toBeInTheDocument();
   });
 
   it('expands search to the left and shows a submit hint', () => {
@@ -184,6 +338,6 @@ describe('SessionsFilters', () => {
 
     expect(screen.queryByPlaceholderText('Search...')).not.toBeInTheDocument();
     expect(searchButton).toHaveAttribute('aria-pressed', 'false');
-    expect(replaceMock).toHaveBeenCalledWith('/sessions');
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
   });
 });

@@ -18,6 +18,9 @@ import {
   NO_REPOSITORIES,
   AUTOMATION_RESULT_PRIORITY_LABELS,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+  getReasoningEffortLabel,
   type AutomationResultPriority,
   type CustomAutomationScheduleMode,
   type ReasoningEffort,
@@ -34,6 +37,11 @@ import {
   BrandIcon,
   Card,
   CardContent,
+  Calendar,
+  CircleAlert,
+  Container,
+  CopyIconButton,
+  Cpu,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -42,7 +50,10 @@ import {
   Label,
   Play,
   Plus,
+  RadioTower,
+  RefreshCw,
   RetryableLoadError,
+  Rss,
   Select,
   SelectContent,
   SelectItem,
@@ -56,10 +67,10 @@ import {
   Zap,
 } from '@/components/system';
 
-import { ModelSelect } from '@/components/tasks/ModelSelect';
-import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
+import { ModelReasoningPicker } from '@/components/tasks/ModelReasoningPicker';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { SettingSummaryRow } from '@/components/settings';
 
 import {
   AutomationDestinationPicker,
@@ -80,6 +91,7 @@ type ConnectedDestinationProvider = Exclude<
 type CustomAutomationFormState = {
   name: string;
   prompt: string;
+  launchCriteria: string;
   enabled: boolean;
   resultPriority: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
@@ -94,16 +106,25 @@ type CustomAutomationFormState = {
 };
 
 type CustomAutomationFieldErrors = Partial<
-  Record<'name' | 'prompt' | 'schedule', string>
+  Record<'name' | 'prompt' | 'schedule' | 'environment', string>
 >;
+
+type CustomAutomationEditorField =
+  | 'schedule'
+  | 'priority'
+  | 'environment'
+  | 'destination'
+  | 'webhook'
+  | null;
 
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
   prompt: '',
+  launchCriteria: '',
   enabled: true,
   resultPriority: 'normal',
   scheduleMode: 'daily',
-  environmentId: '',
+  environmentId: FAST_EXECUTION,
   cronExpression: '',
   model: '',
   reasoningEffort: null,
@@ -116,7 +137,7 @@ const SCHEDULE_OPTIONS: Array<{
   value: CustomAutomationScheduleMode;
   label: string;
 }> = [
-  { value: 'off', label: 'Off' },
+  { value: 'on_demand', label: 'On-demand' },
   { value: 'every_hour', label: 'Every hour' },
   { value: 'every_6_hours', label: 'Every 6 hours' },
   { value: 'daily', label: 'Daily' },
@@ -142,9 +163,50 @@ const DESTINATION_OPTIONS: Array<{
 ];
 
 function scheduleLabel(mode: CustomAutomationScheduleMode): string {
+  if (mode === 'off') return 'On-demand';
   return (
     SCHEDULE_OPTIONS.find((option) => option.value === mode)?.label ?? mode
   );
+}
+
+function destinationSummary(
+  form: Pick<
+    CustomAutomationFormState,
+    'targetProvider' | 'targetMode' | 'targetChannelId'
+  >,
+  slackOptions: Array<{ id: string; name: string; label: string }>,
+  discordOptions: Array<{ id: string; name: string; label: string }>,
+  emailOptions: Array<{ id: string; name: string; label: string }>,
+): string {
+  if (form.targetProvider === 'none') return 'None';
+
+  const providerLabel =
+    DESTINATION_OPTIONS.find((option) => option.value === form.targetProvider)
+      ?.label ?? form.targetProvider;
+  if (form.targetProvider === 'email') {
+    const identity = emailOptions.find(
+      (option) => option.id === form.targetChannelId,
+    );
+    const identityLabel =
+      identity?.name === 'Email'
+        ? identity.label
+        : (identity?.name ?? identity?.label ?? 'Email address');
+    return `${providerLabel} ${identityLabel}`;
+  }
+  if (form.targetMode === 'direct_message') {
+    return `${providerLabel} DM me`;
+  }
+
+  const options =
+    form.targetProvider === 'slack'
+      ? slackOptions
+      : form.targetProvider === 'discord'
+        ? discordOptions
+        : [];
+  const targetLabel = options.find(
+    (option) => option.id === form.targetChannelId,
+  )?.label;
+  return `${providerLabel} ${targetLabel ?? (form.targetChannelId || 'Not configured')}`;
 }
 
 function cadenceLabel(
@@ -311,9 +373,10 @@ function formFromRow(
   return {
     name: row.name,
     prompt: row.prompt,
+    launchCriteria: row.launchCriteria ?? '',
     enabled: row.enabled,
     resultPriority: row.resultPriority ?? 'normal',
-    scheduleMode: row.scheduleMode,
+    scheduleMode: row.scheduleMode === 'off' ? 'on_demand' : row.scheduleMode,
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
     model: row.model ?? '',
@@ -324,12 +387,18 @@ function formFromRow(
   };
 }
 
-function writeInputFromRow(row: CustomAutomationListItem) {
+function writeInputFromRow(
+  row: CustomAutomationListItem,
+  includeLaunchCriteria: boolean,
+) {
   const target = targetFromRow(row);
 
   return {
     name: row.name,
     prompt: row.prompt,
+    ...(includeLaunchCriteria
+      ? { launchCriteria: row.launchCriteria ?? '' }
+      : {}),
     enabled: row.enabled,
     resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
@@ -452,10 +521,13 @@ export function CustomAutomationsSection({
   const optionsQuery = useQuery(
     trpc.automations.getCustomAutomationOptions.queryOptions(),
   );
+  const automationLaunchCriteriaEnabled =
+    optionsQuery.data?.launchCriteriaEnabled === true;
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const cronExpressionRef = useRef<HTMLInputElement>(null);
+  const environmentRef = useRef<HTMLButtonElement>(null);
   // Email identities belong to the automation owner (runs execute as the
   // creator), so editing an existing automation lists the owner's identities
   // rather than the viewer's. Same shape as the base options query.
@@ -465,8 +537,19 @@ export function CustomAutomationsSection({
       { enabled: Boolean(editingId) },
     ),
   );
+  const webhookQuery = useQuery(
+    trpc.automations.getCustomAutomationWebhook.queryOptions(
+      { id: editingId ?? '' },
+      { enabled: Boolean(editingId), staleTime: 0, gcTime: 0 },
+    ),
+  );
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
+  const [editingField, setEditingField] =
+    useState<CustomAutomationEditorField>(null);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [webhookEnabled, setWebhookEnabled] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<CustomAutomationFieldErrors>(
     {},
   );
@@ -588,6 +671,10 @@ export function CustomAutomationsSection({
         toast.success('Custom automation created');
         setIsCreating(false);
         setForm(EMPTY_FORM);
+        setEditingField(null);
+        setModelPickerOpen(false);
+        setWebhookEnabled(false);
+        setWebhookUrl(null);
         setFieldErrors({});
         setResolvedCron(null);
         setScheduleSummary(null);
@@ -605,6 +692,10 @@ export function CustomAutomationsSection({
         toast.success('Custom automation saved');
         setEditingId(null);
         setForm(EMPTY_FORM);
+        setEditingField(null);
+        setModelPickerOpen(false);
+        setWebhookEnabled(false);
+        setWebhookUrl(null);
         setFieldErrors({});
         setResolvedCron(null);
         setScheduleSummary(null);
@@ -629,6 +720,32 @@ export function CustomAutomationsSection({
       onError: (error) => {
         toast.error(error.message || 'Failed to update custom automation');
       },
+    }),
+  );
+
+  const webhookMutation = useMutation(
+    trpc.automations.setCustomAutomationWebhookEnabled.mutationOptions({
+      onSuccess: (result) => {
+        setWebhookEnabled(result.enabled);
+        setWebhookUrl(result.url);
+        toast.success(
+          result.enabled
+            ? 'Webhook trigger enabled'
+            : 'Webhook trigger disabled',
+        );
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+
+  const rotateWebhookMutation = useMutation(
+    trpc.automations.rotateCustomAutomationWebhook.mutationOptions({
+      onSuccess: (result) => {
+        setWebhookEnabled(true);
+        setWebhookUrl(result.url);
+        toast.success('Webhook URL rotated; the previous URL no longer works');
+      },
+      onError: (error) => toast.error(error.message),
     }),
   );
 
@@ -680,6 +797,13 @@ export function CustomAutomationsSection({
     }),
   );
 
+  useEffect(() => {
+    if (webhookQuery.data) {
+      setWebhookEnabled(webhookQuery.data.enabled);
+      setWebhookUrl(webhookQuery.data.url);
+    }
+  }, [webhookQuery.data]);
+
   // Valid five-field cron is parsed and previewed entirely client-side; the
   // server round trip (and its LLM fallback) is only for natural language.
   const schedulingTimeZone = optionsQuery.data?.effectiveTimeZone;
@@ -698,6 +822,9 @@ export function CustomAutomationsSection({
       : scheduleSummary;
 
   const rows = useMemo(() => listQuery.data ?? [], [listQuery.data]);
+  const persistedAutomationEnabled = Boolean(
+    editingId && rows.find((row) => row.id === editingId)?.enabled,
+  );
   const initialListLoadFailed =
     listQuery.isError && listQuery.data === undefined;
   const normalizedSearch = search.trim().toLowerCase();
@@ -749,18 +876,42 @@ export function CustomAutomationsSection({
     createMutation.isPending ||
     updateMutation.isPending ||
     deleteMutation.isPending ||
-    toggleMutation.isPending;
+    toggleMutation.isPending ||
+    webhookMutation.isPending ||
+    rotateWebhookMutation.isPending;
+  const defaultModelId =
+    taskModelsQuery.data?.defaultFastModelId ??
+    taskModelsQuery.data?.defaultModelId ??
+    null;
+  const defaultReasoningEffort =
+    taskModelsQuery.data?.defaultFastReasoningEffort ??
+    taskModelsQuery.data?.defaultReasoningEffort ??
+    null;
   const selectedModel = taskModelsQuery.data?.models.find(
-    (model) => model.id === form.model,
+    (model) => model.id === (form.model || defaultModelId),
   );
   const selectedModelSupportsReasoning = Boolean(
     selectedModel && selectedModel.metadata?.supportsReasoning !== false,
   );
+  const selectedModelLabel = form.model
+    ? (selectedModel?.displayName ?? form.model)
+    : selectedModel?.displayName
+      ? `Default (${selectedModel.displayName})`
+      : 'Deployment default';
+  const selectedReasoningLabel = selectedModelSupportsReasoning
+    ? getReasoningEffortLabel(
+        form.reasoningEffort ?? defaultReasoningEffort ?? 'medium',
+      )
+    : null;
 
   const closeEditor = () => {
     setIsCreating(false);
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setEditingField(null);
+    setModelPickerOpen(false);
+    setWebhookEnabled(false);
+    setWebhookUrl(null);
     setFieldErrors({});
     setResolvedCron(null);
     setScheduleSummary(null);
@@ -771,6 +922,9 @@ export function CustomAutomationsSection({
         `${window.location.pathname}${window.location.search}`,
       );
     }
+    queryClient.removeQueries({
+      queryKey: trpc.automations.getCustomAutomationWebhook.queryKey(),
+    });
   };
 
   const editAutomation = (
@@ -779,6 +933,10 @@ export function CustomAutomationsSection({
   ) => {
     setEditingId(row.id);
     setIsCreating(false);
+    setEditingField(null);
+    setModelPickerOpen(false);
+    setWebhookEnabled(false);
+    setWebhookUrl(null);
     setFieldErrors({});
     setForm({
       ...formFromRow(
@@ -810,6 +968,10 @@ export function CustomAutomationsSection({
       if (row) {
         setEditingId(row.id);
         setIsCreating(false);
+        setEditingField(null);
+        setModelPickerOpen(false);
+        setWebhookEnabled(false);
+        setWebhookUrl(null);
         setForm(
           formFromRow(
             row,
@@ -861,10 +1023,19 @@ export function CustomAutomationsSection({
     setFieldErrors((current) => ({ schedule: current.schedule }));
 
     if (!form.environmentId) {
-      toast.error('Choose an environment.');
+      const environmentError = 'Choose an environment.';
+      setEditingField('environment');
+      setFieldErrors((current) => ({
+        ...current,
+        environment: environmentError,
+      }));
+      const environmentTrigger = environmentRef.current;
+      environmentTrigger?.focus();
+      environmentTrigger?.scrollIntoView?.({ block: 'center' });
       return;
     }
     if (form.scheduleMode === 'cron' && !effectiveResolvedCron) {
+      setEditingField('schedule');
       setFieldErrors((current) => ({
         ...current,
         schedule:
@@ -893,6 +1064,9 @@ export function CustomAutomationsSection({
     const payload = {
       name: form.name,
       prompt: form.prompt,
+      ...(automationLaunchCriteriaEnabled
+        ? { launchCriteria: form.launchCriteria.trim() || null }
+        : {}),
       enabled: form.enabled,
       resultPriority: form.resultPriority,
       scheduleMode: form.scheduleMode,
@@ -966,9 +1140,9 @@ export function CustomAutomationsSection({
             ref={promptRef}
             id="custom-automation-prompt"
             value={form.prompt}
-            maxLength={8000}
+            maxLength={CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH}
             disabled={busy}
-            rows={5}
+            rows={10}
             aria-invalid={fieldErrors.prompt ? true : undefined}
             aria-describedby={
               fieldErrors.prompt ? 'custom-automation-prompt-error' : undefined
@@ -999,121 +1173,187 @@ export function CustomAutomationsSection({
           ) : null}
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="custom-automation-schedule">Schedule</Label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Select
-              value={form.scheduleMode}
+        {automationLaunchCriteriaEnabled ? (
+          <div className="space-y-2">
+            <Label htmlFor="custom-automation-launch-criteria">
+              Launch criteria (optional)
+            </Label>
+            <Textarea
+              id="custom-automation-launch-criteria"
+              value={form.launchCriteria}
+              maxLength={CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH}
               disabled={busy}
-              handoffTargetOnSelect={cronExpressionRef}
-              onValueChange={(value) => {
-                setResolvedCron(null);
-                setScheduleSummary(null);
-                setFieldErrors((current) => ({
-                  ...current,
-                  schedule: undefined,
-                }));
-                setForm((current) => ({
-                  ...current,
-                  scheduleMode: value as CustomAutomationScheduleMode,
-                }));
+              rows={3}
+              onChange={(event) => {
+                const launchCriteria = event.target.value;
+                setForm((current) => ({ ...current, launchCriteria }));
               }}
-            >
-              <SelectTrigger
-                id="custom-automation-schedule"
-                className="w-full sm:w-52"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SCHEDULE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Only investigate newly regressed issues affecting active users."
+            />
+            <p className="text-sm text-muted-foreground">
+              Before work starts, the session checks these criteria against
+              fresh findings and recent runs. When the evidence does not meet
+              them, the run ends quietly without a destination reply or
+              delegated task.
+            </p>
+          </div>
+        ) : null}
 
-            {form.scheduleMode === 'cron' ? (
-              <Input
-                ref={cronExpressionRef}
-                id="custom-automation-cron"
-                aria-label="Custom schedule"
-                className="flex-1"
-                value={form.cronExpression}
+        {editingField === 'schedule' ? (
+          <div className="space-y-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Select
+                value={form.scheduleMode}
                 disabled={busy}
-                placeholder="Weekdays at 9am or 0 9 * * 1-5"
-                aria-invalid={fieldErrors.schedule ? true : undefined}
-                aria-describedby={
-                  fieldErrors.schedule
-                    ? 'custom-automation-schedule-error'
-                    : undefined
-                }
-                onChange={(event) => {
+                handoffTargetOnSelect={cronExpressionRef}
+                onValueChange={(value) => {
+                  const scheduleMode = value as CustomAutomationScheduleMode;
                   setResolvedCron(null);
                   setScheduleSummary(null);
-                  if (fieldErrors.schedule) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    schedule: undefined,
+                  }));
+                  setForm((current) => ({ ...current, scheduleMode }));
+                  setEditingField(scheduleMode === 'cron' ? 'schedule' : null);
+                }}
+              >
+                <SelectTrigger
+                  id="custom-automation-schedule"
+                  aria-label="Schedule"
+                  className="w-full sm:w-52"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SCHEDULE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {form.scheduleMode === 'cron' ? (
+                <Input
+                  ref={cronExpressionRef}
+                  id="custom-automation-cron"
+                  aria-label="Custom schedule"
+                  className="flex-1"
+                  value={form.cronExpression}
+                  disabled={busy}
+                  placeholder="Weekdays at 9am or 0 9 * * 1-5"
+                  aria-invalid={fieldErrors.schedule ? true : undefined}
+                  aria-describedby={
+                    fieldErrors.schedule
+                      ? 'custom-automation-schedule-error'
+                      : undefined
+                  }
+                  onChange={(event) => {
+                    setResolvedCron(null);
+                    setScheduleSummary(null);
+                    if (fieldErrors.schedule) {
+                      setFieldErrors((current) => ({
+                        ...current,
+                        schedule: undefined,
+                      }));
+                    }
+                    setForm((current) => ({
+                      ...current,
+                      cronExpression: event.target.value,
+                    }));
+                  }}
+                  onBlur={() => {
+                    const alreadyResolvingThisInput =
+                      resolveScheduleMutation.isPending &&
+                      resolveScheduleMutation.variables?.schedule ===
+                        form.cronExpression;
+                    if (
+                      !clientParsedCron &&
+                      !resolvedCron &&
+                      form.cronExpression.trim() &&
+                      !alreadyResolvingThisInput
+                    ) {
+                      resolveScheduleMutation.mutate({
+                        schedule: form.cronExpression,
+                      });
+                    }
+                  }}
+                />
+              ) : null}
+            </div>
+            {fieldErrors.schedule ? (
+              <p
+                id="custom-automation-schedule-error"
+                role="alert"
+                className="text-sm text-destructive"
+              >
+                {fieldErrors.schedule}
+              </p>
+            ) : resolveScheduleMutation.isPending ? (
+              <p className="text-sm text-muted-foreground">
+                Interpreting schedule...
+              </p>
+            ) : effectiveScheduleSummary ? (
+              <p className="text-sm text-muted-foreground">
+                {effectiveScheduleSummary}
+              </p>
+            ) : null}
+            {form.scheduleMode === 'cron' ? (
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto p-0"
+                onClick={() => {
+                  if (fieldErrors.schedule || !effectiveResolvedCron) {
                     setFieldErrors((current) => ({
                       ...current,
-                      schedule: undefined,
+                      schedule:
+                        current.schedule ??
+                        (resolveScheduleMutation.isPending
+                          ? 'Still interpreting the schedule, try again in a moment.'
+                          : 'Enter a valid schedule first.'),
                     }));
+                    return;
                   }
-                  setForm((current) => ({
-                    ...current,
-                    cronExpression: event.target.value,
-                  }));
+                  setEditingField(null);
                 }}
-                onBlur={() => {
-                  const alreadyResolvingThisInput =
-                    resolveScheduleMutation.isPending &&
-                    resolveScheduleMutation.variables?.schedule ===
-                      form.cronExpression;
-                  if (
-                    !clientParsedCron &&
-                    !resolvedCron &&
-                    form.cronExpression.trim() &&
-                    !alreadyResolvingThisInput
-                  ) {
-                    resolveScheduleMutation.mutate({
-                      schedule: form.cronExpression,
-                    });
-                  }
-                }}
-              />
+              >
+                Done
+              </Button>
             ) : null}
           </div>
-          {fieldErrors.schedule ? (
-            <p
-              id="custom-automation-schedule-error"
-              role="alert"
-              className="text-sm text-destructive"
-            >
-              {fieldErrors.schedule}
-            </p>
-          ) : resolveScheduleMutation.isPending ? (
-            <p className="text-sm text-muted-foreground">
-              Interpreting schedule...
-            </p>
-          ) : effectiveScheduleSummary ? (
-            <p className="text-sm text-muted-foreground">
-              {effectiveScheduleSummary}
-            </p>
-          ) : null}
-        </div>
+        ) : (
+          <SettingSummaryRow
+            icon={Calendar}
+            label="Schedule"
+            value={
+              form.scheduleMode === 'cron'
+                ? (effectiveScheduleSummary ?? 'Custom schedule')
+                : scheduleLabel(form.scheduleMode)
+            }
+            onEdit={() => setEditingField('schedule')}
+          />
+        )}
 
-        <div className="space-y-2 sm:w-52">
-          <Label htmlFor="custom-automation-priority">Priority</Label>
+        {editingField === 'priority' ? (
           <Select
             value={form.resultPriority}
             disabled={busy}
-            onValueChange={(value) =>
+            onValueChange={(value) => {
               setForm((current) => ({
                 ...current,
                 resultPriority: value as AutomationResultPriority,
-              }))
-            }
+              }));
+              setEditingField(null);
+            }}
           >
-            <SelectTrigger id="custom-automation-priority" className="w-full">
+            <SelectTrigger
+              id="custom-automation-priority"
+              aria-label="Priority"
+              className="w-full sm:w-52"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1124,26 +1364,45 @@ export function CustomAutomationsSection({
               ))}
             </SelectContent>
           </Select>
-        </div>
+        ) : (
+          <SettingSummaryRow
+            icon={CircleAlert}
+            label="Priority"
+            value={AUTOMATION_RESULT_PRIORITY_LABELS[form.resultPriority]}
+            onEdit={() => setEditingField('priority')}
+          />
+        )}
 
-        <div className="flex flex-col gap-4 sm:flex-row">
-          <div className="space-y-2 sm:w-52">
-            <Label htmlFor="custom-automation-environment">
-              Preferred environment
-            </Label>
+        {editingField === 'environment' ? (
+          <div className="space-y-2">
             <Select
               value={form.environmentId || undefined}
               disabled={busy || environmentOptions.length === 0}
-              onValueChange={(value) =>
+              onValueChange={(value) => {
                 setForm((current) => ({
                   ...current,
                   environmentId: value,
-                }))
-              }
+                }));
+                setEditingField(null);
+                if (fieldErrors.environment) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    environment: undefined,
+                  }));
+                }
+              }}
             >
               <SelectTrigger
+                ref={environmentRef}
                 id="custom-automation-environment"
-                className="w-full"
+                aria-label="Environment"
+                className="w-full sm:w-64"
+                aria-invalid={fieldErrors.environment ? true : undefined}
+                aria-describedby={
+                  fieldErrors.environment
+                    ? 'custom-automation-environment-error'
+                    : undefined
+                }
               >
                 <SelectValue placeholder="Select environment" />
               </SelectTrigger>
@@ -1155,53 +1414,93 @@ export function CustomAutomationsSection({
                 ))}
               </SelectContent>
             </Select>
+            {fieldErrors.environment ? (
+              <p
+                id="custom-automation-environment-error"
+                role="alert"
+                className="text-sm text-destructive"
+              >
+                {fieldErrors.environment}
+              </p>
+            ) : null}
           </div>
+        ) : (
+          <SettingSummaryRow
+            icon={Container}
+            label="Environment"
+            value={
+              environmentOptions.find(
+                (environment) => environment.id === form.environmentId,
+              )?.name ?? 'Select environment'
+            }
+            onEdit={() => setEditingField('environment')}
+          />
+        )}
 
-          <div className="min-w-0 flex-1 space-y-2">
-            <Label>Delegated task model</Label>
-            <ModelSelect
-              size="default"
-              ariaLabel="Automation model"
-              value={form.model}
-              emptyOptionLabel="Default delegated task model"
-              className="w-full"
-              disabled={busy}
-              onValueChange={(value) => {
-                const nextModel = taskModelsQuery.data?.models.find(
-                  (model) => model.id === value,
-                );
-                const supportsReasoning = Boolean(
-                  nextModel && nextModel.metadata?.supportsReasoning !== false,
-                );
-                setForm((current) => ({
-                  ...current,
-                  model: value,
-                  reasoningEffort: supportsReasoning
-                    ? current.reasoningEffort
-                    : null,
-                }));
-              }}
-            />
-          </div>
-
-          <div className="space-y-2 sm:w-40">
-            <Label>Effort</Label>
-            <ReasoningEffortSelect
-              value={form.reasoningEffort}
-              defaultEffort="medium"
-              emptyOptionLabel="Model default"
-              ariaLabel="Automation effort"
-              className="w-full"
-              size="default"
-              disabled={busy || !selectedModelSupportsReasoning}
-              onChange={(reasoningEffort) =>
+        <SettingSummaryRow
+          icon={Cpu}
+          label="Model"
+          value={
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1">
+              <span>{selectedModelLabel}</span>
+              {selectedReasoningLabel ? (
+                <span className="text-muted-foreground/80">
+                  ({selectedReasoningLabel})
+                </span>
+              ) : null}
+            </span>
+          }
+          action={
+            <ModelReasoningPicker
+              open={modelPickerOpen}
+              onOpenChange={setModelPickerOpen}
+              trigger={
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0"
+                  disabled={busy || taskModelsQuery.isPending}
+                >
+                  Edit
+                </Button>
+              }
+              models={taskModelsQuery.data?.models ?? []}
+              model={form.model}
+              defaultModelId={defaultModelId}
+              emptyModelLabel={
+                defaultModelId
+                  ? `Default (${selectedModel?.displayName ?? defaultModelId})`
+                  : 'Deployment default'
+              }
+              onModelChange={(model) =>
+                setForm((current) => ({ ...current, model }))
+              }
+              reasoningEffort={form.reasoningEffort}
+              defaultReasoningEffort={defaultReasoningEffort}
+              onReasoningEffortChange={(reasoningEffort) =>
                 setForm((current) => ({ ...current, reasoningEffort }))
               }
+              onModelSelectionChange={(selection) =>
+                setForm((current) => ({
+                  ...current,
+                  model: selection.model,
+                  reasoningEffort: selection.reasoningEffort,
+                }))
+              }
+              providerGrouping={{
+                chatgptConnected: taskModelsQuery.data?.chatgptConnected,
+                openaiConnected: taskModelsQuery.data?.openaiConnected,
+                xaiSubscriptionConnected:
+                  taskModelsQuery.data?.xaiSubscriptionConnected,
+                xaiConnected: taskModelsQuery.data?.xaiConnected,
+              }}
+              disabled={busy || taskModelsQuery.isPending}
             />
-          </div>
-        </div>
+          }
+        />
 
-        <div className="space-y-2">
+        {editingField === 'destination' ? (
           <AutomationDestinationPicker
             channelCatalogAvailable={isAdmin}
             id="custom-automation-destination"
@@ -1227,42 +1526,127 @@ export function CustomAutomationsSection({
               }))
             }
           />
-          <p className="text-sm text-muted-foreground">
-            {form.targetProvider === 'none'
-              ? 'Each run is a session in the web app and does not send a report.'
-              : 'Each run is a session that reports findings and failures here, and replies continue it.'}
-          </p>
-        </div>
+        ) : (
+          <SettingSummaryRow
+            icon={Rss}
+            label="Destination"
+            value={destinationSummary(
+              form,
+              slackOptions,
+              discordOptions,
+              visibleEmailOptions,
+            )}
+            onEdit={() => setEditingField('destination')}
+          />
+        )}
 
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Switch
-              id="custom-automation-enabled"
-              checked={form.enabled}
-              disabled={busy}
-              onCheckedChange={(checked) =>
-                setForm((current) => ({ ...current, enabled: checked }))
-              }
-            />
-            <Label htmlFor="custom-automation-enabled">Enabled</Label>
+        {editingId && editingField === 'webhook' ? (
+          <div className="space-y-3">
+            <div className="flex items-start gap-3">
+              <Switch
+                id="custom-automation-webhook-enabled"
+                checked={webhookEnabled}
+                disabled={
+                  busy ||
+                  !form.enabled ||
+                  !persistedAutomationEnabled ||
+                  webhookQuery.isPending
+                }
+                aria-busy={webhookMutation.isPending || undefined}
+                onCheckedChange={(enabled) =>
+                  webhookMutation.mutate({ id: editingId, enabled })
+                }
+              />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Label htmlFor="custom-automation-webhook-enabled">
+                  Enable webhooks
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  POST to this URL to run this automation. Include any
+                  additional context for the session in a plain text or JSON
+                  body.
+                </p>
+                {webhookEnabled &&
+                form.enabled &&
+                webhookUrl &&
+                !webhookQuery.isPending ? (
+                  <div className="relative min-w-0">
+                    <Input
+                      type="url"
+                      aria-label="Webhook URL"
+                      autoComplete="off"
+                      spellCheck={false}
+                      readOnly
+                      disabled={busy}
+                      value={webhookUrl}
+                      className="min-w-0 w-full pr-20 font-mono text-xs"
+                    />
+                    <div className="absolute inset-y-1 right-1 flex items-center gap-1">
+                      <CopyIconButton
+                        className="size-7"
+                        content={webhookUrl}
+                        tooltip="Copy webhook URL"
+                        aria-label="Copy webhook URL"
+                        disabled={busy}
+                      />
+                      <BasicTooltip content="Rotate webhook URL; revoke the old URL">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="size-7"
+                          aria-label="Rotate webhook URL"
+                          disabled={busy}
+                          onClick={() =>
+                            rotateWebhookMutation.mutate({ id: editingId })
+                          }
+                        >
+                          <RefreshCw />
+                        </Button>
+                      </BasicTooltip>
+                    </div>
+                  </div>
+                ) : null}
+                {webhookQuery.isError ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    Failed to load webhook settings. Close and reopen this
+                    editor to retry.
+                  </p>
+                ) : null}
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy}
-              onClick={closeEditor}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              disabled={busy || !capabilitiesLoaded}
-              onClick={saveForm}
-            >
-              {editingId ? 'Save' : 'Create'}
-            </Button>
-          </div>
+        ) : editingId ? (
+          <SettingSummaryRow
+            icon={RadioTower}
+            label="Webhooks"
+            value={
+              webhookQuery.isPending
+                ? 'Loading...'
+                : webhookEnabled
+                  ? 'Enabled'
+                  : 'Disabled'
+            }
+            onEdit={() => setEditingField('webhook')}
+          />
+        ) : null}
+
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={closeEditor}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={busy || !capabilitiesLoaded}
+            onClick={saveForm}
+          >
+            {editingId ? 'Save' : 'Create'}
+          </Button>
         </div>
       </div>
     </DialogContent>
@@ -1280,6 +1664,10 @@ export function CustomAutomationsSection({
           );
           setIsCreating(true);
           setEditingId(null);
+          setEditingField(null);
+          setModelPickerOpen(false);
+          setWebhookEnabled(false);
+          setWebhookUrl(null);
           setFieldErrors({});
           setForm({
             ...EMPTY_FORM,
@@ -1441,7 +1829,10 @@ export function CustomAutomationsSection({
 
                             toggleMutation.mutate({
                               id: row.id,
-                              ...writeInputFromRow(row),
+                              ...writeInputFromRow(
+                                row,
+                                automationLaunchCriteriaEnabled,
+                              ),
                               enabled,
                             });
                           }}

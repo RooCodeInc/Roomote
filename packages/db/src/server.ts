@@ -55,6 +55,8 @@ export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/sessions';
 export * from './lib/service-credentials';
+export * from './lib/integration-tool-approvals';
+export * from './lib/integration-tool-auto-settings';
 export * from './lib/credential-egress';
 export * from './lib/session-goals';
 export * from './lib/source-control-provider';
@@ -85,6 +87,7 @@ export * from './lib/provider-usage-limits';
 export * from './lib/preview-runtime-config';
 export * from './lib/out-of-band-task-messages';
 export * from './lib/record-task-kickoff-message';
+export * from './lib/task-user-requests';
 export * from './lib/slack-runtime-credentials';
 export * from './lib/slack-installations';
 export * from './lib/teams-runtime-credentials';
@@ -115,6 +118,7 @@ export * from './lib/managed-access';
 export * from './lib/user-personalization';
 export * from './lib/personal-preferences';
 export * from './lib/deployment-experiments';
+export * from './lib/session-status-judgments';
 export * from './lib/private-sessions-experiment';
 export * from './fixtures/development-fixtures';
 
@@ -122,6 +126,7 @@ export {
   users,
   userPersonalizations,
   userPersonalizationRelations,
+  userTaskModelMappingPresets,
   instanceSkills,
   userRelations,
   deploymentSettings,
@@ -144,12 +149,19 @@ export {
   taskPinsRelations,
   sessions,
   sessionGoals,
+  sessionStatusJudgments,
+  sessionStatusJudgmentsRelations,
   sessionsRelations,
   sessionTasks,
   sessionTasksRelations,
   serviceCredentials,
   serviceCredentialApprovals,
   serviceCredentialAudit,
+  integrationToolPolicies,
+  integrationToolUserPolicies,
+  integrationToolApprovalRequests,
+  integrationToolAutoEvaluations,
+  integrationToolSessionOverrides,
   credentialEgressWorkloads,
   credentialEgressSubstitutes,
   credentialEgressAudit,
@@ -299,9 +311,12 @@ export type {
   SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,
+  SessionManualStatus,
   SessionOwnerKind,
   SessionSourceSurface,
   SessionStatus,
+  SessionStatusJudgmentSourceKind,
+  SessionStatusJudgmentState,
   SessionTaskOrigin,
   SessionParticipantRole,
   SessionBackfillPhase,

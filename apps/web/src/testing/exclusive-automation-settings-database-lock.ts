@@ -1,6 +1,7 @@
 import { db, sql } from '@roomote/db/server';
 
 const AUTOMATION_SETTINGS_TEST_LOCK = [20260910, 2451] as const;
+const EXCLUSIVE_LOCK_HOOK_TIMEOUT_MS = 60_000;
 
 /** Serializes suites that replace deployment-wide automation settings rows. */
 export function registerExclusiveAutomationSettingsDatabaseLock() {
@@ -27,10 +28,10 @@ export function registerExclusiveAutomationSettingsDatabaseLock() {
     });
     void lockTransaction.catch((error) => rejectAcquired?.(error));
     await acquired;
-  });
+  }, EXCLUSIVE_LOCK_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     releaseLock?.();
     await lockTransaction;
-  });
+  }, EXCLUSIVE_LOCK_HOOK_TIMEOUT_MS);
 }

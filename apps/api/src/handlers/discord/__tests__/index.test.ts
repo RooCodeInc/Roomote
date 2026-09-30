@@ -359,7 +359,6 @@ describe('Discord Gateway event handler', () => {
     mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.hasFastSession.mockResolvedValue(false);
     mocks.getFastSessionOwner.mockResolvedValue(null);
-    mocks.peerConversationsEnabled.mockResolvedValue(false);
     mocks.mentionsPeer.mockReturnValue(false);
     mocks.findFastMessageSession.mockResolvedValue(null);
     mocks.findFastReplySession.mockResolvedValue(null);
@@ -424,7 +423,7 @@ describe('Discord Gateway event handler', () => {
     );
     mocks.markThreadHistoryDelivered.mockResolvedValue(undefined);
     mocks.fetchThreadHistory.mockResolvedValue([]);
-    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: true });
     mocks.queueMessage.mockResolvedValue(true);
     mocks.enqueueGatewayEvent.mockResolvedValue({ jobId: 'event-message-1' });
     mocks.callViaEmojiConfig.mockResolvedValue(null);
@@ -654,7 +653,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('rejects a reaction from a different Fast session owner', async () => {
+  it('rejects a reaction from a different session owner', async () => {
     mocks.findFastMessageSession.mockResolvedValue({
       id: 'fast-session-1',
       userId: 'another-roomote-user',
@@ -1320,7 +1319,7 @@ describe('Discord Gateway event handler', () => {
       } else if (scenario === 'unlinked sender') {
         mocks.findMappedUserId.mockResolvedValue(null);
       } else {
-        mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+        mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: false });
       }
 
       const response = await postEvent(
@@ -1415,7 +1414,7 @@ describe('Discord Gateway event handler', () => {
       userId: 'roomote-user-1',
       actingUserId: 'roomote-user-1',
     });
-    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: false });
 
     const response = await postEvent(
       envelope(
@@ -1447,7 +1446,7 @@ describe('Discord Gateway event handler', () => {
       type: 11,
     });
     mocks.hasFastSession.mockResolvedValue(true);
-    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: true });
 
     const response = await postEvent(
       envelope(
@@ -1498,9 +1497,8 @@ describe('Discord Gateway event handler', () => {
       kind: 'user',
       userId: 'roomote-user-owner',
     });
-    mocks.peerConversationsEnabled.mockResolvedValue(true);
     mocks.mentionsPeer.mockReturnValue(true);
-    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: true });
 
     const response = await postEvent(
       envelope(
@@ -1515,11 +1513,8 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.peerConversationsEnabled).toHaveBeenCalledWith(
-      'slackPeerConversations',
-    );
     expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
-      expect.objectContaining({ peerConversationsExperimentEnabled: true }),
+      expect.objectContaining({ peerConversationsEnabled: true }),
     );
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1542,9 +1537,8 @@ describe('Discord Gateway event handler', () => {
     mocks.findMappedUserId.mockResolvedValue('roomote-user-peer');
     mocks.hasFastSession.mockResolvedValue(true);
     mocks.getFastSessionOwner.mockResolvedValue(null);
-    mocks.peerConversationsEnabled.mockResolvedValue(true);
     mocks.mentionsPeer.mockReturnValue(true);
-    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: false });
 
     const response = await postEvent(
       envelope(
@@ -1559,9 +1553,8 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.peerConversationsEnabled).not.toHaveBeenCalled();
     expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
-      expect.objectContaining({ peerConversationsExperimentEnabled: false }),
+      expect.objectContaining({ peerConversationsEnabled: false }),
     );
     expect(mocks.answerFast).not.toHaveBeenCalled();
   });
@@ -1600,7 +1593,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('continues the Fast session bound to a Discord DM report reply', async () => {
+  it('continues the session bound to a Discord DM report reply', async () => {
     mocks.findFastReplySession.mockResolvedValue({
       id: '11111111-1111-4111-8111-111111111111',
       userId: 'roomote-user-1',
@@ -1662,7 +1655,7 @@ describe('Discord Gateway event handler', () => {
         replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
       },
     });
-    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: false });
     mocks.fetchThreadHistory.mockResolvedValue([
       {
         id: 'earlier-message',
@@ -2501,7 +2494,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('uses /goal to start a Fast Session goal', async () => {
+  it('uses /goal to start a session goal', async () => {
     mocks.findActiveRun.mockResolvedValue({
       id: 23,
       taskId: 'task-23',

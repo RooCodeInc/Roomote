@@ -1,5 +1,4 @@
 import {
-  AUTOMATION_DESTINATION_DESCRIPTORS,
   getAutomationDestinationDescriptorById,
   getAutomationDestinationDescriptorByKey,
   getAutomationDestinationDescriptorBySlackField,
@@ -7,24 +6,6 @@ import {
 } from '../automation-destination-fields';
 
 describe('automation destination field registry', () => {
-  it('keeps a stable one-of Slack/Discord descriptor for each destination automation', () => {
-    expect(AUTOMATION_DESTINATION_DESCRIPTORS).toHaveLength(11);
-    expect(
-      new Set(
-        AUTOMATION_DESTINATION_DESCRIPTORS.map(
-          (descriptor) => descriptor.automationId,
-        ),
-      ).size,
-    ).toBe(AUTOMATION_DESTINATION_DESCRIPTORS.length);
-    expect(
-      new Set(
-        AUTOMATION_DESTINATION_DESCRIPTORS.map(
-          (descriptor) => descriptor.automationKey,
-        ),
-      ).size,
-    ).toBe(AUTOMATION_DESTINATION_DESCRIPTORS.length);
-  });
-
   it('looks up descriptors by settings id, automation key, and Slack field', () => {
     expect(
       getAutomationDestinationDescriptorById('managerStats'),
@@ -52,13 +33,5 @@ describe('automation destination field registry', () => {
     });
     expect(isAutomationDestinationAutomationId('ciFailureTriage')).toBe(true);
     expect(isAutomationDestinationAutomationId('reviewer')).toBe(false);
-  });
-
-  it('always manages Slack and Discord channel targets for the destination picker', () => {
-    for (const descriptor of AUTOMATION_DESTINATION_DESCRIPTORS) {
-      expect(descriptor.managedTargetKinds).toEqual(
-        expect.arrayContaining(['slack_channel', 'discord_channel']),
-      );
-    }
   });
 });

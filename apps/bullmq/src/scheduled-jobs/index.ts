@@ -1,6 +1,7 @@
 export { heartbeatJob } from './heartbeat';
 export { sleepCheckJob } from './sleep-check';
 export { refreshSnapshotsJob } from './refresh-snapshots';
+export { rebuildRetiredSnapshotsJob } from './rebuild-retired-snapshots';
 export { pullRequestAnalyticsSyncJob } from './pull-request-analytics-sync';
 export { instancePingJob } from './instance-ping';
 export { licenseUsageSyncJob } from './license-usage-sync';

@@ -216,6 +216,35 @@ function makeTaskRun(overrides: Partial<TaskRun> = {}): TaskRun {
   } as TaskRun;
 }
 
+function makeWorkerExitState(overrides: Record<string, unknown> = {}) {
+  const startedAt = new Date('2026-09-22T08:00:00.000Z');
+
+  return {
+    status: RunStatus.Processing,
+    taskPhase: null,
+    vendor: 'roomote',
+    machineId: 'sandbox-1',
+    dequeuedAt: new Date('2026-09-22T07:59:00.000Z'),
+    provisionStartedAt: new Date('2026-09-22T07:59:10.000Z'),
+    provisionReadyAt: new Date('2026-09-22T07:59:45.000Z'),
+    startedAt,
+    setupCompletedAt: null,
+    harnessStartedAt: null,
+    runtimeTaskStartedAt: null,
+    firstAssistantOutputAt: null,
+    workerHeartbeatAt: null,
+    completedAt: null,
+    canceledAt: null,
+    cancelRequestedAt: null,
+    sleepAt: null,
+    sleepRequestedAt: null,
+    snapshotRequestedAt: null,
+    snapshotCreatedAt: null,
+    snapshotFailedAt: null,
+    ...overrides,
+  };
+}
+
 function resetControllerMocks() {
   mockTaskRunsFindFirst.mockResolvedValue(null);
   mockTaskRunsFindMany.mockResolvedValue([]);
@@ -347,7 +376,11 @@ describe('BaseController.handleSpawnTaskRunError', () => {
     expect((capturedError as Error).message).not.toContain('super-secret');
     expect((capturedError as Error).cause).toBeUndefined();
     expect(context).toEqual(
-      expect.objectContaining({ phase: 'spawn_worker', runId: 42 }),
+      expect.objectContaining({
+        phase: 'spawn_worker',
+        runId: 42,
+        taskId: expect.any(String),
+      }),
     );
   });
 
@@ -764,10 +797,17 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
     );
   });
 
-  it('ignores an exit when the run already advanced', async () => {
+  it('classifies a completed run exit as routine after the run advanced', async () => {
     mockUpdateWhere.mockReturnValueOnce({
       returning: vi.fn().mockResolvedValue([]),
     });
+    mockTaskRunsFindFirst.mockResolvedValueOnce(
+      makeWorkerExitState({
+        status: RunStatus.Completed,
+        workerHeartbeatAt: new Date('2026-09-22T08:01:00.000Z'),
+        completedAt: new Date('2026-09-22T08:02:00.000Z'),
+      }),
+    );
 
     const claimed = await controller.testHandleWorkerExitBeforeStart(
       makeTaskRun({ id: 42, status: RunStatus.Processing }),
@@ -776,7 +816,93 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
 
     expect(claimed).toBe('ignore');
     expect(mockFinishRun).not.toHaveBeenCalled();
-    expect(mockCaptureControllerMessage).not.toHaveBeenCalled();
+    expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
+      'Detached worker exit treated as routine after the task run advanced',
+      expect.objectContaining({
+        runId: 42,
+        currentStatus: RunStatus.Completed,
+        exitCode: 0,
+        classification: 'routine',
+        shutdownReason: 'completed',
+        workerHeartbeatAgeMs: expect.any(Number),
+        provisionReadyAt: '2026-09-22T07:59:45.000Z',
+      }),
+      expect.objectContaining({
+        level: 'info',
+        signal: 'worker-exit-routine',
+      }),
+    );
+  });
+
+  it('alerts when a non-zero exit leaves an active run without a heartbeat', async () => {
+    mockUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([]),
+    });
+    mockTaskRunsFindFirst.mockResolvedValueOnce(
+      makeWorkerExitState({
+        status: RunStatus.Preparing,
+        sleepAt: new Date('2026-09-22T08:01:00.000Z'),
+        snapshotFailedAt: new Date('2026-09-22T08:02:00.000Z'),
+      }),
+    );
+
+    const claimed = await controller.testHandleWorkerExitBeforeStart(
+      makeTaskRun({ id: 43, status: RunStatus.Processing }),
+      137,
+    );
+
+    expect(claimed).toBe('ignore');
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
+      'Detached worker exited while the task run remained active',
+      expect.objectContaining({
+        runId: 43,
+        currentStatus: RunStatus.Preparing,
+        exitCode: 137,
+        classification: 'active_failure',
+        shutdownReason: null,
+        workerHeartbeatAgeMs: null,
+        startedAt: '2026-09-22T08:00:00.000Z',
+      }),
+      expect.objectContaining({
+        level: 'warning',
+        signal: 'worker-post-claim-exit',
+      }),
+    );
+  });
+
+  it('treats an active run exit as routine when cleanup was requested', async () => {
+    mockUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([]),
+    });
+    mockTaskRunsFindFirst.mockResolvedValueOnce(
+      makeWorkerExitState({
+        status: RunStatus.Preparing,
+        sleepRequestedAt: new Date('2026-09-22T08:01:30.000Z'),
+      }),
+    );
+
+    const claimed = await controller.testHandleWorkerExitBeforeStart(
+      makeTaskRun({ id: 44, status: RunStatus.Processing }),
+      137,
+    );
+
+    expect(claimed).toBe('ignore');
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
+      'Detached worker exit treated as routine after the task run advanced',
+      expect.objectContaining({
+        runId: 44,
+        currentStatus: RunStatus.Preparing,
+        exitCode: 137,
+        classification: 'routine',
+        shutdownReason: 'sleep_requested',
+      }),
+      expect.objectContaining({
+        level: 'info',
+        signal: 'worker-exit-routine',
+      }),
+    );
   });
 
   it('fails every provisioned run due in the same watchdog scan', async () => {

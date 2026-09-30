@@ -94,7 +94,7 @@ function WakeupRow({
           content={
             canCancel
               ? 'Cancel timer'
-              : 'Only the Session owner or an admin can cancel'
+              : 'Only the session owner or an admin can cancel'
           }
         >
           <Button

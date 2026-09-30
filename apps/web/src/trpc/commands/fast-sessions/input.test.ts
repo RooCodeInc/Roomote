@@ -5,7 +5,7 @@ import {
   updateFastSessionModelSelectionInputSchema,
 } from './input';
 
-describe('Fast session input schemas', () => {
+describe('Session input schemas', () => {
   it('accepts image-only starts and replies', () => {
     const image = 'data:image/png;base64,aGVsbG8=';
     expect(

@@ -17,6 +17,7 @@ import {
   getEnvironmentSnapshot,
   loadEnvironmentSnapshots,
   softDeleteEnvironmentSnapshots,
+  updatePendingEnvironmentSnapshot,
   upsertEnvironmentSnapshot,
 } from '../environment-snapshots';
 import { updateEnvironmentDefinition } from '../environment-definitions';
@@ -178,6 +179,50 @@ describe('environment snapshot helpers', () => {
         snapshotStatus: 'ready',
       }),
     );
+  });
+
+  it('leaves a failed snapshot row alone when the caller requires no snapshot row', async () => {
+    const failedAt = new Date('2026-02-03T00:00:00.000Z');
+
+    await upsertEnvironmentSnapshot(db, {
+      environmentId: testEnvironmentId,
+      provider: 'modal',
+      snapshotId: null,
+      snapshotStatus: 'failed',
+      snapshotCreatedAt: null,
+      snapshotExpiresAt: null,
+      updatedAt: failedAt,
+    });
+
+    const claimedOverFailure = await claimPendingEnvironmentSnapshot(db, {
+      environmentId: testEnvironmentId,
+      provider: 'modal',
+      updatedAt: new Date('2026-02-03T00:01:00.000Z'),
+      requireMissingSnapshot: true,
+      requireNoSnapshotRow: true,
+    });
+    const snapshotRow = await db.query.environmentSnapshots.findFirst({
+      where: eq(environmentSnapshots.environmentId, testEnvironmentId),
+    });
+
+    expect(claimedOverFailure).toBe(false);
+    expect(snapshotRow).toEqual(
+      expect.objectContaining({ snapshotStatus: 'failed', deletedAt: null }),
+    );
+
+    // Once an edit retires that row there is no live row, and the claim wins.
+    await softDeleteEnvironmentSnapshots(db, {
+      environmentId: testEnvironmentId,
+    });
+
+    expect(
+      await claimPendingEnvironmentSnapshot(db, {
+        environmentId: testEnvironmentId,
+        provider: 'modal',
+        requireMissingSnapshot: true,
+        requireNoSnapshotRow: true,
+      }),
+    ).toBe(true);
   });
 
   it('attaches completed manual snapshots only through an active pending row', async () => {
@@ -598,6 +643,51 @@ describe('environment snapshot helpers', () => {
         snapshotStatus: 'ready',
         snapshotCreatedAt: manualCreatedAt,
         snapshotExpiresAt: manualExpiresAt,
+      }),
+    );
+  });
+
+  it('preserves a ready snapshot when a replacement refresh fails', async () => {
+    const createdAt = new Date('2026-02-01T00:00:00.000Z');
+
+    await upsertEnvironmentSnapshot(db, {
+      environmentId: testEnvironmentId,
+      provider: 'modal',
+      snapshotId: 'sandbox-snapshot-known-good',
+      snapshotStatus: 'ready',
+      snapshotCreatedAt: createdAt,
+      snapshotExpiresAt: null,
+    });
+
+    const activeSnapshot = await db.query.environmentSnapshots.findFirst({
+      where: eq(environmentSnapshots.environmentId, testEnvironmentId),
+    });
+
+    const updated = await updatePendingEnvironmentSnapshot(db, {
+      environmentId: testEnvironmentId,
+      provider: 'modal',
+      snapshotId: null,
+      snapshotStatus: 'failed',
+      snapshotCreatedAt: null,
+      snapshotExpiresAt: null,
+      attachmentSource: {
+        source: 'active_snapshot_row',
+        environmentSnapshotId: activeSnapshot!.id,
+        sourceSnapshotId: activeSnapshot!.snapshotId,
+        sourceSnapshotCreatedAt: createdAt.toISOString(),
+      },
+    });
+
+    const currentSnapshot = await db.query.environmentSnapshots.findFirst({
+      where: eq(environmentSnapshots.environmentId, testEnvironmentId),
+    });
+
+    expect(updated).toBe(false);
+    expect(currentSnapshot).toEqual(
+      expect.objectContaining({
+        snapshotId: 'sandbox-snapshot-known-good',
+        snapshotStatus: 'ready',
+        snapshotCreatedAt: createdAt,
       }),
     );
   });

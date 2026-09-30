@@ -748,7 +748,7 @@ describe('GET /api/mcp-oauth/callback', () => {
     expect(updateAuthStatusMock).not.toHaveBeenCalled();
   });
 
-  it('continues the owning Fast Session after custom OAuth without a page visit', async () => {
+  it('continues the owning session after custom OAuth without a page visit', async () => {
     const replayToken = 'custom-replay';
     const sessionId = 'session-1';
     const encodedRedirect = Buffer.from(`/sessions/${sessionId}`).toString(

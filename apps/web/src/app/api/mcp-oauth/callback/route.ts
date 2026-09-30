@@ -564,7 +564,7 @@ export async function GET(request: NextRequest) {
           integrationId: connection.mcpId,
           errorName: getErrorName(continuationError),
         },
-        'Failed to continue the Fast Session after MCP OAuth',
+        'Failed to continue the session after MCP OAuth',
       );
     }
 
@@ -620,7 +620,7 @@ export async function GET(request: NextRequest) {
             integrationId,
             errorName: getErrorName(continuationError),
           },
-          'Failed to continue the Fast Session after MCP OAuth failure',
+          'Failed to continue the session after MCP OAuth failure',
         );
       }
     }

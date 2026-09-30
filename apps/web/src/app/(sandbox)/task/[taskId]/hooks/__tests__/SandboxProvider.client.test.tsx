@@ -170,6 +170,7 @@ function ConnectionStateProbe() {
     hasConnectedOnce,
     connectionError,
     connectionFailureCategory,
+    disconnectReason,
     reconnecting,
   } = useSandboxConnectionStatus();
 
@@ -180,6 +181,9 @@ function ConnectionStateProbe() {
       <div data-testid="connection-error">{String(connectionError)}</div>
       <div data-testid="connection-failure-category">
         {connectionFailureCategory ?? 'none'}
+      </div>
+      <div data-testid="disconnect-reason">
+        {disconnectReason?.code ?? 'none'}
       </div>
       <div data-testid="reconnecting">{String(reconnecting)}</div>
     </div>
@@ -410,6 +414,7 @@ describe('SandboxProvider runtime state sync', () => {
       createWrapper(
         <SandboxProvider
           taskId="task-initial-retry-failure"
+          runId={42}
           url="http://sandbox.test"
           token="token-123"
           refreshConnection={refreshConnectionMock}
@@ -443,6 +448,9 @@ describe('SandboxProvider runtime state sync', () => {
           expect(
             screen.getByTestId('connection-failure-category'),
           ).toHaveTextContent('backend_unavailable');
+          expect(screen.getByTestId('disconnect-reason')).toHaveTextContent(
+            'connection_timeout',
+          );
           expect(screen.getByTestId('reconnecting')).toHaveTextContent('false');
         },
         { timeout: 20_000 },

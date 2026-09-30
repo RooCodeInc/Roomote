@@ -32,6 +32,7 @@ export async function steerMessage(
   let body: {
     message: string;
     images?: string[];
+    clientMessageId?: string;
     senderMode?: 'fast_agent';
   };
 
@@ -39,6 +40,7 @@ export async function steerMessage(
     body = (await c.req.json()) as {
       message: string;
       images?: string[];
+      clientMessageId?: string;
       senderMode?: 'fast_agent';
     };
   } catch {
@@ -47,6 +49,13 @@ export async function steerMessage(
 
   if (!body.message?.trim()) {
     return c.json({ error: 'message is required' }, 400);
+  }
+
+  if (
+    body.clientMessageId !== undefined &&
+    typeof body.clientMessageId !== 'string'
+  ) {
+    return c.json({ error: 'clientMessageId is invalid' }, 400);
   }
 
   if (body.senderMode !== undefined && body.senderMode !== 'fast_agent') {
@@ -58,6 +67,7 @@ export async function steerMessage(
     userId: auth.userId,
     message: body.message,
     images: body.images,
+    clientMessageId: body.clientMessageId?.trim() || undefined,
     senderMode: body.senderMode,
   });
 

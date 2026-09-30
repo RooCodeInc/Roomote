@@ -36,8 +36,97 @@ describe('automation result blocks', () => {
     );
   });
 
+  it('renders bracketed PR-title labels and entity-wrapped destinations', () => {
+    const url = 'https://github.com/RooCodeInc/Roomote/pull/3292';
+    const label = '[Docs] Document optional Done session status';
+    const report = `Draft PR opened: [${label}](${url}) and [\\[Docs\\] Document optional Done session status](&lt;${url}&gt;).`;
+    const [container] = buildAutomationResultBlocks({
+      title: 'Weekly public docs health review',
+      iconUrl: 'https://app.example.com/automation-icons/zap.png',
+      configureUrl: 'https://app.example.com/automations#docs',
+      contentText: report,
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toContainEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [
+            { type: 'text', text: 'Draft PR opened: ' },
+            { type: 'link', url, text: label },
+            { type: 'text', text: ' and ' },
+            { type: 'link', url, text: label },
+            { type: 'text', text: '.' },
+          ],
+        },
+      ],
+    });
+  });
+
   it('omits empty report content', () => {
     expect(buildAutomationResultContentBlocks('  \n')).toEqual([]);
+  });
+
+  it('renders shortcode emoji in structured automation report content', () => {
+    const report = 'Completed :white_check_mark: and ✅.';
+    const [container] = buildAutomationResultBlocks({
+      title: 'Daily report',
+      iconUrl: 'https://app.example.com/automation-icons/zap.png',
+      configureUrl: 'https://app.example.com/automations#daily-report',
+      contentText: report,
+    });
+
+    expect(buildAutomationResultContentBlocks(report)).toEqual([
+      { type: 'markdown', text: report },
+    ]);
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toContainEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text: 'Completed ✅ and ✅.' }],
+        },
+      ],
+    });
+  });
+
+  it('normalizes known emoji in automation report link labels', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Daily report',
+      iconUrl: 'https://app.example.com/automation-icons/zap.png',
+      configureUrl: 'https://app.example.com/automations#daily-report',
+      contentText:
+        '[Passed :white_check_mark:](https://example.com/report) and <https://example.com/report|Passed :thumbsup::skin-tone-6:>',
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toContainEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [
+            {
+              type: 'link',
+              url: 'https://example.com/report',
+              text: 'Passed ✅',
+            },
+            { type: 'text', text: ' and ' },
+            {
+              type: 'link',
+              url: 'https://example.com/report',
+              text: 'Passed 👍🏿',
+            },
+          ],
+        },
+      ],
+    });
   });
 
   it('builds a container with formatted Markdown, images, metadata, and actions', () => {

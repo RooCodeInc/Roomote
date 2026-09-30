@@ -270,6 +270,7 @@ function NestedTaskTranscript({
     <SandboxProvider
       key={session.taskId}
       taskId={session.taskId}
+      runId={session.taskRun.id}
       url={session.taskRun.sandboxServerUrl}
       token={session.token}
       refreshConnection={session.refreshConnection}

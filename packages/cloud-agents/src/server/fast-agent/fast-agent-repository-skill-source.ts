@@ -30,6 +30,7 @@ import {
   type FastAgentSkillScope,
   type FastAgentSkillSummary,
 } from './fast-agent-skill-store';
+import { FastAgentPromptSkillSnapshotCache } from './fast-agent-prompt-skill-snapshot-cache';
 import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from './fast-agent-spill-store';
 
 const execFileAsync = promisify(execFile);
@@ -647,4 +648,46 @@ export class RemoteFastAgentRepositorySkillSource implements FastAgentRepository
     this.records.clear();
     this.snapshots.clear();
   }
+}
+
+const promptSnapshotCache =
+  new FastAgentPromptSkillSnapshotCache<RepositorySkillSnapshot>({
+    cleanup: (snapshot) =>
+      rm(snapshot.directory, { recursive: true, force: true }),
+    // A record carries the Git environment its checkout was fetched with,
+    // the skill's full text, and its resource index, for `load_skill`. The
+    // prompt lists names and descriptions, so none of them outlive the load.
+    retain: (snapshot) => ({
+      ...snapshot,
+      records: snapshot.records.map((record) => ({
+        ...record,
+        gitEnvironment: {} as NodeJS.ProcessEnv,
+        mainContent: '',
+        resources: new Map(),
+      })),
+    }),
+  });
+
+/**
+ * The repository source the system prompt lists from. It runs on every turn,
+ * so its snapshots come from the process-wide prompt cache rather than a fresh
+ * fetch. A snapshot's records carry the environments it was loaded for, so
+ * those are part of the key and one turn's scope never reaches another's.
+ */
+export function createFastAgentPromptRepositorySkillSource(
+  allowedEnvironmentIds: string[],
+): RemoteFastAgentRepositorySkillSource {
+  return new RemoteFastAgentRepositorySkillSource({
+    allowedEnvironmentIds,
+    loadSnapshot: (repository) =>
+      promptSnapshotCache.get(
+        [
+          repository.id,
+          repository.defaultBranch,
+          stripCloneUrlUserInfo(repository.cloneUrl),
+          [...new Set(repository.environmentIds)].sort().join(','),
+        ].join('\0'),
+        () => loadFastAgentRepositorySkillSnapshot(repository),
+      ),
+  });
 }

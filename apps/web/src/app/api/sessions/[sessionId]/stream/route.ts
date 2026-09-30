@@ -25,8 +25,8 @@ export const runtime = 'nodejs';
 
 const STREAM_MAX_MS = 60 * 60 * 1_000;
 const POLL_INTERVAL_MS = 1_000;
-/** Overlap the initial cursor so rows written while the page was loading are
- * not missed; clients merge by eventId, so replays are harmless. */
+/** Bound the replay used when no page watermark is available or a connection
+ * resumes much later. Initial session pages normally provide a fresher cursor. */
 const INITIAL_CURSOR_OVERLAP_MS = 60_000;
 
 export async function GET(
@@ -58,15 +58,17 @@ export async function GET(
 
   const sinceParam = z.coerce
     .number()
-    .int()
+    .finite()
     .nonnegative()
     .safeParse(request.nextUrl.searchParams.get('since') ?? undefined);
+  const fallbackCursor = Date.now() - INITIAL_CURSOR_OVERLAP_MS;
   let cursor = sinceParam.success
-    ? sinceParam.data
-    : Date.now() - INITIAL_CURSOR_OVERLAP_MS;
+    ? Math.max(sinceParam.data, fallbackCursor)
+    : fallbackCursor;
   let lastTitle = session.title;
   let lastConversationResponding: boolean | null | undefined;
   let lastGoalSignature: string | undefined;
+  let lastQueuedMessagesSignature: string | undefined;
 
   return createResponse(request, async (sseSession) => {
     const startTime = Date.now();
@@ -101,8 +103,11 @@ export async function GET(
         }
 
         try {
-          const { messages, cursor: nextCursor } =
-            await getFastSessionMessagesSince(session.id, cursor);
+          const {
+            messages,
+            queuedMessages,
+            cursor: nextCursor,
+          } = await getFastSessionMessagesSince(session.id, cursor);
           cursor = nextCursor;
 
           const [conversation] = await db
@@ -146,6 +151,11 @@ export async function GET(
               { messages, conversationResponding },
               'messages',
             );
+          }
+          const queuedMessagesSignature = JSON.stringify(queuedMessages);
+          if (queuedMessagesSignature !== lastQueuedMessagesSignature) {
+            lastQueuedMessagesSignature = queuedMessagesSignature;
+            await sseSession.push({ queuedMessages }, 'queue');
           }
           const sessionUpdate: {
             title?: string;

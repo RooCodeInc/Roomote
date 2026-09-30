@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { ScheduleOnlyBackgroundAutomationFrequency } from '@roomote/types';
 import { GitMergeIcon } from '@primer/octicons-react';
@@ -8,11 +9,14 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Calendar,
+  Button,
   SquarePen,
   Switch,
   TriangleAlert,
   Wrench,
 } from '@/components/system';
+import { SettingSummaryRow } from '@/components/settings';
 
 type ScheduleOnlyAutomationControl =
   | {
@@ -130,6 +134,9 @@ export function ScheduleOnlyAutomationContent({
   children,
   onFrequencyChange,
 }: ScheduleOnlyAutomationContentProps) {
+  const [editingSchedule, setEditingSchedule] = useState(false);
+  void details;
+
   return (
     <div className="space-y-5">
       {control.kind === 'toggle' ? (
@@ -147,45 +154,55 @@ export function ScheduleOnlyAutomationContent({
             {control.enabledLabel}
           </label>
         </div>
-      ) : (
-        <Select
-          value={frequency}
-          onValueChange={(value) =>
-            onFrequencyChange(
-              value as ScheduleOnlyBackgroundAutomationFrequency,
-            )
-          }
-        >
-          <SelectTrigger
-            id={fieldId}
-            aria-label={`${automationLabel} schedule`}
-            className="w-full md:w-56"
+      ) : editingSchedule ? (
+        <div className="space-y-2">
+          <Select
+            value={frequency}
+            onValueChange={(value) => {
+              onFrequencyChange(
+                value as ScheduleOnlyBackgroundAutomationFrequency,
+              );
+              setEditingSchedule(false);
+            }}
           >
-            <SelectValue placeholder="Select a schedule" />
-          </SelectTrigger>
-          <SelectContent>
-            {control.scheduleOptions.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            <SelectTrigger
+              id={fieldId}
+              aria-label={`${automationLabel} schedule`}
+              className="w-full sm:w-56"
+            >
+              <SelectValue placeholder="Select a schedule" />
+            </SelectTrigger>
+            <SelectContent>
+              {control.scheduleOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            onClick={() => setEditingSchedule(false)}
+          >
+            Done
+          </Button>
+        </div>
+      ) : (
+        <SettingSummaryRow
+          icon={Calendar}
+          label="Schedule"
+          value={
+            control.scheduleOptions.find((option) => option.value === frequency)
+              ?.label ?? frequency
+          }
+          onEdit={() => setEditingSchedule(true)}
+        />
       )}
 
-      {isEnabled ? (
-        <div className="space-y-3">
-          {children}
-          {details.map((detail) => (
-            <p
-              key={detail}
-              className="text-xs text-muted-foreground md:max-w-160"
-            >
-              {detail}
-            </p>
-          ))}
-        </div>
-      ) : null}
+      {isEnabled ? <div className="space-y-3">{children}</div> : null}
     </div>
   );
 }

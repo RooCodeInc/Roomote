@@ -29,7 +29,12 @@ import {
 } from '@/types';
 
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
-import { Env, isBrainConfigured, isRoomoteCloudEnabled } from './env';
+import {
+  Env,
+  isBrainConfigured,
+  isEnvFlagEnabled,
+  isRoomoteCloudEnabled,
+} from './env';
 import { setSentryUserContext } from './sentry-context';
 import { getAuth } from './auth';
 import {
@@ -444,6 +449,9 @@ export async function authorize(
     isAdmin: authContext.isAdmin,
     anonymousAnalyticsEnabled,
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    nightlyExperimentsEnabled: isEnvFlagEnabled(
+      Env.R_NIGHTLY_EXPERIMENTS_ENABLED,
+    ),
     // Drives the Memory item in Settings navigation. Wiring presence, not
     // just the effective toggle: an admin must be able to reach the Memory
     // page to turn a wired-but-disabled Brain on.

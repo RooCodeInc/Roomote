@@ -220,7 +220,7 @@ describe('Slack suggestion reaction execution-root persistence', () => {
     const seeded = await seedSuggestion(messageTs);
     mocks.startFastAgentResponse.mockResolvedValue({
       accepted: false,
-      reason: 'Fast session is busy.',
+      reason: 'Session is busy.',
     });
     const slack = {
       addReaction: vi.fn(async () => true),

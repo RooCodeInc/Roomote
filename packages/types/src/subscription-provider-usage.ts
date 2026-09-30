@@ -62,11 +62,21 @@ export interface SubscriptionUsageWindow {
   resetsAt?: string;
 }
 
+/** Credit balance reported separately from a provider's quota windows. */
+export interface SubscriptionUsageCredits {
+  /** Remaining credits; zero is meaningful when the provider confirms credits. */
+  balance?: number;
+  /** The provider reports that this balance has no finite limit. */
+  unlimited?: boolean;
+}
+
 export interface SubscriptionProviderUsage {
   providerId: SubscriptionUsageProviderId;
   /** Provider-reported plan name (e.g. ChatGPT 'plus'/'pro'), when available. */
   planType?: string;
   windows: SubscriptionUsageWindow[];
+  /** Account credits are independent of 5-hour, weekly, and other quota windows. */
+  credits?: SubscriptionUsageCredits;
   fetchedAt: string;
 }
 

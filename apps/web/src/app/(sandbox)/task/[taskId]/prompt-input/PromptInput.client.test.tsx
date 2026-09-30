@@ -1069,7 +1069,7 @@ describe('PromptInput', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(toastErrorMock).toHaveBeenCalledWith(
-      'Start Goal Mode from the Session conversation.',
+      'Start Goal Mode from the session conversation.',
     );
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
   });
@@ -1414,6 +1414,67 @@ describe('PromptInput', () => {
 
     expect(removeOptimisticMessageMock).not.toHaveBeenCalled();
     expect(toastErrorMock).toHaveBeenCalledWith('Failed to send message.');
+  });
+});
+
+describe('PromptInput history navigation', () => {
+  it('recalls only visible persisted user prompts', () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({
+      data: [
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          text: 'First user prompt',
+        },
+        {
+          eventType: 'roomote_runtime.assistant_message',
+          role: 'assistant',
+          text: 'Assistant reply',
+        },
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          text: '  Latest user prompt\n',
+        },
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          text: ' \n ',
+        },
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          visibleInTranscript: false,
+          text: 'Hidden prompt',
+        },
+      ],
+    });
+
+    render(
+      <PromptInput
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+        taskRun={createTaskRun(1)}
+      />,
+    );
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+    expect(textarea).toHaveValue('  Latest user prompt\n');
+
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+    expect(textarea).toHaveValue('First user prompt');
   });
 });
 

@@ -594,7 +594,12 @@ describe('custom-mcp-servers commands', () => {
     const { tools } = await listCustomMcpServerToolsCommand(adminAuth, { id });
 
     expect(tools).toEqual([
-      { name: 'query', description: 'Run a query', enabled: true },
+      {
+        name: 'query',
+        description: 'Run a query',
+        readOnly: null,
+        enabled: true,
+      },
     ]);
     expect(safeFetchMock).toHaveBeenCalledTimes(4);
 
@@ -667,7 +672,7 @@ describe('custom-mcp-servers commands', () => {
       });
 
       expect(tools).toEqual([
-        { name: 'query', description: null, enabled: true },
+        { name: 'query', description: null, readOnly: null, enabled: true },
       ]);
       expect(safeFetchMock).toHaveBeenCalledTimes(4);
     },
@@ -704,7 +709,7 @@ describe('custom-mcp-servers commands', () => {
     const { tools } = await listCustomMcpServerToolsCommand(adminAuth, { id });
 
     expect(tools).toEqual([
-      { name: 'query', description: null, enabled: true },
+      { name: 'query', description: null, readOnly: null, enabled: true },
     ]);
   });
 

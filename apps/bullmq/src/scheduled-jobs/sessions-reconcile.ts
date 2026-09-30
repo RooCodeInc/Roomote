@@ -1,4 +1,7 @@
-import { reconcileExpiredFastAgentInferenceRetryNotices } from '@roomote/cloud-agents/server';
+import {
+  processSessionStatusJudgmentBatch,
+  reconcileExpiredFastAgentInferenceRetryNotices,
+} from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -6,12 +9,14 @@ import {
   ensureSessionForFastConversation,
   ensureSessionForTask,
   eq,
+  enqueueInactiveSessionStatusJudgmentRequests,
   fastAgentConversations,
   gt,
   inArray,
   isDemoSeedPreservedStatusSession,
   isNull,
   lt,
+  pruneSessionStatusJudgmentHistory,
   or,
   sessionBackfillState,
   sessions,
@@ -210,6 +215,10 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
   let orphanFailures = 0;
   const reconciledRetryNotices =
     await reconcileExpiredFastAgentInferenceRetryNotices(BATCH_SIZE);
+  const enqueuedInactiveStatusJudgments =
+    await enqueueInactiveSessionStatusJudgmentRequests(db, BATCH_SIZE);
+  const processedStatusJudgments = await processSessionStatusJudgmentBatch();
+  const prunedStatusJudgments = await pruneSessionStatusJudgmentHistory(db);
 
   // Fast conversations without a session row (e.g. created before this
   // release finished its backfill) are adopted here so the unified list
@@ -363,6 +372,9 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     refreshedSessions: recent.length,
     healedExpiredLeases: expiredLeases.length,
     reconciledRetryNotices,
+    enqueuedInactiveStatusJudgments,
+    processedStatusJudgments,
+    prunedStatusJudgments,
   });
 }
 

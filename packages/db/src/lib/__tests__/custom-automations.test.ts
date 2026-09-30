@@ -3,15 +3,21 @@ import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   NO_REPOSITORIES,
+  customAutomationRunWhenSchema,
 } from '@roomote/types';
 
 import {
   createCustomAutomation,
   deleteCustomAutomation,
+  ensureCustomAutomationWebhookToken,
   getCustomAutomationById,
+  getCustomAutomationWebhookState,
+  getCustomAutomationWebhookToken,
   listCustomAutomations,
   recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
+  rotateCustomAutomationWebhookToken,
+  setCustomAutomationWebhookToken,
   tryClaimCustomAutomationLaunch,
   updateCustomAutomation,
 } from '../custom-automations';
@@ -24,6 +30,152 @@ import {
 } from '../../server';
 
 describe('custom automations helpers', () => {
+  it('stores one encrypted webhook token and supports safe rotation and revocation', async () => {
+    const created = await createCustomAutomation({
+      name: `On-demand webhook ${Date.now()}`,
+      prompt: 'Run only when manually or webhook triggered.',
+      enabled: true,
+      scheduleMode: 'on_demand',
+      environmentId: FAST_EXECUTION,
+      target: {},
+    });
+    const firstToken = 'A'.repeat(43);
+
+    try {
+      expect(
+        await ensureCustomAutomationWebhookToken(created.id, firstToken),
+      ).toBe(firstToken);
+      const stored = await db.query.customAutomations.findFirst({
+        where: eq(customAutomations.id, created.id),
+        columns: { webhookSecret: true },
+      });
+      expect(stored?.webhookSecret).toBeTruthy();
+      expect(stored?.webhookSecret).not.toBe(firstToken);
+      expect(await getCustomAutomationWebhookToken(created.id)).toBe(
+        firstToken,
+      );
+      await updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: true,
+        scheduleMode: 'on_demand',
+        environmentId: FAST_EXECUTION,
+        target: {},
+      });
+      expect(await getCustomAutomationWebhookToken(created.id)).toBe(
+        firstToken,
+      );
+
+      const replacementToken = 'B'.repeat(43);
+      await setCustomAutomationWebhookToken(created.id, replacementToken);
+      expect(await getCustomAutomationWebhookToken(created.id)).toBe(
+        replacementToken,
+      );
+      const rotatedToken = 'D'.repeat(43);
+      expect(
+        await rotateCustomAutomationWebhookToken(created.id, rotatedToken),
+      ).toBe(rotatedToken);
+      expect(
+        await ensureCustomAutomationWebhookToken(created.id, 'C'.repeat(43)),
+      ).toBe(rotatedToken);
+      expect(await getCustomAutomationWebhookToken(created.id)).toBe(
+        rotatedToken,
+      );
+
+      await setCustomAutomationWebhookToken(created.id, null);
+      expect(await getCustomAutomationWebhookToken(created.id)).toBeNull();
+      expect(await getCustomAutomationWebhookState(created.id)).toMatchObject({
+        enabled: true,
+        token: null,
+      });
+      await updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: true,
+        scheduleMode: 'on_demand',
+        environmentId: FAST_EXECUTION,
+        target: {},
+      });
+      expect(await getCustomAutomationWebhookToken(created.id)).toBeNull();
+      expect(
+        await rotateCustomAutomationWebhookToken(created.id, 'E'.repeat(43)),
+      ).toBeNull();
+
+      await setCustomAutomationWebhookToken(created.id, 'C'.repeat(43));
+      await updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: false,
+        scheduleMode: 'on_demand',
+        environmentId: FAST_EXECUTION,
+        target: {},
+      });
+      expect(await getCustomAutomationWebhookToken(created.id)).toBeNull();
+      expect(
+        await rotateCustomAutomationWebhookToken(created.id, 'G'.repeat(43)),
+      ).toBeNull();
+      expect(
+        await ensureCustomAutomationWebhookToken(created.id, 'F'.repeat(43)),
+      ).toBeNull();
+    } finally {
+      await deleteCustomAutomation(created.id);
+    }
+  });
+
+  it('persists, preserves, and clears launch criteria and runWhen during edits', async () => {
+    const launchCriteria = 'Only investigate new regressions.';
+    const runWhen = customAutomationRunWhenSchema.parse({
+      all: [
+        {
+          id: 'new_regression',
+          ask: 'Does `report` describe a new regression?',
+          type: 'yes_no',
+          criteria: { true: 'New regression.', false: 'No new regression.' },
+          min: 0.75,
+        },
+      ],
+    });
+    const created = await createCustomAutomation({
+      name: `Conditioned report ${Date.now()}`,
+      prompt: 'Find current regressions.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+      launchCriteria,
+      runWhen,
+    });
+
+    expect(created.launchCriteria).toBe(launchCriteria);
+    expect(created.runWhen).toEqual(runWhen);
+
+    const preserved = await updateCustomAutomation(created.id, {
+      name: created.name,
+      prompt: created.prompt,
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+    });
+    expect(preserved.launchCriteria).toBe(launchCriteria);
+    expect(preserved.runWhen).toEqual(runWhen);
+
+    const cleared = await updateCustomAutomation(created.id, {
+      name: created.name,
+      prompt: created.prompt,
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+      launchCriteria: null,
+      runWhen: null,
+    });
+    expect(cleared.launchCriteria).toBeNull();
+    expect(cleared.runWhen).toBeNull();
+
+    await deleteCustomAutomation(created.id);
+  });
+
   it('persists Fast as an execution mode without an environment', async () => {
     const created = await createCustomAutomation({
       name: `Fast digest ${Date.now()}`,
@@ -337,6 +489,94 @@ describe('custom automations helpers', () => {
 
     await releaseCustomAutomationLaunchClaim(created.id, nextClaim!);
     await deleteCustomAutomation(created.id);
+  });
+
+  it('records a manual retry occurrence and keeps later webhook ordering', async () => {
+    const created = await createCustomAutomation({
+      name: `Concurrent webhook outcome ${Date.now()}`,
+      prompt: 'Review the supplied event.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+    });
+    const failedOccurrenceAt = new Date(Date.now() - 120_000);
+    await db
+      .update(customAutomations)
+      .set({ lastRunAt: failedOccurrenceAt, lastError: 'Previous run failed.' })
+      .where(eq(customAutomations.id, created.id));
+
+    const retryClaimedAt = await tryClaimCustomAutomationLaunch(
+      created.id,
+      failedOccurrenceAt,
+    );
+    expect(retryClaimedAt).toBeInstanceOf(Date);
+    expect(retryClaimedAt!.getTime()).toBeGreaterThan(
+      failedOccurrenceAt.getTime(),
+    );
+    let activeClaim = retryClaimedAt;
+
+    try {
+      await expect(
+        recordCustomAutomationRunOutcome(db, {
+          id: created.id,
+          status: 'succeeded',
+          at: new Date(retryClaimedAt!.getTime() + 30_000),
+          lastRunAt: retryClaimedAt!,
+          launchClaimedAt: retryClaimedAt!,
+        }),
+      ).resolves.toBe(true);
+
+      activeClaim = null;
+      const afterRetry = await getCustomAutomationById(created.id);
+      expect(afterRetry?.lastRunAt?.getTime()).toBe(retryClaimedAt!.getTime());
+      expect(afterRetry?.lastSucceededAt?.getTime()).toBe(
+        retryClaimedAt!.getTime() + 30_000,
+      );
+      expect(afterRetry?.lastError).toBeNull();
+      expect(afterRetry?.launchClaimedAt).toBeNull();
+
+      const scheduleClaimedAt = await tryClaimCustomAutomationLaunch(
+        created.id,
+        retryClaimedAt!,
+      );
+      expect(scheduleClaimedAt).toBeInstanceOf(Date);
+      activeClaim = scheduleClaimedAt;
+
+      const webhookOccurrenceAt = new Date(
+        scheduleClaimedAt!.getTime() + 120_000,
+      );
+      const webhookSettledAt = new Date(webhookOccurrenceAt.getTime() + 30_000);
+      await recordCustomAutomationRunOutcome(db, {
+        id: created.id,
+        status: 'succeeded',
+        at: webhookSettledAt,
+        lastRunAt: webhookOccurrenceAt,
+      });
+
+      await expect(
+        recordCustomAutomationRunOutcome(db, {
+          id: created.id,
+          status: 'failed',
+          at: new Date(webhookSettledAt.getTime() + 30_000),
+          error: 'Older webhook completion arrived later.',
+          lastRunAt: new Date(scheduleClaimedAt!.getTime() + 60_000),
+        }),
+      ).resolves.toBe(true);
+
+      const afterOlderWebhook = await getCustomAutomationById(created.id);
+      expect(afterOlderWebhook?.lastRunAt?.getTime()).toBe(
+        webhookOccurrenceAt.getTime(),
+      );
+      expect(afterOlderWebhook?.launchClaimedAt?.getTime()).toBe(
+        scheduleClaimedAt?.getTime(),
+      );
+    } finally {
+      if (activeClaim) {
+        await releaseCustomAutomationLaunchClaim(created.id, activeClaim);
+      }
+      await deleteCustomAutomation(created.id);
+    }
   });
 
   it('rejects a partially specified report destination', async () => {

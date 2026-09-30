@@ -26,6 +26,7 @@ import {
 } from '@roomote/db/server';
 import { resolveGitLabInstanceHost } from '@roomote/gitlab';
 import {
+  INTEGRATION_TOOL_FAST_CONVERSATION_HEADER,
   createMemoryMcpInstructions,
   BRAIN_MCP_ID,
   CHAT_DESTINATIONS_TOOL,
@@ -58,6 +59,8 @@ export type FastAgentIntegration = {
   name: string;
   description: string;
   dataPolicy?: 'shared' | 'private';
+  /** Which approval policies govern a custom server; unset for built-ins. */
+  toolApprovalPolicyScope?: 'deployment' | 'personal';
   instructions?: string;
   tools: McpToolDefinition[];
   endpoint?: {
@@ -546,6 +549,9 @@ export async function listFastAgentIntegrations(
       config,
     }),
     disabledTools: normalizeDisabledToolNames(config.disabledTools ?? []),
+    ...(config.toolApprovalPolicyScope
+      ? { toolApprovalPolicyScope: config.toolApprovalPolicyScope }
+      : {}),
   }));
 
   if (githubInstallation && !configuredServers.github) {
@@ -553,7 +559,7 @@ export async function listFastAgentIntegrations(
       id: 'github',
       name: 'GitHub',
       description:
-        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use the native GitHub tools directly for pull request and issue edits, comments, reviews, labels, branches, merges, and small file changes. Follow the discovered native tool descriptions and schemas for supported arguments.',
+        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use the native GitHub tools directly for pull request and issue edits, comments, reviews, labels, branches, merges, enabling pull request auto-merge, and small file changes. Follow the discovered native tool descriptions and schemas for supported arguments.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
         headers: { Authorization: `Bearer ${authToken}` },
@@ -652,6 +658,9 @@ export async function listFastAgentIntegrations(
         name: result.value.name,
         description: result.value.description,
         dataPolicy: result.value.dataPolicy,
+        ...(result.value.toolApprovalPolicyScope
+          ? { toolApprovalPolicyScope: result.value.toolApprovalPolicyScope }
+          : {}),
         instructions: isMemory
           ? createMemoryMcpInstructions(result.value.id, {
               primary: primaryMemory,
@@ -693,7 +702,7 @@ export async function callFastAgentIntegration(
       context.privateOwnerUserId !== context.userId)
   ) {
     throw new Error(
-      'Private integrations require a private Session owned by the current user.',
+      'Private integrations require a private session owned by the current user.',
     );
   }
   if (
@@ -701,10 +710,10 @@ export async function callFastAgentIntegration(
     isMemoryMcpServer(request.integrationId) &&
     request.integrationId !== BRAIN_MCP_ID
   ) {
-    throw new Error('Private Sessions cannot write to shared memory.');
+    throw new Error('Private sessions cannot write to shared memory.');
   }
   if (privateBrainRead && request.toolName === 'synthesize') {
-    throw new Error('Brain synthesis is unavailable in private Sessions.');
+    throw new Error('Brain synthesis is unavailable in private sessions.');
   }
   if (
     request.integrationId === ROOMOTE_MCP_ID &&
@@ -719,20 +728,23 @@ export async function callFastAgentIntegration(
   // The token minted at list time is short-lived, so deployment-proxy calls
   // re-mint it here: a call late in a long turn must not send an expired
   // bearer. Direct upstream endpoints keep their own resolved headers.
+  // Deployment-proxy calls also name their conversation, so the proxy can
+  // shadow-assess them against this user's latest prompt there.
   let endpoint = integration.endpoint;
   if (!endpoint || endpoint.deploymentProxy) {
     const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+    const proxyHeaders = {
+      Authorization: `Bearer ${authToken}`,
+      [INTEGRATION_TOOL_FAST_CONVERSATION_HEADER]: context.sessionId,
+    };
     endpoint = endpoint
       ? {
           ...endpoint,
-          headers: {
-            ...endpoint.headers,
-            Authorization: `Bearer ${authToken}`,
-          },
+          headers: { ...endpoint.headers, ...proxyHeaders },
         }
       : {
           url: integrationProxyUrl(apiBaseUrl, integration.id),
-          headers: { Authorization: `Bearer ${authToken}` },
+          headers: proxyHeaders,
         };
   }
   if (

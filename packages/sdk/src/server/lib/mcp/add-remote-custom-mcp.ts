@@ -169,7 +169,7 @@ function findMatchingRemoteMcpServer<
   );
   if (nameMatch && urlMatch && nameMatch.id !== urlMatch.id) {
     throw new Error(
-      'The requested name and URL match different custom MCP servers. Review them in Settings.',
+      'The requested name and URL match different custom MCP servers. Review them on the Integrations page or in Personal settings.',
     );
   }
   return nameMatch ?? urlMatch;
@@ -769,7 +769,7 @@ async function requireServer(id: string): Promise<ResolvedCustomMcpServer> {
 }
 
 /**
- * Add, or find again, a remote MCP server for a Fast Session. Any active
+ * Add, or find again, a remote MCP server for a session. Any active
  * member may call this, mirroring integration keys: `deployment` (the
  * default) shares the server with everyone, `owner` keeps it private to the
  * requesting member under Personal settings.

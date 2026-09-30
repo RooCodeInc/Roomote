@@ -8,6 +8,7 @@ import type { WorkItemStatus } from '@roomote/types';
 
 import { loadAutomationThreadFeedbackReport } from './automation-thread-feedback';
 import { type ActiveRepositoryProviderPartition } from './github-deployment-scope';
+import { appendAutomationWebhookInput } from './types';
 
 type SuggesterRepositoryPartition = ActiveRepositoryProviderPartition & {
   repositoryIds: string[];
@@ -43,7 +44,8 @@ export async function dispatchSuggestionScan(params: {
   repositoryCoverage: EnvironmentBackedRepositoryCoverage;
   repositoryPartitions: SuggesterRepositoryPartition[];
   suggesterInstructions: string | null;
-  triggerKind: 'manual' | 'scheduled';
+  triggerKind: 'manual' | 'scheduled' | 'webhook';
+  webhookInputJson?: string;
   destinationPayloadFields?: Record<string, string>;
 }): Promise<{
   errors: string[];
@@ -85,18 +87,22 @@ export async function dispatchSuggestionScan(params: {
             ...(params.deployment.slackTeamId
               ? { teamId: params.deployment.slackTeamId }
               : {}),
-            description: buildSuggestedTasksPrompt({
-              repositoryFullNames: partition.repositoryFullNames,
-              repositoryCoverage: params.repositoryCoverage.filter((coverage) =>
-                partitionIds.has(coverage.repositoryId),
-              ),
-              setupGuidance: null,
-              suggesterInstructions: params.suggesterInstructions,
-              previousSuggestions: params.previousSuggestions,
-              recentThreadFeedback: recentThreadFeedback.promptText,
-            }),
+            description: appendAutomationWebhookInput(
+              buildSuggestedTasksPrompt({
+                repositoryFullNames: partition.repositoryFullNames,
+                repositoryCoverage: params.repositoryCoverage.filter(
+                  (coverage) => partitionIds.has(coverage.repositoryId),
+                ),
+                setupGuidance: null,
+                suggesterInstructions: params.suggesterInstructions,
+                previousSuggestions: params.previousSuggestions,
+                recentThreadFeedback: recentThreadFeedback.promptText,
+              }),
+              params.webhookInputJson,
+            ),
             trigger: 'scheduled',
             notifySlack: true,
+            requiresTerminalCloseoutWithoutTurn: true,
             suggestionSource: 'suggest_ideas',
             visibleInTranscript: false,
             ...(isSlackDestination ? { slackChannel: params.channelId } : {}),
@@ -106,7 +112,12 @@ export async function dispatchSuggestionScan(params: {
         initiator: { kind: 'automation', key: 'suggester' },
         workflow: 'scan',
         surface: 'system',
-        trigger: params.triggerKind === 'manual' ? 'manual' : 'schedule',
+        trigger:
+          params.triggerKind === 'webhook'
+            ? 'webhook'
+            : params.triggerKind === 'manual'
+              ? 'manual'
+              : 'schedule',
         visibility: 'hidden',
         ...(isSlackDestination
           ? { channels: { slackChannelId: params.channelId } }

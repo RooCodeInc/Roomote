@@ -45,7 +45,7 @@ const SUGGESTABLE_EVENT_TYPES = new Set<string>([
 ]);
 
 /** The minimal message shape the suggestion prompt is built from; both task
- * envelopes and fast-session rows reduce to it. */
+ * envelopes and session rows reduce to it. */
 type SuggestableMessage = {
   /** Stable row id; the newest assistant id keys the generation cache. */
   id?: string | number;

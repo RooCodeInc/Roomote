@@ -29,6 +29,19 @@ export async function isFastConversationSharedBrainEligible(
   return conversation?.privacy === 'shared';
 }
 
+/** The facts already saved for a conversation, one `- fact` line each. */
+export async function getFastAgentConversationMemory(
+  database: DatabaseOrTransaction,
+  conversationId: string,
+): Promise<string | null> {
+  const [row] = await database
+    .select({ memory: fastAgentMemoryEvents.memory })
+    .from(fastAgentMemoryEvents)
+    .where(eq(fastAgentMemoryEvents.conversationId, conversationId))
+    .limit(1);
+  return row?.memory ?? null;
+}
+
 /**
  * Append one remembered fact to a conversation's memory outbox row. The agent
  * authors the fact; the server places it: the row is drained by the Brain

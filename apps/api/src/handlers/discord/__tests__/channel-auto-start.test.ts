@@ -210,7 +210,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     // test opts into an accepted Fast turn explicitly.
     mocks.startFastResponse.mockResolvedValue({
       accepted: false,
-      reason: 'Fast session is busy.',
+      reason: 'Session is busy.',
     });
     mocks.evaluateGate.mockResolvedValue({
       shouldLaunch: true,

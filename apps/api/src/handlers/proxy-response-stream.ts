@@ -4,69 +4,21 @@ import {
   registerLongLivedProxyStream,
   type LongLivedProxyStreamTrackingContext,
 } from './long-lived-proxy-stream-registry';
+import {
+  classifyProxyFailure,
+  getProxyFailureErrorFields,
+} from './proxy-failure';
 
-type ProxyResponseLogFieldValue = number | string | undefined;
-
-function extractErrorFields(
-  error: unknown,
-): Record<string, ProxyResponseLogFieldValue> {
-  if (!(error instanceof Error)) {
-    return {
-      error: String(error),
-    };
-  }
-
-  const result: Record<string, ProxyResponseLogFieldValue> = {
-    errorName: error.name,
-    error: error.message,
-  };
-
-  if (
-    'code' in error &&
-    typeof (error as { code?: unknown }).code === 'string'
-  ) {
-    result.errorCode = (error as { code: string }).code;
-  }
-
-  if (!(error.cause instanceof Error)) {
-    return result;
-  }
-
-  result.causeName = error.cause.name;
-  result.cause = error.cause.message;
-
-  if (
-    'code' in error.cause &&
-    typeof (error.cause as { code?: unknown }).code === 'string'
-  ) {
-    result.causeCode = (error.cause as { code: string }).code;
-  }
-
-  return result;
-}
-
-function isExpectedProxyDisconnect(error: unknown): boolean {
-  if (
-    error instanceof DOMException &&
-    (error.name === 'AbortError' || error.name === 'TimeoutError')
-  ) {
-    return true;
-  }
-
-  return (
-    error instanceof Error &&
-    error.cause instanceof DOMException &&
-    (error.cause.name === 'AbortError' || error.cause.name === 'TimeoutError')
-  );
-}
+type ProxyResponseLogFieldValue = boolean | number | string | undefined;
 
 export function createLoggedProxyResponseBody(options: {
   body: ReadableStream<Uint8Array> | null;
   logPrefix: string;
   getLogFields: () => Record<string, ProxyResponseLogFieldValue>;
+  signal?: AbortSignal;
   trackingContext?: LongLivedProxyStreamTrackingContext;
 }): ReadableStream<Uint8Array> | null {
-  const { body, logPrefix, getLogFields, trackingContext } = options;
+  const { body, logPrefix, getLogFields, signal, trackingContext } = options;
 
   if (!body) {
     return null;
@@ -118,12 +70,15 @@ export function createLoggedProxyResponseBody(options: {
 
         controller.enqueue(value);
       } catch (error) {
+        const classification = classifyProxyFailure(error, signal);
         const message = `${logPrefix} ${formatLogFields({
           ...getLogFields(),
-          ...extractErrorFields(error),
+          outcome: classification.outcome,
+          retryable: classification.retryable,
+          ...getProxyFailureErrorFields(error),
         })}`;
 
-        if (isExpectedProxyDisconnect(error)) {
+        if (classification.expected) {
           console.debug(message);
         } else {
           console.error(message);

@@ -10,7 +10,10 @@ import {
 } from '@roomote/cloud-agents/show-widget';
 import {
   CREATE_CUSTOM_SKILL_TOOL,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  getManageCustomAutomationsTool,
+  OPEN_ARTIFACT_TOOL,
   PUBLIC_URL_FETCH_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
 } from '@roomote/types';
@@ -172,7 +175,7 @@ describe('roomote MCP tool descriptions', () => {
     ]);
   });
 
-  it('documents every built-in custom automation schedule preset', async () => {
+  it('documents recurring presets and the on-demand schedule', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(
       registeredTools,
@@ -183,24 +186,46 @@ describe('roomote MCP tool descriptions', () => {
       'schedule',
     ).description;
 
+    expect(scheduleDescription).toContain('built-in presets:');
+    for (const preset of ['every_hour', 'every_6_hours', 'daily', 'weekly']) {
+      expect(scheduleDescription).toContain(preset);
+    }
     expect(scheduleDescription).toContain(
-      'built-in presets: off, every_hour, every_6_hours, daily, weekly',
-    );
-    expect(scheduleDescription).toContain(
-      'Prefer a built-in preset when it matches the requested cadence.',
+      '"on_demand" for runs started only with Run now or an enabled webhook.',
     );
   });
 
-  it('registers the shared custom automation descriptor unchanged', async () => {
+  it('enforces the shared custom automation prompt limit in the native tool schema', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(
+      registeredTools,
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+    );
+    const promptSchema = getInputSchemaField(
+      tool,
+      'prompt',
+    ) as unknown as z.ZodTypeAny;
+
+    expect(
+      promptSchema.safeParse('x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH))
+        .success,
+    ).toBe(true);
+    expect(
+      promptSchema.safeParse(
+        'x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH + 1),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('starts with launch-condition fields hidden until the server reads the experiment state', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(
       registeredTools,
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
     );
+    const disabledTool = getManageCustomAutomationsTool(false);
 
-    expect(automationsTool.config.description).toBe(
-      MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
-    );
+    expect(automationsTool.config.description).toBe(disabledTool.description);
     expect(automationsTool.config.description).toContain(
       'Members can create and manage their own custom automations',
     );
@@ -211,17 +236,21 @@ describe('roomote MCP tool descriptions', () => {
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.annotations,
     );
     expect(Object.keys(automationsTool.config.inputSchema)).toEqual(
-      Object.keys(MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema),
+      Object.keys(disabledTool.inputSchema),
     );
-    for (const fieldName of Object.keys(
-      MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
-    )) {
+    for (const fieldName of Object.keys(disabledTool.inputSchema)) {
       expect(automationsTool.config.inputSchema[fieldName]?.description).toBe(
-        MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema[
-          fieldName as keyof typeof MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema
+        disabledTool.inputSchema[
+          fieldName as keyof typeof disabledTool.inputSchema
         ].description,
       );
     }
+    expect(automationsTool.config.inputSchema).not.toHaveProperty(
+      'launchCriteria',
+    );
+    expect(automationsTool.config.inputSchema).not.toHaveProperty('runWhen');
+    expect(automationsTool.config.description).not.toContain('launchCriteria');
+    expect(automationsTool.config.description).not.toContain('runWhen');
   });
 
   it('registers the shared custom skill descriptor with its advertised fields', async () => {
@@ -372,7 +401,7 @@ describe('roomote MCP tool descriptions', () => {
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
 
     expect(manageTasksTool.config.description).toContain(
-      'Manage Roomote Sessions by default',
+      'Manage Roomote sessions by default',
     );
     expect(manageTasksTool.config.description).not.toContain(
       'Not Slack-visible by itself',
@@ -422,10 +451,10 @@ describe('roomote MCP tool descriptions', () => {
     ]);
     expect(manageTasksTool.config.description).not.toContain('launch');
     expect(taskIdField.description).toBe(
-      'Optional concrete task ID. When provided to get_summary, get_messages, get_updates, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
+      'Optional concrete task ID. When provided to get_summary, get_messages, get_updates, or send_message, targets that task instead of a session. Required for task-only controls such as get_compute_logs and cancel.',
     );
     expect(limitField.description).toBe(
-      'Positive result limit: 1 to 100 for search/get_updates (default 20), or 1 to 1000 for get_messages (task or Fast session)',
+      'Positive result limit: 1 to 100 for search/get_updates (default 20), or 1 to 1000 for get_messages (task or session)',
     );
     expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
       'targetTasks',
@@ -458,19 +487,27 @@ describe('roomote MCP tool descriptions', () => {
     const tool = getRegisteredTool(registeredTools, 'manage_tasks');
 
     expect(tool.config.description).toContain(
-      'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript',
+      'Use action "get_messages" with sessionId for session history, or taskId for a specific task transcript',
     );
     expect(tool.config.description).toContain(
       'Use action "get_updates" with sessionId or taskId and its returned cursor',
     );
-    expect(tool.config.description).toContain('Codex → Roomote');
-    expect(tool.config.description).toContain('Roomote → Codex');
+    expect(tool.config.description).toContain('Client → Roomote');
+    expect(tool.config.description).toContain('Roomote → Client');
+    expect(tool.config.description).toContain('Agent (on behalf of user):');
+    expect(tool.config.description).toContain('untrusted textual convention');
+    expect(tool.config.description).toContain(
+      'not as verified sender provenance',
+    );
+    expect(tool.config.description).toContain(
+      'Never present the agent as the user',
+    );
     expect(tool.config.description).toContain('do not narrate unchanged polls');
     expect(tool.config.description).toContain(
       'keep the final answer self-contained',
     );
     expect(tool.config.description).toContain(
-      'Use start to begin new work in a Session',
+      'Use start to begin new work in a session',
     );
     expect(
       registeredTools.some((candidate) => candidate.name === 'manage_sessions'),
@@ -618,10 +655,59 @@ describe('roomote MCP tool descriptions', () => {
       'Use it to reuse previously uploaded artifact links (for example visual-proof links) instead of relying on transcript memory or re-uploading.',
     );
     expect(artifactsTool.config.description).toContain(
-      'Creation results return viewUrl for the artifact in its task or Session and standaloneViewUrl to open the document, image, or file on its own page with a direct shareable link; share whichever returned URL fits the context rather than constructing an artifact URL.',
+      'Creation results return viewUrl for the artifact in its task or session and standaloneViewUrl to open the document, image, or file on its own page with a direct shareable link; share whichever returned URL fits the context rather than constructing an artifact URL.',
     );
     expect(artifactTypeField.description).toBe(
       'Optional artifact type filter for list (one of "general", "plan", "visual-proof"). Omit to list all artifact types.',
+    );
+  });
+
+  it('registers the generic open_artifact capability', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, OPEN_ARTIFACT_TOOL.name);
+
+    expect(tool.config.title).toBe(OPEN_ARTIFACT_TOOL.title);
+    expect(tool.config.description).toBe(OPEN_ARTIFACT_TOOL.description);
+    expect(tool.config.annotations).toEqual(OPEN_ARTIFACT_TOOL.annotations);
+    const schema = tool.config
+      .inputSchema as unknown as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape)).toEqual([
+      'taskId',
+      'sessionId',
+      'path',
+      'version',
+    ]);
+    expect(tool.config.description).toContain(
+      'Binary or otherwise unsupported formats return an explicit unsupported-format error with metadata but no content',
+    );
+    expect(tool.config.description).toContain(
+      'never guess an artifact ID or path',
+    );
+  });
+
+  it('does not add the current task when opening a Session artifact', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: 'session artifact' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'current-task',
+    });
+    const tool = getRegisteredTool(registeredTools, OPEN_ARTIFACT_TOOL.name);
+
+    await tool.handler?.({ sessionId: 'session-1', path: 'notes/context.md' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/artifacts/open',
+      expect.objectContaining({
+        body: JSON.stringify({
+          sessionId: 'session-1',
+          path: 'notes/context.md',
+        }),
+      }),
     );
   });
 

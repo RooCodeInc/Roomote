@@ -38,6 +38,10 @@ async function assertManualTriggerIsRunnable(
     throw new Error(`Unsupported automation: ${String(automationKey)}`);
   }
 
+  if (automationKey === 'manager_stats') {
+    throw new Error('Manager Stats does not support on-demand runs.');
+  }
+
   const runtime = await getAutomationRuntime(automationKey);
   let hasAdditionalRules = false;
   let rulesDestination: ResolvedAutomationDestination | null = null;
@@ -152,7 +156,7 @@ async function assertManualTriggerIsRunnable(
       case 'sentry':
         if (!(await hasActiveSentryIntegration())) {
           throw new Error(
-            `Configure Sentry in Settings > Integrations before running ${descriptor.label}.`,
+            `Configure Sentry on the Integrations page before running ${descriptor.label}.`,
           );
         }
         break;
@@ -183,6 +187,7 @@ export async function triggerAutomationCommand(
   );
 
   return runAutomationNow(input.automationKey, {
+    context: { trigger: 'manual' },
     ...(destination ? { destination } : {}),
   });
 }

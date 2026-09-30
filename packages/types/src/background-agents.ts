@@ -1,16 +1,17 @@
 export type ConflictResolverFrequency =
   | 'off'
+  | 'on_demand'
   | 'every_hour'
   | 'every_6_hours'
   | 'daily';
 
-export type SuggesterFrequency = 'off' | 'daily' | 'weekly';
+export type SuggesterFrequency = 'off' | 'on_demand' | 'daily' | 'weekly';
 
-export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
+export type AnnouncerFrequency = 'off' | 'on_demand' | 'daily' | 'weekly';
 
-export type ManagerStatsFrequency = 'off' | 'weekly';
+export type ManagerStatsFrequency = 'off' | 'daily' | 'weekly' | 'monthly';
 
-export type ProviderUsageLimitFrequency = 'off' | 'every_hour';
+export type ProviderUsageLimitFrequency = 'off' | 'on_demand' | 'every_hour';
 
 export const DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY: ProviderUsageLimitFrequency =
   'every_hour';
@@ -27,13 +28,18 @@ export function isProviderUsageLimitThreshold(
   return (PROVIDER_USAGE_LIMIT_THRESHOLDS as readonly number[]).includes(value);
 }
 
-export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
+export type SentryTriageFrequency = 'off' | 'on_demand' | 'daily' | 'weekly';
 
-export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
+export type DependabotTriageFrequency =
+  | 'off'
+  | 'on_demand'
+  | 'daily'
+  | 'weekly';
 
-export type CodeqlTriageFrequency = 'off' | 'daily' | 'weekly';
+export type CodeqlTriageFrequency = 'off' | 'on_demand' | 'daily' | 'weekly';
 export const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES = [
   'off',
+  'on_demand',
   'every_hour',
   'every_6_hours',
   'daily',
@@ -66,6 +72,7 @@ export function isScheduleOnlyBackgroundAutomationFrequency(
 /** Cadence presets supported by user-defined custom automations. */
 export type CustomAutomationScheduleMode =
   | ScheduleOnlyBackgroundAutomationFrequency
+  | 'on_demand'
   | 'cron';
 
 export const CUSTOM_AUTOMATION_EXECUTION_MODES = [
@@ -77,7 +84,8 @@ export type CustomAutomationExecutionMode =
 
 export const CUSTOM_AUTOMATION_NAME_MAX_LENGTH = 100;
 
-export const CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH = 8_000;
+export const CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH = 16_000;
+export const CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH = 4_000;
 export const CUSTOM_AUTOMATION_CRON_MAX_LENGTH = 200;
 export const CUSTOM_AUTOMATION_MODEL_MAX_LENGTH = 200;
 export type SecurityAuditorFrequency =

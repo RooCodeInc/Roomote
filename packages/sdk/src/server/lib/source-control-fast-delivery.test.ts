@@ -228,6 +228,51 @@ describe('createFastAgentSourceControlTaskLauncher', () => {
     expect(task.payload).not.toHaveProperty('linkedWorkItems');
   });
 
+  it('marks a terminal pull request branch as eligible for missing-branch fallback', async () => {
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+    });
+    const launch = createFastAgentSourceControlTaskLauncher({
+      userId: 'user-1',
+      conversation,
+      resolveTarget: vi.fn().mockResolvedValue({
+        repositoryId: 'repo-1',
+        branch: 'develop',
+        pullRequest: {
+          url: 'https://github.com/acme/api/pull/42',
+          terminal: true,
+        },
+      }),
+    });
+
+    await launch({
+      prompt: 'Follow up on the merged change',
+      environmentId: null,
+      parentSessionId: 'fast-1',
+      postKickoff: vi.fn(),
+    });
+
+    const params = mocks.createFastAgentTaskLauncher.mock.calls[0]?.[0] as {
+      buildTask: (input: Record<string, unknown>) => {
+        payload: Record<string, unknown>;
+      };
+    };
+    expect(
+      params.buildTask({
+        prompt: 'Follow up on the merged change',
+        environmentId: null,
+        parentSessionId: 'fast-1',
+      }).payload,
+    ).toMatchObject({
+      branch: 'develop',
+      allowMissingBranchFallback: true,
+    });
+  });
+
   it('keeps the discussion repository and drops the sentinel when a blank slate is requested', async () => {
     const conversation = buildSourceControlFastConversation({
       provider: 'github',
@@ -295,7 +340,7 @@ describe('createFastAgentSourceControlTaskLauncher', () => {
       }),
     ).resolves.toEqual({
       success: false,
-      error: expect.stringContaining('head branch could not be resolved'),
+      error: expect.stringContaining('branch could not be resolved'),
     });
     expect(mocks.createFastAgentTaskLauncher).not.toHaveBeenCalled();
   });
@@ -366,7 +411,9 @@ describe('GitHub Fast delivery', () => {
     request.mockResolvedValue({ data: { id: 5002 } });
     pullsGet.mockResolvedValue({
       data: {
+        state: 'open',
         head: { ref: 'feature/ship', sha: 'abc123' },
+        base: { ref: 'main' },
         html_url: 'https://github.com/acme/api/pull/42',
         title: 'Ship it',
       },
@@ -379,6 +426,7 @@ describe('GitHub Fast delivery', () => {
       {
         id: 'repo-1',
         host: null,
+        defaultBranch: 'main',
         githubInstallation: { installationId: 123 },
       },
     ]);
@@ -431,6 +479,45 @@ describe('GitHub Fast delivery', () => {
         title: 'Ship it',
         sha: 'abc123',
       },
+    });
+  });
+
+  it('uses the base branch for terminal PRs and falls back to the repository default', async () => {
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+
+    pullsGet.mockResolvedValueOnce({
+      data: {
+        state: 'closed',
+        head: { ref: 'deleted-feature', sha: 'abc123' },
+        base: { ref: 'develop' },
+        html_url: 'https://github.com/acme/api/pull/42',
+        title: 'Ship it',
+      },
+    });
+    await expect(delivery!.resolveTarget()).resolves.toMatchObject({
+      branch: 'develop',
+      pullRequest: { terminal: true },
+    });
+
+    pullsGet.mockResolvedValueOnce({
+      data: {
+        state: 'closed',
+        head: { ref: 'deleted-feature', sha: 'abc123' },
+        base: {},
+        html_url: 'https://github.com/acme/api/pull/42',
+        title: 'Ship it',
+      },
+    });
+    await expect(delivery!.resolveTarget()).resolves.toMatchObject({
+      branch: 'main',
+      pullRequest: { terminal: true },
     });
   });
 
@@ -851,7 +938,7 @@ describe('other provider Fast deliveries', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.repositoriesFindMany.mockResolvedValue([
-      { id: 'repo-1', host: 'git.example.com' },
+      { id: 'repo-1', host: 'git.example.com', defaultBranch: 'main' },
     ]);
   });
 
@@ -861,7 +948,9 @@ describe('other provider Fast deliveries', () => {
       iid: 42,
       title: 'Update backend',
       web_url: 'https://git.example.com/acme/backend/-/merge_requests/42',
+      state: 'opened',
       source_branch: 'feature/test',
+      target_branch: 'main',
       sha: 'abc123',
     });
     const conversation = buildSourceControlFastConversation({
@@ -896,6 +985,32 @@ describe('other provider Fast deliveries', () => {
         title: 'Update backend',
         sha: 'abc123',
       },
+    });
+  });
+
+  it('uses the target branch instead of a deleted source branch for terminal GitLab merge requests', async () => {
+    mocks.gitlabGetMergeRequest.mockResolvedValue({
+      iid: 42,
+      title: 'Update backend',
+      state: 'merged',
+      web_url: 'https://git.example.com/acme/backend/-/merge_requests/42',
+      source_branch: 'deleted-feature',
+      target_branch: 'develop',
+      sha: 'abc123',
+    });
+    const delivery = await buildSourceControlFastDelivery(
+      buildSourceControlFastConversation({
+        provider: 'gitlab',
+        host: 'git.example.com',
+        repositoryFullName: 'acme/backend',
+        kind: 'pull',
+        number: 42,
+      }),
+    );
+
+    await expect(delivery!.resolveTarget()).resolves.toMatchObject({
+      branch: 'develop',
+      pullRequest: { terminal: true },
     });
   });
 
@@ -946,14 +1061,16 @@ describe('other provider Fast deliveries', () => {
     mocks.adoGetPullRequest.mockResolvedValue({
       pullRequestId: 42,
       title: 'Update backend',
+      status: 'active',
       sourceRefName: 'refs/heads/feature/test',
+      targetRefName: 'refs/heads/main',
       lastMergeSourceCommit: { commitId: 'abc123' },
       repository: {
         webUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
       },
     });
     mocks.repositoriesFindMany.mockResolvedValue([
-      { id: 'repo-1', host: 'dev.azure.com' },
+      { id: 'repo-1', host: 'dev.azure.com', defaultBranch: 'main' },
     ]);
     const conversation = buildSourceControlFastConversation({
       provider: 'ado',
@@ -1010,6 +1127,96 @@ describe('other provider Fast deliveries', () => {
         }),
       ),
     ).resolves.toBeNull();
+  });
+
+  it('uses the destination branch instead of a deleted source branch for terminal Bitbucket pull requests', async () => {
+    mocks.bitbucketGetPullRequest.mockResolvedValue({
+      id: 42,
+      title: 'Update backend',
+      state: 'MERGED',
+      source: {
+        branch: { name: 'deleted-feature' },
+        commit: { hash: 'abc123' },
+      },
+      destination: { branch: { name: 'develop' } },
+      links: {
+        html: { href: 'https://git.example.com/acme/backend/pull-requests/42' },
+      },
+    });
+    const delivery = await buildSourceControlFastDelivery(
+      buildSourceControlFastConversation({
+        provider: 'bitbucket',
+        host: 'git.example.com',
+        repositoryFullName: 'acme/backend',
+        kind: 'pull',
+        number: 42,
+      }),
+    );
+
+    await expect(delivery!.resolveTarget()).resolves.toMatchObject({
+      branch: 'develop',
+      pullRequest: { terminal: true },
+    });
+  });
+
+  it('uses the base branch instead of a deleted head for terminal Gitea pull requests', async () => {
+    mocks.giteaGetPullRequest.mockResolvedValue({
+      number: 42,
+      title: 'Update backend',
+      state: 'closed',
+      merged: true,
+      head: { ref: 'deleted-feature', sha: 'abc123' },
+      base: { ref: 'develop' },
+      html_url: 'https://git.example.com/acme/backend/pulls/42',
+    });
+    const delivery = await buildSourceControlFastDelivery(
+      buildSourceControlFastConversation({
+        provider: 'gitea',
+        host: 'git.example.com',
+        repositoryFullName: 'acme/backend',
+        kind: 'pull',
+        number: 42,
+      }),
+    );
+
+    await expect(delivery!.resolveTarget()).resolves.toMatchObject({
+      branch: 'develop',
+      pullRequest: { terminal: true },
+    });
+  });
+
+  it('uses the target branch instead of a deleted source branch for terminal Azure DevOps pull requests', async () => {
+    mocks.repositoriesFindMany.mockResolvedValue([
+      { id: 'repo-1', host: 'dev.azure.com', defaultBranch: 'main' },
+    ]);
+    mocks.adoListRepositories.mockResolvedValue([
+      { id: 'guid-1', name: 'backend', project: { name: 'Platform' } },
+    ]);
+    mocks.adoGetPullRequest.mockResolvedValue({
+      pullRequestId: 42,
+      title: 'Update backend',
+      status: 'completed',
+      sourceRefName: 'refs/heads/deleted-feature',
+      targetRefName: 'refs/heads/develop',
+      lastMergeSourceCommit: { commitId: 'abc123' },
+      repository: {
+        webUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+      },
+    });
+    const delivery = await buildSourceControlFastDelivery(
+      buildSourceControlFastConversation({
+        provider: 'ado',
+        host: 'dev.azure.com',
+        repositoryFullName: 'acme/Platform/backend',
+        kind: 'pull',
+        number: 42,
+      }),
+    );
+
+    await expect(delivery!.resolveTarget()).resolves.toMatchObject({
+      branch: 'develop',
+      pullRequest: { terminal: true },
+    });
   });
 });
 

@@ -184,7 +184,7 @@ linear.post('/', async (c) => {
 /**
  * Handle an AgentSessionEvent webhook.
  *
- * Every session event enters the session's Fast Session: the Session reads
+ * Every session event enters the session: the session reads
  * the issue, replies as agent responses, and delegates work to tasks bound
  * to the session. Only two things bypass it: stop signals, and answers to a
  * question a running task asked through request_user_input.

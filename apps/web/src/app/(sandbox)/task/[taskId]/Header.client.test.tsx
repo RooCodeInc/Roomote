@@ -194,7 +194,7 @@ describe('Header', () => {
     expect(parentSessionQueryMock).toHaveBeenCalled();
   });
 
-  it('links to the Fast session when the task has no unified session', async () => {
+  it('links to the session when the task has no unified session', async () => {
     parentSessionQueryMock.mockResolvedValue(null);
 
     renderHeader({

@@ -114,7 +114,7 @@ export async function preparePromptAttachments(
   },
   options?: {
     /**
-     * Enforce the Fast Session aggregate attachment-text limit client-side.
+     * Enforce the session aggregate attachment-text limit client-side.
      * The standard task and wake composers accept unbounded prompts, so the
      * check stays opt-in to avoid narrowing those flows.
      */

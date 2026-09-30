@@ -49,7 +49,9 @@ function DropdownMenu({
   onOpenChange,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  const isMobile = useIsMobile();
+  // Non-modal menus stay anchored so outside navigation and keyboard focus
+  // remain available. Ordinary mobile menus retain the modal drawer.
+  const isMobile = useIsMobile() && props.modal !== false;
   const [open, setOpen] = useControllableState({
     prop: openProp,
     defaultProp: defaultOpen ?? false,

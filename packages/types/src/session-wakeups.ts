@@ -160,7 +160,7 @@ export const manageWakeupsFieldSchemas = {
     .boolean()
     .optional()
     .describe(
-      '[create] Set true only for automatic housekeeping required by system instructions. Internal wakeups are hidden from the Session timer list but still count toward the active limit and remain listable, gettable, and cancellable. Omit or set false for user-requested reminders and monitors.',
+      '[create] Set true only for automatic housekeeping required by system instructions. Internal wakeups are hidden from the session timer list but still count toward the active limit and remain listable, gettable, and cancellable. Omit or set false for user-requested reminders and monitors.',
     ),
 } satisfies z.ZodRawShape;
 

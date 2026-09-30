@@ -20,15 +20,6 @@ describe('buildTelegramMessagePermalink', () => {
     ).toBe('https://t.me/c/456789/7/42');
   });
 
-  it('returns null for personal chat / bot DM ids when no bot username is provided', () => {
-    expect(
-      buildTelegramMessagePermalink({
-        chatId: '9876543',
-        messageId: '42',
-      }),
-    ).toBeNull();
-  });
-
   it('falls back to the bot DM link for personal chats when a bot username is provided', () => {
     expect(
       buildTelegramMessagePermalink({
@@ -48,16 +39,19 @@ describe('buildTelegramMessagePermalink', () => {
     ).toBe('https://t.me/roomote_bot');
   });
 
-  it('returns null when the chat id is missing even with a bot username', () => {
+  it('returns null when chat or message metadata is insufficient', () => {
+    expect(
+      buildTelegramMessagePermalink({
+        chatId: '9876543',
+        messageId: '42',
+      }),
+    ).toBeNull();
     expect(
       buildTelegramMessagePermalink({
         chatId: '   ',
         botUsername: 'roomote_bot',
       }),
     ).toBeNull();
-  });
-
-  it('returns null when the chat id or message id is missing', () => {
     expect(
       buildTelegramMessagePermalink({
         chatId: '-100456789',

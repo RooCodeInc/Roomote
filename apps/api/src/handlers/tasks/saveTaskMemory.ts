@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { z } from 'zod';
+import type { z } from 'zod';
 
 import {
   db,
@@ -7,33 +7,12 @@ import {
   isTaskRunSharedBrainEligible,
   saveBrainAgentSummary,
 } from '@roomote/db/server';
-import { TASK_MEMORY_LIMITS } from '@roomote/types';
+import { renderTaskMemorySummary, taskMemorySchema } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import { isRunTokenContext } from '../mcp/proxy-utils';
 import { logHandlerError } from '../utils';
-
-/**
- * Field caps keep one task's memory proportionate: a memory is a distillation
- * for future agents, not a transcript. The numbers live in TASK_MEMORY_LIMITS
- * so the worker tool schema advertises the same caps the server enforces.
- */
-const memoryList = z
-  .array(z.string().trim().min(1).max(TASK_MEMORY_LIMITS.listEntryMaxChars))
-  .max(TASK_MEMORY_LIMITS.listMaxEntries);
-
-const taskMemorySchema = z.object({
-  outcome: z.string().trim().min(1).max(TASK_MEMORY_LIMITS.outcomeMaxChars),
-  decisions: memoryList.optional(),
-  rationale: z
-    .string()
-    .trim()
-    .max(TASK_MEMORY_LIMITS.rationaleMaxChars)
-    .optional(),
-  reusableFacts: memoryList.optional(),
-  unresolvedQuestions: memoryList.optional(),
-});
 
 /** One line per violation, naming the field, so the agent can fix its call. */
 function describeTaskMemoryIssues(
@@ -62,26 +41,6 @@ function describeTaskMemoryIssues(
       return `${path}: ${issue.message}`;
     })
     .join('; ');
-}
-
-function renderAgentSummary(input: z.infer<typeof taskMemorySchema>): string {
-  const section = (title: string, lines: string[]) =>
-    lines.length > 0
-      ? [`## ${title}`, '', ...lines.map((l) => `- ${l}`), '']
-      : [];
-
-  return [
-    '## Outcome',
-    '',
-    input.outcome,
-    '',
-    ...(input.rationale ? ['## Why', '', input.rationale, ''] : []),
-    ...section('Decisions', input.decisions ?? []),
-    ...section('Reusable facts', input.reusableFacts ?? []),
-    ...section('Open questions', input.unresolvedQuestions ?? []),
-  ]
-    .join('\n')
-    .trim();
 }
 
 /**
@@ -141,7 +100,11 @@ export async function saveTaskMemory(
         200,
       );
     }
-    await saveBrainAgentSummary(db, runId, renderAgentSummary(parsed.data));
+    await saveBrainAgentSummary(
+      db,
+      runId,
+      renderTaskMemorySummary(parsed.data),
+    );
 
     return c.json({ saved: true });
   } catch (error) {

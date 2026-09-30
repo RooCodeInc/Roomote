@@ -168,7 +168,7 @@ export function createHttpIntegrationsMcp() {
         'prepare_integration_key',
         {
           description:
-            'Request owner approval for an exact HTTPS origin. Supply only nonsecret policy and omit headerPrefix when the key needs no prefix. The owner enters the key outside chat in the Session UI; saving resumes the same Session.',
+            'Request owner approval for an exact HTTPS origin. Supply only nonsecret policy and omit headerPrefix when the key needs no prefix. The owner enters the key outside chat in the session UI; saving resumes the same session.',
           inputSchema: serviceCredentialPrepareToolSchema,
         },
         async (args) => {
@@ -197,7 +197,7 @@ export function createHttpIntegrationsMcp() {
         'list_integration_keys',
         {
           description:
-            "List this Session owner's nonsecret pending approvals and the live ready grants available to them, including deployment-visible grants, with origin, header, visibility, allowed HTTP methods, and expiry. A ready grant is usable through integration_request with its session: id for any of its allowed methods, and is delivered to attached coding runs as a substitute token with a base URL for ordinary clients and the grant's allowed methods.",
+            "List this session owner's nonsecret pending approvals and the live ready grants available to them, including deployment-visible grants, with origin, header, visibility, allowed HTTP methods, and expiry. A ready grant is usable through integration_request with its session: id for any of its allowed methods, and is delivered to attached coding runs as a substitute token with a base URL for ordinary clients and the grant's allowed methods.",
           inputSchema: {},
         },
         async () => {

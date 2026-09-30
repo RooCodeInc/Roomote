@@ -264,6 +264,18 @@ describe('getCostAnalyticsRows', () => {
       detailsInput,
       new Date(),
     );
+    const ownerExport = await getAnalyticsExportData(
+      { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+      {
+        object: 'costs',
+        viewBy: 'provider',
+        metric: 'cost',
+        filters: { provider: ['private-provider'] },
+        timePeriod: 'all',
+        granularity: 'day',
+      },
+      new Date(),
+    );
     const adminDetails = await getAnalyticsDetails(
       { userId: other.id, isAdmin: true } as UserAuthSuccess,
       detailsInput,
@@ -287,12 +299,33 @@ describe('getCostAnalyticsRows', () => {
     expect(adminDetails.rows).toHaveLength(2);
     expect(adminExport).toMatchObject({ total: 6 });
     expect(adminExport.rows).toHaveLength(3);
+    expect(
+      ownerDetails.rows.find(({ values }) => values.taskTitle === 'Session'),
+    ).toMatchObject({
+      links: { taskTitle: `/sessions/${conversation!.id}` },
+    });
+    expect(
+      ownerExport.rows.find(({ values }) => values.taskTitle === 'Session'),
+    ).toMatchObject({
+      links: { taskTitle: `/sessions/${conversation!.id}` },
+    });
+    expect(
+      adminDetails.rows.find(
+        ({ values }) => values.taskTitle === 'Private session',
+      )?.links,
+    ).toBeUndefined();
+    expect(
+      adminExport.rows.find(
+        ({ values }) => values.taskTitle === 'Private session',
+      )?.links,
+    ).toBeUndefined();
     expect(JSON.stringify(ownerDetails)).toContain(task.id);
     expect(JSON.stringify(ownerDetails)).toContain('Private cost task title');
     for (const response of [adminDetails, adminExport]) {
       const payload = JSON.stringify(response);
       expect(payload).not.toContain(task.id);
       expect(payload).not.toContain(nativeSessionId);
+      expect(payload).not.toContain(conversation!.id);
       expect(payload).not.toContain('Private cost task title');
       expect(payload).not.toContain('secret/private-cost-repository');
       expect(payload).not.toContain('private_task_source');
@@ -717,6 +750,10 @@ describe('getCostAnalyticsRows', () => {
     expect(sessionRows.map((row) => row.details.values.taskTitle)).toEqual([
       'Session',
       'Session',
+    ]);
+    expect(sessionRows.map((row) => row.details.links?.taskTitle)).toEqual([
+      `/sessions/${session!.id}`,
+      `/sessions/${session!.id}`,
     ]);
     expect(delegatedTaskRows.reduce((sum, row) => sum + row.value, 0)).toBe(
       0.007,

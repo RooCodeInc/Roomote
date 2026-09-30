@@ -48,10 +48,33 @@ describe('discoverOAuthEndpoints', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith(
       'https://mcp.sentry.dev/.well-known/oauth-authorization-server',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(metadata.authorization_endpoint).toBe(
       'https://mcp.sentry.dev/oauth/authorize',
     );
+  });
+
+  it('propagates caller cancellation into metadata discovery', async () => {
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    mockFetch.mockImplementationOnce(
+      async (_url: string, init?: { signal?: AbortSignal }) => {
+        requestSignal = init?.signal;
+        return createJsonResponse({
+          authorization_endpoint: 'https://mcp.sentry.dev/oauth/authorize',
+          token_endpoint: 'https://mcp.sentry.dev/oauth/token',
+        });
+      },
+    );
+
+    await discoverOAuthEndpoints('https://mcp.sentry.dev/mcp', {
+      signal: controller.signal,
+    });
+
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+    expect(requestSignal?.aborted).toBe(true);
   });
 
   it('falls back to protected-resource metadata when direct auth discovery fails', async () => {
@@ -165,6 +188,7 @@ describe('discoverOAuthProtectedResourceMetadata', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith(
       'https://mcp.posthog.com/.well-known/oauth-protected-resource/mcp',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(metadata?.scopes_supported).toEqual([
       'openid',
@@ -387,6 +411,65 @@ describe('refreshOAuthToken', () => {
 
     expect(params.get('client_id')).toBe('client-id');
     expect(params.has('client_secret')).toBe(false);
+  });
+
+  it('propagates caller cancellation into the bounded token request', async () => {
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    mockFetch.mockImplementationOnce(
+      async (_url: string, init?: { signal?: AbortSignal }) => {
+        requestSignal = init?.signal;
+        return createTokenResponse();
+      },
+    );
+
+    await refreshOAuthToken(
+      'https://provider.example.com/token',
+      {
+        client_id: 'client-id',
+        token_endpoint_auth_method: 'none',
+      },
+      'refresh-token',
+      { signal: controller.signal },
+    );
+
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+    expect(requestSignal).not.toBe(controller.signal);
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it('aborts a token request at the default deadline', async () => {
+    const timeoutController = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(timeoutController.signal);
+    mockFetch.mockImplementationOnce(
+      async (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        }),
+    );
+
+    const pending = refreshOAuthToken(
+      'https://provider.example.com/token',
+      {
+        client_id: 'client-id',
+        token_endpoint_auth_method: 'none',
+      },
+      'refresh-token',
+    );
+
+    const assertion = expect(pending).rejects.toMatchObject({
+      name: 'TimeoutError',
+    });
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    timeoutController.abort(new DOMException('timed out', 'TimeoutError'));
+    await assertion;
   });
 
   it('includes the resource indicator in refresh-token requests', async () => {

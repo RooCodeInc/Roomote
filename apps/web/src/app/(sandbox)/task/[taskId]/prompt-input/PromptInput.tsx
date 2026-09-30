@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -25,6 +26,7 @@ import {
 } from '@/hooks/useGhostSuggestion';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
+import { usePromptHistoryNavigation } from '@/hooks/usePromptHistoryNavigation';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
@@ -163,6 +165,19 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             : latestTs,
         0,
       ) ?? 0;
+    const promptHistory = useMemo(
+      () =>
+        taskHistory?.flatMap((message) => {
+          const text = message.text;
+          return message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+            message.role === 'user' &&
+            message.visibleInTranscript !== false &&
+            text?.trim()
+            ? [text]
+            : [];
+        }) ?? [],
+      [taskHistory],
+    );
 
     // Suggestions exist only while the agent is waiting for the human: an
     // assistant message landing mid-turn advances the revision, and without
@@ -350,6 +365,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         });
       },
     });
+    const handlePromptHistoryKeyDown = usePromptHistoryNavigation({
+      history: promptHistory,
+      value: prompt,
+      onNavigate: applyPromptChange,
+    });
 
     const updatePrompt = useCallback(
       (
@@ -513,7 +533,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         }
 
         if (!shouldAnswerPendingFreeText && /^\/goal(?:\s|$)/i.test(text)) {
-          toast.error('Start Goal Mode from the Session conversation.');
+          toast.error('Start Goal Mode from the session conversation.');
           return false;
         }
 
@@ -704,6 +724,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           return;
         }
 
+        if (handlePromptHistoryKeyDown(event)) {
+          return;
+        }
+
         const submitButton = event.currentTarget.form?.querySelector(
           'button[type="submit"]',
         ) as HTMLButtonElement | null;
@@ -755,6 +779,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       [
         canSteerQueuedMessages,
         client,
+        handlePromptHistoryKeyDown,
         handleSuggestionKeyDown,
         prompt,
         readOnly,

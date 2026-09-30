@@ -51,7 +51,7 @@ export async function postSlackThreadMarkdownMessage({
     slackTeamId: string;
     source: string;
   };
-  /** Attach the sticky Fast session reply footer to this message. */
+  /** Attach the sticky session reply footer to this message. */
   fastSessionFooter?: { sessionId: string } & FastSessionReplyFooterContext;
   images?: Array<{ url: string; altText: string }>;
   /** Native Block Kit charts rendered after the Markdown body. */

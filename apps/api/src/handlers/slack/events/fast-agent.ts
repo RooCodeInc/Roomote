@@ -3,6 +3,7 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   fastAgentConversationRepository,
+  registerFastAgentTurnActivity,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -22,7 +23,11 @@ import {
   type SlackNotifier,
 } from '@roomote/slack';
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
-import { buildDataVisualizationBlocks } from '@roomote/types';
+import {
+  buildDataVisualizationBlocks,
+  integrationToolApprovalMessage,
+  integrationToolApprovalSlackBlocks,
+} from '@roomote/types';
 import {
   admitFastAgentHumanFollowUp,
   createFastAgentConversationArtifact,
@@ -65,8 +70,13 @@ export async function processFastAgentMessage(params: {
   resolveActiveTasks?: () => Promise<FastAgentActiveTask[]>;
   launchTask: LaunchFastAgentTask;
   directedAtRoomote?: boolean;
+  /**
+   * The judgment model found this unmentioned reply addressed to Roomote.
+   * The turn shows activity and answers, but may still end silently.
+   */
+  addressedToRoomote?: boolean;
   roomoteSlackUserId?: string;
-  peerConversationsExperimentEnabled?: boolean;
+  peerConversationsEnabled?: boolean;
   userInitiated?: boolean;
   originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
@@ -82,8 +92,9 @@ export async function processFastAgentMessage(params: {
     resolveActiveTasks,
     launchTask,
     directedAtRoomote = false,
+    addressedToRoomote = false,
     roomoteSlackUserId,
-    peerConversationsExperimentEnabled = false,
+    peerConversationsEnabled = false,
     userInitiated = true,
   } = params;
   const threadId = event.thread_ts || event.ts;
@@ -116,7 +127,7 @@ export async function processFastAgentMessage(params: {
     event.channel_type !== 'im' &&
     event.channel_type !== 'mpim';
   const eligiblePeerConversationMessage =
-    peerConversationsExperimentEnabled &&
+    peerConversationsEnabled &&
     Boolean(roomoteSlackUserId) &&
     eligibleAmbientHumanMessage;
   const currentMessagePeerDirected =
@@ -143,6 +154,10 @@ export async function processFastAgentMessage(params: {
   let releaseCanonicalFastAgentLock: Awaited<
     ReturnType<typeof acquireFastAgentTurnLock>
   > = null;
+  let activity:
+    | ReturnType<typeof createFastAgentSlackSessionActivity>
+    | undefined;
+  let unregisterActivity: (() => void) | undefined;
 
   try {
     // Resolve route-based aliases only after serializing the inbound Slack
@@ -249,7 +264,9 @@ export async function processFastAgentMessage(params: {
       !roomoteWasLastSpeaker &&
       (previousSenderMessageWasPeerDirected ||
         recentHistoryAddressedAnotherHuman);
+    // Peer caution only applies when no judgment model decided the addressee.
     const peerDirectedTurn =
+      !addressedToRoomote &&
       !roomoteStartedThread &&
       (currentMessagePeerDirected || continuesPeerConversation);
     const peerDirectedContext =
@@ -299,11 +316,13 @@ export async function processFastAgentMessage(params: {
         Boolean(message.user) &&
         message.user !== event.user,
     );
+    // One rule: an unmentioned message in a thread with other people may end
+    // silently. Who spoke last no longer forces a reply; the judgment model
+    // (when configured) already decided whether the message is for Roomote.
     const allowSilentAmbientReply =
       eligibleAmbientHumanMessage &&
-      !roomoteStartedThread &&
-      (peerDirectedTurn ||
-        (!roomoteWasLastSpeaker && hasOtherHumanParticipant));
+      (addressedToRoomote || peerDirectedTurn || hasOtherHumanParticipant);
+    const turnDirectedAtRoomote = isDirected || addressedToRoomote;
 
     const needsCanonicalAdmission =
       !releaseFastAgentLock ||
@@ -322,7 +341,7 @@ export async function processFastAgentMessage(params: {
         ? { senderDisplayName: currentMessage.username }
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
-      directedAtRoomote: isDirected,
+      directedAtRoomote: turnDirectedAtRoomote,
       allowSilentAmbientReply,
       ...(peerDirectedTurn ? { peerDirectedTurn: true } : {}),
       ...(params.originSessionId
@@ -368,6 +387,29 @@ export async function processFastAgentMessage(params: {
           eventKey: durableTurn.eventKey,
         });
     }
+    activity = createFastAgentSlackSessionActivity({
+      slack,
+      workspaceId: teamId,
+      channel: event.channel,
+      threadTs: threadId,
+      title: session.title,
+      resolveTitle: async () =>
+        (await fastAgentConversationRepository.findById({ id: session.id }))
+          ?.title,
+    });
+    unregisterActivity = registerFastAgentTurnActivity(
+      activeTurnLock.signal,
+      activity,
+    );
+    if (durableTurn && (!allowSilentAmbientReply || addressedToRoomote)) {
+      try {
+        activity.start();
+      } catch (error) {
+        console.warn(
+          `[SlackWebhook] Failed to start Slack session activity: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     params.onAccepted?.(() =>
       activeTurnLock.abort(
         new Error('Fast suggestion launch settlement failed.'),
@@ -405,7 +447,7 @@ export async function processFastAgentMessage(params: {
           ? currentMessage.username
           : undefined,
       activeTasks: resolvedActiveTasks,
-      directedAtRoomote: isDirected,
+      directedAtRoomote: turnDirectedAtRoomote,
       allowSilentAmbientReply,
       peerDirectedTurn,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
@@ -432,16 +474,7 @@ export async function processFastAgentMessage(params: {
                 ),
             }
           : {}),
-        activity: createFastAgentSlackSessionActivity({
-          slack,
-          workspaceId: teamId,
-          channel: event.channel,
-          threadTs: threadId,
-          title: session.title,
-          resolveTitle: async () =>
-            (await fastAgentConversationRepository.findById({ id: session.id }))
-              ?.title,
-        }),
+        activity,
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId,
@@ -482,11 +515,23 @@ export async function processFastAgentMessage(params: {
           : {}),
         postReply: async ({
           message,
+          toolApproval,
           kickoff,
           imageArtifactIds = [],
           videoArtifactIds = [],
           charts = [],
         }) => {
+          if (toolApproval) {
+            const messageTs = await slack.postMessage({
+              channel: event.channel,
+              thread_ts: threadId,
+              text: integrationToolApprovalMessage(toolApproval),
+              blocks: integrationToolApprovalSlackBlocks(toolApproval),
+            });
+            if (!messageTs)
+              throw new Error('Slack did not accept the approval request.');
+            return { messageId: messageTs };
+          }
           const replyImages = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
             sessionId: session.id,
@@ -627,6 +672,12 @@ export async function processFastAgentMessage(params: {
       }
     }
   } finally {
+    await activity?.dispose().catch((error) => {
+      console.warn(
+        `[SlackWebhook] Failed to dispose Slack session activity: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+    unregisterActivity?.();
     await releaseCanonicalFastAgentLock?.().catch(() => {});
     await releaseFastAgentLock?.().catch(() => {});
   }

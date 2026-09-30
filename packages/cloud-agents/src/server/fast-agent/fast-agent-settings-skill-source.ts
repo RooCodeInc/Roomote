@@ -28,6 +28,7 @@ import {
   type FastAgentSkillQuery,
   type FastAgentSkillSummary,
 } from './fast-agent-skill-store';
+import { FastAgentPromptSkillSnapshotCache } from './fast-agent-prompt-skill-snapshot-cache';
 import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from './fast-agent-spill-store';
 
 const execFileAsync = promisify(execFile);
@@ -776,4 +777,39 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
     this.marketplaceSnapshots.clear();
     this.records.clear();
   }
+}
+
+const promptMarketplaceSnapshotCache =
+  new FastAgentPromptSkillSnapshotCache<SettingsSkillMarketplaceSnapshot>({
+    cleanup: (snapshot) =>
+      rm(dirname(snapshot.directory), { recursive: true, force: true }),
+    // The prompt lists names and descriptions; `load_skill` reads a skill's
+    // text and resources through its own source, so neither is kept here.
+    retain: (snapshot) => ({
+      ...snapshot,
+      records: snapshot.records.map((record) => ({
+        ...record,
+        content: '',
+        resources: new Map(),
+      })),
+    }),
+  });
+
+/**
+ * The settings source the system prompt lists from. Inline environment skills
+ * are read from the database on every turn as before; marketplace snapshots,
+ * which need a fetch, come from the process-wide prompt cache.
+ */
+export function createFastAgentPromptSettingsSkillSource(
+  allowedEnvironmentIds: string[],
+): RemoteFastAgentSettingsSkillSource {
+  return new RemoteFastAgentSettingsSkillSource({
+    allowedEnvironmentIds,
+    loadMarketplaceSnapshot: (source, revision) =>
+      promptMarketplaceSnapshotCache.get(
+        revision ? `${source}\0${revision}` : source,
+        () =>
+          loadFastAgentSettingsMarketplaceSnapshot(source, runGit, revision),
+      ),
+  });
 }

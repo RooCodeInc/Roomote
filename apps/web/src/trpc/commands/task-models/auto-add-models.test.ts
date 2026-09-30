@@ -15,6 +15,7 @@ import type { ModelsDevCatalog } from './models-dev';
 
 const ANTHROPIC = getSetupModelProvider('anthropic');
 const OPENROUTER = getSetupModelProvider('openrouter');
+const OPENAI = getSetupModelProvider('openai');
 const GOOGLE = getSetupModelProvider('google');
 const XAI_SUBSCRIPTION = getSetupModelProvider('xai-subscription');
 
@@ -61,6 +62,48 @@ describe('buildAutoAddedTaskModelSettings', () => {
     ]);
     expect(result!.taskModelSettings.allowedModelIds).toEqual(['xai/grok-4.7']);
     expect(result!.taskModelSettings.defaultModelId).toBe('xai/grok-4.7');
+  });
+
+  it('seeds GPT 5.6 Luna as the default while retaining GPT-6 routes', () => {
+    const result = buildAutoAddedTaskModelSettings({
+      provider: OPENAI,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['openai']),
+    });
+
+    const modelIds = result!.taskModelSettings.models?.map((model) => model.id);
+
+    expect(modelIds).toEqual(
+      expect.arrayContaining([
+        'openai/gpt-5.6-sol',
+        'openai/gpt-6-sol',
+        'openai/gpt-6.1-sol',
+        'openai/gpt-5.6-luna',
+        'openai/gpt-6-luna',
+      ]),
+    );
+    expect(result!.taskModelSettings.defaultModelId).toBe(
+      'openai/gpt-5.6-luna',
+    );
+  });
+
+  it('seeds the OpenCode Go GPT 5.6 Luna route as the fresh default', () => {
+    const provider = getSetupModelProvider('opencode-go');
+    const result = buildAutoAddedTaskModelSettings({
+      provider,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['opencode-go']),
+    });
+
+    expect(result!.taskModelSettings.models?.map((model) => model.id)).toEqual(
+      expect.arrayContaining([
+        'opencode-go/gpt-5.6-luna',
+        'opencode-go/gpt-6-luna',
+      ]),
+    );
+    expect(result!.taskModelSettings.defaultModelId).toBe(
+      'opencode-go/gpt-5.6-luna',
+    );
   });
 
   it('keeps the usable default-catalog models and effective default when another provider is also connected', () => {
@@ -190,13 +233,13 @@ describe('buildAutoAddedTaskModelSettings', () => {
     const persisted = {
       models: [
         {
-          id: 'openrouter/z-ai/glm-5.2',
-          displayName: 'GLM 5.2',
-          family: 'GLM',
+          id: 'openrouter/openai/gpt-5.6-terra',
+          displayName: 'GPT 5.6 Terra',
+          family: 'GPT',
         },
       ],
-      allowedModelIds: ['openrouter/z-ai/glm-5.2'],
-      defaultModelId: 'openrouter/z-ai/glm-5.2',
+      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
+      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
     };
 
     const result = buildAutoAddedTaskModelSettings({
@@ -208,12 +251,12 @@ describe('buildAutoAddedTaskModelSettings', () => {
     expect(result).not.toBeNull();
     expect(result!.taskModelSettings.models?.map((model) => model.id)).toEqual(
       expect.arrayContaining([
-        'openrouter/z-ai/glm-5.2',
+        'openrouter/openai/gpt-5.6-terra',
         ...ANTHROPIC.suggestedTaskModels.map((suggestion) => suggestion.id),
       ]),
     );
     expect(result!.taskModelSettings.defaultModelId).toBe(
-      'openrouter/z-ai/glm-5.2',
+      'openrouter/openai/gpt-5.6-terra',
     );
     expect(result!.taskModelSettings.allowedModelIds).toEqual(
       expect.arrayContaining(result!.addedModels.map((model) => model.id)),
@@ -243,8 +286,8 @@ describe('buildAutoAddedTaskModelSettings', () => {
     const bedrock = getSetupModelProvider('amazon-bedrock');
     const metadataCatalog: ModelsDevCatalog = {
       models: {
-        'anthropic/claude-sonnet-5': {
-          name: 'Claude Sonnet 5',
+        'anthropic/claude-sonnet-5-5': {
+          name: 'Claude Sonnet 5.5',
           limit: { context: 205_000 },
           cost: { input: 1, output: 3.2 },
         },
@@ -262,7 +305,8 @@ describe('buildAutoAddedTaskModelSettings', () => {
 
     expect(
       result?.addedModels.find(
-        (model) => model.id === 'bedrock-mantle/anthropic.claude-sonnet-5',
+        (model) =>
+          model.id === 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       )?.metadata,
     ).toMatchObject({
       contextWindow: 205_000,
@@ -376,7 +420,7 @@ describe('appendRecommendedTaskModels', () => {
       connectedProviderIds: new Set(['amazon-bedrock']),
       metadataCatalog: {
         models: {
-          'anthropic/claude-sonnet-5': {
+          'anthropic/claude-sonnet-5-5': {
             limit: { context: 205_000 },
             cost: { input: 1, output: 3.2 },
           },
@@ -388,7 +432,8 @@ describe('appendRecommendedTaskModels', () => {
 
     expect(
       result.find(
-        (model) => model.id === 'bedrock-mantle/anthropic.claude-sonnet-5',
+        (model) =>
+          model.id === 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       )?.metadata,
     ).toMatchObject({
       contextWindow: 205_000,

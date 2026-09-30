@@ -4,6 +4,15 @@ describe('resolveEffectiveJudgmentModelSelection', () => {
   it.each([
     [{ hasTypeSafeKey: false }, 'off'],
     [{ hasTypeSafeKey: true }, 'typesafe'],
+    [{ storedSelection: 'roomote', hasTypeSafeKey: true }, 'roomote'],
+    [
+      {
+        envSelection: 'roomote',
+        storedSelection: 'typesafe',
+        hasTypeSafeKey: true,
+      },
+      'roomote',
+    ],
     [{ storedSelection: 'off', hasTypeSafeKey: true }, 'off'],
     [{ storedSelection: 'openrouter', hasTypeSafeKey: false }, 'openrouter'],
     [{ storedSelection: 'vercel', hasTypeSafeKey: true }, 'vercel'],

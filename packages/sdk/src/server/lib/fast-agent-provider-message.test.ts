@@ -72,7 +72,7 @@ describe('Fast provider message bindings', () => {
     ).resolves.toBeNull();
   });
 
-  it('resolves a Slack reaction target to its bound Fast session owner', async () => {
+  it('resolves a Slack reaction target to its bound session owner', async () => {
     const suffix = crypto.randomUUID();
     const { user, conversation } = await createFastConversation({
       surface: 'slack',
@@ -153,7 +153,7 @@ describe('Fast provider message bindings', () => {
     ).resolves.toBeNull();
   });
 
-  it('resolves a Discord DM reply to the bound Fast session', async () => {
+  it('resolves a Discord DM reply to the bound session', async () => {
     const suffix = crypto.randomUUID();
     const { user, conversation } = await createFastConversation({
       surface: 'discord',
@@ -307,7 +307,7 @@ describe('Fast provider message bindings', () => {
     ).resolves.toBeNull();
   });
 
-  it('binds Telegram replies to the originating Fast session', async () => {
+  it('binds Telegram replies to the originating session', async () => {
     const suffix = crypto.randomUUID();
     const { user, conversation } = await createFastConversation({
       surface: 'telegram',

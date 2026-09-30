@@ -578,6 +578,77 @@ export async function saveBrainAgentSummary(
     });
 }
 
+/** The summary currently parked for a run, agent-authored or distilled. */
+export async function getBrainMemorySummary(
+  database: DatabaseOrTransaction,
+  runId: number,
+): Promise<string | null> {
+  const [row] = await database
+    .select({ agentSummary: brainMemoryEvents.agentSummary })
+    .from(brainMemoryEvents)
+    .where(eq(brainMemoryEvents.runId, runId))
+    .limit(1);
+  return row?.agentSummary ?? null;
+}
+
+/**
+ * Park a summary Roomote distilled for a run. It is a compare-and-set against
+ * the summary the distillation started from (`previous`, null for none), so a
+ * memory the agent records meanwhile, or a concurrent distillation, is never
+ * overwritten. Returns whether the summary was stored.
+ *
+ * `requeue` follows saveBrainAgentSummary: bump `revision` and hand a settled
+ * row back so the new text is ingested. The drainer passes false for the row
+ * it already holds, because it writes the same text in the same pass.
+ */
+export async function saveBrainDistilledSummary(
+  database: DatabaseOrTransaction,
+  runId: number,
+  summary: string,
+  previous: string | null,
+  options: { requeue: boolean },
+): Promise<boolean> {
+  if (!(await isTaskRunSharedBrainEligible(database, runId))) {
+    return false;
+  }
+
+  const updated = await database
+    .update(brainMemoryEvents)
+    .set({
+      agentSummary: summary,
+      updatedAt: sql`now()`,
+      ...(options.requeue
+        ? {
+            revision: sql`${brainMemoryEvents.revision} + 1`,
+            status: sql`case when ${brainMemoryEvents.status} = 'processing' then 'processing' else 'pending' end`,
+            attempts: sql`case when ${brainMemoryEvents.status} = 'processing' then ${brainMemoryEvents.attempts} else 0 end`,
+            lastError: null,
+          }
+        : {}),
+    })
+    .where(
+      and(
+        eq(brainMemoryEvents.runId, runId),
+        previous === null
+          ? isNull(brainMemoryEvents.agentSummary)
+          : eq(brainMemoryEvents.agentSummary, previous),
+      ),
+    )
+    .returning({ id: brainMemoryEvents.id });
+
+  if (updated.length > 0 || previous !== null) {
+    return updated.length > 0;
+  }
+
+  // No row yet: the run is still in flight, exactly like an early agent save.
+  const inserted = await database
+    .insert(brainMemoryEvents)
+    .values({ runId, agentSummary: summary })
+    .onConflictDoNothing({ target: brainMemoryEvents.runId })
+    .returning({ id: brainMemoryEvents.id });
+  return inserted.length > 0;
+}
+
 /**
  * Re-ingest every completed run of a task after something the task produced
  * reached an outcome the memory should carry (a linked pull request merged or

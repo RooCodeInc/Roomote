@@ -1,0 +1,33 @@
+{
+  "ruleId": "criterion_6",
+  "examples": [
+    {
+      "name": "Expose queue plumbing in descriptive text",
+      "path": "apps/web/src/components/notifications.ts",
+      "before": "export const description = \"Receive a summary when work finishes.\";\n",
+      "after": "export const description = \"A cron controller enqueues payloads and our internal worker deserializes database event rows.\";\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Describe internal dispatch in task copy",
+      "path": "apps/web/src/components/notifications.ts",
+      "before": "export const taskDescription = \"Review new issues.\";\n",
+      "after": "export const taskDescription = \"This task invokes a schema compiler and polls internal dispatcher state.\";\n",
+      "expected": "violation"
+    },
+    {
+      "name": "A necessary configuration consequence",
+      "path": "apps/web/src/components/notifications.ts",
+      "before": "export const help = \"Notifications\";\n",
+      "after": "export const help = \"Turning this off stops email notifications for new comments.\";\n",
+      "expected": "pass"
+    },
+    {
+      "name": "An actionable permission label",
+      "path": "apps/web/src/components/notifications.ts",
+      "before": "export const help = \"Repository access\";\n",
+      "after": "export const help = \"Read-only access lets your agent review code without changing files.\";\n",
+      "expected": "pass"
+    }
+  ]
+}

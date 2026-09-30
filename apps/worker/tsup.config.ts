@@ -13,6 +13,7 @@ const jsdomSyncWorkerEntry = join(
 export default defineConfig({
   entry: {
     worker: 'scripts/worker.ts',
+    judgement: 'src/run-task/judgement-cli.ts',
     'mcp/roomote-mcp-server/index': 'src/mcp/roomote-mcp-server/index.ts',
     // JSDOM resolves and launches this helper at runtime even when consumers
     // never make synchronous XHR requests. Bundle it beside the MCP server so

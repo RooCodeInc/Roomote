@@ -139,7 +139,7 @@ export const SETUP_INTEGRATIONS_CONTINUE_OPTION = {
   id: 'continue',
   label: 'Continue',
   description:
-    'Continue with or without connecting tools. You can connect them later in Settings.',
+    'Continue with or without connecting tools. You can connect them later on the Integrations page.',
 } as const;
 
 export function getSetupIntegrationQuestionId(

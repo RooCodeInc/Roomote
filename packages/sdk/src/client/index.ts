@@ -15,6 +15,7 @@ import * as mcpConnections from '../mcp-connections';
 import * as userApiKeys from '../user-api-keys';
 import * as llmUsage from '../llm-usage';
 import * as instanceSkills from '../instance-skills';
+import * as toolApprovals from '../tool-approvals';
 import type { AppRouter, AppRouterInput, AppRouterOutput } from '../types';
 
 export type { AppRouter, AppRouterInput, AppRouterOutput };
@@ -57,6 +58,7 @@ export const sdk = {
   userApiKeys,
   llmUsage,
   instanceSkills,
+  toolApprovals,
 };
 
 export interface CreateClientOptions {

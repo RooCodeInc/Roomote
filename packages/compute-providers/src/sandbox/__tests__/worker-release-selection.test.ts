@@ -3,6 +3,7 @@
 import {
   extractWorkerReleaseTagFromArchivePath,
   extractWorkerReleaseVersionFromArchivePath,
+  getWorkerReleaseCompatibilityVersion,
   parseWorkerReleaseTag,
   parseWorkerReleaseTagFromArchivePath,
 } from '../worker-release-selection';
@@ -32,6 +33,20 @@ describe('parseWorkerReleaseTag', () => {
   it('returns null for unrelated tags', () => {
     expect(parseWorkerReleaseTag('worker-current')).toBeNull();
     expect(parseWorkerReleaseTag('app-v1.2.3')).toBeNull();
+  });
+});
+
+describe('getWorkerReleaseCompatibilityVersion', () => {
+  it('normalizes stable and preview versions to the product family', () => {
+    expect(getWorkerReleaseCompatibilityVersion('v1.2.3')).toBe('1.2.3');
+    expect(getWorkerReleaseCompatibilityVersion('1.2.3-preview.1')).toBe(
+      '1.2.3',
+    );
+  });
+
+  it('ignores development and non-semver versions', () => {
+    expect(getWorkerReleaseCompatibilityVersion('develop-abc123')).toBeNull();
+    expect(getWorkerReleaseCompatibilityVersion('local-dev')).toBeNull();
   });
 });
 

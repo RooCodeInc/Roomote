@@ -4,7 +4,12 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Sentry from '@sentry/nextjs';
 
-import type { AcpMessage, TaskStatusEvent } from '@roomote/types';
+import type {
+  AcpMessage,
+  TaskRunDisconnectReason,
+  TaskRunDisconnectReasonCode,
+  TaskStatusEvent,
+} from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { clearLiveTaskStatus, setLiveTaskStatus } from '@/hooks/tasks';
@@ -38,6 +43,7 @@ const CONNECTION_TIMEOUT_MS = 5_000;
 
 interface UseSandboxLiveConnectionOptions {
   taskId: string;
+  runId?: number;
   url: string | undefined | null;
   token: string | undefined;
   refreshConnection?: () => Promise<SandboxConnectionTarget | null>;
@@ -52,6 +58,7 @@ interface UseSandboxLiveConnectionOptions {
 // connection target refresh and store/query-cache sync around that transport.
 export function useSandboxLiveConnection({
   taskId,
+  runId,
   url,
   token,
   refreshConnection,
@@ -74,14 +81,16 @@ export function useSandboxLiveConnection({
     retryStateRef.current = createSandboxReconnectRetryState();
     store.getState()._setHasConnectedOnce(false);
     store.getState()._setConnectionFailureCategory(null);
+    store.getState()._setDisconnectReason(null);
     store.getState()._setReconnecting(false);
-  }, [store, taskId]);
+  }, [store, taskId, runId]);
 
   const connectRef = useRef<(() => void) | null>(null);
   const syncSessionAfterLiveTargetLoss = useCallback(() => {
     store.getState()._setConnected(false);
     store.getState()._setConnectionError(false);
     store.getState()._setConnectionFailureCategory(null);
+    store.getState()._setDisconnectReason(null);
     store.getState()._setReconnecting(false);
 
     void queryClient.invalidateQueries({
@@ -162,7 +171,10 @@ export function useSandboxLiveConnection({
 
     const handleConnectionFailure = (
       message: string,
-      options?: { error?: unknown },
+      options?: {
+        error?: unknown;
+        reasonCode?: TaskRunDisconnectReasonCode;
+      },
     ) => {
       const retryToken = ++activeAttemptToken;
 
@@ -184,14 +196,28 @@ export function useSandboxLiveConnection({
           : options?.error !== undefined
             ? String(options.error)
             : message);
+      const disconnectReason: TaskRunDisconnectReason = {
+        kind: 'disconnect',
+        code: options?.reasonCode ?? 'subscription_error',
+        source: 'web',
+        phase: retryPlan.phase,
+        closeCode: closeCode ?? null,
+        closeReason,
+        reconnectAttempt: retryPlan.kind === 'retry' ? retryPlan.attempt : null,
+        reconnectMaxAttempts:
+          retryPlan.kind === 'retry' ? retryPlan.maxAttempts : null,
+        exhausted: retryPlan.kind === 'exhausted',
+      };
 
-      const logFailure = (logMessage: string) => {
+      const logFailure = (logMessage: string, reason = disconnectReason) => {
         const logContext = {
           hasToken: !!tokenRef.current,
           url: urlRef.current,
           closeCode: closeCode ?? null,
           closeReason,
           taskId,
+          runId: runId ?? null,
+          disconnectReason: reason,
           reconnectPhase: retryPlan.phase,
           reconnectAttempt:
             retryPlan.kind === 'retry' ? retryPlan.attempt : null,
@@ -211,9 +237,11 @@ export function useSandboxLiveConnection({
         message,
         data: {
           taskId,
+          runId: runId ?? null,
           url: urlRef.current ?? undefined,
           closeCode,
           closeReason,
+          disconnectReason,
           reconnectPhase: retryPlan.phase,
           reconnectAttempt:
             retryPlan.kind === 'retry' ? retryPlan.attempt : undefined,
@@ -253,14 +281,19 @@ export function useSandboxLiveConnection({
 
           Sentry.withScope((scope) => {
             scope.setTag('roomote.task_id', taskId);
+            if (runId !== undefined) {
+              scope.setTag('roomote.task_run_id', String(runId));
+            }
             scope.setContext('sandboxConnection', {
               taskId,
+              runId: runId ?? null,
               url: urlRef.current,
               closeCode: closeCode ?? null,
               closeReason,
               failureCategory,
               phase: retryPlan.phase,
               hasToken: !!tokenRef.current,
+              disconnectReason,
             });
 
             Sentry.captureMessage(
@@ -272,6 +305,7 @@ export function useSandboxLiveConnection({
 
         store.getState()._setReconnecting(false);
         store.getState()._setConnectionFailureCategory(failureCategory);
+        store.getState()._setDisconnectReason(disconnectReason);
         store.getState()._setConnectionError(true);
         return;
       }
@@ -287,6 +321,7 @@ export function useSandboxLiveConnection({
       }
 
       store.getState()._setConnectionError(false);
+      store.getState()._setDisconnectReason(disconnectReason);
 
       reconnectTimeout = setTimeout(() => {
         if (cancelled || retryToken !== activeAttemptToken) {
@@ -311,13 +346,33 @@ export function useSandboxLiveConnection({
               return;
             }
 
-            if (isClearlyTerminalReconnectError(error)) {
+            const isTerminalRefreshFailure =
+              isClearlyTerminalReconnectError(error);
+            const refreshDisconnectReason: TaskRunDisconnectReason = {
+              kind: 'disconnect',
+              code: isTerminalRefreshFailure
+                ? 'auth_rejected'
+                : 'connection_refresh_failed',
+              source: 'web',
+              phase: retryPlan.phase,
+              closeCode: transportCloseRef.current.code ?? null,
+              closeReason:
+                error instanceof Error ? error.message : String(error),
+              reconnectAttempt:
+                retryPlan.kind === 'retry' ? retryPlan.attempt : null,
+              reconnectMaxAttempts:
+                retryPlan.kind === 'retry' ? retryPlan.maxAttempts : null,
+              exhausted: isTerminalRefreshFailure,
+            };
+
+            if (isTerminalRefreshFailure) {
               const failureCategory =
                 classifySandboxTransportErrorCategory(error);
               logFailure(
                 retryPlan.phase === 'established'
                   ? '[SandboxProvider] failed to refresh sandbox connection before retry; reconnect refresh failure appears terminal'
                   : '[SandboxProvider] failed to refresh sandbox connection before retry; initial refresh failure appears terminal',
+                refreshDisconnectReason,
               );
               Sentry.addBreadcrumb({
                 category: 'sandbox.websocket',
@@ -325,21 +380,30 @@ export function useSandboxLiveConnection({
                 message: 'sandbox connection refresh failed',
                 data: {
                   taskId,
+                  runId: runId ?? null,
                   url: urlRef.current ?? undefined,
                   reconnectPhase: retryPlan.phase,
                   failureCategory,
+                  disconnectReason: refreshDisconnectReason,
                 },
               });
               store.getState()._setReconnecting(false);
               store.getState()._setConnectionFailureCategory(failureCategory);
+              store.getState()._setDisconnectReason(refreshDisconnectReason);
               store.getState()._setConnectionError(true);
               return;
             }
 
             console.warn(
               '[SandboxProvider] failed to refresh sandbox connection before retry',
+              {
+                taskId,
+                runId: runId ?? null,
+                disconnectReason: refreshDisconnectReason,
+              },
               error,
             );
+            store.getState()._setDisconnectReason(refreshDisconnectReason);
 
             restartTransport();
           });
@@ -351,6 +415,7 @@ export function useSandboxLiveConnection({
       const attemptToken = ++activeAttemptToken;
       store.getState()._setConnectionError(false);
       store.getState()._setConnectionFailureCategory(null);
+      store.getState()._setDisconnectReason(null);
 
       let connected = false;
 
@@ -358,6 +423,7 @@ export function useSandboxLiveConnection({
         if (!connected && !cancelled && attemptToken === activeAttemptToken) {
           handleConnectionFailure(
             '[SandboxProvider] Connection timeout — no response from server',
+            { reasonCode: 'connection_timeout' },
           );
         }
       }, CONNECTION_TIMEOUT_MS);
@@ -377,7 +443,7 @@ export function useSandboxLiveConnection({
             error instanceof Error ? error.message : String(error);
           handleConnectionFailure(
             `[SandboxProvider] subscription error: ${message}`,
-            { error },
+            { error, reasonCode: 'subscription_error' },
           );
         }
       };
@@ -403,6 +469,7 @@ export function useSandboxLiveConnection({
           store.getState()._setHasConnectedOnce(true);
           store.getState()._setConnectionError(false);
           store.getState()._setConnectionFailureCategory(null);
+          store.getState()._setDisconnectReason(null);
           store.getState()._setReconnecting(false);
           const syncPoint = eventApplier.captureSyncPoint();
 
@@ -444,6 +511,7 @@ export function useSandboxLiveConnection({
             };
             handleConnectionFailure(
               '[SandboxProvider] subscription closed by server',
+              { reasonCode: 'subscription_closed' },
             );
           }
         },
@@ -467,6 +535,7 @@ export function useSandboxLiveConnection({
       store.getState()._setConnected(false);
       store.getState()._setConnectionError(false);
       store.getState()._setConnectionFailureCategory(null);
+      store.getState()._setDisconnectReason(null);
       store.getState()._setReconnecting(false);
       store.getState()._setTaskStatus(null);
       clearLiveTaskStatus(taskId);
@@ -476,6 +545,7 @@ export function useSandboxLiveConnection({
     client,
     historyReady,
     taskId,
+    runId,
     refreshConnection,
     queryClient,
     trpc.sandboxSession.byTaskId,

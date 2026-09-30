@@ -432,6 +432,11 @@ export function EditEnvironmentPage({
                 environment={environment}
                 repositories={repositories.data ?? []}
                 repositoriesLoading={repositories.isPending}
+                repositoriesError={
+                  repositories.isError && repositories.data === undefined
+                }
+                repositoriesRetrying={repositories.isFetching}
+                onRetryRepositories={() => void repositories.refetch()}
                 selectedRepositoryIds={selectedRepositoryIds}
                 onToggleRepository={(repositoryId) => {
                   setSelectedRepositoryIds((currentSelection) =>
@@ -593,6 +598,9 @@ function AgentMasterView({
   environment,
   repositories,
   repositoriesLoading,
+  repositoriesError,
+  repositoriesRetrying,
+  onRetryRepositories,
   selectedRepositoryIds,
   onToggleRepository,
   onStartAgent,
@@ -607,6 +615,9 @@ function AgentMasterView({
   environment: EnvironmentWithMeta | null | undefined;
   repositories: SelectedRepositorySummary[];
   repositoriesLoading: boolean;
+  repositoriesError: boolean;
+  repositoriesRetrying: boolean;
+  onRetryRepositories: () => void;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
   onStartAgent: () => void;
@@ -623,6 +634,9 @@ function AgentMasterView({
       environment={environment}
       repositories={repositories}
       repositoriesLoading={repositoriesLoading}
+      repositoriesError={repositoriesError}
+      repositoriesRetrying={repositoriesRetrying}
+      onRetryRepositories={onRetryRepositories}
       selectedRepositoryIds={selectedRepositoryIds}
       onToggleRepository={onToggleRepository}
       onStartAgent={onStartAgent}
@@ -641,6 +655,9 @@ function AgentRepositorySelectionSubview({
   environment,
   repositories,
   repositoriesLoading,
+  repositoriesError,
+  repositoriesRetrying,
+  onRetryRepositories,
   selectedRepositoryIds,
   onToggleRepository,
   onStartAgent,
@@ -655,6 +672,9 @@ function AgentRepositorySelectionSubview({
   environment: EnvironmentWithMeta | null | undefined;
   repositories: SelectedRepositorySummary[];
   repositoriesLoading: boolean;
+  repositoriesError: boolean;
+  repositoriesRetrying: boolean;
+  onRetryRepositories: () => void;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
   onStartAgent: () => void;
@@ -667,7 +687,11 @@ function AgentRepositorySelectionSubview({
   isBusy: boolean;
 }) {
   const canStartAgent =
-    !!environment && !isStartAgentPending && !repositoriesLoading && !isBusy;
+    !!environment &&
+    !isStartAgentPending &&
+    !repositoriesLoading &&
+    !repositoriesError &&
+    !isBusy;
 
   const handleChangeRequestKeyDown = (
     event: React.KeyboardEvent<HTMLTextAreaElement>,
@@ -702,6 +726,21 @@ function AgentRepositorySelectionSubview({
                 <div className="flex items-center justify-center py-12 text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
                 </div>
+              ) : repositoriesError ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p role="alert" className="text-sm text-muted-foreground">
+                    Failed to load repositories.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={repositoriesRetrying}
+                    onClick={onRetryRepositories}
+                  >
+                    Retry
+                  </Button>
+                </div>
               ) : repositories.length > 0 ? (
                 <div className="min-h-0 flex-1 overflow-auto">
                   <EnvironmentRepositorySelector
@@ -714,7 +753,9 @@ function AgentRepositorySelectionSubview({
                 </div>
               ) : null}
 
-              {!repositoriesLoading ? <UpdateGitHubReposHint /> : null}
+              {!repositoriesLoading && !repositoriesError ? (
+                <UpdateGitHubReposHint />
+              ) : null}
 
               <div className="space-y-2">
                 <p className="text-sm font-medium">

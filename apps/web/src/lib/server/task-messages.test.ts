@@ -48,6 +48,34 @@ describe('getTaskMessageEnvelopes', () => {
     });
   });
 
+  it('delivers automatic memory-save events through task transcript history', async () => {
+    const task = await taskFactory.create({
+      id: 'task-message-memory-saved',
+      title: 'Memory save delivery',
+    });
+    const run = await runFactory.create({ taskId: task.id });
+
+    await db.insert(taskMessages).values({
+      runId: run.id,
+      taskId: task.id,
+      ts: run.id,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+      role: 'system',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: 'Saved to memory' }],
+      metadata: { visibleInTranscript: true, memorySave: true },
+      payload: { memories: ['The task retries are capped at three attempts.'] },
+    });
+
+    const [message] = await getTaskMessageEnvelopes({ taskId: task.id });
+
+    expect(message).toMatchObject({
+      eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+      role: 'system',
+      payload: { memories: ['The task retries are capped at three attempts.'] },
+    });
+  });
+
   it('pages backward through a large transcript without gaps or duplicates', async () => {
     const task = await taskFactory.create({
       id: 'task-message-paginated-history',

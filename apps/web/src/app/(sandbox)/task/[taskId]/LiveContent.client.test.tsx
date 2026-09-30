@@ -24,6 +24,10 @@ vi.mock('./ActiveSubtasksList', () => ({
   ActiveSubtasksList: () => <div data-testid="active-subtasks" />,
 }));
 
+vi.mock('./PendingToolApprovalsPanel', () => ({
+  PendingToolApprovalsPanel: () => null,
+}));
+
 vi.mock('./PendingEnvVarRequestPanel', () => ({
   PendingEnvVarRequestPanel: () => <div data-testid="pending-env-var" />,
 }));

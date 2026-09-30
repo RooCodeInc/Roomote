@@ -497,7 +497,7 @@ describe('AcpToolMessage', () => {
   it.each([
     ['send_chat_reply', 'Sent', 'chat reply'],
     ['send_task_message', 'Sent', 'message to task'],
-    ['report_to_parent_session', 'Sent', 'report to Session'],
+    ['report_to_parent_session', 'Sent', 'report to session'],
     ['receive_task_report', 'Received', 'task report'],
     ['inspect_images', 'Inspected', 'Images'],
   ])('renders %s as an expandable receipt', (toolName, action, object) => {

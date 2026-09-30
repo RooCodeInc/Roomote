@@ -168,7 +168,7 @@ export async function renderTelegramLiveTaskStream(input: {
   const data = await getTelegramLiveTaskStreamData(input.taskId);
   if (!data) return { card: false, updated: false };
 
-  // The owning Fast Session posts the successful result. Preserve the live
+  // The owning session posts the successful result. Preserve the live
   // message and its pointer so a resumed run can continue editing it.
   if (input.status === 'complete') {
     return { card: true, updated: true };
@@ -192,7 +192,7 @@ export async function renderTelegramLiveTaskStream(input: {
       messageId: data.messageId,
       ...buildTelegramLiveTaskMessage({
         status,
-        // Final output is delivered by the owning Fast Session. The canonical
+        // Final output is delivered by the owning session. The canonical
         // Telegram status message never duplicates that authoritative reply.
         ...((status === 'running' || status === 'waiting') && input.details
           ? { progress: input.details }

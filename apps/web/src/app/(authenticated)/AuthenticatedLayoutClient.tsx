@@ -9,6 +9,7 @@ import { getSetupRedirectPath } from '@/lib/setup-status';
 import { useRedirectToSignIn } from '@/hooks/useSignInRedirect';
 import { useUser } from '@/hooks/useUser';
 import { useTRPC } from '@/trpc/client';
+import { isVisiblePrimaryNavPath } from '@/components/layout/navigation-items';
 
 import { NavbarHeader, SideNav, FramedSurface } from '@/components/layout';
 import { CommandPaletteProvider } from '@/components/layout/CommandPaletteContext';
@@ -68,10 +69,13 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
     setupSessionPath !== null &&
     (pathname === setupSessionPath ||
       pathname.startsWith(`${setupSessionPath}/`));
+  // Platform issue reports can be raised by the setup Session itself, so the
+  // admin must be able to confirm them before setup is complete.
   const isSetupExemptRoute =
-    pathname === '/integrations' ||
+    isVisiblePrimaryNavPath(pathname, { isAdmin: user?.isAdmin === true }) ||
     pathname === '/settings' ||
-    pathname.startsWith('/settings/');
+    pathname.startsWith('/settings/') ||
+    pathname.startsWith('/platform-issues/');
   // An incomplete administrator must not briefly see another authenticated
   // page while we look up their setup Session. A known setup Session remains
   // accessible during a background refresh.
@@ -137,11 +141,11 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
         <div
           className={`md:hidden sticky top-0 ${zIndex('NAV_HEADER')} w-full bg-card`}
         >
-          <NavbarHeader setupIncomplete={setupRedirectPath !== null} />
+          <NavbarHeader />
         </div>
 
         <div className="flex min-h-0 flex-1">
-          <SideNav setupIncomplete={setupRedirectPath !== null} />
+          <SideNav />
 
           <FramedSurface variant="basic">{children}</FramedSurface>
         </div>

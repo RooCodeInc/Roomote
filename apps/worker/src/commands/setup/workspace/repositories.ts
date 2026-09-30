@@ -201,6 +201,7 @@ export async function initializeRepositories(
             {
               sourceRepo: workspace.sourceRepo,
               sourceBranch: workspace.sourceBranch,
+              allowMissingBranchFallback: workspace.allowMissingBranchFallback,
               sourceSha: workspace.sourceSha,
             },
             environmentSourceControlPrepareOptions,
@@ -425,7 +426,12 @@ export async function initializeRepositories(
               workspace.sha,
               preserveGitState,
               cleanupLegacyPaths,
-              sourceControlPrepareOptions(workspace.repository),
+              {
+                ...sourceControlPrepareOptions(workspace.repository),
+                ...(workspace.allowMissingBranchFallback
+                  ? { allowMissingBranchFallback: true }
+                  : {}),
+              },
             ),
         );
       } catch (error) {

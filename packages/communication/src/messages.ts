@@ -362,6 +362,117 @@ export async function getCommunicationMessages(
 }
 
 /**
+ * Web/API follow-ups admitted while a run's sandbox cannot yet accept a
+ * command. Unlike the provider queues above, the worker peeks and removes
+ * each entry only after the runtime accepts it, so the API keeps queueing
+ * behind anything undelivered and order is preserved against live delivery.
+ * The API performs the trusted actor sync before queueing, exactly as it does
+ * for provider messages.
+ */
+export type QueuedTaskFollowUp = {
+  clientMessageId: string;
+  deliveryMode: 'send' | 'steer';
+  prompt: string;
+  images?: string[];
+  source?: string;
+  userId?: string;
+};
+
+export type PeekedTaskFollowUp = {
+  raw: string;
+  message: QueuedTaskFollowUp | null;
+};
+
+function getTaskFollowUpsKey(runId: number): string {
+  return `task_follow_ups:${runId}`;
+}
+
+function getTaskFollowUpDedupeKey(
+  runId: number,
+  clientMessageId: string,
+): string {
+  return `task_follow_ups:dedupe:${runId}:${clientMessageId}`;
+}
+
+function parseQueuedTaskFollowUp(raw: string): QueuedTaskFollowUp | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<QueuedTaskFollowUp>;
+
+    if (
+      typeof parsed.clientMessageId !== 'string' ||
+      typeof parsed.prompt !== 'string' ||
+      (parsed.deliveryMode !== 'send' && parsed.deliveryMode !== 'steer')
+    ) {
+      return null;
+    }
+
+    return parsed as QueuedTaskFollowUp;
+  } catch {
+    return null;
+  }
+}
+
+/** Returns false when this client message id was already queued. */
+export async function queueTaskFollowUp(
+  runId: number,
+  message: QueuedTaskFollowUp,
+): Promise<boolean> {
+  const result = await getRedis().eval(
+    QUEUE_COMMUNICATION_MESSAGE_ONCE_SCRIPT,
+    2,
+    getTaskFollowUpsKey(runId),
+    getTaskFollowUpDedupeKey(runId, message.clientMessageId),
+    JSON.stringify(message),
+    COMMUNICATION_MESSAGE_TTL_SECONDS.toString(),
+    COMMUNICATION_MESSAGE_DEDUPE_TTL_SECONDS.toString(),
+  );
+  return typeof result === 'number' && result > 0;
+}
+
+/**
+ * Whether this client message id was admitted. Lets a caller resolve an
+ * ambiguous queue write (the script ran but its reply was lost).
+ */
+export async function wasTaskFollowUpQueued(
+  runId: number,
+  clientMessageId: string,
+): Promise<boolean> {
+  return (
+    (await getRedis().exists(
+      getTaskFollowUpDedupeKey(runId, clientMessageId),
+    )) > 0
+  );
+}
+
+export async function hasQueuedTaskFollowUps(runId: number): Promise<boolean> {
+  return (await getRedis().llen(getTaskFollowUpsKey(runId))) > 0;
+}
+
+/** Oldest first. `message` is null for an entry that failed to parse. */
+export async function peekTaskFollowUps(
+  runId: number,
+  limit = 20,
+): Promise<PeekedTaskFollowUp[]> {
+  const rawMessages = await getRedis().lrange(
+    getTaskFollowUpsKey(runId),
+    0,
+    limit - 1,
+  );
+
+  return rawMessages.map((raw) => ({
+    raw,
+    message: parseQueuedTaskFollowUp(raw),
+  }));
+}
+
+export async function removeTaskFollowUp(
+  runId: number,
+  raw: string,
+): Promise<void> {
+  await getRedis().lrem(getTaskFollowUpsKey(runId), 1, raw);
+}
+
+/**
  * Track the most recent inbound user message id for a task run so outbound
  * replies can quote/reply-to the latest user message instead of the original
  * launch message. Telegram task payloads carry the launch message id once at

@@ -47,7 +47,7 @@ describe('mcp self-setup catalog', () => {
           id: 'snowflake',
           name: 'Snowflake',
           category: 'built_in_integration',
-          setupLocation: 'Settings > Integrations > Snowflake',
+          setupLocation: 'Integrations > Snowflake',
           capabilities: expect.arrayContaining([
             'Inspect Snowflake databases, schemas, and tables',
           ]),
@@ -56,12 +56,31 @@ describe('mcp self-setup catalog', () => {
           id: 'grafana',
           name: 'Grafana',
           category: 'built_in_integration',
-          setupLocation: 'Settings > Integrations > Grafana',
+          setupLocation: 'Integrations > Grafana',
           capabilities: expect.arrayContaining([
             'Inspect Grafana dashboards and dashboard metadata',
           ]),
         }),
       ]),
     );
+  });
+
+  it('points manual setup at the page that configures each integration', () => {
+    const setupLocations = Object.fromEntries(
+      AVAILABLE_SETUP_MCP_INTEGRATIONS.map((integration) => [
+        integration.id,
+        integration.setupLocation,
+      ]),
+    );
+
+    expect(setupLocations).toMatchObject({
+      github: 'Settings > Source Control > GitHub',
+      linear: 'Integrations > Linear',
+      sentry: 'Integrations > Sentry',
+      slack: 'Settings > Communications > Slack',
+    });
+    for (const setupLocation of Object.values(setupLocations)) {
+      expect(setupLocation).not.toContain('Settings > Integrations');
+    }
   });
 });

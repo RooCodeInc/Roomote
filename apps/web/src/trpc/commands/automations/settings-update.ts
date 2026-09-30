@@ -659,10 +659,14 @@ export async function updateBackgroundAgentSettingsCommand(
     ? submittedManagerDiscordChannel
     : null;
   const managerStatsFrequency = input.managerStatsFrequency ?? 'off';
+  const providerUsageLimitFrequencyValue =
+    input.providerUsageLimitFrequency ??
+    existingSettings.providerUsageLimitFrequency;
   const providerUsageLimitFrequency =
-    (input.providerUsageLimitFrequency ??
-      existingSettings.providerUsageLimitFrequency) === 'off'
-      ? 'off'
+    providerUsageLimitFrequencyValue === 'off' ||
+    providerUsageLimitFrequencyValue === 'on_demand' ||
+    providerUsageLimitFrequencyValue === 'every_hour'
+      ? providerUsageLimitFrequencyValue
       : DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY;
   const providerUsageLimitThreshold =
     input.providerUsageLimitThreshold ??
@@ -1501,7 +1505,7 @@ export async function updateBackgroundAgentSettingsCommand(
   ) {
     fieldErrors.general =
       fieldErrors.general ||
-      'Configure Sentry in Settings > Integrations before enabling Triage Sentry Issues.';
+      'Configure Sentry on the Integrations page before enabling Triage Sentry Issues.';
   }
 
   if (

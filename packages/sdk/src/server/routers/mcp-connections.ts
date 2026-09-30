@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import type { RunTokenContext } from '@roomote/types';
 import { ROOMOTE_MCP_PATH } from '@roomote/auth';
 import {
   Env,
@@ -21,6 +22,7 @@ import {
 } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
 import { getValidAccessToken, hasValidOAuthTokens } from '../lib/mcp/data';
+import { resolveTaskIntegrationToolApprovals } from '../lib/task-tool-approvals';
 import {
   customMcpConnectionWhere,
   customMcpServerStore,
@@ -84,6 +86,13 @@ type ResolvedMcpServerConfig = {
   headers: Record<string, string>;
   disabledTools?: string[];
   cacheRevision?: string;
+  /**
+   * Which per-tool approval policies govern a custom server: a shared server
+   * takes the deployment's, a personal one its owner's. A name can exist in
+   * both scopes, so the name alone cannot tell them apart. Unset for
+   * built-in integrations, where both layers apply.
+   */
+  toolApprovalPolicyScope?: 'deployment' | 'personal';
 };
 
 type ResolvedMcpServerConfigs = Record<string, ResolvedMcpServerConfig>;
@@ -111,7 +120,7 @@ async function resolveMcpServerConfigs(options: {
   auth: Parameters<typeof resolveActorScopedUserContext>[0];
   requestOrigin: string | null;
   includeRoomoteMemberTools?: boolean;
-  includeCacheRevision?: boolean;
+  includeSessionMetadata?: boolean;
   quiet?: boolean;
 }): Promise<ResolvedMcpServerConfigs> {
   const logInfo: InfoLogger = options.quiet ? () => {} : console.info;
@@ -183,9 +192,13 @@ async function resolveMcpServerConfigs(options: {
     url: `${options.requestOrigin ?? ''}${HTTP_INTEGRATIONS_MCP_PATH}`,
     headers: {},
   };
-  if (!options.includeCacheRevision) {
+  // A worker writes what it receives into an agent's MCP configuration, so
+  // it gets the connection fields only. The cache revision and the approval
+  // policy scope are control-plane metadata for Roomote's Session runtime.
+  if (!options.includeSessionMetadata) {
     for (const server of Object.values(servers)) {
       delete server.cacheRevision;
+      delete server.toolApprovalPolicyScope;
     }
   }
 
@@ -205,9 +218,22 @@ export async function resolveUserMcpServerConfigs(options: {
     auth: { userId: options.userId },
     requestOrigin: getRequestOrigin({ url: options.apiBaseUrl }),
     includeRoomoteMemberTools: options.includeRoomoteMemberTools,
-    includeCacheRevision: true,
+    includeSessionMetadata: true,
     // This runs on every Fast turn; the per-connection info stream is worker
     // config-fetch debugging noise at that frequency.
+    quiet: true,
+  });
+}
+
+/** What a task run mounts, with the policy scope of each custom server. */
+export function resolveTaskRunMcpServerConfigs(
+  auth: RunTokenContext,
+  req: { url?: string } | undefined,
+): Promise<ResolvedMcpServerConfigs> {
+  return resolveMcpServerConfigs({
+    auth,
+    requestOrigin: getRequestOrigin(req),
+    includeSessionMetadata: true,
     quiet: true,
   });
 }
@@ -298,6 +324,26 @@ export const mcpConnectionsRouter = router({
       requestOrigin: getRequestOrigin(ctx.req),
     }),
   })),
+
+  /**
+   * The native approval rules for what a task run mounts, compiled here
+   * because the policy scopes are control-plane metadata a worker never sees.
+   */
+  getTaskToolApprovals: authenticatedProcedure.query(async ({ ctx }) => {
+    if (!isRunToken(ctx.auth)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'This endpoint is only available to run tokens',
+      });
+    }
+    const auth = ctx.auth;
+    const toolApprovals = await resolveTaskIntegrationToolApprovals({
+      runId: auth.runId,
+      actingUserId: (await resolveActorScopedUserContext(ctx.auth)).userId,
+      resolveServers: () => resolveTaskRunMcpServerConfigs(auth, ctx.req),
+    });
+    return { toolApprovals: toolApprovals ?? null };
+  }),
 
   /**
    * Deployment-scoped custom stdio MCP servers, with decrypted env values.
@@ -394,6 +440,10 @@ async function buildScopedCustomMcpServerConfigs(
 ): Promise<ResolvedMcpServerConfigs> {
   const servers: ResolvedMcpServerConfigs = {};
   const rows = await customMcpServerStore(scope).list({ enabledOnly: true });
+  // Every entry built here belongs to this one scope, whichever branch
+  // builds it.
+  const toolApprovalPolicyScope =
+    scope.visibility === 'owner' ? 'personal' : 'deployment';
 
   for (const row of rows) {
     // stdio servers ride the worker merge path via getCustomStdioMcpServers.
@@ -407,6 +457,7 @@ async function buildScopedCustomMcpServerConfigs(
         url: `${requestOrigin ?? ''}/api/mcp/development-fixtures`,
         headers: {},
         cacheRevision: `${row.updatedAt?.getTime() ?? 0}`,
+        toolApprovalPolicyScope,
       };
       continue;
     }
@@ -433,6 +484,7 @@ async function buildScopedCustomMcpServerConfigs(
       url: requestOrigin ? `${requestOrigin}${proxyPath}` : proxyPath,
       headers: { 'X-MCP-Client': PRODUCT_NAME },
       cacheRevision: `${row.updatedAt?.getTime() ?? 0}:${connectionUpdatedAt?.getTime() ?? ''}`,
+      toolApprovalPolicyScope,
     };
   }
 

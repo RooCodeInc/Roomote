@@ -38,7 +38,7 @@ export async function getReviewTaskRelayPayload({
   reviewerSettings?: PrReviewSettings | null;
   /**
    * The reviewing repository's row id; when present, the review is attached
-   * to the Fast session of the task that opened the PR, pinned to this exact
+   * to the session of the task that opened the PR, pinned to this exact
    * connected repository so another instance's same-named repository can
    * never supply the session.
    */

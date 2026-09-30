@@ -884,7 +884,7 @@ telegram.post('/', async (c) => {
     );
     if (!continued) {
       apiLogger.warn(
-        `[telegram] Fast session ${fastSession.id} could not resolve an active delivery route`,
+        `[telegram] session ${fastSession.id} could not resolve an active delivery route`,
       );
       return c.json({
         ok: true,
@@ -1306,7 +1306,7 @@ telegram.post('/', async (c) => {
     });
   } catch (error) {
     apiLogger.error(
-      `[telegram] Failed to initialize the Fast session for chat ${metadata.communicationChannelId}: ${
+      `[telegram] Failed to initialize the session for chat ${metadata.communicationChannelId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -1375,7 +1375,7 @@ telegram.post('/', async (c) => {
       );
       if (!continued) {
         apiLogger.warn(
-          `[telegram] Fast session ${session.id} could not resolve an active delivery route`,
+          `[telegram] session ${session.id} could not resolve an active delivery route`,
         );
       }
     })

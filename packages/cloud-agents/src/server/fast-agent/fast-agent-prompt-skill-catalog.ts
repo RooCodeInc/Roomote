@@ -1,7 +1,11 @@
 import { RemoteFastAgentInstanceSkillSource } from './fast-agent-instance-skill-source';
-import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
 import {
-  RemoteFastAgentSettingsSkillSource,
+  createFastAgentPromptRepositorySkillSource,
+  type RemoteFastAgentRepositorySkillSource,
+} from './fast-agent-repository-skill-source';
+import {
+  createFastAgentPromptSettingsSkillSource,
+  type RemoteFastAgentSettingsSkillSource,
   type FastAgentSettingsPromptCatalog,
 } from './fast-agent-settings-skill-source';
 import {
@@ -19,9 +23,6 @@ export type FastAgentPromptSkillCatalog = {
   marketplaceSources: FastAgentSettingsPromptCatalog['marketplaceSources'];
   /** Skills omitted from the prompt after `FAST_AGENT_PROMPT_SKILL_LIMIT`. */
   omittedSkillCount: number;
-  /** The omitted skills themselves, in catalog order. They stay out of the
-   * system prompt; the per-turn skill relevance hint can still name one. */
-  omittedSkills?: FastAgentSkillSummary[];
   skills: FastAgentSkillSummary[];
   warnings: string[];
 };
@@ -50,12 +51,14 @@ export function createFastAgentPromptSkillCatalogSources({
 }): PromptSkillCatalogSources {
   return {
     instanceSkills: new RemoteFastAgentInstanceSkillSource(userId),
-    settingsSkills: new RemoteFastAgentSettingsSkillSource({
+    // Both list Git-backed skills, and this runs on every turn, so they read
+    // cached snapshots instead of fetching (see the snapshot cache).
+    settingsSkills: createFastAgentPromptSettingsSkillSource(
       allowedEnvironmentIds,
-    }),
-    repositorySkills: new RemoteFastAgentRepositorySkillSource({
+    ),
+    repositorySkills: createFastAgentPromptRepositorySkillSource(
       allowedEnvironmentIds,
-    }),
+    ),
   };
 }
 
@@ -162,7 +165,6 @@ export async function loadFastAgentPromptSkillCatalog(
         0,
         skills.length - FAST_AGENT_PROMPT_SKILL_LIMIT,
       ),
-      omittedSkills: skills.slice(FAST_AGENT_PROMPT_SKILL_LIMIT),
       skills: skills.slice(0, FAST_AGENT_PROMPT_SKILL_LIMIT),
       warnings,
     };

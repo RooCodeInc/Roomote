@@ -31,7 +31,7 @@ const SOURCE_CONTROL_PROVIDERS: FastAgentSourceControlSurface[] = [
 
 /**
  * Launches the structured review pipeline on a pull request, on behalf of a
- * Fast session. The review task attaches to the requesting session (so it
+ * session. The review task attaches to the requesting session (so it
  * shows up there like any delegated task) and, unlike automatic reviews, its
  * outcome reaches that session as pull-request feedback because the
  * requester is waiting.
@@ -132,7 +132,7 @@ export async function handlePrReviewLaunch(
       id: body.fastConversationId,
     });
     if (!record) {
-      return c.json({ error: 'The requesting Session was not found.' }, 404);
+      return c.json({ error: 'The requesting session was not found.' }, 404);
     }
     // Chat and source-control conversations are shared surfaces where any
     // member can already trigger Session events; a web conversation is one
@@ -142,7 +142,7 @@ export async function handlePrReviewLaunch(
       record.userId !== auth.userId
     ) {
       return c.json(
-        { error: 'The requesting Session belongs to another user.' },
+        { error: 'The requesting session belongs to another user.' },
         403,
       );
     }

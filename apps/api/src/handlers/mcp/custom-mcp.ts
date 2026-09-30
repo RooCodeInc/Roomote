@@ -45,7 +45,7 @@ export function createCustomMcpProxy() {
       allowedPrivateCidrs: Env.R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS,
     },
     maxRequestBodyBytes: MAX_CUSTOM_MCP_REQUEST_BODY_BYTES,
-    resolveCredentials: async (auth, routeParams) => {
+    resolveCredentials: async (auth, routeParams, _request, signal) => {
       const serverId = routeParams['serverId'];
 
       if (!serverId || !UUID_PATTERN.test(serverId)) {
@@ -86,7 +86,7 @@ export function createCustomMcpProxy() {
         });
 
         const accessToken = connection
-          ? await getValidAccessToken(connection.id, server.url)
+          ? await getValidAccessToken(connection.id, server.url, signal)
           : null;
 
         if (!accessToken) {
@@ -94,7 +94,7 @@ export function createCustomMcpProxy() {
             401,
             server.ownerUserId
               ? `Custom MCP server '${server.name}' needs to be reconnected in Personal settings`
-              : `Custom MCP server '${server.name}' needs to be reconnected by a deployment admin in Settings > Integrations`,
+              : `Custom MCP server '${server.name}' needs to be reconnected by a deployment admin on the Integrations page`,
           );
         }
 
@@ -105,6 +105,8 @@ export function createCustomMcpProxy() {
         authHeader,
         extraHeaders,
         disabledToolNames: server.disabledTools,
+        toolApprovalIntegrationId: server.name,
+        toolApprovalPolicyScope: server.ownerUserId ? 'personal' : 'deployment',
         upstream: server.url,
       };
     },

@@ -212,10 +212,5 @@ describe('loadFastAgentPromptSkillCatalog', () => {
 
     expect(catalog.skills).toHaveLength(FAST_AGENT_PROMPT_SKILL_LIMIT);
     expect(catalog.omittedSkillCount).toBe(3);
-    expect(catalog.omittedSkills?.map((skill) => skill.name)).toEqual([
-      'skill-064',
-      'skill-065',
-      'skill-066',
-    ]);
   });
 });

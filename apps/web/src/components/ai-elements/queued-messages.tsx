@@ -46,7 +46,7 @@ export const QueuedMessagesItems = ({
   ...props
 }: QueuedMessagesItemsProps) => (
   <ScrollArea className={cn('', className)} {...props}>
-    <div className="max-h-40">
+    <div className="max-h-40 pl-7">
       <ul>{children}</ul>
     </div>
   </ScrollArea>

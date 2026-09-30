@@ -196,11 +196,14 @@ function resolveRuntimeModelStatus(options: {
       return [
         descriptor.runtimeStatusKey,
         {
-          effectiveModelId:
-            effectiveModel ??
-            (descriptor.modelFallback === 'deployment-default'
+          // Env overrides accept raw or bare gateway slugs, while the
+          // settings/launch catalogs normalize ids; expose the canonical id
+          // so every consumer resolves the same catalog entry.
+          effectiveModelId: effectiveModel
+            ? normalizeTaskModelId(effectiveModel)
+            : descriptor.modelFallback === 'deployment-default'
               ? options.settingsDefaultModelId
-              : null),
+              : null,
           persistedModelId: persistedModel,
           source,
           managedByEnv: envModel !== null,
@@ -252,9 +255,22 @@ export async function getTaskModelSettingsCommand(
   // Models selected for a runtime role (or as the default coding model) stay
   // listed and active even when a release drops them from the recommended
   // list, so their selectors keep rendering and saves keep validating.
+  // Env-only overrides are not persisted selections, but the runtime resolves
+  // them independently of the saved config; include their effective ids so
+  // the catalog (and metadata lookups such as supported reasoning efforts)
+  // covers them as well.
+  const envEffectiveModelIds = TASK_MODEL_ROLES.flatMap((role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    const envModel = isConfiguredEnvValue(process.env[descriptor.modelEnvVar])
+      ? process.env[descriptor.modelEnvVar]!.trim()
+      : null;
+
+    return envModel ? [envModel] : [];
+  });
   const selectedModelIds = new Set(
     [
       settings.defaultModelId,
+      ...envEffectiveModelIds,
       ...TASK_MODEL_ROLES.map(
         (role) =>
           persistedRuntimeModelConfig[
@@ -560,6 +576,8 @@ export async function saveTaskModelProviderCommand(
   addedRecommendedModelCount: number;
   addedDiscoveredModelCount: number;
   discoveryError: string | null;
+  /** A problem that did not block the save, such as an account out of credits. */
+  validationWarning: string | null;
 }> {
   assertAdmin(auth);
 
@@ -642,8 +660,9 @@ export async function saveTaskModelProviderCommand(
   // before any submitted credential is persisted. Dynamic endpoints have no
   // model to request at connection time, so a submitted connection is
   // qualified by listing the endpoint's models instead.
+  let validationWarning: string | null = null;
   if (!provider.dynamicModels) {
-    await validateSetupModelProviderCredentials({
+    const warning = await validateSetupModelProviderCredentials({
       provider,
       apiKey: input.apiKey,
       additionalEnvValues: suppliedAdditionalEnvValues,
@@ -652,6 +671,7 @@ export async function saveTaskModelProviderCommand(
         buildRecommendedDeploymentModelConfig(provider).roomoteModel ??
         provider.defaultRoomoteModel,
     });
+    validationWarning = warning?.message ?? null;
   } else {
     // UIs resubmit unchanged fields (connection names, keys echoed back
     // from saved state), so gate the probe on what the save would actually
@@ -689,10 +709,12 @@ export async function saveTaskModelProviderCommand(
           : undefined,
       });
 
+      // Only credential and endpoint problems block the save. An exhausted
+      // account is saved so it can be topped up in parallel; discovery after
+      // the save reports it.
       if (
         probe.error &&
         (probe.failureReason === 'invalid_credentials' ||
-          probe.failureReason === 'insufficient_credits' ||
           probe.failureReason === 'invalid_endpoint')
       ) {
         throw new Error(`${provider.label}: ${probe.error}`);
@@ -872,6 +894,7 @@ export async function saveTaskModelProviderCommand(
     addedRecommendedModelCount,
     addedDiscoveredModelCount,
     discoveryError,
+    validationWarning,
   };
 }
 

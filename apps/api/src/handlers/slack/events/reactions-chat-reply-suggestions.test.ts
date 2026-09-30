@@ -942,7 +942,7 @@ describe('chat reply suggestion reactions', () => {
     expect(slack.deleteMessage).not.toHaveBeenCalled();
   });
 
-  it('forces a Fast-targeted suggestion into a Fast session', async () => {
+  it('forces a Fast-targeted suggestion into a session', async () => {
     workItem.targetRepositoryFullName = FAST_EXECUTION;
     workItem.targetEnvironmentId = null;
     mocks.trackedMessageFindFirst.mockResolvedValue({
@@ -991,7 +991,7 @@ describe('chat reply suggestion reactions', () => {
     });
     mocks.startFastAgentResponse.mockResolvedValue({
       accepted: false,
-      reason: 'Fast session is busy.',
+      reason: 'Session is busy.',
     });
     const slack = {
       postMessage: vi

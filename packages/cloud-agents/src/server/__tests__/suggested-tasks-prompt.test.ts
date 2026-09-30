@@ -48,6 +48,12 @@ describe('buildSuggestedTasksPrompt', () => {
       'collect candidate findings as you go, but do not submit until you have reviewed all selected investigation threads.',
     );
     expect(prompt).toContain(
+      'Do not send any user-visible acknowledgement, progress update, status message, partial finding, or scan narration while work is in flight.',
+    );
+    expect(prompt).toContain(
+      'then make exactly one send_chat_reply call with purpose set to closeout and include the final structured suggestions.',
+    );
+    expect(prompt).toContain(
       'for each candidate finding, record the repository, file paths, relevant functions or variables, the failure mechanism, a concrete repro or user-impact scenario, and a confidence level.',
     );
     expect(prompt).not.toContain(

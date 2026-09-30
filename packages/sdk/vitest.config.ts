@@ -1,6 +1,9 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 
 const globalDbStateTests = [
+  // Other MCP setup suites make unscoped connection assertions. Keep this
+  // real-token lifecycle fixture out of their parallel phase.
+  'src/server/lib/mcp/data-refresh.db.test.ts',
   'src/server/automations/__tests__/ci-failure-triage-routing.integration.test.ts',
   'src/server/lib/task-runs/__tests__/platform-issue-alert-delivery.test.ts',
 ];

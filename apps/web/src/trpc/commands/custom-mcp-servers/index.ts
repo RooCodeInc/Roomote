@@ -30,6 +30,7 @@ import {
   type CustomMcpServerInput,
   type CustomMcpServerVisibility,
   type CustomMcpStdioServerInput,
+  readMcpToolReadOnlyHint,
 } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 import { Env, isCustomMcpDisabled } from '@/lib/server/env';
@@ -558,7 +559,7 @@ export async function listCustomMcpServerToolsCommand(
 
   if (!server.url || server.isStdio) {
     throw new Error(
-      'Local (stdio) servers run inside the task sandbox; their tools cannot be listed from Settings.',
+      'Local (stdio) servers run inside the task sandbox; their tools cannot be listed from the Integrations page.',
     );
   }
 
@@ -681,6 +682,7 @@ export async function listCustomMcpServerToolsCommand(
         name: tool.name,
         description:
           typeof tool.description === 'string' ? tool.description : null,
+        readOnly: readMcpToolReadOnlyHint(tool),
         enabled: !disabled.has(tool.name),
       })),
   };

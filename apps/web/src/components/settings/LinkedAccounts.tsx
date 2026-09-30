@@ -466,7 +466,7 @@ function EmailChannelGuidance({
     return (
       <p className="text-sm text-muted-foreground">
         Email verification isn’t available yet. Ask an admin to configure Email
-        so you can verify your address and start Sessions.
+        so you can verify your address and start sessions.
       </p>
     );
   }
@@ -909,8 +909,8 @@ export function LinkedAccounts() {
     userConnections.isPending;
   const showLoadingState = isLoadingVisibleRows && !hasVisibleRows;
   const emptyStateMessage = isAdmin
-    ? 'No personal linked accounts are available yet. Enable a user-linked app in deployment integrations, then come back here to link your account.'
-    : 'No personal linked accounts are available for this deployment yet. Ask an admin to enable a user-linked app in deployment integrations, then come back here to link your account.';
+    ? 'No personal linked accounts are available yet. Enable a user-linked app on the Integrations page, then come back here to link your account.'
+    : 'No personal linked accounts are available for this deployment yet. Ask an admin to enable a user-linked app on the Integrations page, then come back here to link your account.';
 
   return (
     <Section icon={LucideLink} title="Linked Accounts">

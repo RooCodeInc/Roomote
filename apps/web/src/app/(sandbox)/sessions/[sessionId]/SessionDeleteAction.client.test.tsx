@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import * as React from 'react';
 import type { ReactNode } from 'react';
 
 const mocks = vi.hoisted(() => ({
@@ -7,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   stop: vi.fn(),
   archive: vi.fn(),
   remove: vi.fn(),
+  setStatus: vi.fn(),
+  invalidateQueries: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }));
@@ -29,26 +32,43 @@ vi.mock('@/trpc/client', () => ({
       delete: {
         mutationOptions: (options: object) => ({ ...options, kind: 'delete' }),
       },
+      setStatus: {
+        mutationOptions: (options: object) => ({ ...options, kind: 'status' }),
+      },
+      byId: { queryKey: (input: unknown) => ['sessions', 'byId', input] },
+      list: { queryKey: () => ['sessions', 'list'] },
+      search: { queryKey: () => ['sessions', 'search'] },
     },
   }),
 }));
 vi.mock('@tanstack/react-query', () => ({
   useMutation: (options: {
-    kind: 'stop' | 'archive' | 'delete';
-    onSuccess: (result: unknown) => void;
+    kind: 'stop' | 'archive' | 'delete' | 'status';
+    onSuccess: (result: unknown, variables?: unknown) => void;
   }) => ({
     isPending: false,
     mutate: (input: unknown) => {
-      mocks[options.kind === 'delete' ? 'remove' : options.kind](input);
+      if (options.kind === 'status') {
+        mocks.setStatus(input);
+      } else {
+        mocks[options.kind === 'delete' ? 'remove' : options.kind](input);
+      }
       options.onSuccess(
         options.kind === 'stop'
           ? { success: true, stoppedCount: 2 }
           : options.kind === 'archive'
             ? { id: 'session-1' }
-            : { deleted: true },
+            : options.kind === 'delete'
+              ? { deleted: true }
+              : {
+                  id: 'session-1',
+                  cachedStatus: (input as { status: string }).status,
+                },
+        input,
       );
     },
   }),
+  useQueryClient: () => ({ invalidateQueries: mocks.invalidateQueries }),
 }));
 vi.mock('@/components/layout/side-nav/SideNavItem', () => ({
   SideNavItem: ({ children }: { children: ReactNode }) => (
@@ -58,6 +78,7 @@ vi.mock('@/components/layout/side-nav/SideNavItem', () => ({
   ),
 }));
 vi.mock('@/components/system', () => ({
+  Activity: () => <svg data-icon="activity" />,
   Archive: () => <svg data-icon="archive" />,
   Square: () => <svg data-icon="square" />,
   Trash2: () => <svg data-icon="trash" />,
@@ -99,6 +120,53 @@ vi.mock('@/components/system', () => ({
       {children}
     </button>
   ),
+  DropdownMenuSub: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DropdownMenuSubTrigger: ({ children, ...props }: { children: ReactNode }) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
+  DropdownMenuSubContent: ({ children }: { children: ReactNode }) => (
+    <div data-testid="session-status-submenu">{children}</div>
+  ),
+  DropdownMenuRadioGroup: ({
+    children,
+    onValueChange,
+  }: {
+    children: ReactNode;
+    onValueChange?: (value: string) => void;
+  }) => (
+    <div>
+      {React.Children.map(children, (child) =>
+        React.isValidElement(child)
+          ? React.cloneElement(child, { onValueChange } as never)
+          : child,
+      )}
+    </div>
+  ),
+  DropdownMenuRadioItem: ({
+    children,
+    disabled,
+    onValueChange,
+    value,
+    ...props
+  }: {
+    children: ReactNode;
+    disabled?: boolean;
+    onValueChange?: (value: string) => void;
+    value: string;
+  }) => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onValueChange?.(value)}
+      {...props}
+    >
+      {children}
+    </button>
+  ),
   Dialog: ({ open, children }: { open: boolean; children: ReactNode }) =>
     open ? <div>{children}</div> : null,
   DialogContent: ({ children }: { children: ReactNode }) => (
@@ -124,17 +192,27 @@ import {
 describe('SessionActions', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('orders stop and archive above destructive delete and runs them without confirmation', () => {
+  it('orders status, stop, archive, and destructive actions without confirmation', () => {
     render(<SessionActions sessionId="session-1" />);
 
     const labels = screen
       .getAllByRole('button')
       .map((button) => button.textContent?.trim())
       .filter(Boolean);
-    expect(labels).toEqual(['Stop tasks', 'Archive session', 'Delete session']);
-    expect(screen.getByText('Stop tasks').closest('button')).toContainElement(
-      document.querySelector('[data-icon="square"]'),
-    );
+    expect(labels).toEqual([
+      'Stop all tasks',
+      'Mark session as...',
+      'active',
+      'needs input',
+      'blocked',
+      'ready',
+      'done',
+      'Archive session',
+      'Delete session',
+    ]);
+    expect(
+      screen.getByText('Stop all tasks').closest('button'),
+    ).toContainElement(document.querySelector('[data-icon="square"]'));
     expect(
       screen.getByText('Archive session').closest('button'),
     ).toContainElement(document.querySelector('[data-icon="archive"]'));
@@ -142,7 +220,7 @@ describe('SessionActions', () => {
       screen.getByText('Delete session').closest('button'),
     ).toHaveAttribute('data-variant', 'destructive');
 
-    fireEvent.click(screen.getByText('Stop tasks'));
+    fireEvent.click(screen.getByText('Stop all tasks'));
     expect(mocks.stop).toHaveBeenCalledWith({ sessionId: 'session-1' });
     expect(screen.queryByRole('heading')).not.toBeInTheDocument();
 
@@ -172,5 +250,50 @@ describe('SessionActions', () => {
     );
     expect(screen.getByText(SESSION_DELETION_DESCRIPTION)).toBeInTheDocument();
     expect(mocks.remove).not.toHaveBeenCalled();
+  });
+
+  it('keeps canonical status order with the current status selected', () => {
+    render(<SessionActions sessionId="session-1" status="blocked" />);
+
+    const submenu = screen.getByTestId('session-status-submenu');
+    expect(
+      screen
+        .getAllByRole('button')
+        .map((button) => button.textContent?.trim())
+        .filter(Boolean),
+    ).toEqual([
+      'Stop all tasks',
+      'Mark session as...',
+      'active',
+      'needs input',
+      'blocked',
+      'ready',
+      'done',
+      'Archive session',
+      'Delete session',
+    ]);
+    expect(
+      Array.from(submenu.querySelectorAll('button')).map((button) =>
+        button.textContent?.trim(),
+      ),
+    ).toEqual(['active', 'needs input', 'blocked', 'ready', 'done']);
+    expect(screen.getByRole('button', { name: 'active' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'blocked' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'done' }));
+    expect(mocks.setStatus).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      status: 'done',
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['sessions', 'byId', { sessionId: 'session-1' }],
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['sessions', 'list'],
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['sessions', 'search'],
+    });
+    expect(mocks.refresh).toHaveBeenCalled();
   });
 });

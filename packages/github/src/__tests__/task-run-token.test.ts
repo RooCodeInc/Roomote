@@ -56,6 +56,7 @@ vi.mock('@roomote/db/server', () => ({
 import type { TaskRun } from '@roomote/db/server';
 
 import {
+  GitHubInstallationSpanError,
   createTaskRunGitHubToken,
   createTaskRunWorkerGitHubTokenWithMetadata,
   withTaskRunGitHubTokenRetry,
@@ -288,7 +289,10 @@ describe('createTaskRunGitHubToken', () => {
     });
   });
 
-  it('fails closed when an environment checkout stamp spans GitHub installations', async () => {
+  it('mints the environment installation when extra stamped GitHub repositories span installations', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     mockFindEnvironmentFirst.mockResolvedValue({
       id: 'environment-id',
       config: buildEnvironmentConfig(['Roomote/example-app']),
@@ -322,9 +326,64 @@ describe('createTaskRunGitHubToken', () => {
           },
         } as TaskRun['payload']),
       ),
-    ).rejects.toThrow(
-      'Stamped repositories for task run 123 span multiple GitHub installations',
+    ).resolves.toBe('ghs_test_token');
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-roomote',
+        repositoryIds: [201],
+      },
+      undefined,
+      undefined,
     );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Not reachable with this token: Other/app'),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('fails closed when a GitLab environment stamp spans GitHub installations', async () => {
+    mockFindEnvironmentFirst.mockResolvedValue({
+      id: 'gitlab-environment',
+      config: buildEnvironmentConfig(['group/gitlab-app']),
+    });
+    mockFindMappings.mockResolvedValue([
+      {
+        repository: {
+          fullName: 'group/gitlab-app',
+          installationId: null,
+          githubRepoId: null,
+          isActive: true,
+          sourceControlProvider: 'gitlab',
+        },
+      },
+    ]);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'group/gitlab-app',
+          environmentId: 'gitlab-environment',
+          repositoryProviders: {
+            'group/gitlab-app': 'gitlab',
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow(GitHubInstallationSpanError);
     expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
   });
 

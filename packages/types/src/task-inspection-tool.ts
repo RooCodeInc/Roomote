@@ -36,7 +36,7 @@ export const roomoteTaskInspectionFieldSchemas = {
     })
     .optional()
     .describe(
-      'Positive result limit: 1 to 100 for search/get_updates (default 20), or 1 to 1000 for get_messages (task or Fast session)',
+      'Positive result limit: 1 to 100 for search/get_updates (default 20), or 1 to 1000 for get_messages (task or session)',
     ),
   cursor: z
     .string()

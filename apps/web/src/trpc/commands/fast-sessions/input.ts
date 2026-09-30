@@ -111,6 +111,12 @@ export const replyToFastSessionInputSchema = z
   })
   .superRefine(requireFastSessionContent);
 
+export const deleteFastSessionQueuedMessageInputSchema = z.object({
+  sessionId: z.string().uuid(),
+  /** The client id the queued reply was sent with. */
+  clientMessageId: z.string().uuid(),
+});
+
 export const fastSessionPrReviewActionInputSchema = z.object({
   sessionId: z.string().uuid(),
   deliveryId: z.string().uuid(),

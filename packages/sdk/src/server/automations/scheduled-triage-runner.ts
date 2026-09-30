@@ -20,7 +20,10 @@ import {
 import { resolveDeploymentTimeZone } from './custom-automation-schedule';
 import { isRunDue } from './scheduling-utils';
 import {
+  appendAutomationWebhookInput,
   emptyJobResult,
+  resolveAutomationRunContext,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -63,7 +66,7 @@ type ScheduledTriageAutomationConfig = {
     channelId: string;
     destination: ResolvedAutomationDestination;
     runtime: AutomationRuntime;
-    manualTrigger: boolean;
+    trigger: 'scheduled' | 'manual' | 'webhook';
   }) => Promise<TriageScanBuild>;
 };
 
@@ -103,7 +106,7 @@ export function createScheduledTriageJob(
   const logPrefix = `[${config.automationKey.replaceAll('_', '-')}]`;
 
   return async function scheduledTriageJob(
-    opts: AutomationRunOpts = {},
+    opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
   ): Promise<AutomationJobResult> {
     console.log(
       `${logPrefix} Starting ${config.automationKey.replaceAll('_', ' ')} evaluator`,
@@ -111,6 +114,8 @@ export function createScheduledTriageJob(
 
     const now = new Date();
     const result = emptyJobResult();
+    const { isExplicitRun, taskTrigger, trigger, webhookInputJson } =
+      resolveAutomationRunContext(opts.context);
     const runtime = await getAutomationRuntime(config.automationKey);
     const eligibleDeployments = await findEligibleDeploymentContexts(runtime);
 
@@ -125,7 +130,11 @@ export function createScheduledTriageJob(
       try {
         const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
-        if (!frequency || frequency === 'off') {
+        if (
+          !frequency ||
+          frequency === 'off' ||
+          (frequency === 'on_demand' && !isExplicitRun)
+        ) {
           result.skippedReason = 'Automation is disabled.';
           skipped++;
           continue;
@@ -160,7 +169,7 @@ export function createScheduledTriageJob(
         const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
         if (
-          !opts.manualTrigger &&
+          !isExplicitRun &&
           !isRunDue({
             now,
             timeZone: timezone,
@@ -189,7 +198,7 @@ export function createScheduledTriageJob(
           channelId,
           destination: reportDestination,
           runtime,
-          manualTrigger: opts.manualTrigger === true,
+          trigger,
         });
 
         if (scanTask.kind === 'skip') {
@@ -208,9 +217,9 @@ export function createScheduledTriageJob(
           continue;
         }
 
-        // Automation scans run as the deployment service principal; a manual
-        // trigger is still an automation launch, just with a manual trigger
-        // kind on the task record. Non-Slack destinations ride along as
+        // Automation scans run as the deployment service principal; explicit
+        // runs remain automation launches with their trigger kind preserved on
+        // the task record. Non-Slack destinations ride along as
         // communication payload fields so the surface-generic worker tools
         // target the destination conversation. Multi-provider builders return
         // one payload per provider partition; each launches its own run.
@@ -222,13 +231,21 @@ export function createScheduledTriageJob(
               type: TaskPayloadKind.Scan,
               payload: {
                 ...payload,
+                ...(typeof payload.description === 'string'
+                  ? {
+                      agentPromptText: appendAutomationWebhookInput(
+                        payload.description,
+                        webhookInputJson,
+                      ),
+                    }
+                  : {}),
                 ...buildDestinationTaskPayloadFields(reportDestination),
               },
             },
             initiator: { kind: 'automation', key: config.automationKey },
             workflow: 'scan',
             surface: 'system',
-            trigger: opts.manualTrigger ? 'manual' : 'schedule',
+            trigger: taskTrigger,
             visibility: 'hidden',
             ...(reportDestination.provider === 'slack'
               ? { channels: { slackChannelId: channelId } }

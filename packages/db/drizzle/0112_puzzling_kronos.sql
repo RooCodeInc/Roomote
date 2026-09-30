@@ -1,0 +1,3 @@
+ALTER TABLE "integration_tool_approval_requests" ADD COLUMN "task_id" text;--> statement-breakpoint
+ALTER TABLE "integration_tool_approval_requests" ADD CONSTRAINT "integration_tool_approval_requests_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "integration_tool_approvals_task_call_idx" ON "integration_tool_approval_requests" USING btree ("task_id","args_fingerprint","status");

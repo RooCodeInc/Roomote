@@ -192,6 +192,7 @@ describe('sessions CHECK and uniqueness constraints', () => {
     ['sourceTrigger', 'sessions_source_trigger_check'],
     ['visibility', 'sessions_visibility_check'],
     ['cachedStatus', 'sessions_cached_status_check'],
+    ['manualStatus', 'sessions_manual_status_check'],
   ] as const)(
     'rejects an unknown %s value via %s',
     async (field, constraintName) => {
@@ -202,6 +203,30 @@ describe('sessions CHECK and uniqueness constraints', () => {
       await expectConstraintViolation(createSession(overrides), constraintName);
     },
   );
+
+  it('allows done as a manual status without widening cached_status', async () => {
+    const session = await createSession({
+      cachedStatus: 'active',
+      manualStatus: 'done',
+    });
+
+    expect(session).toMatchObject({
+      cachedStatus: 'active',
+      manualStatus: 'done',
+    });
+  });
+
+  it('keeps active in the database vocabulary for N-1 rollback compatibility', async () => {
+    const session = await createSession({
+      cachedStatus: 'active',
+      manualStatus: 'active' as never,
+    });
+
+    expect(session).toMatchObject({
+      cachedStatus: 'active',
+      manualStatus: 'active',
+    });
+  });
 
   it('enforces the owner shape', async () => {
     const user = await userFactory.create();

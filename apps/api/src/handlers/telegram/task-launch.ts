@@ -84,7 +84,7 @@ export function shouldCreateTelegramTaskTopic(input: {
  * Enqueue a standard task for a Telegram request into a workspace that is
  * already decided, and post the task-started message (with follow/cancel
  * buttons) back to the chat. Used by pinned suggestion launches that run
- * inside a Fast Session.
+ * inside a session.
  */
 export async function launchTelegramTask(input: {
   launchOwnerUserId: string;
@@ -92,7 +92,7 @@ export async function launchTelegramTask(input: {
   metadata: TelegramUpdateCommunicationMetadata;
   workspace: TelegramWorkspaceSelection;
   createTopicForTask?: boolean;
-  /** The Fast Session that owns this task; its transcript gets the kickoff. */
+  /** The session that owns this task; its transcript gets the kickoff. */
   fastAgentParent?: FastAgentParent;
   /** Runs inside the launch gate before the child becomes runnable. */
   beforeEnqueue?: (taskRun: { id: number; taskId: string }) => Promise<void>;

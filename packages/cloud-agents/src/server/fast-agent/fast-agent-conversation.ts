@@ -67,6 +67,9 @@ export type FastAgentSuggestedTask = {
 export type FastAgentReply = {
   purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
   message: string;
+  /** Trusted system notification for one pending tool call, rendered with
+   * native decision buttons by callback-capable communication surfaces. */
+  toolApproval?: import('@roomote/types').IntegrationToolApprovalMetadata;
   imageArtifactIds?: string[];
   videoArtifactIds?: string[];
   charts?: DataVisualizationInput[];
@@ -178,6 +181,8 @@ export type FastAgentMcpServerConfig = {
   disabledTools?: string[];
   /** Opaque, non-secret revision used to invalidate process-local tool catalogs. */
   cacheRevision?: string;
+  /** Which approval policies govern a custom server; unset for built-ins. */
+  toolApprovalPolicyScope?: 'deployment' | 'personal';
 };
 
 /** Structured input request issued with the Fast-native request_user_input tool. */
@@ -200,6 +205,16 @@ export type FastAgentInputPreset =
   | 'setup_starter_tasks'
   | 'setup_integrations';
 
+export type FastAgentAutomationToolResult = {
+  integrationId: string;
+  toolName: string;
+  result: string;
+};
+
+export type FastAgentAutomationLaunchCriteriaDecision = {
+  decision: 'continue' | 'stop';
+};
+
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
@@ -210,6 +225,13 @@ export type FastAgentTurnAdapter = {
    * readiness conditions that the model prompt alone must not enforce.
    */
   assertTaskLaunch?: () => Promise<void>;
+  /** Evaluates a criteria-bearing custom automation after its own evidence gathering. */
+  evaluateAutomationLaunchCriteria?: (input: {
+    findingsReport: string;
+    rawToolResults: FastAgentAutomationToolResult[];
+  }) => Promise<FastAgentAutomationLaunchCriteriaDecision>;
+  /** Materializes any deferred provider root after the launch decision continues. */
+  prepareAutomationLaunch?: () => Promise<FastAgentConversation | void>;
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
   /** Surfaces with a streaming API render the reply as it is written. */
   createReplyStream?: () => FastAgentReplyStream;

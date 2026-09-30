@@ -278,7 +278,7 @@ export async function processSlackWorkflowFunctionExecuted(params: {
       }
     }
 
-    // The step enters a Fast Session the way a mention would: under the
+    // The step enters a session the way a mention would: under the
     // prompt author when one is linked, otherwise under the automation
     // launch identity, with the workflow initiator kept for delegated tasks.
     const launchUserMapping = promptAuthorSlackUserId

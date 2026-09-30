@@ -255,6 +255,8 @@ const session: SessionInfo = {
   },
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   status: 'needs_input',
+  cachedStatus: 'needs_input',
+  manualStatus: null,
   tasks: [],
 };
 
@@ -2471,7 +2473,7 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByLabelText('Full task task-2')).toBeNull();
   });
 
-  it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {
+  it('populates the Artifacts panel from refreshed session tasks', async () => {
     renderWorkspace({
       isMobile: false,
       sessionOverride: { taskSource: 'fast', taskCards: [] },

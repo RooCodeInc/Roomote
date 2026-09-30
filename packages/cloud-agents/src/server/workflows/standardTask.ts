@@ -563,6 +563,7 @@ ${initialTodoSeed}
     </guideline>
     <guideline priority="high">
       <rule>When creating non-codebase markdown output, upload it with \`manage_artifacts\` using action \`upload\` and set \`type: "general"\`. The returned \`viewUrl\` opens the artifact in its task, while \`standaloneViewUrl\` opens the document, image, or file on its own page with a direct shareable link; share whichever returned URL fits the context, unchanged, rather than constructing an artifact URL.</rule>
+      <rule>When you need to inspect an existing artifact, use \`open_artifact\` with the exact owning task or Session and stored path. It returns bounded content only for supported text formats; use \`manage_artifacts\` download when the artifact is binary or too large to open.</rule>
       <rationale>Artifacts outlive the conversation and give the user a durable reference.</rationale>
     </guideline>
   </best_practices>

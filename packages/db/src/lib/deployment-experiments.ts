@@ -1,11 +1,13 @@
 import { eq, sql } from 'drizzle-orm';
 
 import {
-  DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
+  DEPLOYMENT_EXPERIMENT_CONFIG,
+  getDeploymentExperimentAudience,
   getDeploymentExperimentValues,
   type DeploymentExperimentId,
   type DeploymentExperimentValues,
 } from '@roomote/feature-flags';
+import { Env, isEnvFlagEnabled } from '@roomote/env';
 
 import { db, type DatabaseOrTransaction } from '../db';
 import { deploymentSettings } from '../schema';
@@ -27,20 +29,14 @@ export async function isDeploymentExperimentEnabled(
   id: DeploymentExperimentId,
   database: DatabaseOrTransaction = db,
 ): Promise<boolean> {
+  if (
+    getDeploymentExperimentAudience(id) === 'internal-nightly' &&
+    !isEnvFlagEnabled(Env.R_NIGHTLY_EXPERIMENTS_ENABLED)
+  ) {
+    return false;
+  }
+
   return (await getDeploymentExperiments(database))[id];
-}
-
-export async function isDeploymentExperimentEnabledWithShareLock(
-  id: DeploymentExperimentId,
-  database: DatabaseOrTransaction,
-): Promise<boolean> {
-  const [settings] = await database
-    .select({ metadata: deploymentSettings.metadata })
-    .from(deploymentSettings)
-    .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
-    .for('share');
-
-  return getDeploymentExperimentValues(settings?.metadata)[id];
 }
 
 export async function setDeploymentExperimentEnabled(
@@ -49,7 +45,7 @@ export async function setDeploymentExperimentEnabled(
   database: DatabaseOrTransaction = db,
 ): Promise<DeploymentExperimentValues> {
   const metadata = {
-    [DEPLOYMENT_EXPERIMENT_METADATA_KEYS[id]]: enabled,
+    [DEPLOYMENT_EXPERIMENT_CONFIG[id].metadataKey]: enabled,
   };
 
   await database

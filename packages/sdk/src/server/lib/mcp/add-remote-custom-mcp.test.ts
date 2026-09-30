@@ -387,7 +387,7 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(await db.query.customMcpServers.findMany()).toHaveLength(1);
   });
 
-  it('atomically reuses one URL across concurrent Fast Sessions', async () => {
+  it('atomically reuses one URL across concurrent sessions', async () => {
     guardedFetchMock.mockImplementation(async (_url, init) => {
       const body = JSON.parse(String(init?.body)) as { method?: string };
       return body.method === 'initialize'
@@ -575,7 +575,9 @@ describe('addRemoteCustomMcpForFast', () => {
         name: 'records',
         url: 'https://two.example.com/mcp',
       }),
-    ).rejects.toThrow('match different custom MCP servers');
+    ).rejects.toThrow(
+      'match different custom MCP servers. Review them on the Integrations page or in Personal settings.',
+    );
 
     expect(guardedFetchMock).not.toHaveBeenCalled();
     expect(await db.query.customMcpServers.findMany()).toHaveLength(2);
@@ -936,7 +938,7 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(result).not.toHaveProperty('authorizeUrl');
   });
 
-  it('returns the reusable replay and Settings links for manual client registration', async () => {
+  it('returns the reusable replay and Integrations page links for manual client registration', async () => {
     const metadata = {
       issuer: 'https://auth.example.com',
       authorization_endpoint: 'https://auth.example.com/authorize',

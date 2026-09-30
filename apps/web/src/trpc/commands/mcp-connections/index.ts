@@ -41,6 +41,7 @@ import {
   type EffectiveMcpIntegration,
   type McpToolsListJsonRpcPayload,
   parseMcpJsonRpcPayload,
+  readMcpToolReadOnlyHint,
 } from '@roomote/types';
 import { decrypt, encrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
@@ -569,6 +570,7 @@ async function fetchUpstreamMcpTools(input: {
             name: tool.name,
             description:
               typeof tool.description === 'string' ? tool.description : null,
+            readOnly: readMcpToolReadOnlyHint(tool),
           },
         ]
       : [],

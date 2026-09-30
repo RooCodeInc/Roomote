@@ -1497,14 +1497,14 @@ async function fetchTeamsThreadGraphMessagesBestEffort(input: {
 /**
  * Enqueue a Teams task into a workspace that is already decided and post the
  * task-started acknowledgement. Used by pinned suggestion launches that run
- * inside a Fast Session.
+ * inside a session.
  */
 async function launchTeamsTask(input: {
   mappedUserId: string;
   queuedMessage: QueuedTeamsCommunicationMessage;
   metadata: TeamsActivityCommunicationMetadata;
   workspace: TeamsWorkspaceSelection;
-  /** The Fast Session that owns this task; its transcript gets the kickoff. */
+  /** The session that owns this task; its transcript gets the kickoff. */
   fastAgentParent?: FastAgentParent;
   /** Runs inside the launch gate before the child becomes runnable. */
   beforeEnqueue?: (taskRun: { id: number; taskId: string }) => Promise<void>;
@@ -2377,7 +2377,7 @@ teams.post('/', async (c) => {
     });
     if (!continued) {
       apiLogger.warn(
-        `[teams] Fast session ${fastSession.id} could not resolve an active delivery route`,
+        `[teams] session ${fastSession.id} could not resolve an active delivery route`,
       );
       return c.json({
         ok: true,
@@ -2660,7 +2660,7 @@ teams.post('/', async (c) => {
       });
     } catch (error) {
       apiLogger.error(
-        `[teams] Failed to initialize the Fast session for conversation ${metadata.communicationChannelId}: ${
+        `[teams] Failed to initialize the session for conversation ${metadata.communicationChannelId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -2684,7 +2684,7 @@ teams.post('/', async (c) => {
       .then((continued) => {
         if (!continued) {
           apiLogger.warn(
-            `[teams] Fast session ${session.id} could not resolve an active delivery route`,
+            `[teams] session ${session.id} could not resolve an active delivery route`,
           );
         }
       })

@@ -7,6 +7,10 @@ import { isMcpConnectionAsanaConfig } from '@roomote/types';
 import type { Variables } from '../../../types';
 
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
+import {
+  readNativeMcpRequestBody,
+  resolveNativeToolApprovalGuard,
+} from '../native-tool-approvals';
 import { McpProxyError } from '../proxy-utils';
 import { registerAsanaTools } from './tools';
 
@@ -67,12 +71,23 @@ asanaMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
   const transport = createAsanaTransport();
 
   try {
-    await resolveDeploymentMcpAuth(c.get('authContext'), 'Asana');
+    const auth = await resolveDeploymentMcpAuth(c.get('authContext'), 'Asana');
+    const guard = await resolveNativeToolApprovalGuard({
+      auth,
+      integrationId: 'asana',
+      requestHeaders: c.req.raw.headers,
+    });
+    const body = await readNativeMcpRequestBody(c.req.raw);
+    const refusal = await guard.checkCall(body);
+    if (refusal) return refusal;
     const connectionConfig = await resolveAsanaConnection();
     const server = createAsanaMcpServer(connectionConfig);
 
     await server.connect(transport);
-    return await transport.handleRequest(c.req.raw);
+    return guard.filterToolsList(
+      body,
+      await transport.handleRequest(c.req.raw),
+    );
   } catch (error) {
     if (error instanceof McpProxyError) {
       return Response.json(

@@ -164,6 +164,8 @@ type PrivateWorkspaceManagerMethods = {
     sha?: string;
     repositoryId?: string;
     allowRemoteHeadFallback: boolean;
+    allowMissingBranchFallback?: boolean;
+    fallbackBranch?: string;
     setDefaultRemote: boolean;
   }) => Promise<void>;
 };
@@ -245,6 +247,95 @@ describe('WorkspaceManager git synchronization', () => {
       buildCheckoutCommands('main'),
     );
     expect(sdk.repositories.reportDefaultBranch).not.toHaveBeenCalled();
+  });
+
+  it('falls back to origin/HEAD when an explicitly allowed branch is gone', async () => {
+    executor.execute
+      .mockResolvedValueOnce({
+        command: GIT_FETCH_COMMAND,
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: buildVerifyRemoteBranchCommand('deleted-base'),
+        success: false,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: GIT_REFRESH_ORIGIN_HEAD_COMMAND,
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: GIT_RESOLVE_LOCAL_ORIGIN_HEAD_COMMAND,
+        success: true,
+        duration: 5,
+        stdout: 'origin/main\n',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: buildVerifyRemoteBranchCommand('main'),
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      });
+
+    await syncRepositoryGitState({
+      executor,
+      repoFullName: 'acme/backend',
+      targetBranch: 'deleted-base',
+      fallbackBranch: 'main',
+      allowMissingBranchFallback: true,
+      allowRemoteHeadFallback: false,
+      setDefaultRemote: false,
+    });
+
+    expect(executor.executeAll).toHaveBeenCalledWith(
+      buildCheckoutCommands('main'),
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      'Target branch deleted-base for acme/backend is unavailable; using origin/HEAD main.',
+    );
+  });
+
+  it('keeps an existing explicitly allowed branch instead of falling back', async () => {
+    executor.execute
+      .mockResolvedValueOnce({
+        command: GIT_FETCH_COMMAND,
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: buildVerifyRemoteBranchCommand('develop'),
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      });
+
+    await syncRepositoryGitState({
+      executor,
+      repoFullName: 'acme/backend',
+      targetBranch: 'develop',
+      fallbackBranch: 'main',
+      allowMissingBranchFallback: true,
+      allowRemoteHeadFallback: false,
+      setDefaultRemote: false,
+    });
+
+    expect(executor.executeAll).toHaveBeenCalledWith(
+      buildCheckoutCommands('develop'),
+    );
+    expect(executor.execute).toHaveBeenCalledTimes(2);
   });
 
   it('retries repository not found failures as token propagation delays before succeeding', async () => {

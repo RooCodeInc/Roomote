@@ -31,6 +31,7 @@ import type {
   RunKind,
   RunStatus,
   TaskPayload,
+  SessionStatusJudgmentOutcome,
   RequestedWorkKind,
   RequestedWorkKindSource,
   ComputeProvider,
@@ -79,6 +80,7 @@ import type {
   CredentialEgressPhase,
   CredentialEgressRevocationKind,
   TaskModelSettings,
+  UserTaskModelMapping,
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
   UserRole,
@@ -87,6 +89,7 @@ import type {
   FastAgentParent,
   FastAgentSurface,
   ReasoningEffort,
+  SessionManualStatus,
   SessionStatus,
   SessionPrivacy,
   SessionWakeupReportPolicy,
@@ -94,6 +97,10 @@ import type {
   SessionWakeupStatus,
   AutomationResultPriority,
   AutomationResultVisibility,
+  CustomAutomationLaunchCriteriaAnswers,
+  CustomAutomationLaunchCriteriaOutcomes,
+  CustomAutomationLaunchCriteriaSnapshot,
+  CustomAutomationRunWhen,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -179,6 +186,32 @@ export const userPersonalizations = pgTable('user_personalizations', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+/** Private, per-user saved mappings for the task model roles. */
+export const userTaskModelMappingPresets = pgTable(
+  'user_task_model_mapping_presets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    nameKey: text('name_key').notNull(),
+    roles: jsonb('roles').$type<UserTaskModelMapping>().notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('user_task_model_mapping_presets_owner_name_unique_idx').on(
+      table.userId,
+      table.nameKey,
+    ),
+    index('user_task_model_mapping_presets_owner_created_idx').on(
+      table.userId,
+      table.createdAt,
+    ),
+  ],
+);
 
 export const instanceSkills = pgTable(
   'instance_skills',
@@ -1716,6 +1749,20 @@ export const taskRuns = pgTable(
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure')`,
       ),
+    // Finished runs whose sandbox sleep check has not yet examined (see
+    // destroySandboxesOfFinishedRuns). Keyed on the settlement time the sweep
+    // ranges over, one index per branch of its OR, so it reads only the
+    // lookback window instead of all unclaimed run history.
+    index('task_runs_sleep_check_finished_completed_idx')
+      .using('btree', table.completedAt)
+      .where(
+        sql`${table.status} IN ('failed', 'canceled', 'completed') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure') AND ${table.completedAt} IS NOT NULL`,
+      ),
+    index('task_runs_sleep_check_finished_canceled_idx')
+      .using('btree', table.canceledAt)
+      .where(
+        sql`${table.status} IN ('failed', 'canceled', 'completed') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure') AND ${table.completedAt} IS NULL AND ${table.canceledAt} IS NOT NULL`,
+      ),
     index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
     index('task_runs_source_run_id_idx').on(table.sourceRunId),
     uniqueIndex('task_runs_discord_source_event_unique')
@@ -1984,7 +2031,9 @@ export const llmUsageEvents = pgTable(
       .default(0),
     costSource: text('cost_source')
       .notNull()
-      .$type<'opencode_message' | 'litellm_gateway' | 'missing'>(),
+      .$type<
+        'opencode_message' | 'litellm_gateway' | 'provider_response' | 'missing'
+      >(),
     pricingMetadata: jsonb('pricing_metadata')
       .notNull()
       .default({})
@@ -3793,6 +3842,19 @@ export const fastAgentMessages = pgTable(
       table.ts,
       table.turnSeq,
     ),
+    index('fast_agent_messages_visible_user_order_idx').on(
+      table.conversationId,
+      table.ts.desc(),
+    ).where(sql`
+        ${table.role} = 'user'
+        AND (
+          ${table.metadata} ->> 'visibleInTranscript' = 'true'
+          OR (
+            ${table.metadata} ->> 'visibleInTranscript' IS NULL
+            AND ${table.eventType} <> 'roomote_runtime.user_prompt'
+          )
+        )
+      `),
   ],
 );
 
@@ -3800,7 +3862,7 @@ export const fastAgentMessages = pgTable(
  * fast_agent_provider_messages
  *
  * Durable provider message bindings for communication surfaces whose stable
- * conversation address can host more than one Fast session. Inbound replies
+ * conversation address can host more than one session. Inbound replies
  * use these server-written rows to recover the canonical session without
  * trusting identifiers embedded in message text or webhook routing metadata.
  */
@@ -4273,7 +4335,7 @@ export const slackFastIntegrationCalls = pgTable(
  */
 
 /**
- * N-1 rollback: no longer written since Linear sessions enter Fast Sessions
+ * N-1 rollback: no longer written since Linear sessions use the session flow
  * (the workspace elicitation flow is gone). The previous release still reads
  * and writes this table; drop it only after that release is no longer the
  * supported rollback target.
@@ -4328,6 +4390,8 @@ export const automations = pgTable('automations', {
   key: text('key').primaryKey().$type<BackgroundAutomationKey>(),
   enabled: boolean('enabled').notNull().default(false),
   internal: boolean('internal').notNull().default(false),
+  /** Encrypted opaque bearer token for an optional built-in webhook trigger. */
+  webhookSecret: encryptedText('webhook_secret'),
   schedule: jsonb('schedule')
     .notNull()
     .default({})
@@ -4359,7 +4423,7 @@ export const automationsRelations = relations(automations, ({ many }) => ({
 
 export type SessionOwnerKind = 'user' | 'automation' | 'system';
 export type SessionSourceSurface = TaskSurface | FastAgentSurface;
-export type { SessionPrivacy, SessionStatus };
+export type { SessionManualStatus, SessionPrivacy, SessionStatus };
 export type SessionTaskOrigin =
   | 'direct_launch'
   | 'fast_delegation'
@@ -4371,6 +4435,15 @@ export type SessionBackfillPhase =
   | 'fast_tasks'
   | 'tasks'
   | 'participants';
+export type SessionStatusJudgmentSourceKind = 'fast_turn' | 'task_terminal';
+export type SessionStatusJudgmentState =
+  | 'awaiting_settlement'
+  | 'pending'
+  | 'processing'
+  | 'applied'
+  | 'ignored'
+  | 'failed'
+  | 'stale';
 
 /**
  * sessions
@@ -4415,6 +4488,12 @@ export const sessions = pgTable(
       .$type<TaskVisibility>(),
     activityAt: bigint('activity_at', { mode: 'number' }).notNull(),
     cachedStatus: text('cached_status').$type<SessionStatus>(),
+    // Optional user-selected status. When present, runtime reconciliation
+    // preserves it while cached_status remains the deterministic lifecycle
+    // status. 'done' is intentionally valid here but not in cached_status.
+    manualStatus: text('manual_status').$type<SessionManualStatus>(),
+    manualStatusSetAt: timestamp('manual_status_set_at'),
+    inactivityDueAt: timestamp('inactivity_due_at'),
     // Fast-conversation responding lease: while this is in the future, status
     // recomputation treats the conversation as actively responding. TTL-based
     // so a crashed turn self-heals instead of pinning the session 'active'.
@@ -4429,6 +4508,11 @@ export const sessions = pgTable(
       table.activityAt.desc(),
       table.id.desc(),
     ),
+    index('sessions_inactivity_due_idx')
+      .on(table.visibility, table.inactivityDueAt, table.id)
+      .where(
+        sql`${table.inactivityDueAt} IS NOT NULL AND ${table.manualStatus} IS NULL`,
+      ),
     index('sessions_owner_user_id_idx').on(table.ownerUserId),
     uniqueIndex('sessions_fast_conversation_id_unique')
       .on(table.fastConversationId)
@@ -4467,6 +4551,10 @@ export const sessions = pgTable(
     check(
       'sessions_cached_status_check',
       sql`${table.cachedStatus} IS NULL OR ${table.cachedStatus} in ('active', 'needs_input', 'blocked', 'ready')`,
+    ),
+    check(
+      'sessions_manual_status_check',
+      sql`${table.manualStatus} IS NULL OR ${table.manualStatus} in ('active', 'needs_input', 'blocked', 'ready', 'done')`,
     ),
   ],
 );
@@ -4577,6 +4665,227 @@ export const serviceCredentialAudit = pgTable('service_credential_audit', {
 });
 
 /**
+ * integration_tool_policies
+ *
+ * Integration tool approvals: durable
+ * approval policy for code-mode integration tool calls in Sessions. One row
+ * per (integration, tool); deployment-scoped and admin-configured. Absence of
+ * a row is the default `allow`, which preserves the pre-experiment behavior.
+ * Policies never widen access: provider, actor, and admin authorization
+ * ceilings still decide which tools are mounted at all. Additive; N-1 code
+ * never reads or writes it.
+ */
+export const integrationToolPolicies = pgTable(
+  'integration_tool_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /** N-1: unused since Auto became a deployment setting; drop next release. */
+    auto: boolean('auto').notNull().default(false),
+    updatedByUserId: text('updated_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_policies_tool_idx').on(
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
+
+/**
+ * integration_tool_user_policies
+ *
+ * Integration tool approvals: personal
+ * per-tool approval modes. Same modes as `integration_tool_policies`, scoped
+ * to one user's own Sessions, and only ever tightening: the stricter of the
+ * deployment and personal mode applies. `allow` is stored as no row. Rows
+ * cascade with their user. Additive; N-1 code never reads or writes it.
+ */
+export const integrationToolUserPolicies = pgTable(
+  'integration_tool_user_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /** N-1: unused since Auto became a deployment setting; drop next release. */
+    auto: boolean('auto').notNull().default(false),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_user_policies_tool_idx').on(
+      table.userId,
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
+
+/**
+ * integration_tool_approval_requests
+ *
+ * Integration tool approvals: pending
+ * and decided approval requests for code-mode integration tool calls gated by
+ * an `ask` policy. One row is both the pending request and its redacted audit
+ * outcome: arguments are stored only as a redacted display summary; the
+ * decision is bound to the exact native permission request and consumed once
+ * by the OpenCode runtime. Secret-looking values are redacted before insert;
+ * nothing here may carry raw credential material. Terminal states are never
+ * resurrected: an expired or cancelled row stays decided forever. Additive;
+ * N-1 code never reads or writes it.
+ */
+export const integrationToolApprovalRequests = pgTable(
+  'integration_tool_approval_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    /** The Session owner the agent acts for; only this user may decide. */
+    requesterUserId: text('requester_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * The task whose agent asked, or null for the Session's own agent. A
+     * task's approved row is claimed by the integration proxy for that task's
+     * exact call rather than relayed by a bridge.
+     */
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    /** The OpenCode permission request this decision replies to. */
+    nativeRequestId: text('native_request_id').notNull(),
+    /** SHA-256 hex of the canonical {integrationId, toolName, args} payload. */
+    argsFingerprint: text('args_fingerprint').notNull(),
+    /** Redacted argument preview for the approver and the audit trail. */
+    argsSummary: jsonb('args_summary').notNull(),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<import('@roomote/types').IntegrationToolApprovalStatus>(),
+    decidedByUserId: text('decided_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    decidedAt: timestamp('decided_at'),
+    /** Why a cancelled request was cancelled (for example experiment disabled). */
+    cancelReason: text('cancel_reason'),
+    /**
+     * What the decision model made of this Ask first call under Auto mode,
+     * recorded beside the decision.
+     */
+    autoEvaluation:
+      jsonb('auto_evaluation').$type<
+        import('@roomote/types').IntegrationToolAutoEvaluation
+      >(),
+    /** The window for the requester to answer; unresolved rows fail closed. */
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('integration_tool_approvals_session_requester_idx').on(
+      table.sessionId,
+      table.requesterUserId,
+      table.status,
+    ),
+    index('integration_tool_approvals_task_call_idx').on(
+      table.taskId,
+      table.argsFingerprint,
+      table.status,
+    ),
+    // One open ask per native permission request; the runtime never reuses
+    // request ids, so identical re-asks are separate decisions by design.
+    uniqueIndex('integration_tool_approvals_pending_native_idx')
+      .on(table.sessionId, table.nativeRequestId)
+      .where(sql`status = 'pending'`),
+  ],
+);
+
+/**
+ * Risk assessments Auto mode made of calls it did not decide (Auto off,
+ * hosted judgment model present): a log for comparing the model's view with
+ * real traffic before Auto is turned on. Not tied to an approval row, since
+ * those calls never asked anyone.
+ */
+export const integrationToolAutoEvaluations = pgTable(
+  'integration_tool_auto_evaluations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    /** Redacted argument preview, as on an approval row. */
+    argsSummary: jsonb('args_summary').notNull(),
+    evaluation: jsonb('evaluation')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolAutoEvaluation>(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('integration_tool_auto_evaluations_created_at_idx').on(
+      table.createdAt.desc(),
+    ),
+  ],
+);
+
+/**
+ * integration_tool_session_overrides
+ *
+ * Integration tool approvals:
+ * requester-owned, session-scoped overrides of a tool's approval mode. `allow`
+ * records "don't ask again this session" for a tool the deployment gates with
+ * `ask`; `ask` gates a default-allow tool for this session only. A deployment
+ * `reject` policy is never loosened by a row here, and rows cascade with
+ * their session. Additive; N-1 code never reads or writes it.
+ */
+export const integrationToolSessionOverrides = pgTable(
+  'integration_tool_session_overrides',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolSessionOverrideMode>(),
+    setByUserId: text('set_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_session_overrides_tool_idx').on(
+      table.sessionId,
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
+
+/**
  * Credential egress control plane (additive, N-1 safe: previous releases never
  * read these tables). One row per attached run that a trusted controller
  * registered with the credential-substituting egress gateway. The
@@ -4678,6 +4987,81 @@ export const sessionGoals = pgTable(
     check(
       'session_goals_blocker_candidate_count_check',
       sql`${table.blockerCandidateCount} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Durable status-judgment requests and their bounded, transcript-free results.
+ * Rows are both the recovery outbox and the ordered history used by the
+ * experimental board. They never replace deterministic Session lifecycle.
+ */
+export const sessionStatusJudgments = pgTable(
+  'session_status_judgments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    sourceEventId: text('source_event_id').notNull(),
+    generation: integer('generation').notNull(),
+    sourceKind: text('source_kind')
+      .notNull()
+      .$type<SessionStatusJudgmentSourceKind>(),
+    state: text('state')
+      .notNull()
+      .default('pending')
+      .$type<SessionStatusJudgmentState>(),
+    outcome: text('outcome').$type<SessionStatusJudgmentOutcome>(),
+    confidence: real('confidence'),
+    probabilities: jsonb('probabilities').$type<Partial<
+      Record<SessionStatusJudgmentOutcome, number>
+    > | null>(),
+    model: text('model'),
+    attempts: integer('attempts').notNull().default(0),
+    claimedAt: timestamp('claimed_at'),
+    settledAt: timestamp('settled_at'),
+    judgedAt: timestamp('judged_at'),
+    errorCode: text('error_code'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_status_judgments_session_event_unique').on(
+      table.sessionId,
+      table.sourceEventId,
+    ),
+    uniqueIndex('session_status_judgments_session_generation_unique').on(
+      table.sessionId,
+      table.generation,
+    ),
+    index('session_status_judgments_pending_idx').on(
+      table.state,
+      table.createdAt,
+    ),
+    index('session_status_judgments_session_generation_idx').on(
+      table.sessionId,
+      table.generation.desc(),
+    ),
+    check(
+      'session_status_judgments_source_kind_check',
+      sql`${table.sourceKind} in ('fast_turn', 'task_terminal')`,
+    ),
+    check(
+      'session_status_judgments_state_check',
+      sql`${table.state} in ('awaiting_settlement', 'pending', 'processing', 'applied', 'ignored', 'failed', 'stale')`,
+    ),
+    check(
+      'session_status_judgments_outcome_check',
+      sql`${table.outcome} IS NULL OR ${table.outcome} in ('open', 'done', 'blocked', 'needs_input', 'unclear')`,
+    ),
+    check(
+      'session_status_judgments_confidence_check',
+      sql`${table.confidence} IS NULL OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`,
+    ),
+    check(
+      'session_status_judgments_attempts_check',
+      sql`${table.attempts} >= 0`,
     ),
   ],
 );
@@ -4882,8 +5266,19 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   tasks: many(sessionTasks),
   participants: many(sessionParticipants),
   pins: many(sessionPins),
+  statusJudgments: many(sessionStatusJudgments),
   usageEvents: many(llmUsageEvents),
 }));
+
+export const sessionStatusJudgmentsRelations = relations(
+  sessionStatusJudgments,
+  ({ one }) => ({
+    session: one(sessions, {
+      fields: [sessionStatusJudgments.sessionId],
+      references: [sessions.id],
+    }),
+  }),
+);
 
 export const sessionTasksRelations = relations(sessionTasks, ({ one }) => ({
   session: one(sessions, {
@@ -4935,6 +5330,10 @@ export const customAutomations = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     prompt: text('prompt').notNull(),
+    /** Encrypted opaque bearer token for the optional custom webhook trigger. */
+    webhookSecret: encryptedText('webhook_secret'),
+    launchCriteria: text('launch_criteria'),
+    runWhen: jsonb('run_when').$type<CustomAutomationRunWhen | null>(),
     resultPriority: text('result_priority')
       .notNull()
       .default('normal')
@@ -5017,6 +5416,15 @@ export const automationResults = pgTable(
       text('result_visibility').$type<AutomationResultVisibility>(),
     automationName: text('automation_name').notNull(),
     content: text('content').notNull(),
+    launchCriteriaSnapshot: jsonb(
+      'launch_criteria_snapshot',
+    ).$type<CustomAutomationLaunchCriteriaSnapshot | null>(),
+    launchCriteriaAnswers: jsonb(
+      'launch_criteria_answers',
+    ).$type<CustomAutomationLaunchCriteriaAnswers | null>(),
+    launchCriteriaOutcome: jsonb(
+      'launch_criteria_outcome',
+    ).$type<CustomAutomationLaunchCriteriaOutcomes | null>(),
     resultKind: text('result_kind')
       .notNull()
       .default('outcome')

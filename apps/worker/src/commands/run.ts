@@ -37,13 +37,21 @@ export async function run({
       ),
     workspaceConfigFn: async ({
       taskRun: {
-        payload: { environmentId, repo, branch, sha, selectedRepositories },
+        payload: {
+          environmentId,
+          repo,
+          branch,
+          allowMissingBranchFallback,
+          sha,
+          selectedRepositories,
+        },
       },
     }) =>
       buildWorkspaceConfig({
         environmentId,
         repo,
         branch,
+        allowMissingBranchFallback,
         sha,
         selectedRepositories,
       }),

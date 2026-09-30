@@ -86,6 +86,32 @@ describe('withNullableOptionals', () => {
     ).toMatchObject({ action: 'update', threadId: 'T1', issueNumber: 7 });
   });
 
+  it('deserializes numeric and boolean transport values before validation', () => {
+    expect(
+      schema.parse({
+        action: 'update',
+        issueNumber: '7',
+        suggestions: [{ label: 'Fix it', priority: '2' }],
+      }),
+    ).toMatchObject({
+      action: 'update',
+      issueNumber: 7,
+      suggestions: [{ label: 'Fix it', priority: 2 }],
+    });
+  });
+
+  it('rejects non-decimal numeric transport values', () => {
+    expect(() =>
+      schema.parse({ action: 'update', issueNumber: '0x10' }),
+    ).toThrow();
+    expect(() =>
+      schema.parse({ action: 'update', issueNumber: '0b10' }),
+    ).toThrow();
+    expect(() =>
+      schema.parse({ action: 'update', issueNumber: '0o10' }),
+    ).toThrow();
+  });
+
   it('keeps inner refinements for non-null values', () => {
     expect(() => schema.parse({ action: 'get', issueNumber: 0 })).toThrow(
       'Issue number must be positive.',
@@ -183,6 +209,90 @@ describe('NullableOptionalsMcpServer', () => {
         threadId: undefined,
         limit: undefined,
         suggestions: [{ label: 'a', priority: undefined }],
+      },
+    ]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it('deserializes source-control numeric and boolean arguments at the MCP boundary', async () => {
+    const server = new NullableOptionalsMcpServer({
+      name: 'test',
+      version: '0.0.0',
+    });
+    const received: unknown[] = [];
+    server.registerTool(
+      'manage_source_control',
+      {
+        inputSchema: {
+          action: z.enum([
+            'get_pull_request',
+            'update_pull_request_comment',
+            'resolve_pull_request_thread',
+          ]),
+          prNumber: z.number().int().positive(),
+          commentId: z.string().optional(),
+          resolved: z.boolean().optional(),
+        },
+      },
+      async (args) => {
+        received.push(args);
+        return { content: [{ type: 'text', text: 'ok' }] };
+      },
+    );
+
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    await client.connect(clientTransport);
+
+    const { tools } = await client.listTools();
+    const properties = tools[0]!.inputSchema.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(properties.prNumber).toMatchObject({ type: 'integer' });
+    expect(properties.resolved).toMatchObject({
+      anyOf: [{ type: 'boolean' }, { type: 'null' }],
+    });
+
+    await client.callTool({
+      name: 'manage_source_control',
+      arguments: {
+        action: 'get_pull_request',
+        prNumber: '12',
+      },
+    });
+    await client.callTool({
+      name: 'manage_source_control',
+      arguments: {
+        action: 'update_pull_request_comment',
+        prNumber: '12',
+        commentId: '3001',
+      },
+    });
+    await client.callTool({
+      name: 'manage_source_control',
+      arguments: {
+        action: 'resolve_pull_request_thread',
+        prNumber: '12',
+        resolved: 'false',
+      },
+    });
+
+    expect(received).toEqual([
+      { action: 'get_pull_request', prNumber: 12 },
+      {
+        action: 'update_pull_request_comment',
+        prNumber: 12,
+        commentId: '3001',
+      },
+      {
+        action: 'resolve_pull_request_thread',
+        prNumber: 12,
+        resolved: false,
       },
     ]);
 

@@ -7,6 +7,7 @@ export interface RepositoryWorkspace {
   type: 'repository';
   repository: string;
   branch?: string;
+  allowMissingBranchFallback?: boolean;
   sha?: string;
 }
 
@@ -43,6 +44,7 @@ export interface EnvironmentWorkspace {
    */
   sourceRepo?: string;
   sourceBranch?: string;
+  allowMissingBranchFallback?: boolean;
   sourceSha?: string;
 }
 

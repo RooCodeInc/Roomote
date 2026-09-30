@@ -4,7 +4,11 @@ const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
   answerQuestion: vi.fn(),
   createArtifact: vi.fn(),
-  createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
+  createActivity: vi.fn(() => ({
+    start: vi.fn(),
+    settle: vi.fn(),
+    dispose: vi.fn().mockResolvedValue(undefined),
+  })),
   findConversation: vi.fn(),
   findSession: vi.fn(),
   getActiveTasks: vi.fn(),
@@ -29,6 +33,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   ),
   fastAgentConversationRepository: { findById: mocks.findConversation },
   getActiveFastAgentTasks: mocks.getActiveTasks,
+  registerFastAgentTurnActivity: vi.fn(() => vi.fn()),
 }));
 
 vi.mock('@roomote/communication', () => ({
@@ -124,6 +129,12 @@ describe('Fast Slack reaction input', () => {
   it('admits a reaction turn durably so an interruption resumes it with the same reaction', async () => {
     // The row was still pending from an earlier attempt (a redelivered
     // event), so this run is a resumption.
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn(),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    mocks.createActivity.mockReturnValueOnce(activity);
     mocks.persistAdmission.mockResolvedValueOnce({
       id: 'row-1',
       eventKey: 'key-1',
@@ -155,6 +166,11 @@ describe('Fast Slack reaction input', () => {
       }),
     ).resolves.toBe(true);
     await vi.waitFor(() => expect(mocks.answerQuestion).toHaveBeenCalledOnce());
+
+    expect(activity.start).toHaveBeenCalledOnce();
+    expect(activity.start.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.getActiveTasks.mock.invocationCallOrder[0]!,
+    );
 
     expect(mocks.persistAdmission).toHaveBeenCalledWith({
       parent: expect.objectContaining({ sessionId: 'session-1' }),

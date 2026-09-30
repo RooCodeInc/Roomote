@@ -10,6 +10,7 @@ import {
   compareBigIntMessageIds,
   resolveUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
+  type UnmentionedThreadMention,
 } from '../shared/unmentioned-thread-reply.js';
 import type { DiscordThreadHistoryMessage } from './thread-context.js';
 
@@ -19,6 +20,20 @@ function getMentionedDiscordUserIds(text: string): string[] {
   return Array.from(text.matchAll(DISCORD_USER_MENTION_PATTERN))
     .map((match) => match[1])
     .filter((userId): userId is string => Boolean(userId));
+}
+
+/** Every user mention in `text`, as the judgment state's mention list. */
+function getDiscordMentionsForJudgment(
+  text: string,
+  botUserId: string | undefined,
+): UnmentionedThreadMention[] {
+  return Array.from(text.matchAll(DISCORD_USER_MENTION_PATTERN)).map(
+    (match) => ({
+      token: match[0],
+      userId: match[1] ?? null,
+      isBot: Boolean(botUserId) && match[1] === botUserId,
+    }),
+  );
 }
 
 function mentionsDiscordBotInText(
@@ -81,6 +96,7 @@ function toSharedHistoryMessages(
         message.user,
       ),
       text: message.text,
+      mentions: getDiscordMentionsForJudgment(message.text, botUserId),
     };
   });
 }
@@ -91,6 +107,14 @@ function toSharedHistoryMessages(
  * eligibility and interjection window rules come from the shared Slack/Teams
  * core in `handlers/shared/unmentioned-thread-reply`.
  */
+type UnmentionedDiscordThreadReplyRoutingDecision =
+  | { shouldRoute: false }
+  | {
+      shouldRoute: true;
+      /** The judgment model found the reply addressed to Roomote. */
+      addressedToRoomote?: true;
+    };
+
 export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   message: DiscordMessage;
   botUserId: string | undefined;
@@ -106,57 +130,47 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   isAutomationReportThread?: boolean;
   /** True when the thread is an open Fast conversation. */
   isOpenConversationThread?: boolean;
-  /** Owner-controlled opt-in that keeps peer-mentioned Fast turns eligible. */
-  peerConversationsExperimentEnabled?: boolean;
+  /** True in a user-owned Fast conversation, where peer-mentioned turns stay eligible. */
+  peerConversationsEnabled?: boolean;
   fetchThreadMessages: () => Promise<DiscordThreadHistoryMessage[] | null>;
-}): Promise<boolean> {
+}): Promise<UnmentionedDiscordThreadReplyRoutingDecision> {
   const { message, botUserId } = params;
   const senderDiscordUserId = message.author?.id;
 
   if (!senderDiscordUserId || message.author?.bot) {
-    return false;
+    return { shouldRoute: false };
   }
 
   // DMs and explicit bot mentions are handled by the normal task-entry path.
   if (!message.guild_id || isDiscordBotMentioned(message, botUserId)) {
-    return false;
+    return { shouldRoute: false };
   }
 
   // Unmentioned routing needs a linked sender so drive-by chats never trigger
   // work or account-linking spam for spectators.
   if (!params.mappedUserId || !botUserId) {
-    return false;
+    return { shouldRoute: false };
   }
 
   // Replies that mention somebody else without addressing the bot are directed
   // at that person, not Roomote.
-  if (
+  const eventMentionsSomebodyElse =
     mentionsDiscordUserOtherThanBotWithoutMentioningBot(
       getDiscordMessageContent(message),
       getDiscordMessageMentions(message),
       botUserId,
-    ) &&
-    !(
-      params.peerConversationsExperimentEnabled &&
-      params.isOpenConversationThread
-    )
+    );
+  if (
+    eventMentionsSomebodyElse &&
+    !(params.peerConversationsEnabled && params.isOpenConversationThread)
   ) {
-    return false;
+    return { shouldRoute: false };
   }
 
   // A Roomote-owned task conversation is required (active run, resumable
   // completed run, or pending routing for this thread).
   if (!params.isRoomoteThread) {
-    return false;
-  }
-
-  // The owner opt-in admits visible human discussion in this exact Fast
-  // thread. Provider and linked-sender checks above still fail closed.
-  if (
-    params.peerConversationsExperimentEnabled &&
-    params.isOpenConversationThread
-  ) {
-    return true;
+    return { shouldRoute: false };
   }
 
   const threadMessages = await params.fetchThreadMessages();
@@ -165,7 +179,7 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   // history means it is unreliable. Require an explicit mention instead of
   // routing blind.
   if (!threadMessages || threadMessages.length === 0) {
-    return false;
+    return { shouldRoute: false };
   }
 
   // Discord threads created from a message share that message's id as the
@@ -183,6 +197,10 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   const decision = await resolveUnmentionedThreadReplyRouting({
     eventMessageId: message.id,
     eventText: getDiscordMessageContent(message),
+    eventMentions: getDiscordMentionsForJudgment(
+      getDiscordMessageContent(message),
+      botUserId,
+    ),
     senderUserId: senderDiscordUserId,
     isThreadTaskOwner:
       Boolean(params.ownedThreadUserId) &&
@@ -190,9 +208,21 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
     isThreadRootAuthor,
     isAutomationReportThread: params.isAutomationReportThread,
     isOpenConversationThread: params.isOpenConversationThread,
+    allowPeerConversationMessages:
+      params.peerConversationsEnabled === true &&
+      params.isOpenConversationThread === true,
+    eventMentionsSomebodyElse,
     threadMessages: toSharedHistoryMessages(threadMessages, botUserId),
     compareMessageIds: compareBigIntMessageIds,
   });
 
-  return decision.shouldRoute;
+  if (!decision.shouldRoute) {
+    return { shouldRoute: false };
+  }
+  return {
+    shouldRoute: true,
+    ...(decision.routedByJudgmentModel
+      ? { addressedToRoomote: true as const }
+      : {}),
+  };
 }

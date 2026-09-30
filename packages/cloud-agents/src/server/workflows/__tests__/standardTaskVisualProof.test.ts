@@ -99,27 +99,28 @@ describe('Standard Task visual-proof step', () => {
     expect(skillContent).not.toContain('Slack screenshot posting');
   });
 
-  it('requires implement-changes to run the judge after the proof step with images and the diff snapshot', () => {
+  it('runs the judge only on proof that kept images, and only on the proof', () => {
     const skillContent = readImplementChangesSkill();
 
     expect(skillContent).toContain(
-      'run one focused Task-tool judge pass after the initial self-review and only after any required pre-delivery `capture-visual-proof` step for this shipped change has completed',
+      'the pre-delivery `capture-visual-proof` step for this shipped change kept screenshots or keyframes, run one focused Task-tool judge pass after the initial self-review',
     );
     expect(skillContent).toContain(
-      'the path `/tmp/capture-visual-proof/diff-at-start.patch` when it exists, and the local paths of every kept screenshot and keyframe so the judge can open them',
+      'the path `/tmp/capture-visual-proof/diff-at-start.patch`, and the local paths of every kept screenshot and keyframe so the judge can open them',
     );
     expect(skillContent).toContain(
-      'to report undisclosed source drift between the proof snapshot and the shipped diff',
+      'Supply the final shipped diff (branch base through working tree, including untracked files, computed the same way as the snapshot)',
     );
     expect(skillContent).toContain(
-      'Treat the judge verdict as review input and fix actionable plan-mismatch, proof, or drift gaps it finds',
+      'The judge checks the visual proof only: whether the images show the shipped change and whether source changed after capture began.',
     );
     expect(skillContent).toContain(
-      'When those judge-driven fixes change repository files, re-run the `capture-visual-proof` step once for the updated shipped change',
+      'When the proof step kept no images, do not run the judge.',
     );
     expect(skillContent).toContain(
-      'then run one more focused judge pass against the refreshed diff, validation state, and refreshed proof result before delivery',
+      'then run one more focused judge pass against the refreshed proof result before delivery',
     );
+    expect(skillContent).not.toContain('compare plan versus built result');
     expect(skillContent).not.toContain('background visual proof');
   });
 });

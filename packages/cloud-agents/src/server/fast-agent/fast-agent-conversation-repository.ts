@@ -15,9 +15,11 @@ import {
   advanceSessionReadCursor,
   getSessionForFastConversation,
   gt,
+  inArray,
   isNotNull,
   isNull,
   lt,
+  lte,
   ne,
   or,
   sessions,
@@ -483,6 +485,68 @@ export type FastAgentUnresolvedRequest = {
 };
 
 const UNRESOLVED_REQUEST_CHAIN_LIMIT = 8;
+const FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT = 80;
+
+/**
+ * Read the human-authored prompts that were already in the Session before its
+ * current UserPrompt. The N-1 `compatibility_messages` mirror intentionally
+ * omits event metadata, so `fast_agent_messages` is the trust source for
+ * distinguishing human requests from platform events and other transcript
+ * content.
+ *
+ * Timestamps are milliseconds and there is no causal cursor across turns, so
+ * the current prompt is excluded by its event id, and prompts sharing a
+ * timestamp are returned as one entry. Callers that take the newest entry as
+ * the request then see every prompt that could be the latest one.
+ */
+export async function listRecentFastAgentHumanUserPromptTexts(input: {
+  conversationId: string;
+  beforeTs: number;
+  currentEventId: string;
+}): Promise<string[]> {
+  const rows = await db
+    .select({
+      ts: fastAgentMessages.ts,
+      contentBlocks: fastAgentMessages.contentBlocks,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        lte(fastAgentMessages.ts, input.beforeTs),
+        ne(fastAgentMessages.eventId, input.currentEventId),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        eq(fastAgentMessages.role, 'user'),
+        sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+        sql`coalesce(${fastAgentMessages.metadata}->>'inputKind', 'message') <> ${FAST_AGENT_REACTION_INPUT_TYPE}`,
+        sql`coalesce(${fastAgentMessages.metadata}->>'visibleInTranscript', 'true') <> 'false'`,
+      ),
+    )
+    // Order within a shared timestamp only affects how a grouped entry reads.
+    .orderBy(
+      desc(fastAgentMessages.ts),
+      desc(fastAgentMessages.createdAt),
+      desc(fastAgentMessages.turnSeq),
+      desc(fastAgentMessages.id),
+    )
+    .limit(FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT);
+
+  const groups: Array<{ ts: number; texts: string[] }> = [];
+  for (const row of rows.reverse()) {
+    const text = row.contentBlocks
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n')
+      .trim();
+    if (!text) continue;
+    const last = groups.at(-1);
+    if (last?.ts === row.ts) {
+      last.texts.push(text);
+    } else {
+      groups.push({ ts: row.ts, texts: [text] });
+    }
+  }
+  return groups.map((group) => group.texts.join('\n\n'));
+}
 
 async function findFastAgentTurnPrompt(
   conversationId: string,
@@ -678,6 +742,63 @@ export async function scheduleFastAgentDurableTurnRetry(
     .where(pendingDurableTurnWhere(id))
     .returning({ id: fastAgentParentEvents.id });
   return rows.length > 0;
+}
+
+/**
+ * How long a native steer holds the queued follow-ups it is delivering
+ * before the queue may take them back. A live steer delivers or releases its
+ * claim within one dispatch, so this only bounds how long a crashed owner
+ * delays the queue's whole-turn fallback.
+ */
+const FAST_AGENT_HUMAN_STEER_CLAIM_MS = 2 * 60 * 1000;
+
+/**
+ * Claim queued human follow-ups for one native steer, returning the ids the
+ * steer may deliver. A row withdrawn or settled since the lookup is left out,
+ * and until the claim is released a withdrawal no longer succeeds, so a
+ * withdrawn follow-up is never delivered and a delivered one is never
+ * reported as withdrawn.
+ */
+export async function claimFastAgentHumanFollowUpSteers(
+  ids: string[],
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({
+      claimedUntil: new Date(Date.now() + FAST_AGENT_HUMAN_STEER_CLAIM_MS),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        inArray(fastAgentParentEvents.id, ids),
+        isNull(fastAgentParentEvents.admission),
+        isNull(fastAgentParentEvents.deliveredAt),
+        isNull(fastAgentParentEvents.discardedAt),
+      ),
+    )
+    .returning({ id: fastAgentParentEvents.id });
+  return new Set(rows.map((row) => row.id));
+}
+
+/**
+ * Return steer claims whose follow-ups were not delivered, so the queue's
+ * whole-turn fallback picks them up without waiting out the lease.
+ */
+export async function releaseFastAgentHumanFollowUpSteerClaims(
+  ids: string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+  await db
+    .update(fastAgentParentEvents)
+    .set({ claimedUntil: null, updatedAt: new Date() })
+    .where(
+      and(
+        inArray(fastAgentParentEvents.id, ids),
+        isNull(fastAgentParentEvents.admission),
+        isNull(fastAgentParentEvents.deliveredAt),
+      ),
+    );
 }
 
 export type FastAgentActiveInferenceRetryNotice = {
@@ -1008,7 +1129,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         (resolvedOwner.kind !== 'user' || conversation.surface !== 'web')
       ) {
         throw new Error(
-          'Private Sessions require a user-owned web conversation.',
+          'Private sessions require a user-owned web conversation.',
         );
       }
       if (resolvedOwner.kind === 'automation') {

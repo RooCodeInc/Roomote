@@ -1,5 +1,5 @@
 import {
-  DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
+  DEPLOYMENT_EXPERIMENT_CONFIG,
   getDeploymentExperimentValues,
 } from '@roomote/feature-flags';
 
@@ -9,7 +9,7 @@ import {
 } from './deployment-experiments';
 
 export const PRIVATE_SESSIONS_EXPERIMENT_METADATA_KEY =
-  DEPLOYMENT_EXPERIMENT_METADATA_KEYS.privateSessions;
+  DEPLOYMENT_EXPERIMENT_CONFIG.privateSessions.metadataKey;
 
 export function isPrivateSessionsExperimentEnabledInMetadata(
   metadata: unknown,

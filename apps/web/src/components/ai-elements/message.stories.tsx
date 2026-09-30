@@ -1523,7 +1523,7 @@ Let me start with the token generation service.`}
 // ---------------------------------------------------------------------------
 
 export const FastSessionToolCalls: Story = {
-  name: 'Fast Session – All Tool Calls',
+  name: 'Session – All Tool Calls',
   render: () => (
     <ToolCallInventory tools={SESSION_TOOL_CALL_CATALOG} surface="session" />
   ),

@@ -102,13 +102,15 @@ type SleepCheckPath =
   | 'merged_pr'
   | 'stale_worker'
   | 'hard_limit'
-  | 'booting_no_heartbeat';
+  | 'booting_no_heartbeat'
+  | 'terminal_run';
 
 type DestroyInstanceReason =
   | 'due_sleep_shutdown'
   | 'provider_timeout_backstop'
   | 'worker_heartbeat_stale'
-  | 'booting_no_heartbeat';
+  | 'booting_no_heartbeat'
+  | 'terminal_run_orphaned';
 
 type SleepCheckJob = Pick<
   TaskRun,
@@ -131,6 +133,7 @@ const SENTRY_DESTROY_INSTANCE_REASONS = new Set<DestroyInstanceReason>([
   'provider_timeout_backstop',
   'worker_heartbeat_stale',
   'booting_no_heartbeat',
+  'terminal_run_orphaned',
 ]);
 
 interface DestroyInstanceAuditDetails {
@@ -175,6 +178,8 @@ function getDestroyInstanceSentryMessage(
       return 'Sleep check is destroying sandbox after the worker missed its initial heartbeat.';
     case 'due_sleep_shutdown':
       return 'Sleep check is destroying sandbox for scheduled sleep shutdown.';
+    case 'terminal_run_orphaned':
+      return 'Sleep check is destroying a sandbox that outlived its finished task run.';
   }
 }
 
@@ -354,6 +359,7 @@ export const sleepCheckJob = async () => {
     .limit(SLEEP_CHECK_BATCH_LIMIT);
 
   const failedWithoutInstance = await failNeverStartedRunsWithoutInstance(now);
+  await destroySandboxesOfFinishedRuns(now);
 
   warnIfSleepCheckBatchLimitReached('due sleep', dueJobs.length);
   warnIfSleepCheckBatchLimitReached('stale worker', staleWorkerJobs.length);
@@ -789,6 +795,141 @@ async function failNeverStartedRunsWithoutInstance(now: Date): Promise<number> {
     }
   }
   return failed;
+}
+
+/**
+ * Finished runs are outside every path above, which only look at active
+ * statuses. A run that fails or is canceled mid-flight (or finishes through a
+ * path that never reached a due sleep) can therefore leave its sandbox
+ * running, holding a slot against the provider's per-tenant cap until the
+ * provider's own timeout reaps it hours later.
+ */
+const FINISHED_RUN_STATUSES = [
+  RunStatus.Failed,
+  RunStatus.Canceled,
+  RunStatus.Completed,
+];
+/** Leave the worker's own shutdown time to finish first. */
+const FINISHED_RUN_SANDBOX_GRACE_MS = 2 * 60 * 1_000;
+/** Longer than any provider timeout, so older rows are never re-examined. */
+const FINISHED_RUN_SANDBOX_LOOKBACK_MS = 24 * 60 * 60 * 1_000;
+
+function finishedRunWithSandboxEligible(now: Date) {
+  const settledBefore = new Date(now.getTime() - FINISHED_RUN_SANDBOX_GRACE_MS);
+  const settledAfter = new Date(
+    now.getTime() - FINISHED_RUN_SANDBOX_LOOKBACK_MS,
+  );
+  return and(
+    inArray(taskRuns.status, FINISHED_RUN_STATUSES),
+    isNotNull(taskRuns.machineId),
+    inArray(taskRuns.vendor, [...SLEEP_CHECK_PROVIDERS]),
+    // A sleep-check claim marks a run whose sandbox was already handled (or
+    // checked once here); a snapshot means the sleep path retired it.
+    isNull(taskRuns.sleepRequestedAt),
+    isNull(taskRuns.snapshotRequestedAt),
+    isNull(taskRuns.snapshotId),
+    or(
+      and(
+        isNotNull(taskRuns.completedAt),
+        lte(taskRuns.completedAt, settledBefore),
+        gt(taskRuns.completedAt, settledAfter),
+      ),
+      and(
+        isNull(taskRuns.completedAt),
+        isNotNull(taskRuns.canceledAt),
+        lte(taskRuns.canceledAt, settledBefore),
+        gt(taskRuns.canceledAt, settledAfter),
+      ),
+    ),
+  );
+}
+
+export function findFinishedRunsWithSandbox(now: Date) {
+  return db
+    .select(SLEEP_CHECK_JOB_COLUMNS)
+    .from(taskRuns)
+    .where(finishedRunWithSandboxEligible(now))
+    .orderBy(asc(taskRuns.createdAt))
+    .limit(SLEEP_CHECK_BATCH_LIMIT);
+}
+
+/**
+ * Each finished run is examined once: the claim stamps `sleepRequestedAt`,
+ * which also takes it out of the selection above. The claim is released only
+ * when the provider could not be asked, so a transient failure is retried.
+ */
+async function destroySandboxesOfFinishedRuns(now: Date): Promise<number> {
+  const runs = await findFinishedRunsWithSandbox(now);
+
+  let destroyed = 0;
+  for (const job of runs) {
+    const [claimed] = await db
+      .update(taskRuns)
+      .set({ sleepRequestedAt: now })
+      .where(
+        and(
+          eq(taskRuns.id, job.id),
+          eq(taskRuns.machineId, job.machineId!),
+          finishedRunWithSandboxEligible(now),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (!claimed) {
+      continue;
+    }
+
+    try {
+      const client = await getSleepCheckClient(job.vendor as ComputeProvider);
+      const { status } = await client.getInstanceStatus({
+        instanceId: job.machineId!,
+      });
+
+      if (status !== 'running') {
+        continue;
+      }
+
+      await destroyInstanceWithAudit(
+        job,
+        client,
+        {
+          path: 'terminal_run',
+          phase: 'finished_run_sandbox_cleanup',
+          reason: 'terminal_run_orphaned',
+        },
+        '[sleepCheck]',
+      );
+      await recordSleepCheckEvent(
+        job,
+        'completed',
+        `Destroyed sandbox ${job.machineId} that was still running after task run #${job.id} finished as ${job.status}.`,
+        {
+          path: 'terminal_run',
+          decision: 'finished_run_sandbox_destroyed',
+          ...buildSleepCheckDetails(job),
+        },
+      );
+      console.warn(
+        `[sleepCheck] Destroyed sandbox ${job.machineId} left running by finished task run #${job.id} (${job.status})`,
+      );
+      destroyed += 1;
+    } catch (error) {
+      if (isInstanceNotFoundError(error)) {
+        continue;
+      }
+
+      await db
+        .update(taskRuns)
+        .set({ sleepRequestedAt: null })
+        .where(eq(taskRuns.id, job.id))
+        .catch(() => {});
+      console.error(
+        `[sleepCheck] Failed to clean up the sandbox of finished task run #${job.id}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+  return destroyed;
 }
 
 function getBaseSleepCheckCandidateConditions(
@@ -1960,6 +2101,8 @@ function describeSleepCheckPath(path: SleepCheckPath): string {
       return 'Stale-worker recovery';
     case 'booting_no_heartbeat':
       return 'Booting-without-heartbeat recovery';
+    case 'terminal_run':
+      return 'Finished-run sandbox cleanup';
   }
 }
 

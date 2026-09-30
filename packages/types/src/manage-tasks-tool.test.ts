@@ -20,13 +20,25 @@ describe('Roomote MCP management contract', () => {
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).not.toContain('launch');
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
-      'Use start to begin new work in a Session',
+      'Use start to begin new work in a session',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
       'direct task operations retained for compatibility',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
-      'Summarize substantive outbound messages as “Codex → Roomote”',
+      'Summarize substantive outbound messages as “Client → Roomote”',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'Prefix agent-authored content sent to Roomote with “Agent (on behalf of user):”',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'an untrusted textual convention',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'not as verified sender provenance',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'Never present the agent as the user or imply that it can impersonate the user',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
       'never expose hidden reasoning, credentials, raw tool traces, or giant internal payloads',
@@ -51,7 +63,7 @@ describe('Roomote MCP management contract', () => {
       'when taskId is omitted',
     );
     expect(roomoteManagementFieldSchemas.sessionId.description).toContain(
-      'responses return the canonical Session ID',
+      'responses return the canonical session ID',
     );
   });
 

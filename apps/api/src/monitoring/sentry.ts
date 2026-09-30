@@ -3,6 +3,10 @@ import * as Sentry from '@sentry/node';
 import type { Scope } from '@sentry/node';
 
 import type { Variables } from '../types';
+import {
+  redactCustomAutomationWebhookPath,
+  redactCustomAutomationWebhookUrl,
+} from '../sensitive-path';
 
 const API_SENTRY_DSN_KEYS = ['API_SENTRY_DSN', 'SENTRY_DSN'] as const;
 const MAX_SENTRY_FLUSH_MS = 2_000;
@@ -51,10 +55,11 @@ function setRequestScope(
 ): void {
   const requestId = c.req.header('x-request-id');
   const authContext = c.get('authContext');
+  const requestPath = redactCustomAutomationWebhookPath(c.req.path);
 
   scope.setTag('roomote.service', 'api');
   scope.setTag('roomote.method', c.req.method);
-  scope.setTag('roomote.path', c.req.path);
+  scope.setTag('roomote.path', requestPath);
 
   if (requestId) {
     scope.setTag('roomote.request_id', requestId);
@@ -62,8 +67,8 @@ function setRequestScope(
 
   scope.setContext('request', {
     method: c.req.method,
-    path: c.req.path,
-    url: c.req.url,
+    path: requestPath,
+    url: redactCustomAutomationWebhookUrl(c.req.url),
     ...(requestId ? { requestId } : {}),
   });
 

@@ -6,6 +6,7 @@ import {
 import {
   db,
   getAutomationRuntime,
+  recordBackgroundAutomationResult,
   recordAutomationRunOutcome,
   slackInstallations,
   taskPullRequests,
@@ -41,7 +42,10 @@ import { resolveDeploymentTimeZone } from './custom-automation-schedule';
 import { isRunDue } from './scheduling-utils';
 import { resolveAutomationRepositoryDestination } from './ci-failure-triage-routing';
 import {
+  appendAutomationWebhookInput,
   emptyJobResult,
+  resolveAutomationRunContext,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -321,12 +325,14 @@ Do not send an acknowledgement or progress update. Treat later replies in this t
 }
 
 export async function announcerJob(
-  opts: AutomationRunOpts = {},
+  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting announcer evaluator`);
 
   const now = new Date();
   const result = emptyJobResult();
+  const { isExplicitRun, taskTrigger, webhookInputJson } =
+    resolveAutomationRunContext(opts.context);
   const runtime = await getAutomationRuntime('announcer');
   const eligibleDeployments = await findEligibleDeployments(runtime);
 
@@ -342,12 +348,20 @@ export async function announcerJob(
   for (const deployment of eligibleDeployments) {
     try {
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
+      const isExplicitOnDemandRun = isExplicitRun && frequency === 'on_demand';
 
-      if (!frequency || frequency === 'off' || !(frequency in WINDOW_DAYS)) {
+      if (
+        !frequency ||
+        frequency === 'off' ||
+        (!isExplicitOnDemandRun && !(frequency in WINDOW_DAYS))
+      ) {
         result.skippedReason = 'Automation is disabled.';
         skipped++;
         continue;
       }
+
+      const scanFrequency: AnnouncerFrequency =
+        frequency === 'on_demand' ? 'daily' : (frequency as AnnouncerFrequency);
 
       const defaultDestination =
         opts.destination ??
@@ -383,11 +397,11 @@ export async function announcerJob(
       const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
       if (
-        !opts.manualTrigger &&
+        !isExplicitRun &&
         !isRunDue({
           now,
           timeZone: timezone,
-          frequency: frequency as AnnouncerFrequency,
+          frequency: scanFrequency,
           lastRunAt: runtime.lastRunAt,
           scheduleHourLocal: SCHEDULE_HOUR_LOCAL,
           windowDays: WINDOW_DAYS,
@@ -398,7 +412,7 @@ export async function announcerJob(
         continue;
       }
 
-      const windowDays = WINDOW_DAYS[frequency as AnnouncerFrequency];
+      const windowDays = WINDOW_DAYS[scanFrequency];
       const since = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
       const mergedPullRequests = await getMergedPullRequests(since);
 
@@ -411,6 +425,12 @@ export async function announcerJob(
           key: 'announcer',
           status: 'skipped',
           at: new Date(),
+        });
+        await recordBackgroundAutomationResult({
+          automationKey: 'announcer',
+          content: 'No merged PRs to summarize.',
+          dedupeKey: `announcer:no-merged-prs:${now.toISOString()}:${deployment.slackTeamId ?? 'deployment'}`,
+          visibility: 'shared',
         });
 
         result.skippedReason = 'No merged pull requests in the window.';
@@ -491,13 +511,16 @@ export async function announcerJob(
               ...(firstPullRequest.repositoryHost
                 ? { sourceControlHost: firstPullRequest.repositoryHost }
                 : {}),
-              description: buildAnnouncerTaskDescription({
-                destination,
-                mergedPullRequests: group.pullRequests,
-                instructions: runtime.instructions,
-                recentThreadFeedback,
-                routingInstructions: rules?.instructions,
-              }),
+              description: appendAutomationWebhookInput(
+                buildAnnouncerTaskDescription({
+                  destination,
+                  mergedPullRequests: group.pullRequests,
+                  instructions: runtime.instructions,
+                  recentThreadFeedback,
+                  routingInstructions: rules?.instructions,
+                }),
+                webhookInputJson,
+              ),
               ...buildDestinationTaskPayloadFields(destination),
               backgroundAutomationKey: 'announcer',
               ...(destination.provider === 'slack'
@@ -512,7 +535,7 @@ export async function announcerJob(
           initiator: { kind: 'automation', key: 'announcer' },
           workflow: 'standard',
           surface: 'system',
-          trigger: opts.manualTrigger ? 'manual' : 'schedule',
+          trigger: taskTrigger,
           ...(destination.provider === 'slack'
             ? { channels: { slackChannelId: channelId } }
             : {}),

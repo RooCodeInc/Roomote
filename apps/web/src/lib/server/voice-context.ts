@@ -13,7 +13,7 @@ import {
 } from '@roomote/types';
 
 /**
- * What the Fast session behind a voice conversation can reach. GPT-Live gets
+ * What the session behind a voice conversation can reach. GPT-Live gets
  * this so a repository or integration name is recognised as work to delegate
  * rather than something to ask about, and the transcript cleanup gets it as
  * vocabulary so misheard names are corrected to the real ones.

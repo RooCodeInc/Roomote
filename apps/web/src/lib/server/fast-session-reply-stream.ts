@@ -63,7 +63,7 @@ function getSubscriber(): Redis {
 }
 
 /**
- * Live reply text for a Fast session, published by the turn while the model
+ * Live reply text for a session, published by the turn while the model
  * is still writing as `assistant_message_chunk` events (the same envelope
  * the task runtime streams). Best effort: without Redis the transcript still
  * fills in from the persisted rows.

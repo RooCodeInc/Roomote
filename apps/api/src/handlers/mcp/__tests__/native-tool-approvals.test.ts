@@ -1,0 +1,209 @@
+type Approvals = {
+  blocks: Map<string, string>;
+  defaultBlock?: 'needs_approval';
+  shadowDefaultTools: boolean;
+};
+
+const { mockResolveBlocks, mockClaim, mockShadow } = vi.hoisted(() => ({
+  mockResolveBlocks: vi.fn(
+    async (): Promise<Approvals> => ({
+      blocks: new Map<string, string>(),
+      shadowDefaultTools: false,
+    }),
+  ),
+  mockClaim: vi.fn(async () => false),
+  mockShadow: vi.fn(),
+}));
+
+vi.mock('../tool-approval-enforcement', () => ({
+  claimProxyTaskToolCall: mockClaim,
+  describeProxyToolApprovalBlock: (toolName: string, block: string) =>
+    `${toolName}:${block}`,
+  resolveProxyToolApprovalBlock: (approvals: Approvals, toolName: string) =>
+    approvals.blocks.get(toolName) ?? approvals.defaultBlock,
+  resolveProxyToolApprovalBlocks: mockResolveBlocks,
+  readFastConversationIdHeader: (headers: Headers) =>
+    headers.get('x-roomote-fast-conversation-id'),
+  shadowProxyToolCall: mockShadow,
+}));
+
+vi.mock('../proxy-utils', () => ({
+  getJsonRpcMethod: (body: { method?: unknown } | null) =>
+    typeof body?.method === 'string' ? body.method : null,
+  getJsonRpcRequestId: (body: { id?: unknown } | null) =>
+    typeof body?.id === 'string' || typeof body?.id === 'number'
+      ? body.id
+      : null,
+  getToolCallName: (
+    body: { method?: unknown; params?: { name?: unknown } } | null,
+  ) =>
+    body?.method === 'tools/call' && typeof body.params?.name === 'string'
+      ? body.params.name
+      : null,
+  jsonRpcErrorResponse: (
+    status: number,
+    code: number,
+    message: string,
+    id: string | number | null = null,
+  ) =>
+    Response.json({ jsonrpc: '2.0', id, error: { code, message } }, { status }),
+  resolveRunTokenTaskId: vi.fn(async () => 'task-1'),
+  resolveTaskOrSessionUserIdOrNull: vi.fn(async () => 'user-1'),
+}));
+
+import { resolveNativeToolApprovalGuard } from '../native-tool-approvals';
+
+describe('resolveNativeToolApprovalGuard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolveBlocks.mockResolvedValue({
+      blocks: new Map(),
+      shadowDefaultTools: false,
+    });
+    mockClaim.mockResolvedValue(false);
+  });
+
+  it('hides disabled tools from native tools/list responses', async () => {
+    mockResolveBlocks.mockResolvedValue({
+      blocks: new Map([
+        ['disabled_tool', 'reject'],
+        ['ask_tool', 'needs_approval'],
+      ]),
+      shadowDefaultTools: false,
+    });
+    const guard = await resolveNativeToolApprovalGuard({
+      auth: { userId: 'user-1', tokenType: 'auth' },
+      integrationId: 'notion',
+    });
+
+    const response = await guard.filterToolsList(
+      { method: 'tools/list' },
+      new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          result: {
+            tools: [
+              { name: 'safe_tool' },
+              { name: 'disabled_tool' },
+              { name: 'ask_tool' },
+            ],
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    expect(
+      ((await response.json()) as { result: { tools: { name: string }[] } })
+        .result.tools,
+    ).toEqual([{ name: 'safe_tool' }, { name: 'ask_tool' }]);
+  });
+
+  it('refuses disabled calls and only releases ask calls after approval', async () => {
+    mockResolveBlocks.mockResolvedValue({
+      blocks: new Map([
+        ['disabled_tool', 'reject'],
+        ['ask_tool', 'needs_approval'],
+      ]),
+      shadowDefaultTools: false,
+    });
+    const guard = await resolveNativeToolApprovalGuard({
+      auth: { userId: null, tokenType: 'run', runId: 42 },
+      integrationId: 'notion',
+    });
+
+    const disabled = await guard.checkCall({
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'disabled_tool', arguments: {} },
+    });
+    expect(disabled?.status).toBe(403);
+    expect(mockClaim).not.toHaveBeenCalled();
+
+    const pending = await guard.checkCall({
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'ask_tool', arguments: {} },
+    });
+    expect(pending?.status).toBe(403);
+
+    mockClaim.mockResolvedValue(true);
+    await expect(
+      guard.checkCall({
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'ask_tool', arguments: {} },
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('holds default tools for a claim while Auto mode is on and offers every call for shadow assessment', async () => {
+    mockResolveBlocks.mockResolvedValue({
+      blocks: new Map(),
+      defaultBlock: 'needs_approval',
+      shadowDefaultTools: true,
+    });
+    const guard = await resolveNativeToolApprovalGuard({
+      auth: { userId: null, tokenType: 'run', runId: 42 },
+      integrationId: 'notion',
+    });
+
+    const held = await guard.checkCall({
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'any_tool', arguments: { q: 1 } },
+    });
+    expect(held?.status).toBe(403);
+    expect(mockShadow).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultBlock: 'needs_approval' }),
+      expect.objectContaining({
+        integrationId: 'notion',
+        toolName: 'any_tool',
+        args: { q: 1 },
+        taskId: 'task-1',
+      }),
+    );
+    expect(mockClaim).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      integrationId: 'notion',
+      toolName: 'any_tool',
+      args: { q: 1 },
+    });
+
+    mockClaim.mockResolvedValue(true);
+    await expect(
+      guard.checkCall({
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'any_tool', arguments: { q: 1 } },
+      }),
+    ).resolves.toBeNull();
+  });
+  it("passes the Fast conversation a Session's call names to shadow assessment", async () => {
+    mockResolveBlocks.mockResolvedValue({
+      blocks: new Map(),
+      shadowDefaultTools: true,
+    });
+    const conversationId = '0b9c1c52-5f55-4d3e-9c1f-3f1e2c4b8a11';
+    const guard = await resolveNativeToolApprovalGuard({
+      auth: { userId: 'user-1', tokenType: 'auth' },
+      integrationId: 'notion',
+      requestHeaders: new Headers({
+        'x-roomote-fast-conversation-id': conversationId,
+      }),
+    });
+
+    await guard.checkCall({
+      id: 4,
+      method: 'tools/call',
+      params: { name: 'search', arguments: {} },
+    });
+    expect(mockShadow).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'user-1',
+        fastConversationId: conversationId,
+      }),
+    );
+  });
+});

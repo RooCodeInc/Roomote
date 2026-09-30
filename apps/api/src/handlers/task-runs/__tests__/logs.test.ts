@@ -103,13 +103,20 @@ describe('getTaskRunLogs', () => {
       version: 1,
     };
 
-    mockFindFirst.mockResolvedValueOnce({
-      id: 101,
-      status: 'running',
-      vendor: 'modal',
-      machineId: 'machine-1',
-      sandboxCmdId: 'cmd-1',
-    });
+    mockFindFirst
+      .mockResolvedValueOnce({
+        id: 101,
+        taskId: 'task-101',
+        status: 'running',
+        vendor: 'modal',
+        machineId: 'machine-1',
+        sandboxCmdId: 'cmd-1',
+      })
+      .mockResolvedValueOnce({
+        status: 'failed',
+        error: 'stream finished after the run failed',
+        errorCode: 'docker_worker_start_timeout',
+      });
     mockStreamCommandOutput.mockImplementation(async function* () {
       yield { stream: 'stdout', data: 'Installing tools' };
     });
@@ -139,13 +146,20 @@ describe('getTaskRunLogs', () => {
   });
 
   it('streams log events and disconnect from the task run command output', async () => {
-    mockFindFirst.mockResolvedValueOnce({
-      id: 101,
-      status: 'running',
-      vendor: 'modal',
-      machineId: 'machine-1',
-      sandboxCmdId: 'cmd-1',
-    });
+    mockFindFirst
+      .mockResolvedValueOnce({
+        id: 101,
+        taskId: 'task-101',
+        status: 'running',
+        vendor: 'modal',
+        machineId: 'machine-1',
+        sandboxCmdId: 'cmd-1',
+      })
+      .mockResolvedValueOnce({
+        status: 'failed',
+        error: 'stream finished after the run failed',
+        errorCode: 'docker_worker_start_timeout',
+      });
     mockStreamCommandOutput.mockImplementation(async function* () {
       yield { stream: 'stdout', data: 'Installing tools' };
       yield { stream: 'stderr', data: 'A warning' };
@@ -170,6 +184,9 @@ describe('getTaskRunLogs', () => {
     expect(body).toContain('"stream":"stderr"');
     expect(body).toContain('"data":"A warning"');
     expect(body).toContain('event: disconnect');
+    expect(body).toContain('"status":"failed"');
+    expect(body).toContain('"errorCode":"docker_worker_start_timeout"');
+    expect(body).toContain('stream finished after the run failed');
     expect(mockStreamCommandOutput).toHaveBeenCalledWith(
       expect.objectContaining({
         instanceId: 'machine-1',

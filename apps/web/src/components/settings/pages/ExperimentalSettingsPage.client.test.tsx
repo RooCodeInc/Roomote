@@ -46,18 +46,27 @@ vi.mock(
   }),
 );
 
-vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
-  ResultsExperimentalSetting: () => <div>Results setting</div>,
-}));
-
 vi.mock(
-  '@/components/settings/SlackPeerConversationsExperimentalSetting',
+  '@/components/settings/SessionTaskCommunicationTriageExperimentalSetting',
   () => ({
-    SlackPeerConversationsExperimentalSetting: () => (
-      <div>Slack peer conversations setting</div>
+    SessionTaskCommunicationTriageExperimentalSetting: () => (
+      <div>Task communication triage setting</div>
     ),
   }),
 );
+
+vi.mock(
+  '@/components/settings/AutomationLaunchCriteriaExperimentalSetting',
+  () => ({
+    AutomationLaunchCriteriaExperimentalSetting: () => (
+      <div>Custom automation launch criteria setting</div>
+    ),
+  }),
+);
+
+vi.mock('@/components/settings/JevgrepExperimentalSetting', () => ({
+  JevgrepExperimentalSetting: () => <div>Jevgrep code search setting</div>,
+}));
 
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
@@ -69,17 +78,34 @@ describe('ExperimentalSettingsPage', () => {
     state.isFetching = false;
   });
 
-  it('marks every experimental setting as admin-only', () => {
+  it('keeps customer-preview settings admin-only and omits internal experiments', () => {
     render(<ExperimentalSettingsPage />);
 
     expect(screen.getByTestId('experimental-settings')).toHaveAttribute(
       'data-admin-only',
       'true',
     );
+    expect(screen.getByText('Jevgrep code search setting')).toBeInTheDocument();
     expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(
       screen.getByText('Browser notifications setting'),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('switch', { name: 'Toggle Auto tool approvals' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Task communication triage setting'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Session status judgment setting'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Sessions board setting'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Custom automation launch criteria setting'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
   });
 
   it('shows one retryable error instead of default-valued settings after an initial load failure', () => {
@@ -96,9 +122,6 @@ describe('ExperimentalSettingsPage', () => {
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
     expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('Slack peer conversations setting'),
-    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(refetchMock).toHaveBeenCalledOnce();
@@ -110,10 +133,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Results setting')).toBeInTheDocument();
-    expect(
-      screen.getByText('Slack peer conversations setting'),
-    ).toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();
@@ -142,10 +162,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Results setting')).toBeInTheDocument();
-    expect(
-      screen.getByText('Slack peer conversations setting'),
-    ).toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();

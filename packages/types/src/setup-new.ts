@@ -153,7 +153,7 @@ export function isSetupStarterTaskId(
 
 /**
  * Linkage between deployment setup and the persisted conversational setup
- * Fast session. This deliberately stays a small additive JSON shape so
+ * session. This deliberately stays a small additive JSON shape so
  * existing deployments need no migration and checklist state stays derived.
  */
 export type SetupNewSetupSession = {

@@ -214,7 +214,7 @@ describe('function-executed', () => {
   it('fails the step when Fast does not accept the request', async () => {
     startFastAgentResponseMock.mockResolvedValue({
       accepted: false,
-      reason: 'Fast session is busy.',
+      reason: 'Session is busy.',
     });
     const { processSlackWorkflowFunctionExecuted } =
       await import('./function-executed.js');
@@ -230,7 +230,7 @@ describe('function-executed', () => {
 
     expect(completeFunctionErrorMock).toHaveBeenCalledWith({
       functionExecutionId: 'Fn123',
-      error: expect.stringContaining('Fast session is busy.'),
+      error: expect.stringContaining('Session is busy.'),
     });
     expect(completeFunctionSuccessMock).not.toHaveBeenCalled();
   });

@@ -1,7 +1,7 @@
 import { INTEGRATION_SAVED_TAG } from '@roomote/types';
 
 /**
- * The human turn Roomote sends into a Fast Session after its owner saves an
+ * The human turn Roomote sends into a session after its owner saves an
  * API key through the Session form. The technical instruction rides in an
  * `<integration_saved>` block that the Session transcript hides; the text
  * after it is what the human sees. The text is fixed: it never carries the
@@ -39,7 +39,7 @@ export function buildNativeIntegrationOauthContinuation(
 }
 
 /**
- * The human turn Roomote sends into a Fast Session when the human opened a
+ * The human turn Roomote sends into a session when the human opened a
  * custom remote MCP authorization link and the provider refused to register
  * this deployment as a client, so authorization never started. `reason` is
  * the provider's own bounded explanation, or undefined.

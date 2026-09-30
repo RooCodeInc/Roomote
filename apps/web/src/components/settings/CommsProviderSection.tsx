@@ -755,10 +755,10 @@ export function CommsProviderSection({
               )}
               {agentMailStatusOnly && !provider.agentmail ? (
                 <div className="flex items-start gap-2 mt-4">
-                  <Info className="size-4 mt-0.5 shrink-0 text-amber-600" />
-                  <p className="text-sm">
-                    Managed Email is unavailable. Roomote Cloud has not
-                    provisioned an inbox for this deployment.
+                  <Info className="size-4 mt-0.5 shrink-0 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    Roomote Cloud creates this deployment&apos;s inbox the first
+                    time Roomote sends an email.
                   </p>
                 </div>
               ) : null}

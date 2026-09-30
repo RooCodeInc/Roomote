@@ -14,20 +14,23 @@ import {
   useStickToBottomContext,
   type ScrollToBottom,
 } from 'use-stick-to-bottom';
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
 } from '@/components/ai-elements';
+import { MemorySavedMessage } from '@/components/ai-elements/MemorySavedMessage';
 import {
   MessageUiOptionsProvider,
   type MessageUiOptions,
 } from '@/components/ai-elements/message-ui-options';
+import { type SlackMentionScope } from '@/components/ai-elements/slack-mention-context';
 import {
-  SlackMentionProvider,
-  type SlackMentionScope,
-} from '@/components/ai-elements/slack-mention-context';
+  buildSlackTranscriptMentionText,
+  SlackMentionTranscriptProvider,
+} from '@/components/ai-elements/slack-message-references';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { Button, Skeleton } from '@/components/system';
@@ -40,6 +43,7 @@ import {
   useSandboxTaskPhase,
   type TaskSession,
 } from './hooks';
+import type { AcpUiMessage } from './types';
 import { useInternalTranscriptRowsVisible } from './useInternalTranscriptRowsVisible';
 
 import { SleepWakeMessages } from './messages/index';
@@ -290,6 +294,15 @@ const MessagesBase = ({
     renderSessionPrompt &&
     sessionPrompt?.visibleInTranscript !== false &&
     Boolean(sessionPrompt);
+  const slackMentionText = useMemo(
+    () =>
+      buildSlackTranscriptMentionText({
+        messages,
+        sessionPrompt,
+        includeSessionPrompt: shouldRenderSessionPrompt,
+      }),
+    [messages, sessionPrompt, shouldRenderSessionPrompt],
+  );
   const resolvedHideFirstAcpUserPrompt =
     hideFirstAcpUserPrompt ?? shouldRenderSessionPrompt;
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
@@ -303,6 +316,13 @@ const MessagesBase = ({
     resetKey: session.taskId,
     isWorking: taskPhase === 'running',
   });
+  const renderMemoryMessage = useCallback(
+    (message: AcpUiMessage) =>
+      message.updateType === ACP_ENVELOPE_EVENT_TYPES.MemorySaved ? (
+        <MemorySavedMessage message={message} />
+      ) : undefined,
+    [],
+  );
   const shouldShowWorking =
     taskPhase === 'running' && !hasVisibleAssistantOutput(renderBlocks);
 
@@ -313,7 +333,10 @@ const MessagesBase = ({
 
   return (
     <MessageUiOptionsProvider value={resolvedMessageUiOptions}>
-      <SlackMentionProvider scope={slackMentionScope}>
+      <SlackMentionTranscriptProvider
+        scope={slackMentionScope}
+        text={slackMentionText}
+      >
         <Conversation
           className="min-h-0 flex-1"
           initial={hasAnchor ? false : initialScrollBehavior}
@@ -332,6 +355,7 @@ const MessagesBase = ({
               blocks={renderBlocks}
               showInternalMessages={showInternalMessages}
               onSuppress={suppressMessage}
+              renderMessage={renderMemoryMessage}
             />
             {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
             {shouldShowWorking && <DelayedWorkingMessage />}
@@ -341,7 +365,7 @@ const MessagesBase = ({
           {scrollRef && <ScrollBridge handleRef={scrollRef} />}
           <ScrollToHash messages={messages} />
         </Conversation>
-      </SlackMentionProvider>
+      </SlackMentionTranscriptProvider>
     </MessageUiOptionsProvider>
   );
 };

@@ -220,6 +220,34 @@ describe('API-proxy admission', () => {
     const skipped = lifecycle({ status: 'skipped', reason: 'no_grants' });
     await expect(
       admitCredentialEgressApiProxy(input(skipped), deps()),
-    ).rejects.toThrow('no longer eligible');
+    ).rejects.toThrow('revoked or expired during startup');
   });
+
+  it.each([
+    [
+      { status: 'failed', error: 'Control-plane request failed (503)' },
+      'Credential egress registration failed: Control-plane request failed (503).',
+    ],
+    [
+      { status: 'skipped', reason: 'run_not_eligible' },
+      'its Session was archived or no longer belongs to the user who launched it',
+    ],
+    [
+      { status: 'skipped', reason: 'disabled' },
+      'cannot deliver integration keys to this compute provider',
+    ],
+    [
+      { status: 'skipped', reason: 'unsupported_provider' },
+      'cannot deliver integration keys to this compute provider',
+    ],
+  ] as const)(
+    'names the refused outcome %j in the start error',
+    async (outcome, message) => {
+      const cycle = lifecycle(outcome);
+      await expect(
+        admitCredentialEgressApiProxy(input(cycle), deps()),
+      ).rejects.toThrow(message);
+      expect(cycle.startLeaseRenewal).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -17,6 +17,7 @@ import { useShallow } from 'zustand/react/shallow';
 import {
   type RunStatus,
   type TaskPhase,
+  type TaskRunDisconnectReason,
   type AcpPlanTodo,
   type TaskStatusEvent,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
@@ -71,6 +72,7 @@ type SandboxTaskPhase = TaskStatus['phase'];
 
 interface SandboxProviderProps {
   taskId: string;
+  runId?: number;
   url: string | undefined | null;
   token: string | undefined;
   refreshConnection?: () => Promise<SandboxConnectionTarget | null>;
@@ -99,6 +101,7 @@ interface SandboxProviderProps {
 
 export function SandboxProvider({
   taskId,
+  runId,
   url,
   token,
   refreshConnection,
@@ -223,6 +226,7 @@ export function SandboxProvider({
 
   const reconnect = useSandboxLiveConnection({
     taskId,
+    runId,
     url,
     token,
     refreshConnection,
@@ -365,6 +369,7 @@ export function useSandboxConnectionStatus(): {
   hasConnectedOnce: boolean;
   connectionError: boolean;
   connectionFailureCategory: SandboxConnectionFailureCategory | null;
+  disconnectReason: TaskRunDisconnectReason | null;
   reconnecting: boolean;
   reconnect: SandboxReconnect;
 } {
@@ -378,6 +383,7 @@ export function useSandboxConnectionStatus(): {
       hasConnectedOnce: s.hasConnectedOnce,
       connectionError: s.connectionError,
       connectionFailureCategory: s.connectionFailureCategory,
+      disconnectReason: s.disconnectReason,
       reconnecting: s.reconnecting,
     })),
   );

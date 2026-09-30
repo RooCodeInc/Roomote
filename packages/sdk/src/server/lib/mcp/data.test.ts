@@ -1,11 +1,11 @@
-const { findFirstMock, setMock, updateMock, updateWhereMock } = vi.hoisted(
-  () => ({
+const { findFirstMock, setMock, updateMock, updateWhereMock, returningMock } =
+  vi.hoisted(() => ({
     findFirstMock: vi.fn(),
     setMock: vi.fn(),
     updateMock: vi.fn(),
     updateWhereMock: vi.fn(),
-  }),
-);
+    returningMock: vi.fn(),
+  }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
@@ -18,6 +18,11 @@ vi.mock('@roomote/db/server', () => ({
   },
   mcpConnections: { id: 'mcp_connections.id' },
   eq: vi.fn((column: string, value: string) => ({ column, value })),
+  and: vi.fn((...conditions: unknown[]) => conditions),
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    strings,
+    values,
+  })),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -31,7 +36,8 @@ import { getClientInformation, getValidAccessToken, storeTokens } from './data';
 describe('storeTokens', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    updateWhereMock.mockResolvedValue(undefined);
+    updateWhereMock.mockReturnValue({ returning: returningMock });
+    returningMock.mockResolvedValue([{ id: 'conn-1' }]);
     setMock.mockReturnValue({ where: updateWhereMock });
     updateMock.mockReturnValue({ set: setMock });
   });
@@ -73,7 +79,8 @@ describe('storeTokens', () => {
 describe('getClientInformation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    updateWhereMock.mockResolvedValue(undefined);
+    updateWhereMock.mockReturnValue({ returning: returningMock });
+    returningMock.mockResolvedValue([{ id: 'conn-1' }]);
     setMock.mockReturnValue({ where: updateWhereMock });
     updateMock.mockReturnValue({ set: setMock });
   });
@@ -169,9 +176,14 @@ describe('getClientInformation', () => {
       }),
     });
     vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
 
     await expect(
-      getValidAccessToken('conn-1', 'https://mcp.linear.app/mcp'),
+      getValidAccessToken(
+        'conn-1',
+        'https://mcp.linear.app/mcp',
+        controller.signal,
+      ),
     ).resolves.toBe('fresh-access-token');
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -181,6 +193,12 @@ describe('getClientInformation', () => {
     expect(setMock).toHaveBeenCalledWith(
       expect.objectContaining({ refreshToken: 'refresh-token' }),
     );
+    const requestSignal = fetchMock.mock.calls[0]?.[1]?.signal as
+      | AbortSignal
+      | undefined;
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+    expect(requestSignal?.aborted).toBe(true);
   });
 
   it('includes the monday.com MCP resource when refreshing tokens', async () => {
@@ -247,5 +265,70 @@ describe('getClientInformation', () => {
     );
     const tokenBody = new URLSearchParams(String(tokenRequest?.[1]?.body));
     expect(tokenBody.get('resource')).toBe('https://mcp.monday.com/mcp');
+  });
+
+  it('marks curated connections for reconnect after a definitive refresh rejection', async () => {
+    findFirstMock.mockResolvedValue({
+      id: 'conn-1',
+      mcpId: 'linear',
+      accessToken: 'expired-access-token',
+      refreshToken: 'revoked-refresh-token',
+      tokenExpiresAt: new Date(0),
+      authConfig: {
+        type: 'oauth_client',
+        client_id: 'linear-client',
+        client_secret: 'enc:linear-secret',
+        registered_redirect_uri:
+          'https://customer.example/api/mcp-oauth/callback',
+        token_endpoint_auth_method: 'client_secret_post',
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { error: 'invalid_grant', error_description: 'Grant revoked' },
+            { status: 400 },
+          ),
+        ),
+    );
+
+    await expect(
+      getValidAccessToken('conn-1', 'https://mcp.linear.app/mcp'),
+    ).resolves.toBeUndefined();
+
+    expect(setMock).toHaveBeenCalledWith(
+      expect.objectContaining({ authStatus: 'error' }),
+    );
+  });
+
+  it('keeps the stale curated token after a transient refresh failure', async () => {
+    findFirstMock.mockResolvedValue({
+      id: 'conn-1',
+      mcpId: 'linear',
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      tokenExpiresAt: new Date(0),
+      authConfig: {
+        type: 'oauth_client',
+        client_id: 'linear-client',
+        client_secret: 'enc:linear-secret',
+        registered_redirect_uri:
+          'https://customer.example/api/mcp-oauth/callback',
+        token_endpoint_auth_method: 'client_secret_post',
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('Unavailable', { status: 503 })),
+    );
+
+    await expect(
+      getValidAccessToken('conn-1', 'https://mcp.linear.app/mcp'),
+    ).resolves.toBe('expired-access-token');
+
+    expect(setMock).not.toHaveBeenCalled();
   });
 });

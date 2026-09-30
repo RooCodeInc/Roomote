@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { TaskArtifactType } from '@roomote/types';
+import type { TaskArtifactType, TaskRunTerminalReason } from '@roomote/types';
 import {
   TASK_INITIATOR_KINDS,
   TASK_STATES,
@@ -100,7 +100,9 @@ export type TaskRunWithPullRequest = TaskRun & {
 export type TaskRunProgress = Pick<
   TaskRun,
   'id' | 'taskId' | 'status' | 'vendor' | 'error' | 'errorCode'
->;
+> & {
+  terminalReason?: TaskRunTerminalReason | null;
+};
 
 export type TaskWithAssociations = Task & {
   attributionKind?: TaskCreatorKind | null;

@@ -76,6 +76,22 @@ vi.mock('@/components/system', async () => {
     Skeleton: ({ className }: { className?: string }) => (
       <div className={className}>loading</div>
     ),
+    RetryableLoadError: ({
+      message,
+      isRetrying,
+      onRetry,
+    }: {
+      message: string;
+      isRetrying?: boolean;
+      onRetry: () => void;
+    }) => (
+      <div role="alert">
+        <p>{message}</p>
+        <button type="button" disabled={isRetrying} onClick={onRetry}>
+          Retry
+        </button>
+      </div>
+    ),
     Tabs: ({
       children,
       value,
@@ -163,6 +179,41 @@ describe('PullRequestsList', () => {
       data: { pullRequests, openCount: 2 },
       isPending: false,
     });
+  });
+
+  it('shows a retryable error when the initial pull request load fails', () => {
+    const refetch = vi.fn();
+    useQueryMock.mockReturnValue({
+      data: undefined,
+      isPending: false,
+      isError: true,
+      isFetching: false,
+      refetch,
+    });
+
+    render(<PullRequestsList enabled={true} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Failed to load recent pull requests.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(refetch).toHaveBeenCalledOnce();
+    expect(screen.queryByText('No recent pull requests. Yet.')).toBeNull();
+  });
+
+  it('keeps cached pull requests visible when a refetch fails', () => {
+    useQueryMock.mockReturnValue({
+      data: { pullRequests, openCount: 2 },
+      isPending: false,
+      isError: true,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+
+    render(<PullRequestsList enabled={true} />);
+
+    expect(screen.getByText('Draft PR')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('filters pull requests by status and persists the selection', async () => {

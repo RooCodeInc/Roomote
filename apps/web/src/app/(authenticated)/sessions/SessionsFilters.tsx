@@ -17,6 +17,8 @@ import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
 import { TaskFilters } from '@/components/tasks';
 import {
   Activity,
+  Archive,
+  BasicTooltip,
   Button,
   ChevronDown,
   CornerDownLeftIcon,
@@ -25,6 +27,8 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
   Input,
+  Columns3,
+  List,
   MessagesSquare,
   Search,
   Share2,
@@ -38,6 +42,7 @@ const ADVANCED_FILTER_PARAMS = [
   'pullRequest',
   'model',
   'source',
+  'archive',
 ] as const;
 
 const activeFilterStyle =
@@ -59,18 +64,20 @@ function SessionFilterDropdown({
   value,
   options,
   onChange,
+  defaultValue = 'all',
 }: {
   ariaLabel: string;
   icon: ReactNode;
   value: string;
   options: FilterOption[];
   onChange: (value: string) => void;
+  defaultValue?: string;
 }) {
-  const active = value !== 'all';
+  const active = value !== defaultValue;
   const label = options.find((option) => option.value === value)?.label;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
@@ -126,22 +133,26 @@ export function SessionsFilters({
   timePeriod,
   scope = 'all',
   status = 'all',
+  view = 'list',
   query = '',
   repository = null,
   pullRequest = null,
   model = null,
   source = 'all',
+  archive = 'non-archived',
   sourceOptions,
 }: {
   userId: string | null;
   timePeriod: TimePeriodFilter;
   scope?: string;
   status?: string;
+  view?: 'list' | 'board';
   query?: string;
   repository?: string | null;
   pullRequest?: string | null;
   model?: string | null;
   source?: string;
+  archive?: 'archived' | 'non-archived' | 'all';
   sourceOptions: string[];
 }) {
   const router = useRouter();
@@ -159,7 +170,6 @@ export function SessionsFilters({
   const updateParams = useCallback(
     (mutate: (params: URLSearchParams) => void) => {
       const params = new URLSearchParams(searchParams);
-      params.delete('view');
       mutate(params);
       params.delete('before');
       const nextQuery = params.toString();
@@ -214,18 +224,20 @@ export function SessionsFilters({
           updateParams((params) => params.set('scope', value))
         }
       />
-      <SessionFilterDropdown
-        ariaLabel="Session status"
-        icon={<Activity className="size-4 lg:mr-1.5" />}
-        value={status}
-        options={sessionStatusOptions}
-        onChange={(value) =>
-          updateParams((params) => {
-            if (value === 'all') params.delete('status');
-            else params.set('status', value);
-          })
-        }
-      />
+      {view === 'list' ? (
+        <SessionFilterDropdown
+          ariaLabel="Session status"
+          icon={<Activity className="size-4 lg:mr-1.5" />}
+          value={status}
+          options={sessionStatusOptions}
+          onChange={(value) =>
+            updateParams((params) => {
+              if (value === 'all') params.delete('status');
+              else params.set('status', value);
+            })
+          }
+        />
+      ) : null}
       <TaskFilters
         userId={userId ?? 'all'}
         repositoryName={null}
@@ -288,33 +300,56 @@ export function SessionsFilters({
               })
             }
           />
+          <SessionFilterDropdown
+            ariaLabel="Session archive state"
+            icon={<Archive className="size-4 lg:mr-1.5" />}
+            value={archive}
+            defaultValue="non-archived"
+            options={[
+              { value: 'archived', label: 'Archived' },
+              { value: 'non-archived', label: 'Non-Archived' },
+              { value: 'all', label: 'All' },
+            ]}
+            onChange={(value) =>
+              updateParams((params) => {
+                if (value === 'non-archived') params.delete('archive');
+                else params.set('archive', value);
+              })
+            }
+          />
         </>
       ) : null}
 
-      <div className="ml-auto flex items-center gap-2">
-        <Button
-          variant={advancedFiltersVisible ? 'default' : 'ghost'}
-          size="sm"
-          className="size-8"
-          aria-label="Toggle advanced filters"
-          aria-pressed={advancedFiltersVisible}
-          disabled={hasAdvancedUrlFilters}
-          title={
+      <div className="flex items-center gap-2 md:ml-auto">
+        <BasicTooltip
+          content={
             hasAdvancedUrlFilters
               ? 'Clear active filters to hide advanced filters'
               : 'Advanced filters'
           }
-          onClick={() => {
-            if (hasAdvancedUrlFilters) return;
-            setShowAdvancedFilters((current) => {
-              const next = !current;
-              writeStoredPreference(ADVANCED_FILTERS_STORAGE_KEY, String(next));
-              return next;
-            });
-          }}
         >
-          <SlidersHorizontal />
-        </Button>
+          <Button
+            variant={advancedFiltersVisible ? 'default' : 'ghost'}
+            size="sm"
+            className="size-8"
+            aria-label="Toggle advanced filters"
+            aria-pressed={advancedFiltersVisible}
+            disabled={hasAdvancedUrlFilters}
+            onClick={() => {
+              if (hasAdvancedUrlFilters) return;
+              setShowAdvancedFilters((current) => {
+                const next = !current;
+                writeStoredPreference(
+                  ADVANCED_FILTERS_STORAGE_KEY,
+                  String(next),
+                );
+                return next;
+              });
+            }}
+          >
+            <SlidersHorizontal />
+          </Button>
+        </BasicTooltip>
         {showSearch ? (
           <form
             className="relative"
@@ -366,6 +401,37 @@ export function SessionsFilters({
         >
           <Search />
         </Button>
+        <div className="flex items-center rounded-lg border border-border p-0.5">
+          <Button
+            variant={view === 'list' ? 'default' : 'ghost'}
+            size="sm"
+            aria-label="List view"
+            aria-pressed={view === 'list'}
+            title="List view"
+            className="rounded-r-none"
+            onClick={() =>
+              updateParams((params) => {
+                params.delete('view');
+                if (params.get('status') === 'done') params.delete('status');
+              })
+            }
+          >
+            <List />
+          </Button>
+          <Button
+            variant={view === 'board' ? 'default' : 'ghost'}
+            size="sm"
+            aria-label="Board view"
+            aria-pressed={view === 'board'}
+            title="Board view"
+            className="rounded-l-none"
+            onClick={() =>
+              updateParams((params) => params.set('view', 'board'))
+            }
+          >
+            <Columns3 />
+          </Button>
+        </div>
       </div>
     </div>
   );

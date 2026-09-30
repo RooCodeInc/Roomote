@@ -18,6 +18,7 @@ import {
   type WebTaskInitiatorSettleNotificationJob,
   type AutomationJobResult,
   type AutomationRunOpts,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT,
 } from '@roomote/sdk/server';
 import {
   processSessionTitleRefreshJob,
@@ -34,6 +35,7 @@ import {
   heartbeatJob,
   sleepCheckJob,
   refreshSnapshotsJob,
+  rebuildRetiredSnapshotsJob,
   pullRequestAnalyticsSyncJob,
   instancePingJob,
   licenseUsageSyncJob,
@@ -73,7 +75,7 @@ type ScheduledJob = Job<unknown, void, string>;
 
 const AUTOMATION_JOBS: Record<
   ScheduledAutomationJobName,
-  (opts?: AutomationRunOpts) => Promise<AutomationJobResult>
+  (opts: AutomationRunOpts) => Promise<AutomationJobResult>
 > = {
   conflict_resolver: conflictScanJob,
   suggester: suggesterJob,
@@ -114,6 +116,11 @@ async function createJobs(queue: Queue): Promise<void> {
   await queue.upsertJobScheduler(
     ScheduledJobName.RefreshSnapshots,
     { every: 24 * 60 * 60 * 1000 }, // Every 24 hours.
+  );
+
+  await queue.upsertJobScheduler(
+    ScheduledJobName.RebuildRetiredSnapshots,
+    { every: 5 * 60 * 1000 }, // Every 5 minutes.
   );
 
   // Automation jobs tick at their minimum supported cadence and due-gate
@@ -262,7 +269,9 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
   }
 
   if (isAutomationJobName(job.name)) {
-    await AUTOMATION_JOBS[job.name]();
+    await AUTOMATION_JOBS[job.name]({
+      context: SCHEDULED_AUTOMATION_RUN_CONTEXT,
+    });
     return;
   }
 
@@ -273,6 +282,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return sleepCheckJob();
     case ScheduledJobName.RefreshSnapshots:
       return refreshSnapshotsJob();
+    case ScheduledJobName.RebuildRetiredSnapshots:
+      return rebuildRetiredSnapshotsJob();
     case ScheduledJobName.PullRequestAnalyticsSync:
       return pullRequestAnalyticsSyncJob(job.data ?? {});
     case ScheduledJobName.InstancePing:
@@ -324,7 +335,9 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
     case ScheduledJobName.SessionTitleRefresh:
       return processSessionTitleRefreshJob(job.data as SessionTitleRefreshJob);
     case ScheduledJobName.CustomAutomations:
-      await customAutomationsJob();
+      await customAutomationsJob({
+        context: SCHEDULED_AUTOMATION_RUN_CONTEXT,
+      });
       return;
     default:
       throw new Error(`Unknown job type: ${job.name}`);

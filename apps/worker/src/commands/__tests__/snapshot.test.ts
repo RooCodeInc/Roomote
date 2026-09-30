@@ -124,7 +124,7 @@ describe('snapshot', () => {
     expect(mockDone).toHaveBeenCalledWith({
       id: 42,
       status: RunStatus.Failed,
-      error: 'setup failed',
+      error: 'Snapshot failed during setup_environment: setup failed',
     });
     expect(mockUpdateSnapshotStatus).toHaveBeenCalledWith({
       environmentId: 'env-1',
@@ -162,7 +162,44 @@ describe('snapshot', () => {
       {
         runId: 42,
         environmentId: 'env-1',
-        stage: 'snapshot',
+        stage: 'snapshot.setup_environment',
+        snapshotFailureStage: 'setup_environment',
+      },
+    );
+  });
+
+  it('preserves the original failure stage when run finalization fails', async () => {
+    mockDone.mockRejectedValue(new Error('API unavailable'));
+
+    const result = await snapshot({
+      runId: 42,
+      environmentId: 'env-1',
+      sandboxId: 'sb-1',
+    });
+
+    expect(result).toBe(false);
+    expect(mockUpdateSnapshotStatus).toHaveBeenCalledWith({
+      environmentId: 'env-1',
+      snapshotStatus: 'failed',
+    });
+    expect(mockCaptureWorkerException).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ message: 'API unavailable' }),
+      {
+        runId: 42,
+        environmentId: 'env-1',
+        stage: 'snapshot.finalize',
+        snapshotFailureStage: 'setup_environment',
+      },
+    );
+    expect(mockCaptureWorkerException).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ message: 'setup failed' }),
+      {
+        runId: 42,
+        environmentId: 'env-1',
+        stage: 'snapshot.setup_environment',
+        snapshotFailureStage: 'setup_environment',
       },
     );
   });

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { ScheduleOnlyAutomationContent } from './ScheduleOnlyAutomationContent';
 
@@ -32,7 +32,7 @@ describe('ScheduleOnlyAutomationContent', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders schedule details only when the automation is enabled', () => {
+  it('keeps schedule editing collapsed and omits repeated details', () => {
     const details = [
       'Reviews merged PRs since the last run.',
       'Posts only actionable follow-up work.',
@@ -44,7 +44,7 @@ describe('ScheduleOnlyAutomationContent', () => {
         control={{
           kind: 'schedule',
           scheduleOptions: [
-            { value: 'off', label: 'Never' },
+            { value: 'off', label: 'Off' },
             { value: 'daily', label: 'Daily' },
           ],
         }}
@@ -57,10 +57,16 @@ describe('ScheduleOnlyAutomationContent', () => {
       />,
     );
 
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Code Quality Auditor schedule'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(details[0])).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(
       screen.getByLabelText('Code Quality Auditor schedule'),
     ).toBeInTheDocument();
-    expect(screen.queryByText(details[0])).not.toBeInTheDocument();
 
     rerender(
       <ScheduleOnlyAutomationContent
@@ -68,7 +74,7 @@ describe('ScheduleOnlyAutomationContent', () => {
         control={{
           kind: 'schedule',
           scheduleOptions: [
-            { value: 'off', label: 'Never' },
+            { value: 'off', label: 'Off' },
             { value: 'daily', label: 'Daily' },
           ],
         }}
@@ -81,7 +87,7 @@ describe('ScheduleOnlyAutomationContent', () => {
       />,
     );
 
-    expect(screen.getByText(details[0])).toBeInTheDocument();
-    expect(screen.getByText(details[1])).toBeInTheDocument();
+    expect(screen.queryByText(details[0])).not.toBeInTheDocument();
+    expect(screen.queryByText(details[1])).not.toBeInTheDocument();
   });
 });

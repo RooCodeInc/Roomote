@@ -99,7 +99,7 @@ function buildOwningSessionContext({
 }
 
 /**
- * Enters a mention into the discussion's Fast Session. Turns are queued so
+ * Enters a mention into the discussion's session. Turns are queued so
  * a busy Session steers or replays them instead of dropping them.
  *
  * When a task in another Session opened the discussion (a Slack Session's

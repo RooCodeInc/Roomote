@@ -326,7 +326,7 @@ export function ArtifactViewerContent({
           : null;
       if (!sessionId) {
         throw new Error(
-          'The task that created this artifact is not attached to a Session.',
+          'The task that created this artifact is not attached to a session.',
         );
       }
 
@@ -337,7 +337,7 @@ export function ArtifactViewerContent({
             artifact.path,
             artifact.version,
           )}`
-        : `Build the ${artifact.path} artifact (v${artifact.version}) created in this Session.`;
+        : `Build the ${artifact.path} artifact (v${artifact.version}) created in this session.`;
       await trpcClient.fastSessions.reply.mutate({
         sessionId,
         text: buildRequest,
@@ -347,7 +347,7 @@ export function ArtifactViewerContent({
     onSuccess: (sessionId) => {
       if (!sessionId) return;
 
-      toast.success('Sent to Session.');
+      toast.success('Sent to session.');
       const sessionPath = `/sessions/${sessionId}`;
       if (pathname !== sessionPath) {
         router.push(sessionPath);

@@ -57,7 +57,7 @@ describe('Telegram task topic launch', () => {
     rememberTelegramImplicitTopicMock.mockResolvedValue(undefined);
   });
 
-  it('stamps the owning Fast Session onto the task and runs the kickoff gate', async () => {
+  it('stamps the owning session onto the task and runs the kickoff gate', async () => {
     const beforeEnqueue = vi.fn().mockResolvedValue(undefined);
     enqueueTaskMock.mockImplementation(
       async (

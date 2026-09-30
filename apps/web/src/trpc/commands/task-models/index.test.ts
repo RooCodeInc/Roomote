@@ -1,5 +1,6 @@
 import {
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  DEFAULT_TASK_MODEL_ID,
   normalizeTaskModelId,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
@@ -1760,8 +1761,11 @@ describe('task model provider commands', () => {
         taskModelSettings: expect.objectContaining({
           allowedModelIds: expect.arrayContaining([
             'openai/gpt-5.6-sol',
+            'openai/gpt-6-sol',
+            'openai/gpt-6.1-sol',
             'openai/gpt-5.6-terra',
             'openai/gpt-5.6-luna',
+            'openai/gpt-6-luna',
           ]),
         }),
       }),
@@ -1782,8 +1786,8 @@ describe('task model provider commands', () => {
     // recommended list joins the catalog as disabled, metadata-less rows.
     expect(anthropicModels.map((model) => model.id)).toEqual(
       expect.arrayContaining([
-        'anthropic/claude-sonnet-5',
-        'anthropic/claude-opus-5',
+        'anthropic/claude-sonnet-5-5',
+        'anthropic/claude-opus-5-5',
         'anthropic/claude-haiku-4-5',
       ]),
     );
@@ -1796,6 +1800,34 @@ describe('task model provider commands', () => {
     expect(result.models.some((model) => model.id.startsWith('google/'))).toBe(
       false,
     );
+  });
+
+  it('lists env-only coding overrides in the settings catalog', async () => {
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OPENROUTER_API_KEY',
+    ]);
+    // The env override is a bare gateway slug for a model that is neither
+    // persisted nor in the recommended catalog; the catalog and the runtime
+    // status must agree on its canonical id so metadata (including
+    // supported reasoning efforts) resolves for it.
+    process.env.R_MODEL = 'z-ai/glm-9.9';
+
+    const result = await getTaskModelSettingsCommand(buildMockAuth());
+    const modelById = new Map(result.models.map((model) => [model.id, model]));
+
+    expect(result.runtimeModels.codingModel.effectiveModelId).toBe(
+      'openrouter/z-ai/glm-9.9',
+    );
+    expect(modelById.get('openrouter/z-ai/glm-9.9')).toMatchObject({
+      enabled: true,
+    });
+    expect(
+      result.helperModelOptions.some(
+        (option) => option.id === 'openrouter/z-ai/glm-9.9',
+      ),
+    ).toBe(true);
+
+    delete process.env.R_MODEL;
   });
 
   it('keeps role-selected models listed and enabled after they leave the recommended list', async () => {
@@ -1953,7 +1985,7 @@ describe('task model provider commands', () => {
         provider: expect.objectContaining({ id: 'anthropic' }),
         apiKey: '  sk-ant-test  ',
         action: 'save it',
-        modelId: 'anthropic/claude-sonnet-5',
+        modelId: 'anthropic/claude-sonnet-5-5',
       }),
     );
 
@@ -1995,17 +2027,17 @@ describe('task model provider commands', () => {
       'anthropic/claude-fable-5',
       'anthropic/claude-fable-5-1',
       'anthropic/claude-haiku-4-5',
-      'anthropic/claude-opus-5',
-      'anthropic/claude-sonnet-5',
+      'anthropic/claude-opus-5-5',
+      'anthropic/claude-sonnet-5-5',
     ]);
     expect([...seededSettings.allowedModelIds].sort()).toEqual([
       'anthropic/claude-fable-5',
       'anthropic/claude-fable-5-1',
       'anthropic/claude-haiku-4-5',
-      'anthropic/claude-opus-5',
-      'anthropic/claude-sonnet-5',
+      'anthropic/claude-opus-5-5',
+      'anthropic/claude-sonnet-5-5',
     ]);
-    expect(seededSettings?.defaultModelId).toBe('anthropic/claude-sonnet-5');
+    expect(seededSettings?.defaultModelId).toBe('anthropic/claude-sonnet-5-5');
     expect(result.addedRecommendedModelCount).toBe(5);
 
     expect(
@@ -2033,6 +2065,24 @@ describe('task model provider commands', () => {
 
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
     expect(txInsert).not.toHaveBeenCalled();
+  });
+
+  it('saves a key whose account is out of credits and returns the warning', async () => {
+    mockValidateSetupModelProviderCredentials.mockResolvedValueOnce({
+      code: 'insufficient_credits',
+      message:
+        'The Anthropic account seems to be out of credits or quota. Add credits before using it.',
+    });
+
+    const result = await saveTaskModelProviderCommand(buildMockAuth(), {
+      provider: 'anthropic',
+      apiKey: 'sk-ant-empty-account',
+    });
+
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalled();
+    expect(result.validationWarning).toBe(
+      'The Anthropic account seems to be out of credits or quota. Add credits before using it.',
+    );
   });
 
   it('saves an endpoint provider when model discovery is temporarily unavailable', async () => {
@@ -2063,9 +2113,38 @@ describe('task model provider commands', () => {
     expect(result.addedDiscoveredModelCount).toBe(0);
   });
 
+  it('saves an endpoint provider whose account is out of credits and reports it', async () => {
+    mockCollectCandidateProviderCredentials.mockResolvedValue({
+      values: [{ name: 'VLLM_BASE_URL', value: 'https://vllm.example/v1' }],
+      clearedEnvVarNames: [],
+      changedValues: [
+        { name: 'VLLM_BASE_URL', value: 'https://vllm.example/v1' },
+      ],
+      clearedPersistedEnvVarNames: [],
+      persistedEnv: {},
+    });
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'VLLM_BASE_URL',
+    ]);
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      VLLM_BASE_URL: 'https://vllm.example/v1',
+    });
+    fetchMock.mockResolvedValue(new Response(null, { status: 402 }));
+
+    const result = await saveTaskModelProviderCommand(buildMockAuth(), {
+      provider: 'vllm',
+      apiKey: 'https://vllm.example/v1',
+    });
+
+    // Credit exhaustion is not a credential problem, so the connection is
+    // saved and the post-save discovery reports why no models were added.
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalled();
+    expect(result.discoveryError).toContain('enough credits or quota');
+    expect(result.addedDiscoveredModelCount).toBe(0);
+  });
+
   it.each([
     [401, 'https://vllm.example/v1', 'rejected the API key'],
-    [402, 'https://vllm.example/v1', 'enough credits or quota'],
     [null, 'not a URL', 'valid endpoint URL'],
   ])(
     'does not save an endpoint provider after a blocking %s discovery response',
@@ -2112,10 +2191,8 @@ describe('task model provider commands', () => {
     // The default catalog's OpenRouter models stay (that provider is
     // connected via runtime env) and keep the effective default model.
     expect(modelIds).toContain('openrouter/openai/gpt-5.6-terra');
-    expect(modelIds).toContain('anthropic/claude-sonnet-5');
-    expect(seededSettings?.defaultModelId).toBe(
-      'openrouter/openai/gpt-5.6-terra',
-    );
+    expect(modelIds).toContain('anthropic/claude-sonnet-5-5');
+    expect(seededSettings?.defaultModelId).toBe(DEFAULT_TASK_MODEL_ID);
     expect(result.addedRecommendedModelCount).toBe(5);
   });
 

@@ -356,6 +356,26 @@ export class OpenCodeServerClient {
     );
   }
 
+  async replyPermission(options: {
+    requestId: string;
+    reply: 'once' | 'reject';
+    message?: string;
+    signal?: AbortSignal;
+  }): Promise<boolean> {
+    return await this.request(
+      `/permission/${encodeURIComponent(options.requestId)}/reply`,
+      {
+        method: 'POST',
+        body: {
+          reply: options.reply,
+          ...(options.message ? { message: options.message } : {}),
+        },
+        signal: options.signal,
+        label: 'replyPermission',
+      },
+    );
+  }
+
   async rejectQuestion(options: {
     requestId: string;
     signal?: AbortSignal;

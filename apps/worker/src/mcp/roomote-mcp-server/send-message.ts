@@ -82,7 +82,7 @@ export async function handleSendMessage(
         message: `Task ${result.result.taskId ?? params.taskId} is resuming from snapshot.`,
         ...result.result,
         sent: {
-          direction: 'Codex → Roomote',
+          direction: 'Client → Roomote',
           target: { kind: 'task', id: params.taskId },
           text: params.message,
         },
@@ -92,7 +92,7 @@ export async function handleSendMessage(
     return successResult({
       message: `Message sent to task ${params.taskId}.`,
       sent: {
-        direction: 'Codex → Roomote',
+        direction: 'Client → Roomote',
         target: { kind: 'task', id: params.taskId },
         text: params.message,
       },

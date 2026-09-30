@@ -78,6 +78,18 @@ export function parseWorkerReleaseTag(
   return null;
 }
 
+/**
+ * Returns the stable product-version family represented by a worker release.
+ * Preview suffixes remain compatible with the same product release family.
+ */
+export function getWorkerReleaseCompatibilityVersion(
+  version: string | null | undefined,
+): string | null {
+  const match = version?.trim().match(/^v?(\d+\.\d+\.\d+)(?:[-+].*)?$/);
+
+  return match?.[1] ?? null;
+}
+
 function parseComparableWorkerReleaseVersion(
   version: string,
 ): ParsedComparableWorkerReleaseVersion | null {

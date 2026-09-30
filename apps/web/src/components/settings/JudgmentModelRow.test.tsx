@@ -32,6 +32,7 @@ function buildSettings(overrides: Record<string, unknown> = {}) {
     typeSafe: { connected: false, source: null },
     openRouterConnected: false,
     vercelGatewayConnected: false,
+    roomoteConnected: false,
     storedSelection: null,
     envSelection: null,
     effectiveSelection: 'off',
@@ -60,9 +61,12 @@ describe('JudgmentModelRow', () => {
     expect(screen.getByText('Judgment model')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Makes quick routing and triage decisions (which channel messages start work, which skill or tool fits, whether a reply is for Roomote). Anything it is unsure about falls back to the helper model.',
+        /Answers the quick yes\/no and multiple-choice questions Roomote asks, such as whether a reply is meant for it\./,
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Test decisions' }),
+    ).toHaveAttribute('href', '/settings/models/decisions');
     expect(
       screen.getByRole('combobox', { name: 'Judgment model' }),
     ).toHaveTextContent('Off');
@@ -72,6 +76,12 @@ describe('JudgmentModelRow', () => {
     expect(screen.getByRole('option', { name: 'Off' })).not.toHaveAttribute(
       'data-disabled',
     );
+    expect(
+      screen.getByRole('option', { name: /Roomote judgment model/ }),
+    ).toHaveTextContent('Not configured on this deployment');
+    expect(
+      screen.getByRole('option', { name: /Roomote judgment model/ }),
+    ).toHaveAttribute('data-disabled');
     expect(
       screen.getByRole('option', { name: /Jev via TypeSafe/ }),
     ).toHaveTextContent('Connect TypeSafe');
@@ -118,6 +128,25 @@ describe('JudgmentModelRow', () => {
     expect(toast.success).toHaveBeenCalledWith(
       'Judgment model set to Jev via Vercel AI Gateway.',
     );
+  });
+
+  it('offers the Roomote judgment model when the deployment configures it', () => {
+    judgmentSettingsData.current = buildSettings({
+      roomoteConnected: true,
+      effectiveSelection: 'roomote',
+    });
+
+    render(<JudgmentModelRow />);
+
+    expect(
+      screen.getByRole('combobox', { name: 'Judgment model' }),
+    ).toHaveTextContent('Roomote judgment model');
+
+    openSelect();
+
+    expect(
+      screen.getByRole('option', { name: 'Roomote judgment model' }),
+    ).not.toHaveAttribute('data-disabled');
   });
 
   it('offers OpenRouter when its existing provider connection is available', () => {

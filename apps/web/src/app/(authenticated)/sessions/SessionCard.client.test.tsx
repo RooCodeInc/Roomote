@@ -6,23 +6,23 @@ vi.mock('../../(sandbox)/sessions/[sessionId]/SessionDeleteAction', () => ({
   ),
 }));
 
-import { formatSessionMobileTimestamp, SessionCard } from './SessionCard';
+import { formatSessionCompactTimestamp, SessionCard } from './SessionCard';
 
-describe('formatSessionMobileTimestamp', () => {
+describe('formatSessionCompactTimestamp', () => {
   const now = new Date(2026, 8, 21, 15, 30);
 
   it.each([
-    [new Date(2026, 8, 21, 9, 5), '09:05 AM'],
+    [new Date(2026, 8, 21, 9, 5), '09:05'],
     [new Date(2026, 8, 20, 23, 59), 'Sep 20'],
     [new Date(2025, 6, 4, 12, 0), 'Jul 4 2025'],
   ])('formats %s for compact mobile display', (date, expected) => {
-    expect(formatSessionMobileTimestamp(date, now)).toBe(expected);
+    expect(formatSessionCompactTimestamp(date, now)).toBe(expected);
   });
 });
 
 describe('SessionCard', () => {
   it('links to the transcript without repository or execution metadata', async () => {
-    render(
+    const { container } = render(
       <SessionCard
         viewerUserId="user-1"
         session={{
@@ -68,6 +68,13 @@ describe('SessionCard', () => {
     expect(
       screen.getByRole('link', { name: /Update homepage background/ }),
     ).toHaveAttribute('href', '/sessions/session-1');
+    const activityTime = container.querySelector('time');
+    expect(activityTime).toHaveAttribute('dateTime');
+    expect(activityTime).toHaveAttribute('title');
+    expect(activityTime).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('Activity time:'),
+    );
     expect(screen.getByText('Test User from Web')).toBeInTheDocument();
     expect(screen.queryByText(/started a session/)).not.toBeInTheDocument();
     expect(screen.getByText('$0.01')).toBeInTheDocument();
@@ -220,6 +227,28 @@ describe('SessionCard', () => {
       />,
     );
     expect(screen.getByText('blocked')).toHaveClass('capitalize');
+
+    rerender(
+      <SessionCard
+        session={{ ...session, cachedStatus: 'blocked' }}
+        viewerUserId="user-1"
+        hideAttentionBadges
+      />,
+    );
+    expect(
+      screen.queryByText('blocked', { exact: true }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <SessionCard
+        session={{ ...session, cachedStatus: 'needs_input' }}
+        viewerUserId="user-1"
+        hideAttentionBadges
+      />,
+    );
+    expect(
+      screen.queryByText('needs input', { exact: true }),
+    ).not.toBeInTheDocument();
   });
 
   it('labels automation-owned sessions with the automation actor', () => {
@@ -254,9 +283,42 @@ describe('SessionCard', () => {
     expect(
       screen.getByText('Sentry Triage from Automation'),
     ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText('Sentry Triage').querySelector('img'),
-    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Sentry Triage')).not.toBeInTheDocument();
+  });
+
+  it('keeps the user avatar decorative when the card text names the actor', () => {
+    render(
+      <SessionCard
+        viewerUserId="user-1"
+        session={{
+          id: 'session-avatar',
+          title: 'Review avatar semantics',
+          ownerKind: 'user',
+          ownerAutomation: null,
+          ownerName: 'Test User',
+          ownerEmail: 'test@example.com',
+          ownerImageUrl: '/api/avatars/user-1/avatar-123.png',
+          ownerUserId: 'user-1',
+          privacy: 'shared',
+          sourceSurface: 'web',
+          activityAt: Date.now() / 1000,
+          cachedStatus: 'ready',
+          executionCount: 0,
+          inferenceCostMicroUsd: 0,
+          directInferenceCostMicroUsd: 0,
+          unread: false,
+          artifactCount: 0,
+          singleArtifact: null,
+          pullRequests: [],
+          tasks: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Test User from Web')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Test User')).not.toBeInTheDocument();
+    expect(document.querySelector('img')).toHaveAttribute('loading', 'eager');
+    expect(document.querySelector('img')).toHaveAttribute('decoding', 'sync');
   });
 
   it('uses canonical identity for the viewer without changing other users', () => {
@@ -291,7 +353,9 @@ describe('SessionCard', () => {
 
     rerender(<SessionCard session={session} viewerUserId="owner-user" />);
     expect(screen.getByText('Same Display Name from Web')).toBeInTheDocument();
-    expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
+    expect(
+      screen.queryByLabelText('Same Display Name'),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('Y')).not.toBeInTheDocument();
   });
 

@@ -14,6 +14,7 @@ import { userApiKeysRouter } from './user-api-keys';
 import { llmUsageRouter } from './llm-usage';
 import { statuspageRouter } from './statuspage';
 import { instanceSkillsRouter } from './instance-skills';
+import { toolApprovalsRouter } from './tool-approvals';
 
 export const appRouter = router({
   auth: authRouter,
@@ -28,6 +29,7 @@ export const appRouter = router({
   llmUsage: llmUsageRouter,
   statuspage: statuspageRouter,
   instanceSkills: instanceSkillsRouter,
+  toolApprovals: toolApprovalsRouter,
 });
 
 export type AppRouter = typeof appRouter;

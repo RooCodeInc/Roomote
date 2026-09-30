@@ -7,6 +7,7 @@ import {
   sandboxLogEventSchema,
   sandboxErrorEventSchema,
 } from '@roomote/types';
+import type { TaskRunDisconnectEvent } from '@roomote/types';
 
 interface UseSandboxLogsOptions {
   runId: number | undefined;
@@ -90,7 +91,29 @@ export function useSandboxLogs({
       setIsConnected(false);
     });
 
-    eventSource.addEventListener('disconnect', () => cleanup());
+    eventSource.addEventListener('disconnect', (event) => {
+      if (event instanceof MessageEvent && event.data) {
+        try {
+          const disconnectEvent = JSON.parse(
+            event.data,
+          ) as Partial<TaskRunDisconnectEvent> | null;
+
+          if (
+            disconnectEvent?.correlation?.runId === runId &&
+            disconnectEvent.disconnectReason?.code !== 'stream_completed'
+          ) {
+            console.warn('[SandboxLogs] task runtime log stream disconnected', {
+              ...disconnectEvent,
+              runId,
+            });
+          }
+        } catch {
+          // Ignore malformed disconnect metadata.
+        }
+      }
+
+      cleanup();
+    });
 
     return cleanup;
   }, [runId, enabled, cleanup]);

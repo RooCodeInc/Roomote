@@ -76,7 +76,7 @@ this pipeline is ever committed to the repository.
 <name>Narrate first (the narrative drives the visuals)</name>
 <actions>
 <action>Synthesize the narration BEFORE capture: `SCRIPT=/tmp/feature-demo/demo-script.json node "$HOME/.agents/skills/feature-demo/scripts/build-narration.mjs"`. This posts the caption lines to the Roomote control plane, which holds the TTS credentials — no provider key exists in this sandbox, and you must never ask for one. It writes `/tmp/feature-demo/vo/*.mp3` and `/tmp/feature-demo/narration.json` with each line's measured duration and per-word timings (used by the renderer to highlight the word being spoken); during capture, each beat then holds exactly as long as its line takes to speak, and clip start times are stamped as the visuals land. No retiming happens afterwards.</action>
-<action>Exit code 3 means narration is not configured on this deployment: proceed captions-only — capture paces each captioned beat from the caption's estimated speaking time instead, so the demo still reads at narrative pace. Mention in the final report that voice-over is available if an admin connects ElevenLabs under Settings → Integrations.</action>
+<action>Exit code 3 means narration is not configured on this deployment: proceed captions-only — capture paces each captioned beat from the caption's estimated speaking time instead, so the demo still reads at narrative pace. Mention in the final report that voice-over is available if an admin connects ElevenLabs on the Integrations page.</action>
 </actions>
 </step>
 

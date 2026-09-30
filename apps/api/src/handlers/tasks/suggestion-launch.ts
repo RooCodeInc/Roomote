@@ -204,7 +204,7 @@ export async function resolveSuggestionOriginSessionId(
       columns: { id: true },
     });
     if (!session) {
-      throw new Error('The suggestion origin Session is no longer available.');
+      throw new Error('The suggestion origin session is no longer available.');
     }
     return session.id;
   }
@@ -235,7 +235,7 @@ export async function resolveSuggestionFastConversation(input: {
     columns: { id: true, fastConversationId: true },
   });
   if (!session) {
-    throw new Error('The suggestion origin Session is no longer available.');
+    throw new Error('The suggestion origin session is no longer available.');
   }
   // Look up the origin before creating by the clicked card's identity: the
   // original conversation also owns the reply destination and existing owner.

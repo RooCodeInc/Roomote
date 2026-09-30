@@ -27,7 +27,7 @@ import {
 /**
  * A compact setup action card, intentionally matching the other cards in the
  * setup conversation. Detailed integration configuration reuses the shared
- * Settings surface without navigating away from the session.
+ * Integrations page surface without navigating away from the session.
  */
 export function SetupIntegrationsCard({
   sessionId,

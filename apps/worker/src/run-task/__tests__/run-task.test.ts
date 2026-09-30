@@ -1,3 +1,13 @@
+vi.mock('../judgement-proxy', async (original) => ({
+  ...(await original<typeof import('../judgement-proxy')>()),
+  setupJudgement: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../jevgrep', async (original) => ({
+  ...(await original<typeof import('../jevgrep')>()),
+  setupJevgrep: vi.fn().mockResolvedValue(false),
+}));
+
 import { EventEmitter } from 'node:events';
 
 const {
@@ -7,6 +17,8 @@ const {
   buildSandboxInstructionMock,
   taskRunsDoneMock,
   taskRunsActivateSlackReplyTargetMock,
+  peekTaskFollowUpsMock,
+  removeTaskFollowUpMock,
   taskRunsClearActiveSlackReplyTargetMock,
   taskRunsRecordEventMock,
   taskRunsStampMilestoneMock,
@@ -49,6 +61,8 @@ const {
     threadTs: '1710000000.456',
     reactionsAllowed: false,
   }),
+  peekTaskFollowUpsMock: vi.fn().mockResolvedValue([]),
+  removeTaskFollowUpMock: vi.fn().mockResolvedValue(undefined),
   taskRunsClearActiveSlackReplyTargetMock: vi.fn().mockResolvedValue(undefined),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
   taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
@@ -75,9 +89,11 @@ const {
     taskFinishedAt: undefined,
     taskAbortedAt: undefined,
   })),
-  createServerMock: vi.fn(() => ({
-    close: vi.fn().mockResolvedValue(undefined),
-  })),
+  createServerMock: vi.fn(
+    (_options: { userEnv: () => Record<string, string> }) => ({
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  ),
   drainSlackMessagesMock: vi
     .fn()
     .mockResolvedValue({ resumed: false, reason: 'no_pending_messages' }),
@@ -103,10 +119,21 @@ const {
   installZeroCliMock: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('node:fs', () => ({
-  existsSync: existsSyncMock,
-  mkdirSync: mkdirSyncMock,
-  writeFileSync: writeFileSyncMock,
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+
+  return {
+    ...actual,
+    existsSync: existsSyncMock,
+    mkdirSync: mkdirSyncMock,
+    writeFileSync: writeFileSyncMock,
+  };
+});
+
+vi.mock('../../commands/utils/scrub-sandbox-secrets', () => ({
+  scrubSandboxSecretsBeforeSnapshot: vi
+    .fn()
+    .mockResolvedValue({ failedSteps: [] }),
 }));
 
 vi.mock('../../mcp/roomote-mcp-server/chat-reply-satisfaction', () => ({
@@ -121,7 +148,10 @@ type FakeHarnessManager = EventEmitter & {
   resumeTask: ReturnType<typeof vi.fn>;
   sendFollowUpPrompt: ReturnType<typeof vi.fn>;
   startNewTask: ReturnType<typeof vi.fn>;
+  startNewTaskFromPrompt: ReturnType<typeof vi.fn>;
   initializeWithoutPrompt: ReturnType<typeof vi.fn>;
+  currentPhase: string;
+  currentSessionId?: string;
   cancelTask: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
 };
@@ -170,7 +200,9 @@ vi.mock('@roomote/sdk/client', () => ({
       activateSlackReplyTarget: taskRunsActivateSlackReplyTargetMock,
       clearActiveSlackReplyTarget: taskRunsClearActiveSlackReplyTargetMock,
       done: taskRunsDoneMock,
+      peekTaskFollowUps: peekTaskFollowUpsMock,
       recordEvent: taskRunsRecordEventMock,
+      removeTaskFollowUp: removeTaskFollowUpMock,
       stampMilestone: taskRunsStampMilestoneMock,
       setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
       syncActingUserId: taskRunsSyncActingUserIdMock,
@@ -198,16 +230,21 @@ vi.mock('../../sandbox-server', () => ({
   HarnessManager: class FakeHarnessManager extends EventEmitter {
     currentIsConnected = true;
     currentSleepAt: number | null = null;
+    currentPhase = 'running';
+    currentSessionId: string | undefined;
     callbacks?: HarnessManagerCallbacks;
     getStatus = vi.fn(() => ({
       isConnected: this.currentIsConnected,
-      phase: 'running',
-      sessionId: undefined,
+      phase: this.currentPhase,
+      sessionId: this.currentSessionId,
     }));
     resumeTask = vi.fn();
     sendFollowUpPrompt = vi.fn(() => true);
     startNewTask = vi.fn();
-    initializeWithoutPrompt = vi.fn();
+    startNewTaskFromPrompt = vi.fn(() => true);
+    initializeWithoutPrompt = vi.fn(() => {
+      this.currentPhase = 'waiting_for_prompt';
+    });
     cancelTask = vi.fn();
     dispose = vi.fn();
 
@@ -291,8 +328,52 @@ import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import { resolveWorkerReleaseMetadata } from '../../monitoring/worker-release-metadata';
 import type { HarnessManagerCallbacks } from '../../sandbox-server/lib/harness-manager';
 import { getDefaultKeepaliveMs } from '../completion';
+import { setupJevgrep } from '../jevgrep';
 import { runTask } from '../run-task';
 import type { EnvironmentSetupSettledOutcome } from '../types';
+
+function createFollowUpRunTaskInput(input: {
+  id: number;
+  taskId: string;
+  prompt?: string;
+  actingUserId?: string | null;
+}) {
+  return {
+    taskRun: {
+      id: input.id,
+      taskId: input.taskId,
+      actingUserId: input.actingUserId ?? null,
+      payloadKind: TaskPayloadKind.StandardTask,
+      harness: 'opencode-server',
+      payload: {},
+      result: null,
+    },
+    envVars: {},
+    workspacePath: '/tmp/workspace',
+    prompt: input.prompt ?? '',
+    harnessInstructions: undefined,
+    agentInstructions: undefined,
+    environmentConfig: undefined,
+    callbacks: {},
+    context: {},
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      log: vi.fn(),
+    },
+    harnessSessionId: undefined,
+    workerEnv: {
+      authToken: 'cloud-token',
+      roomoteAppUrl: 'https://api.example.test',
+      trpcUrl: 'https://web.example.test',
+      buildUserFacingEnv: vi.fn(() => ({
+        HOME: '/tmp/home',
+        PATH: '/usr/bin',
+      })),
+    },
+  } as never;
+}
 
 describe('runTask', () => {
   beforeEach(() => {
@@ -309,6 +390,8 @@ describe('runTask', () => {
       threadTs: '1710000000.456',
       reactionsAllowed: false,
     });
+    peekTaskFollowUpsMock.mockReset().mockResolvedValue([]);
+    removeTaskFollowUpMock.mockReset().mockResolvedValue(undefined);
 
     createHarnessMock.mockResolvedValue({
       harness: {},
@@ -590,6 +673,10 @@ describe('runTask', () => {
   });
 
   it('always enables the terminal runtime env and sandbox server', async () => {
+    vi.mocked(setupJevgrep).mockImplementationOnce(async ({ runtimeEnv }) => {
+      runtimeEnv.R_JEVGREP_GATEWAY_URL = 'https://api.example.test/jevgrep';
+      return true;
+    });
     await runTask({
       taskRun: {
         id: 110,
@@ -637,6 +724,14 @@ describe('runTask', () => {
         allowTerminal: true,
       }),
     );
+    const terminalEnv = createServerMock.mock.calls.at(-1)?.[0].userEnv();
+    expect(terminalEnv).toEqual(
+      expect.objectContaining({
+        R_JEVGREP_GATEWAY_URL: 'https://api.example.test/jevgrep',
+      }),
+    );
+    expect(terminalEnv?.PATH).toContain('/.roomote/jevgrep/bin:');
+    expect(terminalEnv).not.toHaveProperty('ROOMOTE_CLOUD_TOKEN');
   });
 
   it('keeps the task terminal enabled while clearing only reserved reply context env vars', async () => {
@@ -1257,62 +1352,97 @@ describe('runTask', () => {
     );
   });
 
-  it('keeps scheduled automation scans silent without requiring a closeout', async () => {
-    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(456_000);
+  it.each([
+    {
+      suggestionSource: 'suggest_ideas',
+      suppressNonTerminalRepliesWithoutTurn: true,
+      requiresTerminalCloseoutWithoutTurn: true,
+    },
+    {
+      suggestionSource: 'codeql_triage',
+      suppressNonTerminalRepliesWithoutTurn: true,
+      requiresTerminalCloseoutWithoutTurn: false,
+    },
+    {
+      suggestionSource: 'suggest_ideas',
+      suppressNonTerminalRepliesWithoutTurn: false,
+      requiresTerminalCloseoutWithoutTurn: false,
+    },
+  ])(
+    'copies explicit reply policies for $suggestionSource scans',
+    async ({
+      suggestionSource,
+      suppressNonTerminalRepliesWithoutTurn,
+      requiresTerminalCloseoutWithoutTurn,
+    }) => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(456_000);
 
-    try {
-      await runTask({
-        taskRun: {
-          id: 108,
-          taskId: 'task-108',
-          payloadKind: TaskPayloadKind.Scan,
-          harness: 'opencode-server',
-          payload: {
-            repo: '__all_repositories__',
-            slackChannel: 'C123',
-            channel: 'C123',
-            suggestionSource: 'codeql_triage',
-          },
-          result: null,
-        } as never,
-        envVars: {},
-        workspacePath: '/tmp/workspace',
-        prompt: '',
-        harnessInstructions: undefined,
-        agentInstructions: undefined,
-        environmentConfig: undefined,
-        callbacks: {},
-        context: {},
-        logger: {
-          info: vi.fn(),
-          warn: vi.fn(),
-          error: vi.fn(),
-          log: vi.fn(),
-        } as never,
-        harnessSessionId: 'session-108',
-        workerEnv: {
-          authToken: 'cloud-token',
-          roomoteAppUrl: 'https://api.example.test',
-          trpcUrl: 'https://web.example.test',
-          buildUserFacingEnv: vi.fn(() => ({
-            HOME: '/tmp/home',
-            PATH: '/usr/bin',
-          })),
-        } as never,
-      });
-    } finally {
-      nowSpy.mockRestore();
-    }
+      try {
+        await runTask({
+          taskRun: {
+            id: 108,
+            taskId: 'task-108',
+            payloadKind: TaskPayloadKind.Scan,
+            harness: 'opencode-server',
+            payload: {
+              repo: '__all_repositories__',
+              slackChannel: 'C123',
+              channel: 'C123',
+              suggestionSource,
+              ...(suppressNonTerminalRepliesWithoutTurn
+                ? { suppressNonTerminalRepliesWithoutTurn: true }
+                : {}),
+              ...(requiresTerminalCloseoutWithoutTurn
+                ? { requiresTerminalCloseoutWithoutTurn: true }
+                : {}),
+            },
+            result: null,
+          } as never,
+          envVars: {},
+          workspacePath: '/tmp/workspace',
+          prompt: '',
+          harnessInstructions: undefined,
+          agentInstructions: undefined,
+          environmentConfig: undefined,
+          callbacks: {},
+          context: {},
+          logger: {
+            info: vi.fn(),
+            warn: vi.fn(),
+            error: vi.fn(),
+            log: vi.fn(),
+          } as never,
+          harnessSessionId: 'session-108',
+          workerEnv: {
+            authToken: 'cloud-token',
+            roomoteAppUrl: 'https://api.example.test',
+            trpcUrl: 'https://web.example.test',
+            buildUserFacingEnv: vi.fn(() => ({
+              HOME: '/tmp/home',
+              PATH: '/usr/bin',
+            })),
+          } as never,
+        });
+      } finally {
+        nowSpy.mockRestore();
+      }
 
-    expect(writeFileSyncMock).toHaveBeenCalledWith(
-      '/tmp/workspace/.roomote-runtime-home/.config/opencode/roomote-slack-reply-satisfaction.json',
-      JSON.stringify({
-        startedAtMs: 456_000,
-        currentTurnRequiresInitialAck: false,
-      }),
-      'utf8',
-    );
-  });
+      expect(writeFileSyncMock).toHaveBeenCalledWith(
+        '/tmp/workspace/.roomote-runtime-home/.config/opencode/roomote-slack-reply-satisfaction.json',
+        JSON.stringify({
+          startedAtMs: 456_000,
+          currentTurnRequiresInitialAck: false,
+          ...(suppressNonTerminalRepliesWithoutTurn
+            ? { suppressNonTerminalRepliesWithoutTurn: true }
+            : {}),
+          ...(requiresTerminalCloseoutWithoutTurn
+            ? { requiresTerminalCloseoutWithoutTurn: true }
+            : {}),
+        }),
+        'utf8',
+      );
+    },
+  );
 
   it('lets silent Slack custom automation runs finish without a terminal closeout', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(456_789);
@@ -3177,6 +3307,162 @@ describe('runTask', () => {
     expect(harnessManager?.initializeWithoutPrompt).not.toHaveBeenCalled();
   });
 
+  it('starts the first queued follow-up normally for an empty session', async () => {
+    peekTaskFollowUpsMock.mockResolvedValueOnce([
+      {
+        raw: 'raw-empty-session',
+        message: {
+          deliveryMode: 'send',
+          prompt: 'Start with the queued request.',
+          clientMessageId: 'client-empty-session',
+        },
+      },
+    ]);
+
+    await runTask(createFollowUpRunTaskInput({ id: 152, taskId: 'task-152' }));
+
+    const drain = startPollingMock.mock.calls.at(-1)?.[0].drainTaskFollowUps as
+      | (() => Promise<void>)
+      | undefined;
+    expect(drain).toBeTypeOf('function');
+    await drain?.();
+
+    const harnessManager = harnessManagerInstances.at(-1);
+    expect(harnessManager?.initializeWithoutPrompt).toHaveBeenCalledTimes(1);
+    expect(harnessManager?.startNewTaskFromPrompt).toHaveBeenCalledWith({
+      prompt: 'Start with the queued request.',
+      images: undefined,
+      workflowPhase: undefined,
+      source: undefined,
+      userId: undefined,
+      clientMessageId: 'client-empty-session',
+    });
+    expect(harnessManager?.sendFollowUpPrompt).not.toHaveBeenCalled();
+    expect(removeTaskFollowUpMock).toHaveBeenCalledWith({
+      runId: 152,
+      raw: 'raw-empty-session',
+    });
+  });
+
+  it('preserves startup steer semantics across an actor transition', async () => {
+    peekTaskFollowUpsMock.mockResolvedValueOnce([
+      {
+        raw: 'raw-startup-steer',
+        message: {
+          deliveryMode: 'steer',
+          prompt: 'Steer the active task now.',
+          userId: 'user-2',
+          clientMessageId: 'client-startup-steer',
+        },
+      },
+    ]);
+
+    await runTask(
+      createFollowUpRunTaskInput({
+        id: 153,
+        taskId: 'task-153',
+        actingUserId: 'user-1',
+      }),
+    );
+
+    const harnessManager = harnessManagerInstances.at(-1)!;
+    harnessManager.currentSessionId = 'runtime-session-153';
+    harnessManager.currentPhase = 'running';
+    const mcpRefreshCallsBefore = getMcpServerConfigsMock.mock.calls.length;
+
+    const drain = startPollingMock.mock.calls.at(-1)?.[0].drainTaskFollowUps as
+      | (() => Promise<void>)
+      | undefined;
+    await drain?.();
+
+    expect(harnessManager.sendFollowUpPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Steer the active task now.',
+        autoSteerWhenQueued: true,
+        userId: 'user-2',
+        clientMessageId: 'client-startup-steer',
+      }),
+    );
+    expect(getMcpServerConfigsMock.mock.calls.length).toBeGreaterThan(
+      mcpRefreshCallsBefore,
+    );
+    expect(removeTaskFollowUpMock).toHaveBeenCalledWith({
+      runId: 153,
+      raw: 'raw-startup-steer',
+    });
+  });
+
+  it('retries only the removal when it fails after the runtime accepted the prompt', async () => {
+    const entry = {
+      raw: 'raw-accepted',
+      message: {
+        deliveryMode: 'send' as const,
+        prompt: 'Deliver me exactly once.',
+        clientMessageId: 'client-accepted',
+      },
+    };
+    peekTaskFollowUpsMock
+      .mockResolvedValueOnce([entry])
+      .mockResolvedValueOnce([entry]);
+    removeTaskFollowUpMock
+      .mockRejectedValueOnce(new Error('Redis unavailable'))
+      .mockResolvedValueOnce(undefined);
+
+    await runTask(createFollowUpRunTaskInput({ id: 155, taskId: 'task-155' }));
+
+    const harnessManager = harnessManagerInstances.at(-1)!;
+    harnessManager.currentSessionId = 'runtime-session-155';
+    harnessManager.currentPhase = 'idle';
+
+    const drain = startPollingMock.mock.calls.at(-1)?.[0]
+      .drainTaskFollowUps as () => Promise<void>;
+    await expect(drain()).rejects.toThrow('Redis unavailable');
+    await drain();
+
+    expect(harnessManager.sendFollowUpPrompt).toHaveBeenCalledTimes(1);
+    expect(removeTaskFollowUpMock).toHaveBeenCalledTimes(2);
+    expect(removeTaskFollowUpMock).toHaveBeenLastCalledWith({
+      runId: 155,
+      raw: 'raw-accepted',
+    });
+  });
+
+  it('leaves a queued follow-up in place when the runtime rejects it', async () => {
+    peekTaskFollowUpsMock.mockResolvedValueOnce([
+      {
+        raw: 'raw-rejected',
+        message: {
+          deliveryMode: 'send',
+          prompt: 'Retry me on the next tick.',
+          clientMessageId: 'client-rejected',
+        },
+      },
+      {
+        raw: 'raw-behind-rejected',
+        message: {
+          deliveryMode: 'send',
+          prompt: 'Stay behind the first message.',
+          clientMessageId: 'client-behind-rejected',
+        },
+      },
+    ]);
+
+    await runTask(createFollowUpRunTaskInput({ id: 154, taskId: 'task-154' }));
+
+    const harnessManager = harnessManagerInstances.at(-1)!;
+    harnessManager.currentSessionId = 'runtime-session-154';
+    harnessManager.currentPhase = 'idle';
+    harnessManager.sendFollowUpPrompt.mockReturnValueOnce(false);
+
+    const drain = startPollingMock.mock.calls.at(-1)?.[0].drainTaskFollowUps as
+      | (() => Promise<void>)
+      | undefined;
+    await drain?.();
+
+    expect(harnessManager.sendFollowUpPrompt).toHaveBeenCalledTimes(1);
+    expect(removeTaskFollowUpMock).not.toHaveBeenCalled();
+  });
+
   it('does not start the initial prompt if cancellation is requested during startup', async () => {
     const cancelController = new AbortController();
     const logger = {
@@ -4276,7 +4562,7 @@ describe('runTask', () => {
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
-        excludeSkillNames: ['doctor', 'zero'],
+        excludeSkillNames: ['doctor', 'zero', 'jevgrep'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(

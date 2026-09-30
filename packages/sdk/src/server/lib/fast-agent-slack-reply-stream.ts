@@ -82,7 +82,7 @@ export function createSlackFastReplyStream(params: {
       messageTs = null;
       // Message completion (even a closeout) is not turn completion.
       // The registered turn activity cleanup owns the final idle transition.
-      await params.slack.stopMessageStream({
+      const stopped = await params.slack.stopMessageStream({
         channel: params.channelId,
         ts,
         sessionStatus: 'processing',
@@ -91,7 +91,10 @@ export function createSlackFastReplyStream(params: {
       const images = reply.imageArtifactIds?.length
         ? ((await params.resolveImages?.(reply.imageArtifactIds)) ?? [])
         : [];
-      const updateBody = async (message: string) => {
+      const updateBody = async (
+        message: string,
+        preserveNewerCarrier = false,
+      ) => {
         try {
           return await updateSlackThreadMessageWithFooterText({
             slack: params.slack,
@@ -110,6 +113,7 @@ export function createSlackFastReplyStream(params: {
               sessionId: params.sessionId,
               ...params.footerContext,
             }),
+            preserveNewerCarrier,
           });
         } catch (error) {
           console.warn(
@@ -153,9 +157,23 @@ export function createSlackFastReplyStream(params: {
           );
           return undefined;
         }
-        console.error(
-          `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}, and the partial stream could not be removed; keeping it as the delivery.`,
-        );
+
+        // A failed stop can leave the stream temporarily ineligible for the
+        // canonical Block Kit rewrite. If the partial cannot be removed, retry
+        // in place before accepting a permanently footerless delivery.
+        if (!stopped) {
+          await params.slack.stopMessageStream({
+            channel: params.channelId,
+            ts,
+            sessionStatus: 'processing',
+          });
+        }
+        updated = await updateBody(reply.message, true);
+        if (!updated) {
+          console.error(
+            `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}, and the partial stream could not be removed; keeping it as the delivery.`,
+          );
+        }
       }
       await recordFastAgentConversationMessageBestEffort({
         sessionId: params.sessionId,

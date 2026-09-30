@@ -14,6 +14,7 @@ import {
   GitPullRequest,
   GitPullRequestCreateArrow,
   GitPullRequestDraft,
+  RetryableLoadError,
   Skeleton,
   Tabs,
   TabsList,
@@ -160,6 +161,13 @@ export function PullRequestsList({ enabled }: PullRequestsListProps) {
             <Skeleton key={index} className="h-12 w-full" />
           ))}
         </div>
+      ) : pullRequestsQuery.isError && pullRequestsQuery.data === undefined ? (
+        <RetryableLoadError
+          className="p-4 md:p-4 [&_[data-slot=empty-icon]]:mb-0"
+          message="Failed to load recent pull requests."
+          isRetrying={pullRequestsQuery.isFetching}
+          onRetry={() => void pullRequestsQuery.refetch()}
+        />
       ) : filteredPullRequests.length === 0 ? (
         <p className="px-4 py-3 text-sm text-muted-foreground">
           {statusFilter === 'all'

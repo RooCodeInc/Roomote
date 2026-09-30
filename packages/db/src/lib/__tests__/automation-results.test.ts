@@ -1,19 +1,36 @@
+import { randomUUID } from 'node:crypto';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   automationResults,
   db,
+  createCustomAutomation,
+  deleteCustomAutomation,
   ensureAutomationRows,
   eq,
+  getAutomationResultByDedupeKey,
+  listCustomAutomationConditionRuns,
+  listRecentCustomAutomationResults,
+  recordCustomAutomationResult,
   recordAutomationResultForTask,
+  recordBackgroundAutomationResult,
+  recordSilentAutomationResultForRun,
   reconcileAutomationResultAcceptance,
+  runFactory,
   taskFactory,
   taskPullRequests,
+  taskRuns,
   tasks,
+  users,
+  userFactory,
+  workItems,
 } from '../../server';
+import { FAST_EXECUTION, RunStatus } from '@roomote/types';
 
 describe('automation result acceptance', () => {
   const taskIds: string[] = [];
+  const customAutomationIds: string[] = [];
+  const userIds: string[] = [];
 
   beforeAll(() => ensureAutomationRows(db));
 
@@ -24,12 +41,23 @@ describe('automation result acceptance', () => {
         .where(eq(automationResults.sourceTaskId, taskId));
       await db.delete(tasks).where(eq(tasks.id, taskId));
     }
+    for (const automationId of customAutomationIds.splice(0)) {
+      await db
+        .delete(automationResults)
+        .where(eq(automationResults.customAutomationId, automationId));
+      await deleteCustomAutomation(automationId);
+    }
+    for (const userId of userIds.splice(0)) {
+      await db.delete(users).where(eq(users.id, userId));
+    }
   });
 
-  async function createAutomationTask() {
+  async function createAutomationTask(
+    initiatorAutomation: typeof tasks.$inferSelect.initiatorAutomation = 'issue_fixer',
+  ) {
     const task = await taskFactory.create({
       initiatorKind: 'automation',
-      initiatorAutomation: 'issue_fixer',
+      initiatorAutomation,
       initiatorUserId: null,
     });
     taskIds.push(task.id);
@@ -191,5 +219,253 @@ describe('automation result acceptance', () => {
       acceptedAt: mergedAt,
       acceptanceReason: 'pull_request_merged',
     });
+  });
+
+  it('stores skipped runWhen answers privately for authorized inspection', async () => {
+    const owner = await userFactory.create();
+    userIds.push(owner.id);
+    const runWhen = {
+      all: [
+        {
+          id: 'new_regression',
+          ask: 'Does `report` describe a new regression?',
+          type: 'yes_no' as const,
+          criteria: { true: 'New regression.', false: 'No new regression.' },
+          min: 0.75,
+        },
+      ],
+      onUncertain: 'skip' as const,
+    };
+    const automation = await createCustomAutomation({
+      name: `Condition result ${Date.now()}`,
+      prompt: 'Find current regressions.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+      createdByUserId: owner.id,
+      runWhen,
+    });
+    customAutomationIds.push(automation.id);
+    const dedupeKey = `condition-result:${automation.id}`;
+
+    const saved = await recordCustomAutomationResult({
+      automationId: automation.id,
+      userId: owner.id,
+      content: 'No new regression was found.',
+      dedupeKey,
+      visibility: 'private',
+      launchCriteriaSnapshot: { runWhen },
+      launchCriteriaAnswers: {
+        runWhen: { new_regression: { type: 'noul', noul: 0.1 } },
+      },
+      launchCriteriaOutcome: { runWhen: 'skipped' },
+    });
+
+    expect(saved).toMatchObject({
+      launchCriteriaSnapshot: { runWhen },
+      launchCriteriaAnswers: {
+        runWhen: { new_regression: { type: 'noul', noul: 0.1 } },
+      },
+      launchCriteriaOutcome: { runWhen: 'skipped' },
+      preparationStatus: 'ready',
+      headline: 'Run skipped by saved conditions',
+    });
+    await expect(
+      getAutomationResultByDedupeKey(dedupeKey),
+    ).resolves.toMatchObject({
+      launchCriteriaOutcome: { runWhen: 'skipped' },
+    });
+    await expect(
+      listCustomAutomationConditionRuns(automation.id),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: saved!.id,
+        launchCriteriaOutcome: { runWhen: 'skipped' },
+        launchCriteriaAnswers: {
+          runWhen: { new_regression: { type: 'noul', noul: 0.1 } },
+        },
+      }),
+    ]);
+    await expect(
+      listRecentCustomAutomationResults(automation.id),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        content: 'No new regression was found.',
+        launchCriteriaOutcome: null,
+        runWhenOutcome: 'skipped',
+      }),
+    ]);
+  });
+
+  it('stores private launch findings and Jev answers outside shared results', async () => {
+    const owner = await userFactory.create();
+    userIds.push(owner.id);
+    const launchCriteria = 'Only investigate new regressions.';
+    const automation = await createCustomAutomation({
+      name: `Launch gate ${Date.now()}`,
+      prompt: 'Check current production issues.',
+      launchCriteria,
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+      createdByUserId: owner.id,
+    });
+    customAutomationIds.push(automation.id);
+
+    const saved = await recordCustomAutomationResult({
+      automationId: automation.id,
+      userId: owner.id,
+      content: 'The latest issue is a known duplicate.',
+      dedupeKey: `launch-gate:${automation.id}`,
+      visibility: 'private',
+      launchCriteriaSnapshot: { launchCriteria },
+      launchCriteriaAnswers: {
+        criteriaMet: { type: 'noul', noul: 0.08 },
+      },
+      launchCriteriaOutcome: { launchCriteria: 'skipped' },
+    });
+
+    expect(saved).toMatchObject({
+      resultVisibility: 'private',
+      launchCriteriaSnapshot: { launchCriteria },
+      launchCriteriaAnswers: {
+        criteriaMet: { type: 'noul', noul: 0.08 },
+      },
+      launchCriteriaOutcome: { launchCriteria: 'skipped' },
+      preparationStatus: 'ready',
+      headline: 'Run skipped by launch criteria',
+    });
+    await expect(
+      listCustomAutomationConditionRuns(automation.id),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: saved!.id,
+        content: 'The latest issue is a known duplicate.',
+        launchCriteriaSnapshot: { launchCriteria },
+        launchCriteriaOutcome: { launchCriteria: 'skipped' },
+      }),
+    ]);
+    await expect(
+      listRecentCustomAutomationResults(automation.id),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        content: 'The latest issue is a known duplicate.',
+        launchCriteriaOutcome: 'skipped',
+        runWhenOutcome: null,
+      }),
+    ]);
+  });
+
+  it('clears a qualifying no-op at publication without clearing a substantive outcome', async () => {
+    const task = await createAutomationTask('dependabot_triage');
+    const empty = await recordAutomationResultForTask({
+      taskId: task.id,
+      content: 'No open alerts. No remediation work needed.',
+      dedupeKey: `empty:${task.id}`,
+      visibility: 'shared',
+    });
+    const substantive = await recordAutomationResultForTask({
+      taskId: task.id,
+      content: 'No open alerts in one repository. Access blocked for another.',
+      dedupeKey: `substantive:${task.id}`,
+      visibility: 'shared',
+    });
+    const inputRequest = await recordAutomationResultForTask({
+      taskId: task.id,
+      content: 'No open alerts.',
+      dedupeKey: `input:${task.id}`,
+      visibility: 'shared',
+      resultKind: 'input_request',
+    });
+
+    expect(empty?.ignoredAt).toBeInstanceOf(Date);
+    expect(substantive?.ignoredAt).toBeNull();
+    expect(inputRequest?.ignoredAt).toBeNull();
+  });
+
+  it('persists a cleared outcome for a completed silent scan, once', async () => {
+    const task = await createAutomationTask('codeql_triage');
+    await db
+      .update(tasks)
+      .set({ state: 'completed' })
+      .where(eq(tasks.id, task.id));
+    const run = await runFactory.create({ taskId: task.id });
+    await db
+      .update(taskRuns)
+      .set({ status: RunStatus.Completed })
+      .where(eq(taskRuns.id, run.id));
+
+    const result = await recordSilentAutomationResultForRun(run.id);
+    expect(result).toMatchObject({
+      automationKey: 'codeql_triage',
+      sourceRunId: run.id,
+      content: 'No output.',
+      ignoredAt: expect.any(Date),
+    });
+    expect(await recordSilentAutomationResultForRun(run.id)).toBeNull();
+    expect(
+      await db.query.automationResults.findMany({
+        where: eq(automationResults.sourceTaskId, task.id),
+      }),
+    ).toHaveLength(1);
+  });
+
+  it('persists a cleared taskless scheduler no-op', async () => {
+    const result = await recordBackgroundAutomationResult({
+      automationKey: 'code_quality_auditor',
+      content: 'No merged PRs to audit.',
+      dedupeKey: `no-pr-audit:${randomUUID()}`,
+      visibility: 'shared',
+    });
+    expect(result?.ignoredAt).toBeInstanceOf(Date);
+    if (result) {
+      await db
+        .delete(automationResults)
+        .where(eq(automationResults.id, result.id));
+    }
+  });
+
+  it('does not invent an empty outcome for a reported, actionable, unfinished, or unrelated run', async () => {
+    for (const scenario of [
+      'reported',
+      'actionable',
+      'unfinished',
+      'unrelated',
+    ] as const) {
+      const task = await createAutomationTask(
+        scenario === 'unrelated' ? 'security_auditor' : 'dependabot_triage',
+      );
+      await db
+        .update(tasks)
+        .set({ state: 'completed' })
+        .where(eq(tasks.id, task.id));
+      const run = await runFactory.create({ taskId: task.id });
+      await db
+        .update(taskRuns)
+        .set({
+          status:
+            scenario === 'unfinished' ? RunStatus.Failed : RunStatus.Completed,
+        })
+        .where(eq(taskRuns.id, run.id));
+      if (scenario === 'reported') {
+        await recordAutomationResultForTask({
+          taskId: task.id,
+          content: 'Access blocked; scan incomplete.',
+          dedupeKey: `reported:${task.id}`,
+          visibility: 'shared',
+        });
+      }
+      if (scenario === 'actionable') {
+        await db.insert(workItems).values({
+          kind: 'auto_fix',
+          sourceTaskId: task.id,
+          title: 'Fix alert',
+          sortOrder: 0,
+        });
+      }
+      expect(await recordSilentAutomationResultForRun(run.id)).toBeNull();
+    }
   });
 });

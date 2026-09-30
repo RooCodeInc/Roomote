@@ -83,7 +83,7 @@ async function completeEmptySetupIntegrationDiscovery(
       setupSession.sessionId !== context.sessionId ||
       session?.fastConversationId !== context.fastConversationId
     ) {
-      throw new Error('This request does not belong to the setup Session.');
+      throw new Error('This request does not belong to the setup session.');
     }
     // Missing means a legacy session that predates discovery and is already complete.
     if (setupSession.integrationDiscoveryCompletedAt !== null) return;
@@ -229,7 +229,7 @@ export function buildFastAgentSetupAdapter(
         ).map((integration) => ({
           id: integration.id,
           label: integration.name,
-          description: `Connect ${integration.name} in Settings.`,
+          description: `Connect ${integration.name} on the Integrations page.`,
         }));
         if (options.length === 0) {
           await completeEmptySetupIntegrationDiscovery(context);

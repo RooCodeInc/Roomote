@@ -78,6 +78,12 @@ export interface QueuedPromptMessageSnapshot {
   userName?: string;
   userImageUrl?: string;
   clientMessageId?: string;
+  /**
+   * Set on prompts the harness queues on its own (recovery and continuation
+   * nudges), so a reader of the transcript can tell them from a request a
+   * person or the platform sent.
+   */
+  source?: string;
   timestamp: number;
 }
 

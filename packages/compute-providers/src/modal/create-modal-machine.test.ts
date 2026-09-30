@@ -26,9 +26,12 @@ const mockGetWorkerRelease = vi.mocked(getWorkerRelease);
 describe('createModalMachine', () => {
   const MODAL_IMAGE_REF = 'ghcr.io/roomote/modal-worker:test';
   let tempDir: string;
+  let originalReleaseProductVersion: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    originalReleaseProductVersion = process.env.RELEASE_PRODUCT_VERSION;
+    delete process.env.RELEASE_PRODUCT_VERSION;
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'modal-files-'));
     fs.writeFileSync(
       path.join(tempDir, 'install-browser-agent.sh'),
@@ -39,8 +42,83 @@ describe('createModalMachine', () => {
   });
 
   afterEach(() => {
+    if (originalReleaseProductVersion === undefined) {
+      delete process.env.RELEASE_PRODUCT_VERSION;
+    } else {
+      process.env.RELEASE_PRODUCT_VERSION = originalReleaseProductVersion;
+    }
     delete process.env.LOCAL_SANDBOX_FILES_DIR;
     fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('rejects a worker archive from a different application release family', async () => {
+    process.env.RELEASE_PRODUCT_VERSION = '1.2.3';
+    mockGetWorkerRelease.mockResolvedValue({
+      archive: Buffer.from('worker-release'),
+      tag: 'worker-v1.3.0',
+      version: '1.3.0',
+    });
+
+    const createInstance = vi.fn();
+
+    await expect(
+      createModalMachine({
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: MODAL_IMAGE_REF,
+        launchMode: 'fresh',
+        computeClient: {
+          vendor: 'modal',
+          createInstance,
+          resumeFromSnapshot: vi.fn(),
+          writeFiles: vi.fn(),
+          runCommand: vi.fn(),
+          destroyInstance: vi.fn(),
+        },
+      }),
+    ).rejects.toThrow(
+      'Worker release 1.3.0 is incompatible with application release 1.2.3',
+    );
+
+    expect(createInstance).not.toHaveBeenCalled();
+  });
+
+  it('passes the application product version to installer compatibility checks', async () => {
+    process.env.RELEASE_PRODUCT_VERSION = '1.2.3';
+    const runCommand = vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'ok' });
+    const writeFiles = vi.fn().mockResolvedValue(undefined);
+
+    mockGetWorkerRelease.mockResolvedValue({
+      archive: Buffer.from('worker-release'),
+      tag: 'worker-v1.2.3-preview.1',
+      version: '1.2.3-preview.1',
+    });
+
+    await createModalMachine({
+      modalTokenId: 'token-id',
+      modalTokenSecret: 'token-secret',
+      modalBaseImageRef: MODAL_IMAGE_REF,
+      launchMode: 'fresh',
+      computeClient: {
+        vendor: 'modal',
+        createInstance: vi.fn().mockResolvedValue({
+          instanceId: 'modal-123',
+          domains: {},
+        }),
+        resumeFromSnapshot: vi.fn(),
+        writeFiles,
+        runCommand,
+        destroyInstance: vi.fn(),
+      },
+    });
+
+    expect(runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          ROOMOTE_APPLICATION_PRODUCT_VERSION: '1.2.3',
+        }),
+      }),
+    );
   });
 
   it('passes the uploaded worker archive path to the shared install script', async () => {

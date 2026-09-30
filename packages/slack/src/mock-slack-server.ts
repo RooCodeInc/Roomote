@@ -1109,7 +1109,7 @@ export class MockSlackServer {
       case 'POST assistant.threads.setTitle':
       case 'POST assistant.threads.setSuggestedPrompts': {
         // Assistant thread presentation calls are accepted and ignored so the
-        // Fast session activity adapter does not retry a 404 for minutes.
+        // session activity adapter does not retry a 404 for minutes.
         json(response, 200, { ok: true });
         return;
       }

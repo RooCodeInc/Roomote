@@ -137,13 +137,26 @@ export async function getDeploymentTaskModelOptions(
 ): Promise<{
   models: TaskModelOption[];
   defaultModelId: string;
+  /**
+   * The model an unoverridden PR review runs on: `R_CODE_REVIEW_MODEL`, then
+   * the persisted code-review role model, then the task default.
+   */
+  codeReviewModelId: string;
   codingModelRoutingRules: CodingModelRoutingRule[];
 }> {
-  const { enabledCatalogModels, defaultModelId, codingModelRoutingRules } =
-    await loadPersistedRuntimeModelConfig(executor);
+  const {
+    runtimeModelConfig,
+    enabledCatalogModels,
+    defaultModelId,
+    codingModelRoutingRules,
+  } = await loadPersistedRuntimeModelConfig(executor);
   return {
     models: enabledCatalogModels,
     defaultModelId,
+    codeReviewModelId:
+      normalizeConfiguredValue(process.env.R_CODE_REVIEW_MODEL) ??
+      runtimeModelConfig.roomoteCodeReviewModel ??
+      defaultModelId,
     codingModelRoutingRules: codingModelRoutingRules ?? [],
   };
 }

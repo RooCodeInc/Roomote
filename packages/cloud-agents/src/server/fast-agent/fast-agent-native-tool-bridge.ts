@@ -68,6 +68,10 @@ import {
   buildFastAgentCodeModeServerNames,
   buildFastAgentToolFilter,
 } from './fast-agent-tool-policy';
+import {
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
+  ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+} from '../../opencode-prompt-subagents';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -394,13 +398,13 @@ const chartInput = z.object({
 })
 
 export default {
-  description: "Deliver a user-visible reply. Write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
+  description: "Deliver a user-visible reply. Automation replies require an explicit message containing only the finished announcement, result, or clarification, without progress narration or tool activity. For other replies, write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
   args: {
-    message: z.string().min(1).optional().describe("Markdown reply text. Omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
+    message: z.string().min(1).optional().describe("Markdown reply text. Required for automation replies; include only the finished announcement, result, or clarification. For other replies, omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded images to attach. Never claim an image or screenshot is attached, shown, or included unless this list is non-empty. If attachment delivery fails, reply with an accessible artifact viewer link and say that the image could not be attached."),
     videoArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded videos explicitly selected for native Slack delivery. Recover IDs and viewer links with manage_tasks get_summary. Never claim a video is attached unless selected here and delivery succeeds; when native delivery fails or is unavailable, share only its viewer link without an error or unavailability explanation."),
-    charts: z.array(chartInput).max(2).optional().describe("Up to two pie, bar, area, or line charts. Charts render in the web Session transcript and as native Block Kit data visualization blocks on Slack; other chat providers retain the Markdown fallback. Keep the Markdown reply useful on its own. Cartesian series names and categories must be unique, and every series must contain exactly one point for every category."),
+    charts: z.array(chartInput).max(2).optional().describe("Up to two pie, bar, area, or line charts. Charts render in the web session transcript and as native Block Kit data visualization blocks on Slack; other chat providers retain the Markdown fallback. Keep the Markdown reply useful on its own. Cartesian series names and categories must be unique, and every series must contain exactly one point for every category."),
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
@@ -425,12 +429,25 @@ export default {
 }
 `,
 
+  [FAST_AGENT_NATIVE_TOOL_NAMES.evaluateAutomationLaunchCriteria]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Evaluate the saved launch criteria for this custom automation after gathering the relevant current evidence with read-only tools. A confident stop ends the run quietly before delegated work or any destination reply.",
+  args: {
+    findingsReport: z.string().trim().min(1).max(12000).describe("Concise findings report grounded in the read-only tool results gathered so far"),
+  },
+  execute: (args, context) => invoke("evaluate_automation_launch_criteria", args, context),
+}
+`,
+
   [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Create a durable text artifact in this Session. Use this for documents the user should keep, share, or build from; use show_widget for transient visual presentation and launch_task for repository or filesystem work.",
+  description: "Create a durable text artifact in this session. Use this for documents the user should keep, share, or build from; use show_widget for transient visual presentation and launch_task for repository or filesystem work.",
   args: {
     path: z.string().min(1).max(255).describe("Relative artifact path, including a useful file extension"),
     content: z.string().min(1).max(131072).describe("UTF-8 text content; maximum 128 KiB"),
@@ -482,7 +499,7 @@ export default {
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
     environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact launch target ID from the system prompt; pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, pass "${ALL_REPOSITORIES}" for all active repositories, or omit/pass null to use normal workspace routing`)}),
-    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID a user explicitly asked for, by name, description, or a capability ask such as 'your strongest model'; omit or pass null to let Roomote choose from routing rules and the deployment default"),
     reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; use only with a selected model and omit or pass null to use the model's default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
     mode: z.enum(["standard", "environment_setup", "environment_verification"]).optional().describe("Use environment_setup for an admin-approved Blank slate environment-definition task. environment_verification is rejected on every turn; recipe verification is created automatically by ensure_environment create"),
@@ -500,7 +517,7 @@ export default {
   args: {
     repository: z.string().min(1).optional().describe("Repository full name like owner/name; omit in a pull request conversation to review the current pull request"),
     pullRequestNumber: z.number().int().positive().optional().describe("Pull request number; omit in a pull request conversation to review the current pull request"),
-    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment code-review default"),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID a user explicitly asked for, by name or unambiguous description; omit or pass null to use the deployment code-review default"),
     reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; omit or pass null to use the model's code-review default"),
     kickoffMessage: z.string().min(1).describe("Brief user-facing note that the review is underway; do not mention delegation or queue state"),
   },
@@ -529,7 +546,7 @@ import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
   description: ${JSON.stringify(
-    `Create and share a rendered visual in the Session transcript when a structured or visual presentation communicates better than prose. Use it proactively to show, mock up, preview, or visualize an interface or interaction. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} Use request_user_input for questions.`,
+    `Create and share a rendered visual in the session transcript when a structured or visual presentation communicates better than prose. Use it proactively to show, mock up, preview, or visualize an interface or interaction. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} Use request_user_input for questions.`,
   )},
   args: {
     html: z.string().min(1).max(${SHOW_WIDGET_MAX_HTML_CHARS}).describe("Compact semantic HTML that fully fits the fixed canvas; avoid long prose, large lists, and dense data"),
@@ -580,7 +597,7 @@ export default {
     prompt: z.string().min(10).max(${SESSION_WAKEUP_PROMPT_MAX_LENGTH}).optional().describe("[create] What to do when it fires. This conversation stays in context, so keep it short: what to check, what counts as done, what to tell the user."),
     schedule: z.string().max(${SESSION_WAKEUP_SCHEDULE_MAX_LENGTH}).optional().describe(${JSON.stringify(`[create] ${SESSION_WAKEUP_SCHEDULE_GRAMMAR}`)}),
     reportPolicy: z.enum(["always", "only_when_notable"]).optional().describe("[create] 'always' replies on every run (default for one-shots); 'only_when_notable' stays silent unless there is news (default for repeating schedules). Omit to use the default."),
-    internal: z.boolean().optional().describe("[create] Set true only for automatic housekeeping required by system instructions. Internal wakeups are hidden from the Session timer list but still count toward the active limit and remain listable, gettable, and cancellable. Omit or set false for user-requested reminders and monitors."),
+    internal: z.boolean().optional().describe("[create] Set true only for automatic housekeeping required by system instructions. Internal wakeups are hidden from the session timer list but still count toward the active limit and remain listable, gettable, and cancellable. Omit or set false for user-requested reminders and monitors."),
   },
   execute: (args, context) => invoke("manage_wakeups", args, context),
 }
@@ -670,7 +687,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Add or reconnect one remote MCP integration from its HTTPS streamable-HTTP endpoint. Any member may call this. Use it for a service's official hosted remote MCP endpoint or a URL the human supplied; never invent a URL, and a local stdio project is not a hosted MCP. It is shared with everyone in the deployment by default, like an integration key; pass visibility 'owner' only when the human asked to keep it private to them, and say which it is when you report it. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or the existing Settings link for static headers/manual OAuth client setup. Roomote registers this deployment with the provider before returning an authorization link, so a returned link can succeed. A client-registration-required or needs-static-headers result means this human cannot connect it now: relay the result's reason (the provider's own words) when present, share settingsUrl as the alternative, and continue with the integration-key route. A pending-owner result means a shared server someone else added is still waiting on them or an administrator: say so, share no link, and continue with the integration-key route or a private server of their own if they ask. Server-backed results include integrationId, the actual Fast catalog ID: use that exact integrationId with find_integration_tools and call_integration_tool, never a server UUID, but do not narrate IDs or catalog checks to the human. Share authorizeUrl and settingsUrl exactly unchanged, labeled 'Authorize <name>' and 'Integration settings' respectively; never rewrite either target. The conversation resumes automatically after the human authorizes, so never ask them to send a follow-up. In user-visible progress say at most that you are checking. Never ask for or accept secrets in chat or tool arguments.",
+  description: "Add or reconnect one remote MCP integration from its HTTPS streamable-HTTP endpoint. Any member may call this. Use it for a service's official hosted remote MCP endpoint or a URL the human supplied; never invent a URL, and a local stdio project is not a hosted MCP. It is shared with everyone in the deployment by default, like an integration key; pass visibility 'owner' only when the human asked to keep it private to them, and say which it is when you report it. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or a settingsUrl for static headers/manual OAuth client setup: the Integrations page for a shared server, or Personal settings for a private one. Roomote registers this deployment with the provider before returning an authorization link, so a returned link can succeed. A client-registration-required or needs-static-headers result means this human cannot connect it now: relay the result's reason (the provider's own words) when present, share settingsUrl as the alternative, and continue with the integration-key route. A pending-owner result means a shared server someone else added is still waiting on them or an administrator: say so, share no link, and continue with the integration-key route or a private server of their own if they ask. Server-backed results include integrationId, the actual Fast catalog ID: use that exact integrationId with find_integration_tools and call_integration_tool, never a server UUID, but do not narrate IDs or catalog checks to the human. Share authorizeUrl and settingsUrl exactly unchanged, labeled 'Authorize <name>' and 'Integration settings' respectively; never rewrite either target. The conversation resumes automatically after the human authorizes, so never ask them to send a follow-up. In user-visible progress say at most that you are checking. Never ask for or accept secrets in chat or tool arguments.",
   args: {
     name: z.string().trim().min(1).max(80).describe("Short integration name; Roomote normalizes it to a lowercase slug"),
     url: z.string().url().startsWith("https://").max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
@@ -685,7 +702,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Connect or reconnect one built-in Roomote integration selected from the read-only catalog returned by find_integration_tools. Pass only the exact canonical provider id from that catalog; never guess an id or use a display name. The backend safely chooses already-connected reuse, keyless enablement, OAuth, or the existing secure Settings form. Unavailable, permission-denied, pending, operator-configuration, and denied-authorization outcomes are authoritative and must never be bypassed with a remote MCP or API key. Never accept credentials in chat or tool arguments.",
+  description: "Connect or reconnect one built-in Roomote integration selected from the read-only catalog returned by find_integration_tools. Pass only the exact canonical provider id from that catalog; never guess an id or use a display name. The backend safely chooses already-connected reuse, keyless enablement, OAuth, or the existing secure form on the Integrations page. Unavailable, permission-denied, pending, operator-configuration, and denied-authorization outcomes are authoritative and must never be bypassed with a remote MCP or API key. Never accept credentials in chat or tool arguments.",
   args: {
     integrationId: z.enum(${JSON.stringify(MCP_INTEGRATIONS.map(({ id }) => id))}).describe("Exact canonical built-in provider id returned by find_integration_tools"),
   },
@@ -812,7 +829,7 @@ export default {
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, official remote MCP, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this Session.",
+  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, official remote MCP, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this session.",
   args: {},
   execute: (args, context) => invoke("list_integration_keys", args, context),
 }
@@ -848,7 +865,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Present a trusted, non-blocking Roomote capability card in a web Session. Use it when the user's current goal needs an unavailable capability or when the setup guidance recommends the next capability. A previous Not now choice does not prevent a later relevant offer.",
+  description: "Present a trusted, non-blocking Roomote capability card in a web session. Use it when the user's current goal needs an unavailable capability or when the setup guidance recommends the next capability. A previous Not now choice does not prevent a later relevant offer.",
   args: {
     capability: z.enum(${JSON.stringify(FAST_AGENT_CAPABILITY_IDS)}),
     message: z.string().min(1).max(500).describe("Concise user-facing reason this capability is useful now"),
@@ -1627,6 +1644,17 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
+    automationLaunchCriteriaEnabled?: boolean;
+    brainEnabled?: boolean;
+    /**
+     * Per-tool approval rules in OpenCode config-permission shape, applied to the parent build agent
+     * and the helper subagents in the generated per-conversation config.
+     * Rules live in config rather than the session ruleset so a policy
+     * change never strands stale state in a persisted session: this file is
+     * rewritten every turn, and a policy change disposes the directory's
+     * cached instance instead of rebuilding the session.
+     */
+    toolApprovalPermission?: Record<string, 'ask' | 'deny'>;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1673,6 +1701,15 @@ export async function getFastAgentNativeToolRuntime(
   );
   runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
   runtime.codeModeIntegrationsActive = true;
+  // Approval rules apply to the parent build agent and to the helper
+  // subagents. OpenCode merges this per-directory config over the shared
+  // server config, so a permission-only entry extends the existing advisor
+  // and judge definitions instead of replacing them.
+  const toolApprovalAgentEntries = options.toolApprovalPermission
+    ? {
+        permission: options.toolApprovalPermission,
+      }
+    : {};
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
@@ -1693,9 +1730,19 @@ export async function getFastAgentNativeToolRuntime(
               serviceCredentialPrepareEnabled:
                 options.serviceCredentialPrepareEnabled,
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
+              automationLaunchCriteriaEnabled:
+                options.automationLaunchCriteriaEnabled,
+              brainEnabled: options.brainEnabled,
             },
           ),
+          ...toolApprovalAgentEntries,
         },
+        ...(options.toolApprovalPermission
+          ? {
+              [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: toolApprovalAgentEntries,
+              [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: toolApprovalAgentEntries,
+            }
+          : {}),
       },
       mcp: Object.fromEntries(
         mountedIntegrations.map((integration) => [

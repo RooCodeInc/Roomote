@@ -839,10 +839,10 @@ describe('WorkspaceManager tool versions', () => {
         undefined,
         false,
         false,
-        {
+        expect.objectContaining({
           setDefaultRemote: false,
           toolVersionsConfig: undefined,
-        },
+        }),
       );
     });
 
@@ -870,10 +870,10 @@ describe('WorkspaceManager tool versions', () => {
         undefined,
         false,
         false,
-        {
+        expect.objectContaining({
           setDefaultRemote: false,
           toolVersionsConfig: undefined,
-        },
+        }),
       );
     });
 
@@ -905,11 +905,11 @@ describe('WorkspaceManager tool versions', () => {
         undefined,
         false,
         false,
-        {
+        expect.objectContaining({
           sourceControlProvider: 'github',
           setDefaultRemote: false,
           toolVersionsConfig: undefined,
-        },
+        }),
       );
       expect(prepareRepositorySpy).toHaveBeenCalledWith(
         'acme/gitlab-app',
@@ -917,11 +917,11 @@ describe('WorkspaceManager tool versions', () => {
         undefined,
         false,
         false,
-        {
+        expect.objectContaining({
           sourceControlProvider: 'gitlab',
           setDefaultRemote: false,
           toolVersionsConfig: undefined,
-        },
+        }),
       );
     });
   });

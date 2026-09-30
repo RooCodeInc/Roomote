@@ -183,7 +183,7 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
       demoSeedFastSession.conversationId
   ) {
     throw new Error(
-      `Cannot seed demo data: reserved Fast Session ID ${demoSeedFastSession.sessionId} is already used by an unrelated Session.`,
+      `Cannot seed demo data: reserved session ID ${demoSeedFastSession.sessionId} is already used by an unrelated session.`,
     );
   }
 
@@ -243,7 +243,7 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
 
   record(`user ${demoSeedUserId}`, !existingUser);
 
-  // A complete Fast Session keeps the standard seed useful for validating the
+  // A complete session keeps the standard seed useful for validating the
   // canonical Session detail route, transcript, and Slack origin metadata.
   const existingFastConversation =
     await db.query.fastAgentConversations.findFirst({
@@ -335,7 +335,7 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
   }
 
   if (!fastSession) {
-    throw new Error('Failed to seed the canonical Fast Session');
+    throw new Error('Failed to seed the canonical session');
   }
 
   record('Session for Fast conversation demo', fastSessionCreated);

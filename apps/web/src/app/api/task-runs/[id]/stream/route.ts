@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createResponse } from 'better-sse';
 import { z } from 'zod';
 
-import { RunStatus, isExitedRunStatus } from '@roomote/types';
+import {
+  RunStatus,
+  isExitedRunStatus,
+  type TaskRunTerminalReason,
+} from '@roomote/types';
 import { db, eq, taskRuns } from '@roomote/db/server';
 
 import { authorizeUserToken } from '@/lib/server';
@@ -43,13 +47,23 @@ export async function GET(
     });
     if (!run || !(await canReadTask(authResult, run.taskId))) return undefined;
     // Preserve the legacy result.error fallback without streaming arbitrary JSON.
+    const error = getTaskRunError(run) ?? null;
+
     return {
       id: run.id,
       taskId: run.taskId,
       status: run.status,
       vendor: run.vendor,
-      error: getTaskRunError(run) ?? null,
+      error,
       errorCode: run.errorCode,
+      terminalReason: isExitedRunStatus(run.status)
+        ? ({
+            kind: 'terminal',
+            status: run.status,
+            errorCode: run.errorCode,
+            message: error,
+          } satisfies TaskRunTerminalReason)
+        : null,
     };
   };
 

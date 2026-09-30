@@ -9,7 +9,6 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const state = vi.hoisted(() => ({
   setOpen: vi.fn(),
   user: {},
-  drawerSetupIncomplete: false,
 }));
 
 vi.mock('next/image', () => ({
@@ -70,14 +69,7 @@ vi.mock('@/components/tasks/NewTaskDialog', () => ({
 }));
 
 vi.mock('./NavbarDrawer', () => ({
-  NavbarDrawer: ({
-    setupIncomplete,
-    onNewSession,
-  }: {
-    setupIncomplete?: boolean;
-    onNewSession?: () => void;
-  }) => {
-    state.drawerSetupIncomplete = setupIncomplete ?? false;
+  NavbarDrawer: ({ onNewSession }: { onNewSession?: () => void }) => {
     return (
       <button type="button" onClick={onNewSession}>
         Drawer New Session
@@ -91,15 +83,6 @@ import { NavbarHeader } from './NavbarHeader';
 describe('NavbarHeader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    state.drawerSetupIncomplete = false;
-  });
-
-  it('disables Home and passes incomplete setup state to the drawer', () => {
-    render(<NavbarHeader setupIncomplete />);
-
-    expect(screen.queryByRole('link')).not.toBeInTheDocument();
-    expect(screen.getByAltText('Roomote')).toHaveClass('opacity-50');
-    expect(state.drawerSetupIncomplete).toBe(true);
   });
 
   it('renders the current Roomote mark in the mobile header', () => {

@@ -319,7 +319,7 @@ async function handleGitLabMergeRequestNote({
 
 /**
  * Every @roomote note on a merge request or issue enters that discussion's
- * Fast Session. The Session reads the discussion, replies as a note, and
+ * session. The session reads the discussion, replies as a note, and
  * delegates work when the request needs a task.
  */
 export async function handleGitLabNote(

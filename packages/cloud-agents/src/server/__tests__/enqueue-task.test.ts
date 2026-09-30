@@ -1056,6 +1056,34 @@ describe('enqueueTask Session linkage', () => {
     ).toHaveLength(0);
   });
 
+  it.each(['environmentDefinitionId', 'verifiesEnvironmentId'] as const)(
+    'captures Session creation for user-started launches carrying the %s environment marker',
+    async (marker) => {
+      const userId = await createUser();
+      mockCaptureEvent.mockClear();
+
+      await launchFresh({
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+        task: standardTaskInput({
+          payload: {
+            repo: 'acme/widgets',
+            description: 'Do the thing',
+            [marker]: crypto.randomUUID(),
+          },
+        }),
+      });
+
+      expect(
+        mockCaptureEvent.mock.calls.filter(
+          ([event]) => event === 'session_created',
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
   it('creates exactly one Session link for a visible fresh task', async () => {
     const userId = await createUser();
     const run = await launchFresh({
@@ -1132,7 +1160,7 @@ describe('enqueueTask Session linkage', () => {
     expect(run.actingUserId).toBe(userId);
   });
 
-  it('attaches an ownerless automation task to a Fast Session without a human actor', async () => {
+  it('attaches an ownerless automation task to a session without a human actor', async () => {
     const fastAgentSessionId = crypto.randomUUID();
     await db.insert(fastAgentConversations).values({
       id: fastAgentSessionId,
@@ -1378,7 +1406,7 @@ describe('enqueueTask Session linkage', () => {
         surface: 'web',
         trigger: 'manual',
       }),
-    ).rejects.toThrow('another Session');
+    ).rejects.toThrow('another session');
   });
 });
 
@@ -1666,7 +1694,7 @@ describe('enqueueTask snapshot resume', () => {
     expect(resumePayload.fastAgentSessionId).toBe(fastAgentSessionId);
   });
 
-  it('preserves a Discord Fast session across resume', async () => {
+  it('preserves a Discord session across resume', async () => {
     const userId = await createUser();
     const fastAgentSessionId = '33333333-3333-4333-8333-333333333333';
     const freshRun = await launchFresh({
@@ -1986,6 +2014,79 @@ describe('enqueueTaskRelaunch failed start', () => {
     expect(runsForTask).toHaveLength(2);
   });
 
+  async function createFailedStartRun(userId: string) {
+    const failedRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error: 'Workspace has exceeded its spend limit',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, failedRun.id));
+
+    return failedRun;
+  }
+
+  it('returns the retry that is still in flight when the same run is retried again', async () => {
+    const userId = await createUser();
+    const failedRun = await createFailedStartRun(userId);
+
+    const firstRetry = await enqueueTaskRelaunch(
+      { sourceRunId: failedRun.id, actingUserId: userId },
+      { enqueue: false },
+    );
+    const secondRetry = await enqueueTaskRelaunch(
+      { sourceRunId: failedRun.id, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    expect(secondRetry.id).toBe(firstRetry.id);
+
+    const runsForTask = await db.query.taskRuns.findMany({
+      where: eq(taskRuns.taskId, failedRun.taskId),
+    });
+    expect(runsForTask).toHaveLength(2);
+  });
+
+  it.each([RunStatus.Canceled, RunStatus.Failed])(
+    'creates a new run when the earlier retry ended as %s',
+    async (endedStatus) => {
+      const userId = await createUser();
+      const failedRun = await createFailedStartRun(userId);
+
+      const endedRetry = await enqueueTaskRelaunch(
+        { sourceRunId: failedRun.id, actingUserId: userId },
+        { enqueue: false },
+      );
+
+      await db
+        .update(taskRuns)
+        .set({ status: endedStatus, completedAt: new Date() })
+        .where(eq(taskRuns.id, endedRetry.id));
+
+      const nextRetry = await enqueueTaskRelaunch(
+        { sourceRunId: failedRun.id, actingUserId: userId },
+        { enqueue: false },
+      );
+
+      expect(nextRetry.id).not.toBe(endedRetry.id);
+      expect(nextRetry.sourceRunId).toBe(failedRun.id);
+      expect(nextRetry.status).toBe(RunStatus.Pending);
+
+      const runsForTask = await db.query.taskRuns.findMany({
+        where: eq(taskRuns.taskId, failedRun.taskId),
+      });
+      expect(runsForTask).toHaveLength(3);
+    },
+  );
+
   it('rejects relaunch when the source run is not failed', async () => {
     const userId = await createUser();
 
@@ -2067,6 +2168,58 @@ describe('enqueueTaskRelaunch failed start', () => {
     expect(failedRun.payload).toMatchObject({
       communicationSourceEventId: sourceEventId,
     });
+  });
+
+  it('drops launch idempotency keys so failed-start retry does not hit the unique index', async () => {
+    const userId = await createUser();
+    const launchIdempotencyKey = 'fast:session-1:turn-1:retry-key';
+
+    const failedRun = await enqueueTask(
+      {
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+        task: standardTaskInput({
+          payload: {
+            repo: 'acme/widgets',
+            description: 'Do the thing',
+            launchIdempotencyKey,
+          },
+        }),
+      } as FreshTaskLaunch,
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+    createdTaskIds.push(failedRun.taskId);
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error:
+          'Credential egress registration failed: Control-plane request failed (503).',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, failedRun.id));
+
+    await db
+      .update(tasks)
+      .set({ state: 'failed' })
+      .where(eq(tasks.id, failedRun.taskId));
+
+    const relaunchRun = await enqueueTaskRelaunch(
+      {
+        sourceRunId: failedRun.id,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+
+    expect(relaunchRun.taskId).toBe(failedRun.taskId);
+    expect(relaunchRun.id).not.toBe(failedRun.id);
+    expect(relaunchRun.payload).toMatchObject({ repo: 'acme/widgets' });
+    expect(relaunchRun.payload).not.toHaveProperty('launchIdempotencyKey');
+    expect(failedRun.payload).toMatchObject({ launchIdempotencyKey });
   });
 
   it('allows relaunch when only a provider kickoff message exists', async () => {

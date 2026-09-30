@@ -84,6 +84,25 @@ describe('RuntimePromptQueue', () => {
     });
   });
 
+  describe('restore', () => {
+    it('keeps the harness source of a hidden continuation across a restore', () => {
+      const original = createQueue();
+      original.queue.enqueue({
+        text: 'Continue where you left off after the temporary provider rate limit.',
+        visibleInTranscript: false,
+        source: 'opencode-rate-limit-retry',
+      });
+
+      const restored = createQueue();
+      restored.queue.restore(original.queue.snapshot());
+
+      expect(restored.queue.dequeue()).toMatchObject({
+        visibleInTranscript: false,
+        source: 'opencode-rate-limit-retry',
+      });
+    });
+  });
+
   describe('clear', () => {
     it('removes all queued messages', () => {
       const { queue } = createQueue();

@@ -6,8 +6,9 @@ import type {
   McpRecommendationCategory,
 } from './types';
 
-const INTEGRATIONS_SETTINGS_PATH = 'Settings > Integrations';
-const SOURCE_CONTROL_SETTINGS_PATH = 'Settings > Environments > Source control';
+const INTEGRATIONS_PAGE_PATH = 'Integrations';
+const COMMUNICATIONS_SETTINGS_PATH = 'Settings > Communications';
+const SOURCE_CONTROL_SETTINGS_PATH = 'Settings > Source Control';
 
 export type AvailableSetupMcpIntegration = Omit<
   McpRecommendation,
@@ -21,7 +22,7 @@ type SetupMcpIntegrationMetadata = {
 };
 
 function getIntegrationSettingsPath(name: string): string {
-  return `${INTEGRATIONS_SETTINGS_PATH} > ${name}`;
+  return `${INTEGRATIONS_PAGE_PATH} > ${name}`;
 }
 
 function getDefaultSetupMcpIntegrationMetadata(
@@ -281,7 +282,7 @@ const MANUAL_SETUP_MCP_INTEGRATIONS: AvailableSetupMcpIntegration[] = [
       'Post task updates back into Slack',
       'Keep implementation work connected to the originating thread',
     ],
-    setupLocation: getIntegrationSettingsPath('Slack'),
+    setupLocation: `${COMMUNICATIONS_SETTINGS_PATH} > Slack`,
   },
 ];
 

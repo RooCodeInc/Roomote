@@ -59,6 +59,8 @@ import { startBullMqLivenessWatchdog } from './liveness-watchdog';
 import { startSessionWakeupQueue } from './session-wakeup-queue';
 import { startHomeComposerRecommendationsQueue } from './home-composer-recommendations-queue';
 import { startAutomationResultPreparationQueue } from './automation-result-preparation-queue';
+import { startTaskActivityDigestQueue } from './task-activity-digest-queue';
+import { startBuiltInAutomationWebhooksQueue } from './built-in-automation-webhooks-queue';
 import { installBullMqGracefulShutdown } from './graceful-shutdown';
 
 // Deployments roll every service at once while migrations run only ahead
@@ -242,6 +244,12 @@ const {
   worker: automationResultPreparationWorker,
   queueEvents: automationResultPreparationQueueEvents,
 } = await startAutomationResultPreparationQueue();
+const { queue: taskActivityDigestQueue, worker: taskActivityDigestWorker } =
+  startTaskActivityDigestQueue();
+const {
+  queue: builtInAutomationWebhooksQueue,
+  worker: builtInAutomationWebhooksWorker,
+} = startBuiltInAutomationWebhooksQueue();
 
 const serverAdapter = new HonoAdapter(serveStatic);
 
@@ -288,6 +296,10 @@ createBullBoard({
       readOnlyMode: false,
     }),
     new BullMQAdapter(automationResultPreparationQueue, {
+      readOnlyMode: false,
+    }),
+    new BullMQAdapter(taskActivityDigestQueue, { readOnlyMode: false }),
+    new BullMQAdapter(builtInAutomationWebhooksQueue, {
       readOnlyMode: false,
     }),
   ],
@@ -509,6 +521,10 @@ installBullMqGracefulShutdown({
     await automationResultPreparationWorker.close();
     await automationResultPreparationQueueEvents.close();
     await automationResultPreparationQueue.close();
+    await taskActivityDigestWorker.close();
+    await taskActivityDigestQueue.close();
+    await builtInAutomationWebhooksWorker.close();
+    await builtInAutomationWebhooksQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
   },

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { format, formatDistanceToNow, isSameDay, isSameYear } from 'date-fns';
+import type { SessionManualStatus } from '@roomote/types';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import {
@@ -35,6 +36,7 @@ type SessionCardData = {
   sourceSurface: string;
   activityAt: number;
   cachedStatus: 'active' | 'needs_input' | 'blocked' | 'ready' | null;
+  manualStatus?: SessionManualStatus | null;
   executionCount: number;
   inferenceCostMicroUsd: number;
   directInferenceCostMicroUsd: number;
@@ -61,8 +63,8 @@ type SessionCardData = {
   canManage?: boolean;
 };
 
-export function formatSessionMobileTimestamp(date: Date, now = new Date()) {
-  if (isSameDay(date, now)) return format(date, 'hh:mm b');
+export function formatSessionCompactTimestamp(date: Date, now = new Date()) {
+  if (isSameDay(date, now)) return format(date, 'HH:mm');
   if (isSameYear(date, now)) return format(date, 'LLL d');
   return format(date, 'LLL d Y', { useAdditionalWeekYearTokens: true });
 }
@@ -71,10 +73,12 @@ export function SessionCard({
   session,
   viewerUserId,
   query = '',
+  hideAttentionBadges = false,
 }: {
   session: SessionCardData;
   viewerUserId: string;
   query?: string;
+  hideAttentionBadges?: boolean;
 }) {
   const ownerDisplayName =
     getUserDisplayName({
@@ -101,8 +105,10 @@ export function SessionCard({
       )
     : getSessionArtifactsViewUrl('', session.id);
 
+  const accessibleActivityTimestamp = activityDate.toLocaleString();
+
   return (
-    <div className="ph-no-capture group relative flex w-full items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10">
+    <div className="ph-no-capture group/card relative flex w-full @container items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10 group-data-[dragging=true]/board:hover:bg-transparent">
       <Link
         href={`/sessions/${session.id}`}
         className="absolute inset-0 z-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -113,7 +119,7 @@ export function SessionCard({
         {session.ownerKind === 'automation' ? (
           <span
             className="flex size-8 items-center justify-center overflow-clip rounded-full border border-border bg-white dark:bg-muted"
-            aria-label={actorName}
+            aria-hidden="true"
           >
             <TaskAutomationIcon
               automationKey={session.ownerAutomation}
@@ -126,7 +132,9 @@ export function SessionCard({
             name={ownerDisplayName}
             email={session.ownerEmail ?? undefined}
             size="md"
-            alt={ownerDisplayName}
+            alt=""
+            loading="eager"
+            decoding="sync"
           />
         )}
         {session.unread && session.ownerUserId === viewerUserId ? (
@@ -162,18 +170,28 @@ export function SessionCard({
                 </TooltipContent>
               </Tooltip>
             ) : null}
-            {status === 'active' || status === 'ready' ? null : (
+            {status === 'active' ||
+            status === 'ready' ||
+            (hideAttentionBadges &&
+              (status === 'needs_input' || status === 'blocked')) ? null : (
               <SessionStatusBadge status={status} className="capitalize" />
             )}
           </div>
-          <span className="shrink-0 text-xs text-muted-foreground md:hidden">
-            {formatSessionMobileTimestamp(activityDate)}
-          </span>
-          <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">
-            {formatDistanceToNow(activityDate, { addSuffix: true })}
-          </span>
+          <time
+            dateTime={activityDate.toISOString()}
+            aria-label={`Activity time: ${accessibleActivityTimestamp}`}
+            title={accessibleActivityTimestamp}
+            className="shrink-0 text-xs text-muted-foreground"
+          >
+            <span className="@[360px]:hidden">
+              {formatSessionCompactTimestamp(activityDate)}
+            </span>
+            <span className="hidden @[360px]:inline">
+              {formatDistanceToNow(activityDate, { addSuffix: true })}
+            </span>
+          </time>
         </div>
-        <p className="mt-1 line-clamp-2 wrap-anywhere text-base font-medium group-hover:underline">
+        <p className="mt-1 line-clamp-2 wrap-anywhere text-base font-medium group-hover/card:underline group-data-[dragging=true]/board:no-underline">
           {session.title}
         </p>
         <SessionSearchSnippet
@@ -205,7 +223,11 @@ export function SessionCard({
       </div>
       {session.canManage ? (
         <div className="pointer-events-auto relative -top-2 z-20 shrink-0 self-start">
-          <SessionActions sessionId={session.id} listRow />
+          <SessionActions
+            sessionId={session.id}
+            listRow
+            status={session.manualStatus ?? session.cachedStatus}
+          />
         </div>
       ) : null}
     </div>

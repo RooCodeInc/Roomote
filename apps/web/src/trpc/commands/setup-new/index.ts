@@ -1658,15 +1658,17 @@ export async function saveSetupNewModelConfigCommand(
       }
     : buildRecommendedDeploymentModelConfig(provider);
 
-  if (!isOauthProvider) {
-    await validateSetupModelProviderCredentials({
-      provider,
-      apiKey,
-      additionalEnvValues,
-      action: 'continue',
-      modelId: runtimeModelConfig.roomoteModel!,
-    });
-  }
+  // An account out of credits does not block setup; the wizard shows the
+  // returned warning so the operator can top it up in parallel.
+  const validationWarning = isOauthProvider
+    ? null
+    : await validateSetupModelProviderCredentials({
+        provider,
+        apiKey,
+        additionalEnvValues,
+        action: 'continue',
+        modelId: runtimeModelConfig.roomoteModel!,
+      });
 
   const metadataCatalog = await fetchModelsDevCatalog(
     AbortSignal.timeout(10_000),
@@ -1779,6 +1781,7 @@ export async function saveSetupNewModelConfigCommand(
     return {
       setupNewState,
       runtimeModelConfig,
+      validationWarning: validationWarning?.message ?? null,
     };
   });
 }

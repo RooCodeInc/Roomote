@@ -160,7 +160,7 @@ describe('getPrBodyAttributionLine', () => {
         'https://app.roomote.dev/sessions/session-123',
       ),
     );
-    expect(sessionLine).not.toContain('Fast session');
+    expect(sessionLine).not.toContain('Roomote Fast mode');
     expect(sessionLine).not.toContain('execution details');
     expect(sessionLine).toContain('in [the web UI](');
   });

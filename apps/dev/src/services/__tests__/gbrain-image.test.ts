@@ -37,6 +37,10 @@ describe('gbrain image configuration', () => {
     expect(entrypoint).toContain(
       'https://github.com/garrytan/gbrain/issues/4294',
     );
+    expect(entrypoint).toContain('DEFAULT_CHAT_MODEL="roomote/helper"');
+    expect(entrypoint).not.toContain(
+      'DEFAULT_CHAT_MODEL="${BRAIN_PROVIDER}:roomote/helper"',
+    );
     // A supervisor beaten to the queue lock by a container still being
     // replaced retries instead of taking the server down (LOCK_HELD = 2).
     expect(entrypoint).toContain('SUPERVISOR_LOCK_HELD_EXIT=2');

@@ -16,6 +16,7 @@ import {
 import { formatSlackThreadContext } from './utils';
 
 import { standardTask } from './standardTask';
+import { DISCORD_TABLE_FORMATTING_INSTRUCTIONS } from '../discord-table-formatting';
 
 export function buildSlackMessageInstructions({
   includeRequestUserInputGuidance = false,
@@ -163,6 +164,8 @@ export function buildChatProviderMessageInstructions(
   provider: NonSlackChatProvider,
 ): string {
   const { tag, name, label } = getNonSlackChatProviderDisplay(provider);
+  const tableFormattingInstructions =
+    provider === 'discord' ? DISCORD_TABLE_FORMATTING_INSTRUCTIONS : '';
   const requestUserInputInstructions =
     provider === 'discord' || provider === 'telegram' || provider === 'teams'
       ? `
@@ -212,6 +215,8 @@ export function buildChatProviderMessageInstructions(
     <rule>Keep internal workflow names, routine validation details, todo transitions, tool logs, every routine implementation-process chatter, repeated heartbeat text, and internal reasoning out of ${label} unless they create a blocker, delivery change, or concrete next step for the user.</rule>
     <rule>When mentioning a preview, PR, task, or similar destination, prefer descriptive links or plain URLs that render clearly in ${label} instead of burying destinations in implementation detail.</rule>
   </${tag}_message_style>
+
+  ${tableFormattingInstructions}
 
   ${requestUserInputInstructions}
 

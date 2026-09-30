@@ -373,10 +373,10 @@ describe('launchClaimedTeamsSuggestion', () => {
     );
   });
 
-  it('posts the rejection reason and releases the claim when the Fast session refuses the suggestion', async () => {
+  it('posts the rejection reason and releases the claim when the session refuses the suggestion', async () => {
     const launchFast = vi
       .fn()
-      .mockResolvedValue({ accepted: false, reason: 'Fast session is busy.' });
+      .mockResolvedValue({ accepted: false, reason: 'Session is busy.' });
     const postMessage = vi.fn();
 
     const outcome = await launchClaimedTeamsSuggestion({
@@ -392,7 +392,7 @@ describe('launchClaimedTeamsSuggestion', () => {
 
     expect(outcome).toEqual({ result: 'rejected' });
     expect(postMessage).toHaveBeenCalledWith(
-      'Could not start "Fix the flaky test" — Fast session is busy.',
+      'Could not start "Fix the flaky test" — Session is busy.',
     );
     expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
     expect(releaseWorkItemClaimMock).toHaveBeenCalledWith(expect.anything(), {

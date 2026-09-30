@@ -56,6 +56,7 @@ import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
 import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
 import { registerRoomoteCustomSkillsTool } from './roomote-custom-skills-tool';
+import { registerRoomoteArtifactTool } from './roomote-artifacts-tool';
 import { registerRoomoteCommunicationTools } from './roomote-communication-tools';
 import { registerRoomotePublicUrlFetchTool } from './roomote-public-url-fetch';
 
@@ -396,7 +397,7 @@ function createRoomoteTransport() {
   });
 }
 
-function createRoomoteMcpServer(
+async function createRoomoteMcpServer(
   auth: McpAuthContext,
   actingUserId: string | null,
   toolAuth: McpAuth,
@@ -412,8 +413,9 @@ function createRoomoteMcpServer(
       registerRoomoteCommunicationTools(server, actingUserId);
     }
   }
-  registerRoomoteCustomAutomationsTool(server, toolAuth);
+  await registerRoomoteCustomAutomationsTool(server, toolAuth);
   registerRoomoteCustomSkillsTool(server, toolAuth);
+  registerRoomoteArtifactTool(server, toolAuth);
   registerRoomotePublicUrlFetchTool(server);
 
   server.registerTool(
@@ -589,7 +591,7 @@ function createRoomoteMcpRouter(options: {
               }
             : rawAuth,
       };
-      const server = createRoomoteMcpServer(
+      const server = await createRoomoteMcpServer(
         auth,
         actingUserId,
         toolAuth,

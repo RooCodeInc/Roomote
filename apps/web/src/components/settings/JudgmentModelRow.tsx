@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { toast } from 'sonner';
 import {
   isJudgmentModelSelection,
@@ -22,16 +23,19 @@ import {
 } from '@/components/system';
 import { useJudgmentModelSettings } from '@/hooks/task-models/useJudgmentModelSettings';
 import { useSetJudgmentModelSelection } from '@/hooks/task-models/useSetJudgmentModelSelection';
+import { SETTINGS_PATHS } from '@/lib/settings';
 
 const JUDGMENT_MODEL_LABEL = 'Judgment model';
+const JUDGMENT_DECISIONS_PATH = `${SETTINGS_PATHS.models}/decisions`;
 
 const JUDGMENT_MODEL_DESCRIPTION =
-  'Makes quick routing and triage decisions (which channel messages start work, which skill or tool fits, whether a reply is for Roomote). Anything it is unsure about falls back to the helper model.';
+  'Answers the quick yes/no and multiple-choice questions Roomote asks, such as whether a reply is meant for it.';
 
 const MISSING_PROVIDER_HINTS: Record<
   Exclude<JudgmentModelSelection, 'off'>,
   string
 > = {
+  roomote: 'Not configured on this deployment',
   typesafe: 'Connect TypeSafe',
   openrouter: 'Connect OpenRouter',
   vercel: 'Connect Vercel AI Gateway',
@@ -41,6 +45,8 @@ const UNUSABLE_SELECTION_MESSAGES: Record<
   Exclude<JudgmentModelSelection, 'off'>,
   string
 > = {
+  roomote:
+    'The Roomote judgment model is not configured on this deployment, so these decisions use the helper model.',
   typesafe:
     'TypeSafe is not connected, so these decisions use the helper model.',
   openrouter:
@@ -68,6 +74,8 @@ export function JudgmentModelRow() {
     switch (selection) {
       case 'off':
         return true;
+      case 'roomote':
+        return settings.roomoteConnected;
       case 'typesafe':
         return settings.typeSafe.connected;
       case 'openrouter':
@@ -128,7 +136,13 @@ export function JudgmentModelRow() {
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            {JUDGMENT_MODEL_DESCRIPTION}
+            {JUDGMENT_MODEL_DESCRIPTION}{' '}
+            <Link
+              href={JUDGMENT_DECISIONS_PATH}
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              Test decisions
+            </Link>
           </p>
         </div>
 

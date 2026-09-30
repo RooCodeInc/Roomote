@@ -240,7 +240,7 @@ function getSendChatReplyPurpose(input) {
 
 function isPrematureAutomationReply(input, state) {
   if (
-    state?.requiresTerminalCloseoutWithoutTurn !== true ||
+    state?.suppressNonTerminalRepliesWithoutTurn !== true ||
     trimString(state.currentTurnMessageTs)
   ) {
     return false;

@@ -14,6 +14,7 @@ import {
 import { authorize } from '@/lib/server/auth-context';
 import { truncatePageTitle } from '@/lib/page-title';
 import {
+  FAST_SESSION_TRANSCRIPT_INITIAL_LIMIT,
   getFastSessionById,
   getFastSessionTasks,
 } from '@/lib/server/fast-sessions';
@@ -57,10 +58,13 @@ const getSessionPageData = cache(async (sessionId: string) => {
     ? await getFastSessionById(
         authorizedUser,
         unifiedSession.fastConversationId,
+        { transcriptLimit: FAST_SESSION_TRANSCRIPT_INITIAL_LIMIT },
       )
     : unifiedSession
       ? null
-      : await getFastSessionById(authorizedUser, sessionId);
+      : await getFastSessionById(authorizedUser, sessionId, {
+          transcriptLimit: FAST_SESSION_TRANSCRIPT_INITIAL_LIMIT,
+        });
 
   if (!unifiedSession && !session) {
     notFound();
@@ -147,6 +151,8 @@ export default async function SessionDetailPage({
       },
       createdAt: unifiedSession.createdAt,
       status: unifiedSession.status,
+      cachedStatus: unifiedSession.cachedStatus ?? null,
+      manualStatus: unifiedSession.manualStatus ?? null,
       goal: unifiedSession.goal,
       tasks: unifiedSession.tasks,
       artifacts: unifiedSession.artifacts,
@@ -159,6 +165,7 @@ export default async function SessionDetailPage({
             <div className="flex min-h-0 flex-1">
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <FastSessionTranscript
+                  key={session.id}
                   sessionId={session.id}
                   secretSessionId={
                     unifiedSession.ownerUserId === authorizedUser.userId
@@ -166,7 +173,9 @@ export default async function SessionDetailPage({
                       : undefined
                   }
                   initialMessages={session.messages}
-                  hasOlderMessages={session.hasOlderMessages}
+                  initialQueuedMessages={session.queuedMessages}
+                  initialMessagesCursor={session.messagesCursor}
+                  initialStreamCursor={session.initialStreamCursor}
                   canReply
                   initialTitle={unifiedSession.title}
                   fallbackTitle={unifiedSession.title}
@@ -268,6 +277,8 @@ export default async function SessionDetailPage({
     },
     createdAt: session.createdAt,
     status: null,
+    cachedStatus: null,
+    manualStatus: null,
     goal: null,
     tasks: [],
     artifacts: [],
@@ -285,9 +296,12 @@ export default async function SessionDetailPage({
     <SessionWorkspace session={sessionInfo}>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
         <FastSessionTranscript
+          key={session.id}
           sessionId={session.id}
           initialMessages={session.messages}
-          hasOlderMessages={session.hasOlderMessages}
+          initialQueuedMessages={session.queuedMessages}
+          initialMessagesCursor={session.messagesCursor}
+          initialStreamCursor={session.initialStreamCursor}
           canReply
           initialTitle={session.title}
           fallbackTitle={fallbackTitle}

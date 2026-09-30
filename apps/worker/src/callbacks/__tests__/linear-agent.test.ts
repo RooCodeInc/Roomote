@@ -328,7 +328,7 @@ describe('linearAgentCallbacks', () => {
     );
   });
 
-  it('leaves the final response to the Fast Session for a delegated child', async () => {
+  it('leaves the final response to the session for a delegated child', async () => {
     const context = {};
     const taskRun = createLinearFastChildRun();
 

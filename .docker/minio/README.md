@@ -25,9 +25,15 @@ verified during the build:
 | Runtime base image (by digest)        | Docker                                         |
 
 The MinIO pins are the same values `apps/api/scripts/setup-sandbox-minio.ts`
-uses to build MinIO for sandboxes, and `deploy/ci/validate-deployment-artifacts.mjs`
-fails if the two drift. A sandbox and a deployment therefore run the identical
-binary.
+uses for sandboxes, and `deploy/ci/validate-deployment-artifacts.mjs` fails if
+the two drift. A sandbox and a deployment therefore run the identical binary.
+
+Sandboxes have no Docker daemon, so that script takes the `minio` binary out
+of this published image over the registry API (the image named in
+`deploy/deployment-catalog.json`) and accepts it only if it matches the pinned
+SHA-256. If the registry is unreachable or the checksum differs, it builds
+from the pinned source instead, with the same result. Anonymous pulls of the
+image must stay enabled for the fast path to work.
 
 Both builds pass `-trimpath -ldflags="-buildid= -s -w"`: no VCS or path
 noise, no toolchain-derived build ID, no DWARF or symbol table (upstream's

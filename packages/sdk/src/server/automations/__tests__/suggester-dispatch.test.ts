@@ -104,6 +104,7 @@ describe('dispatchSuggestionScan', () => {
           }),
           trigger: 'scheduled',
           notifySlack: true,
+          requiresTerminalCloseoutWithoutTurn: true,
           slackChannel: 'C123SUGGEST',
           suggestionSource: 'suggest_ideas',
           visibleInTranscript: false,
