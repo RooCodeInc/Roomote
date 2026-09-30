@@ -6488,6 +6488,33 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it.each([
+    ['enables', false, true],
+    ['disables', true, false],
+  ] as const)(
+    'refreshes a warm OpenCode instance when Brain %s',
+    async (_label, initialBrainEnabled, nextBrainEnabled) => {
+      mocks.getSession.mockResolvedValue({
+        id: `brain-toggle-${initialBrainEnabled}`,
+        compatibilityMessages: [],
+        openCodeSessionId: 'persisted-session',
+      });
+      mocks.isBrainEnabled
+        .mockResolvedValueOnce(initialBrainEnabled)
+        .mockResolvedValueOnce(nextBrainEnabled);
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(mocks.generateText.mock.calls[1]?.[2]).toMatchObject({
+        disposeInstanceBeforeSession: { completed: false },
+      });
+      expect(mocks.getNativeRuntime.mock.calls[1]?.[2]).toMatchObject({
+        brainEnabled: nextBrainEnabled,
+      });
+    },
+  );
+
   it('surfaces a full conversation memory as a tool failure', async () => {
     mocks.isBrainEnabled.mockResolvedValue(true);
     mocks.appendMemory.mockResolvedValue({

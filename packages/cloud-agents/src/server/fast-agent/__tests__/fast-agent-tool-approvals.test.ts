@@ -95,7 +95,7 @@ import {
   isFastAgentApprovalChatSurface,
   resolveFastAgentToolApprovalRules,
   resolveFastAgentToolApprovalSession,
-  shouldDisposeInstanceForToolApprovalRules,
+  shouldDisposeInstanceForToolConfig,
 } from '../fast-agent-tool-approvals';
 import { resolveFastAgentToolApprovalUserRequest } from '../fast-agent-tool-approval-context';
 import {
@@ -656,18 +656,18 @@ describe('integrationToolApprovalRulesToConfig', () => {
   });
 });
 
-describe('shouldDisposeInstanceForToolApprovalRules', () => {
+describe('shouldDisposeInstanceForToolConfig', () => {
   it('never disposes on an unknown record: after a restart the instance is fresh, not stale', () => {
     // Restart/legacy-equivalence cases: there is no live instance to
     // refresh, and disposing would be a false-positive cache break.
     expect(
-      shouldDisposeInstanceForToolApprovalRules({
+      shouldDisposeInstanceForToolConfig({
         recordedHash: undefined,
         currentHash: null,
       }),
     ).toBe(false);
     expect(
-      shouldDisposeInstanceForToolApprovalRules({
+      shouldDisposeInstanceForToolConfig({
         recordedHash: undefined,
         currentHash: 'hash-a',
       }),
@@ -676,7 +676,7 @@ describe('shouldDisposeInstanceForToolApprovalRules', () => {
 
   it('disposes when the cached instance booted with different rules', () => {
     expect(
-      shouldDisposeInstanceForToolApprovalRules({
+      shouldDisposeInstanceForToolConfig({
         recordedHash: 'hash-a',
         currentHash: 'hash-b',
       }),
@@ -684,13 +684,13 @@ describe('shouldDisposeInstanceForToolApprovalRules', () => {
     // Experiment turned off: the recorded gated instance must be refreshed
     // back to the ungated config.
     expect(
-      shouldDisposeInstanceForToolApprovalRules({
+      shouldDisposeInstanceForToolConfig({
         recordedHash: 'hash-a',
         currentHash: null,
       }),
     ).toBe(true);
     expect(
-      shouldDisposeInstanceForToolApprovalRules({
+      shouldDisposeInstanceForToolConfig({
         recordedHash: null,
         currentHash: 'hash-a',
       }),
@@ -699,13 +699,13 @@ describe('shouldDisposeInstanceForToolApprovalRules', () => {
 
   it('preserves the cached instance on unchanged effective policies, including ordering-equivalent rules', () => {
     expect(
-      shouldDisposeInstanceForToolApprovalRules({
+      shouldDisposeInstanceForToolConfig({
         recordedHash: 'hash-a',
         currentHash: 'hash-a',
       }),
     ).toBe(false);
     expect(
-      shouldDisposeInstanceForToolApprovalRules({
+      shouldDisposeInstanceForToolConfig({
         recordedHash: null,
         currentHash: null,
       }),
@@ -725,7 +725,7 @@ describe('ordering-equivalent policies share one hash', () => {
     ]);
     expect(first).toBe(reordered);
     expect(
-      shouldDisposeInstanceForToolApprovalRules({
+      shouldDisposeInstanceForToolConfig({
         recordedHash: first,
         currentHash: reordered,
       }),

@@ -221,17 +221,15 @@ export function integrationToolApprovalRulesToConfig(
 
 /**
  * Whether the live per-directory OpenCode instance must be disposed so its
- * cached agent state is rebuilt from the freshly rewritten config. Approval
- * rules ride in the generated per-conversation config, which every turn
- * rewrites, and OpenCode's own servers are disposable child processes: after
- * a Roomote restart there is no live instance at all, and the next turn's
- * instance boots from the current config. A dispose is therefore only needed
- * when the same process previously booted the instance with different rules
- * (`recordedHash` set and unequal). An unknown record after a restart is
- * fresh state, not stale state, and must not dispose — that would be a
- * false-positive cache break.
+ * cached agent state is rebuilt from the freshly rewritten tool config.
+ * OpenCode's own servers are disposable child processes: after a Roomote
+ * restart there is no live instance, and the next turn boots from the current
+ * config. A dispose is therefore only needed when this process previously
+ * booted the instance with a different fingerprint (`recordedHash` set and
+ * unequal). An unknown record after a restart is fresh state, not stale state,
+ * and must not dispose — that would be a false-positive cache break.
  */
-export function shouldDisposeInstanceForToolApprovalRules(input: {
+export function shouldDisposeInstanceForToolConfig(input: {
   recordedHash: string | null | undefined;
   currentHash: string | null;
 }): boolean {
