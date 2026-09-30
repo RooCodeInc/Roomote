@@ -51,7 +51,7 @@ const CREATED_AT = '2026-08-26T13:44:18.000Z';
 const COMPLETED_AT = '2026-08-26T13:48:07.000Z';
 
 const IN_PROGRESS_BODY = [
-  `<!-- roomote-review-summary sha=${REVIEW_HEAD_SHA} mode=sync version=2 phase=reviewing -->`,
+  `<!-- roomote-review-summary sha=${REVIEW_HEAD_SHA} mode=sync version=3 phase=reviewing -->`,
   '<!-- roomote-review-status:start -->',
   'I am reviewing the updated PR head now.',
   '<!-- roomote-review-status:end -->',
@@ -61,7 +61,7 @@ const IN_PROGRESS_BODY = [
 ].join('\n');
 
 const TERMINAL_BODY = [
-  `<!-- roomote-review-summary sha=${REVIEW_HEAD_SHA} mode=sync version=2 phase=reviewed -->`,
+  `<!-- roomote-review-summary sha=${REVIEW_HEAD_SHA} mode=sync version=3 phase=reviewed outcome=findings_remain finding_count=1 -->`,
   '<!-- roomote-review-status:start -->',
   '1 issue outstanding. [See task](https://roomote.dev/task/reviewtask)',
   '<!-- roomote-review-status:end -->',
@@ -163,12 +163,14 @@ describe('PR review-summary lifecycle replay', () => {
 
   it('promotes only after a durable clean terminal summary is recorded', async () => {
     const cleanBody = TERMINAL_BODY.replace(
-      '1 issue outstanding.',
-      'No new code issues found.',
-    ).replace(
-      '- [ ] Validate image values before they satisfy the empty-message guard.',
-      '',
-    );
+      'outcome=findings_remain finding_count=1',
+      'outcome=clean finding_count=0',
+    )
+      .replace('1 issue outstanding.', 'Review finished without concerns.')
+      .replace(
+        '- [ ] Validate image values before they satisfy the empty-message guard.',
+        '',
+      );
 
     await queuePrReviewSummaryNotification(
       summaryPayload({
@@ -188,7 +190,7 @@ describe('PR review-summary lifecycle replay', () => {
       reviewHeadSha: REVIEW_HEAD_SHA,
       reviewResult: expect.objectContaining({
         outcome: 'clean',
-        findingCount: null,
+        findingCount: 0,
       }),
     });
     expect(
@@ -199,18 +201,68 @@ describe('PR review-summary lifecycle replay', () => {
     );
   });
 
-  it('does not promote a stale clean summary', async () => {
-    mockEnqueuePrReviewNotification.mockResolvedValueOnce({
-      notifiedTaskCount: 0,
-      reason: 'stale_review_cycle',
-    });
-    const cleanBody = TERMINAL_BODY.replace(
+  it('does not promote structured findings despite clean-looking prose', async () => {
+    const contradictoryBody = TERMINAL_BODY.replace(
       '1 issue outstanding.',
       'No code issues found.',
     ).replace(
       '- [ ] Validate image values before they satisfy the empty-message guard.',
       '',
     );
+
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: contradictoryBody,
+        previousBody: IN_PROGRESS_BODY,
+        updatedAt: COMPLETED_AT,
+      }),
+    );
+
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledOnce();
+    expect(
+      mockMarkRoomotePullRequestReadyAfterCleanReview,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('does not promote malformed v3 metadata via legacy prose fallback', async () => {
+    const malformedBody = TERMINAL_BODY.replace(
+      'outcome=findings_remain finding_count=1',
+      'outcome=clean',
+    )
+      .replace('1 issue outstanding.', 'No code issues found.')
+      .replace(
+        '- [ ] Validate image values before they satisfy the empty-message guard.',
+        '',
+      );
+
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: malformedBody,
+        previousBody: IN_PROGRESS_BODY,
+        updatedAt: COMPLETED_AT,
+      }),
+    );
+
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledOnce();
+    expect(
+      mockMarkRoomotePullRequestReadyAfterCleanReview,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('does not promote a stale clean summary', async () => {
+    mockEnqueuePrReviewNotification.mockResolvedValueOnce({
+      notifiedTaskCount: 0,
+      reason: 'stale_review_cycle',
+    });
+    const cleanBody = TERMINAL_BODY.replace(
+      'outcome=findings_remain finding_count=1',
+      'outcome=clean finding_count=0',
+    )
+      .replace('1 issue outstanding.', 'No code issues found.')
+      .replace(
+        '- [ ] Validate image values before they satisfy the empty-message guard.',
+        '',
+      );
 
     await queuePrReviewSummaryNotification(
       summaryPayload({

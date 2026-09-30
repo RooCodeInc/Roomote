@@ -16,8 +16,17 @@ export const REVIEW_CHECKLIST_END_MARKER =
   '<!-- roomote-review-checklist:end -->';
 
 export type ReviewMetaPhase = 'Reviewing' | 'Reviewed';
-export const REVIEW_SUMMARY_MARKER_VERSION = '2';
+export const REVIEW_SUMMARY_MARKER_VERSION = '3';
 const MAX_REVIEW_SUMMARY_MARKER_LENGTH = 1_024;
+
+export type ReviewSummaryResultMetadata = {
+  outcome: 'clean' | 'findings_remain' | 'incomplete';
+  findingCount: number;
+};
+
+export type ParsedReviewSummaryResultMetadata =
+  | { format: 'legacy' }
+  | { format: 'structured'; result: ReviewSummaryResultMetadata | null };
 
 export function isReviewInProgressStatusLine(line: string): boolean {
   return /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.|I am reviewing the updated PR head now\.)/i.test(
@@ -144,13 +153,80 @@ export function getReviewSummaryMarkerPhase(
   const phase = getReviewSummaryMarkerAttribute(body, 'phase')?.toLowerCase();
 
   if (
-    version !== REVIEW_SUMMARY_MARKER_VERSION ||
+    (version !== '2' && version !== REVIEW_SUMMARY_MARKER_VERSION) ||
     (phase !== 'reviewing' && phase !== 'reviewed')
   ) {
     return undefined;
   }
 
   return phase === 'reviewing' ? 'Reviewing' : 'Reviewed';
+}
+
+/**
+ * Version 3 terminal markers carry the authoritative review disposition.
+ * Unversioned and v1/v2 markers remain eligible for legacy prose/checklist
+ * parsing; malformed v3 and unknown versions fail closed.
+ */
+export function parseReviewSummaryResultMetadata(
+  body: string,
+): ParsedReviewSummaryResultMetadata {
+  const tokens = getReviewSummaryMarkerTokens(body);
+  if (!tokens) {
+    return { format: 'structured', result: null };
+  }
+
+  const values = new Map<string, string>();
+  const duplicates = new Set<string>();
+  for (const token of tokens) {
+    const separator = token.indexOf('=');
+    if (separator === -1) continue;
+    const name = token.slice(0, separator);
+    if (values.has(name)) duplicates.add(name);
+    values.set(name, token.slice(separator + 1));
+  }
+
+  const version = values.get('version');
+  if (duplicates.has('version')) {
+    return { format: 'structured', result: null };
+  }
+  if (version === undefined || version === '1' || version === '2') {
+    return { format: 'legacy' };
+  }
+  if (
+    version !== REVIEW_SUMMARY_MARKER_VERSION ||
+    duplicates.has('phase') ||
+    duplicates.has('outcome') ||
+    duplicates.has('finding_count') ||
+    values.get('phase') !== 'reviewed'
+  ) {
+    return { format: 'structured', result: null };
+  }
+
+  const outcome = values.get('outcome');
+  const findingCountValue = values.get('finding_count');
+  if (
+    (outcome !== 'clean' &&
+      outcome !== 'findings_remain' &&
+      outcome !== 'incomplete') ||
+    !findingCountValue ||
+    !/^(?:0|[1-9]\d*)$/.test(findingCountValue)
+  ) {
+    return { format: 'structured', result: null };
+  }
+
+  const findingCount = Number.parseInt(findingCountValue, 10);
+  if (
+    !Number.isSafeInteger(findingCount) ||
+    (outcome === 'clean' && findingCount !== 0) ||
+    (outcome === 'findings_remain' && findingCount === 0)
+  ) {
+    return { format: 'structured', result: null };
+  }
+
+  return {
+    format: 'structured',
+    result: { outcome, findingCount },
+  };
 }
 
 /**
@@ -184,6 +260,7 @@ export function isReviewSummaryInProgress(body: string): boolean {
 function withReviewSummaryMarkerPhase(
   summaryMarker: string,
   phase: ReviewMetaPhase,
+  reviewResult?: ReviewSummaryResultMetadata,
 ): string {
   const markerPhase = phase.toLowerCase();
   const tokens = getReviewSummaryMarkerTokens(summaryMarker);
@@ -201,6 +278,14 @@ function withReviewSummaryMarkerPhase(
   );
   attributes.set('version', `version=${REVIEW_SUMMARY_MARKER_VERSION}`);
   attributes.set('phase', `phase=${markerPhase}`);
+  if (phase === 'Reviewed') {
+    const result = reviewResult ?? { outcome: 'incomplete', findingCount: 0 };
+    attributes.set('outcome', `outcome=${result.outcome}`);
+    attributes.set('finding_count', `finding_count=${result.findingCount}`);
+  } else {
+    attributes.delete('outcome');
+    attributes.delete('finding_count');
+  }
   return `${REVIEW_SUMMARY_MARKER} ${[...attributes.values()].join(' ')} -->`;
 }
 
@@ -285,6 +370,7 @@ export function buildReviewSummaryBody({
   commitHref,
   repositoryFullName,
   reviewedSha,
+  reviewResult,
 }: {
   summaryMarker: string;
   statusContent: string;
@@ -293,6 +379,7 @@ export function buildReviewSummaryBody({
   commitHref?: string;
   repositoryFullName?: string | null;
   reviewedSha?: string;
+  reviewResult?: ReviewSummaryResultMetadata;
 }): string {
   const resolvedMetaPhase = resolveReviewMetaPhase({
     statusContent,
@@ -301,6 +388,7 @@ export function buildReviewSummaryBody({
   const versionedSummaryMarker = withReviewSummaryMarkerPhase(
     summaryMarker,
     resolvedMetaPhase,
+    reviewResult,
   );
   const sha = reviewedSha ?? parseReviewSummaryMarkerSha(summaryMarker);
   const resolvedCommitHref =
@@ -447,6 +535,7 @@ export function buildTerminalReviewSummaryBody({
     statusContent: terminalStatus,
     checklistContent: preservedChecklist ?? undefined,
     metaPhase: 'Reviewed',
+    reviewResult: { outcome: 'incomplete', findingCount: 0 },
     commitHref,
     repositoryFullName,
   });
