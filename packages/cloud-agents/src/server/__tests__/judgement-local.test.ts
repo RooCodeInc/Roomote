@@ -116,3 +116,58 @@ it('does not expose backend errors in example suite reports', async () => {
   expect(report.reports[0]?.results[0]?.operationalFailure).toBe(true);
   expect(JSON.stringify(report)).not.toContain('secret provider details');
 });
+
+it('routes shared CLI checks through Roomote inference and keeps JSON readable', async () => {
+  const { runCli } = await import('@roo-code/judgement');
+  const stdout: string[] = [];
+  const code = await runCli(['check', '--format', 'json', '--no-progress'], {
+    cwd,
+    check: checkLocalRepositoryJudgement,
+    stdout: (text) => {
+      stdout.push(text);
+    },
+  });
+  expect(code).toBe(1);
+  const report = JSON.parse(stdout.join(''));
+  expect(report.status).toBe('violation');
+  expect(report.rules[0].findings[0].changes).toEqual([
+    expect.objectContaining({ path: 'example.md', side: 'after', line: 1 }),
+  ]);
+  expect(evaluate).toHaveBeenCalled();
+});
+
+it('captures staged examples through the shared CLI without loading inference', async () => {
+  const { runCli } = await import('@roo-code/judgement');
+  const { evaluateLocalRepositoryJudgement } =
+    await import('../judgement-local');
+  await writeFile(join(cwd, 'example.md'), 'unstaged content');
+  const stdout: string[] = [];
+  const code = await runCli(
+    [
+      'capture',
+      '--rule',
+      'criterion_1',
+      '--path',
+      'example.md',
+      '--name',
+      'ordinary noun',
+      '--expected',
+      'violation',
+    ],
+    {
+      cwd,
+      evaluate: evaluateLocalRepositoryJudgement,
+      check: checkLocalRepositoryJudgement,
+      stdout: (text) => {
+        stdout.push(text);
+      },
+    },
+  );
+  expect(code).toBe(0);
+  const fixture = JSON.parse(stdout.join(''));
+  expect(fixture.examples[0]).toMatchObject({
+    after: 'new Session checks',
+    expected: 'violation',
+  });
+  expect(evaluate).not.toHaveBeenCalled();
+});

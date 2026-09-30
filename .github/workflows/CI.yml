@@ -186,6 +186,8 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/test
           REDIS_URL: redis://localhost:6379
+      - name: Test Judgement CI isolation
+        run: node --test scripts/judgement/__tests__/*.test.mjs
       - name: Run release script unit tests
         run: pnpm test:release-scripts
 

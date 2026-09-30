@@ -94,3 +94,59 @@ Rules 7 and 8 use a violation cutoff of 0.75. Validate the capitalization and pr
 rules together with sentence starts, quoted UI labels, headings, migration and
 security requirements, and edits near unchanged violations. Difficult examples
 remain in the validation fixtures even when their scores fall below the cutoff.
+
+## Turn feedback into examples
+
+Capture reads the staged version and previews a fixture without inference:
+
+```sh
+pnpm judgement capture --rule criterion_7 --path docs/example.md --name 'ordinary noun' --expected violation
+```
+
+Use the actual changed path and the intended label (`pass` for a false positive,
+`violation` for a missed violation). Inspect the preview and redact private data.
+Repeat with `--output .judgement/examples/new-case.json` to save a new file;
+existing files are never overwritten or staged. Test it with
+`pnpm judgement test --rule criterion_7 --examples .judgement/examples/new-case.json`,
+then merge the reviewed example into that rule's fixture file. Supporting context
+is included when the rule requests it; `--context <path>` adds an unchanged file.
+Committed changes can be captured with `--base <commit> --head <commit>`.
+
+To compare model, rule, or cutoff changes, save JSON reports before and after on
+the same examples, then run:
+
+```sh
+pnpm judgement compare --before .judgement/results/before.json --after .judgement/results/after.json
+```
+
+Comparison reports improvements and regressions per example, including inference
+failures. Both reports must include fixture hashes from the current library.
+Use `--before-threshold` and `--after-threshold` to select recorded calibration
+cutoffs. A regression exits with code 1. Comparison makes no inference calls.
+
+## Check output and CI
+
+Findings include the observed probability, rule cutoff, and a bounded preview of
+changed lines. The preview identifies the packet's edits; it does not claim the
+model located the violation on a particular line. Longer checks print progress to
+stderr; `--no-progress` disables it. JSON reports remain on stdout.
+
+The standalone library reuses cached judgments for matching packets. Roomote's
+custom inference adapter keeps caching disabled because backend settings can
+change without a stable cache fingerprint.
+
+The `Judgement` GitHub Actions workflow runs a strict check of the full PR diff.
+A job with read-only permissions and no inference secret collects Git objects for
+the base and head snapshots. A separate job imports those objects into an empty
+repository and runs the pinned checker without checking out PR files. Git hooks,
+configuration, and repository history are not transferred. Status publication
+runs separately with repository status permission. Violations,
+missing inference credentials, timeouts, and incomplete checks fail the status.
+The workflow uses a dedicated `TYPESAFE_API_KEY` repository secret and the
+`JUDGEMENT_MODEL` repository variable (default `jev-1.13.0`). Keep that model aligned
+with calibration; local commands use Roomote's configured model.
+
+After this workflow lands, configure the secret, verify a successful run, and add
+`Judgement` as a required status check for protected branches. Until then, the
+workflow alone does not enforce a merge gate. Keep the workflow's pinned checker
+version aligned with the application dependencies.
