@@ -121,7 +121,9 @@ export default async function SessionsPage({
           model={params.model ?? null}
         />
       </div>
-      <main className="min-h-0 flex-1 overflow-y-auto bg-background md:flex md:flex-col md:overflow-hidden">
+      <main
+        className={`min-h-0 flex-1 overflow-y-auto bg-background ${view === 'board' ? 'md:flex md:flex-col md:overflow-hidden' : ''}`}
+      >
         {result.sessions.length === 0 ? (
           <Empty>
             <EmptyHeader>

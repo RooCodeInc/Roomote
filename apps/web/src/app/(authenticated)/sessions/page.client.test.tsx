@@ -66,7 +66,9 @@ describe('Sessions list', () => {
   });
 
   it('keeps every session and long-content link accessible, including older sessions', async () => {
-    render(await SessionsPage({ searchParams: Promise.resolve({}) }));
+    const { container } = render(
+      await SessionsPage({ searchParams: Promise.resolve({}) }),
+    );
 
     for (const status of [
       'active',
@@ -97,10 +99,14 @@ describe('Sessions list', () => {
       expect.anything(),
       expect.objectContaining({ limit: 100 }),
     );
+    expect(container.querySelector('main')).toHaveClass('overflow-y-auto');
+    expect(container.querySelector('main')).not.toHaveClass(
+      'md:overflow-hidden',
+    );
   });
 
   it('exposes the board from a direct URL without a deployment flag', async () => {
-    render(
+    const { container } = render(
       await SessionsPage({
         searchParams: Promise.resolve({ view: 'board' }),
       }),
@@ -110,6 +116,10 @@ describe('Sessions list', () => {
     expect(
       screen.getByRole('link', { name: 'Show older sessions' }),
     ).toHaveAttribute('href', '/sessions?view=board&before=older-cursor');
+    expect(container.querySelector('main')).toHaveClass(
+      'md:flex',
+      'md:overflow-hidden',
+    );
   });
 
   it('shows deployment-wide board lanes while preserving each Session card', async () => {
