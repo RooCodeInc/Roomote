@@ -1752,7 +1752,9 @@ describe('runCustomAutomationNow', () => {
       reasoningEffort: 'xhigh',
     } as never);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.getSession).toHaveBeenCalledWith(
@@ -1798,8 +1800,14 @@ describe('runCustomAutomationNow', () => {
     });
     const secondWebhookInputJson = JSON.stringify('Review issue #42.');
     const [firstResult, secondResult] = await Promise.all([
-      runCustomAutomationNow(automation.id, 'webhook', firstWebhookInputJson),
-      runCustomAutomationNow(automation.id, 'webhook', secondWebhookInputJson),
+      runCustomAutomationNow(automation.id, {
+        trigger: 'webhook',
+        webhookInputJson: firstWebhookInputJson,
+      }),
+      runCustomAutomationNow(automation.id, {
+        trigger: 'webhook',
+        webhookInputJson: secondWebhookInputJson,
+      }),
     ]);
 
     expect(firstResult).toEqual({ outcome: 'queued' });
@@ -1844,7 +1852,9 @@ describe('runCustomAutomationNow', () => {
     ] as never);
     fastMocks.slackIsAppInChannel.mockResolvedValue(true);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
@@ -1860,7 +1870,9 @@ describe('runCustomAutomationNow', () => {
   it('skips manual run when a concurrent launch holds the claim', async () => {
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(null);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result).toEqual({
       outcome: 'skipped',
@@ -1874,7 +1886,9 @@ describe('runCustomAutomationNow', () => {
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
     fastMocks.enqueueParentEvent.mockRejectedValueOnce(new Error('queue down'));
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result.outcome).toBe('failed');
     expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(db, {
@@ -1911,7 +1925,9 @@ describe('runCustomAutomationNow', () => {
       teamId: 'T123',
     } as never);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
@@ -1958,7 +1974,9 @@ describe('runCustomAutomationNow', () => {
     });
     fastMocks.isManagedTelegramTopic.mockResolvedValue(true);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.isManagedTelegramTopic).toHaveBeenCalledWith({
@@ -2007,7 +2025,9 @@ describe('runCustomAutomationNow', () => {
     } as never);
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(recoveryClaim);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
@@ -2028,7 +2048,9 @@ describe('runCustomAutomationNow', () => {
       enabled: false,
     } as never);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result.outcome).toBe('failed');
     expect(fastMocks.enqueueParentEvent).not.toHaveBeenCalled();

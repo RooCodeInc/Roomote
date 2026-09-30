@@ -779,6 +779,8 @@ customAutomationsRouter.post('/:id/run', async (c) => {
   if (!existing || !canManage(c, existing)) {
     return c.json({ error: 'Custom automation was not found.' }, 404);
   }
-  const result = await runCustomAutomationNow(c.req.param('id'));
+  const result = await runCustomAutomationNow(c.req.param('id'), {
+    trigger: 'manual',
+  });
   return c.json(result, result.outcome === 'failed' ? 400 : 200);
 });

@@ -67,8 +67,10 @@ describe('processBuiltInAutomationWebhookJob', () => {
 
     expect(matchesTokenMock).toHaveBeenCalledWith('digest', 'current');
     expect(runAutomationMock).toHaveBeenCalledWith('suggester', {
-      trigger: 'webhook',
-      webhookInputJson: '{"issue":"test"}',
+      context: {
+        trigger: 'webhook',
+        webhookInputJson: '{"issue":"test"}',
+      },
     });
   });
 });
