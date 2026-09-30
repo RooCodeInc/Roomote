@@ -46,6 +46,28 @@ import {
 
 const MODAL_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
 const LAUNCH_DIAGNOSTIC_PROBE_TIMEOUT_MS = 15_000;
+
+type WorkerExitResult = {
+  disposition: 'ignore' | 'restart' | 'failed';
+  classification: 'routine' | 'active_failure' | 'bootstrap_failure';
+  shutdownReason: string | null;
+};
+
+function formatWorkerExitLog(exitCode: number, result: WorkerExitResult) {
+  const reason =
+    result.classification === 'routine'
+      ? result.shutdownReason
+        ? `routine shutdown: ${result.shutdownReason}`
+        : 'routine exit'
+      : result.classification === 'active_failure'
+        ? 'active run had no shutdown marker'
+        : result.shutdownReason === 'bootstrap_restart_pending'
+          ? 'bootstrap restart scheduled'
+          : 'bootstrap failure recorded';
+
+  return `worker exited with code ${exitCode}; ${reason}`;
+}
+
 function createCentralCommandOutputRecorder(runId: number) {
   return createCommandOutputTranscriptRecorder({
     write: async (entries, maxChars) => {
@@ -242,7 +264,7 @@ export async function spawnModalWorker(
     onWorkerExit?: (event: {
       exitCode: number;
       launchDiagnostics?: string;
-    }) => Promise<'ignore' | 'restart' | 'failed'>;
+    }) => Promise<WorkerExitResult>;
     onWorkerRestart?: () => void;
     /** Session-egress admission; omitted in unit paths that do not exercise it. */
     credentialEgress?: CredentialEgressLifecycle;
@@ -381,6 +403,27 @@ export async function spawnModalWorker(
     getComputeProviderCommandOutputSource(vendor) === 'central'
       ? createCentralCommandOutputRecorder(taskRun.id)
       : undefined;
+  const classifyWorkerExit = onWorkerExit
+    ? async (event: {
+        exitCode: number;
+        launchDiagnostics?: string;
+      }): Promise<WorkerExitResult> => {
+        try {
+          const result = await onWorkerExit(event);
+          await computeLog?.append(
+            'command',
+            formatWorkerExitLog(event.exitCode, result),
+          );
+          return result;
+        } catch (error) {
+          await computeLog?.append(
+            'command',
+            `worker exited with code ${event.exitCode}; lifecycle classification failed`,
+          );
+          throw error;
+        }
+      }
+    : undefined;
 
   const configuredResources = resolveConfiguredComputeProviderResources({
     provider: 'modal',
@@ -486,9 +529,7 @@ export async function spawnModalWorker(
   const args = getWorkerLaunchArgs(taskRun, machine.machineId);
 
   let immediateExitDisposition: 'restart' | 'failed' | undefined;
-  let workerExitClassification:
-    | Promise<'ignore' | 'restart' | 'failed'>
-    | undefined;
+  let workerExitClassification: Promise<WorkerExitResult> | undefined;
 
   try {
     await updateTaskRunMachine({
@@ -591,20 +632,16 @@ export async function spawnModalWorker(
           ...(onWorkerExit || computeLog
             ? {
                 onExit: async ({ exitCode }: { exitCode: number }) => {
-                  if (onWorkerExit) {
+                  if (classifyWorkerExit) {
                     // Publish ownership before aborting admission. The launch
                     // promise may reject on that abort before this callback's
                     // async classifier has finished its database claim.
                     workerExitClassification = (async () => {
-                      await computeLog?.append(
-                        'command',
-                        `worker exited with code ${exitCode}`,
-                      );
-
-                      const disposition = await onWorkerExit({ exitCode });
+                      const result = await classifyWorkerExit({ exitCode });
+                      const { disposition } = result;
 
                       if (disposition === 'ignore') {
-                        return disposition;
+                        return result;
                       }
 
                       try {
@@ -637,7 +674,7 @@ export async function spawnModalWorker(
                         }
                       }
 
-                      return disposition;
+                      return result;
                     })();
                   }
 
@@ -646,7 +683,7 @@ export async function spawnModalWorker(
                   // already-guarded replacement.
                   admissionAbortController.abort();
 
-                  if (!onWorkerExit) {
+                  if (!classifyWorkerExit) {
                     return;
                   }
 
@@ -661,10 +698,6 @@ export async function spawnModalWorker(
         // grace-period exits through the same classifier as later exits so the
         // first bootstrap failure gets its one durable replacement.
         if (launchResult.exitCode !== null) {
-          await computeLog?.append(
-            'command',
-            `worker exited with code ${launchResult.exitCode}`,
-          );
           // Without any captured output the exit is undiagnosable from logs, so
           // probe the still-alive sandbox before classification/cleanup.
           const probeDiagnostics =
@@ -685,14 +718,15 @@ export async function spawnModalWorker(
             probeDiagnostics,
           );
 
-          if (onWorkerExit) {
+          if (classifyWorkerExit) {
             // The classifier finalizes the run itself on the 'failed' disposition
             // (this spawn then returns without rethrowing), so the diagnostics
             // must travel with the exit event to reach the run's error.
-            const disposition = await onWorkerExit({
+            const result = await classifyWorkerExit({
               exitCode: launchResult.exitCode,
               ...(launchDiagnostics ? { launchDiagnostics } : {}),
             });
+            const { disposition } = result;
 
             if (disposition !== 'ignore') {
               immediateExitDisposition = disposition;
@@ -702,6 +736,10 @@ export async function spawnModalWorker(
             // The worker claimed the run before exiting, so its normal lifecycle
             // owns terminal state and sandbox cleanup from this point onward.
           } else {
+            await computeLog?.append(
+              'command',
+              `worker exited with code ${launchResult.exitCode}`,
+            );
             throw exitError;
           }
         }

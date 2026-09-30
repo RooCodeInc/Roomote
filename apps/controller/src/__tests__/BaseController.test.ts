@@ -685,7 +685,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
 
     await expect(
       controller.testHandleWorkerExitBeforeStart(job, 1),
-    ).resolves.toBe('restart');
+    ).resolves.toEqual({
+      disposition: 'restart',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'bootstrap_restart_pending',
+    });
 
     expect(mockDbUpdateSet).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -729,7 +733,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
         makeTaskRun({ id: 42, status: RunStatus.Dequeued }),
         1,
       ),
-    ).resolves.toBe('failed');
+    ).resolves.toEqual({
+      disposition: 'failed',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'failed',
+    });
 
     expect(mockFinishRun).toHaveBeenCalledWith({
       id: 42,
@@ -749,7 +757,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
         1,
         'probe "worker --version" exited with code 1; probe stderr: Error: WORKER_API_URL is required',
       ),
-    ).resolves.toBe('failed');
+    ).resolves.toEqual({
+      disposition: 'failed',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'failed',
+    });
 
     const expectedError =
       'Worker process exited before claiming task run (exit code 1); ' +
@@ -784,7 +796,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
         1,
         'stderr: worker failed before claim',
       ),
-    ).resolves.toBe('restart');
+    ).resolves.toEqual({
+      disposition: 'restart',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'bootstrap_restart_pending',
+    });
 
     expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
@@ -814,7 +830,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       0,
     );
 
-    expect(claimed).toBe('ignore');
+    expect(claimed).toEqual({
+      disposition: 'ignore',
+      classification: 'routine',
+      shutdownReason: 'completed',
+    });
     expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
       'Detached worker exit treated as routine after the task run advanced',
@@ -851,7 +871,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       137,
     );
 
-    expect(claimed).toBe('ignore');
+    expect(claimed).toEqual({
+      disposition: 'ignore',
+      classification: 'active_failure',
+      shutdownReason: null,
+    });
     expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
       'Detached worker exited while the task run remained active',
@@ -887,7 +911,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       137,
     );
 
-    expect(claimed).toBe('ignore');
+    expect(claimed).toEqual({
+      disposition: 'ignore',
+      classification: 'routine',
+      shutdownReason: 'sleep_requested',
+    });
     expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
       'Detached worker exit treated as routine after the task run advanced',
@@ -959,7 +987,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
         makeTaskRun({ id: 44, status: RunStatus.Dequeued }),
         1,
       ),
-    ).resolves.toBe('failed');
+    ).resolves.toEqual({
+      disposition: 'failed',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'failed',
+    });
 
     expect(mockCaptureControllerException).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'notification failed' }),
