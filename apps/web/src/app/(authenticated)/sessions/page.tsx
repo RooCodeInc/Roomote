@@ -28,6 +28,8 @@ import {
   SessionBoardColumn,
 } from './SessionBoard';
 
+const SESSIONS_PAGE_SIZE = 100;
+
 export default async function SessionsPage({
   searchParams,
 }: {
@@ -86,6 +88,7 @@ export default async function SessionsPage({
       model: params.model,
       archive,
       includeJudgedStatus: view === 'board',
+      limit: SESSIONS_PAGE_SIZE,
     }),
     getSessionSources(authorizedUser, archive),
   ]);
@@ -129,7 +132,9 @@ export default async function SessionsPage({
           archive={archive}
         />
       </div>
-      <main className="min-h-0 flex-1 overflow-y-auto bg-background">
+      <main
+        className={`min-h-0 flex-1 overflow-y-auto bg-background ${view === 'board' ? 'md:flex md:flex-col md:overflow-hidden' : ''}`}
+      >
         {result.sessions.length === 0 ? (
           <Empty>
             <EmptyHeader>
@@ -158,7 +163,7 @@ export default async function SessionsPage({
                       session={session}
                       viewerUserId={authorizedUser.userId}
                       query={q}
-                      hideBlockedBadge
+                      hideAttentionBadges
                     />
                   </SessionBoardCard>
                 ))}

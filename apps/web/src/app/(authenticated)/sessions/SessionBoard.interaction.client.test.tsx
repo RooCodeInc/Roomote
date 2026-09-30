@@ -17,6 +17,7 @@ const testState = vi.hoisted(() => ({
   mutate: vi.fn(),
   replace: vi.fn(),
   searchParams: new URLSearchParams('view=board&status=active&before=cursor'),
+  dragListener: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -51,6 +52,7 @@ vi.mock('@dnd-kit/core', async () => {
     MouseSensor: function MouseSensor() {},
     TouchSensor: function TouchSensor() {},
     closestCenter: vi.fn(),
+    pointerWithin: vi.fn(),
     useSensor: vi.fn((sensor: unknown, options: unknown) => ({
       sensor,
       options,
@@ -66,7 +68,7 @@ vi.mock('@dnd-kit/core', async () => {
         'aria-describedby': 'dnd-instructions',
       },
       isDragging: false,
-      listeners: {},
+      listeners: { onMouseDown: testState.dragListener },
       setActivatorNodeRef: vi.fn(),
       setNodeRef: vi.fn(),
       transform: null,
@@ -179,21 +181,20 @@ describe('SessionBoard drag interaction', () => {
     testState.searchParams = new URLSearchParams(
       'view=board&status=active&before=cursor',
     );
+    testState.dragListener.mockReset();
   });
 
-  it('keeps interactive content intact and exposes a keyboard-capable handle', () => {
+  it('uses the whole managed card as the activator without hijacking interactive descendants', () => {
     renderInteractionBoard();
 
+    const activator = screen.getByRole('group', {
+      name: 'Move Build the board to another status',
+    });
+    expect(activator).toHaveAttribute('data-session-board-drag-activator');
+    expect(activator).toHaveAttribute('aria-roledescription', 'draggable');
     expect(
-      screen.getByRole('button', {
-        name: 'Move Build the board to another status',
-      }),
-    ).toHaveAttribute('data-session-board-drag-handle');
-    expect(
-      screen.getByRole('button', {
-        name: 'Move Build the board to another status',
-      }),
-    ).toHaveAttribute('aria-roledescription', 'draggable');
+      document.querySelector('[data-session-board-drag-handle]'),
+    ).not.toBeInTheDocument();
     expect(
       testState.dndProps?.accessibility?.screenReaderInstructions.draggable,
     ).toContain('arrow keys');
@@ -210,12 +211,14 @@ describe('SessionBoard drag interaction', () => {
       delay: 250,
       tolerance: 5,
     });
-    expect(
-      screen.getByRole('link', { name: 'Build the board' }),
-    ).toHaveAttribute('href', '/sessions/session-active');
-    expect(
-      screen.getByRole('button', { name: 'Card action' }),
-    ).toBeInTheDocument();
+    const sessionLink = screen.getByRole('link', { name: 'Build the board' });
+    expect(sessionLink).toHaveAttribute('href', '/sessions/session-active');
+    const cardAction = screen.getByRole('button', { name: 'Card action' });
+    fireEvent.mouseDown(sessionLink);
+    fireEvent.mouseDown(cardAction);
+    expect(testState.dragListener).not.toHaveBeenCalled();
+    fireEvent.mouseDown(activator);
+    expect(testState.dragListener).toHaveBeenCalledOnce();
     expect(
       screen.queryByRole('button', {
         name: 'Move Already done to another status',
@@ -272,7 +275,7 @@ describe('SessionBoard drag interaction', () => {
     }
   });
 
-  it('shows valid targets, ignores invalid/no-op drops, and sends a valid drop to the shared mutation', () => {
+  it('keeps the source lane available as a no-op and sends a changed lane to the shared mutation', () => {
     renderInteractionBoard();
     const event = activeDragEvent();
 
@@ -280,6 +283,9 @@ describe('SessionBoard drag interaction', () => {
     expect(screen.getByRole('region', { name: 'active' })).toHaveAttribute(
       'data-session-board-drop-target',
       'source',
+    );
+    expect(screen.getByRole('region', { name: 'active' })).not.toHaveAttribute(
+      'aria-disabled',
     );
     expect(screen.getByRole('region', { name: 'done' })).toHaveAttribute(
       'data-session-board-drop-target',

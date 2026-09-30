@@ -2,9 +2,69 @@ import { describe, expect, it } from 'vitest';
 
 import {
   chooseApplicableSessionStatusJudgment,
+  resolveAuthoritativeSessionStatusJudgment,
   resolveSessionStatusJudgmentPrecedence,
   SESSION_STATUS_INACTIVITY_MS,
 } from '../session-status-judgment';
+
+describe('resolveAuthoritativeSessionStatusJudgment', () => {
+  const reviewHandoff = {
+    automationInitiatedRoomoteCreatedOpenPullRequest: true,
+  };
+
+  it('requires user review for a settled automation-created PR handoff', () => {
+    expect(
+      resolveAuthoritativeSessionStatusJudgment({
+        sessionOrigin: {
+          kind: 'automation',
+          automation: 'custom_automation',
+        },
+        roomoteWorkState: 'settled',
+        reviewHandoff,
+      }),
+    ).toBe('needs_input');
+  });
+
+  it.each([
+    {
+      name: 'active automation work',
+      sessionOrigin: {
+        kind: 'automation' as const,
+        automation: 'custom_automation',
+      },
+      roomoteWorkState: 'active' as const,
+      reviewHandoff,
+    },
+    {
+      name: 'an automation waiting on a tactical question',
+      sessionOrigin: {
+        kind: 'automation' as const,
+        automation: 'custom_automation',
+      },
+      roomoteWorkState: 'waiting_for_user' as const,
+      reviewHandoff,
+    },
+    {
+      name: 'a human-requested PR',
+      sessionOrigin: { kind: 'user' as const, automation: null },
+      roomoteWorkState: 'settled' as const,
+      reviewHandoff,
+    },
+    {
+      name: 'settled automation work without a reviewable PR',
+      sessionOrigin: {
+        kind: 'automation' as const,
+        automation: 'custom_automation',
+      },
+      roomoteWorkState: 'settled' as const,
+      reviewHandoff: {
+        automationInitiatedRoomoteCreatedOpenPullRequest: false,
+      },
+    },
+  ])('does not override $name', ({ name: _name, ...input }) => {
+    expect(resolveAuthoritativeSessionStatusJudgment(input)).toBeNull();
+  });
+});
 
 const clearDone = {
   choice: 'done' as const,

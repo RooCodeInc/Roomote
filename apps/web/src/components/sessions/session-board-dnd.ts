@@ -4,7 +4,10 @@ import {
   type SessionManualStatus,
 } from '@roomote/types';
 import {
+  closestCenter,
   KeyboardCode,
+  pointerWithin,
+  type CollisionDetection,
   type KeyboardCoordinateGetter,
   type UniqueIdentifier,
 } from '@dnd-kit/core';
@@ -26,13 +29,18 @@ export function getSessionBoardDropStatus(
 }
 
 export function canDropSessionBoardCard(
-  sourceColumn: SessionBoardColumn,
+  _sourceColumn: SessionBoardColumn,
   targetColumn: UniqueIdentifier | null | undefined,
   canManage: boolean,
 ): targetColumn is SessionManualStatus {
   const targetStatus = getSessionBoardDropStatus(targetColumn);
-  return canManage && targetStatus !== null && targetStatus !== sourceColumn;
+  return canManage && targetStatus !== null;
 }
+
+export const sessionBoardCollisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  return pointerCollisions.length > 0 ? pointerCollisions : closestCenter(args);
+};
 
 export function getSessionBoardKeyboardTarget(
   currentColumn: SessionBoardColumn,
