@@ -6501,12 +6501,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       mocks.isBrainEnabled
         .mockResolvedValueOnce(initialBrainEnabled)
+        .mockResolvedValueOnce(nextBrainEnabled)
         .mockResolvedValueOnce(nextBrainEnabled);
 
       await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
       await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
       expect(mocks.generateText.mock.calls[1]?.[2]).toMatchObject({
+        disposeInstanceBeforeSession: { completed: false },
+      });
+      expect(mocks.generateText.mock.calls[2]?.[2]).toMatchObject({
         disposeInstanceBeforeSession: { completed: false },
       });
       expect(mocks.getNativeRuntime.mock.calls[1]?.[2]).toMatchObject({

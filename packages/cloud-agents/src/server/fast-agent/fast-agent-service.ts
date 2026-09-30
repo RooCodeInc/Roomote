@@ -6516,7 +6516,9 @@ export async function answerFastAgentQuestion({
         `[Fast Agent] Tool configuration changed for session ${session.id}; refreshing the OpenCode instance.`,
       );
     }
-    fastAgentToolConfigFingerprints.set(session.id, toolConfigFingerprint);
+    if (!toolConfigDisposeInstance) {
+      fastAgentToolConfigFingerprints.set(session.id, toolConfigFingerprint);
+    }
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       persistedSessionId: session.openCodeSessionId,
@@ -7195,21 +7197,22 @@ export async function answerFastAgentQuestion({
       },
     });
     if (toolConfigDisposeState) {
-      // A failed dispose leaves the cached instance on the previous turn's
-      // tool config. Restore the previous record so the next turn retries the
-      // refresh instead of trusting a stale instance.
+      // Advance the fingerprint only after disposal succeeds. If another turn
+      // changed it while this one was queued, leave that newer state intact.
       void promptTextPromise
         .catch(() => undefined)
         .then(() => {
-          if (toolConfigDisposeState.completed) return;
-          if (previousToolConfigFingerprint === undefined) {
-            fastAgentToolConfigFingerprints.delete(session.id);
-          } else {
-            fastAgentToolConfigFingerprints.set(
-              session.id,
-              previousToolConfigFingerprint,
-            );
-          }
+          if (!toolConfigDisposeState.completed) return;
+          const recordedFingerprint = fastAgentToolConfigFingerprints.has(
+            session.id,
+          )
+            ? fastAgentToolConfigFingerprints.get(session.id)
+            : undefined;
+          if (recordedFingerprint !== previousToolConfigFingerprint) return;
+          fastAgentToolConfigFingerprints.set(
+            session.id,
+            toolConfigFingerprint,
+          );
         });
     }
     const promptText = await promptTextPromise.finally(() => {
