@@ -1159,12 +1159,12 @@ export function FastSessionTranscript({
       [...serverMessages.values()]
         .sort(compareTranscriptMessages)
         .flatMap((message) => {
-          const text = getTranscriptMessageText(message)?.trim();
+          const text = getTranscriptMessageText(message);
           return message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
             message.role === 'user' &&
             message.metadata?.visibleInTranscript !== false &&
             message.metadata?.turnSource === 'human' &&
-            text
+            text?.trim()
             ? [text]
             : [];
         }),

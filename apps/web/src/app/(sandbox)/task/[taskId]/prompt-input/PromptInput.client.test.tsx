@@ -1445,7 +1445,12 @@ describe('PromptInput history navigation', () => {
         {
           eventType: 'roomote_runtime.user_prompt',
           role: 'user',
-          text: 'Latest user prompt',
+          text: '  Latest user prompt\n',
+        },
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          text: ' \n ',
         },
         {
           eventType: 'roomote_runtime.user_prompt',
@@ -1466,7 +1471,7 @@ describe('PromptInput history navigation', () => {
     const textarea = screen.getByPlaceholderText(/Message agent/i);
 
     fireEvent.keyDown(textarea, { key: 'ArrowUp' });
-    expect(textarea).toHaveValue('Latest user prompt');
+    expect(textarea).toHaveValue('  Latest user prompt\n');
 
     fireEvent.keyDown(textarea, { key: 'ArrowUp' });
     expect(textarea).toHaveValue('First user prompt');

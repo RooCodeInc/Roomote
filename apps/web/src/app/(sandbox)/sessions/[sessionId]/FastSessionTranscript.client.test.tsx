@@ -3744,7 +3744,7 @@ describe('FastSessionTranscript', () => {
           textMessage({
             id: 'user-2',
             role: 'user',
-            text: 'Latest user prompt',
+            text: '  Latest user prompt\n',
             ts: 4,
             turnSource: 'human',
           }),
@@ -3756,6 +3756,13 @@ describe('FastSessionTranscript', () => {
             visible: false,
             turnSource: 'human',
           }),
+          textMessage({
+            id: 'blank-user',
+            role: 'user',
+            text: ' \n ',
+            ts: 6,
+            turnSource: 'human',
+          }),
         ]}
         canReply
       />,
@@ -3763,7 +3770,7 @@ describe('FastSessionTranscript', () => {
     const input = screen.getByPlaceholderText('Message agent');
 
     fireEvent.keyDown(input, { key: 'ArrowUp' });
-    expect(input).toHaveValue('Latest user prompt');
+    expect(input).toHaveValue('  Latest user prompt\n');
 
     fireEvent.keyDown(input, { key: 'ArrowUp' });
     expect(input).toHaveValue('First user prompt');

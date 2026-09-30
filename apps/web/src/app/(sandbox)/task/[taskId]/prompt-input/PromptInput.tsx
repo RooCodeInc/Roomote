@@ -168,11 +168,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const promptHistory = useMemo(
       () =>
         taskHistory?.flatMap((message) => {
-          const text = message.text?.trim();
+          const text = message.text;
           return message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
             message.role === 'user' &&
             message.visibleInTranscript !== false &&
-            text
+            text?.trim()
             ? [text]
             : [];
         }) ?? [],
