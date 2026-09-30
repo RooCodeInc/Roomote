@@ -1533,6 +1533,7 @@ function BuiltInWebhookSetting({
 }) {
   const trpc = useTRPC();
   const [editing, setEditing] = useState(false);
+  const [retryingAfterError, setRetryingAfterError] = useState(false);
   const [webhookState, setWebhookState] = useState<{
     enabled: boolean;
     url: string | null;
@@ -1567,7 +1568,8 @@ function BuiltInWebhookSetting({
   if (!isBuiltInWebhookAutomationKey(automationKey)) return null;
 
   const initialLoadFailed =
-    webhookQuery.isError && webhookQuery.data === undefined;
+    webhookQuery.data === undefined &&
+    (webhookQuery.isError || retryingAfterError);
 
   if (!editing) {
     return (
@@ -1575,10 +1577,10 @@ function BuiltInWebhookSetting({
         icon={RadioTower}
         label="Webhooks"
         value={
-          webhookQuery.isPending
-            ? 'Loading...'
-            : initialLoadFailed
-              ? 'Unavailable'
+          initialLoadFailed
+            ? 'Unavailable'
+            : webhookQuery.isPending
+              ? 'Loading...'
               : webhookState.enabled
                 ? 'Enabled'
                 : 'Disabled'
@@ -1594,8 +1596,13 @@ function BuiltInWebhookSetting({
       {initialLoadFailed ? (
         <RetryableLoadError
           message="Failed to load webhook settings."
-          isRetrying={webhookQuery.isFetching}
-          onRetry={() => void webhookQuery.refetch()}
+          isRetrying={webhookQuery.isFetching || retryingAfterError}
+          onRetry={() => {
+            setRetryingAfterError(true);
+            void webhookQuery
+              .refetch()
+              .finally(() => setRetryingAfterError(false));
+          }}
           className="py-3"
         />
       ) : (

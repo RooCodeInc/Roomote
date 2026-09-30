@@ -9,6 +9,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { toast } from 'sonner';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH } from '@roomote/types';
 const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
@@ -46,6 +47,9 @@ const state = vi.hoisted(() => ({
     enabled: boolean;
     url: string | null;
   },
+  realWebhookQuery: null as
+    | null
+    | (() => Promise<{ enabled: boolean; url: string | null }>),
   builtInAutomationWebhookPending: false,
   builtInAutomationWebhookError: false,
   builtInAutomationWebhookFetching: false,
@@ -399,7 +403,14 @@ vi.mock('sonner', () => ({
   },
 }));
 
+const actualQuery = await vi.hoisted(() =>
+  vi.importActual<typeof import('@tanstack/react-query')>(
+    '@tanstack/react-query',
+  ),
+);
+
 vi.mock('@tanstack/react-query', () => ({
+  ...actualQuery,
   useQuery: (queryOptions: { queryKey?: unknown[] }) => {
     state.queriedKeys.push(queryOptions.queryKey);
     const key1 = queryOptions.queryKey?.[1];
@@ -466,6 +477,13 @@ vi.mock('@tanstack/react-query', () => ({
       };
     }
     if (key1 === 'getBuiltInAutomationWebhook') {
+      if (state.realWebhookQuery) {
+        return actualQuery.useQuery({
+          queryKey: queryOptions.queryKey!,
+          queryFn: state.realWebhookQuery,
+          retry: false,
+        });
+      }
       return {
         isPending: state.builtInAutomationWebhookPending,
         isError: state.builtInAutomationWebhookError,
@@ -1057,6 +1075,8 @@ describe('AutomationsSettings', () => {
     state.customAutomationRunPendingId = null;
     state.customAutomationWebhookSettings = null;
     state.builtInAutomationWebhookFallback = { enabled: false, url: null };
+    state.realWebhookQuery = null;
+    state.builtInAutomationWebhookRefetch.mockResolvedValue(undefined);
     state.builtInAutomationWebhookPending = false;
     state.builtInAutomationWebhookError = false;
     state.builtInAutomationWebhookFetching = false;
@@ -1322,8 +1342,69 @@ describe('AutomationsSettings', () => {
       }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Retry' }));
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Retry' }));
+    });
     expect(state.builtInAutomationWebhookRefetch).toHaveBeenCalledOnce();
+  });
+
+  it('keeps Retry mounted through real query transitions and recovers without reloading', async () => {
+    state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
+    let finishRetry!: (value: { enabled: boolean; url: string | null }) => void;
+    const query = vi
+      .fn<() => Promise<{ enabled: boolean; url: string | null }>>()
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockRejectedValueOnce(new Error('still unavailable'))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishRetry = resolve;
+          }),
+      );
+    state.realWebhookQuery = query;
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <AutomationsSettings />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Manager Stats/,
+      }),
+    );
+    await screen.findByText('Unavailable');
+    editSummaryRow('Webhooks');
+    const originalRetry = screen.getByRole('button', { name: 'Retry' });
+    fireEvent.click(originalRetry);
+    await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(query).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole('button', { name: 'Retry' })).toBe(originalRetry);
+    expect(originalRetry).toBeDisabled();
+    expect(
+      screen.queryByRole('switch', { name: 'manager_stats webhook enabled' }),
+    ).not.toBeInTheDocument();
+    await act(async () =>
+      finishRetry({ enabled: true, url: 'https://roomote.example/webhook' }),
+    );
+    expect(
+      await screen.findByRole('switch', {
+        name: 'manager_stats webhook enabled',
+      }),
+    ).toBeChecked();
+    expect(screen.getByRole('textbox', { name: 'Webhook URL' })).toHaveValue(
+      'https://roomote.example/webhook',
+    );
+    expect(
+      screen.queryByText('Failed to load webhook settings.'),
+    ).not.toBeInTheDocument();
+    client.clear();
   });
 
   it('keeps cached built-in webhook settings visible after a refetch failure', async () => {
