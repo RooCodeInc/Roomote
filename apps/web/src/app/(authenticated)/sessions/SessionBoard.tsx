@@ -9,13 +9,13 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type SyntheticEvent,
 } from 'react';
 import {
   DndContext,
   KeyboardSensor,
   MouseSensor,
   TouchSensor,
-  closestCenter,
   useDraggable,
   useDroppable,
   useSensor,
@@ -38,11 +38,11 @@ import {
   useReducedMotion,
 } from 'motion/react';
 
-import { GripVertical, buttonVariants } from '@/components/system';
 import { useSessionStatusMutation } from '@/components/sessions/use-session-status-mutation';
 import {
   canDropSessionBoardCard,
   getSessionBoardDropStatus,
+  sessionBoardCollisionDetection,
   sessionBoardKeyboardCoordinates,
   type SessionBoardDragData,
 } from '@/components/sessions/session-board-dnd';
@@ -105,6 +105,25 @@ const SessionBoardCardRegistryContext =
   createContext<SessionBoardCardRegistry | null>(null);
 const SessionBoardDndContext = createContext<SessionBoardDndState | null>(null);
 
+const COLUMN_HEADER_CLASSES: Partial<Record<SessionBoardColumnStatus, string>> =
+  {
+    needs_input: 'text-warning',
+    blocked: 'text-destructive',
+  };
+
+function isInteractiveDragTarget(
+  target: EventTarget | null,
+  currentTarget: EventTarget | null,
+) {
+  return (
+    target instanceof Element &&
+    target !== currentTarget &&
+    target.closest(
+      'a, button, input, textarea, select, [role="button"], [contenteditable="true"], [data-session-board-no-drag]',
+    ) !== null
+  );
+}
+
 function getDragData(active: Active): SessionBoardDragData | undefined {
   return active.data.current as SessionBoardDragData | undefined;
 }
@@ -136,6 +155,9 @@ const sessionBoardAnnouncements: Announcements = {
     const targetStatus = getSessionBoardDropStatus(over.id);
     if (!targetStatus)
       return 'Move canceled because that column is unavailable.';
+    if (targetStatus === data.column) {
+      return `${data.title} remains in ${getSessionStatusLabel(data.column)}.`;
+    }
     if (!canDropSessionBoardCard(data.column, targetStatus, data.canManage)) {
       return `${data.title} remains in ${getSessionStatusLabel(data.column)}.`;
     }
@@ -202,6 +224,7 @@ export function SessionBoard({ children }: { children: ReactNode }) {
       if (
         !data ||
         !targetStatus ||
+        targetStatus === data.column ||
         !canDropSessionBoardCard(data.column, targetStatus, data.canManage)
       ) {
         return;
@@ -243,7 +266,7 @@ export function SessionBoard({ children }: { children: ReactNode }) {
     <DndContext
       id="session-board-dnd"
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={sessionBoardCollisionDetection}
       accessibility={{
         announcements: sessionBoardAnnouncements,
         screenReaderInstructions: {
@@ -261,7 +284,10 @@ export function SessionBoard({ children }: { children: ReactNode }) {
             value={{ register, unregister }}
           >
             <LayoutGroup id="session-board">
-              <div className="relative grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))] gap-3 p-4">
+              <div
+                data-session-board-dragging={activeDrag !== null}
+                className="group/board relative grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))] gap-3 p-4 md:min-h-0 md:flex-1 md:grid-flow-col md:auto-cols-[minmax(16rem,1fr)] md:grid-cols-none md:overflow-x-auto"
+              >
                 <AnimatePresence initial={false} mode="popLayout">
                   {children}
                 </AnimatePresence>
@@ -308,10 +334,10 @@ export const SessionBoardColumn = forwardRef<
     ? 'inactive'
     : droppable.isOver
       ? 'over'
-      : isDropTarget
-        ? 'available'
-        : isSourceColumn
-          ? 'source'
+      : isSourceColumn
+        ? 'source'
+        : isDropTarget
+          ? 'available'
           : 'unavailable';
   const dropClasses =
     dropTargetState === 'over'
@@ -342,18 +368,24 @@ export const SessionBoardColumn = forwardRef<
       aria-disabled={isDragging && !isDropTarget ? true : undefined}
       data-session-board-column={column}
       data-session-board-drop-target={dropTargetState}
-      className={`relative min-w-0 motion-safe:transition-[background-color,box-shadow,opacity] ${dropClasses}`}
+      className={`relative min-w-0 motion-safe:transition-[background-color,box-shadow,opacity] md:flex md:min-h-0 md:flex-col ${dropClasses}`}
     >
-      <header className="mb-2 flex cursor-default items-center justify-between gap-2">
+      <header
+        data-session-board-column-header={column}
+        className={`mb-2 flex cursor-default items-center justify-between gap-2 px-2 py-1.5 md:sticky md:top-0 md:z-10 md:shrink-0 ${COLUMN_HEADER_CLASSES[column] ?? ''}`}
+      >
         <h2
           id={`session-board-${column}`}
           className="text-sm font-medium capitalize"
         >
           {label}
         </h2>
-        <span className="text-xs text-muted-foreground">{count}</span>
+        <span className="text-xs text-current/70">{count}</span>
       </header>
-      <div className="divide-y-2 divide-background bg-card">
+      <div
+        data-session-board-card-list={column}
+        className="divide-y-2 divide-background bg-card md:min-h-0 md:flex-1 md:overflow-y-auto md:scroll-thin"
+      >
         {children}
         {count === 0 && isDropTarget ? (
           <div className="flex min-h-20 items-center justify-center border border-dashed border-foreground/20 px-4 text-center text-xs text-muted-foreground">
@@ -411,6 +443,22 @@ export function SessionBoardCard({
     ? `translate3d(${draggable.transform.x}px, ${draggable.transform.y}px, 0)`
     : undefined;
   const isDragging = draggable.isDragging;
+  const setDragNodeRef = useCallback(
+    (node: HTMLElement | null) => {
+      draggable.setNodeRef(node);
+      draggable.setActivatorNodeRef(node);
+    },
+    [draggable],
+  );
+  const dragListeners = Object.fromEntries(
+    Object.entries(draggable.listeners ?? {}).map(([eventName, listener]) => [
+      eventName,
+      (event: SyntheticEvent) => {
+        if (isInteractiveDragTarget(event.target, event.currentTarget)) return;
+        listener(event as never);
+      },
+    ]),
+  ) as typeof draggable.listeners;
 
   return (
     <motion.div
@@ -437,31 +485,18 @@ export function SessionBoardCard({
         className="relative w-full"
       >
         <div
-          ref={draggable.setNodeRef}
+          ref={setDragNodeRef}
           style={{ transform: dragTransform }}
-          className="relative w-full"
+          className={`relative w-full ${canManage ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          {...(canManage ? draggable.attributes : {})}
+          {...(canManage ? dragListeners : {})}
+          role={canManage ? 'group' : undefined}
+          aria-label={canManage ? `Move ${title} to another status` : undefined}
+          aria-pressed={undefined}
+          title={canManage ? 'Drag to change session status' : undefined}
+          data-session-board-drag-activator={canManage ? true : undefined}
         >
-          {canManage ? (
-            <button
-              type="button"
-              aria-label={`Move ${title} to another status`}
-              title="Drag to change session status"
-              data-session-board-drag-handle
-              className={buttonVariants({
-                variant: 'ghost',
-                size: 'icon',
-                className:
-                  'absolute top-2 right-2 z-30 size-8 cursor-grab touch-none bg-card/90 text-muted-foreground hover:bg-accent active:cursor-grabbing',
-              })}
-              ref={draggable.setActivatorNodeRef}
-              {...draggable.attributes}
-              {...draggable.listeners}
-            >
-              <GripVertical />
-              <span className="sr-only">Move {title} to another status</span>
-            </button>
-          ) : null}
-          <div className={canManage ? 'pr-10' : undefined}>{children}</div>
+          {children}
         </div>
       </motion.div>
     </motion.div>

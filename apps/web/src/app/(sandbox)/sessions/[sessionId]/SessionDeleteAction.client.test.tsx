@@ -202,6 +202,7 @@ describe('SessionActions', () => {
     expect(labels).toEqual([
       'Stop all tasks',
       'Mark session as...',
+      'active',
       'needs input',
       'blocked',
       'ready',
@@ -263,6 +264,7 @@ describe('SessionActions', () => {
     ).toEqual([
       'Stop all tasks',
       'Mark session as...',
+      'active',
       'needs input',
       'blocked',
       'ready',
@@ -274,10 +276,8 @@ describe('SessionActions', () => {
       Array.from(submenu.querySelectorAll('button')).map((button) =>
         button.textContent?.trim(),
       ),
-    ).toEqual(['needs input', 'blocked', 'ready', 'done']);
-    expect(
-      screen.queryByRole('button', { name: 'active' }),
-    ).not.toBeInTheDocument();
+    ).toEqual(['active', 'needs input', 'blocked', 'ready', 'done']);
+    expect(screen.getByRole('button', { name: 'active' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'blocked' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'done' }));

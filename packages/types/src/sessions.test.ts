@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { getSessionBoardColumn, SESSION_MANUAL_STATUSES } from './sessions';
 
 describe('SESSION_MANUAL_STATUSES', () => {
-  it('keeps manual statuses in product order without exposing active', () => {
+  it('keeps manual statuses in board order', () => {
     expect(SESSION_MANUAL_STATUSES).toEqual([
+      'active',
       'needs_input',
       'blocked',
       'ready',

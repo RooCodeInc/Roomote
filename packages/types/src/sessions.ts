@@ -10,6 +10,7 @@ export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
 /** User-selectable statuses, kept separate from the deterministic lifecycle. */
 export const SESSION_MANUAL_STATUSES = [
+  'active',
   'needs_input',
   'blocked',
   'ready',
