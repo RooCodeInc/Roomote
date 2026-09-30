@@ -1575,6 +1575,20 @@ describe('AutomationsSettings', () => {
     ).toBeEnabled();
   });
 
+  it('names the usage-alert run action without restoring the removed manager-stats action', async () => {
+    state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Run Inference Provider Usage Alerts now',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Run Weekly Manager Stats now' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows provider support as plain text instead of badges', async () => {
     render(<AutomationsSettings />);
 

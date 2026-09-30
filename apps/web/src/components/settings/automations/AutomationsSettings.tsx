@@ -4610,6 +4610,7 @@ export function AutomationsSettings({
                   <Button
                     variant="ghost"
                     size="icon"
+                    aria-label={`Run ${AUTOMATION_DEFINITIONS.providerUsageLimit.label} now`}
                     onClick={() =>
                       triggerMutation.mutate({
                         automationKey: 'provider_usage_limit',
