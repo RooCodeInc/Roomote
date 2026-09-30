@@ -87,7 +87,21 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildRepositoryCoverage: vi.fn(async () => []),
   enqueueTask: mockEnqueueTask,
-  formatRepositoryEnvironmentLines: vi.fn(() => ''),
+  formatRepositoryEnvironmentLines: vi.fn(
+    (
+      coverage: Array<{
+        repositoryFullName: string;
+        targetEnvironmentId?: string;
+      }>,
+    ) =>
+      coverage
+        .filter((entry) => entry.targetEnvironmentId)
+        .map(
+          (entry) =>
+            `- ${entry.repositoryFullName} -> environment ${entry.targetEnvironmentId}`,
+        )
+        .join('\n'),
+  ),
 }));
 
 vi.mock('../automation-thread-feedback', () => ({
@@ -236,6 +250,30 @@ describe('buildMergedPullRequestTaskContext', () => {
     expect(context).not.toContain('GitHub PR facts');
     expect(context).toContain(
       'https://gitlab.com/acme/backend/-/merge_requests/42',
+    );
+  });
+
+  it('includes environment-backed repository coverage in the task context', () => {
+    const context = buildMergedPullRequestTaskContext({
+      channelId: 'C123',
+      destination: {
+        provider: 'slack',
+        channelId: 'C123',
+      } as never,
+      hasMorePullRequests: false,
+      trigger: 'scheduled',
+      mergedPullRequests: [],
+      repositoryCoverage: [
+        {
+          repositoryFullName: 'acme/backend',
+          targetEnvironmentId: '11111111-1111-4111-8111-111111111111',
+        },
+      ],
+      scanMode: { kind: 'interval', since: new Date('2026-07-01T00:00:00Z') },
+    });
+
+    expect(context).toContain(
+      '<repository_environments>\n- acme/backend -> environment 11111111-1111-4111-8111-111111111111\n  </repository_environments>',
     );
   });
 });

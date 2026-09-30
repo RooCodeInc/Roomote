@@ -1,4 +1,7 @@
-import { findEnvironmentForRepo } from './task-run-queue';
+import {
+  getAvailableEnvironments,
+  type RoutableEnvironment,
+} from './available-environments';
 
 export type RepositoryCoverage = {
   repositoryFullName: string;
@@ -12,20 +15,46 @@ type EnvironmentBackedRepositoryCoverage = RepositoryCoverage & {
 export async function buildRepositoryCoverage(
   repositoryFullNames: string[],
 ): Promise<RepositoryCoverage[]> {
-  return Promise.all(
-    repositoryFullNames.map(async (repositoryFullName) => {
-      const targetEnvironmentId =
-        (await findEnvironmentForRepo(repositoryFullName)) ?? undefined;
+  const environments = await getAvailableEnvironments();
 
-      return targetEnvironmentId
-        ? {
-            repositoryFullName,
-            targetEnvironmentId,
-          }
-        : {
-            repositoryFullName,
-          };
-    }),
+  return repositoryFullNames.map((repositoryFullName) => {
+    const normalizedRepositoryName = repositoryFullName.toLowerCase();
+    const matches = environments
+      .filter((environment) =>
+        environment.repositoryNames.some(
+          (name) => name.toLowerCase() === normalizedRepositoryName,
+        ),
+      )
+      .sort((left, right) =>
+        compareEnvironmentCoverage(left, right, normalizedRepositoryName),
+      );
+    const targetEnvironmentId = matches[0]?.id;
+
+    return targetEnvironmentId
+      ? {
+          repositoryFullName,
+          targetEnvironmentId,
+        }
+      : {
+          repositoryFullName,
+        };
+  });
+}
+
+function compareEnvironmentCoverage(
+  left: RoutableEnvironment,
+  right: RoutableEnvironment,
+  normalizedRepositoryName: string,
+): number {
+  const isPrimary = (environment: RoutableEnvironment) =>
+    environment.config?.repositories[0]?.repository.toLowerCase() ===
+    normalizedRepositoryName;
+  const primaryDifference = Number(isPrimary(right)) - Number(isPrimary(left));
+
+  return (
+    primaryDifference ||
+    left.repositoryNames.length - right.repositoryNames.length ||
+    left.id.localeCompare(right.id)
   );
 }
 
