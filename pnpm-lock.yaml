@@ -92,8 +92,8 @@ importers:
         specifier: ^1.52.0
         version: 1.52.0
       '@roo-code/judgement':
-        specifier: github:RooCodeInc/judgement#e4196715a2c0ce55fc41423704db077adb427215
-        version: https://codeload.github.com/RooCodeInc/judgement/tar.gz/e4196715a2c0ce55fc41423704db077adb427215
+        specifier: 0.4.0
+        version: 0.4.0
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:packages/config-typescript
@@ -945,8 +945,8 @@ importers:
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
       '@roo-code/judgement':
-        specifier: github:RooCodeInc/judgement#e4196715a2c0ce55fc41423704db077adb427215
-        version: https://codeload.github.com/RooCodeInc/judgement/tar.gz/e4196715a2c0ce55fc41423704db077adb427215
+        specifier: 0.4.0
+        version: 0.4.0
       '@roomote/auth':
         specifier: workspace:^
         version: link:../../packages/auth
@@ -1150,8 +1150,8 @@ importers:
         specifier: 1.18.30
         version: 1.18.30
       '@roo-code/judgement':
-        specifier: github:RooCodeInc/judgement#e4196715a2c0ce55fc41423704db077adb427215
-        version: https://codeload.github.com/RooCodeInc/judgement/tar.gz/e4196715a2c0ce55fc41423704db077adb427215
+        specifier: 0.4.0
+        version: 0.4.0
       '@roomote/ado':
         specifier: workspace:^
         version: link:../ado
@@ -5104,9 +5104,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@roo-code/judgement@https://codeload.github.com/RooCodeInc/judgement/tar.gz/e4196715a2c0ce55fc41423704db077adb427215':
-    resolution: {tarball: https://codeload.github.com/RooCodeInc/judgement/tar.gz/e4196715a2c0ce55fc41423704db077adb427215}
-    version: 0.4.0
+  '@roo-code/judgement@0.4.0':
+    resolution: {integrity: sha512-MPleLuyuZI4OZjijiiCwroC8XS7ZdoxPbnbiLjg23ryirTM9WLZoqAuySVGTOPmQraOTTRiXKFuuBCDik5LdDw==}
     engines: {node: '>=22.20.0'}
     hasBin: true
 
@@ -15591,7 +15590,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.61.1':
     optional: true
 
-  '@roo-code/judgement@https://codeload.github.com/RooCodeInc/judgement/tar.gz/e4196715a2c0ce55fc41423704db077adb427215':
+  '@roo-code/judgement@0.4.0':
     dependencies:
       picomatch: 4.0.7
 
