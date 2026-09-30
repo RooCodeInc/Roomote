@@ -24,9 +24,9 @@ import { getDecisionModelRequirements } from './judgment-decision-policy';
 
 const AUTO_EVALUATION_TIMEOUT_MS = 20_000;
 /**
- * Which judgment models may assess tool calls, from the decision policy: Jev,
- * or the Roomote judgment model when the deployment selected it. The helper
- * model never does.
+ * Which judgment models may assess tool calls, from the decision policy. Only
+ * Jev does: a deployment on the Roomote judgment model gets no Auto (every
+ * call asks, as with no model at all), and the helper model never assesses.
  */
 export const AUTO_DECISION_REQUIREMENTS = getDecisionModelRequirements(
   'integration-tool-auto-evaluation',
