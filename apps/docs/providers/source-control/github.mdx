@@ -179,6 +179,12 @@ Install the GitHub App on the repositories Roomote should use. Then sign in,
 complete the GitHub card in the setup conversation, and confirm repository
 sync sees the expected repositories.
 
+If a repository stamped onto an existing task is later deleted or removed from
+the GitHub App, Roomote can resume the task using the stamped repositories that
+remain available. Resumption still fails when none of the task's stamped
+repositories remain accessible; reconnect or restore repository access before
+continuing that task.
+
 To replace a saved GitHub App, open **Settings > Source Control** and select
 **Remove**. Roomote removes the saved deployment credentials and disconnects
 existing GitHub repositories so you can configure another app. Process
