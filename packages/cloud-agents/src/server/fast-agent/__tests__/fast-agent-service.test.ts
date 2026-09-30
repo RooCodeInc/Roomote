@@ -65,6 +65,7 @@ const mocks = vi.hoisted(() => ({
   revokeDurableReplay: vi.fn(),
   scheduleDurableRetry: vi.fn(),
   findActiveRetryNotice: vi.fn(),
+  listRecentFastAgentHumanUserPromptTexts: vi.fn(async () => []),
   loadTurnAttempt: vi.fn(),
   getUnifiedSession: vi.fn(),
   createSessionStatusJudgmentRequest: vi.fn(),
@@ -206,6 +207,8 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   revokeFastAgentDurableTurnReplay: mocks.revokeDurableReplay,
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
+  listRecentFastAgentHumanUserPromptTexts:
+    mocks.listRecentFastAgentHumanUserPromptTexts,
   loadFastAgentTurnAttemptSummary: mocks.loadTurnAttempt,
 }));
 
