@@ -70,6 +70,12 @@ vi.mock('@/components/settings/JevgrepExperimentalSetting', () => ({
 
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
+vi.mock('@/components/settings/JudgementExperimentalSetting', () => ({
+  JudgementExperimentalSetting: () => (
+    <div>Judgement repository rules setting</div>
+  ),
+}));
+
 describe('ExperimentalSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -86,6 +92,9 @@ describe('ExperimentalSettingsPage', () => {
       'true',
     );
     expect(screen.getByText('Jevgrep code search setting')).toBeInTheDocument();
+    expect(
+      screen.getByText('Judgement repository rules setting'),
+    ).toBeInTheDocument();
     expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(
       screen.getByText('Browser notifications setting'),

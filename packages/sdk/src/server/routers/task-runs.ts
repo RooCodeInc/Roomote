@@ -1092,6 +1092,7 @@ export const taskRunsRouter = router({
     z.object({ runId: z.number() }),
     'runId',
   ).query(async () => {
+    if (!(await isDeploymentExperimentEnabled('judgement'))) return false;
     const backend = await resolveJudgmentBackend({ bypassCache: true });
     return Boolean(backend && backend.provider !== 'roomote');
   }),
