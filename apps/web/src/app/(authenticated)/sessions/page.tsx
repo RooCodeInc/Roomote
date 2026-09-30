@@ -6,21 +6,29 @@ import {
   getSessionStatusLabel,
   SESSION_BOARD_COLUMNS,
   SESSION_STATUSES,
+  type SessionBoardColumn as SessionBoardColumnStatus,
   type SessionStatus,
 } from '@roomote/types';
-import { getDeploymentExperiments } from '@roomote/db/server';
 
 import { parseTimePeriodParam } from '@/types';
 import { authorize } from '@/lib/server/auth-context';
 import {
   getSessions,
   getSessionSources,
+  type SessionArchiveFilter,
   type SessionScope,
 } from '@/lib/server/sessions';
 import { Empty, EmptyDescription, EmptyHeader } from '@/components/system';
 
 import { SessionsFilters } from './SessionsFilters';
 import { SessionCard } from './SessionCard';
+import {
+  SessionBoard,
+  SessionBoardCard,
+  SessionBoardColumn,
+} from './SessionBoard';
+
+const SESSIONS_PAGE_SIZE = 100;
 
 export default async function SessionsPage({
   searchParams,
@@ -37,34 +45,34 @@ export default async function SessionsPage({
     pullRequest?: string;
     source?: string;
     model?: string;
+    archive?: string;
   }>;
 }) {
-  const [authorizedUser, params = {}, experiments] = await Promise.all([
+  const [authorizedUser, params = {}] = await Promise.all([
     authorize(),
     searchParams,
-    getDeploymentExperiments().catch(() => {
-      console.error(
-        '[Sessions] Failed to load deployment experiments; showing the list view.',
-      );
-      return { sessionStatusJudgment: false, sessionsBoard: false };
-    }),
   ]);
   if (!authorizedUser.success) {
     notFound();
   }
   const { before, user, period, q } = params;
-  const boardEnabled = experiments.sessionsBoard;
-  const view = boardEnabled && params.view === 'board' ? 'board' : 'list';
+  const view = params.view === 'board' ? 'board' : 'list';
   const scope = ['all', 'tasks', 'reviews', 'automations'].includes(
     params.scope ?? '',
   )
     ? (params.scope as SessionScope)
     : 'all';
-  const status = (SESSION_STATUSES as readonly string[]).includes(
-    params.status ?? '',
-  )
-    ? (params.status as SessionStatus)
+  const status = (view === 'board'
+    ? SESSION_BOARD_COLUMNS
+    : SESSION_STATUSES
+  ).includes(params.status as never)
+    ? (params.status as SessionStatus | SessionBoardColumnStatus)
     : undefined;
+  const archive = ['archived', 'non-archived', 'all'].includes(
+    params.archive ?? '',
+  )
+    ? (params.archive as SessionArchiveFilter)
+    : 'non-archived';
   const timePeriod = parseTimePeriodParam(period ?? null, 'all');
   const [result, sources] = await Promise.all([
     getSessions(authorizedUser, {
@@ -78,9 +86,11 @@ export default async function SessionsPage({
       pullRequest: params.pullRequest,
       source: params.source,
       model: params.model,
-      includeJudgedStatus: boardEnabled && experiments.sessionStatusJudgment,
+      archive,
+      includeJudgedStatus: view === 'board',
+      limit: SESSIONS_PAGE_SIZE,
     }),
-    getSessionSources(authorizedUser),
+    getSessionSources(authorizedUser, archive),
   ]);
   const boardColumns =
     view === 'board'
@@ -91,19 +101,17 @@ export default async function SessionsPage({
               getSessionBoardColumn({
                 cachedStatus: session.cachedStatus ?? null,
                 manualStatus: session.manualStatus ?? null,
-                judgmentStatus: experiments.sessionStatusJudgment
-                  ? session.judgedStatus
-                  : null,
+                judgmentStatus: session.judgedStatus,
               }) === column,
           ),
-        })).filter(({ sessions }) => sessions.length > 0)
+        }))
       : [];
   const olderParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value && key !== 'before' && key !== 'view')
       olderParams.set(key, value);
   });
-  if (boardEnabled && view === 'board') olderParams.set('view', 'board');
+  if (view === 'board') olderParams.set('view', 'board');
   if (result.nextCursor) olderParams.set('before', result.nextCursor);
 
   return (
@@ -115,16 +123,18 @@ export default async function SessionsPage({
           scope={scope}
           status={status ?? 'all'}
           view={view}
-          boardEnabled={boardEnabled}
           query={q ?? ''}
           repository={params.repository ?? null}
           pullRequest={params.pullRequest ?? null}
           source={params.source ?? 'all'}
           sourceOptions={sources}
           model={params.model ?? null}
+          archive={archive}
         />
       </div>
-      <main className="min-h-0 flex-1 overflow-y-auto bg-background">
+      <main
+        className={`min-h-0 flex-1 overflow-y-auto bg-background ${view === 'board' ? 'md:flex md:flex-col md:overflow-hidden' : ''}`}
+      >
         {result.sessions.length === 0 ? (
           <Empty>
             <EmptyHeader>
@@ -132,43 +142,34 @@ export default async function SessionsPage({
             </EmptyHeader>
           </Empty>
         ) : view === 'board' ? (
-          <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))] gap-3 p-4">
-            {boardColumns.map(({ column, sessions: columnSessions }) => {
-              return (
-                <section
-                  key={column}
-                  aria-labelledby={`session-board-${column}`}
-                  className="min-w-0"
-                >
-                  <header className="mb-2 flex cursor-default items-center justify-between gap-2">
-                    <h2
-                      id={`session-board-${column}`}
-                      className="text-sm font-medium capitalize"
-                    >
-                      {getSessionStatusLabel(column)}
-                    </h2>
-                    <span className="text-xs text-muted-foreground">
-                      {columnSessions.length}
-                    </span>
-                  </header>
-                  <div className="divide-y-2 divide-background bg-card">
-                    {columnSessions.map((session) => (
-                      <SessionCard
-                        key={session.id}
-                        session={session}
-                        viewerUserId={authorizedUser.userId}
-                        query={q}
-                        hideBlockedBadge
-                        sessionStatusExperimentEnabled={
-                          experiments.sessionStatusJudgment
-                        }
-                      />
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
+          <SessionBoard>
+            {boardColumns.map(({ column, sessions: columnSessions }) => (
+              <SessionBoardColumn
+                key={column}
+                column={column}
+                label={getSessionStatusLabel(column)}
+                count={columnSessions.length}
+                statusFilter={status}
+              >
+                {columnSessions.map((session) => (
+                  <SessionBoardCard
+                    key={session.id}
+                    sessionId={session.id}
+                    column={column}
+                    canManage={session.canManage ?? false}
+                    title={session.title}
+                  >
+                    <SessionCard
+                      session={session}
+                      viewerUserId={authorizedUser.userId}
+                      query={q}
+                      hideAttentionBadges
+                    />
+                  </SessionBoardCard>
+                ))}
+              </SessionBoardColumn>
+            ))}
+          </SessionBoard>
         ) : (
           <div className="divide-y divide-card">
             {result.sessions.map((session) => (
@@ -177,9 +178,6 @@ export default async function SessionsPage({
                 session={session}
                 viewerUserId={authorizedUser.userId}
                 query={q}
-                sessionStatusExperimentEnabled={
-                  experiments.sessionStatusJudgment
-                }
               />
             ))}
           </div>

@@ -1,7 +1,8 @@
 vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
-  evaluateTypeSafeJudgments: vi
-    .fn()
-    .mockResolvedValue({ relevant: { type: 'noul', noul: 0.9 } }),
+  evaluateTypeSafeJudgmentsWithUsage: vi.fn().mockResolvedValue({
+    answers: { relevant: { type: 'noul', noul: 0.9 } },
+    usage: { inputTokens: 120, outputTokens: 8, totalTokens: 128 },
+  }),
 }));
 
 import { Hono } from 'hono';
@@ -1540,6 +1541,7 @@ describe('Jevgrep gateway', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       answers: { relevant: { type: 'noul', noul: 0.9 } },
+      usage: { input_tokens: 120, output_tokens: 8, total_tokens: 128 },
     });
   });
   it('rejects oversized source before evaluation', async () => {

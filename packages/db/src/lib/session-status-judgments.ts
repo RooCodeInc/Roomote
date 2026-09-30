@@ -13,7 +13,6 @@ import {
   type SessionStatusJudgmentState,
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
-import { isDeploymentExperimentEnabled } from './deployment-experiments';
 
 const CLAIM_LEASE_MS = 2 * 60 * 1_000;
 const SESSION_STATUS_INACTIVITY_MS = 4 * 24 * 60 * 60 * 1_000;
@@ -91,12 +90,6 @@ export async function enqueueInactiveSessionStatusJudgmentRequests(
   database: DatabaseOrTransaction,
   limit = 100,
 ): Promise<number> {
-  if (
-    !(await isDeploymentExperimentEnabled('sessionStatusJudgment', database))
-  ) {
-    return 0;
-  }
-
   const candidates = await database.execute<{
     session_id: string;
     due_ms: string | number;
@@ -142,11 +135,6 @@ export async function createSessionStatusJudgmentRequest(
     state: 'awaiting_settlement' | 'pending';
   },
 ) {
-  if (
-    !(await isDeploymentExperimentEnabled('sessionStatusJudgment', database))
-  ) {
-    return null;
-  }
   return runInTransactionIfAvailable(database, async (tx) => {
     const [session] = await tx
       .select({ id: sessions.id })
@@ -209,26 +197,6 @@ export async function settleSessionStatusJudgmentTurn(
 ): Promise<void> {
   await clearManualStatusAfterNewerUserMessage(database, input.sessionId);
   await refreshSessionInactivityDueAt(database, input.sessionId);
-  if (
-    !(await isDeploymentExperimentEnabled('sessionStatusJudgment', database))
-  ) {
-    await database
-      .update(sessionStatusJudgments)
-      .set({
-        state: 'ignored',
-        errorCode: 'experiment_disabled',
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(sessionStatusJudgments.sessionId, input.sessionId),
-          eq(sessionStatusJudgments.sourceEventId, input.sourceEventId),
-          eq(sessionStatusJudgments.state, 'awaiting_settlement'),
-        ),
-      );
-    return;
-  }
-
   const nextState: SessionStatusJudgmentState = input.visible
     ? 'pending'
     : 'ignored';
@@ -263,19 +231,27 @@ export async function settleSessionStatusJudgmentTurn(
 export async function claimSessionStatusJudgmentRequests(
   database: DatabaseOrTransaction,
   limit: number,
+  options: { sessionIds?: string[] } = {},
 ): Promise<(typeof sessionStatusJudgments.$inferSelect)[]> {
+  if (options.sessionIds?.length === 0) return [];
+
   return runInTransactionIfAvailable(database, async (tx) => {
     const expiredClaim = new Date(Date.now() - CLAIM_LEASE_MS);
     const candidates = await tx
       .select()
       .from(sessionStatusJudgments)
       .where(
-        or(
-          eq(sessionStatusJudgments.state, 'pending'),
-          and(
-            eq(sessionStatusJudgments.state, 'processing'),
-            lt(sessionStatusJudgments.claimedAt, expiredClaim),
+        and(
+          or(
+            eq(sessionStatusJudgments.state, 'pending'),
+            and(
+              eq(sessionStatusJudgments.state, 'processing'),
+              lt(sessionStatusJudgments.claimedAt, expiredClaim),
+            ),
           ),
+          options.sessionIds
+            ? inArray(sessionStatusJudgments.sessionId, options.sessionIds)
+            : undefined,
         ),
       )
       .orderBy(sessionStatusJudgments.createdAt, sessionStatusJudgments.id)
@@ -331,7 +307,7 @@ export async function completeSessionStatusJudgment(
     model?: string;
     errorCode?: string;
   },
-): Promise<'applied' | 'ignored' | 'stale' | 'disabled' | 'missing'> {
+): Promise<'applied' | 'ignored' | 'stale' | 'missing'> {
   return runInTransactionIfAvailable(database, async (tx) => {
     const [session] = await tx
       .select({ id: sessions.id })
@@ -355,19 +331,6 @@ export async function completeSessionStatusJudgment(
         })
         .where(eq(sessionStatusJudgments.id, input.id));
       return 'stale';
-    }
-
-    if (!(await isDeploymentExperimentEnabled('sessionStatusJudgment', tx))) {
-      await tx
-        .update(sessionStatusJudgments)
-        .set({
-          state: 'ignored',
-          claimedAt: null,
-          errorCode: 'experiment_disabled',
-          updatedAt: new Date(),
-        })
-        .where(eq(sessionStatusJudgments.id, input.id));
-      return 'disabled';
     }
 
     const [updated] = await tx
@@ -399,20 +362,15 @@ export async function retryOrFailSessionStatusJudgment(
   database: DatabaseOrTransaction,
   input: { id: string; attempts: number; errorCode: string },
 ): Promise<void> {
-  const enabled = await isDeploymentExperimentEnabled(
-    'sessionStatusJudgment',
-    database,
-  );
   await database
     .update(sessionStatusJudgments)
     .set({
-      state: !enabled
-        ? 'ignored'
-        : input.attempts >= MAX_SESSION_STATUS_JUDGMENT_ATTEMPTS
+      state:
+        input.attempts >= MAX_SESSION_STATUS_JUDGMENT_ATTEMPTS
           ? 'failed'
           : 'pending',
       claimedAt: null,
-      errorCode: enabled ? input.errorCode : 'experiment_disabled',
+      errorCode: input.errorCode,
       updatedAt: new Date(),
     })
     .where(
@@ -420,26 +378,6 @@ export async function retryOrFailSessionStatusJudgment(
         eq(sessionStatusJudgments.id, input.id),
         eq(sessionStatusJudgments.state, 'processing'),
       ),
-    );
-}
-
-export async function discardPendingSessionStatusJudgments(
-  database: DatabaseOrTransaction,
-): Promise<void> {
-  await database
-    .update(sessionStatusJudgments)
-    .set({
-      state: 'ignored',
-      claimedAt: null,
-      errorCode: 'experiment_disabled',
-      updatedAt: new Date(),
-    })
-    .where(
-      inArray(sessionStatusJudgments.state, [
-        'awaiting_settlement',
-        'pending',
-        'processing',
-      ]),
     );
 }
 

@@ -426,6 +426,25 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(config.agent.build.tools['*']).toBe(false);
   });
 
+  it.each([
+    ['without', false],
+    ['with', true],
+  ] as const)(
+    'configures save_memory exposure %s Brain',
+    async (_label, brainEnabled) => {
+      const runtime = await getFastAgentNativeToolRuntime(
+        `save-memory-${brainEnabled}`,
+        [],
+        { brainEnabled },
+      );
+      const config = JSON.parse(
+        await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+      );
+
+      expect(config.agent.build.tools.save_memory).toBe(brainEnabled);
+    },
+  );
+
   it('keeps colliding integration ids addressable with unique code-mode names', async () => {
     const runtime = await getFastAgentNativeToolRuntime(
       'code-mode-integrations-collision',

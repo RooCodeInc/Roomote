@@ -2,7 +2,7 @@
 
 import { useState, type SyntheticEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   getSessionStatusLabel,
@@ -13,6 +13,7 @@ import {
 
 import { useTRPC } from '@/trpc/client';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
+import { useSessionStatusMutation } from '@/components/sessions/use-session-status-mutation';
 import {
   Activity,
   Archive,
@@ -44,16 +45,13 @@ export function SessionActions({
   sessionId,
   listRow = false,
   status,
-  sessionStatusExperimentEnabled = false,
 }: {
   sessionId: string;
   listRow?: boolean;
   status?: SessionStatus | SessionManualStatus | null;
-  sessionStatusExperimentEnabled?: boolean;
 }) {
   const trpc = useTRPC();
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const currentStatus = status ?? 'ready';
   const stopTasks = useMutation(
@@ -116,33 +114,7 @@ export function SessionActions({
       onError: () => toast.error('Failed to delete session.'),
     }),
   );
-  const setStatus = useMutation(
-    trpc.sessions.setStatus.mutationOptions({
-      onSuccess: (result, variables) => {
-        if (!result) {
-          toast.error('Failed to update session status.');
-          return;
-        }
-        const nextStatus = (variables as { status: SessionManualStatus })
-          .status;
-        toast.success(
-          `Session marked as ${getSessionStatusLabel(nextStatus)}.`,
-        );
-        void queryClient.invalidateQueries({
-          queryKey: trpc.sessions.byId.queryKey({ sessionId }),
-        });
-        void queryClient.invalidateQueries({
-          queryKey: trpc.sessions.list.queryKey(),
-        });
-        void queryClient.invalidateQueries({
-          queryKey: trpc.sessions.search.queryKey(),
-        });
-        router.refresh();
-      },
-      onError: (error) =>
-        toast.error(error.message || 'Failed to update session status.'),
-    }),
-  );
+  const setStatus = useSessionStatusMutation();
   const isPending =
     stopTasks.isPending ||
     archiveSession.isPending ||
@@ -188,37 +160,35 @@ export function SessionActions({
             <Square className="size-4" />
             Stop all tasks
           </DropdownMenuItem>
-          {sessionStatusExperimentEnabled ? (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="flex cursor-pointer items-center gap-2">
-                <Activity className="size-4" />
-                Mark session as...
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                <DropdownMenuRadioGroup
-                  value={currentStatus}
-                  onValueChange={(value) => {
-                    if (value === currentStatus) return;
-                    setStatus.mutate({
-                      sessionId,
-                      status: value as SessionManualStatus,
-                    });
-                  }}
-                >
-                  {SESSION_MANUAL_STATUSES.map((nextStatus) => (
-                    <DropdownMenuRadioItem
-                      key={nextStatus}
-                      value={nextStatus}
-                      disabled={isPending || nextStatus === currentStatus}
-                      className="capitalize"
-                    >
-                      {getSessionStatusLabel(nextStatus)}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          ) : null}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="flex cursor-pointer items-center gap-2">
+              <Activity className="size-4" />
+              Mark session as...
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup
+                value={currentStatus}
+                onValueChange={(value) => {
+                  if (value === currentStatus) return;
+                  setStatus.mutate({
+                    sessionId,
+                    status: value as SessionManualStatus,
+                  });
+                }}
+              >
+                {SESSION_MANUAL_STATUSES.map((nextStatus) => (
+                  <DropdownMenuRadioItem
+                    key={nextStatus}
+                    value={nextStatus}
+                    disabled={isPending || nextStatus === currentStatus}
+                    className="capitalize"
+                  >
+                    {getSessionStatusLabel(nextStatus)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuItem
             onClick={() => archiveSession.mutate({ sessionId })}
             disabled={isPending}

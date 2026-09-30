@@ -18,11 +18,12 @@ import type {
   AutomationJobResult,
   AutomationRunNowResult,
   AutomationRunOpts,
+  ExplicitAutomationRunContext,
 } from './types';
 
 const AUTOMATION_RUNNERS: Record<
   TriggerableBackgroundAutomationKey,
-  (opts?: AutomationRunOpts) => Promise<AutomationJobResult>
+  (opts: AutomationRunOpts) => Promise<AutomationJobResult>
 > = {
   conflict_resolver: conflictScanJob,
   suggester: suggesterJob,
@@ -42,25 +43,25 @@ const AUTOMATION_RUNNERS: Record<
 
 export function getAutomationRunner(
   key: TriggerableBackgroundAutomationKey,
-): (opts?: AutomationRunOpts) => Promise<AutomationJobResult> {
+): (opts: AutomationRunOpts) => Promise<AutomationJobResult> {
   return AUTOMATION_RUNNERS[key];
 }
 
 /**
- * Synchronous manual "Run now": invokes the same runner the scheduler uses,
- * inline, and maps the pass result to a user-facing outcome.
+ * Synchronous explicit run: invokes the same runner the scheduler uses inline
+ * and maps the pass result to a user-facing outcome.
  */
 export async function runAutomationNow(
   key: TriggerableBackgroundAutomationKey,
-  opts: AutomationRunOpts = {},
+  opts: {
+    context: ExplicitAutomationRunContext;
+    destination?: AutomationRunOpts['destination'];
+  },
 ): Promise<AutomationRunNowResult> {
   let result: AutomationJobResult;
 
   try {
-    result = await AUTOMATION_RUNNERS[key]({
-      ...opts,
-      manualTrigger: true,
-    });
+    result = await AUTOMATION_RUNNERS[key](opts);
   } catch (error) {
     return {
       outcome: 'failed',

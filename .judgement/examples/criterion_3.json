@@ -1,0 +1,47 @@
+{
+  "ruleId": "criterion_3",
+  "examples": [
+    {
+      "name": "Return raw exception message",
+      "path": "apps/api/src/handlers/project.ts",
+      "before": "export function failure(c, error) { return c.json({ error: \"Unable to load the project.\" }, 500); }\n",
+      "after": "export function failure(c, error) { return c.json({ error: error.message }, 500); }\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Return stack trace",
+      "path": "apps/api/src/handlers/project.ts",
+      "before": "export function failure(c, error) { return c.json({ error: \"Unable to load the project.\" }, 500); }\n",
+      "after": "export function failure(c, error) { return c.json({ error: error.stack }, 500); }\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Return full exception object",
+      "path": "apps/api/src/handlers/project.ts",
+      "before": "export function failure(c, error) { return c.json({ error: \"Request failed.\" }, 500); }\n",
+      "after": "export function failure(c, error) { return c.json({ error }, 500); }\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Sanitized failure response",
+      "path": "apps/api/src/handlers/project.ts",
+      "before": "export function failure(c, error) { return c.json({ error: error.message }, 500); }\n",
+      "after": "export function failure(c, error) { return c.json({ error: \"Unable to load the project. Try again.\" }, 500); }\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Safe not-found response",
+      "path": "apps/api/src/handlers/project.ts",
+      "before": "export function missing(c) { return c.json({}, 404); }\n",
+      "after": "export function missing(c) { return c.json({ error: \"Project not found.\" }, 404); }\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Safe validation message",
+      "path": "apps/api/src/handlers/project.ts",
+      "before": "export function invalid(c) { return c.json({}, 400); }\n",
+      "after": "export function invalid(c) { return c.json({ error: \"Enter a valid project name.\" }, 400); }\n",
+      "expected": "pass"
+    }
+  ]
+}

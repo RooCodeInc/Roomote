@@ -4390,6 +4390,8 @@ export const automations = pgTable('automations', {
   key: text('key').primaryKey().$type<BackgroundAutomationKey>(),
   enabled: boolean('enabled').notNull().default(false),
   internal: boolean('internal').notNull().default(false),
+  /** Encrypted opaque bearer token for an optional built-in webhook trigger. */
+  webhookSecret: encryptedText('webhook_secret'),
   schedule: jsonb('schedule')
     .notNull()
     .default({})
@@ -4489,8 +4491,6 @@ export const sessions = pgTable(
     // Optional user-selected status. When present, runtime reconciliation
     // preserves it while cached_status remains the deterministic lifecycle
     // status. 'done' is intentionally valid here but not in cached_status.
-    // Keep 'active' in the database vocabulary for N-1 rollback compatibility;
-    // the current API and UI reject it as a new manual selection.
     manualStatus: text('manual_status').$type<SessionManualStatus>(),
     manualStatusSetAt: timestamp('manual_status_set_at'),
     inactivityDueAt: timestamp('inactivity_due_at'),

@@ -1,16 +1,46 @@
 ---
-title: What to ask Roomote
-icon: messages-square
-description: Frame asks so Roomote can stay scoped, useful, and reviewable.
+title: Use cases
+icon: bot-message-square
+description: See how Roomote agents, workflows, triggers, and environments fit together.
 ---
 
-Roomote is built for the work that constantly pulls teams out of focus:
-questions, planning, investigations, bugfixes, review follow-up, and
-backlogged improvements.
+Roomote agents are the product's core abstraction. A teammate gives an agent an
+outcome, the agent answers directly or delegates execution, and Roomote keeps
+the conversation, evidence, and follow-up connected. The same agent can help
+with a question in one turn, a plan in the next, and an implementation task
+after that.
 
-The best asks give a Roomote agent a clear first milestone. Teams usually start
-with codebase questions and small fixes, then move into bugfixes, PR review,
-and more complex implementation work once the workflow feels natural.
+Roomote does not split these capabilities into selectable agent identities.
+Planning, coding, explanation, review, and conflict resolution are workflows or
+behavior modes that an agent can use for the current request.
+
+## The product model
+
+Keep four parts of a request distinct when you decide how to use Roomote:
+
+| Part | What it means | Examples |
+| --- | --- | --- |
+| **Agent** | The Roomote agent that understands the request, uses authorized tools, and reports the result. | A shared engineering agent, a support-facing agent, or an agent reached through chat. |
+| **Workflow** | The kind of work the agent performs. | A question, plan, implementation, scan, pull request review, or conflict-resolution workflow. |
+| **Surface and trigger** | Where the request arrives and what starts it. | The web dashboard, Slack, Linear, GitHub, an API call, a manual run, a schedule, or a webhook. |
+| **Environment** | The execution context used when work needs a workspace. | A named environment, a repository, all repositories, or a blank-slate sandbox. |
+
+The surface is the interaction channel, not a different product. The workflow is
+the work being requested, not a permanent agent type. An environment controls
+repositories, services, variables, and sandbox setup; it does not decide what
+the agent should do.
+
+## Where Roomote fits
+
+Use a session when the work benefits from conversation, clarification, or a
+shared trail of decisions. A session may answer directly or delegate one or
+more tasks. Use a task when you need an independently controllable execution
+with a terminal, logs, diff, preview, or artifacts. The task reports back to
+its owning session when one exists.
+
+Use [automations](/automations) when the same prompt or event should create
+repeatable work without a teammate starting each run. Automations still create
+ordinary sessions and tasks, so the review path stays the same.
 
 ## Good asks
 
@@ -31,10 +61,12 @@ issue or pull request, and any constraints Roomote should respect.
 
 The strongest prompts usually include:
 
-- the outcome you want
+- the outcome you want and the first milestone that would prove progress
 - the repository, environment, file path, issue, or PR Roomote should use
 - any constraints that matter, such as "do not change the API contract"
 - whether you want an explanation, a plan, implementation work, or review
+- the evidence or delivery path you expect, such as a test result, diff, preview,
+  or pull request
 
 ## Ask patterns that work well
 

@@ -40,6 +40,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   HAS_PULL_REQUEST_FILTER_VALUE,
   LINEAR_SESSION_ACTOR_PREFIX,
+  type SessionBoardColumn,
   type SessionManualStatus,
   type BackgroundAutomationKey,
 } from '@roomote/types';
@@ -60,10 +61,12 @@ import {
 
 type SessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 export type SessionScope = 'all' | 'tasks' | 'reviews' | 'automations';
+export type SessionArchiveFilter = 'archived' | 'non-archived' | 'all';
 
 type SessionListInput = {
   scope?: SessionScope;
-  status?: 'active' | 'needs_input' | 'blocked' | 'ready';
+  status?: SessionBoardColumn;
+  archive?: SessionArchiveFilter;
   user?: string | null;
   repository?: string | null;
   pullRequest?: string | null;
@@ -352,7 +355,6 @@ async function getSessionSearchSnippets(
       where ${inArray(sessions.id, sessionIds)}
         and ${accessCondition}
         and ${eq(sessions.visibility, 'visible')}
-        and ${isNull(sessions.archivedAt)}
         and ${inArray(fastAgentMessages.role, ['user', 'assistant'])}
         and case
           when ${fastAgentMessages.metadata} ->> 'visibleInTranscript' is not null
@@ -376,7 +378,6 @@ async function getSessionSearchSnippets(
       where ${inArray(sessions.id, sessionIds)}
         and ${accessCondition}
         and ${eq(sessions.visibility, 'visible')}
-        and ${isNull(sessions.archivedAt)}
         and ${isNull(tasks.deletedAt)}
         and ${inArray(taskMessages.role, ['user', 'assistant'])}
         and case
@@ -430,6 +431,7 @@ function listConditions(
 ) {
   const cursor = decodeCursor(input.before);
   const scope = input.scope ?? 'all';
+  const archive = input.archive ?? 'non-archived';
   const period = input.period ?? 'all';
   const pullRequest = input.pullRequest
     ? parsePullRequestFilterValue(input.pullRequest)
@@ -461,18 +463,78 @@ function listConditions(
           ),
       )
     : undefined;
+  const latestJudgmentOutcome = sql<string | null>`(
+    select case
+      when judgment.state = 'applied' then judgment.outcome
+      else null
+    end
+    from session_status_judgments as judgment
+    where judgment.session_id = ${sessions.id}
+    order by judgment.generation desc
+    limit 1
+  )`;
+  const settledStatus = or(
+    eq(sessions.cachedStatus, 'ready'),
+    isNull(sessions.cachedStatus),
+  );
+  const boardStatusCondition = (() => {
+    if (!input.includeJudgedStatus || !input.status) return undefined;
+
+    switch (input.status) {
+      case 'active':
+        return and(
+          isNull(sessions.manualStatus),
+          eq(sessions.cachedStatus, 'active'),
+        );
+      case 'needs_input':
+      case 'blocked':
+        return or(
+          eq(sessions.manualStatus, input.status),
+          and(
+            isNull(sessions.manualStatus),
+            or(
+              eq(sessions.cachedStatus, input.status),
+              and(settledStatus, eq(latestJudgmentOutcome, input.status)),
+            ),
+          ),
+        );
+      case 'done':
+        return or(
+          eq(sessions.manualStatus, 'done'),
+          and(
+            isNull(sessions.manualStatus),
+            settledStatus,
+            eq(latestJudgmentOutcome, 'done'),
+          ),
+        );
+      case 'ready':
+        return or(
+          eq(sessions.manualStatus, 'ready'),
+          and(
+            isNull(sessions.manualStatus),
+            settledStatus,
+            sql`coalesce(${latestJudgmentOutcome}, '') not in ('done', 'blocked', 'needs_input')`,
+          ),
+        );
+    }
+  })();
 
   return and(
     sessionListScope(auth),
     input.ownedOnly ? sessionOwnerScope(auth) : undefined,
     eq(sessions.visibility, 'visible'),
-    isNull(sessions.archivedAt),
+    archive === 'archived'
+      ? isNotNull(sessions.archivedAt)
+      : archive === 'all'
+        ? undefined
+        : isNull(sessions.archivedAt),
     input.ids ? inArray(sessions.id, input.ids) : undefined,
-    input.status === 'ready'
-      ? or(eq(sessions.cachedStatus, 'ready'), isNull(sessions.cachedStatus))
-      : input.status
-        ? eq(sessions.cachedStatus, input.status)
-        : undefined,
+    boardStatusCondition ??
+      (input.status === 'ready'
+        ? or(eq(sessions.cachedStatus, 'ready'), isNull(sessions.cachedStatus))
+        : input.status && input.status !== 'done'
+          ? eq(sessions.cachedStatus, input.status)
+          : undefined),
     input.user ? sessionCreatorCondition(input.user) : undefined,
     input.source
       ? eq(sessions.sourceSurface, input.source as never)
@@ -643,7 +705,7 @@ async function hydrateSessionRows(
   options: {
     /** Skip the linked-tasks query when the caller already fetched them. */
     preloadedLinkedTasks?: HydratedLinkedTask[];
-    /** Board judgments remain hidden while the board experiment is disabled. */
+    /** Board judgments are only loaded when the board view needs them. */
     includeJudgedStatus?: boolean;
   } = {},
 ) {
@@ -967,7 +1029,10 @@ export async function getSessions(auth: SessionAuth, input: SessionListInput) {
   };
 }
 
-export async function getSessionSources(auth: SessionAuth) {
+export async function getSessionSources(
+  auth: SessionAuth,
+  archive: SessionArchiveFilter = 'non-archived',
+) {
   const rows = await db
     .selectDistinct({ source: sessions.sourceSurface })
     .from(sessions)
@@ -975,7 +1040,11 @@ export async function getSessionSources(auth: SessionAuth) {
       and(
         sessionListScope(auth),
         eq(sessions.visibility, 'visible'),
-        isNull(sessions.archivedAt),
+        archive === 'archived'
+          ? isNotNull(sessions.archivedAt)
+          : archive === 'all'
+            ? undefined
+            : isNull(sessions.archivedAt),
       ),
     )
     .orderBy(asc(sessions.sourceSurface));

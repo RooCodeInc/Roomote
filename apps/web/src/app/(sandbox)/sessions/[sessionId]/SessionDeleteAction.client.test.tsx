@@ -192,7 +192,7 @@ import {
 describe('SessionActions', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('orders stop and archive above destructive delete and runs them without confirmation', () => {
+  it('orders status, stop, archive, and destructive actions without confirmation', () => {
     render(<SessionActions sessionId="session-1" />);
 
     const labels = screen
@@ -201,6 +201,12 @@ describe('SessionActions', () => {
       .filter(Boolean);
     expect(labels).toEqual([
       'Stop all tasks',
+      'Mark session as...',
+      'active',
+      'needs input',
+      'blocked',
+      'ready',
+      'done',
       'Archive session',
       'Delete session',
     ]);
@@ -246,19 +252,8 @@ describe('SessionActions', () => {
     expect(mocks.remove).not.toHaveBeenCalled();
   });
 
-  it('gates the status submenu and keeps canonical order with the current status selected', () => {
-    const { rerender } = render(
-      <SessionActions sessionId="session-1" status="blocked" />,
-    );
-    expect(screen.queryByText('Mark session as...')).not.toBeInTheDocument();
-
-    rerender(
-      <SessionActions
-        sessionId="session-1"
-        status="blocked"
-        sessionStatusExperimentEnabled
-      />,
-    );
+  it('keeps canonical status order with the current status selected', () => {
+    render(<SessionActions sessionId="session-1" status="blocked" />);
 
     const submenu = screen.getByTestId('session-status-submenu');
     expect(
@@ -269,6 +264,7 @@ describe('SessionActions', () => {
     ).toEqual([
       'Stop all tasks',
       'Mark session as...',
+      'active',
       'needs input',
       'blocked',
       'ready',
@@ -280,10 +276,8 @@ describe('SessionActions', () => {
       Array.from(submenu.querySelectorAll('button')).map((button) =>
         button.textContent?.trim(),
       ),
-    ).toEqual(['needs input', 'blocked', 'ready', 'done']);
-    expect(
-      screen.queryByRole('button', { name: 'active' }),
-    ).not.toBeInTheDocument();
+    ).toEqual(['active', 'needs input', 'blocked', 'ready', 'done']);
+    expect(screen.getByRole('button', { name: 'active' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'blocked' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'done' }));

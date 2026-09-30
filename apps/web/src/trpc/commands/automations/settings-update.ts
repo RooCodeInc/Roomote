@@ -659,10 +659,14 @@ export async function updateBackgroundAgentSettingsCommand(
     ? submittedManagerDiscordChannel
     : null;
   const managerStatsFrequency = input.managerStatsFrequency ?? 'off';
+  const providerUsageLimitFrequencyValue =
+    input.providerUsageLimitFrequency ??
+    existingSettings.providerUsageLimitFrequency;
   const providerUsageLimitFrequency =
-    (input.providerUsageLimitFrequency ??
-      existingSettings.providerUsageLimitFrequency) === 'off'
-      ? 'off'
+    providerUsageLimitFrequencyValue === 'off' ||
+    providerUsageLimitFrequencyValue === 'on_demand' ||
+    providerUsageLimitFrequencyValue === 'every_hour'
+      ? providerUsageLimitFrequencyValue
       : DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY;
   const providerUsageLimitThreshold =
     input.providerUsageLimitThreshold ??

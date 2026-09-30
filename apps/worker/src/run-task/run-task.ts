@@ -85,6 +85,7 @@ import {
 } from './agent-home';
 import { installZeroCli } from '../commands/setup/agent-clis';
 import { buildJevgrepTerminalEnv, setupJevgrep } from './jevgrep';
+import { buildJudgementTerminalEnv, setupJudgement } from './judgement-proxy';
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
@@ -115,7 +116,7 @@ import {
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
-import { createJudgeEnforcement } from './judge-enforcement';
+import { installRepositoryJudgement } from './repository-judgement';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -735,6 +736,7 @@ export const runTask = async ({
     logger,
     getResult: () => taskRun.result,
   };
+  let closeJudgementProxy: (() => Promise<void>) | undefined;
   let closeJevgrepProxy: (() => Promise<void>) | undefined;
 
   try {
@@ -950,6 +952,14 @@ export const runTask = async ({
 
     const homeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
+    await setupJudgement({
+      runtimeEnv,
+      logger,
+      registerCleanup: (close) => {
+        closeJudgementProxy = close;
+      },
+    });
+
     const jevgrepEnabled = await setupJevgrep({
       runId: taskRun.id,
       homeDir,
@@ -1162,12 +1172,9 @@ export const runTask = async ({
       runId: taskRun.id,
       logger,
     });
-    const judgeEnforcement = await createJudgeEnforcement({
-      runId: taskRun.id,
-      repoPaths,
-      logger,
-      recordWorkerRuntimeEvent,
-    });
+    for (const repositoryPath of Object.values(repoPaths ?? {})) {
+      await installRepositoryJudgement(repositoryPath, logger);
+    }
     const persistRuntimeState = createRuntimeStatePersister(
       taskRun.id,
       recordWorkerRuntimeEvent,
@@ -1503,8 +1510,6 @@ export const runTask = async ({
       taskId: taskRun.taskId,
       logger,
       callbacks: {
-        onBeforeTaskCompletion: async () =>
-          await judgeEnforcement.beforeTaskCompletion(),
         onTaskCompletionSettled: async (completionId: string) => {
           await settleMissingChatCloseoutFallback(context, completionId);
           if (userAttentionNotificationsEnabled) {
@@ -2257,10 +2262,13 @@ export const runTask = async ({
       workingDirectory: workspacePath,
       harnessLogger: logger,
       userEnv: () =>
-        buildJevgrepTerminalEnv(
-          workerEnv.buildUserFacingEnv(),
+        buildJudgementTerminalEnv(
+          buildJevgrepTerminalEnv(
+            workerEnv.buildUserFacingEnv(),
+            runtimeEnv,
+            homeDir,
+          ),
           runtimeEnv,
-          homeDir,
         ),
       harness,
       harnessManager,
@@ -2595,6 +2603,7 @@ export const runTask = async ({
       : resolvedResult;
   } finally {
     activeWorkerCrashContext = null;
+    await closeJudgementProxy?.();
     await closeJevgrepProxy?.();
   }
 };

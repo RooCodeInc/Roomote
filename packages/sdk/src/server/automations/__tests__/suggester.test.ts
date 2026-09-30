@@ -109,7 +109,7 @@ describe('suggesterJob repository routing', () => {
     mockGetAutomationRuntime.mockResolvedValue({
       key: 'suggester',
       enabled: true,
-      scheduleMode: 'daily',
+      scheduleMode: 'on_demand',
       lastRunAt: null,
       instructions: null,
       settings: {
@@ -158,7 +158,7 @@ describe('suggesterJob repository routing', () => {
       successfulScans: 1,
     });
 
-    const result = await suggesterJob({ manualTrigger: true });
+    const result = await suggesterJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBe('task-1');
     expect(mockDispatchSuggestionScan).toHaveBeenCalledTimes(1);

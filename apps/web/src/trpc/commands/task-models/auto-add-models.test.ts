@@ -77,6 +77,7 @@ describe('buildAutoAddedTaskModelSettings', () => {
       expect.arrayContaining([
         'openai/gpt-5.6-sol',
         'openai/gpt-6-sol',
+        'openai/gpt-6.1-sol',
         'openai/gpt-5.6-luna',
         'openai/gpt-6-luna',
       ]),

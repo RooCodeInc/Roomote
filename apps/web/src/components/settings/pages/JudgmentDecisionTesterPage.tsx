@@ -17,6 +17,10 @@ import {
   Textarea,
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
+import {
+  JudgmentExamplePresets,
+  type LoadedJudgmentExample,
+} from './JudgmentExamplePresets';
 
 type Target = 'configured' | 'roomote';
 type ModelChoice = Target | 'both';
@@ -176,7 +180,20 @@ export function JudgmentDecisionTesterPage() {
   const [questionsText, setQuestionsText] = useState('');
   const [modelChoice, setModelChoice] = useState<ModelChoice>();
   const [inputError, setInputError] = useState<string>();
-  const [asked, setAsked] = useState<Record<string, Question>>({});
+  const [loadedExample, setLoadedExample] = useState<LoadedJudgmentExample>();
+  const [repeats, setRepeats] = useState(1);
+  const [running, setRunning] = useState(false);
+  const [runs, setRuns] = useState<
+    Array<{
+      label: string;
+      state: unknown;
+      questions: Record<string, Question>;
+      results: Partial<Record<Target, TestResult>>;
+      example?: LoadedJudgmentExample;
+      edited: boolean;
+    }>
+  >([]);
+  const [runIndex, setRunIndex] = useState(0);
 
   const decision = useMemo(
     () =>
@@ -190,6 +207,7 @@ export function JudgmentDecisionTesterPage() {
     setStateText(JSON.stringify(decision.sampleState, null, 2));
     setQuestionsText(JSON.stringify(decision.questions, null, 2));
     test.reset();
+    setLoadedExample(undefined);
     setInputError(undefined);
     // Reset only when the decision changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -213,7 +231,7 @@ export function JudgmentDecisionTesterPage() {
       ? modelChoice
       : modelOptions[0]?.value;
 
-  const run = () => {
+  const run = async () => {
     let state: unknown;
     let questions: Record<string, Question>;
     try {
@@ -236,18 +254,45 @@ export function JudgmentDecisionTesterPage() {
       return;
     }
     setInputError(undefined);
-    setAsked(questions);
-    test.mutate(
-      {
-        state: state as Record<string, unknown>,
-        questions: questions as never,
-        targets: chosen,
-      },
-      { onError: (error) => setInputError(error.message) },
-    );
+    setRunning(true);
+    try {
+      for (let index = 0; index < repeats; index++) {
+        const results = await test.mutateAsync({
+          state: state as Record<string, unknown>,
+          questions: questions as never,
+          targets: chosen,
+        });
+        setRuns((previous) =>
+          [
+            {
+              label: `${loadedExample?.label ?? decision?.label ?? 'Custom'} · run ${index + 1}`,
+              state,
+              questions,
+              results: results as Partial<Record<Target, TestResult>>,
+              example: loadedExample,
+              edited: Boolean(
+                loadedExample &&
+                (stateText !== loadedExample.stateText ||
+                  questionsText !== loadedExample.questionsText),
+              ),
+            },
+            ...previous,
+          ].slice(0, 10),
+        );
+        setRunIndex(0);
+      }
+    } catch (error) {
+      setInputError(
+        error instanceof Error ? error.message : 'The request failed.',
+      );
+    } finally {
+      setRunning(false);
+    }
   };
 
-  const results = (test.data ?? {}) as Partial<Record<Target, TestResult>>;
+  const selectedRun = runs[runIndex];
+  const results = selectedRun?.results ?? {};
+  const asked = selectedRun?.questions ?? {};
   const answeredTargets = (Object.keys(results) as Target[]).filter(
     (t) => results[t],
   );
@@ -265,7 +310,7 @@ export function JudgmentDecisionTesterPage() {
           <Skeleton className="h-64 w-full" />
         ) : catalog ? (
           <div className="grid gap-4 lg:grid-cols-2">
-            <div className="min-w-0 space-y-3">
+            <fieldset disabled={running} className="min-w-0 space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="judgment-decision">Decision</Label>
                 <Select value={decision?.id} onValueChange={setDecisionId}>
@@ -292,6 +337,25 @@ export function JudgmentDecisionTesterPage() {
                 )}
               </div>
 
+              {decision?.id === 'repository-judgement' && (
+                <JudgmentExamplePresets
+                  onLoad={(example) => {
+                    setLoadedExample(example);
+                    setStateText(example.stateText);
+                    setQuestionsText(example.questionsText);
+                    setInputError(undefined);
+                  }}
+                />
+              )}
+              {loadedExample && (
+                <p className="text-xs text-muted-foreground">
+                  Loaded: {loadedExample.label} · {loadedExample.stage}
+                  {stateText !== loadedExample.stateText ||
+                  questionsText !== loadedExample.questionsText
+                    ? ' · edited'
+                    : ''}
+                </p>
+              )}
               <div className="space-y-1.5">
                 <Label htmlFor="judgment-state">State (JSON)</Label>
                 <Textarea
@@ -299,7 +363,7 @@ export function JudgmentDecisionTesterPage() {
                   value={stateText}
                   onChange={(event) => setStateText(event.target.value)}
                   spellCheck={false}
-                  className="min-h-56 font-mono text-xs"
+                  className="min-h-56 max-h-96 overflow-y-auto font-mono text-xs"
                 />
               </div>
 
@@ -325,11 +389,23 @@ export function JudgmentDecisionTesterPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Button
-                  onClick={run}
-                  disabled={test.isPending || availableTargets.length === 0}
+                <Select
+                  value={String(repeats)}
+                  onValueChange={(value) => setRepeats(Number(value))}
                 >
-                  {test.isPending ? 'Asking…' : 'Ask'}
+                  <SelectTrigger aria-label="Repetitions" className="w-auto">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">One run</SelectItem>
+                    <SelectItem value="3">Three runs</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={() => void run()}
+                  disabled={running || availableTargets.length === 0}
+                >
+                  {running ? 'Asking…' : 'Ask'}
                 </Button>
               </div>
               {availableTargets.length === 0 && (
@@ -351,12 +427,58 @@ export function JudgmentDecisionTesterPage() {
                   value={questionsText}
                   onChange={(event) => setQuestionsText(event.target.value)}
                   spellCheck={false}
-                  className="min-h-40 font-mono text-xs"
+                  className="min-h-40 max-h-96 overflow-y-auto font-mono text-xs"
                 />
               </details>
-            </div>
+            </fieldset>
 
             <div className="min-w-0 space-y-3">
+              {runs.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="judgment-run">Recent runs</Label>
+                  <Select
+                    value={String(runIndex)}
+                    onValueChange={(value) => setRunIndex(Number(value))}
+                  >
+                    <SelectTrigger id="judgment-run" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {runs.map((item, index) => (
+                        <SelectItem key={index} value={String(index)}>
+                          {index + 1} · {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedRun?.example && (
+                    <p className="text-xs text-muted-foreground">
+                      Expected: {selectedRun.example.expected} · Violation
+                      cutoff: {Math.round(selectedRun.example.threshold * 100)}%
+                      · {selectedRun.example.stage}
+                      {selectedRun.edited ? ' · edited input' : ''}. This is a
+                      packet answer; verify final status with a full check.
+                    </p>
+                  )}
+                </div>
+              )}
+              {selectedRun && (
+                <details className="space-y-1.5">
+                  <summary className="cursor-pointer text-sm text-muted-foreground">
+                    View tested input
+                  </summary>
+                  <pre className="max-h-64 overflow-auto rounded-md border p-3 text-xs">
+                    {JSON.stringify(
+                      {
+                        state: selectedRun.state,
+                        questions: selectedRun.questions,
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
+              )}
               {answeredTargets.length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">
                   Answers appear here.
@@ -399,9 +521,20 @@ export function JudgmentDecisionTesterPage() {
                         </span>
                         {answeredTargets.map((target) => {
                           const result = results[target];
-                          const pick = result?.ok
-                            ? pickOf(question, result.answers[questionId])
+                          const answer = result?.ok
+                            ? result.answers[questionId]
                             : undefined;
+                          const violationProbability =
+                            selectedRun?.example && question.type === 'noul'
+                              ? answer?.noul
+                              : undefined;
+                          const pick =
+                            violationProbability !== undefined
+                              ? violationProbability >=
+                                selectedRun!.example!.threshold
+                                ? 'flagged'
+                                : 'below cutoff'
+                              : pickOf(question, answer);
                           const invalid =
                             result?.ok && result.invalid.includes(questionId);
                           return pick !== undefined || invalid ? (
@@ -410,6 +543,31 @@ export function JudgmentDecisionTesterPage() {
                               <strong>
                                 {invalid ? 'invalid answer' : pick}
                               </strong>
+                              {violationProbability !== undefined && (
+                                <span>
+                                  {' '}
+                                  · violation probability{' '}
+                                  {Math.round(violationProbability * 100)}%
+                                </span>
+                              )}
+                              {result?.ok &&
+                                result.answers[questionId]?.confidence !==
+                                  undefined && (
+                                  <span>
+                                    {' '}
+                                    · confidence{' '}
+                                    {Math.round(
+                                      result.answers[questionId]!.confidence! *
+                                        100,
+                                    )}
+                                    %
+                                    {selectedRun?.example &&
+                                    result.answers[questionId]!.confidence! <
+                                      selectedRun.example.threshold
+                                      ? ' (below threshold)'
+                                      : ''}
+                                  </span>
+                                )}
                             </span>
                           ) : null;
                         })}
@@ -426,7 +584,11 @@ export function JudgmentDecisionTesterPage() {
                               className="truncate font-mono"
                               title={optionDescription(question, option.key)}
                             >
-                              {option.label}
+                              {selectedRun?.example && question.type === 'noul'
+                                ? option.key === 'yes'
+                                  ? 'violation'
+                                  : 'no violation'
+                                : option.label}
                             </span>
                             {answeredTargets.map((target, index) => {
                               const result = results[target];

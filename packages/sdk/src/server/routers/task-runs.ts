@@ -1,6 +1,9 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { evaluateJudgeFileCriteria } from '@roomote/cloud-agents/server/judge-file';
+import {
+  evaluateJudgeFileCriteria,
+  evaluateRepositoryJudgement,
+} from '@roomote/cloud-agents/server/judge-file';
 import { resolveJudgmentBackend } from '@roomote/cloud-agents/server/typesafe-judgment';
 import {
   db,
@@ -196,6 +199,33 @@ const judgeFileCriteriaInputSchema = z
       .max(JUDGE_MAX_CRITERIA_PER_REQUEST),
   })
   .strict();
+
+const repositoryJudgementRequestSchema = z
+  .object({
+    kind: z.literal('judge'),
+    rule: z.string().min(1).max(23000),
+    evidence: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1).max(4096),
+            kind: z.enum(['patch', 'before', 'after', 'context']),
+            line: z.number().int().positive(),
+            text: z.string().max(23000),
+            oid: z.string().max(64).optional(),
+          })
+          .strict(),
+      )
+      .max(2000),
+    focusPaths: z.array(z.string().max(4096)).max(2000),
+    complete: z.boolean(),
+    unresolved: z.array(z.string().max(4096)).max(2000),
+  })
+  .strict()
+  .refine(
+    (request) => Buffer.byteLength(JSON.stringify(request)) <= 23000,
+    'Judgement evidence exceeds the request budget',
+  );
 
 function runTokenOnlyScoped<T extends z.ZodType>(
   schema: T,
@@ -1058,6 +1088,23 @@ export const taskRunsRouter = router({
     },
   ),
 
+  evaluateRepositoryJudgement: runTokenOnlyScoped(
+    z
+      .object({ runId: z.number(), request: repositoryJudgementRequestSchema })
+      .strict(),
+    'runId',
+  ).mutation(async ({ input }) => {
+    try {
+      const answer = await evaluateRepositoryJudgement(input.request);
+      return answer
+        ? { kind: 'answered' as const, answer }
+        : { kind: 'unavailable' as const };
+    } catch {
+      return { kind: 'error' as const };
+    }
+  }),
+
+  // Retained for workers from the previous release.
   evaluateJudgeFileCriteria: runTokenOnlyScoped(
     judgeFileCriteriaInputSchema,
     'runId',

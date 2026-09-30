@@ -6,18 +6,17 @@ import {
   completeSessionStatusJudgment,
   desc,
   db,
-  discardPendingSessionStatusJudgments,
   eq,
   fastAgentMessages,
   hasFastConversationPendingUserInput,
   inArray,
-  isDeploymentExperimentEnabled,
   isNull,
   retryOrFailSessionStatusJudgment,
   sessionGoals,
   sessionTasks,
   sessions,
   sql,
+  taskPullRequests,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
@@ -48,6 +47,14 @@ type JudgmentState = {
   evaluationTime: string;
   latestVisibleUserMessageAt: string | null;
   manualStatusChangedAt: string | null;
+  sessionOrigin: {
+    kind: 'user' | 'automation' | 'system';
+    automation: string | null;
+  };
+  roomoteWorkState: 'active' | 'settled' | 'waiting_for_user';
+  reviewHandoff: {
+    automationInitiatedRoomoteCreatedOpenPullRequest: boolean;
+  };
   objective: string;
   recentMessages: Array<{ role: 'user' | 'assistant'; text: string }>;
   childTasks: Array<{
@@ -58,6 +65,18 @@ type JudgmentState = {
   }>;
   goalStatus: string | null;
 };
+
+export function resolveAuthoritativeSessionStatusJudgment(input: {
+  sessionOrigin: JudgmentState['sessionOrigin'];
+  roomoteWorkState: JudgmentState['roomoteWorkState'];
+  reviewHandoff: JudgmentState['reviewHandoff'];
+}): 'needs_input' | null {
+  return input.sessionOrigin.kind === 'automation' &&
+    input.roomoteWorkState === 'settled' &&
+    input.reviewHandoff.automationInitiatedRoomoteCreatedOpenPullRequest
+    ? 'needs_input'
+    : null;
+}
 
 export function resolveSessionStatusJudgmentPrecedence(input: {
   evaluationTime: string;
@@ -143,6 +162,8 @@ async function loadJudgmentState(sessionId: string): Promise<{
   const [session] = await db
     .select({
       title: sessions.title,
+      ownerKind: sessions.ownerKind,
+      ownerAutomation: sessions.ownerAutomation,
       fastConversationId: sessions.fastConversationId,
       manualStatusSetAt: sessions.manualStatusSetAt,
       respondingUntil: sessions.respondingUntil,
@@ -244,6 +265,31 @@ async function loadJudgmentState(sessionId: string): Promise<{
         : Promise.resolve([]),
     ]);
 
+  const [reviewablePullRequestRows, pendingUserInput] = await Promise.all([
+    db
+      .select({ id: taskPullRequests.id })
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .innerJoin(
+        taskPullRequests,
+        eq(taskPullRequests.taskId, sessionTasks.taskId),
+      )
+      .where(
+        and(
+          eq(sessionTasks.sessionId, sessionId),
+          isNull(tasks.deletedAt),
+          eq(tasks.visibility, 'visible'),
+          eq(tasks.initiatorKind, 'automation'),
+          eq(taskPullRequests.createdByRoomote, true),
+          inArray(taskPullRequests.status, ['draft', 'open']),
+        ),
+      )
+      .limit(1),
+    session.fastConversationId
+      ? hasFastConversationPendingUserInput(db, session.fastConversationId)
+      : Promise.resolve(false),
+  ]);
+
   const recentMessages = messages.reverse().flatMap((message) => {
     const text = visibleMessageText(message.contentBlocks);
     if (!text || (message.role !== 'user' && message.role !== 'assistant')) {
@@ -261,12 +307,31 @@ async function loadJudgmentState(sessionId: string): Promise<{
   const latestVisibleUserMessageAt = latestVisibleUserMessageRows[0]?.ts
     ? new Date(latestVisibleUserMessageRows[0].ts).toISOString()
     : null;
+  const liveTurn =
+    session.respondingUntil !== null &&
+    session.respondingUntil.getTime() > Date.now();
+  const hasActiveTask = activeTaskRows.length > 0;
+  const goalStillActive = session.goalStatus === 'active';
+  const roomoteWorkState = pendingUserInput
+    ? 'waiting_for_user'
+    : liveTurn || hasActiveTask || goalStillActive
+      ? 'active'
+      : 'settled';
   const state: JudgmentState = {
     evaluationTime,
     latestVisibleUserMessageAt,
     // The current develop baseline has no persisted manual-status contract;
     // keep the model-state slot explicit for the separate status source.
     manualStatusChangedAt: session.manualStatusSetAt?.toISOString() ?? null,
+    sessionOrigin: {
+      kind: session.ownerKind,
+      automation: session.ownerAutomation,
+    },
+    roomoteWorkState,
+    reviewHandoff: {
+      automationInitiatedRoomoteCreatedOpenPullRequest:
+        reviewablePullRequestRows.length > 0,
+    },
     objective:
       boundedText(session.goalObjective, 1_500) ??
       boundedText(session.title, 500) ??
@@ -291,13 +356,10 @@ async function loadJudgmentState(sessionId: string): Promise<{
     state.childTasks.pop();
   }
 
-  const pendingUserInput = session.fastConversationId
-    ? await hasFastConversationPendingUserInput(db, session.fastConversationId)
-    : false;
   return {
     state,
     respondingUntil: session.respondingUntil,
-    hasActiveTask: activeTaskRows.length > 0,
+    hasActiveTask,
     pendingUserInput,
   };
 }
@@ -335,13 +397,9 @@ export function chooseApplicableSessionStatusJudgment(answer: {
 
 export async function processSessionStatusJudgmentBatch(
   limit = MAX_JUDGMENTS_PER_TICK,
+  options: { sessionIds?: string[] } = {},
 ): Promise<number> {
-  if (!(await isDeploymentExperimentEnabled('sessionStatusJudgment'))) {
-    await discardPendingSessionStatusJudgments(db);
-    return 0;
-  }
-
-  const requests = await claimSessionStatusJudgmentRequests(db, limit);
+  const requests = await claimSessionStatusJudgmentRequests(db, limit, options);
   for (const request of requests) {
     try {
       await clearManualStatusAfterNewerUserMessage(db, request.sessionId);
@@ -388,6 +446,22 @@ export async function processSessionStatusJudgmentBatch(
           confidence: 1,
           probabilities: { done: 1 },
           errorCode: liveWork ? 'live_work' : undefined,
+        });
+        continue;
+      }
+
+      const authoritativeOutcome = resolveAuthoritativeSessionStatusJudgment(
+        snapshot.state,
+      );
+      if (authoritativeOutcome) {
+        await completeSessionStatusJudgment(db, {
+          id: request.id,
+          sessionId: request.sessionId,
+          generation: request.generation,
+          state: 'applied',
+          outcome: authoritativeOutcome,
+          confidence: 1,
+          probabilities: { [authoritativeOutcome]: 1 },
         });
         continue;
       }

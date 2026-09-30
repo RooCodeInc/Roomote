@@ -1,688 +1,120 @@
 ---
 title: Automations
-icon: calendar-clock
-description: Set up background Roomote work for PR review, conflict resolution, recurring triage, and team updates.
+icon: zap
+description: Understand how Roomote turns recurring triggers into reviewable agent work.
 ---
 
-Automations let Roomote work without waiting for a teammate to write a new
-prompt every time.
-
-Use them after your first environment is working well. Connect source control
-or a communications provider when an automation depends on those services.
-Automations are most useful when your team already trusts the normal task
-review flow and wants Roomote to keep an eye on repeated work.
-
-<Tip>
-  Unsure of how automations can help? Get inspiration from the [Cookbook](/cookbook).
-</Tip>
-
-## Before you turn them on
-
-Make sure the basics are in place:
-
-- source control is connected for PR and repository automations
-- a communications provider is connected for automations that post updates to
-  channels
-- Roomote has at least one healthy environment for the repositories it should
-  work in
-- the team knows where automation output will appear
-
-Automations can create useful work quickly. Start with one or two that map to
-a real team habit, tell the team where output will appear, then expand once
-the signal is good.
-
-Automation reports contain the finished announcement or result. Intermediate
-research notes and tool progress are excluded from the posted report.
-
-Session-backed automations that post to a chat channel are replyable. Reply in
-the thread Roomote started and you continue the session behind that report,
-without needing to mention Roomote. That works on Slack, Discord, Teams, and
-Telegram, and it works after delegated tasks have finished. Deterministic alerts
-such as **Inference Provider Usage Alerts** do not create a task or session, so
-their cards are informational rather than replyable session threads.
-
-## Recommended automations
-
-Members can create and manage their own custom automations on the
-**Automations** page or through Roomote chat. Admins can manage all custom
-automations, including those created by other members and those without a
-creator. Built-in automations and deployment-wide settings remain admin-only.
-
-During setup, Roomote checks connected repositories for recurring work that an
-automation could handle. Admins can review the recommendations, turn individual
-automations on or off, and continue to apply the selected set. Skipping the
-review does not enable anything.
-
-Recommendations are a starting point rather than a fixed policy. After applying
-them, use the **Automations** page to adjust schedules, destinations, workspace
-targets, prompts, or models, and to create other automations from scratch.
-
-Members and admins can also ask Roomote to create recurring work during a conversation. Roomote
-confirms the schedule, checks for an existing matching automation, and asks for
-approval before it saves anything. After creation, Roomote offers to run the
-automation immediately so you can verify the prompt and destination. Members
-manage the custom automations they create; managing someone else's automation
-requires an admin.
-
-## Review automation results
-
-The **Results** inbox is available to all deployment members from the main
-navigation. It collects durable automation reports and structured follow-ups in
-one review queue. Items are ordered by priority and recency, with critical and
-high-priority findings before normal results.
-
-Select a result to review its full report and suggested work.
-From there, you can edit the prepared prompt, choose a model, and start it as a
-normal session. The item is marked accepted only after the session starts. Use
-**Clear** when no follow-up is needed, or **Clear all** to dismiss the current
-queue.
-
-The inbox complements configured chat and Email report destinations rather
-than replacing them. Automation runs keep their normal sessions and delivery
-behavior; eligible output also appears in Results.
-
-Results is shared across the deployment only for output Roomote can prove is
-safe to share: destinationless automations and reports sent to confirmed public
-Slack channels. Email, direct messages, private Slack channels, and providers
-without authoritative public/private destination metadata stay out of Results.
-Older results without a saved visibility decision also remain private.
-
-## Pull request automations
-
-These automations react to pull requests, issues, and repository state.
-
-| Automation                 | What it does                                                      | Good first use                                                         |
-| -------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| **Review Code**            | Reviews pull requests automatically or on demand                  | Add an extra reviewer for regressions, risky changes, and missed tests |
-| **Triage Issues**          | Posts clarifying questions or an implementation plan when an issue is opened/reopened on GitHub, GitLab, or Gitea | Get a grounded plan on the issue without auto-opening a PR           |
-| **Resolve PR Conflicts**   | Looks for merge conflicts and helps fix them on open PRs          | Keep long-running branches from getting stuck                          |
-| **Merge announcer**        | Summarizes commits pushed to active repositories' default branches and names the pusher | Keep the team aware of changes that land outside pull requests |
-
-For **Review Code**, decide whether Roomote should review new commits
-automatically and whether draft pull requests should be included. If your team
-treats drafts as active collaboration, include them. If drafts are noisy or
-half-formed, keep them out until they are ready. You can also publish each
-GitHub review as a **Roomote code review** check on the reviewed commit. Roomote
-controls whether it publishes the check; GitHub branch protection or rulesets
-control whether that check is required before merging. The GitHub App
-installation must grant **Checks: Read and write**; update and reapprove older
-installations that do not have that permission.
-
-For **Triage Issues**, turn the toggle on once a supported source-control
-provider is connected (GitHub, GitLab, or Gitea) and the repos you care about
-have configured Roomote environments. When an issue is opened or reopened,
-Roomote starts a task immediately, investigates the issue, and posts a concrete
-plan or clarifying questions as a comment on that issue. It does not need a
-Manager Channel, does not post Slack digests, does not implement the fix, and
-does not open a pull request automatically. Azure DevOps work items and
-Bitbucket issues are not covered yet.
-
-For **Resolve PR Conflicts**, pick a schedule, PR age cap, and label. The
-label is the team-controlled opt-in for scheduled scans. Make sure the label
-exists in your repositories, add it to PRs where you want Roomote to attempt
-conflict resolution, and remove it when a human should handle the conflict
-instead. Roomote only tries this on labeled PRs that are still active, and it
-skips PRs older than the age cap you set.
-
-For **Merge announcer**, connect a source-control provider and turn the toggle
-on. Choose Slack, Microsoft Teams, Telegram, or Discord, then select a channel
-or **DM me**. Choose **Default** to use the shared Manager Channel or normal
-primary-conversation fallback. Roomote reacts to provider-deduplicated push
-webhooks for each active repository's current default branch, uses the
-deployment helper model to write a brief commit summary, and includes the pusher
-and commit authors. Feature-branch pushes and branch deletions are ignored.
-GitHub, GitLab, Azure DevOps, Bitbucket, and Gitea are supported.
-For GitHub merge commits that Roomote can match to a pull request, the summary
-uses that pull request's context and **View changes** opens the pull request.
-When the pull request body contains a suitable image, the Slack announcement
-can also show one representative screenshot after Roomote validates its URL and
-image type. Announcements continue without an image when validation fails.
-Other announcements link to the provider's compare view.
-
-## Custom automations
-
-The **Automations** page shows built-in and custom automations together in a
-searchable list. Filter the list to **All**, **Built-in**, or **Custom** when you
-need a narrower view. Each row shows its current configuration and actions;
-select **Configure** to edit an automation.
-
-Members can list, inspect, edit, enable or disable, delete, and run their own
-custom automations. Admins can perform these actions on all custom automations,
-including those without a creator. These ownership rules apply in the dashboard
-and in Roomote chat.
-
-These management permissions are separate from viewing a run. Any signed-in
-deployment member with a session link can view its timeline and linked task
-transcripts, logs, and artifacts, including runs of another member's custom
-automation. The link does not grant management or execution permissions, and
-does not make the session public. Lists and filters retain their existing
-visibility restrictions.
-
-Create custom automation runs with:
-
-- a clear **name**
-- the **prompt** Roomote should run
-- a **cadence** (`every hour`, `every 6 hours`, `daily`, or `weekly`) or
-  **On-demand** to skip scheduled runs
-- an optional **preferred environment**: a named environment, **All
-  repositories**, or **Blank slate**. Blank slate always delegates the run to a
-  sandbox with no repositories checked out; leave it as **Let Roomote decide**
-  to route normally
-- an optional **model** override for the automation's session, including
-  later turns; without an override, it uses the deployment orchestration default.
-  Delegated coding tasks use their own model selection or deployment coding default
-- an optional **effort** override (`low`, `medium`, `high`, `extra high`, or
-  `max`) when the selected model supports configurable reasoning
-- an optional **report destination**: a direct message to the automation owner,
-  or a channel, through Slack, Discord, Teams, or Telegram; **Email** is also
-  available as a private destination when AgentMail is configured and the owner
-  has an account email. Verification is required to reply or initiate work by
-  email, not to receive automation reports
-
-Each custom automation row summarizes its cadence, workspace target, report
-destination, creator, and most recent run. Its runs also appear as sessions in
-the normal session history. Blank slate runs clone nothing up front; when
-source control is connected the agent can still check out any active repository
-on demand, and otherwise the run needs no source-control credentials. Named
-environment and repository-scoped runs prepare their selected repositories
-first, but can use the same checkout mechanism for other authorized active
-repositories without provisioning another environment's services.
-
-On-demand automations can still be started with **Run now**. While editing an
-automation, enable webhooks to get a private URL that starts the same configured
-run when it receives an HTTP `POST`. An empty body triggers the saved prompt
-unchanged. A `text/plain` or JSON body up to 64 KiB is appended as an untrusted
-one-run instruction; it never changes the saved prompt. Invalid JSON and
-unsupported content types are rejected. Roomote uses this input only within the
-configured prompt and existing system, authorization, and safety rules. Keep the
-URL private like a password. Disabling webhooks, rotating the URL, or disabling
-the automation revokes it. Webhook runs require an enabled automation with an
-active owner and use the same launch eligibility as manual runs. Each accepted
-POST starts an independent run; per-URL and per-client rate limits guard against
-floods and return HTTP `429` when exceeded.
-
-When creating an automation through Roomote chat, ask for **suggested tasks** or
-**launchable follow-ups** if qualifying findings should become tasks that
-teammates can start from the report. Asking only for a summary or list of action
-items keeps those actions as report text. Launchable suggestions require a chat
-report destination. Each suggestion can select its own named environment,
-**All repositories**, **Blank slate**, or **Let Roomote decide** target, so one report can offer
-follow-ups for different workspaces and execution modes. Repository-specific suggestions from
-**All repositories** runs start in a matching named environment when one is
-available. Choosing **All repositories** is a delegation preference, not a
-request to prepare every repository on every run: the sandbox starts with a
-`REPOSITORIES.md` index of every active repository and the agent checks out
-only the ones the task needs. Use a named environment when the automation only
-needs a specific repository set.
-
-Suggestions can accompany the session's report after a delegated task finishes,
-not just its initial response. Accepting one keeps the follow-up in the
-originating report's context. In Slack, each accepted suggestion starts a
-separate top-level execution thread and session instead of reusing the report
-thread; retrying that same suggestion reuses its execution thread. Thread or
-topic placement on other providers depends on the provider and execution
-target.
-
-For a custom automation you manage, choose **Custom schedule** and enter either a standard
-five-field cron expression or a natural-language schedule such as “weekdays at
-9am.” Roomote previews the interpreted schedule before saving and asks for
-clarification rather than guessing when the recurrence itself is ambiguous.
-Custom schedules do not support seconds or cron macros.
-
-Every run is a session. On each due tick, Roomote opens a session for the run
-and hands it the prompt exactly as if a teammate had typed it. The session
-answers from integrations when that is enough, and delegates a normal task when
-repository or workspace work is needed, using the preferred environment as a
-routing hint when one is set. Delegated tasks report back to the session, and
-the session is what talks to the report destination.
-
-Runs deliver to every custom-automation report destination: Slack, Discord,
-Microsoft Teams, Telegram, or Email. Chat providers support a channel/chat or
-a direct message to the automation owner; Email is private only. Each run keeps
-a distinct session, and the report links
-back to that session in the web app. The session transcript shows the
-automation's configured prompt and any delegated task cards, and its normal
-composer lets a signed-in teammate continue the run from the dashboard. Replies
-on chat providers continue the session directly there. A reply to an email
-report continues it in the same mail thread only when it comes from the owner's
-account email and passes DMARC; if the address was not verified yet, the reply
-verifies it implicitly (the report carries the single-use reference token the
-reply quotes as proof of receipt). Roomote verifies the active provider
-installation, conversation, and linked user before resuming. Runs with no
-report destination remain stored sessions and do not post externally.
-
-Runs execute as the automation's creator. An automation without a creator
-cannot run until an administrator re-saves it.
-
-A run can skip or fail before execution when its configuration or launch state
-prevents it from starting. When the report destination is reachable, startup or
-delegated-task failures are reported there. If the destination is disconnected
-or cannot be resolved, check the automation's latest run error in the dashboard.
-When a report destination is set, Roomote uses that conversation for actionable
-or important findings, meaningful completed results, blockers, and questions
-that need input. Routine success, healthy status, and no-change results stay
-silent unless the automation prompt explicitly asks for a report in those
-cases. In Slack, the first report starts a thread and later updates continue
-that thread. On other providers, updates use the run's conversation or topic.
-Reply to the report to continue the session. There is no progress chatter in
-between. Without a destination, the run happens silently and its
-results remain in its stored web session, including any delegated task cards.
-
-Unless the prompt asks for a different presentation, custom automation reports
-lead with the result, stay concise, and use short Markdown headings and bullets
-when there are several findings. A report sent to chat keeps the essential
-conclusions and actions in its first message; supporting detail can continue in
-thread replies. Explicit instructions in the automation prompt about format,
-length, tone, audience, or detail placement always take precedence.
-
-In Slack, automation reports appear as structured cards. Markdown tables render
-as tables when they fit, and the card can include links to the task, related pull
-requests, and automation settings. Completed runs also show their trigger or
-schedule, model, estimated inference cost, and elapsed time.
-
-Direct-message destinations require the automation owner to link an account for
-the selected communications provider and make the bot reachable there.
-Email destinations use the owner's one account email, including before it is
-verified. Verification is required to reply or initiate work by email, not to
-receive automation reports — and replying to a report verifies the address
-implicitly. If the address changes, is suppressed, the owner is
-removed, or AgentMail becomes unavailable, delivery stops rather than switching
-to another address or communications provider.
-Microsoft Teams channel destinations must match an active conversation already
-known to the connected Teams installation; custom Bot Framework service URLs
-are not accepted.
-
-Use **Run now** on any enabled automation, regardless of its schedule, to test it immediately. Each card has
-its own run state, so starting one custom automation does not prevent you from
-running another. A queued result confirms that Roomote accepted a session turn,
-not that a coding task launched or the work completed. A task ID is not promised
-at this point; follow the session or configured report destination for the final
-result and any delegated tasks.
-
-### Upgrading to 1.4
-
-Existing custom automations now use this session-first flow. Review prompts
-that assumed a sandbox would always start: specify the repository work you need,
-and check the preferred environment. Their model override now controls the session;
-delegated coding tasks use an explicitly selected model or the deployment coding
-default instead.
-
-Set an explicit report destination if you want external delivery. Without one,
-the run stays in a stored web session rather than falling back to the owner's
-direct messages or email.
-Existing automations with a creator do not need to be re-saved just to upgrade;
-only creatorless automations require an administrator to re-save them before
-they can run. Use **Run now** to verify the prompt, routing, and destination.
-
-See [Schedule maintenance](/cookbook/scheduled-housekeeping)
-for three copyable custom automation prompts, or
-[draft a product-updates newsletter](/cookbook/product-updates-newsletter) with
-a custom MCP server and a natural-language schedule.
-
-The admin-only **Scheduling timezone** setting is available on both the Automations and
-Deployment settings pages. Members can choose schedules for their own custom
-automations but cannot change this shared timezone or other deployment settings.
-It applies to all scheduled automations and to
-natural-language schedule interpretation. Existing deployments continue using
-their Slack workspace timezone (or UTC when unavailable) until an admin pins
-an explicit IANA timezone.
-
-Members can also manage their own custom automations conversationally, and
-admins can manage all custom automations, through the
-`manage_custom_automations` tool: list eligible destinations and models, inspect,
-resolve a schedule, create, update, delete, or run an enabled automation
-immediately. Set the schedule to `on_demand` when it should only run manually
-or through an enabled webhook. List results omit
-stored prompts to keep the conversation focused; after choosing an automation,
-Roomote can inspect its prompt by exact ID. The tool is available both from a
-Roomote task and directly in a session, so a quick chat message can handle
-the full automation lifecycle without launching a task.
-Sessions can also reach the deployment's enabled MCP servers, the
-same ones delegated tasks use. Use the tool's model-list action to
-see the deployment's enabled model IDs and default before setting an override.
-Model IDs preserve the configured inference route: `openrouter/...` targets
-OpenRouter, while `openai/...` uses the deployment's OpenAI route, including a
-connected ChatGPT subscription when configured. A model-specific reasoning
-effort can be set alongside the model; Roomote maps the selected level to the
-provider's supported reasoning or thinking-budget format.
-
-## Call Roomote via emoji
-
-Use **Call Roomote via emoji** to let teammates summon Roomote by reacting to a
-message in Slack, Discord, or Microsoft Teams. An admin chooses the emoji name,
-such as `:white_check_mark:`, and can add optional instructions that apply to
-every request started this way.
-
-When the configured reaction is added, Roomote handles it like a teammate
-replied in that thread with `@Roomote Act on this`. Existing Roomote task
-threads continue the active task; other threads start a task with the thread's
-conversation as context. Optional automation instructions are added after the
-default `Act on this` prompt.
-
-The teammate adding the reaction must have a linked Roomote account, just as
-they would when mentioning Roomote directly from that communications provider.
-
-Provider support differs slightly:
-
-- Slack supports standard and workspace custom emoji reactions.
-- Discord supports standard and server custom emoji reactions.
-- Microsoft Teams sends reaction activities only for messages posted by
-  Roomote. Teams supports its native `like`, `heart`, `laugh`, `surprised`,
-  `sad`, and `angry` reactions; choose an equivalent configured emoji such as
-  `:thumbsup:` for Like or `:heart:` for Heart.
-
-Telegram reactions on Roomote session replies are supported, but Telegram is not
-available for **Call Roomote via emoji** on arbitrary messages. Its Bot API
-reaction updates are handled only for user-attributed reactions on Roomote
-replies and suggested-task cards.
-
-## Channel automations
-
-The channel section starts with **Auto-respond to channels**.
-
-Use it to let Roomote start a session from new top-level messages in
-selected Slack or Discord channels, even when nobody mentions Roomote directly.
-Roomote can answer or delegate the work to a task; if the session cannot accept an
-automated entry, Roomote falls back to a direct task launch so the request is
-not dropped. You can add multiple channels across both providers, and each one
-can include its own optional instructions and launch criteria.
-
-Good first examples:
-
-- `#ask-engineering`
-- `#bugs`
-- `#support-inbound`
-- `#ops-requests`
-
-For Slack channels, invite Roomote to every auto-respond channel before you
-save it. For Discord channels, pick from the text and announcement channels
-the Roomote bot can already see in your server.
-
-A few provider-specific behaviors to know:
-
-- On Discord, messages from people who have not linked their Discord account
-  to Roomote do not start tasks; Roomote sends them a direct message
-  explaining how to link instead.
-- Messages posted by other bots or webhooks (for example a deploy or alert
-  feed) can start sessions too. Roomote uses the deployment's automation
-  identity for these entries. Use launch criteria to keep noisy feeds in check
-  — for example, only launching on new or worsening alerts.
-
-If Roomote cannot determine whether to start a task or encounters an unexpected
-startup error, it notifies human users but stays silent for bot and webhook
-messages. Specific issues such as unavailable access or a read-only deployment
-can still receive a status reply.
-
-Launch criteria are evaluated by the helper model. Deployments with the
-optional [judgment model](/models#judgment-model) turned on get a faster
-decision on clear-cut messages; unclear ones still go to the helper model.
-
-Start with a low-risk channel first. Auto-response can feel noisy if the
-channel mixes casual discussion with requests that should become Roomote
-tasks.
-
-See how channel instructions and launch criteria work together in the
-[vendor outage triage](/cookbook/vendor-outage-triage) and
-[support channel](/cookbook/support-channel) recipes.
-
-## Manager automations
-
-The manager section controls the shared Manager Channel plus recurring
-manager-facing updates and suggestions.
-
-| Automation                   | What it posts                                                    | Typical cadence                             |
-| ---------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
-| **Automation output**        | The shared Manager Channel destination                           | Configure once                              |
-| **Weekly Manager Stats**     | A weekly summary of Roomote activity                             | Weekly                                      |
-| **Inference Provider Usage Alerts** | Warnings when an inference-provider quota approaches exhaustion | Hourly                              |
-| **Triage Sentry Issues**     | Prioritized Sentry follow-up work                                | Daily or weekly                             |
-| **Triage Dependabot Alerts** | Suggested follow-up tasks for open dependency alerts             | Daily or weekly                             |
-| **Triage CodeQL Alerts**     | Remediation follow-up tasks for open code-scanning / CodeQL alerts | Daily or weekly                           |
-| **Security Auditor**         | Security follow-up work from recently merged PRs                 | Every hour, every 6 hours, daily, or weekly |
-| **Code Quality Auditor**     | Code quality follow-up work from recently merged PRs             | Every hour, every 6 hours, daily, or weekly |
-| **Suggest Ideas**            | Useful coding work Roomote thinks the team could do              | Daily or weekly                             |
-| **CI Failure Triage**        | Automatic repro-and-fix tasks for failing default-branch CI runs | Immediate via webhook                       |
-| **Platform Issue Alerts**    | Configuration and access issues reported by Roomote tasks        | Immediate when an issue is reported         |
-| **Announce Roomote Updates** | Highlights after a major or minor Roomote update installs successfully | After a qualifying deployment update     |
-| **Summarize Merged PRs**     | A digest of recently merged pull requests                        | Daily or weekly                             |
-
-Weekly Manager Stats is enabled by default on new deployments and starts
-posting only after a valid report destination is configured. Slack reports
-include a daily chart of created and merged pull requests for the reporting
-period. Existing deployments keep their saved automation settings.
-
-Built-in automations with a **Destination** control can use the same Email
-destination as custom automations. The admin who selects Email chooses their
-own account identity; Roomote saves that exact identity and sends each report
-in a replyable email thread. If the account membership, selected address,
-suppression status, or AgentMail availability changes, delivery stops rather
-than switching the report to another address or provider. Receiving these
-outbound reports does not require email verification, but replying still
-requires the account address to be verified and pass DMARC.
-
-Set **Automation output** first. This is the shared Slack or Discord Manager
-Channel for manager-facing posts, suggestions, summaries, and setup alerts.
-Make sure the Roomote app can access the channel before you save it.
-
-For Slack, the first account connection after app installation automatically
-sets up public `#roomote-managers` if no Slack or Discord Manager Channel is
-configured. Existing automation destinations are unchanged, and no automations
-are enabled by channel setup. See [Slack setup](/providers/communications/slack#automatic-manager-channel)
-for required permissions and retry instructions.
-
-**Inference Provider Usage Alerts** is enabled at an hourly cadence with an 85% threshold
-when it first appears, preserving the provider warning behavior from earlier
-Roomote releases. Admins can disable it, choose a Slack, Discord, or Email destination,
-and set the warning threshold from 5% through 95% in 5% increments. Roomote
-checks hourly, posts an alert card for each provider that crosses the threshold
-in a quota cycle, and sends a fresh critical alert if the quota later reaches
-100%. The automation-specific destination wins, followed by the shared Manager
-Channel and then the supported primary Teams, Telegram, or Discord conversation
-fallback. The check is deterministic, supports **Run now**, and never starts a
-Roomote task or session.
-
-**Platform Issue Alerts** are enabled by default. Tasks and sessions use
-them for admin-fixable platform, configuration, and access defects. Their own
-Slack, Discord, or Email destination wins, followed by the shared Manager Channel. If
-neither channel is configured, Roomote sends the alert directly to active
-deployment admins using each admin's first linked provider in this order:
-Slack, Teams, Telegram, then Discord. Admins need a linked account and must be
-reachable by the bot for this fallback to work. When only some admins receive
-an alert, Roomote keeps it pending and retries the remaining deliveries instead
-of marking the report complete. Disable the automation explicitly if the
-deployment should not send these alerts.
-
-**Announce Roomote Updates** is enabled by default. It posts only after the
-deployment workflow finishes its readiness checks for a newer installed
-release, not when a release merely becomes available. The first observation
-establishes a silent baseline, so enabling the feature or installing Roomote
-does not replay historical announcements. Restarts, retries of the same
-version, and rollbacks do not post. Patch-only updates also stay silent while
-still becoming the baseline for the next comparison. An update posts when its
-installed version crosses a major or minor boundary, including a patch release
-such as `1.10.5` to `1.11.2`. When an update skips releases, the message selects
-up to three authored highlights across the intervening changelog entries and
-links to the full notes for the installed release. If that authoritative range
-has no authored highlights, Roomote silently completes the announcement instead
-of retrying it; missing or unreadable release data remains retryable. Leave its
-destination on **Default** to use the standard automation destination, or choose
-a Slack, Microsoft Teams, Telegram, or Discord channel or direct message, or
-an Email identity.
-Delivery failures remain pending for retry without reposting a destination
-already recorded as successful.
-
-An alert's **Send to Roomote** action opens an admin-only confirmation page with
-the exact title, report details, and source task or session link. Viewing the
-page does not submit anything: an admin must confirm before the report leaves
-the deployment. A failed submission remains retryable, and repeated clicks on
-an already submitted report do not create duplicates.
-
-Each automation card shows a **Reports to** line with the destination the next
-run will use and which setting produced it. Reports go to the automation's own
-explicit destination when one is set, otherwise to the shared Manager Channel.
-An unavailable explicit Email destination fails closed and never enters the
-fallback waterfall. If Slack is
-not connected, fallback selection runs only when no destination is saved or the
-saved destination is a Slack channel. Roomote then checks your primary Microsoft
-Teams conversation, the configured Telegram chat, and the default Discord
-channel in that order (see
-[Communications](/communications#supported-providers) for connecting those
-surfaces).
-
-**Suggest Ideas** can also report to Teams or Telegram as first-class
-destinations. When you select Telegram, Roomote creates a sticky **Suggest
-Ideas** forum topic in your primary Telegram chat (create once, reuse on later
-runs) and posts digests there. You cannot pick an existing Telegram thread —
-Roomote owns the recurring topic. When you select Teams, digests go to the
-primary Teams conversation captured for the deployment.
-
-Cards also show a plain provider-support line for what each automation supports
-today: the chat surfaces it can report to and the source-control providers it
-works with. Triage Dependabot Alerts and Triage CodeQL Alerts are GitHub-only
-by nature. CI Failure Triage supports GitHub Actions, GitLab Pipelines, Azure
-DevOps builds, Bitbucket Pipelines, and Gitea Actions. Triage Issues supports GitHub, GitLab,
-and Gitea issues.
-Security Auditor, Code Quality Auditor, Weekly Manager
-Stats, Suggest Ideas, Summarize Merged PRs, and Triage Sentry Issues work with
-any connected source-control provider. Resolve PR Conflicts supports GitHub,
-GitLab, Azure DevOps, and Gitea. Bitbucket is not supported because its API
-does not expose the mergeability and label signals required for an unattended
-opt-in scan. CI Failure Triage reacts immediately to GitHub
-Actions, GitLab Pipeline, Azure DevOps `build.complete`, Bitbucket
-Pipelines commit-status, and Gitea Actions `workflow_run` webhooks rather than
-running on a daily or weekly schedule.
-
-**Code Quality Auditor** inspects recently merged PR diffs and only posts
-high-confidence maintainability issues worth a real follow-up task. It is
-meant to catch confusing abstractions, file bloat, brittle branching, and other
-quality regressions, not correctness bugs or security issues.
-
-**Triage Sentry Issues** scans connected Sentry projects and posts the issues
-that look worth engineering follow-up. Leave project slugs blank to scan
-everything available to the configured token, or scope it to specific
-projects.
-
-**Triage Dependabot Alerts** scans open GitHub Dependabot alerts across your
-active repositories and suggests tightly scoped follow-up update tasks. It
-does not open PRs directly from the scheduled scan. Follow-up remediation
-preserves the repository's dependency minimum-age and exclusion policies and
-uses only versions those policies allow. When a matching Dependabot update entry
-or Renovate rule names reviewers or assignees, the remediation pull request
-requests those reviewers and assigns those owners after creation. Roomote does
-not infer dependency owners from `CODEOWNERS`. When every repository is scanned
-successfully and no alerts are open, Roomote stays silent instead of posting an
-empty report. Access failures, actionable alerts, and remediation work still
-produce a report.
-
-**Triage CodeQL Alerts** scans open GitHub code-scanning alerts (especially
-CodeQL findings) across your active repositories and launches tightly scoped
-remediation follow-up tasks. It does not open PRs directly from the scheduled
-scan.
-
-**Security Auditor** reviews recently merged PRs for concrete security issues
-and secure-by-default gaps that are worth a real follow-up task.
-
-**CI Failure Triage** reacts the moment CI fails on a repository's default
-branch (GitHub Actions workflow runs, GitLab Pipelines, Azure DevOps
-builds, Bitbucket Pipelines, and Gitea Actions). When a failure persists (it is not already fixed by a newer run and is
-not a one-off flake), Roomote starts a fix task that reproduces the failing
-job inside the repository's configured environment, finds the root cause, opens
-a PR with the fix, and posts one summary to the configured destination when it
-finishes. Only repositories that belong to a configured Roomote environment are
-triaged. For GitLab, ensure Pipeline Hooks are enabled on the webhook Roomote
-receives. For Azure DevOps, Roomote ensures the project-scoped
-`build.complete` service hook when Azure DevOps repositories are synced. For Bitbucket, repository webhooks include `repo:commit_status_created` and
-`repo:commit_status_updated`, and the OAuth client needs the Pipelines scope.
-For Gitea, repository webhook resync includes the `workflow_run` event so
-Actions completions reach Roomote; host matching uses the deployment
-`GITEA_BASE_URL`.
-
-For **Suggest Ideas**, **Summarize Merged PRs**, **Security Auditor**, **Code
-Quality Auditor**, **CI Failure Triage**, and **Merge announcer**, choose the
-standard report destination and optionally describe **Additional rules** in
-natural language:
-
-> Only triage backend and platform. Send platform failures to #platform-ci in our Engineering Slack workspace.
-
-Roomote checks rules against accessible repositories and connected destinations
-when you save. Include the source-control provider or host, or the communication
-workspace, when names could be ambiguous. Unclear, contradictory, unavailable,
-or unsupported rules cannot be saved. An inference provider must be available
-to interpret new rules. A failed save leaves the previous configuration intact.
-
-Repository restrictions apply to scheduled runs, **Run now**, and webhook runs
-where the automation uses them. Explicit
-restrictions select the matching repositories at save time; save revised rules
-to include newly added repositories. Destination-only rules do not limit scope:
-other repositories continue using the standard destination. Workflow and
-report-writing guidance can also be included. Pre-run workflow, job, branch,
-and time conditions are not supported in Additional rules. Clear the rules to
-restore the automation's all-repository behavior using the standard
-destination. Existing **Suggestion preferences** and merged-PR **Additional
-instructions** remain separate and keep their current meaning.
-
-Repositories still need an active source-control connection. CI Failure Triage
-also requires a configured environment for the repository it repairs. Security
-and code-quality scans can inspect connected repositories without an
-environment, but launchable remediation still needs a matching environment.
-**Run now** processes the eligible scope and can produce separate runs for
-different providers, hosts, or report destinations. CI Failure Triage is
-webhook-driven; scheduled checks do not scan repositories.
-
-Follow the [CI failure auto-fix recipe](/cookbook/ci-failure-auto-fix) for a
-copyable noise-control configuration.
-
-## Add instructions to reduce noise
-
-Several automations include an **Additional instructions** field. Use it to
-tell Roomote what good signal looks like for your team.
-
-Helpful instructions are specific:
-
-```text
-Prioritize changes that reduce repeated support escalations.
-Skip suggestions that require product approval before engineering can start.
-For merged PR summaries, call out customer-visible changes first.
-```
-
-Avoid broad instructions such as "only send good ideas." Roomote needs to
-know what your team considers useful, risky, or out of scope.
-
-## Run an automation now
-
-Some automations include a **Run now** action. Use it when you want to test
-the current configuration before waiting for the next scheduled run.
-
-After you run one, check the destination channel and the task view. A healthy
-automation should leave enough context for a reviewer to understand why
-Roomote posted and what should happen next.
-
-If the automation creates a task, review the same evidence you would review for
-manual work: transcript, logs, diffs, previews, artifacts, and final summary.
-
-## Use Slack workflows for event-driven custom triggers
-
-For **scheduled** work with a fixed prompt, prefer **Custom automations**
-above. For **event-driven** team workflows, use Slack's own workflow builder
-and end the workflow with a Roomote mention.
-
-Good custom event triggers include:
-
-- send new bug-channel posts to Roomote for triage
-- turn operational requests from another system into Roomote tasks
-- ask Roomote to gather diagnostics when a support escalation arrives
-
-This keeps event routing in Slack while still letting Roomote run a normal,
-reviewable task.
-
-## Possible issues
-
-- **Nothing posts to chat.** Check that the selected communications provider is
-  connected, Roomote can access the destination channel, and the automation is
-  enabled.
-- **Suggestions are too broad.** Add narrower instructions about what to
-  prioritize and what to ignore.
-- **Review Code comments on too much.** Turn off draft PR review or adjust
-  when automatic reviews run.
-- **Conflict resolution starts on the wrong PRs.** Use the configured label as
-  the opt-in boundary and remove it from PRs that need human handling.
+Automations let a Roomote agent start repeatable work without waiting for a
+teammate to write the same prompt each time. An automation combines a saved
+instruction with a trigger, optional execution preferences, and a report
+destination. Every run becomes a distinct session and can answer directly or
+delegate a normal task when repository or workspace work is needed.
+
+Automations are not a separate agent identity. They are one way to launch the
+same Roomote agent workflows that teammates can start from the dashboard, chat,
+source control, Linear, or the API.
+
+## When to use an automation
+
+Use an automation when the work has a repeatable input and a clear review path:
+
+- scheduled summaries, triage, audits, or housekeeping
+- pull request reviews and conflict checks
+- source-control or provider events that should start a bounded workflow
+- recurring team updates delivered to a channel, direct message, or email
+- a custom prompt that should be available through **Run now** or a private
+  webhook
+
+Use a regular [session](/fast-sessions) when the request needs an evolving
+conversation, clarification, or a one-off decision. Use a [task](/tasks) when
+you need an independently controllable execution with a terminal, logs, diff,
+preview, or artifacts. Automation runs use those same surfaces rather than
+creating a separate execution model.
+
+## How an automation runs
+
+1. A schedule, provider event, manual action, or webhook starts the automation.
+2. Roomote opens a new session with the saved prompt and the run's trigger
+   context.
+3. The session answers from its available integrations when that is enough. If
+   workspace work is needed, it delegates a task using the configured routing
+   preference.
+4. The session reports meaningful findings, completed results, blockers, or
+   questions to its configured destination. Routine success and no-change runs
+   can remain silent unless the prompt asks for a report.
+5. The run remains available in the web app as a session, with links to any
+   delegated tasks, pull requests, artifacts, costs, and the final report.
+
+Each run is independent. Starting one automation does not cancel or serialize
+another run, and a queued run means Roomote accepted the session turn, not that
+the delegated work has completed.
+
+## Built-in and custom work
+
+Admins manage built-in automations and deployment-wide settings. Members can
+create and manage the custom automations they own; administrators can manage
+all custom automations, including those without a creator. The [configuration
+guide](/automation-configuration) explains built-in controls, while the
+[custom automation guide](/custom-automations) covers saved prompts, schedules,
+destinations, models, and execution targets.
+
+Built-in automations cover common team workflows:
+
+| Area | Examples | Typical trigger |
+| --- | --- | --- |
+| Pull requests and repositories | Review Code, Triage Issues, Resolve PR Conflicts, Merge announcer | Pull request or repository event, schedule, or **Run now** |
+| Team operations | Manager Stats, Summarize Merged PRs, Suggest Ideas | Daily, weekly, or monthly schedule |
+| Reliability and security | CI Failure Triage, Triage Sentry Issues, Triage Dependabot Alerts, Triage CodeQL Alerts, Security Auditor, Code Quality Auditor | Provider event or recurring scan |
+| Deployment operations | Platform Issue Alerts, Inference Provider Usage Alerts, Announce Roomote Updates | Platform event, quota check, or qualifying release |
+| Conversations | Call Roomote via emoji and Auto-respond to channels | Reaction or new channel message |
+
+The exact provider support, permissions, and output behavior differ by
+automation. Review the [configuration guide](/automation-configuration) before
+enabling a built-in automation instead of assuming every one starts a coding
+task or supports every provider.
+
+## Choose the review path first
+
+Before enabling automation, decide where a teammate will inspect the result:
+
+- a session in the web app when the run has no external destination
+- a Slack, Discord, Microsoft Teams, Telegram, or email report when the team
+  needs a notification or replyable thread
+- the [Results inbox](/automation-results) when eligible reports should become a
+  shared review queue with prepared follow-up work
+
+Reports contain the finished announcement or result. Intermediate research notes
+and tool progress are excluded from a posted automation report. Session-backed
+chat reports can be replyable; reply in the thread Roomote started to continue
+the session without mentioning Roomote. Deterministic alerts such as
+**Inference Provider Usage Alerts** are informational cards and do not create a
+task or session.
+
+## Start with a bounded rollout
+
+Make sure the basics are in place before enabling a recurring workflow:
+
+- source control is connected for pull request and repository automations
+- a communications provider is connected when the automation posts to a channel
+  or direct message
+- at least one healthy environment exists for repositories that need workspace
+  execution
+- the team knows where the automation will report and who owns its runs
+
+Start with one or two automations tied to a real team habit. Use **Run now** to
+check the prompt, routing, permissions, and destination before waiting for the
+next trigger. Then review the transcript, logs, diffs, previews, artifacts, and
+final summary using the same evidence standard as manually started work.
+
+## Continue with the guides
+
+- [Configure automations](/automation-configuration) for built-in settings,
+  destinations, event-driven controls, and noise reduction
+- [Custom automations](/custom-automations) for saved prompts, schedules,
+  environments, models, ownership, and reports
+- [Automation webhooks](/automation-webhooks) for secure HTTP triggering and
+  troubleshooting
+- [Automation results](/automation-results) for the Results inbox and a
+  practical review workflow
+- [Cookbook recipes](/cookbook) for copyable team systems built from these
+  pieces

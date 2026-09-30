@@ -553,7 +553,9 @@ describe('custom automation ownership', () => {
       const auth = isAdmin ? adminAuth : memberAuth;
       await triggerCustomAutomationCommand(auth, input);
       await deleteCustomAutomationCommand(auth, input);
-      expect(mocks.runCustomAutomationNow).toHaveBeenCalledWith(input.id);
+      expect(mocks.runCustomAutomationNow).toHaveBeenCalledWith(input.id, {
+        trigger: 'manual',
+      });
       expect(mocks.deleteCustomAutomation).toHaveBeenCalledWith(input.id);
     },
   );

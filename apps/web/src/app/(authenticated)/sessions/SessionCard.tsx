@@ -73,14 +73,12 @@ export function SessionCard({
   session,
   viewerUserId,
   query = '',
-  hideBlockedBadge = false,
-  sessionStatusExperimentEnabled = false,
+  hideAttentionBadges = false,
 }: {
   session: SessionCardData;
   viewerUserId: string;
   query?: string;
-  hideBlockedBadge?: boolean;
-  sessionStatusExperimentEnabled?: boolean;
+  hideAttentionBadges?: boolean;
 }) {
   const ownerDisplayName =
     getUserDisplayName({
@@ -110,7 +108,7 @@ export function SessionCard({
   const accessibleActivityTimestamp = activityDate.toLocaleString();
 
   return (
-    <div className="ph-no-capture group relative flex w-full @container items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10">
+    <div className="ph-no-capture group/card relative flex w-full @container items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10 group-data-[dragging=true]/board:hover:bg-transparent">
       <Link
         href={`/sessions/${session.id}`}
         className="absolute inset-0 z-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -174,7 +172,8 @@ export function SessionCard({
             ) : null}
             {status === 'active' ||
             status === 'ready' ||
-            (hideBlockedBadge && status === 'blocked') ? null : (
+            (hideAttentionBadges &&
+              (status === 'needs_input' || status === 'blocked')) ? null : (
               <SessionStatusBadge status={status} className="capitalize" />
             )}
           </div>
@@ -192,7 +191,7 @@ export function SessionCard({
             </span>
           </time>
         </div>
-        <p className="mt-1 line-clamp-2 wrap-anywhere text-base font-medium group-hover:underline">
+        <p className="mt-1 line-clamp-2 wrap-anywhere text-base font-medium group-hover/card:underline group-data-[dragging=true]/board:no-underline">
           {session.title}
         </p>
         <SessionSearchSnippet
@@ -228,7 +227,6 @@ export function SessionCard({
             sessionId={session.id}
             listRow
             status={session.manualStatus ?? session.cachedStatus}
-            sessionStatusExperimentEnabled={sessionStatusExperimentEnabled}
           />
         </div>
       ) : null}

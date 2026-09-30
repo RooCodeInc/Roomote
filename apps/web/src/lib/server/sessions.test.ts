@@ -642,6 +642,83 @@ describe('unified Session queries', () => {
     });
   });
 
+  it('filters archive state with non-archived as the default', async () => {
+    const live = await sessionFactory.create({
+      title: 'Archive filter live',
+      activityAt: 200,
+    });
+    const archived = await sessionFactory.create({
+      title: 'Archive filter archived',
+      activityAt: 100,
+      archivedAt: new Date(),
+    });
+    const ids = [live.id, archived.id];
+    const auth = { userId: crypto.randomUUID(), isAdmin: true };
+
+    await expect(getSessions(auth, { ids })).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: live.id })],
+    });
+    await expect(
+      getSessions(auth, { ids, archive: 'archived' }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: archived.id })],
+    });
+    expect(
+      (await getSessions(auth, { ids, archive: 'all' })).sessions.map(
+        (session) => session.id,
+      ),
+    ).toEqual([live.id, archived.id]);
+  });
+
+  it('filters board statuses using the same derived lane semantics', async () => {
+    const manualDone = await sessionFactory.create({
+      title: 'Board status manual done',
+      activityAt: 300,
+      cachedStatus: 'active',
+      manualStatus: 'done',
+    });
+    const judgedDone = await sessionFactory.create({
+      title: 'Board status judged done',
+      activityAt: 200,
+      cachedStatus: 'ready',
+    });
+    const ready = await sessionFactory.create({
+      title: 'Board status ready',
+      activityAt: 100,
+      cachedStatus: null,
+    });
+    await db.insert(sessionStatusJudgments).values({
+      sessionId: judgedDone.id,
+      sourceEventId: 'board-filter-turn',
+      generation: 1,
+      sourceKind: 'fast_turn',
+      state: 'applied',
+      outcome: 'done',
+      confidence: 0.97,
+    });
+    const ids = [manualDone.id, judgedDone.id, ready.id];
+    const auth = { userId: crypto.randomUUID(), isAdmin: true };
+
+    const done = await getSessions(auth, {
+      ids,
+      status: 'done',
+      includeJudgedStatus: true,
+    });
+    expect(done.sessions.map((session) => session.id)).toEqual([
+      manualDone.id,
+      judgedDone.id,
+    ]);
+
+    const readyResult = await getSessions(auth, {
+      ids,
+      status: 'ready',
+      includeJudgedStatus: true,
+    });
+    expect(readyResult.sessions.map((session) => session.id)).toEqual([
+      ready.id,
+    ]);
+  });
+
   it('lists only owned Sessions in descending activity order', async () => {
     const owner = await userFactory.create();
     const other = await userFactory.create();
@@ -1129,6 +1206,12 @@ describe('unified Session queries', () => {
     await expect(
       getSessionSources({ userId: owner.id, isAdmin: false }),
     ).resolves.toEqual(['web']);
+    await expect(
+      getSessionSources({ userId: owner.id, isAdmin: false }, 'archived'),
+    ).resolves.toEqual(['slack']);
+    await expect(
+      getSessionSources({ userId: owner.id, isAdmin: false }, 'all'),
+    ).resolves.toEqual(['slack', 'web']);
   });
 
   it('aggregates direct and attached-task inference costs exactly once', async () => {

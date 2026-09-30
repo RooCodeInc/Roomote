@@ -1,14 +1,16 @@
 import {
   db,
   eq,
+  ensureAutomationRows,
   fastAgentConversations,
+  inArray,
   fastAgentMessages,
   sessionFactory,
   sessionStatusJudgments,
   sessions,
-  setDeploymentExperimentEnabled,
   taskFactory,
   sessionTasks,
+  taskPullRequests,
   userFactory,
   tasks,
   users,
@@ -35,8 +37,9 @@ const conversationIds: string[] = [];
 const taskIds: string[] = [];
 const userIds: string[] = [];
 
+beforeAll(() => ensureAutomationRows(db));
+
 afterEach(async () => {
-  await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
   evaluateMock.mockReset();
   while (sessionIds.length > 0) {
     await db.delete(sessions).where(eq(sessions.id, sessionIds.pop()!));
@@ -86,7 +89,6 @@ function highConfidenceDone() {
 
 describe('processSessionStatusJudgmentBatch', () => {
   it('judges only visible transcript text and leaves cached runtime state unchanged', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const visibleUserTs = Date.now();
     const user = await userFactory.create();
     userIds.push(user.id);
@@ -141,15 +143,33 @@ describe('processSessionStatusJudgmentBatch', () => {
     });
     highConfidenceDone();
 
-    await expect(processSessionStatusJudgmentBatch()).resolves.toBe(1);
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
 
-    expect(evaluateMock).toHaveBeenCalledOnce();
-    expect(evaluateMock).toHaveBeenCalledWith(
+    const evaluation = evaluateMock.mock.calls.find(([input]) => {
+      const state = input.state as {
+        objective?: string;
+        recentMessages?: Array<{ text: string }>;
+      };
+      return (
+        state.objective === 'Answer the question' &&
+        state.recentMessages?.some(
+          (message) => message.text === 'What does this service do?',
+        )
+      );
+    });
+    expect(evaluation?.[0]).toEqual(
       expect.objectContaining({ decision: 'session-status-judgment' }),
     );
-    const state = evaluateMock.mock.calls[0]?.[0].state as {
+    const state = evaluation?.[0].state as {
       latestVisibleUserMessageAt: string | null;
       recentMessages: Array<{ text: string }>;
+      sessionOrigin: { kind: string; automation: string | null };
+      roomoteWorkState: string;
+      reviewHandoff: {
+        automationInitiatedRoomoteCreatedOpenPullRequest: boolean;
+      };
     };
     expect(state.latestVisibleUserMessageAt).toBe(
       new Date(visibleUserTs).toISOString(),
@@ -157,6 +177,11 @@ describe('processSessionStatusJudgmentBatch', () => {
     expect(state.recentMessages.map((message) => message.text)).toEqual([
       'What does this service do?',
     ]);
+    expect(state.sessionOrigin).toEqual({ kind: 'user', automation: null });
+    expect(state.roomoteWorkState).toBe('settled');
+    expect(state.reviewHandoff).toEqual({
+      automationInitiatedRoomoteCreatedOpenPullRequest: false,
+    });
     const [judgment] = await db
       .select()
       .from(sessionStatusJudgments)
@@ -169,8 +194,113 @@ describe('processSessionStatusJudgmentBatch', () => {
     expect(persistedSession?.cachedStatus).toBe('ready');
   });
 
+  it('deterministically marks a settled automation-created PR handoff as needing input', async () => {
+    const session = await sessionFactory.create({
+      ownerKind: 'automation',
+      ownerUserId: null,
+      ownerAutomation: 'custom_automation',
+      cachedStatus: 'ready',
+    });
+    sessionIds.push(session.id);
+    const task = await taskFactory.create({
+      state: 'completed',
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'custom_automation',
+    });
+    taskIds.push(task.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+    await db.insert(taskPullRequests).values({
+      taskId: task.id,
+      prUrl: `https://github.com/acme/example/pull/${task.id}`,
+      prNumber: 42,
+      repository: 'acme/example',
+      status: 'draft',
+      createdByRoomote: true,
+    });
+    await db.insert(sessionStatusJudgments).values({
+      sessionId: session.id,
+      sourceEventId: 'automation-task-terminal',
+      generation: 1,
+      sourceKind: 'task_terminal',
+      state: 'pending',
+    });
+
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
+
+    expect(evaluateMock).not.toHaveBeenCalled();
+    const [judgment] = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(eq(sessionStatusJudgments.sessionId, session.id));
+    expect(judgment).toMatchObject({
+      state: 'applied',
+      outcome: 'needs_input',
+      confidence: 1,
+    });
+  });
+
+  it('does not treat a human-requested PR in an automation-owned session as an automation handoff', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'automation',
+      ownerUserId: null,
+      ownerAutomation: 'custom_automation',
+      cachedStatus: 'ready',
+    });
+    sessionIds.push(session.id);
+    const task = await taskFactory.create({
+      state: 'completed',
+      initiatorKind: 'user',
+      initiatorUserId: user.id,
+      initiatorAutomation: null,
+    });
+    taskIds.push(task.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'follow_up',
+    });
+    await db.insert(taskPullRequests).values({
+      taskId: task.id,
+      prUrl: `https://github.com/acme/example/pull/${task.id}`,
+      prNumber: 43,
+      repository: 'acme/example',
+      status: 'open',
+      createdByRoomote: true,
+    });
+    await db.insert(sessionStatusJudgments).values({
+      sessionId: session.id,
+      sourceEventId: 'human-follow-up-terminal',
+      generation: 1,
+      sourceKind: 'task_terminal',
+      state: 'pending',
+    });
+    highConfidenceDone();
+
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
+
+    expect(evaluateMock).toHaveBeenCalledOnce();
+    expect(evaluateMock.mock.calls[0]?.[0].state.reviewHandoff).toEqual({
+      automationInitiatedRoomoteCreatedOpenPullRequest: false,
+    });
+    const [judgment] = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(eq(sessionStatusJudgments.sessionId, session.id));
+    expect(judgment).toMatchObject({ state: 'applied', outcome: 'done' });
+  });
+
   it('does not apply a done result while a linked task is active', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const { session } = await createSession();
     const childTasks = [];
     for (let index = 0; index < 13; index += 1) {
@@ -201,7 +331,9 @@ describe('processSessionStatusJudgmentBatch', () => {
     });
     highConfidenceDone();
 
-    await processSessionStatusJudgmentBatch();
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
 
     const [judgment] = await db
       .select()
@@ -215,7 +347,6 @@ describe('processSessionStatusJudgmentBatch', () => {
   });
 
   it('applies inactivity done precedence without a configured judgment backend', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const user = await userFactory.create();
     userIds.push(user.id);
     const [conversation] = await db
@@ -255,7 +386,9 @@ describe('processSessionStatusJudgmentBatch', () => {
     });
     evaluateMock.mockResolvedValue(null);
 
-    await processSessionStatusJudgmentBatch();
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
 
     expect(evaluateMock).not.toHaveBeenCalled();
 
@@ -271,7 +404,6 @@ describe('processSessionStatusJudgmentBatch', () => {
   });
 
   it('marks an unconfigured judgment backend ignored without applying a status', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const { session } = await createSession();
     await db.insert(sessionStatusJudgments).values({
       sessionId: session.id,
@@ -282,7 +414,9 @@ describe('processSessionStatusJudgmentBatch', () => {
     });
     evaluateMock.mockResolvedValue(null);
 
-    await processSessionStatusJudgmentBatch();
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
 
     const [judgment] = await db
       .select()
@@ -292,5 +426,60 @@ describe('processSessionStatusJudgmentBatch', () => {
       state: 'ignored',
       errorCode: 'judgment_unconfigured',
     });
+  });
+
+  it('does not let unrelated pending rows displace a scoped fixture', async () => {
+    const { session: target } = await createSession();
+    const competitors = await Promise.all(
+      Array.from({ length: 4 }, () => createSession()),
+    );
+    const competitorIds = competitors.map(({ session }) => session.id);
+    await db.insert(sessionStatusJudgments).values(
+      competitorIds.map((sessionId, index) => ({
+        sessionId,
+        sourceEventId: `competitor-${index}`,
+        generation: 1,
+        sourceKind: 'fast_turn' as const,
+        state: 'pending' as const,
+      })),
+    );
+    await db.insert(sessionStatusJudgments).values({
+      sessionId: target.id,
+      sourceEventId: 'target',
+      generation: 1,
+      sourceKind: 'fast_turn',
+      state: 'pending',
+    });
+    evaluateMock.mockResolvedValue({
+      outcome: {
+        type: 'choice',
+        choice: 'done',
+        confidence: 0.97,
+        probabilities: { done: 0.97 },
+      },
+    });
+
+    await Promise.all([
+      processSessionStatusJudgmentBatch(undefined, {
+        sessionIds: [target.id],
+      }),
+      processSessionStatusJudgmentBatch(undefined, {
+        sessionIds: competitorIds,
+      }),
+    ]);
+
+    const [targetJudgment] = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(eq(sessionStatusJudgments.sessionId, target.id));
+    const competitorJudgments = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(inArray(sessionStatusJudgments.sessionId, competitorIds));
+    expect(targetJudgment).toMatchObject({ state: 'applied', outcome: 'done' });
+    expect(competitorJudgments).toHaveLength(4);
+    expect(competitorJudgments.every(({ state }) => state === 'applied')).toBe(
+      true,
+    );
   });
 });

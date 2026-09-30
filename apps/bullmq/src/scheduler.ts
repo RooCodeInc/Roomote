@@ -18,6 +18,7 @@ import {
   type WebTaskInitiatorSettleNotificationJob,
   type AutomationJobResult,
   type AutomationRunOpts,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT,
 } from '@roomote/sdk/server';
 import {
   processSessionTitleRefreshJob,
@@ -74,7 +75,7 @@ type ScheduledJob = Job<unknown, void, string>;
 
 const AUTOMATION_JOBS: Record<
   ScheduledAutomationJobName,
-  (opts?: AutomationRunOpts) => Promise<AutomationJobResult>
+  (opts: AutomationRunOpts) => Promise<AutomationJobResult>
 > = {
   conflict_resolver: conflictScanJob,
   suggester: suggesterJob,
@@ -268,7 +269,9 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
   }
 
   if (isAutomationJobName(job.name)) {
-    await AUTOMATION_JOBS[job.name]();
+    await AUTOMATION_JOBS[job.name]({
+      context: SCHEDULED_AUTOMATION_RUN_CONTEXT,
+    });
     return;
   }
 
@@ -332,7 +335,9 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
     case ScheduledJobName.SessionTitleRefresh:
       return processSessionTitleRefreshJob(job.data as SessionTitleRefreshJob);
     case ScheduledJobName.CustomAutomations:
-      await customAutomationsJob();
+      await customAutomationsJob({
+        context: SCHEDULED_AUTOMATION_RUN_CONTEXT,
+      });
       return;
     default:
       throw new Error(`Unknown job type: ${job.name}`);

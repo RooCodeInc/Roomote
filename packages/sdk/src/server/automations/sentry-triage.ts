@@ -34,7 +34,10 @@ import {
   type TriageScanBuild,
 } from './scheduled-triage-runner';
 
-const WINDOW_DAYS: Record<Exclude<SentryTriageFrequency, 'off'>, number> = {
+const WINDOW_DAYS: Record<
+  Exclude<SentryTriageFrequency, 'off' | 'on_demand'>,
+  number
+> = {
   daily: 1,
   weekly: 7,
 };
@@ -75,16 +78,16 @@ function buildSentryTriagePrompt({
   projectSlugs,
   repositoryFullNames,
   repositoryCoverage,
-  manualTrigger,
+  trigger,
   recentThreadFeedback,
 }: {
   channelId: string;
   destination: ResolvedAutomationDestination;
-  frequency: Exclude<SentryTriageFrequency, 'off'>;
+  frequency: Exclude<SentryTriageFrequency, 'off' | 'on_demand'>;
   projectSlugs: string[];
   repositoryFullNames: string[];
   repositoryCoverage: RepositoryCoverage[];
-  manualTrigger: boolean;
+  trigger: 'scheduled' | 'manual' | 'webhook';
   recentThreadFeedback?: string | null;
 }): string {
   const promptContext = buildDestinationPromptContext(destination);
@@ -108,7 +111,7 @@ function buildSentryTriagePrompt({
 <task_context>
   <source>background-automation</source>
   <run_mode>read_only</run_mode>
-  <trigger>${manualTrigger ? 'manual' : 'scheduled'}</trigger>
+  <trigger>${trigger}</trigger>
   <scan_window>last ${windowDays} day${windowDays === 1 ? '' : 's'}</scan_window>
   <${promptContext.channelTag}>${promptContext.destinationRef}</${promptContext.channelTag}>
   <project_scope>
@@ -139,7 +142,7 @@ export const sentryTriageJob = createScheduledTriageJob({
     channelId,
     destination,
     runtime,
-    manualTrigger,
+    trigger,
   }) {
     if (!(await hasSentryMcpConnection())) {
       return {
@@ -148,7 +151,13 @@ export const sentryTriageJob = createScheduledTriageJob({
       } satisfies TriageScanBuild;
     }
 
-    const frequency = runtime.scheduleMode as SentryTriageFrequency;
+    const frequency: Exclude<SentryTriageFrequency, 'off' | 'on_demand'> =
+      runtime.scheduleMode === 'on_demand'
+        ? 'daily'
+        : (runtime.scheduleMode as Exclude<
+            SentryTriageFrequency,
+            'off' | 'on_demand'
+          >);
 
     if (frequency !== 'daily' && frequency !== 'weekly') {
       return { kind: 'skip', reason: 'frequency is off' };
@@ -197,7 +206,7 @@ export const sentryTriageJob = createScheduledTriageJob({
         projectSlugs,
         repositoryFullNames: partitionRepositories,
         repositoryCoverage: partitionCoverage,
-        manualTrigger,
+        trigger,
         recentThreadFeedback: recentThreadFeedback.promptText,
       }),
       trigger: 'scheduled',

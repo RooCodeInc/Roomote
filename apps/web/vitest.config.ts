@@ -52,7 +52,9 @@ export default defineConfig({
             'src/{hooks,components}/**/*.test.{js,jsx,ts,tsx}',
           ],
           environment: 'jsdom',
-          maxWorkers: 8,
+          // Keep the full client suite below the CI runner's Node heap limit.
+          // The server project runs concurrently with its own four workers.
+          maxWorkers: 4,
           setupFiles: './vitest.setup.client.ts',
         },
       },

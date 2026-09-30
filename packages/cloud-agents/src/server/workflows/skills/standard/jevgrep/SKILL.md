@@ -11,15 +11,16 @@ not install or enable it yourself. Use it when you understand the behavior you n
 do not know which files implement it:
 
 ```sh
-jg "Where is authentication checked before a request reaches a handler?" ./apps/api/src
+jg "Where is authentication checked before a request reaches a handler?" ./src/auth
 ```
 
 Use direct reads or `rg` for known paths and exact symbols. For unfamiliar
-behavior, inspect the repository's file list to choose the smallest plausible
-package or folder, then ask a specific natural-language question with that
-folder as the search root. If you cannot identify a narrow root, use ordinary
-code search. Avoid repository-wide searches and vague queries such as
-"what is this".
+behavior, use path listings or a targeted keyword search to choose a specific
+subsystem folder, then ask a natural-language question with that folder as the
+search root. A whole app or package source tree is too broad. If ordinary search
+already locates the implementation, read it directly. If you cannot identify a
+narrow root, use ordinary code search. Avoid repository-wide searches and vague
+queries such as "what is this".
 
 During ordinary task discovery, make at most one `jg` search attempt. Set the
 attempt budget across the parent and its subagents: when delegating exploration,

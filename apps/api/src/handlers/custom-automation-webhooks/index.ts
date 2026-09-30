@@ -14,7 +14,7 @@ import {
 import { runCustomAutomationNow } from '@roomote/sdk/server';
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
-const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
 type WebhookInputReadResult =
   | { ok: true; promptInputJson: string | null }
@@ -80,7 +80,7 @@ function encodeUntrustedJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 
-async function readWebhookInput(
+export async function readWebhookInput(
   request: Request,
 ): Promise<WebhookInputReadResult> {
   let body: Uint8Array;
@@ -184,9 +184,12 @@ customAutomationWebhooks.all('/:id/:token', async (c) => {
 
   // The parsed body is passed only to this run and remains explicitly untrusted
   // prompt data; the saved automation prompt and URL credential are unchanged.
-  const result = webhookInput.promptInputJson
-    ? await runCustomAutomationNow(id, 'webhook', webhookInput.promptInputJson)
-    : await runCustomAutomationNow(id, 'webhook');
+  const result = await runCustomAutomationNow(id, {
+    trigger: 'webhook',
+    ...(webhookInput.promptInputJson
+      ? { webhookInputJson: webhookInput.promptInputJson }
+      : {}),
+  });
   if (result.outcome === 'failed' || result.outcome === 'skipped') {
     return respond(c, 503, { error: 'trigger_failed' });
   }

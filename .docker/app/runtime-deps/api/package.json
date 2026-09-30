@@ -12,6 +12,7 @@
   "pnpm": {
     "overrides": {
       "axios": "1.18.1",
+      "moment": "2.31.0",
       "toml": "4.2.0"
     }
   }

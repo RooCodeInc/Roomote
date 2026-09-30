@@ -1,52 +1,56 @@
 ---
-title: Architecture
+title: How a Roomote deployment runs
 icon: network
-description: A contributor-oriented map of the apps and packages that make up Roomote.
+description: Understand how a request becomes a reviewable Roomote result.
 ---
 
-This page is for contributors and operators who need a quick map of the source
-tree. It is intentionally high level. Public docs should explain how to run,
-configure, and use Roomote.
+Roomote keeps the conversation, execution, and review path connected. This
+overview explains what happens after someone asks a Roomote agent to do work,
+without requiring you to know the repository's internal service layout.
 
-Roomote is a pnpm + Turborepo monorepo with applications under `apps/` and
-shared libraries under `packages/`.
+## From request to result
 
-## Applications
+1. A teammate starts a request from the web dashboard, a communications
+   provider, source control, Linear, an automation, or the API.
+2. Roomote creates or resumes a session, chooses the model and any authorized
+   integrations, and selects an environment when the request needs a workspace.
+3. A task runs in an isolated sandbox with the repositories, services, and
+   variables defined by that environment.
+4. The task records its conversation, terminal output, logs, artifacts, code
+   diff, and live preview as it works. The session keeps the explanation and
+   reports from delegated tasks together.
+5. Roomote returns the result to the originating surface and, for code changes,
+   can deliver a branch, pull request, or reviewable diff.
 
-| App                    | Description                                                                          |
-| ---------------------- | ------------------------------------------------------------------------------------ |
-| `apps/web`             | Next.js web dashboard for setup, settings, tasks, and review.                        |
-| `apps/docs`            | Mintlify public documentation site published at `docs.roomote.dev`.                  |
-| `apps/api`             | Hono API server: webhooks, MCP and task-control routes, artifact APIs, backend tRPC. |
-| `apps/controller`      | Worker-dispatch control plane: dequeues jobs and launches sandbox workers.           |
-| `apps/worker`          | Task runtime that runs inside each sandbox and executes the agent.                   |
-| `apps/bullmq`          | Background workers, scheduled jobs, and the opt-in Discord Gateway supervisor.       |
-| `apps/discord-gateway` | Reusable Discord Gateway connection and durable inbound-delivery subsystem.          |
-| `apps/preview-proxy`   | Reverse proxy that exposes live previews from task sandboxes.                        |
-| `apps/dev`             | Local dev CLI that orchestrates the PM2-managed services (`pnpm dev`).               |
+## What operators configure
 
-## Packages
+- **Inference providers** supply the models used for coding, orchestration,
+  vision, review, and helper work.
+- **Environments** define repositories, services, variables, and the sandbox
+  setup a task can use.
+- **Communications providers** and source-control providers connect Roomote to
+  the places where people start work and review results.
+- **Mediated built-in integrations** provide additional authorized context and
+  tools while keeping their credentials outside task sandboxes.
+- **MCP servers** depend on their transport and configuration: remote custom
+  servers use Roomote's proxy, while environment-defined servers and
+  deployment-scoped custom stdio servers can deliver configured HTTP `headers`
+  or process `env` values to the task sandbox that runs them.
+- **Automations** start repeatable sessions from schedules, provider events,
+  manual actions, or webhooks.
 
-| Package                                                  | Description                                                         |
-| -------------------------------------------------------- | ------------------------------------------------------------------- |
-| `packages/cloud-agents`                                  | Agent definitions, prompt assembly, routing, workflows, and skills. |
-| `packages/db`                                            | Drizzle ORM schema and migrations.                                  |
-| `packages/sdk`                                           | Shared contract between API, controller, and worker.                |
-| `packages/auth`                                          | Authentication and session handling.                                |
-| `packages/compute-providers`                             | Sandbox provider integrations.                                      |
-| `packages/github`, `gitlab`, `gitea`, `ado`, `bitbucket` | Source-control provider integrations.                               |
-| `packages/slack`, `linear`, `communication`              | Conversation-surface and issue-tracker integrations.                |
-| `packages/redis`, `env`, `types`, `feature-flags`        | Shared infrastructure utilities.                                    |
+The web dashboard is the main configuration and review surface. Chat, source
+control, Linear, the API, and automations are ways to interact with the same
+Roomote agents and sessions, not separate products.
 
-## Request flow
+## Where to continue
 
-1. A task is created from the web dashboard, Slack, or another entry surface.
-2. The API records it and enqueues work; the controller dequeues and provisions
-   a sandbox with the selected sandbox provider.
-3. The worker runs inside the sandbox, executes the agent against your
-   repositories, and streams progress back.
-4. Live previews from the sandbox are exposed through the preview proxy, and
-   results are delivered back to the surface that started the task.
-
-For local setup, see [Local development](/local-development). For running a
-deployment, see [Self-hosting](/self-hosting).
+- Start with [How Roomote works](/how-roomote-works) for surfaces, sessions, and
+  environments.
+- Configure an operator deployment with [Self-hosting](/self-hosting) and
+  [Environments](/environments).
+- Choose execution capacity from [Sandboxes](/compute) and inference from
+  [Models](/models).
+- Review evidence in [Sessions](/fast-sessions) and [Tasks](/tasks).
+- Use [Local development](/local-development) only when you intend to modify
+  Roomote itself.

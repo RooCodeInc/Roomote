@@ -148,6 +148,11 @@ in **Available Models**, and assign it to a role or select it for a session or
 task. Adding these routes does not change existing model defaults; access still
 depends on the connected provider account or plan.
 
+**GPT-6.1 Sol** is available through the same curated provider routes as GPT-6
+Sol. OpenAI describes it as near-Astra performance at a lower cost. Existing
+defaults and saved mappings stay unchanged; differentiated recommendations that
+previously used GPT-6 Sol now use GPT-6.1 Sol.
+
 **DeepSeek V4.1 Flash** is recommended through
 [DeepSeek](/providers/inference/deepseek),
 [OpenRouter](/providers/inference/openrouter),
@@ -170,7 +175,7 @@ saved defaults and role mappings do not change automatically.
 Providers can also offer differentiated presets for the model roles below — for
 example a strong model for planning and code review and a fast, low-cost model
 for helper and explore work. The **Recommended** OpenAI and ChatGPT subscription
-presets use GPT-6 Sol for coding, while the GitHub Copilot preset uses GPT-6
+presets use GPT-6.1 Sol for coding, while the GitHub Copilot preset uses GPT-6
 Luna. Connecting one of these providers in the setup wizard applies its
 **Default** preset; choose a differentiated preset later when you want to split
 roles across models.
@@ -357,8 +362,9 @@ code search. Jevgrep is currently available with the three Jev routes above;
 selecting **Off** or the **Roomote judgment model** disables it for new task runs.
 Turning off the experiment also stops new evaluations from existing tasks.
 The agent, including OpenCode's explore subagent, is instructed to make at most
-one narrowly scoped attempt during task discovery, stop after 30 seconds, and
-fall back to ordinary search. Exact symbols and known paths use ordinary search
+one attempt within a specific subsystem folder during task discovery, stop after
+30 seconds, and fall back to ordinary search. Whole app or package source trees
+are too broad. Exact symbols and known paths use ordinary search
 directly. Jevgrep evaluations do not use the Roomote shadow evaluator.
 
 The **Roomote judgment model** is an open-weight model served on
@@ -370,7 +376,7 @@ request.
 
 When a judgment model is on, Roomote asks it first for:
 
-- [Auto-respond to channels](/automations#channel-automations) launch criteria,
+- [Auto-respond to channels](/automation-configuration#channel-automations) launch criteria,
   including whether a message repeats an incident that already launched
 - whether a new task request asks a question, wants a plan, or wants an
   implementation
@@ -399,6 +405,17 @@ asks, with the exact questions and a sample state to edit, and shows the
 answer's probabilities and latency. When Jev answers and the Roomote judgment
 model is also configured, it can ask both side by side. Test decisions go to
 the same judgment model as real ones but are not captured or shadowed.
+
+For **Repository Judgement**, choose a rule and labeled example, select its initial
+or expanded evidence, and click **Load example**. Edit the inputs or ask for three
+repeated runs. Each answer shows the probability of a rule violation and whether
+it reaches the rule's cutoff. Recent runs retain their original inputs and labels.
+Expected labels are never sent to the model.
+
+These are individual evidence requests. A partial screen cannot approve a file,
+and the tester's 20-second timeout does not measure the commit hook's three-second
+budget. Confirm a proposed improvement through the full Judgement checker before
+changing a rule or its violation cutoff.
 
 ## Reasoning settings
 

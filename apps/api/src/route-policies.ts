@@ -261,6 +261,15 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     ],
   },
   {
+    name: 'webhook-built-in-automation',
+    match: { type: 'prefix', path: '/api/webhooks/built-in-automations' },
+    policy: 'webhook',
+    rateLimits: [
+      { keySource: 'client', limit: 60, windowSeconds: 60 },
+      { keySource: 'webhook-credential', limit: 15, windowSeconds: 60 },
+    ],
+  },
+  {
     // The BullMQ worker authenticates this route with the Discord gateway
     // secret. It has no client IP, so applying webhook limits would make every
     // worker request share one bucket during an outage retry storm.

@@ -4,7 +4,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 const evaluate = vi.hoisted(() => vi.fn());
 vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
-  evaluateTypeSafeJudgments: evaluate,
+  evaluateTypeSafeJudgmentsWithUsage: evaluate,
 }));
 import { evaluateJevgrepRequest } from '../jevgrep';
 
@@ -20,10 +20,16 @@ beforeEach(() => {
 
 it('uses the configured Jev model and preserves probabilities in the CLI wire format', async () => {
   const answers = { relevant: { type: 'noul', noul: 0.83 } };
-  evaluate.mockResolvedValue(answers);
+  evaluate.mockResolvedValue({
+    answers,
+    usage: { inputTokens: 120, outputTokens: 8, totalTokens: 128 },
+  });
   const response = await evaluateJevgrepRequest(request);
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ answers });
+  expect(await response.json()).toEqual({
+    answers,
+    usage: { input_tokens: 120, output_tokens: 8, total_tokens: 128 },
+  });
   expect(evaluate).toHaveBeenCalledWith({
     state: request.state,
     questions: request.questions,
@@ -31,6 +37,15 @@ it('uses the configured Jev model and preserves probabilities in the CLI wire fo
     bypassBackendCache: true,
     skipShadow: true,
     timeoutMs: 15_000,
+  });
+});
+
+it('leaves unavailable token counts absent instead of reporting zero usage', async () => {
+  const answers = { relevant: { type: 'noul', noul: 0.83 } };
+  evaluate.mockResolvedValue({ answers, usage: {} });
+  expect(await (await evaluateJevgrepRequest(request)).json()).toEqual({
+    answers,
+    usage: {},
   });
 });
 

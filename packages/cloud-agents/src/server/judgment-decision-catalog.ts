@@ -1,3 +1,4 @@
+import { question } from '@roo-code/judgement';
 import type { CodingModelRoutingRule, TaskModelOption } from '@roomote/types';
 
 import {
@@ -174,6 +175,11 @@ export const JUDGMENT_DECISION_DEFINITIONS = {
       evaluationTime: '2026-09-28T00:00:00.000Z',
       latestVisibleUserMessageAt: '2026-09-28T00:00:00.000Z',
       manualStatusChangedAt: null,
+      sessionOrigin: { kind: 'user', automation: null },
+      roomoteWorkState: 'waiting_for_user',
+      reviewHandoff: {
+        automationInitiatedRoomoteCreatedOpenPullRequest: false,
+      },
       objective: 'Fix the flaky checkout test and open a pull request.',
       recentMessages: [
         {
@@ -264,6 +270,36 @@ export const JUDGMENT_DECISION_DEFINITIONS = {
       recentResults: [],
     },
     note: 'Additional `run_when_*` questions are generated from each automation’s saved criteria.',
+  },
+  'repository-judgement': {
+    id: 'repository-judgement',
+    label: 'Repository Judgement',
+    description: 'Whether a staged file satisfies a repository business rule.',
+    questions: {
+      result: question({
+        kind: 'judge',
+        rule: '',
+        evidence: [],
+        focusPaths: [],
+        complete: true,
+        unresolved: [],
+      }),
+    },
+    sampleState: {
+      kind: 'judge',
+      rule: 'Do not expose internal error details in user-facing text.',
+      evidence: [
+        {
+          path: 'src/errors.ts',
+          kind: 'after',
+          line: 1,
+          text: 'showError(error.stack);',
+        },
+      ],
+      focusPaths: ['src/errors.ts'],
+      complete: true,
+      unresolved: [],
+    },
   },
   'judge-file-criterion': {
     id: 'judge-file-criterion',

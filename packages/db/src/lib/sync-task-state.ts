@@ -3,7 +3,6 @@ import { RunStatus, type TaskState } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
 import { taskRuns, tasks } from '../schema';
-import { isDeploymentExperimentEnabled } from './deployment-experiments';
 import { createSessionStatusJudgmentRequest } from './session-status-judgments';
 import { touchSessionForTask } from './sessions';
 
@@ -153,12 +152,7 @@ export async function syncTaskStateFromRuns(
     Math.floor(Date.now() / 1000),
   );
 
-  if (
-    updatedTask &&
-    nextState !== 'active' &&
-    session &&
-    (await isDeploymentExperimentEnabled('sessionStatusJudgment', tx))
-  ) {
+  if (updatedTask && nextState !== 'active' && session) {
     const terminalRun = selectTaskStateRun(runs);
     if (terminalRun) {
       await createSessionStatusJudgmentRequest(tx, {
