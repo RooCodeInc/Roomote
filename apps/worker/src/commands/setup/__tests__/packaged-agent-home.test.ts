@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { createRequire } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
@@ -144,6 +145,43 @@ describe('syncPackagedAgentHome', () => {
       expect(
         fs.readFileSync(path.join(installedSkillDir, resource), 'utf8'),
       ).toBe(expectedContent);
+    }
+  });
+
+  it('ships Judgement references to both skill homes and removes them when excluded', () => {
+    const require = createRequire(import.meta.url);
+    const packageRoot = path.dirname(
+      path.dirname(require.resolve('@roo-code/judgement')),
+    );
+    const source = path.join(packageRoot, 'skills/judgement');
+    fs.cpSync(
+      source,
+      path.join(workerDir, '.packaged-skills/standard/judgement'),
+      { recursive: true },
+    );
+    syncPackagedAgentHome({ homeDir, workerDir });
+    const runtimeHome = path.join(testRootDir, 'runtime-home');
+    const options = {
+      homeDir: runtimeHome,
+      sourceHomeDir: homeDir,
+      skillsFolderName: 'standard',
+    };
+    activateSkillsFolder(options);
+    for (const agent of ['.agents', '.claude']) {
+      for (const file of ['SKILL.md', 'references/agent-guide.md']) {
+        expect(
+          fs.readFileSync(
+            path.join(runtimeHome, agent, 'skills/judgement', file),
+            'utf8',
+          ),
+        ).toBe(fs.readFileSync(path.join(source, file), 'utf8'));
+      }
+    }
+    activateSkillsFolder({ ...options, excludeSkillNames: ['judgement'] });
+    for (const agent of ['.agents', '.claude']) {
+      expect(
+        fs.existsSync(path.join(runtimeHome, agent, 'skills/judgement')),
+      ).toBe(false);
     }
   });
 

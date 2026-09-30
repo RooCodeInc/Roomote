@@ -93,8 +93,8 @@ importers:
         specifier: ^1.52.0
         version: 1.52.0
       '@roo-code/judgement':
-        specifier: 0.4.0
-        version: 0.4.0
+        specifier: 0.4.1
+        version: 0.4.1
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:packages/config-typescript
@@ -949,8 +949,8 @@ importers:
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
       '@roo-code/judgement':
-        specifier: 0.4.0
-        version: 0.4.0
+        specifier: 0.4.1
+        version: 0.4.1
       '@roomote/auth':
         specifier: workspace:^
         version: link:../../packages/auth
@@ -1154,8 +1154,8 @@ importers:
         specifier: 1.18.30
         version: 1.18.30
       '@roo-code/judgement':
-        specifier: 0.4.0
-        version: 0.4.0
+        specifier: 0.4.1
+        version: 0.4.1
       '@roomote/ado':
         specifier: workspace:^
         version: link:../ado
@@ -5124,8 +5124,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@roo-code/judgement@0.4.0':
-    resolution: {integrity: sha512-MPleLuyuZI4OZjijiiCwroC8XS7ZdoxPbnbiLjg23ryirTM9WLZoqAuySVGTOPmQraOTTRiXKFuuBCDik5LdDw==}
+  '@roo-code/judgement@0.4.1':
+    resolution: {integrity: sha512-+7Nhylse9QqdLijnx5BOc5dzLn82gN2sZUVcNGswvoqxYIKHNBkYzbTkRvmKMDbU+OWVmM8gYJnx1OTcH6wdwA==}
     engines: {node: '>=22.20.0'}
     hasBin: true
 
@@ -15628,7 +15628,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.61.1':
     optional: true
 
-  '@roo-code/judgement@0.4.0':
+  '@roo-code/judgement@0.4.1':
     dependencies:
       picomatch: 4.0.7
 

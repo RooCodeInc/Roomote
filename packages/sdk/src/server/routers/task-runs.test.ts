@@ -260,6 +260,41 @@ describe('taskRunsRouter queue message guards', () => {
     expect(jevgrepMocks.backend).not.toHaveBeenCalled();
   });
 
+  it.each(['typesafe', 'openrouter', 'vercel'])(
+    'enables Judgement for configured %s without the Jevgrep experiment',
+    async (provider) => {
+      jevgrepMocks.backend.mockResolvedValue({
+        provider,
+        apiKey: 'server-only-key',
+      });
+      expect(
+        await createRunCaller().isRepositoryJudgementEnabled({ runId: 42 }),
+      ).toBe(true);
+      expect(jevgrepMocks.backend).toHaveBeenCalledWith({ bypassCache: true });
+      expect(jevgrepMocks.experiment).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, { provider: 'roomote', apiKey: 'server-only-key' }])(
+    'hides Judgement when no supported Jev backend is configured',
+    async (backend) => {
+      jevgrepMocks.backend.mockResolvedValue(backend);
+      expect(
+        await createRunCaller().isRepositoryJudgementEnabled({ runId: 42 }),
+      ).toBe(false);
+    },
+  );
+
+  it('scopes the Judgement capability check to the authenticated run', async () => {
+    await expect(
+      createRunCaller().isRepositoryJudgementEnabled({ runId: 43 }),
+    ).rejects.toThrow();
+    await expect(
+      createAuthCaller().isRepositoryJudgementEnabled({ runId: 42 }),
+    ).rejects.toThrow();
+    expect(jevgrepMocks.backend).not.toHaveBeenCalled();
+  });
+
   it('validates and authorizes bounded repository judgments', async () => {
     const request = {
       kind: 'judge' as const,

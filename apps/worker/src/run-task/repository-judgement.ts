@@ -8,12 +8,7 @@ export async function installRepositoryJudgement(
   cwd: string,
   logger: Pick<Console, 'warn'> = console,
 ) {
-  const workerDirectory = dirname(resolve(process.argv[1] ?? 'worker.js'));
-  const candidates = [
-    resolve(workerDirectory, 'judgement.js'),
-    resolve(workerDirectory, '../dist/judgement.js'),
-  ];
-  const cli = candidates.find((candidate) => existsSync(candidate));
+  const cli = resolveJudgementCli();
   if (!cli) {
     logger.warn(
       '[judgement] Hook unavailable: build the worker to install Judgement.',
@@ -23,7 +18,7 @@ export async function installRepositoryJudgement(
   try {
     await installGitHook({
       cwd,
-      command: [process.execPath, cli],
+      command: [process.execPath, cli, 'check', '--staged', '--hook'],
       signal: AbortSignal.timeout(5000),
     });
   } catch {
@@ -31,4 +26,13 @@ export async function installRepositoryJudgement(
       '[judgement] Could not install the repository hook; commits are not checked.',
     );
   }
+}
+
+export function resolveJudgementCli() {
+  const workerDirectory = dirname(resolve(process.argv[1] ?? 'worker.js'));
+  const candidates = [
+    resolve(workerDirectory, 'judgement.js'),
+    resolve(workerDirectory, '../dist/judgement.js'),
+  ];
+  return candidates.find((candidate) => existsSync(candidate));
 }
