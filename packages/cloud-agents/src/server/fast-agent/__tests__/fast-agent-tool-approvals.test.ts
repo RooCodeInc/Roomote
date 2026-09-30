@@ -752,7 +752,7 @@ describe('extractApprovalCallArgs', () => {
 
   it('returns a plain call input directly', () => {
     expect(extractApprovalCallArgs({ input: { channel: 'C1' } }, tool)).toEqual(
-      { channel: 'C1' },
+      { args: { channel: 'C1' } },
     );
   });
 
@@ -770,15 +770,17 @@ describe('extractApprovalCallArgs', () => {
         },
         tool,
       ),
-    ).toEqual({ channel: 'C1', text: 'hi' });
+    ).toEqual({ args: { channel: 'C1', text: 'hi' } });
   });
 
   it('falls back to the script when the child call is not tracked', () => {
     const code = { code: 'return 1' };
     expect(
       extractApprovalCallArgs({ input: code, toolCalls: [] }, tool),
-    ).toEqual(code);
-    expect(extractApprovalCallArgs(undefined, tool)).toBeUndefined();
+    ).toEqual({ args: code });
+    expect(extractApprovalCallArgs(undefined, tool)).toEqual({
+      args: undefined,
+    });
   });
 
   it('shows the paused call, not an earlier call to the same tool in one script', () => {
@@ -787,14 +789,367 @@ describe('extractApprovalCallArgs', () => {
         {
           input: { code: 'two calls' },
           toolCalls: [
-            { tool: 'mock-slack.post_message', input: { channel: 'first' } },
+            {
+              tool: 'mock-slack.post_message',
+              input: { channel: 'first' },
+              status: 'completed',
+            },
             { tool: 'mock-slack.read_channel', input: { channel: 'other' } },
-            { tool: 'mock-slack.post_message', input: { channel: 'second' } },
+            {
+              tool: 'mock-slack.post_message',
+              input: { channel: 'second' },
+              status: 'running',
+            },
           ],
         },
         tool,
       ),
-    ).toEqual({ channel: 'second' });
+    ).toEqual({ args: { channel: 'second' } });
+  });
+
+  it('cannot tell apart calls to the same tool started together', () => {
+    const running = (channel: string) => ({
+      tool: 'mock-slack.post_message',
+      input: { channel },
+      status: 'running',
+    });
+    expect(
+      extractApprovalCallArgs(
+        {
+          input: { code: 'Promise.all' },
+          toolCalls: [running('a'), running('b')],
+        },
+        tool,
+      ),
+    ).toEqual({ candidates: [{ channel: 'a' }, { channel: 'b' }] });
+    // Identical arguments are one call for approval, flagged as running
+    // together so their asks share a decision.
+    expect(
+      extractApprovalCallArgs(
+        {
+          input: { code: 'Promise.all' },
+          toolCalls: [running('a'), running('a')],
+        },
+        tool,
+      ),
+    ).toEqual({ args: { channel: 'a' }, concurrent: 2 });
+    // Finished calls are not candidates.
+    expect(
+      extractApprovalCallArgs(
+        {
+          input: { code: 'Promise.all' },
+          toolCalls: [{ ...running('a'), status: 'error' }, running('b')],
+        },
+        tool,
+      ),
+    ).toEqual({ args: { channel: 'b' } });
+  });
+});
+
+describe('parallel calls in one script', () => {
+  const ask = {
+    requestId: 'req-1',
+    sessionId: 'opencode-session',
+    permission: codeModeToolKey('mock-slack', 'post_message'),
+    messageId: 'message-1',
+    callId: 'call-1',
+  };
+  const parallelHelpers = () => ({
+    fetchCallArgs: vi.fn(async () => ({
+      input: { code: 'Promise.all' },
+      toolCalls: [
+        {
+          tool: 'mock-slack.post_message',
+          input: { channel: 'C1' },
+          status: 'running',
+        },
+        {
+          tool: 'mock-slack.post_message',
+          input: { channel: 'C2' },
+          status: 'running',
+        },
+      ],
+    })),
+    reply: vi.fn(async () => undefined),
+  });
+  const bridgeFor = (auto: boolean) =>
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      ...(auto
+        ? {
+            autoToolKeys: new Set([
+              JSON.stringify(['mock-slack', 'post_message']),
+            ]),
+          }
+        : {}),
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([]);
+    vi.mocked(insertIntegrationToolApproval).mockResolvedValue({
+      approvalId: 'batch-approval',
+      integrationId: 'mock-slack',
+      toolName: 'post_message',
+      argsSummary: [{ channel: 'C1' }, { channel: 'C2' }],
+      status: 'pending',
+      taskId: null,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+  });
+
+  it('asks about several calls with one card, and runs or stops them together', async () => {
+    const decide = (status: 'approved' | 'rejected') =>
+      vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+        status,
+      } as never);
+    for (const status of ['approved', 'rejected'] as const) {
+      vi.mocked(insertIntegrationToolApproval).mockClear();
+      decide(status);
+      vi.mocked(markIntegrationToolApprovalConsumed).mockResolvedValue(true);
+      const bridge = bridgeFor(false);
+      const first = parallelHelpers();
+      const second = parallelHelpers();
+      bridge.handleAsk({ ...ask, requestId: `${status}-a` }, first);
+      bridge.handleAsk({ ...ask, requestId: `${status}-b` }, second);
+      const expected =
+        status === 'approved'
+          ? ['once', undefined]
+          : ['reject', 'The requester rejected this tool call.'];
+      await vi.waitFor(() => {
+        expect(first.reply).toHaveBeenCalledWith(`${status}-a`, ...expected);
+        expect(second.reply).toHaveBeenCalledWith(`${status}-b`, ...expected);
+      });
+      // One card, listing every call in the batch.
+      expect(insertIntegrationToolApproval).toHaveBeenCalledTimes(1);
+      expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          argsSummary: [{ channel: 'C1' }, { channel: 'C2' }],
+        }),
+      );
+    }
+    // The approved card was consumed once for the whole batch.
+    expect(markIntegrationToolApprovalConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one assessment per call across the asks of one script', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    const bridge = bridgeFor(true);
+    const first = parallelHelpers();
+    const second = parallelHelpers();
+    bridge.handleAsk({ ...ask, requestId: 'ask-a' }, first);
+    bridge.handleAsk({ ...ask, requestId: 'ask-b' }, second);
+    await vi.waitFor(() => {
+      expect(first.reply).toHaveBeenCalledWith('ask-a', 'once');
+      expect(second.reply).toHaveBeenCalledWith('ask-b', 'once');
+    });
+    // Two calls, two assessments, not one set per ask.
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives identical parallel calls one shared decision, and keeps tools apart', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision)
+      .mockResolvedValueOnce({
+        action: 'approve',
+        mode: 'on',
+        evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+      })
+      .mockResolvedValue({
+        action: 'ask',
+        mode: 'on',
+        evaluation: { recommendation: 'ask', answers: {}, evaluatedAt: '' },
+      });
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
+    const identical = () => ({
+      fetchCallArgs: vi.fn(async () => ({
+        input: { code: 'Promise.all' },
+        toolCalls: [1, 2].map(() => ({
+          tool: 'mock-slack.post_message',
+          input: { channel: 'C1' },
+          status: 'running',
+        })),
+      })),
+      reply: vi.fn(async () => undefined),
+    });
+    const bridge = bridgeFor(true);
+    const first = identical();
+    const second = identical();
+    bridge.handleAsk({ ...ask, requestId: 'same-a' }, first);
+    bridge.handleAsk({ ...ask, requestId: 'same-b' }, second);
+    await vi.waitFor(() => {
+      expect(first.reply).toHaveBeenCalledWith('same-a', 'once');
+      expect(second.reply).toHaveBeenCalledWith('same-b', 'once');
+    });
+    // One assessment for the one distinct call, even though a second
+    // assessment would have asked.
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks about identical calls running together with one card', async () => {
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'approved',
+    } as never);
+    vi.mocked(markIntegrationToolApprovalConsumed).mockResolvedValue(true);
+    const identical = () => ({
+      fetchCallArgs: vi.fn(async () => ({
+        input: { code: 'Promise.all' },
+        toolCalls: [1, 2].map(() => ({
+          tool: 'mock-slack.post_message',
+          input: { channel: 'C1' },
+          status: 'running',
+        })),
+      })),
+      reply: vi.fn(async () => undefined),
+    });
+    const bridge = bridgeFor(false);
+    const first = identical();
+    const second = identical();
+    bridge.handleAsk({ ...ask, requestId: 'twin-a' }, first);
+    bridge.handleAsk({ ...ask, requestId: 'twin-b' }, second);
+    await vi.waitFor(() => {
+      expect(first.reply).toHaveBeenCalledWith('twin-a', 'once', undefined);
+      expect(second.reply).toHaveBeenCalledWith('twin-b', 'once', undefined);
+    });
+    expect(insertIntegrationToolApproval).toHaveBeenCalledTimes(1);
+    expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ argsSummary: { channel: 'C1' } }),
+    );
+  });
+
+  it('assesses a later identical call in the same script again', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    const single = () => ({
+      fetchCallArgs: vi.fn(async () => ({
+        input: { code: 'sequential' },
+        toolCalls: [
+          {
+            tool: 'mock-slack.post_message',
+            input: { channel: 'C1' },
+            status: 'running',
+          },
+        ],
+      })),
+      reply: vi.fn(async () => undefined),
+    });
+    const bridge = bridgeFor(true);
+    const first = single();
+    bridge.handleAsk({ ...ask, requestId: 'later-a' }, first);
+    await vi.waitFor(() =>
+      expect(first.reply).toHaveBeenCalledWith('later-a', 'once'),
+    );
+    // A steer may have changed things since; the settled decision is gone.
+    const second = single();
+    bridge.handleAsk({ ...ask, requestId: 'later-b' }, second);
+    await vi.waitFor(() =>
+      expect(second.reply).toHaveBeenCalledWith('later-b', 'once'),
+    );
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledTimes(2);
+  });
+
+  it('runs them under Auto only when every one of them would run', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    const approved = parallelHelpers();
+    bridgeFor(true).handleAsk({ ...ask, requestId: 'all-ok' }, approved);
+    await vi.waitFor(() =>
+      expect(approved.reply).toHaveBeenCalledWith('all-ok', 'once'),
+    );
+    // Each call was assessed with its own arguments.
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ args: { channel: 'C1' } }),
+    );
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ args: { channel: 'C2' } }),
+    );
+    expect(insertAutoApprovedIntegrationToolApproval).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        argsSummary: [{ channel: 'C1' }, { channel: 'C2' }],
+      }),
+    );
+
+    vi.mocked(resolveIntegrationToolAutoDecision)
+      .mockReset()
+      .mockResolvedValueOnce({
+        action: 'approve',
+        mode: 'on',
+        evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+      })
+      .mockResolvedValueOnce({
+        action: 'ask',
+        mode: 'on',
+        evaluation: { recommendation: 'ask', answers: {}, evaluatedAt: '' },
+      });
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
+    const oneRisky = parallelHelpers();
+    bridgeFor(true).handleAsk({ ...ask, requestId: 'one-risky' }, oneRisky);
+    await vi.waitFor(() =>
+      expect(oneRisky.reply).toHaveBeenCalledWith(
+        'one-risky',
+        'reject',
+        'The requester rejected this tool call.',
+      ),
+    );
+    // One call Auto would not run makes the batch ask, with Auto's reason.
+    expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        argsSummary: [{ channel: 'C1' }, { channel: 'C2' }],
+        autoEvaluation: expect.objectContaining({ recommendation: 'ask' }),
+      }),
+    );
+  });
+
+  it('pauses Auto instead of asking when one call in a batch cannot be checked', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision)
+      .mockResolvedValueOnce({
+        action: 'ask',
+        mode: 'on',
+        evaluation: { recommendation: 'ask', answers: {}, evaluatedAt: '' },
+      })
+      .mockResolvedValueOnce({
+        action: 'ask',
+        mode: 'on',
+        evaluation: {
+          recommendation: 'ask',
+          unavailable: 'error',
+          evaluatedAt: '',
+        },
+      });
+    const batch = parallelHelpers();
+    bridgeFor(true).handleAsk({ ...ask, requestId: 'one-unchecked' }, batch);
+    await vi.waitFor(() =>
+      expect(batch.reply).toHaveBeenCalledWith(
+        'one-unchecked',
+        'reject',
+        INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
+      ),
+    );
+    expect(suspendIntegrationToolAutoForSession).toHaveBeenCalledWith(
+      'session-id',
+    );
+    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
   });
 });
 

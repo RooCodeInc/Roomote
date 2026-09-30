@@ -482,9 +482,12 @@ function listConditions(
 
     switch (input.status) {
       case 'active':
-        return and(
-          isNull(sessions.manualStatus),
-          eq(sessions.cachedStatus, 'active'),
+        return or(
+          eq(sessions.manualStatus, 'active'),
+          and(
+            isNull(sessions.manualStatus),
+            eq(sessions.cachedStatus, 'active'),
+          ),
         );
       case 'needs_input':
       case 'blocked':

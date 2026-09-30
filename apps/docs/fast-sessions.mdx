@@ -193,17 +193,20 @@ attached tasks. Open the cost breakdown to separate direct session orchestration
 from each task's usage.
 
 The sessions page supports a list of pinned and recent sessions with unread
-indicators. Common scope, status, and time filters stay visible; turn on
-advanced filters for user, environment, pull request, model, and source. Active
-advanced filters remain visible until you clear them. Search matches session and task titles,
-repositories, and conversation text. Queries of at least three characters
-include transcript matches and show a highlighted excerpt. **Ready** is not a
-terminal state: you can reply or start another execution in the same session
-later.
+indicators. Common scope, status, archive state, and time filters stay visible;
+turn on advanced filters for user, environment, pull request, model, and source.
+Active advanced filters remain visible until you clear them. Search matches
+session and task titles, repositories, and conversation text. Queries of at
+least three characters include transcript matches and show a highlighted
+excerpt. **Ready** is not a terminal state: you can reply or start another
+execution in the same session later.
 
 The Sessions page shows the list by default and includes a board view with
 **Active**, **Needs input**, **Blocked**, **Ready**, and **Done** columns. Members
-see the board only for sessions they can already access.
+see the board only for sessions they can already access. Select a lane heading
+to filter the board to that status. On desktop, drag a card between lanes to
+change its status; keyboard users can pick up, move, and drop the focused card
+with the controls announced by the board.
 
 The deployment's configured judgment model classifies settled Session outcomes.
 The judgment uses recent visible conversation and child-task summaries. Active
@@ -211,11 +214,14 @@ work and structured input requests continue to use their deterministic status;
 uncertain judgments fall back to the existing status. A Done column is
 informational and never closes, cancels, or archives a session or task.
 
-An authorized Session manager can choose **Needs input**, **Blocked**, **Ready**,
-or **Done** from the shared overflow menu on the Sessions board, list, or
-workspace. **Active** remains a deterministic runtime state rather than a
-manual selection. Manual **Done** only changes the Session's displayed outcome;
-it does not stop tasks or archive the Session.
+An authorized Session manager can choose **Active**, **Needs input**,
+**Blocked**, **Ready**, or **Done** from the shared overflow menu on the Sessions
+board, list, or workspace. Manual **Done** only changes the Session's displayed
+outcome; it does not stop tasks or archive the Session.
+
+When an automation creates a pull request, the session remains **Needs input**
+while that pull request is open so the review handoff stays visible. Merging or
+closing the pull request releases that handoff for status re-evaluation.
 After at least four days (96 hours) without a newer visible user message,
 inactivity reconciliation can move a settled Session to **Done** before model
 classification. A newer visible user message releases the manual override so
@@ -257,6 +263,11 @@ follow-ups continue the same conversation with full context. For conversations
 that live on another surface, Roomote posts the answer back into the originating
 thread with a quoted copy of your web message, so the conversation stays in one
 place for everyone following it there.
+
+In an empty reply box, press ArrowUp to recall earlier prompts from the visible
+conversation. Continue pressing ArrowUp to move backward through prompt history;
+ordinary multiline editing, suggestions, and input-method composition keep
+their normal keyboard behavior.
 
 For substantive requests, Roomote sends a brief acknowledgement before it starts
 model-invoked work. An eligible Slack message may receive an acknowledgement
