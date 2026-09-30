@@ -8,6 +8,12 @@ const { sessionStatusState } = vi.hoisted(() => ({
   },
 }));
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/sessions',
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 vi.mock('@/components/sessions/use-session-status-mutation', () => ({
   useSessionStatusMutation: () => ({ isPending: false, mutate: vi.fn() }),
 }));
@@ -148,7 +154,7 @@ describe('Sessions list', () => {
       within(blockedSection).getAllByText('blocked', { exact: true }),
     ).toHaveLength(1);
     expect(
-      within(blockedSection).getByRole('heading').parentElement,
+      within(blockedSection).getByRole('heading').closest('header'),
     ).toHaveClass('cursor-default');
   });
 

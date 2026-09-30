@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import Link from 'next/link';
 import type { HTMLAttributes, ReactNode } from 'react';
 
@@ -15,6 +15,14 @@ type DndTestProps = {
 const testState = vi.hoisted(() => ({
   dndProps: null as DndTestProps | null,
   mutate: vi.fn(),
+  replace: vi.fn(),
+  searchParams: new URLSearchParams('view=board&status=active&before=cursor'),
+}));
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/sessions',
+  useRouter: () => ({ replace: testState.replace }),
+  useSearchParams: () => testState.searchParams,
 }));
 
 vi.mock('@/components/sessions/use-session-status-mutation', () => ({
@@ -116,7 +124,12 @@ import {
 function renderInteractionBoard() {
   return render(
     <SessionBoard>
-      <SessionBoardColumn column="active" label="active" count={1}>
+      <SessionBoardColumn
+        column="active"
+        label="active"
+        count={1}
+        statusFilter="active"
+      >
         <SessionBoardCard
           sessionId="session-active"
           column="active"
@@ -162,6 +175,10 @@ describe('SessionBoard drag interaction', () => {
   beforeEach(() => {
     testState.dndProps = null;
     testState.mutate.mockReset();
+    testState.replace.mockReset();
+    testState.searchParams = new URLSearchParams(
+      'view=board&status=active&before=cursor',
+    );
   });
 
   it('keeps interactive content intact and exposes a keyboard-capable handle', () => {
@@ -204,6 +221,55 @@ describe('SessionBoard drag interaction', () => {
         name: 'Move Already done to another status',
       }),
     ).not.toBeInTheDocument();
+  });
+
+  it('places the count after the title and toggles the shared status filter', () => {
+    renderInteractionBoard();
+
+    const activeHeading = screen.getByRole('heading', { name: 'active' });
+    expect(activeHeading.nextElementSibling).toHaveTextContent('1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all sessions' }));
+    expect(testState.replace).toHaveBeenCalledWith('/sessions?view=board');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show only completed sessions' }),
+    );
+    expect(testState.replace).toHaveBeenCalledWith(
+      '/sessions?view=board&status=done',
+    );
+  });
+
+  it('humanizes the filter action for every board lane', () => {
+    render(
+      <SessionBoard>
+        <SessionBoardColumn column="active" label="active" count={1}>
+          {null}
+        </SessionBoardColumn>
+        <SessionBoardColumn column="needs_input" label="needs input" count={1}>
+          {null}
+        </SessionBoardColumn>
+        <SessionBoardColumn column="blocked" label="blocked" count={1}>
+          {null}
+        </SessionBoardColumn>
+        <SessionBoardColumn column="ready" label="ready" count={1}>
+          {null}
+        </SessionBoardColumn>
+        <SessionBoardColumn column="done" label="done" count={1}>
+          {null}
+        </SessionBoardColumn>
+      </SessionBoard>,
+    );
+
+    for (const name of [
+      'Show only active sessions',
+      'Show only sessions needing input',
+      'Show only blocked sessions',
+      'Show only ready sessions',
+      'Show only completed sessions',
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
   });
 
   it('shows valid targets, ignores invalid/no-op drops, and sends a valid drop to the shared mutation', () => {

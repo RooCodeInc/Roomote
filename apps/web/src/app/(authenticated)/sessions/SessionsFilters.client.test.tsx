@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import Link from 'next/link';
 
 const { replaceMock, searchParamsMock, viewport } = vi.hoisted(() => ({
@@ -77,7 +83,7 @@ describe('SessionsFilters', () => {
     localStorage.clear();
   });
 
-  it.each(['repository', 'pullRequest', 'model', 'source'])(
+  it.each(['repository', 'pullRequest', 'model', 'source', 'archive'])(
     'shows advanced filters when the URL supplies %s without changing the saved preference',
     (param) => {
       localStorage.setItem(
@@ -210,6 +216,7 @@ describe('SessionsFilters', () => {
       screen.queryByTestId('advanced-task-filters'),
     ).not.toBeInTheDocument();
     expect(advancedFiltersButton).toHaveAttribute('aria-pressed', 'false');
+    expect(advancedFiltersButton).not.toHaveAttribute('title');
     fireEvent.click(advancedFiltersButton);
 
     expect(screen.getByTestId('advanced-task-filters')).toBeInTheDocument();
@@ -223,6 +230,52 @@ describe('SessionsFilters', () => {
     await waitFor(() =>
       expect(screen.getByTestId('advanced-task-filters')).toBeInTheDocument(),
     );
+  });
+
+  it('defaults archive filtering to non-archived and serializes non-default choices', async () => {
+    localStorage.setItem('roomote-sessions-advanced-filters-visible', 'true');
+    const { rerender } = render(<SessionsFilters {...baseProps} />);
+
+    const archiveButton = await screen.findByRole('button', {
+      name: 'Session archive state',
+    });
+    fireEvent.keyDown(archiveButton, { key: 'ArrowDown' });
+    const options = await screen.findAllByRole('menuitemcheckbox');
+    expect(options.map((option) => option.textContent)).toEqual([
+      'Archived',
+      'Non-Archived',
+      'All',
+    ]);
+    expect(
+      within(screen.getByRole('menu')).getByRole('menuitemcheckbox', {
+        name: 'Non-Archived',
+      }),
+    ).toHaveAttribute('data-state', 'checked');
+
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Archived' }));
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?archive=archived');
+
+    replaceMock.mockReset();
+    searchParamsMock.current = new URLSearchParams('archive=archived');
+    rerender(<SessionsFilters {...baseProps} archive="archived" />);
+    fireEvent.keyDown(
+      screen.getByRole('button', { name: 'Session archive state' }),
+      { key: 'ArrowDown' },
+    );
+    fireEvent.click(
+      screen.getByRole('menuitemcheckbox', { name: 'Non-Archived' }),
+    );
+    expect(replaceMock).toHaveBeenCalledWith('/sessions');
+  });
+
+  it('hides the status filter in board view while keeping advanced filters', async () => {
+    localStorage.setItem('roomote-sessions-advanced-filters-visible', 'true');
+    render(<SessionsFilters {...baseProps} view="board" />);
+
+    await screen.findByRole('button', { name: 'Session archive state' });
+    expect(
+      screen.queryByRole('button', { name: 'Session status' }),
+    ).not.toBeInTheDocument();
   });
 
   it('expands search to the left and shows a submit hint', () => {
