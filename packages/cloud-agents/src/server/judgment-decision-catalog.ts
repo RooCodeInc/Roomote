@@ -175,6 +175,11 @@ export const JUDGMENT_DECISION_DEFINITIONS = {
       evaluationTime: '2026-09-28T00:00:00.000Z',
       latestVisibleUserMessageAt: '2026-09-28T00:00:00.000Z',
       manualStatusChangedAt: null,
+      sessionOrigin: { kind: 'user', automation: null },
+      roomoteWorkState: 'waiting_for_user',
+      reviewHandoff: {
+        automationInitiatedRoomoteCreatedOpenPullRequest: false,
+      },
       objective: 'Fix the flaky checkout test and open a pull request.',
       recentMessages: [
         {
