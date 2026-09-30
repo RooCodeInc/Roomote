@@ -75,6 +75,8 @@ jobs:
   judgement:
     name: Judge Git evidence
     needs: collect
+    outputs:
+      coverage: ${{ steps.check.outputs.coverage }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions: {}
@@ -111,7 +113,8 @@ jobs:
           git cat-file -e "$JUDGEMENT_BASE:.judgement/rules.json"
           git update-ref refs/heads/evidence "$JUDGEMENT_BASE"
           git symbolic-ref HEAD refs/heads/evidence
-      - name: Run strict check
+      - name: Check repository rules
+        id: check
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           JUDGEMENT_MODEL: ${{ vars.JUDGEMENT_MODEL || 'jev-1.13.0' }}
@@ -121,10 +124,21 @@ jobs:
             echo 'Configure the TYPESAFE_API_KEY repository secret for Judgement.' >&2
             exit 2
           fi
+          result=0
           node "$RUNNER_TEMP/judgement-tool/node_modules/@roo-code/judgement/src/cli.js" \
             check --cwd "$RUNNER_TEMP/judgement-input" \
             --base "$JUDGEMENT_BASE" --head "$PR_HEAD" \
-            --model "$JUDGEMENT_MODEL" --timeout-ms 120000 --no-cache
+            --model "$JUDGEMENT_MODEL" --timeout-ms 120000 --no-cache || result=$?
+          case "$result" in
+            0) echo 'coverage=complete' >> "$GITHUB_OUTPUT" ;;
+            3)
+              # Incomplete coverage is not a rule violation. Keep it visible.
+              echo 'coverage=incomplete' >> "$GITHUB_OUTPUT"
+              echo '::warning::Judgement found no violations, but coverage is incomplete. See the check log.'
+              echo 'Judgement found no violations, but coverage is incomplete. See the check log for unresolved rules.' >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *) exit "$result" ;;
+          esac
 
   report:
     name: Publish Judgement result
@@ -134,18 +148,22 @@ jobs:
     permissions:
       statuses: write
     steps:
-      # This job receives only the job conclusion, never repository contents or secrets.
-      - name: Publish strict result
+      # This job receives only the conclusion and coverage flag, never repository contents or secrets.
+      - name: Publish result
         env:
           GH_TOKEN: ${{ github.token }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           CHECK_OUTCOME: ${{ needs.judgement.result }}
+          CHECK_COVERAGE: ${{ needs.judgement.outputs.coverage }}
         run: |
           state=failure
           description='Judgement failed or did not complete; inspect the run'
           if [ "$CHECK_OUTCOME" = success ]; then
             state=success
             description='Repository rule check completed without findings'
+            if [ "$CHECK_COVERAGE" = incomplete ]; then
+              description='No rule violations found; coverage incomplete (see run)'
+            fi
           fi
           gh api --silent "repos/$GITHUB_REPOSITORY/statuses/$PR_HEAD" \
             -f state="$state" -f context=Judgement -f description="$description" \
