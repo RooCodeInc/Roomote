@@ -28,6 +28,7 @@ import {
   getCommunicationProviderDisplayName,
   getSourceControlProviderLabel,
   getTriggerableBackgroundAutomationDescriptorByKey,
+  isBuiltInWebhookAutomationKey,
   sourceControlProviders,
   type ChannelAutoStartLaunchMode,
   type ConflictResolverMaxPrAgeDays,
@@ -85,6 +86,7 @@ import {
 } from './AutomationDestinationPicker';
 import { AutomationDefaultDestinationSetting } from './AutomationDefaultDestinationSetting';
 import { AutomationAdditionalRules } from './CiFailureTriageAdditionalRules';
+import { SettingSummaryRow } from '@/components/settings';
 import {
   buildAutomationDiscordDestinationOptions,
   buildManagerSlackChannelOptions,
@@ -101,10 +103,13 @@ import {
   BatteryWarning,
   BrandIcon,
   Button,
+  Calendar,
   Card,
   CardHeader,
   ChartColumnIncreasing,
   Check,
+  CircleAlert,
+  CopyIconButton,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -125,6 +130,9 @@ import {
   Smile,
   MessagesSquare,
   PackageCheck,
+  RadioTower,
+  RefreshCw,
+  Rss,
   Skeleton,
   Slack,
   Slider,
@@ -134,6 +142,7 @@ import {
   TriangleAlert,
   Users,
   Wrench,
+  type LucideIcon,
 } from '@/components/system';
 
 type FieldErrors = Partial<
@@ -211,18 +220,6 @@ type SlackChannelAccessWarnings = {
 type AutomationSlackDestinationField =
   (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField'];
 
-const SLACK_DESTINATION_FIELD_AUTOMATION_KEYS = Object.fromEntries(
-  AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
-    descriptor.slackField,
-    descriptor.automationKey,
-  ]),
-) as {
-  [K in AutomationSlackDestinationField]: Extract<
-    BackgroundAutomationKey,
-    (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['automationKey']
-  >;
-};
-
 const SLACK_DESTINATION_FIELD_AUTOMATION_IDS = Object.fromEntries(
   AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
     descriptor.slackField,
@@ -264,18 +261,6 @@ type AutomationDefinition = {
 };
 
 type AutomationCategory = 'source-code' | 'communication' | 'operations';
-
-/**
- * Where an automation's next run will report, as resolved server-side through
- * the destination waterfall (own target -> Manager Channel -> primary
- * conversation).
- */
-type ResolvedAutomationDestinationSummary = {
-  provider: CommunicationProvider;
-  channelId: string;
-  source: 'automation_target' | 'manager_channel' | 'primary_conversation';
-  displayName: string | null;
-};
 
 /**
  * A launched-task entry in an automation's run history
@@ -336,7 +321,7 @@ const TRIGGERABLE_AUTOMATION_DESCRIPTIONS = {
   conflict_resolver: 'Fix merge conflicts in open PRs.',
   suggester: 'Suggest valuable coding work to do.',
   announcer: 'Post a recurring digest of recently merged PRs.',
-  manager_stats: "Summary of Roomote's activity during the week",
+  manager_stats: "Summary of Roomote's activity for the selected period.",
   provider_usage_limit:
     'Alert when a configured AI provider approaches its usage limit.',
   sentry_triage: 'Scan Sentry issues and post a prioritized triage report.',
@@ -351,12 +336,14 @@ const TRIGGERABLE_AUTOMATION_DESCRIPTIONS = {
 } as const;
 
 const TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS = {
-  off: 'Never',
+  off: 'Off',
+  on_demand: 'On-demand',
   every_hour: 'Every hour',
   every_15_minutes: 'Every 15 minutes',
   every_6_hours: 'Every 6 hours',
   daily: 'Daily',
-  weekly: 'Once a week',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
 } as const;
 
 /**
@@ -477,6 +464,10 @@ const SUGGESTER_FREQUENCY_OPTIONS =
   getScheduleOptions<SuggesterFrequency>('suggester');
 const ANNOUNCER_FREQUENCY_OPTIONS =
   getScheduleOptions<AnnouncerFrequency>('announcer');
+const MANAGER_STATS_FREQUENCY_OPTIONS =
+  getScheduleOptions<ManagerStatsFrequency>('manager_stats');
+const PROVIDER_USAGE_LIMIT_FREQUENCY_OPTIONS =
+  getScheduleOptions<ProviderUsageLimitFrequency>('provider_usage_limit');
 const SENTRY_TRIAGE_FREQUENCY_OPTIONS =
   getScheduleOptions<SentryTriageFrequency>('sentry_triage');
 const SCHEDULE_ONLY_AUTOMATION_FREQUENCY_OPTIONS =
@@ -711,11 +702,18 @@ function buildScheduleOnlyAutomationEnabledState(
   formState: ScheduleOnlyAutomationFrequencyState | null | undefined,
 ): Record<ScheduleOnlyBackgroundAutomationId, boolean> {
   return Object.fromEntries(
-    SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
-      automation.id,
-      (formState?.[automation.frequencyField] ??
-        automation.defaultFrequency) !== 'off',
-    ]),
+    SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => {
+      const frequency =
+        formState?.[automation.frequencyField] ?? automation.defaultFrequency;
+      const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
+        automation.automationKey,
+      );
+      return [
+        automation.id,
+        frequency !== 'off' &&
+          Boolean(descriptor?.scheduleModes.some((mode) => mode === frequency)),
+      ];
+    }),
   ) as Record<ScheduleOnlyBackgroundAutomationId, boolean>;
 }
 
@@ -1264,40 +1262,6 @@ function SlackChannelAccessWarning({
   );
 }
 
-const DESTINATION_SOURCE_LABELS: Record<
-  ResolvedAutomationDestinationSummary['source'],
-  string
-> = {
-  automation_target: "this automation's channel",
-  manager_channel: 'Manager Channel',
-  primary_conversation: 'primary conversation (automatic)',
-};
-
-function AutomationReportsToLine({
-  destination,
-  emptyFallbackText,
-}: {
-  destination: ResolvedAutomationDestinationSummary | null | undefined;
-  emptyFallbackText?: string;
-}) {
-  if (!destination) {
-    return (
-      <p className="text-xs text-muted-foreground md:max-w-160">
-        {emptyFallbackText ??
-          'Reports to: not configured — set a Manager Channel.'}
-      </p>
-    );
-  }
-
-  return (
-    <p className="text-xs text-muted-foreground md:max-w-160">
-      Reports to {destination.displayName ?? destination.channelId} (
-      {getCommunicationProviderDisplayName(destination.provider)}) —{' '}
-      {DESTINATION_SOURCE_LABELS[destination.source]}
-    </p>
-  );
-}
-
 function AutomationRunsDebugPanel({
   runs,
   status,
@@ -1385,6 +1349,310 @@ function AutomationRunsDebugPanel({
   );
 }
 
+type BuiltInSelectOption<T extends string> = {
+  value: T;
+  label: string;
+  disabled?: boolean;
+};
+
+function BuiltInSelectSetting<T extends string>({
+  icon: Icon,
+  label,
+  value,
+  summary,
+  options,
+  id,
+  selectAriaLabel,
+  disabled = false,
+  onChange,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: T;
+  summary: React.ReactNode;
+  options: readonly BuiltInSelectOption<T>[];
+  id?: string;
+  selectAriaLabel: string;
+  disabled?: boolean;
+  onChange: (value: T) => void | boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  if (!editing) {
+    return (
+      <SettingSummaryRow
+        icon={Icon}
+        label={label}
+        value={summary}
+        onEdit={() => setEditing(true)}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <Select
+        value={value}
+        disabled={disabled}
+        onValueChange={(nextValue) => {
+          const accepted = onChange(nextValue as T);
+          if (accepted !== false) setEditing(false);
+        }}
+      >
+        <SelectTrigger
+          id={id}
+          aria-label={selectAriaLabel}
+          className="w-full sm:w-56"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem
+              key={option.value}
+              value={option.value}
+              disabled={option.disabled}
+            >
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        type="button"
+        variant="link"
+        size="sm"
+        className="h-auto p-0"
+        onClick={() => setEditing(false)}
+      >
+        Done
+      </Button>
+    </div>
+  );
+}
+
+function BuiltInToggleSetting({
+  icon: Icon,
+  label,
+  enabled,
+  onChange,
+}: {
+  icon: LucideIcon;
+  label: string;
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  if (!editing) {
+    return (
+      <SettingSummaryRow
+        icon={Icon}
+        label={label}
+        value={enabled ? 'Enabled' : 'Disabled'}
+        onEdit={() => setEditing(true)}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-3">
+        <Switch
+          checked={enabled}
+          onCheckedChange={onChange}
+          aria-label={`${label} enabled`}
+        />
+        <span className="text-sm text-muted-foreground">
+          {enabled ? 'Enabled' : 'Disabled'}
+        </span>
+      </div>
+      <Button
+        type="button"
+        variant="link"
+        size="sm"
+        className="h-auto p-0"
+        onClick={() => setEditing(false)}
+      >
+        Done
+      </Button>
+    </div>
+  );
+}
+
+function BuiltInDestinationSetting({
+  summary,
+  picker,
+  warning,
+  error,
+}: {
+  summary: React.ReactNode;
+  picker: React.ReactNode;
+  warning?: React.ReactNode;
+  error?: React.ReactNode;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  return (
+    <div className="space-y-2">
+      {editing ? (
+        <>
+          {picker}
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            onClick={() => setEditing(false)}
+          >
+            Done
+          </Button>
+        </>
+      ) : (
+        <SettingSummaryRow
+          icon={Rss}
+          label="Destination"
+          value={summary}
+          actionLabel="Edit destination"
+          onEdit={() => setEditing(true)}
+        />
+      )}
+      {warning}
+      {error}
+    </div>
+  );
+}
+
+function BuiltInWebhookSetting({
+  automationKey,
+  automationEnabled,
+}: {
+  automationKey: TriggerableBackgroundAutomationKey;
+  automationEnabled: boolean;
+}) {
+  const trpc = useTRPC();
+  const [editing, setEditing] = useState(false);
+  const [webhookState, setWebhookState] = useState<{
+    enabled: boolean;
+    url: string | null;
+  }>({ enabled: false, url: null });
+  const webhookQuery = useQuery(
+    trpc.automations.getBuiltInAutomationWebhook.queryOptions({
+      automationKey,
+    }),
+  );
+  const setMutation = useMutation(
+    trpc.automations.setBuiltInAutomationWebhookEnabled.mutationOptions({
+      onSuccess: (result) => {
+        setWebhookState(result);
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+  const rotateMutation = useMutation(
+    trpc.automations.rotateBuiltInAutomationWebhook.mutationOptions({
+      onSuccess: (result) => {
+        setWebhookState(result);
+        toast.success('Webhook URL rotated; the previous URL no longer works');
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+
+  useEffect(() => {
+    if (webhookQuery.data) setWebhookState(webhookQuery.data);
+  }, [webhookQuery.data]);
+
+  if (!isBuiltInWebhookAutomationKey(automationKey)) return null;
+
+  if (!editing) {
+    return (
+      <SettingSummaryRow
+        icon={RadioTower}
+        label="Webhooks"
+        value={
+          webhookQuery.isPending
+            ? 'Loading...'
+            : webhookState.enabled
+              ? 'Enabled'
+              : 'Disabled'
+        }
+        onEdit={() => setEditing(true)}
+      />
+    );
+  }
+
+  const busy = setMutation.isPending || rotateMutation.isPending;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <Switch
+          id={`${automationKey}-webhook-enabled`}
+          checked={webhookState.enabled}
+          disabled={!automationEnabled || busy || webhookQuery.isPending}
+          aria-label={`${automationKey} webhook enabled`}
+          onCheckedChange={(enabled) =>
+            setMutation.mutate({ automationKey, enabled })
+          }
+        />
+        <Label htmlFor={`${automationKey}-webhook-enabled`}>
+          Enable webhook
+        </Label>
+      </div>
+      {webhookState.enabled && webhookState.url ? (
+        <div className="relative min-w-0">
+          <Input
+            type="url"
+            aria-label="Webhook URL"
+            autoComplete="off"
+            spellCheck={false}
+            readOnly
+            value={webhookState.url}
+            className="min-w-0 w-full pr-20 font-mono text-xs"
+          />
+          <div className="absolute inset-y-1 right-1 flex items-center gap-1">
+            <CopyIconButton
+              className="size-7"
+              content={webhookState.url}
+              tooltip="Copy webhook URL"
+              aria-label="Copy webhook URL"
+              disabled={busy}
+            />
+            <BasicTooltip content="Rotate webhook URL; revoke the old URL">
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                aria-label="Rotate webhook URL"
+                disabled={busy}
+                onClick={() => rotateMutation.mutate({ automationKey })}
+              >
+                <RefreshCw />
+              </Button>
+            </BasicTooltip>
+          </div>
+        </div>
+      ) : null}
+      {!automationEnabled ? (
+        <p className="text-xs text-muted-foreground">
+          Enable the automation from its list switch before enabling this
+          webhook.
+        </p>
+      ) : null}
+      <Button
+        type="button"
+        variant="link"
+        size="sm"
+        className="h-auto p-0"
+        onClick={() => setEditing(false)}
+      >
+        Done
+      </Button>
+    </div>
+  );
+}
+
 function AutomationCard({
   automation,
   isOpen,
@@ -1411,6 +1679,11 @@ function AutomationCard({
   children: React.ReactNode;
 }) {
   const Icon = automation.icon;
+  const automationKey = AUTOMATION_RUN_KEYS_BY_ID[automation.id];
+  const webhookAutomationKey =
+    automationKey && isBuiltInWebhookAutomationKey(automationKey)
+      ? automationKey
+      : null;
   const open = !disabled && (alwaysOpen || isOpen);
   const actionLabel = iconEnabled
     ? `Configure ${automation.label}`
@@ -1487,13 +1760,19 @@ function AutomationCard({
           }
         }}
       >
-        <DialogContent size="lg">
+        <DialogContent size="4xl">
           <DialogHeader>
             <DialogTitle>{automation.label}</DialogTitle>
             <DialogDescription>{automation.description}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {children}
+            {webhookAutomationKey ? (
+              <BuiltInWebhookSetting
+                automationKey={webhookAutomationKey}
+                automationEnabled={iconEnabled}
+              />
+            ) : null}
             {debugSection}
             {footer ? <div className="flex items-center">{footer}</div> : null}
           </div>
@@ -1580,25 +1859,19 @@ function ScheduledAutomationCard<TFrequency extends string>({
       }
     >
       <div className="space-y-5">
-        <Select
+        <BuiltInSelectSetting
+          icon={Calendar}
+          label="Schedule"
           value={frequency}
-          onValueChange={(value) => onFrequencyChange(value as TFrequency)}
-        >
-          <SelectTrigger
-            id={selectId}
-            aria-label={selectAriaLabel}
-            className="w-full md:w-56"
-          >
-            <SelectValue placeholder="Select a schedule" />
-          </SelectTrigger>
-          <SelectContent>
-            {scheduleOptions.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          summary={
+            scheduleOptions.find((option) => option.value === frequency)
+              ?.label ?? frequency
+          }
+          options={scheduleOptions}
+          id={selectId}
+          selectAriaLabel={selectAriaLabel}
+          onChange={(value) => onFrequencyChange(value)}
+        />
 
         {iconEnabled ? children : null}
       </div>
@@ -2558,11 +2831,11 @@ export function AutomationsSettings({
       field,
       inputId,
       label,
-      helperText,
+      helperText: _helperText,
       savedChannelId,
       savedDiscordChannelId: _savedDiscordChannelId,
       warningChannelId,
-      reportsToFallbackText,
+      reportsToFallbackText: _reportsToFallbackText,
       allowTelegram = false,
       savedTelegramSelected = false,
       allowTeams = false,
@@ -2583,6 +2856,9 @@ export function AutomationsSettings({
       allowTeams?: boolean;
       savedTeamsSelected?: boolean;
     }) => {
+      void label;
+      void _helperText;
+      void _reportsToFallbackText;
       const discordField = SLACK_TO_DISCORD_DESTINATION_FIELDS[field];
       const emailField = SLACK_TO_EMAIL_DESTINATION_FIELDS[field];
       const value = formState?.[field] ?? '';
@@ -2600,7 +2876,6 @@ export function AutomationsSettings({
         (telegramConnected || useTelegram || savedTelegramSelected);
       const showTeamsOption =
         allowTeams && (teamsConnected || useTeams || savedTeamsSelected);
-      const effectiveLabel = label.replace(/ Slack channel$/u, ' destination');
       const selectedProvider = emailValue
         ? 'email'
         : useTelegram
@@ -2630,121 +2905,121 @@ export function AutomationsSettings({
           (provider !== 'teams' || allowTeams),
       );
 
-      const destinationHelper = useTelegram
-        ? 'Roomote will create a recurring Suggest Ideas topic in your Telegram chat and keep posting there. You can’t pick an existing thread.'
-        : useTeams
-          ? 'Roomote will post Suggest Ideas digests to your primary Teams conversation.'
-          : helperText;
+      const slackOptions = buildSlackDestinationOptions(value);
+      const discordOptions = buildAutomationDiscordDestinationOptions({
+        channels: discordChannelsQuery.data?.channels ?? [],
+        selectedChannelId: discordValue || null,
+        includeProviderSuffix: false,
+      });
+      const summary =
+        selectedProvider === 'none'
+          ? 'Default'
+          : selectedProvider === 'email'
+            ? (visibleEmailOptions.find((option) => option.id === emailValue)
+                ?.label ?? 'Email')
+            : selectedProvider === 'slack'
+              ? `Slack ${slackOptions.find((option) => option.id === value)?.label ?? value}`
+              : selectedProvider === 'discord'
+                ? `Discord ${discordOptions.find((option) => option.id === discordValue)?.label ?? discordValue}`
+                : selectedProvider === 'teams'
+                  ? 'Teams primary conversation'
+                  : 'Telegram recurring topic';
+      const warning =
+        !discordValue &&
+        !emailValue &&
+        !useTelegram &&
+        !useTeams &&
+        shouldShowManagerSlackChannelWarning({
+          formValue: value,
+          savedChannelId,
+          warningChannelId,
+          isDirty: isDirty[SLACK_DESTINATION_FIELD_AUTOMATION_IDS[field]],
+        }) ? (
+          <SlackChannelAccessWarning slackAppMention={slackAppMention} />
+        ) : null;
+      const error =
+        fieldErrors[field] ??
+        fieldErrors[discordField] ??
+        fieldErrors[emailField] ??
+        fieldErrors.suggesterUseTelegram ??
+        fieldErrors.suggesterUseTeams;
 
       return (
-        <div className="space-y-2">
-          <AutomationDestinationPicker
-            id={inputId}
-            label={effectiveLabel}
-            value={{
-              provider: selectedProvider,
-              mode: selectedProvider === 'email' ? 'direct_message' : 'channel',
-              channelId: selectedChannelId,
-            }}
-            availableProviders={destinationProviders}
-            slackOptions={buildSlackDestinationOptions(value)}
-            discordOptions={buildAutomationDiscordDestinationOptions({
-              channels: discordChannelsQuery.data?.channels ?? [],
-              selectedChannelId: discordValue || null,
-              includeProviderSuffix: false,
-            })}
-            emailOptions={visibleEmailOptions}
-            defaultSlackChannelId={managerSlackChannelId ?? ''}
-            defaultDiscordChannelId={managerDiscordChannelId ?? ''}
-            defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
-            fixedDestinationLabels={{
-              ...(showTeamsOption
-                ? { teams: 'Uses the primary Teams conversation.' }
-                : {}),
-              ...(showTelegramOption
-                ? { telegram: 'Uses the recurring Suggest Ideas topic.' }
-                : {}),
-            }}
-            allowDirectMessage={false}
-            noneLabel="Default"
-            noneDescription="Uses the Manager Channel or primary conversation fallback."
-            disabled={
-              (slackChannelsQuery.isFetching ||
-                discordChannelsQuery.isFetching) &&
-              selectedProvider === 'none'
-            }
-            onChange={(destination) =>
-              setFormState((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      [field]:
-                        destination.provider === 'slack'
-                          ? destination.channelId
-                          : '',
-                      [discordField]:
-                        destination.provider === 'discord'
-                          ? destination.channelId
-                          : '',
-                      [emailField]:
-                        destination.provider === 'email'
-                          ? destination.channelId
-                          : '',
-                      ...(allowTelegram
-                        ? {
-                            suggesterUseTelegram:
-                              destination.provider === 'telegram',
-                          }
-                        : {}),
-                      ...(allowTeams
-                        ? {
-                            suggesterUseTeams: destination.provider === 'teams',
-                          }
-                        : {}),
-                    }
-                  : prev,
-              )
-            }
-          />
-          {destinationHelper ? (
-            <p className="text-xs text-muted-foreground md:max-w-160">
-              {destinationHelper}
-            </p>
-          ) : null}
-          <AutomationReportsToLine
-            destination={
-              settingsQuery.data?.resolvedDestinations[
-                SLACK_DESTINATION_FIELD_AUTOMATION_KEYS[field]
-              ]
-            }
-            emptyFallbackText={reportsToFallbackText}
-          />
-          {!discordValue &&
-          !emailValue &&
-          !useTelegram &&
-          !useTeams &&
-          shouldShowManagerSlackChannelWarning({
-            formValue: value,
-            savedChannelId,
-            warningChannelId,
-            isDirty: isDirty[SLACK_DESTINATION_FIELD_AUTOMATION_IDS[field]],
-          }) ? (
-            <SlackChannelAccessWarning slackAppMention={slackAppMention} />
-          ) : null}
-          {(fieldErrors[field] ??
-          fieldErrors[discordField] ??
-          fieldErrors[emailField] ??
-          fieldErrors.suggesterUseTelegram ??
-          fieldErrors.suggesterUseTeams) ? (
-            <p className="text-xs text-destructive">
-              {fieldErrors[field] ??
-                fieldErrors[discordField] ??
-                fieldErrors[emailField] ??
-                fieldErrors.suggesterUseTelegram ??
-                fieldErrors.suggesterUseTeams}
-            </p>
-          ) : null}
-        </div>
+        <BuiltInDestinationSetting
+          summary={summary}
+          warning={warning}
+          error={
+            error ? <p className="text-xs text-destructive">{error}</p> : null
+          }
+          picker={
+            <AutomationDestinationPicker
+              id={inputId}
+              label="Destination"
+              value={{
+                provider: selectedProvider,
+                mode:
+                  selectedProvider === 'email' ? 'direct_message' : 'channel',
+                channelId: selectedChannelId,
+              }}
+              availableProviders={destinationProviders}
+              slackOptions={slackOptions}
+              discordOptions={discordOptions}
+              emailOptions={visibleEmailOptions}
+              defaultSlackChannelId={managerSlackChannelId ?? ''}
+              defaultDiscordChannelId={managerDiscordChannelId ?? ''}
+              defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
+              fixedDestinationLabels={{
+                ...(showTeamsOption
+                  ? { teams: 'Uses the primary Teams conversation.' }
+                  : {}),
+                ...(showTelegramOption
+                  ? { telegram: 'Uses the recurring Suggest Ideas topic.' }
+                  : {}),
+              }}
+              allowDirectMessage={false}
+              noneLabel="Default"
+              noneDescription=""
+              disabled={
+                (slackChannelsQuery.isFetching ||
+                  discordChannelsQuery.isFetching) &&
+                selectedProvider === 'none'
+              }
+              onChange={(destination) =>
+                setFormState((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        [field]:
+                          destination.provider === 'slack'
+                            ? destination.channelId
+                            : '',
+                        [discordField]:
+                          destination.provider === 'discord'
+                            ? destination.channelId
+                            : '',
+                        [emailField]:
+                          destination.provider === 'email'
+                            ? destination.channelId
+                            : '',
+                        ...(allowTelegram
+                          ? {
+                              suggesterUseTelegram:
+                                destination.provider === 'telegram',
+                            }
+                          : {}),
+                        ...(allowTeams
+                          ? {
+                              suggesterUseTeams:
+                                destination.provider === 'teams',
+                            }
+                          : {}),
+                      }
+                    : prev,
+                )
+              }
+            />
+          }
+        />
       );
     },
     [
@@ -3084,23 +3359,16 @@ export function AutomationsSettings({
               }
             >
               <div className="space-y-5">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="call-roomote-via-emoji-enabled"
-                    checked={formState.callRoomoteViaEmojiEnabled}
-                    onCheckedChange={(callRoomoteViaEmojiEnabled) =>
-                      setFormState((prev) =>
-                        prev ? { ...prev, callRoomoteViaEmojiEnabled } : prev,
-                      )
-                    }
-                  />
-                  <Label
-                    htmlFor="call-roomote-via-emoji-enabled"
-                    className="text-sm"
-                  >
-                    Allow emoji reactions to call Roomote
-                  </Label>
-                </div>
+                <BuiltInToggleSetting
+                  icon={Smile}
+                  label="Emoji reactions"
+                  enabled={formState.callRoomoteViaEmojiEnabled}
+                  onChange={(callRoomoteViaEmojiEnabled) =>
+                    setFormState((prev) =>
+                      prev ? { ...prev, callRoomoteViaEmojiEnabled } : prev,
+                    )
+                  }
+                />
 
                 {callRoomoteViaEmojiIsEnabled ? (
                   <div className="space-y-5">
@@ -3218,64 +3486,66 @@ export function AutomationsSettings({
               }
             >
               <div className="space-y-5">
-                <div className="flex items-center gap-3">
-                  <Switch
-                    id="release-announcements-enabled"
-                    checked={formState?.releaseAnnouncementsEnabled ?? true}
-                    onCheckedChange={(enabled) =>
-                      setFormState((prev) =>
-                        prev
-                          ? { ...prev, releaseAnnouncementsEnabled: enabled }
-                          : prev,
-                      )
-                    }
-                    aria-label="Announce Roomote Updates enabled"
-                  />
-                  <Label
-                    htmlFor="release-announcements-enabled"
-                    className="text-sm"
-                  >
-                    Announce successfully installed Roomote updates
-                  </Label>
-                </div>
-                <AutomationDestinationPicker
-                  id="release-announcements-destination"
-                  label="Post announcements to"
-                  value={{
-                    provider: formState.releaseAnnouncementsTargetProvider,
-                    mode: formState.releaseAnnouncementsTargetMode,
-                    channelId: formState.releaseAnnouncementsTargetChannelId,
-                  }}
-                  availableProviders={availableDestinationProviders}
-                  slackOptions={buildSlackDestinationOptions(
-                    formState.releaseAnnouncementsTargetProvider === 'slack'
-                      ? formState.releaseAnnouncementsTargetChannelId
-                      : null,
-                  )}
-                  discordOptions={mergeAnnouncerDiscordOptions}
-                  emailOptions={buildEmailDestinationOptions(
-                    formState.releaseAnnouncementsTargetProvider === 'email'
-                      ? formState.releaseAnnouncementsTargetChannelId
-                      : null,
-                  )}
-                  defaultSlackChannelId={managerSlackChannelId ?? ''}
-                  defaultDiscordChannelId={managerDiscordChannelId ?? ''}
-                  defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
-                  noneLabel="Default"
-                  noneDescription="Uses the standard automation destination."
-                  onChange={(destination) =>
-                    setFormState((previous) =>
-                      previous
-                        ? {
-                            ...previous,
-                            releaseAnnouncementsTargetProvider:
-                              destination.provider,
-                            releaseAnnouncementsTargetMode: destination.mode,
-                            releaseAnnouncementsTargetChannelId:
-                              destination.channelId,
-                          }
-                        : previous,
-                    )
+                <BuiltInDestinationSetting
+                  summary={
+                    formState.releaseAnnouncementsTargetProvider === 'none'
+                      ? 'Default'
+                      : formState.releaseAnnouncementsTargetProvider === 'email'
+                        ? (buildEmailDestinationOptions(
+                            formState.releaseAnnouncementsTargetChannelId,
+                          ).find(
+                            (option) =>
+                              option.id ===
+                              formState.releaseAnnouncementsTargetChannelId,
+                          )?.label ?? 'Email')
+                        : formState.releaseAnnouncementsTargetMode ===
+                            'direct_message'
+                          ? `${formState.releaseAnnouncementsTargetProvider} DM me`
+                          : `${formState.releaseAnnouncementsTargetProvider} channel`
+                  }
+                  picker={
+                    <AutomationDestinationPicker
+                      id="release-announcements-destination"
+                      label="Destination"
+                      value={{
+                        provider: formState.releaseAnnouncementsTargetProvider,
+                        mode: formState.releaseAnnouncementsTargetMode,
+                        channelId:
+                          formState.releaseAnnouncementsTargetChannelId,
+                      }}
+                      availableProviders={availableDestinationProviders}
+                      slackOptions={buildSlackDestinationOptions(
+                        formState.releaseAnnouncementsTargetProvider === 'slack'
+                          ? formState.releaseAnnouncementsTargetChannelId
+                          : null,
+                      )}
+                      discordOptions={mergeAnnouncerDiscordOptions}
+                      emailOptions={buildEmailDestinationOptions(
+                        formState.releaseAnnouncementsTargetProvider === 'email'
+                          ? formState.releaseAnnouncementsTargetChannelId
+                          : null,
+                      )}
+                      defaultSlackChannelId={managerSlackChannelId ?? ''}
+                      defaultDiscordChannelId={managerDiscordChannelId ?? ''}
+                      defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
+                      noneLabel="Default"
+                      noneDescription=""
+                      onChange={(destination) =>
+                        setFormState((previous) =>
+                          previous
+                            ? {
+                                ...previous,
+                                releaseAnnouncementsTargetProvider:
+                                  destination.provider,
+                                releaseAnnouncementsTargetMode:
+                                  destination.mode,
+                                releaseAnnouncementsTargetChannelId:
+                                  destination.channelId,
+                              }
+                            : previous,
+                        )
+                      }
+                    />
                   }
                 />
               </div>
@@ -3299,20 +3569,16 @@ export function AutomationsSettings({
               }
             >
               <div className="space-y-5">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="reviewer-enabled"
-                    checked={formState.reviewerEnabled}
-                    onCheckedChange={(reviewerEnabled) =>
-                      setFormState((prev) =>
-                        prev ? { ...prev, reviewerEnabled } : prev,
-                      )
-                    }
-                  />
-                  <Label htmlFor="reviewer-enabled" className="text-sm">
-                    Allow {PRODUCT_NAME} to review PRs
-                  </Label>
-                </div>
+                <BuiltInToggleSetting
+                  icon={GitPullRequest}
+                  label="Review PRs"
+                  enabled={formState.reviewerEnabled}
+                  onChange={(reviewerEnabled) =>
+                    setFormState((prev) =>
+                      prev ? { ...prev, reviewerEnabled } : prev,
+                    )
+                  }
+                />
 
                 {reviewerIsEnabled ? (
                   <div className="space-y-6 pt-1">
@@ -3581,45 +3847,52 @@ export function AutomationsSettings({
               }
             >
               <div className="space-y-5">
-                <Select
+                <BuiltInSelectSetting
+                  icon={Calendar}
+                  label="Schedule"
                   value={formState.conflictResolverFrequency}
-                  onValueChange={(value) =>
+                  summary={
+                    CONFLICT_RESOLVER_FREQUENCY_OPTIONS.find(
+                      (option) =>
+                        option.value === formState.conflictResolverFrequency,
+                    )?.label ?? formState.conflictResolverFrequency
+                  }
+                  options={CONFLICT_RESOLVER_FREQUENCY_OPTIONS}
+                  id="conflict-resolver-frequency"
+                  selectAriaLabel="Resolve PR Conflicts schedule"
+                  onChange={(value) =>
                     setFormState((prev) =>
                       prev
-                        ? {
-                            ...prev,
-                            conflictResolverFrequency:
-                              value as ConflictResolverFrequency,
-                          }
+                        ? { ...prev, conflictResolverFrequency: value }
                         : prev,
                     )
                   }
-                >
-                  <SelectTrigger
-                    id="conflict-resolver-frequency"
-                    aria-label="Resolve PR Conflicts schedule"
-                    className="w-full md:w-56"
-                  >
-                    <SelectValue placeholder="Select a schedule" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CONFLICT_RESOLVER_FREQUENCY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
 
                 {conflictResolverIsEnabled ? (
                   <div className="space-y-5">
                     <div className="space-y-2">
-                      <Label htmlFor="conflict-resolver-max-pr-age">
-                        PR age cap
-                      </Label>
-                      <Select
+                      <BuiltInSelectSetting
+                        icon={CircleAlert}
+                        label="PR age cap"
                         value={String(formState.conflictResolverMaxPrAgeDays)}
-                        onValueChange={(value) =>
+                        summary={
+                          CONFLICT_RESOLVER_MAX_PR_AGE_OPTIONS.find(
+                            (option) =>
+                              option.value ===
+                              formState.conflictResolverMaxPrAgeDays,
+                          )?.label ??
+                          String(formState.conflictResolverMaxPrAgeDays)
+                        }
+                        options={CONFLICT_RESOLVER_MAX_PR_AGE_OPTIONS.map(
+                          (option) => ({
+                            value: String(option.value),
+                            label: option.label,
+                          }),
+                        )}
+                        id="conflict-resolver-max-pr-age"
+                        selectAriaLabel="Resolve PR Conflicts PR age cap"
+                        onChange={(value) =>
                           setFormState((prev) =>
                             prev
                               ? {
@@ -3631,27 +3904,7 @@ export function AutomationsSettings({
                               : prev,
                           )
                         }
-                      >
-                        <SelectTrigger
-                          id="conflict-resolver-max-pr-age"
-                          aria-label="Resolve PR Conflicts PR age cap"
-                          className="w-full md:w-56"
-                        >
-                          <SelectValue placeholder="Select a cap" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CONFLICT_RESOLVER_MAX_PR_AGE_OPTIONS.map(
-                            (option) => (
-                              <SelectItem
-                                key={option.value}
-                                value={String(option.value)}
-                              >
-                                {option.label}
-                              </SelectItem>
-                            ),
-                          )}
-                        </SelectContent>
-                      </Select>
+                      />
                       <p className="text-xs text-muted-foreground md:max-w-120">
                         Sets the maximum PR age that Resolve PR Conflicts will
                         consider. Labeled PRs older than this are skipped.
@@ -3985,12 +4238,6 @@ export function AutomationsSettings({
                         slackChannelAccessWarnings.dependabotTriageSlackChannel,
                     })
                   : null}
-
-                <p className="text-xs text-muted-foreground md:max-w-160">
-                  Scans current open Dependabot alerts across active
-                  repositories and suggests tightly scoped dependency update
-                  tasks instead of opening PRs directly.
-                </p>
               </div>
             </ScheduledAutomationCard>
 
@@ -4058,12 +4305,6 @@ export function AutomationsSettings({
                         slackChannelAccessWarnings.codeqlTriageSlackChannel,
                     })
                   : null}
-
-                <p className="text-xs text-muted-foreground md:max-w-160">
-                  Scans current open code-scanning/CodeQL alerts across active
-                  repositories and launches implement-changes follow-up tasks
-                  instead of opening PRs in the scan itself.
-                </p>
               </div>
             </ScheduledAutomationCard>
 
@@ -4293,27 +4534,6 @@ export function AutomationsSettings({
               onOpenChange={(open) => setAutomationOpen('managerStats', open)}
               iconEnabled={iconEnabled.managerStats}
               debugSection={renderDebugRunsSection('managerStats')}
-              runAction={
-                <BasicTooltip
-                  content={getRunTooltip('managerStats', managerStatsIsEnabled)}
-                >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() =>
-                      triggerMutation.mutate({
-                        automationKey: 'manager_stats',
-                      })
-                    }
-                    disabled={isRunDisabled(
-                      'managerStats',
-                      managerStatsIsEnabled,
-                    )}
-                  >
-                    <Play />
-                  </Button>
-                </BasicTooltip>
-              }
               footer={
                 <AutomationFooter
                   isDirty={isDirty.managerStats}
@@ -4327,25 +4547,25 @@ export function AutomationsSettings({
               }
             >
               <div className="space-y-5">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="manager-stats-enabled"
-                    checked={managerStatsIsEnabled}
-                    onCheckedChange={(enabled) =>
-                      setFormState((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              managerStatsFrequency: enabled ? 'weekly' : 'off',
-                            }
-                          : prev,
-                      )
-                    }
-                  />
-                  <Label htmlFor="manager-stats-enabled" className="text-sm">
-                    Enabled
-                  </Label>
-                </div>
+                <BuiltInSelectSetting
+                  icon={Calendar}
+                  label="Schedule"
+                  value={formState.managerStatsFrequency}
+                  summary={
+                    MANAGER_STATS_FREQUENCY_OPTIONS.find(
+                      (option) =>
+                        option.value === formState.managerStatsFrequency,
+                    )?.label ?? formState.managerStatsFrequency
+                  }
+                  options={MANAGER_STATS_FREQUENCY_OPTIONS}
+                  id="manager-stats-frequency"
+                  selectAriaLabel="Manager Stats schedule"
+                  onChange={(value) =>
+                    setFormState((prev) =>
+                      prev ? { ...prev, managerStatsFrequency: value } : prev,
+                    )
+                  }
+                />
 
                 {managerStatsIsEnabled ? (
                   <div className="space-y-5">
@@ -4364,10 +4584,6 @@ export function AutomationsSettings({
                       warningChannelId:
                         slackChannelAccessWarnings.managerStatsSlackChannel,
                     })}
-
-                    <p className="text-xs text-muted-foreground md:max-w-160">
-                      Posts a weekly summary on Fridays.
-                    </p>
                   </div>
                 ) : null}
               </div>
@@ -4421,30 +4637,27 @@ export function AutomationsSettings({
               }
             >
               <div className="space-y-5">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="provider-usage-limit-enabled"
-                    checked={providerUsageLimitIsEnabled}
-                    onCheckedChange={(enabled) =>
-                      setFormState((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              providerUsageLimitFrequency: enabled
-                                ? 'every_hour'
-                                : 'off',
-                            }
-                          : prev,
-                      )
-                    }
-                  />
-                  <Label
-                    htmlFor="provider-usage-limit-enabled"
-                    className="text-sm"
-                  >
-                    Enabled
-                  </Label>
-                </div>
+                <BuiltInSelectSetting
+                  icon={Calendar}
+                  label="Schedule"
+                  value={formState.providerUsageLimitFrequency}
+                  summary={
+                    PROVIDER_USAGE_LIMIT_FREQUENCY_OPTIONS.find(
+                      (option) =>
+                        option.value === formState.providerUsageLimitFrequency,
+                    )?.label ?? formState.providerUsageLimitFrequency
+                  }
+                  options={PROVIDER_USAGE_LIMIT_FREQUENCY_OPTIONS}
+                  id="provider-usage-limit-frequency"
+                  selectAriaLabel="Inference Provider Usage Alerts schedule"
+                  onChange={(value) =>
+                    setFormState((prev) =>
+                      prev
+                        ? { ...prev, providerUsageLimitFrequency: value }
+                        : prev,
+                    )
+                  }
+                />
 
                 {providerUsageLimitIsEnabled ? (
                   <div className="space-y-5">
@@ -4494,7 +4707,7 @@ export function AutomationsSettings({
                       />
                       <p className="text-xs text-muted-foreground">
                         Alert when a provider reaches this percentage of its
-                        reported quota. Roomote checks hourly and sends one
+                        reported quota. Scheduled checks run hourly and send one
                         alert per quota cycle, plus a critical alert at 100%.
                       </p>
                     </div>
@@ -4550,57 +4763,42 @@ export function AutomationsSettings({
               }
             >
               <div className="space-y-5">
-                <Select
+                <BuiltInSelectSetting
+                  icon={Calendar}
+                  label="Schedule"
                   value={formState.sentryTriageFrequency}
-                  onValueChange={(value) => {
-                    const frequency = value as SentryTriageFrequency;
-
+                  summary={
+                    SENTRY_TRIAGE_FREQUENCY_OPTIONS.find(
+                      (option) =>
+                        option.value === formState.sentryTriageFrequency,
+                    )?.label ?? formState.sentryTriageFrequency
+                  }
+                  options={SENTRY_TRIAGE_FREQUENCY_OPTIONS.map((option) => ({
+                    ...option,
+                    disabled: !canSelectSentryTriageFrequency({
+                      sentryConnected,
+                      frequency: option.value,
+                    }),
+                  }))}
+                  id="sentry-triage-frequency"
+                  selectAriaLabel="Triage Sentry Issues schedule"
+                  onChange={(value) => {
                     if (
                       !canSelectSentryTriageFrequency({
-                        sentryConnected: sentryConnected,
-                        frequency,
+                        sentryConnected,
+                        frequency: value,
                       })
                     ) {
                       toast.error(
                         'Configure Sentry on the Integrations page before enabling Triage Sentry Issues.',
                       );
-                      return;
+                      return false;
                     }
-
                     setFormState((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            sentryTriageFrequency: frequency,
-                          }
-                        : prev,
+                      prev ? { ...prev, sentryTriageFrequency: value } : prev,
                     );
                   }}
-                >
-                  <SelectTrigger
-                    id="sentry-triage-frequency"
-                    aria-label="Triage Sentry Issues schedule"
-                    className="w-full md:w-56"
-                  >
-                    <SelectValue placeholder="Select a schedule" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SENTRY_TRIAGE_FREQUENCY_OPTIONS.map((option) => (
-                      <SelectItem
-                        key={option.value}
-                        value={option.value}
-                        disabled={
-                          !canSelectSentryTriageFrequency({
-                            sentryConnected: sentryConnected,
-                            frequency: option.value,
-                          })
-                        }
-                      >
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
 
                 {!sentryConnected ? (
                   <Alert variant="light" className="md:max-w-160">
@@ -4716,34 +4914,24 @@ export function AutomationsSettings({
               }
             >
               <div className="space-y-5">
-                <Select
+                <BuiltInSelectSetting
+                  icon={Calendar}
+                  label="Schedule"
                   value={formState.suggesterFrequency}
-                  onValueChange={(value) => {
+                  summary={
+                    SUGGESTER_FREQUENCY_OPTIONS.find(
+                      (option) => option.value === formState.suggesterFrequency,
+                    )?.label ?? formState.suggesterFrequency
+                  }
+                  options={SUGGESTER_FREQUENCY_OPTIONS}
+                  id="suggester-frequency"
+                  selectAriaLabel="Suggest Ideas schedule"
+                  onChange={(value) =>
                     setFormState((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            suggesterFrequency: value as SuggesterFrequency,
-                          }
-                        : prev,
-                    );
-                  }}
-                >
-                  <SelectTrigger
-                    id="suggester-frequency"
-                    aria-label="Suggest Ideas schedule"
-                    className="w-full md:w-56"
-                  >
-                    <SelectValue placeholder="Select a schedule" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SUGGESTER_FREQUENCY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      prev ? { ...prev, suggesterFrequency: value } : prev,
+                    )
+                  }
+                />
 
                 {suggesterIsEnabled ? (
                   <div className="space-y-5">
@@ -4853,34 +5041,24 @@ export function AutomationsSettings({
               }
             >
               <div className="space-y-5">
-                <Select
+                <BuiltInSelectSetting
+                  icon={Calendar}
+                  label="Schedule"
                   value={formState.announcerFrequency}
-                  onValueChange={(value) =>
+                  summary={
+                    ANNOUNCER_FREQUENCY_OPTIONS.find(
+                      (option) => option.value === formState.announcerFrequency,
+                    )?.label ?? formState.announcerFrequency
+                  }
+                  options={ANNOUNCER_FREQUENCY_OPTIONS}
+                  id="announcer-frequency"
+                  selectAriaLabel="Summarize Merged PRs schedule"
+                  onChange={(value) =>
                     setFormState((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            announcerFrequency: value as AnnouncerFrequency,
-                          }
-                        : prev,
+                      prev ? { ...prev, announcerFrequency: value } : prev,
                     )
                   }
-                >
-                  <SelectTrigger
-                    id="announcer-frequency"
-                    aria-label="Summarize Merged PRs schedule"
-                    className="w-full md:w-56"
-                  >
-                    <SelectValue placeholder="Select a schedule" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ANNOUNCER_FREQUENCY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
 
                 {announcerIsEnabled ? (
                   <div className="space-y-5">
@@ -4966,26 +5144,18 @@ export function AutomationsSettings({
               }
             >
               <div className="space-y-5">
-                <div className="flex items-center gap-3">
-                  <Switch
-                    id="platform-issue-alerts-enabled"
-                    checked={formState?.platformIssueAlertsEnabled ?? true}
-                    onCheckedChange={(enabled) =>
-                      setFormState((prev) =>
-                        prev
-                          ? { ...prev, platformIssueAlertsEnabled: enabled }
-                          : prev,
-                      )
-                    }
-                    aria-label="Alert on Config Errors enabled"
-                  />
-                  <Label
-                    htmlFor="platform-issue-alerts-enabled"
-                    className="text-sm"
-                  >
-                    Alert deployment admins about configuration issues
-                  </Label>
-                </div>
+                <BuiltInToggleSetting
+                  icon={BellElectric}
+                  label="Configuration alerts"
+                  enabled={formState?.platformIssueAlertsEnabled ?? true}
+                  onChange={(enabled) =>
+                    setFormState((prev) =>
+                      prev
+                        ? { ...prev, platformIssueAlertsEnabled: enabled }
+                        : prev,
+                    )
+                  }
+                />
                 {renderSlackDestinationField({
                   field: 'platformIssueSlackChannel',
                   inputId: 'platform-issue-slack-channel',

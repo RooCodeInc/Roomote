@@ -11,16 +11,21 @@ import {
 
 export type ConflictResolverFrequency =
   | 'off'
+  | 'on_demand'
   | 'every_hour'
   | 'every_6_hours'
   | 'daily';
-export type SuggesterFrequency = 'off' | 'daily' | 'weekly';
-export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
-export type ManagerStatsFrequency = 'off' | 'weekly';
-export type ProviderUsageLimitFrequency = 'off' | 'every_hour';
-export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
-export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
-export type CodeqlTriageFrequency = 'off' | 'daily' | 'weekly';
+export type SuggesterFrequency = 'off' | 'on_demand' | 'daily' | 'weekly';
+export type AnnouncerFrequency = 'off' | 'on_demand' | 'daily' | 'weekly';
+export type ManagerStatsFrequency = 'off' | 'daily' | 'weekly' | 'monthly';
+export type ProviderUsageLimitFrequency = 'off' | 'on_demand' | 'every_hour';
+export type SentryTriageFrequency = 'off' | 'on_demand' | 'daily' | 'weekly';
+export type DependabotTriageFrequency =
+  | 'off'
+  | 'on_demand'
+  | 'daily'
+  | 'weekly';
+export type CodeqlTriageFrequency = 'off' | 'on_demand' | 'daily' | 'weekly';
 export type ReviewerEnvironmentScope = 'all' | 'specific';
 export type ReviewerAuthorReviewMode = 'all' | 'specific' | 'none';
 

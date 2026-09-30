@@ -74,13 +74,11 @@ export function SessionCard({
   viewerUserId,
   query = '',
   hideBlockedBadge = false,
-  sessionStatusExperimentEnabled = false,
 }: {
   session: SessionCardData;
   viewerUserId: string;
   query?: string;
   hideBlockedBadge?: boolean;
-  sessionStatusExperimentEnabled?: boolean;
 }) {
   const ownerDisplayName =
     getUserDisplayName({
@@ -228,7 +226,6 @@ export function SessionCard({
             sessionId={session.id}
             listRow
             status={session.manualStatus ?? session.cachedStatus}
-            sessionStatusExperimentEnabled={sessionStatusExperimentEnabled}
           />
         </div>
       ) : null}

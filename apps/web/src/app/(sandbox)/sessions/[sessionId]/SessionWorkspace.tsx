@@ -185,7 +185,6 @@ type SessionTaskPreview = {
 export type SessionInfo = {
   id: string;
   canDelete: boolean;
-  sessionStatusExperimentEnabled: boolean;
   ownerName: string | null;
   ownerEmail: string | null;
   ownerImageUrl: string | null;
@@ -1147,9 +1146,6 @@ export function SessionWorkspace({
                           ? (currentSession.manualStatus ??
                             currentSession.cachedStatus)
                           : (session.manualStatus ?? session.cachedStatus)
-                      }
-                      sessionStatusExperimentEnabled={
-                        session.sessionStatusExperimentEnabled
                       }
                     />
                   ) : null

@@ -204,4 +204,26 @@ describe('sentryTriageJob buildScanTask', () => {
       reason: 'Sentry MCP is not configured',
     });
   });
+
+  it('uses the daily scan window for an explicit on-demand run', async () => {
+    mockGetActiveRepositoryFullNames.mockResolvedValue(['acme/api']);
+    mockBuildRepositoryCoverage.mockResolvedValue([
+      { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
+    ]);
+    mockPartitionActiveRepositoriesByProvider.mockResolvedValue([]);
+
+    const result = await config.buildScanTask({
+      ...buildScanTaskParams(),
+      runtime: { scheduleMode: 'on_demand', instructions: null, settings: {} },
+      manualTrigger: true,
+    });
+
+    expect(result.kind).toBe('scan');
+    if (result.kind !== 'scan') {
+      throw new Error('expected a scan build');
+    }
+    expect(String(result.payloads[0]!.description)).toContain(
+      '<scan_window>last 1 day</scan_window>',
+    );
+  });
 });

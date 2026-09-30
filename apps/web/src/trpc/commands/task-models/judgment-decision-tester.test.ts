@@ -24,6 +24,7 @@ vi.mock('./judgment-model', () => ({
 
 import {
   getJudgmentDecisionCatalogCommand,
+  getJudgmentExamplePresetsCommand,
   judgmentDecisionTestSchema,
   testJudgmentDecisionCommand,
 } from './judgment-decision-tester';
@@ -62,6 +63,18 @@ describe('judgment decision tester', () => {
     );
     await expect(testJudgmentDecisionCommand(member, input)).rejects.toThrow(
       'Unauthorized',
+    );
+    await expect(getJudgmentExamplePresetsCommand(member)).rejects.toThrow(
+      'Unauthorized',
+    );
+    expect(mocks.testBackend).not.toHaveBeenCalled();
+  });
+
+  it('serves prepared examples without making inference calls', async () => {
+    const presets = await getJudgmentExamplePresetsCommand(admin());
+    expect(presets.examples.length).toBeGreaterThan(0);
+    expect(presets.examples[0]!.packets[0]!.state).not.toHaveProperty(
+      'expected',
     );
     expect(mocks.testBackend).not.toHaveBeenCalled();
   });

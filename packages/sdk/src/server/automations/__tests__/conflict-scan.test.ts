@@ -230,6 +230,30 @@ describe('conflictScanJob', () => {
     expect(octokit.paginate).toHaveBeenCalledOnce();
   });
 
+  it('runs an explicit manual pass when the automation is on-demand', async () => {
+    mockIsRepoSkipped.mockReturnValue(true);
+    mockGetAutomationRuntime.mockResolvedValue({
+      key: 'conflict_resolver',
+      enabled: true,
+      scheduleMode: 'on_demand',
+      lastRunAt: null,
+      instructions: null,
+      settings: {
+        label: 'auto-resolve-conflicts',
+        maxPrAgeDays: 7,
+      },
+      targets: [],
+      scanCursor: null,
+      slackChannelId: null,
+      managerSlackChannelId: null,
+    });
+
+    const result = await conflictScanJob({ manualTrigger: true });
+
+    expect(result.skippedReason).toBe('No labeled conflict candidates found.');
+    expect(mockIsRepoSkipped).toHaveBeenCalledWith('Roomote/example-app');
+  });
+
   it('records the pass outcome on the automations row', async () => {
     mockIsRepoSkipped.mockReturnValue(false);
 

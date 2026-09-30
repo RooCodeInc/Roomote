@@ -20,6 +20,7 @@ import {
 import { resolveDeploymentTimeZone } from './custom-automation-schedule';
 import { isRunDue } from './scheduling-utils';
 import {
+  appendAutomationWebhookInput,
   emptyJobResult,
   type AutomationJobResult,
   type AutomationRunOpts,
@@ -125,7 +126,11 @@ export function createScheduledTriageJob(
       try {
         const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
-        if (!frequency || frequency === 'off') {
+        if (
+          !frequency ||
+          frequency === 'off' ||
+          (frequency === 'on_demand' && !opts.manualTrigger)
+        ) {
           result.skippedReason = 'Automation is disabled.';
           skipped++;
           continue;
@@ -222,13 +227,22 @@ export function createScheduledTriageJob(
               type: TaskPayloadKind.Scan,
               payload: {
                 ...payload,
+                ...(typeof payload.description === 'string'
+                  ? {
+                      agentPromptText: appendAutomationWebhookInput(
+                        payload.description,
+                        opts.webhookInputJson,
+                      ),
+                    }
+                  : {}),
                 ...buildDestinationTaskPayloadFields(reportDestination),
               },
             },
             initiator: { kind: 'automation', key: config.automationKey },
             workflow: 'scan',
             surface: 'system',
-            trigger: opts.manualTrigger ? 'manual' : 'schedule',
+            trigger:
+              opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
             visibility: 'hidden',
             ...(reportDestination.provider === 'slack'
               ? { channels: { slackChannelId: channelId } }

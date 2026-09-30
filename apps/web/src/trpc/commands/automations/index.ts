@@ -18,6 +18,11 @@ export type {
 } from './types';
 export { triggerAutomationCommand } from './trigger-agent';
 export {
+  getBuiltInAutomationWebhookCommand,
+  rotateBuiltInAutomationWebhookCommand,
+  setBuiltInAutomationWebhookEnabledCommand,
+} from './built-in-automations';
+export {
   createCustomAutomationCommand,
   deleteCustomAutomationCommand,
   getCustomAutomationOptionsCommand,

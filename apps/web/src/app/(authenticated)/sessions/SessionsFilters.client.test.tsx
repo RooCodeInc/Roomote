@@ -139,13 +139,8 @@ describe('SessionsFilters', () => {
     );
   });
 
-  it('keeps the board switch hidden until enabled and preserves its URL when available', () => {
-    const { rerender } = render(<SessionsFilters {...baseProps} />);
-    expect(
-      screen.queryByRole('button', { name: 'Board view' }),
-    ).not.toBeInTheDocument();
-
-    rerender(<SessionsFilters {...baseProps} boardEnabled view="list" />);
+  it('always exposes the board switch and preserves its URL', () => {
+    render(<SessionsFilters {...baseProps} view="list" />);
     fireEvent.click(screen.getByRole('button', { name: 'Board view' }));
     expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
   });
@@ -272,6 +267,6 @@ describe('SessionsFilters', () => {
 
     expect(screen.queryByPlaceholderText('Search...')).not.toBeInTheDocument();
     expect(searchButton).toHaveAttribute('aria-pressed', 'false');
-    expect(replaceMock).toHaveBeenCalledWith('/sessions');
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
   });
 });

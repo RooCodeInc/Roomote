@@ -2,6 +2,30 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.14.0 (2026-09-30)
+
+Roomote 1.14 expands automation triggers and session workflows while adding GPT-6.1 Sol and staged repository Judgement checks.
+
+### Highlights
+
+- Start eligible built-in automations on demand or through secure webhooks, and schedule Manager Stats daily, weekly, or monthly.
+- Use the generally available sessions board, automatic status classification, and authorized manual status controls.
+- Choose GPT-6.1 Sol across supported providers and ChatGPT Fast mode, including differentiated recommendation presets.
+- Check staged repository changes against Judgement rules with deployment-managed inference, local calibration tools, and Settings examples.
+
+### Minor changes
+
+- Eligible built-in automations can now run on demand or from secure, revocable webhooks with bounded per-run input, while Manager Stats supports daily, weekly, and monthly schedules.
+- Add GPT-6.1 Sol across supported provider routes and ChatGPT Fast mode, and use it in differentiated recommendation presets while preserving saved selections and GPT-6 Sol availability.
+- Repository rules now run as staged pre-commit Judgement checks using deployment-managed inference, with `.judgement/rules.json`, local test and calibration commands, and labeled examples in the Settings decision tester.
+- The sessions board and automatic status classification are now generally available, with authorized manual status controls and animated status moves that respect reduced-motion preferences.
+
+### Patch changes
+
+- Brain expansion and synthesis now use deployment helper models correctly in gateway mode instead of forwarding the helper sentinel to upstream providers.
+- Experimental Jevgrep code search now upgrades to version 0.5.0 in existing sandboxes, guides Explore to try bounded semantic search for unclear subsystem implementations, and preserves provider token counts so searches release conservative rate-limit reservations based on actual usage.
+- Slack-backed transcripts now resolve user and channel references into readable links, and automation reports correctly render Markdown links with bracketed titles.
+
 ## 1.13.4 (2026-09-29)
 
 Roomote 1.13.4 keeps automation and Session workflows quiet and controllable while expanding optional code search, model availability, and repository safeguards.

@@ -34,7 +34,6 @@ import {
   MessagePlainText,
   MessageCopyButton,
   MessageNewTaskButton,
-  MessageResponse,
   MessageTimestamp,
 } from '@/components/ai-elements';
 
@@ -48,6 +47,7 @@ import { AcpDataVisualizations } from './AcpDataVisualizations';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 import { SlackMessageText } from '@/components/ai-elements/slack-message-text';
+import { SlackMessageResponse } from '@/components/ai-elements/slack-message-response';
 import { useOpenSessionArtifactViewer } from '@/app/(sandbox)/sessions/[sessionId]/session-task-panel-context';
 import { useArtifactLink } from '../../hooks/ArtifactLinkProvider';
 
@@ -428,7 +428,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
               </MessagePlainText>
             </CollapsibleContent>
           ) : (
-            <MessageResponse>{content}</MessageResponse>
+            <SlackMessageResponse text={content} />
           )}
           {!isUser && msg.charts?.length ? (
             <AcpDataVisualizations charts={msg.charts} />

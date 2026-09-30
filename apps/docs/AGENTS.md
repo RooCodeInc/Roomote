@@ -94,8 +94,21 @@ recipe, run `pnpm --filter @roomote/docs generate-cookbook-index` so the table i
 generated table between its `cookbook-recipes` markers by hand.
 
 Never add individual Cookbook recipe pages to `docs.json`. Only
-`cookbook/index` and `cookbook/template` belong in the Cookbook sidebar group;
-readers discover recipes through the generated index.
+`cookbook/index` and `cookbook/template` belong in the Automating Work sidebar
+group; readers discover recipes through the generated index.
+
+### Continuous docs quality
+
+For any user-facing product change, evaluate and update the relevant public docs
+in the same change unless the behavior is explicitly an internal-nightly
+experiment. Keep every page referenced as a navigation leaf in `docs.json`
+equipped with a frontmatter `icon`; use the matching app icon when the feature
+has one and a supported Lucide icon otherwise. Keep central concepts in a
+coherent set of overview, configuration, and deep-reference pages instead of
+one overloaded page or duplicated sections. Use product terms and behavior
+verified in the app or runtime, not invented capabilities. Before delivery,
+verify navigation references, internal links, generated Cookbook content, and a
+rendered preview of affected pages with the docs check command below.
 
 ## Working notes
 

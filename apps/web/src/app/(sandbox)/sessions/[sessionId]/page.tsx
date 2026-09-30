@@ -3,10 +3,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 
-import {
-  getDeploymentExperiments,
-  resolveEffectiveModelRuntimeEnv,
-} from '@roomote/db/server';
+import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
 import {
   getTextFromContentBlocks,
   PRODUCT_NAME,
@@ -107,19 +104,13 @@ export default async function SessionDetailPage({
   const sessionPageDataPromise = getSessionPageData(sessionId);
   const modelEnvPromise: Promise<Record<string, string>> =
     resolveEffectiveModelRuntimeEnv().catch(() => ({}));
-  const experimentsPromise = getDeploymentExperiments().catch(() => ({
-    sessionStatusJudgment: false,
-    sessionsBoard: false,
-  }));
   const [
     { authorizedUser, unifiedSession, session },
     modelEnv,
-    experiments,
     resolvedParams,
   ] = await Promise.all([
     sessionPageDataPromise,
     modelEnvPromise,
-    experimentsPromise,
     searchParams,
   ]);
   const autoStartVoice = hasVoiceAutostartFlag(resolvedParams);
@@ -137,7 +128,6 @@ export default async function SessionDetailPage({
   if (unifiedSession) {
     const sessionInfo: SessionInfo = {
       id: unifiedSession.id,
-      sessionStatusExperimentEnabled: experiments.sessionStatusJudgment,
       canDelete:
         unifiedSession.privacy === 'private'
           ? unifiedSession.privateOwnerUserId === authorizedUser.userId
@@ -272,7 +262,6 @@ export default async function SessionDetailPage({
 
   const sessionInfo: SessionInfo = {
     id: session.id,
-    sessionStatusExperimentEnabled: false,
     canDelete: false,
     ownerName: session.ownerName,
     ownerEmail: session.ownerEmail,

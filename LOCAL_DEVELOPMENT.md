@@ -6,14 +6,14 @@ checkout. If you want to operate Roomote for a team, start with the public
 
 ## Prerequisites
 
-| Tool | Version | Notes |
-| ---- | ------- | ----- |
-| macOS | Latest | This guide is optimized for macOS. Apple Silicon runs the task worker natively (no amd64 emulation). |
-| Docker Desktop | Latest | Provides Docker Engine and Compose for local services. |
-| mise | Latest | Manages the repository toolchain. |
-| ngrok | Latest | Optional, only when `R_PUBLIC_URL` uses an ngrok domain. |
-| OpenCode CLI | Latest | Required to run tasks and server-side model calls. Install with `npm install -g opencode-ai`. |
-| Python 3 | Latest | Required by the server-side OpenCode CLI helper. Install with `brew install python` if `python3` is missing. |
+| Tool           | Version | Notes                                                                                                        |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| macOS          | Latest  | This guide is optimized for macOS. Apple Silicon runs the task worker natively (no amd64 emulation).         |
+| Docker Desktop | Latest  | Provides Docker Engine and Compose for local services.                                                       |
+| mise           | Latest  | Manages the repository toolchain.                                                                            |
+| ngrok          | Latest  | Optional, only when `R_PUBLIC_URL` uses an ngrok domain.                                                     |
+| OpenCode CLI   | Latest  | Required to run tasks and server-side model calls. Install with `npm install -g opencode-ai`.                |
+| Python 3       | Latest  | Required by the server-side OpenCode CLI helper. Install with `brew install python` if `python3` is missing. |
 
 The dev toolchain runs on Node.js 24.13.1, pinned in `.tool-versions`,
 `.nvmrc`, and `.node-version`. The `package.json` `engines` field accepts
@@ -142,14 +142,14 @@ the `roomote-worker:local` image exists.
 
 Common options:
 
-| Option | Default | Description |
-| ------ | ------- | ----------- |
-| `--reset` | `false` | Reset the database before starting services. |
-| `--verbose` | `false` | Enable verbose output with stdio logging. |
-| `--skip-worker-release-build` | `false` | Reuse the existing worker artifact from `./releases`. |
-| `--use-release` | `false` | Use GitHub worker releases instead of the local worker build. |
-| `--worker-release-channel` | `stable` | GitHub worker release channel for `--use-release`. |
-| `--worker-release-version` | unset | Optional GitHub worker release version pin. |
+| Option                        | Default  | Description                                                   |
+| ----------------------------- | -------- | ------------------------------------------------------------- |
+| `--reset`                     | `false`  | Reset the database before starting services.                  |
+| `--verbose`                   | `false`  | Enable verbose output with stdio logging.                     |
+| `--skip-worker-release-build` | `false`  | Reuse the existing worker artifact from `./releases`.         |
+| `--use-release`               | `false`  | Use GitHub worker releases instead of the local worker build. |
+| `--worker-release-channel`    | `stable` | GitHub worker release channel for `--use-release`.            |
+| `--worker-release-version`    | unset    | Optional GitHub worker release version pin.                   |
 
 Examples:
 
@@ -291,3 +291,38 @@ curl -X GET "http://localhost:13001/trpc/auth.me" \
   -H "Authorization: Bearer $(pnpm --silent --filter @roomote/auth development:create-auth-token local@roomote.dev local 3600000)" \
   -H "Content-Type: application/json" | jq
 ```
+
+### Checking staged changes with Judgement
+
+The pre-commit hook runs Judgement after `lint-staged`, so it checks the formatted
+staged snapshot. Confirmed violations and invalid policies block the commit;
+incomplete checks report their status and allow the commit after a three-second
+check deadline. In managed Roomote tasks, this repository hook only formats;
+the worker-installed wrapper runs Judgement once through task inference, even
+when the proxy is unavailable.
+
+Run `pnpm judgement --verbose` from the Roomote checkout to check staged changes
+against `.judgement/rules.json`. The command loads `.env.local` and uses the same deployment
+judgment-model settings and encrypted provider credentials as the local API.
+The local database must be running. Select Jev through TypeSafe, OpenRouter, or
+Vercel AI Gateway in **Settings → Models**; `R_JUDGMENT_MODEL` overrides that choice.
+You do not need the standalone CLI's `TYPESAFE_API_KEY` variable.
+
+`--verbose` shows model outcomes and confidence scores. An outcome below the
+rule's confidence threshold remains incomplete, including a low-confidence
+violation. The command exits unsuccessfully for violations or incomplete checks.
+Use `--dry-run` to inspect evidence planning without database or model access,
+or `--format json` for the report as JSON. Checks are not cached because the
+configured inference backend can change. Managed task hooks use the same API
+inference settings through a worker-owned local proxy and retain their
+three-second deadline.
+
+Run `pnpm judgement test` to evaluate the labeled examples under
+`.judgement/examples/` at their configured thresholds. Use `--rule criterion_8`
+to select a rule and `--dry-run` to validate inputs without inference. To compare
+thresholds, run `pnpm judgement calibrate --rule criterion_8 --thresholds 0.8,0.85,0.9`
+or use `--all` to include every rule. Judgement owns the test and calibration
+runner; Roomote supplies its inference adapter. Live runs make model requests.
+Generated reports belong in local output or CI artifacts. See
+[the agent guide](https://github.com/RooCodeInc/judgement/blob/main/docs/agents.md)
+for labeling examples and interpreting results.

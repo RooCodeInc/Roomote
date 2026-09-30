@@ -225,7 +225,7 @@ describe('announcerJob non-Slack posting', () => {
     mockGetAutomationRuntime.mockResolvedValue({
       key: 'announcer',
       enabled: true,
-      scheduleMode: 'daily',
+      scheduleMode: 'on_demand',
       lastRunAt: null,
       instructions: null,
       destination: null,

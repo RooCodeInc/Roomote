@@ -48,6 +48,7 @@ import {
 import { hasAnyActiveRepository } from './github-deployment-scope';
 import { resolveAutomationRepositoryDestination } from './ci-failure-triage-routing';
 import {
+  appendAutomationWebhookInput,
   emptyJobResult,
   type AutomationJobResult,
   type AutomationRunOpts,
@@ -451,11 +452,13 @@ async function processDeployment(
     const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
     const lastRunAt = runtime.lastRunAt;
     const scanCursor = runtime.scanCursor;
+    const isManualOnDemandRun =
+      opts.manualTrigger === true && frequency === 'on_demand';
 
     if (
       !frequency ||
       frequency === 'off' ||
-      !(frequency in FREQUENCY_INTERVAL_MS)
+      (!isManualOnDemandRun && !(frequency in FREQUENCY_INTERVAL_MS))
     ) {
       return { kind: 'skipped', reason: 'Automation is disabled.' };
     }
@@ -475,8 +478,9 @@ async function processDeployment(
       return { kind: 'skipped', reason: 'Manager channel is not configured.' };
     }
 
-    const intervalMs =
-      FREQUENCY_INTERVAL_MS[frequency as keyof typeof FREQUENCY_INTERVAL_MS];
+    const intervalMs = isManualOnDemandRun
+      ? FREQUENCY_INTERVAL_MS.daily
+      : FREQUENCY_INTERVAL_MS[frequency as keyof typeof FREQUENCY_INTERVAL_MS];
 
     if (
       !opts.manualTrigger &&
@@ -680,17 +684,20 @@ async function processDeployment(
             // Legacy partitions without a recorded host omit the field and
             // resolve by (provider, fullName) alone.
             ...(host ? { sourceControlHost: host } : {}),
-            description: config.buildPrompt({
-              channelId,
-              destination: reportDestination,
-              hasMorePullRequests: pullRequestBatch.hasMore,
-              mergedPullRequests: partitionPullRequests,
-              manualTrigger: opts.manualTrigger === true,
-              repositoryCoverage,
-              scanMode,
-              recentThreadFeedback: recentThreadFeedback.promptText,
-              additionalInstructions: rules?.instructions,
-            }),
+            description: appendAutomationWebhookInput(
+              config.buildPrompt({
+                channelId,
+                destination: reportDestination,
+                hasMorePullRequests: pullRequestBatch.hasMore,
+                mergedPullRequests: partitionPullRequests,
+                manualTrigger: opts.manualTrigger === true,
+                repositoryCoverage,
+                scanMode,
+                recentThreadFeedback: recentThreadFeedback.promptText,
+                additionalInstructions: rules?.instructions,
+              }),
+              opts.webhookInputJson,
+            ),
             trigger: 'scheduled',
             ...(reportDestination.provider === 'slack'
               ? {
@@ -708,7 +715,7 @@ async function processDeployment(
         initiator: { kind: 'automation', key: config.automationKey },
         workflow: 'scan',
         surface: 'system',
-        trigger: opts.manualTrigger ? 'manual' : 'schedule',
+        trigger: opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
         visibility: 'hidden',
         ...(reportDestination.provider === 'slack'
           ? { channels: { slackChannelId: channelId } }

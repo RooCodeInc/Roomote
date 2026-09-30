@@ -1,3 +1,8 @@
+vi.mock('../judgement-proxy', async (original) => ({
+  ...(await original<typeof import('../judgement-proxy')>()),
+  setupJudgement: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../jevgrep', () => ({
   setupJevgrep: vi.fn().mockResolvedValue(false),
 }));

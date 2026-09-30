@@ -197,7 +197,7 @@ function resolveRateLimitBucketKey(
       return resolveStateTokenKey(c);
     case 'webhook-credential': {
       const token =
-        /^\/api\/webhooks\/custom-automations\/[^/]+\/([^/]+)$/u.exec(
+        /^\/api\/webhooks\/(?:custom-automations|built-in-automations)\/[^/]+\/([^/]+)$/u.exec(
           c.req.path,
         )?.[1];
       return token

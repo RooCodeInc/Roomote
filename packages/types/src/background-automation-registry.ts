@@ -76,6 +76,8 @@ export type TriggerableBackgroundAutomationDescriptor<
   /** Public black-on-white PNG used in automation result cards. */
   slackIcon: string;
   scheduleModes: readonly TScheduleMode[];
+  /** Whether this built-in exposes the generic public POST webhook trigger. */
+  supportsWebhook?: boolean;
   manualTriggerRequirements: readonly BackgroundAutomationManualTriggerRequirement[];
   /** Whether the automation posts to the shared manager channel by default. */
   usesManagerChannel: boolean;
@@ -116,6 +118,7 @@ export type TriggerableBackgroundAutomationDescriptor<
 
 const CONFLICT_RESOLVER_SCHEDULE_MODES = [
   'off',
+  'on_demand',
   'every_hour',
   'every_6_hours',
   'daily',
@@ -123,6 +126,7 @@ const CONFLICT_RESOLVER_SCHEDULE_MODES = [
 
 const DAILY_WEEKLY_SCHEDULE_MODES = [
   'off',
+  'on_demand',
   'daily',
   'weekly',
 ] as const satisfies readonly (
@@ -151,6 +155,7 @@ const MERGE_ANNOUNCER_SCHEDULE_MODES = [
 
 const HOURLY_AUDIT_SCHEDULE_MODES = [
   'off',
+  'on_demand',
   'every_hour',
   'every_6_hours',
   'daily',
@@ -162,11 +167,14 @@ const HOURLY_AUDIT_SCHEDULE_MODES = [
 
 const MANAGER_STATS_SCHEDULE_MODES = [
   'off',
+  'daily',
   'weekly',
+  'monthly',
 ] as const satisfies readonly ManagerStatsFrequency[];
 
 const PROVIDER_USAGE_LIMIT_SCHEDULE_MODES = [
   'off',
+  'on_demand',
   'every_hour',
 ] as const satisfies readonly ProviderUsageLimitFrequency[];
 
@@ -176,6 +184,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Resolve PR Conflicts',
     slackIcon: 'git-merge-conflict',
     scheduleModes: CONFLICT_RESOLVER_SCHEDULE_MODES,
+    supportsWebhook: true,
     // Provider-neutral scan: any active repository qualifies, GitHub
     // installation no longer required.
     manualTriggerRequirements: ['repository'],
@@ -188,6 +197,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Suggest Ideas',
     slackIcon: 'lightbulb',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    supportsWebhook: true,
     // Provider-agnostic: suggestion scans work with any synced repository.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
@@ -208,6 +218,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Summarize Merged PRs',
     slackIcon: 'git-merge',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    supportsWebhook: true,
     // Merged-PR summaries read the provider-neutral taskPullRequests table.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
@@ -222,9 +233,10 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   },
   {
     automationKey: 'manager_stats',
-    label: 'Weekly Manager Stats',
+    label: 'Manager Stats',
     slackIcon: 'chart-column-increasing',
     scheduleModes: MANAGER_STATS_SCHEDULE_MODES,
+    supportsWebhook: true,
     // The stats digest is computed from the provider-neutral PR list
     // primitives plus taskPullRequests, so any active repository qualifies.
     manualTriggerRequirements: ['slack', 'repository'],
@@ -238,6 +250,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     resultPriority: 'critical',
     slackIcon: 'battery-warning',
     scheduleModes: PROVIDER_USAGE_LIMIT_SCHEDULE_MODES,
+    supportsWebhook: true,
     manualTriggerRequirements: [],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
@@ -259,6 +272,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     resultPriority: 'high',
     slackIcon: 'sentry',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    supportsWebhook: true,
     manualTriggerRequirements: ['slack', 'sentry'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
@@ -271,6 +285,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     resultPriority: 'high',
     slackIcon: 'dependabot',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    supportsWebhook: true,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
@@ -283,6 +298,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     resultPriority: 'high',
     slackIcon: 'github',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    supportsWebhook: true,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
@@ -310,6 +326,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     resultPriority: 'critical',
     slackIcon: 'triangle-alert',
     scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
+    supportsWebhook: true,
     // Merged-PR audits read the provider-neutral pullRequestFacts table.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
@@ -328,6 +345,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Code Quality Auditor',
     slackIcon: 'square-pen',
     scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
+    supportsWebhook: true,
     // Merged-PR audits read the provider-neutral pullRequestFacts table.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
@@ -393,6 +411,24 @@ export type TriggerableBackgroundAutomationDescriptorItem =
 
 export type TriggerableBackgroundAutomationKey =
   TriggerableBackgroundAutomationDescriptorItem['automationKey'];
+
+export const BUILT_IN_WEBHOOK_AUTOMATION_KEYS =
+  TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS.filter(
+    (descriptor) =>
+      'supportsWebhook' in descriptor && descriptor.supportsWebhook === true,
+  ).map(
+    (descriptor) => descriptor.automationKey,
+  ) as readonly TriggerableBackgroundAutomationKey[];
+
+const BUILT_IN_WEBHOOK_AUTOMATION_KEY_SET = new Set<string>(
+  BUILT_IN_WEBHOOK_AUTOMATION_KEYS,
+);
+
+export function isBuiltInWebhookAutomationKey(
+  value: string,
+): value is TriggerableBackgroundAutomationKey {
+  return BUILT_IN_WEBHOOK_AUTOMATION_KEY_SET.has(value);
+}
 
 type BackgroundAutomationSettingsCatalogEntry =
   | {

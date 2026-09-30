@@ -890,6 +890,13 @@
       "when": 1790605452042,
       "tag": "0126_living_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1790675830722,
+      "tag": "0127_harsh_silvermane",
+      "breakpoints": true
     }
   ]
 }

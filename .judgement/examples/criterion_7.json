@@ -1,0 +1,82 @@
+{
+  "ruleId": "criterion_7",
+  "examples": [
+    {
+      "name": "Mid-sentence session capital",
+      "path": "docs/guide.md",
+      "before": "Review the remaining session checks before release.\n",
+      "after": "Review the remaining Session checks before release.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Mid-sentence task capital",
+      "path": "docs/guide.md",
+      "before": "You can resume the task from the sidebar.\n",
+      "after": "You can resume the Task from the sidebar.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "UI prose with capitalized ordinary noun",
+      "path": "apps/web/src/components/status-copy.ts",
+      "before": "export const message = \"The task is ready to resume.\";\n",
+      "after": "export const message = \"The Task is ready to resume.\";\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Lowercase ordinary nouns",
+      "path": "docs/guide.md",
+      "before": "Review the remaining checks.\n",
+      "after": "Review the remaining session and task checks.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Sentence begins with session",
+      "path": "docs/guide.md",
+      "before": "History is available.\n",
+      "after": "Session history is available.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Sentence begins with task",
+      "path": "docs/guide.md",
+      "before": "Checks are complete.\n",
+      "after": "Task checks are complete.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Title case heading",
+      "path": "docs/guide.md",
+      "before": "## Release Checks\n",
+      "after": "## Task and Session Checks\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Exact quoted UI label",
+      "path": "docs/guide.md",
+      "before": "Click the button to continue.\n",
+      "after": "Click the exact UI label \"New Task\" to continue.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Code identifier",
+      "path": "src/types.ts",
+      "before": "export type RecordId = string;\n",
+      "after": "export type TaskId = string;\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Fix prior capitalization",
+      "path": "docs/guide.md",
+      "before": "Open the Task to review its Session history.\n",
+      "after": "Open the task to review its session history.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Do not attribute unchanged violation to new diff",
+      "path": "docs/guide.md",
+      "before": "Open the Task to review history.\nWait for completion.\n",
+      "after": "Open the Task to review history.\nWait for completion before closing.\n",
+      "expected": "pass"
+    }
+  ]
+}

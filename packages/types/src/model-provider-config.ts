@@ -497,7 +497,7 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
     label: 'Recommended',
     roles: {
       coding: {
-        modelId: 'openai/gpt-6-sol',
+        modelId: 'openai/gpt-6.1-sol',
         reasoningEffort: 'medium',
       },
       helper: {
@@ -505,7 +505,7 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
         reasoningEffort: 'low',
       },
       vision: {
-        modelId: 'openai/gpt-6-sol',
+        modelId: 'openai/gpt-6.1-sol',
         reasoningEffort: 'low',
       },
       codeReview: {
@@ -517,7 +517,7 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
         reasoningEffort: 'low',
       },
       planning: {
-        modelId: 'openai/gpt-6-sol',
+        modelId: 'openai/gpt-6.1-sol',
         reasoningEffort: 'xhigh',
       },
     },
@@ -535,7 +535,7 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
         reasoningEffort: 'low',
       },
       vision: {
-        modelId: 'openai/gpt-6-sol',
+        modelId: 'openai/gpt-6.1-sol',
         reasoningEffort: 'low',
       },
       codeReview: {
@@ -547,7 +547,7 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
         reasoningEffort: 'low',
       },
       planning: {
-        modelId: 'openai/gpt-6-sol',
+        modelId: 'openai/gpt-6.1-sol',
         reasoningEffort: 'xhigh',
       },
     },
@@ -714,6 +714,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-6-astra': 'vercel/openai/gpt-6-astra',
       'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-6-sol': 'vercel/openai/gpt-6-sol',
+      'gpt-6-1-sol': 'vercel/openai/gpt-6.1-sol',
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
       'gpt-6-luna': 'vercel/openai/gpt-6-luna',
@@ -755,6 +756,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-sonnet-5-5': 'requesty/anthropic/claude-sonnet-5-5',
       'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
       'gpt-6-sol': 'requesty/gpt-6-sol@eu',
+      'gpt-6-1-sol': 'requesty/gpt-6.1-sol@eu',
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
       'gpt-6-luna': 'requesty/gpt-6-luna@eu',
@@ -839,6 +841,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-6-astra': 'openai/gpt-6-astra',
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-6-sol': 'openai/gpt-6-sol',
+      'gpt-6-1-sol': 'openai/gpt-6.1-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
       'gpt-6-luna': 'openai/gpt-6-luna',
@@ -868,6 +871,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'gpt-5-6-sol': 'azure/gpt-5.6-sol',
       'gpt-6-sol': 'azure/gpt-6-sol',
+      'gpt-6-1-sol': 'azure/gpt-6.1-sol',
       'gpt-5-6-terra': 'azure/gpt-5.6-terra',
       'gpt-5-6-luna': 'azure/gpt-5.6-luna',
       'gpt-6-luna': 'azure/gpt-6-luna',
@@ -879,9 +883,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       recommendedCodingModelId: 'azure/gpt-5.6-terra',
       recommendedRoleModels: {
         helper: 'azure/gpt-6-luna',
-        codeReview: 'azure/gpt-6-sol',
+        codeReview: 'azure/gpt-6.1-sol',
         explore: 'azure/gpt-6-luna',
-        planning: 'azure/gpt-6-sol',
+        planning: 'azure/gpt-6.1-sol',
       },
     }),
   },
@@ -908,6 +912,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'gpt-5-6-sol': 'azure-cognitive-services/gpt-5.6-sol',
       'gpt-6-sol': 'azure-cognitive-services/gpt-6-sol',
+      'gpt-6-1-sol': 'azure-cognitive-services/gpt-6.1-sol',
       'gpt-5-6-terra': 'azure-cognitive-services/gpt-5.6-terra',
       'gpt-5-6-luna': 'azure-cognitive-services/gpt-5.6-luna',
       'gpt-6-luna': 'azure-cognitive-services/gpt-6-luna',
@@ -919,9 +924,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       recommendedCodingModelId: 'azure-cognitive-services/gpt-5.6-terra',
       recommendedRoleModels: {
         helper: 'azure-cognitive-services/gpt-6-luna',
-        codeReview: 'azure-cognitive-services/gpt-6-sol',
+        codeReview: 'azure-cognitive-services/gpt-6.1-sol',
         explore: 'azure-cognitive-services/gpt-6-luna',
-        planning: 'azure-cognitive-services/gpt-6-sol',
+        planning: 'azure-cognitive-services/gpt-6.1-sol',
       },
     }),
   },
@@ -1020,6 +1025,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-6-astra': 'opencode/gpt-6-astra',
       'gpt-5-6-sol': 'opencode/gpt-5.6-sol',
       'gpt-6-sol': 'opencode/gpt-6-sol',
+      'gpt-6-1-sol': 'opencode/gpt-6.1-sol',
       'gpt-5-6-terra': 'opencode/gpt-5.6-terra',
       'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
       'gpt-6-luna': 'opencode/gpt-6-luna',
@@ -1114,6 +1120,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-sonnet-5-5': 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       'gpt-5-6-sol': 'bedrock-mantle/openai.gpt-5.6-sol',
       'gpt-6-sol': 'bedrock-mantle/openai.gpt-6-sol',
+      'gpt-6-1-sol': 'bedrock-mantle/openai.gpt-6.1-sol',
       'gpt-5-6-terra': 'bedrock-mantle/openai.gpt-5.6-terra',
       'gpt-5-6-luna': 'bedrock-mantle/openai.gpt-5.6-luna',
       'gpt-6-luna': 'bedrock-mantle/openai.gpt-6-luna',
@@ -1240,6 +1247,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-6-astra': 'github-copilot/gpt-6-astra',
       'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
       'gpt-6-sol': 'github-copilot/gpt-6-sol',
+      'gpt-6-1-sol': 'github-copilot/gpt-6.1-sol',
       'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
       'gpt-5-6-luna': 'github-copilot/gpt-5.6-luna',
       'gpt-6-luna': 'github-copilot/gpt-6-luna',
@@ -1333,6 +1341,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-6-astra': 'openai/gpt-6-astra',
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-6-sol': 'openai/gpt-6-sol',
+      'gpt-6-1-sol': 'openai/gpt-6.1-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
       'gpt-6-luna': 'openai/gpt-6-luna',

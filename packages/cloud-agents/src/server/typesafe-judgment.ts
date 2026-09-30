@@ -983,16 +983,9 @@ async function requestFromBackend(
   }
 }
 
-/**
- * Ask the configured judgment backend a set of independent questions over the
- * same state. Unregistered decisions are Jev-only; returns `null` when the
- * required backend is unavailable so callers can keep their existing behavior.
- * Throws on transport, HTTP, or response-shape failures so callers can log and
- * fall back.
- */
-export async function evaluateTypeSafeJudgments<
+type TypeSafeJudgmentParams<
   TQuestions extends Record<string, TypeSafeQuestion>,
->(params: {
+> = {
   /** JSON-serializable context the questions are answered over. */
   state: unknown;
   questions: TQuestions;
@@ -1003,7 +996,33 @@ export async function evaluateTypeSafeJudgments<
   bypassBackendCache?: boolean;
   /** Disable secondary evaluation for source-retrieval requests. */
   skipShadow?: boolean;
-}): Promise<TypeSafeAnswers<TQuestions> | null> {
+};
+
+/**
+ * Ask the configured judgment backend a set of independent questions over the
+ * same state. Unregistered decisions are Jev-only; returns `null` when the
+ * required backend is unavailable so callers can keep their existing behavior.
+ * Throws on transport, HTTP, or response-shape failures so callers can log and
+ * fall back.
+ */
+export async function evaluateTypeSafeJudgments<
+  TQuestions extends Record<string, TypeSafeQuestion>,
+>(
+  params: TypeSafeJudgmentParams<TQuestions>,
+): Promise<TypeSafeAnswers<TQuestions> | null> {
+  const result = await evaluateTypeSafeJudgmentsWithUsage(params);
+  return result?.answers ?? null;
+}
+
+/** Return normalized token counts for callers that pace requests using usage. */
+export async function evaluateTypeSafeJudgmentsWithUsage<
+  TQuestions extends Record<string, TypeSafeQuestion>,
+>(
+  params: TypeSafeJudgmentParams<TQuestions>,
+): Promise<{
+  answers: TypeSafeAnswers<TQuestions>;
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+} | null> {
   const excludeRoomoteModel = decisionModelExcludesRoomoteModel(params);
   const backend = await resolveJudgmentBackend({
     bypassCache: params.bypassBackendCache,
@@ -1068,7 +1087,17 @@ export async function evaluateTypeSafeJudgments<
     });
   }
 
-  return answers as TypeSafeAnswers<TQuestions>;
+  const usage = parseJudgmentUsage(response);
+  const tokenCount = (value: number | undefined) =>
+    value !== undefined && Number.isSafeInteger(value) ? value : undefined;
+  return {
+    answers: answers as TypeSafeAnswers<TQuestions>,
+    usage: {
+      inputTokens: tokenCount(usage.inputTokens),
+      outputTokens: tokenCount(usage.outputTokens),
+      totalTokens: tokenCount(usage.totalTokens),
+    },
+  };
 }
 
 /**

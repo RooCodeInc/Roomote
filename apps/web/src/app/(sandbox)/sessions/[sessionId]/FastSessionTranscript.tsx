@@ -49,10 +49,11 @@ import {
   MessageUiOptionsProvider,
   Shimmer,
 } from '@/components/ai-elements';
+import { type SlackMentionScope } from '@/components/ai-elements/slack-mention-context';
 import {
-  SlackMentionProvider,
-  type SlackMentionScope,
-} from '@/components/ai-elements/slack-mention-context';
+  buildSlackTranscriptMentionText,
+  SlackMentionTranscriptProvider,
+} from '@/components/ai-elements/slack-message-references';
 import { WorkspaceHeader } from '@/components/layout';
 import {
   Alert,
@@ -1532,6 +1533,13 @@ export function FastSessionTranscript({
     streamMessages,
     liveVoiceUiMessages,
   ]);
+  const slackMentionText = useMemo(
+    () =>
+      buildSlackTranscriptMentionText({
+        messages: [...uiMessagesBeforeInput, ...uiMessagesAfterInput],
+      }),
+    [uiMessagesAfterInput, uiMessagesBeforeInput],
+  );
   const transcriptWorking =
     isSending ||
     conversationResponding === true ||
@@ -2159,7 +2167,10 @@ export function FastSessionTranscript({
     <MessageUiOptionsProvider
       value={{ displayMode, hidePrReviewActions: true }}
     >
-      <SlackMentionProvider scope={slackMentionScope}>
+      <SlackMentionTranscriptProvider
+        scope={slackMentionScope}
+        text={slackMentionText}
+      >
         <WorkspaceHeader
           className="py-3.25"
           contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
@@ -2381,7 +2392,7 @@ export function FastSessionTranscript({
             />
           </div>
         ) : null}
-      </SlackMentionProvider>
+      </SlackMentionTranscriptProvider>
     </MessageUiOptionsProvider>
   );
 }

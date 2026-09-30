@@ -36,6 +36,36 @@ describe('automation result blocks', () => {
     );
   });
 
+  it('renders bracketed PR-title labels and entity-wrapped destinations', () => {
+    const url = 'https://github.com/RooCodeInc/Roomote/pull/3292';
+    const label = '[Docs] Document optional Done session status';
+    const report = `Draft PR opened: [${label}](${url}) and [\\[Docs\\] Document optional Done session status](&lt;${url}&gt;).`;
+    const [container] = buildAutomationResultBlocks({
+      title: 'Weekly public docs health review',
+      iconUrl: 'https://app.example.com/automation-icons/zap.png',
+      configureUrl: 'https://app.example.com/automations#docs',
+      contentText: report,
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toContainEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [
+            { type: 'text', text: 'Draft PR opened: ' },
+            { type: 'link', url, text: label },
+            { type: 'text', text: ' and ' },
+            { type: 'link', url, text: label },
+            { type: 'text', text: '.' },
+          ],
+        },
+      ],
+    });
+  });
+
   it('omits empty report content', () => {
     expect(buildAutomationResultContentBlocks('  \n')).toEqual([]);
   });

@@ -1,10 +1,10 @@
-const CUSTOM_AUTOMATION_WEBHOOK_PATH =
-  /^\/api\/webhooks\/custom-automations\/([^/]+)\/[^/]+$/u;
+const AUTOMATION_WEBHOOK_PATH =
+  /^\/api\/webhooks\/(custom-automations|built-in-automations)\/([^/]+)\/[^/]+$/u;
 
 export function redactCustomAutomationWebhookPath(path: string): string {
   return path.replace(
-    CUSTOM_AUTOMATION_WEBHOOK_PATH,
-    '/api/webhooks/custom-automations/$1/[redacted]',
+    AUTOMATION_WEBHOOK_PATH,
+    '/api/webhooks/$1/$2/[redacted]',
   );
 }
 

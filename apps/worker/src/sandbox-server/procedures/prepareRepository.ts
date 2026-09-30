@@ -1,3 +1,4 @@
+import { installRepositoryJudgement } from '../../run-task/repository-judgement';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -180,6 +181,7 @@ async function prepareOnDemandRepository({
   // Never re-run preparation on an existing checkout: it would fetch and
   // reset the working tree, discarding whatever the agent changed there.
   if (existsSync(join(repositoryPath, '.git'))) {
+    await installRepositoryJudgement(repositoryPath);
     return {
       success: true,
       repositoryFullName: repository.fullName,
@@ -199,6 +201,7 @@ async function prepareOnDemandRepository({
       ? {}
       : { sourceControlProvider: requested.sourceControlProvider },
   );
+  await installRepositoryJudgement(preparedPath);
   const manifestPath = await refreshRepositoriesManifest(workspaceRoot, scope);
 
   return {

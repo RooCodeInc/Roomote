@@ -1,4 +1,5 @@
 import { SlackNotifier } from '@roomote/slack';
+import { CronExpressionParser } from 'cron-parser';
 
 import { getRedis } from '@roomote/redis';
 
@@ -13,6 +14,58 @@ interface SlackDeploymentContext {
  * schedules that omit a time of day.
  */
 export const DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL = 3;
+
+const MANAGER_STATS_SCHEDULES = {
+  daily: '0 17 * * *',
+  weekly: '0 17 * * 5',
+  monthly: '0 17 L * *',
+} as const;
+
+type ManagerStatsScheduleFrequency = keyof typeof MANAGER_STATS_SCHEDULES;
+
+/**
+ * Manager Stats ends its configured calendar period at 5 PM local time. The
+ * scheduler still ticks hourly, but the due boundary is calculated from a
+ * timezone-aware cron occurrence so DST and month length are not approximated
+ * with elapsed milliseconds.
+ */
+export function isManagerStatsRunDueOnLocalPeriod(params: {
+  now: Date;
+  timeZone: string;
+  lastRunAt: Date | null;
+  frequency: ManagerStatsScheduleFrequency;
+}): boolean {
+  const localDate = getLocalDateParts(params.now, params.timeZone);
+  const { hour, minute } = getLocalHourMinute(params.now, params.timeZone);
+  const afterFivePm = hour > 17 || (hour === 17 && minute >= 0);
+  const localDayOfWeek = getLocalDayOfWeek(params.now, params.timeZone);
+  const lastDayOfMonth = new Date(
+    Date.UTC(localDate.year, localDate.month, 0),
+  ).getUTCDate();
+  const atPeriodEnd =
+    params.frequency === 'daily'
+      ? afterFivePm
+      : params.frequency === 'weekly'
+        ? localDayOfWeek === 5 && afterFivePm
+        : localDate.day === lastDayOfMonth && afterFivePm;
+
+  if (!atPeriodEnd) return false;
+
+  const occurrence = CronExpressionParser.parse(
+    MANAGER_STATS_SCHEDULES[params.frequency],
+    {
+      currentDate: new Date(params.now.getTime() + 1),
+      tz: params.timeZone,
+    },
+  )
+    .prev()
+    .toDate();
+
+  return (
+    occurrence.getTime() <= params.now.getTime() &&
+    (!params.lastRunAt || params.lastRunAt.getTime() < occurrence.getTime())
+  );
+}
 
 function getLocalDateKey(date: Date, timeZone: string): string {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -42,6 +95,18 @@ function getLocalDayOfWeek(date: Date, timeZone: string): number {
   ]);
 
   return dayByWeekday.get(weekday) ?? -1;
+}
+
+function getLocalDateParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+  return { year: value('year'), month: value('month'), day: value('day') };
 }
 
 function getLocalHourMinute(

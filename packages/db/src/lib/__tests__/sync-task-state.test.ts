@@ -18,7 +18,6 @@ import {
   syncTaskStateFromRuns,
   deriveTaskStateFromRuns,
   selectTaskStateRun,
-  setDeploymentExperimentEnabled,
 } from '../../server';
 import type { CreateTaskRun } from '../../types';
 
@@ -73,7 +72,6 @@ async function readTask(taskId: string) {
 }
 
 afterEach(async () => {
-  await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
   while (createdTaskIds.length > 0) {
     const taskId = createdTaskIds.pop()!;
     // task_runs.task_id cascades on task delete.
@@ -150,7 +148,6 @@ describe('deriveTaskStateFromRuns', () => {
 
 describe('syncTaskStateFromRuns', () => {
   it('queues a status judgment in the task-state transaction on terminal transition', async () => {
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', true);
     const task = await makeTask('active');
     const run = await insertRun({
       taskId: task.id,
@@ -184,7 +181,6 @@ describe('syncTaskStateFromRuns', () => {
         state: 'pending',
       }),
     );
-    await setDeploymentExperimentEnabled('sessionStatusJudgment', false);
   });
 
   it('marks an only-child Session ready when sleep completion settles its task', async () => {
