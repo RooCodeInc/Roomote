@@ -18,6 +18,7 @@ import {
   SUGGESTION_MIN_HISTORY_MESSAGES,
   useGhostSuggestion,
 } from '@/hooks/useGhostSuggestion';
+import { usePromptHistoryNavigation } from '@/hooks/usePromptHistoryNavigation';
 import {
   LiveVoiceButton,
   PromptInput as PromptInputRoot,
@@ -232,6 +233,7 @@ export function SessionPromptInput({
   onSend,
   historyMessageCount = 0,
   assistantMessageCount = 0,
+  promptHistory = [],
   taskStateRevision = '',
   agentWorking = false,
   queuedMessages = [],
@@ -252,6 +254,8 @@ export function SessionPromptInput({
   /** Persisted assistant messages with text; each completed agent turn
    * advances the suggestion query key. */
   assistantMessageCount?: number;
+  /** Visible persisted messages sent by users, oldest first. */
+  promptHistory?: readonly string[];
   /** Fingerprint of the delegated tasks' state; a task finishing while the
    * session is idle refreshes the suggestion through this key. */
   taskStateRevision?: string;
@@ -333,6 +337,11 @@ export function SessionPromptInput({
     active: !prompt && !isBusy && !isUpdatingModelSelection && !agentWorking,
     surface: 'session',
     onAccept: (text) => setPrompt(text),
+  });
+  const handlePromptHistoryKeyDown = usePromptHistoryNavigation({
+    history: promptHistory,
+    value: prompt,
+    onNavigate: setPrompt,
   });
 
   const handleSubmit = async (message: PromptInputMessage) => {
@@ -492,7 +501,8 @@ export function SessionPromptInput({
                 onFocus={() => setIsTextareaFocused(true)}
                 onBlur={() => setIsTextareaFocused(false)}
                 onKeyDown={(event) => {
-                  handleSuggestionKeyDown(event);
+                  if (handleSuggestionKeyDown(event)) return;
+                  handlePromptHistoryKeyDown(event);
                 }}
                 placeholder={ghostSuggestion ?? 'Message agent'}
                 aria-describedby={
