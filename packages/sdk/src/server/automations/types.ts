@@ -1,13 +1,45 @@
 import type { ResolvedAutomationDestination } from './destination';
 
+export type AutomationRunContext =
+  | { trigger: 'scheduled' }
+  | { trigger: 'manual' }
+  | {
+      trigger: 'webhook';
+      /** Canonical JSON from an authenticated webhook body; never persisted as the saved prompt. */
+      webhookInputJson?: string;
+    };
+
+export type ExplicitAutomationRunContext = Exclude<
+  AutomationRunContext,
+  { trigger: 'scheduled' }
+>;
+
+export const SCHEDULED_AUTOMATION_RUN_CONTEXT = {
+  trigger: 'scheduled',
+} as const satisfies AutomationRunContext;
+
 export type AutomationRunOpts = {
-  manualTrigger?: boolean;
-  trigger?: 'manual' | 'webhook';
-  /** Canonical JSON from an authenticated webhook body; never persisted as the saved prompt. */
-  webhookInputJson?: string;
+  context: AutomationRunContext;
   /** Destination selected by the caller for a one-off run. */
   destination?: ResolvedAutomationDestination;
 };
+
+export function resolveAutomationRunContext(context: AutomationRunContext): {
+  trigger: AutomationRunContext['trigger'];
+  taskTrigger: 'schedule' | 'manual' | 'webhook';
+  isExplicitRun: boolean;
+  isManualRun: boolean;
+  webhookInputJson: string | undefined;
+} {
+  return {
+    trigger: context.trigger,
+    taskTrigger: context.trigger === 'scheduled' ? 'schedule' : context.trigger,
+    isExplicitRun: context.trigger !== 'scheduled',
+    isManualRun: context.trigger === 'manual',
+    webhookInputJson:
+      context.trigger === 'webhook' ? context.webhookInputJson : undefined,
+  };
+}
 
 /** Adds one bounded, explicitly untrusted webhook body to a single run. */
 export function appendAutomationWebhookInput(
@@ -25,7 +57,7 @@ export function appendAutomationWebhookInput(
 }
 
 /**
- * Aggregate result of one automation pass (scheduled tick or manual Run now).
+ * Aggregate result of one automation pass (scheduled tick or explicit run).
  */
 export type AutomationJobResult = {
   /** Task launched by this pass, when the automation launches tasks. */

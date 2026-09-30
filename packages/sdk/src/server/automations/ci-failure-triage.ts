@@ -64,6 +64,8 @@ import {
 } from './github-deployment-scope';
 import {
   emptyJobResult,
+  resolveAutomationRunContext,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -76,13 +78,14 @@ const LOG_PREFIX = '[ci-failure-triage]';
  * The task focuses on the latest default-branch failure only.
  */
 export async function ciFailureTriageJob(
-  opts: AutomationRunOpts = {},
+  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting ci failure triage evaluator`);
 
   const result = emptyJobResult();
 
-  if (opts.manualTrigger !== true) {
+  const { isExplicitRun } = resolveAutomationRunContext(opts.context);
+  if (!isExplicitRun) {
     result.skippedReason =
       'CI failure triage is webhook-driven; only manual Run now is supported offline.';
     return result;

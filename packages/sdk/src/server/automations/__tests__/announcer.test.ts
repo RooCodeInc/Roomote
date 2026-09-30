@@ -266,7 +266,7 @@ describe('announcerJob non-Slack posting', () => {
       channelId: '-100555',
     });
 
-    const result = await announcerJob({ manualTrigger: true });
+    const result = await announcerJob({ context: { trigger: 'manual' } });
 
     expect(result.completed).toBe(true);
     expect(result.errors).toEqual([]);
@@ -299,7 +299,7 @@ describe('announcerJob non-Slack posting', () => {
     });
     mockMergedPullRequestRows.mockResolvedValue([]);
 
-    await announcerJob({ manualTrigger: true });
+    await announcerJob({ context: { trigger: 'manual' } });
 
     expect(mockRecordBackgroundAutomationResult).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -362,7 +362,7 @@ describe('announcerJob non-Slack posting', () => {
       postMessage: mockAdapterPostMessage,
     });
 
-    const result = await announcerJob({ manualTrigger: true });
+    const result = await announcerJob({ context: { trigger: 'manual' } });
 
     expect(result.completed).toBe(true);
     expect(mockEnqueueTask).toHaveBeenCalledWith(
@@ -384,7 +384,7 @@ describe('announcerJob non-Slack posting', () => {
       channelId: '-100555',
     });
 
-    await announcerJob({ manualTrigger: true });
+    await announcerJob({ context: { trigger: 'manual' } });
 
     expect(mockLoadAutomationThreadFeedbackContext).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -432,7 +432,7 @@ describe('announcerJob non-Slack posting', () => {
       }),
     );
 
-    await announcerJob({ manualTrigger: true });
+    await announcerJob({ context: { trigger: 'manual' } });
 
     expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
     expect(
@@ -449,7 +449,7 @@ describe('announcerJob non-Slack posting', () => {
     });
     mockEnqueueTask.mockRejectedValue(new Error('queue unavailable'));
 
-    const result = await announcerJob({ manualTrigger: true });
+    const result = await announcerJob({ context: { trigger: 'manual' } });
 
     expect(result.completed).toBe(false);
     expect(result.errors).toEqual(['queue unavailable']);
@@ -462,7 +462,7 @@ describe('announcerJob non-Slack posting', () => {
   it('skips the deployment when no destination resolves', async () => {
     mockResolveAutomationRuntimeDestination.mockResolvedValue(null);
 
-    const result = await announcerJob({ manualTrigger: true });
+    const result = await announcerJob({ context: { trigger: 'manual' } });
 
     expect(result.completed).toBe(false);
     expect(result.skippedReason).toBe('Announcer channel is not configured.');

@@ -31,10 +31,12 @@ export async function processBuiltInAutomationWebhookJob(
   }
 
   const result = await runAutomationNow(data.automationKey, {
-    trigger: 'webhook',
-    ...(data.webhookInputJson
-      ? { webhookInputJson: data.webhookInputJson }
-      : {}),
+    context: {
+      trigger: 'webhook',
+      ...(data.webhookInputJson
+        ? { webhookInputJson: data.webhookInputJson }
+        : {}),
+    },
   });
 
   if (result.outcome === 'failed') {

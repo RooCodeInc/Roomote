@@ -62,6 +62,9 @@ export {
 } from './github-deployment-scope';
 export type {
   AutomationJobResult,
+  AutomationRunContext,
   AutomationRunNowResult,
   AutomationRunOpts,
+  ExplicitAutomationRunContext,
 } from './types';
+export { SCHEDULED_AUTOMATION_RUN_CONTEXT } from './types';

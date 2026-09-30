@@ -197,7 +197,7 @@ describe('createMergedPullRequestAuditJob eligibility gate', () => {
       settings: {},
     });
 
-    const result = await job({ manualTrigger: true });
+    const result = await job({ context: { trigger: 'manual' } });
 
     expect(result.skippedReason).toBe(
       'No merged pull requests in the scan window.',
@@ -214,7 +214,7 @@ describe('buildMergedPullRequestTaskContext', () => {
         channelId: 'C123',
       } as never,
       hasMorePullRequests: false,
-      manualTrigger: false,
+      trigger: 'scheduled',
       mergedPullRequests: [
         {
           repositoryId: '11111111-1111-4111-8111-111111111111',

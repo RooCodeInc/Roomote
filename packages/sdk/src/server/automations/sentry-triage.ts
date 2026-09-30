@@ -78,7 +78,7 @@ function buildSentryTriagePrompt({
   projectSlugs,
   repositoryFullNames,
   repositoryCoverage,
-  manualTrigger,
+  trigger,
   recentThreadFeedback,
 }: {
   channelId: string;
@@ -87,7 +87,7 @@ function buildSentryTriagePrompt({
   projectSlugs: string[];
   repositoryFullNames: string[];
   repositoryCoverage: RepositoryCoverage[];
-  manualTrigger: boolean;
+  trigger: 'scheduled' | 'manual' | 'webhook';
   recentThreadFeedback?: string | null;
 }): string {
   const promptContext = buildDestinationPromptContext(destination);
@@ -111,7 +111,7 @@ function buildSentryTriagePrompt({
 <task_context>
   <source>background-automation</source>
   <run_mode>read_only</run_mode>
-  <trigger>${manualTrigger ? 'manual' : 'scheduled'}</trigger>
+  <trigger>${trigger}</trigger>
   <scan_window>last ${windowDays} day${windowDays === 1 ? '' : 's'}</scan_window>
   <${promptContext.channelTag}>${promptContext.destinationRef}</${promptContext.channelTag}>
   <project_scope>
@@ -142,7 +142,7 @@ export const sentryTriageJob = createScheduledTriageJob({
     channelId,
     destination,
     runtime,
-    manualTrigger,
+    trigger,
   }) {
     if (!(await hasSentryMcpConnection())) {
       return {
@@ -206,7 +206,7 @@ export const sentryTriageJob = createScheduledTriageJob({
         projectSlugs,
         repositoryFullNames: partitionRepositories,
         repositoryCoverage: partitionCoverage,
-        manualTrigger,
+        trigger,
         recentThreadFeedback: recentThreadFeedback.promptText,
       }),
       trigger: 'scheduled',

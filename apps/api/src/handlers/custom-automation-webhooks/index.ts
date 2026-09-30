@@ -184,9 +184,12 @@ customAutomationWebhooks.all('/:id/:token', async (c) => {
 
   // The parsed body is passed only to this run and remains explicitly untrusted
   // prompt data; the saved automation prompt and URL credential are unchanged.
-  const result = webhookInput.promptInputJson
-    ? await runCustomAutomationNow(id, 'webhook', webhookInput.promptInputJson)
-    : await runCustomAutomationNow(id, 'webhook');
+  const result = await runCustomAutomationNow(id, {
+    trigger: 'webhook',
+    ...(webhookInput.promptInputJson
+      ? { webhookInputJson: webhookInput.promptInputJson }
+      : {}),
+  });
   if (result.outcome === 'failed' || result.outcome === 'skipped') {
     return respond(c, 503, { error: 'trigger_failed' });
   }

@@ -560,7 +560,7 @@ export async function triggerCustomAutomationCommand(
   input: { id: string },
 ): Promise<AutomationRunNowResult> {
   await getOwnedAutomation(auth, input.id);
-  return runCustomAutomationNow(input.id);
+  return runCustomAutomationNow(input.id, { trigger: 'manual' });
 }
 
 function buildCustomAutomationWebhookUrl(id: string, token: string): string {

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   notifyWebTaskInitiatorOnSettle: vi.fn(),
   processSessionAttentionNotificationJob: vi.fn(),
   processSessionTitleRefreshJob: vi.fn(),
+  suggesterJob: vi.fn(),
 }));
 
 vi.mock('bullmq', () => ({
@@ -50,7 +51,8 @@ vi.mock('@roomote/sdk/server', () => ({
   providerUsageLimitJob: vi.fn(),
   securityAuditorJob: vi.fn(),
   sentryTriageJob: vi.fn(),
-  suggesterJob: vi.fn(),
+  suggesterJob: mocks.suggesterJob,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT: { trigger: 'scheduled' },
   notifyWebTaskInitiatorOnSettle: mocks.notifyWebTaskInitiatorOnSettle,
   processSessionAttentionNotificationJob:
     mocks.processSessionAttentionNotificationJob,
@@ -83,6 +85,19 @@ import { ScheduledJobName } from './types';
 import { startScheduler } from './scheduler';
 
 describe('startScheduler', () => {
+  it('passes an explicit scheduled context to automation runners', async () => {
+    await startScheduler();
+    const handler = mocks.workerConstructor.mock.calls[0]![1] as (job: {
+      name: string;
+    }) => Promise<void>;
+
+    await handler({ name: 'suggester' });
+
+    expect(mocks.suggesterJob).toHaveBeenCalledWith({
+      context: { trigger: 'scheduled' },
+    });
+  });
+
   it('schedules current footer refresh every 30 seconds and dispatches it', async () => {
     await startScheduler();
     expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(

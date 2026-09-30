@@ -187,6 +187,7 @@ export async function triggerAutomationCommand(
   );
 
   return runAutomationNow(input.automationKey, {
+    context: { trigger: 'manual' },
     ...(destination ? { destination } : {}),
   });
 }

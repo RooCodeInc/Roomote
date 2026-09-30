@@ -22,6 +22,8 @@ import { isRunDue } from './scheduling-utils';
 import {
   appendAutomationWebhookInput,
   emptyJobResult,
+  resolveAutomationRunContext,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -64,7 +66,7 @@ type ScheduledTriageAutomationConfig = {
     channelId: string;
     destination: ResolvedAutomationDestination;
     runtime: AutomationRuntime;
-    manualTrigger: boolean;
+    trigger: 'scheduled' | 'manual' | 'webhook';
   }) => Promise<TriageScanBuild>;
 };
 
@@ -104,7 +106,7 @@ export function createScheduledTriageJob(
   const logPrefix = `[${config.automationKey.replaceAll('_', '-')}]`;
 
   return async function scheduledTriageJob(
-    opts: AutomationRunOpts = {},
+    opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
   ): Promise<AutomationJobResult> {
     console.log(
       `${logPrefix} Starting ${config.automationKey.replaceAll('_', ' ')} evaluator`,
@@ -112,6 +114,8 @@ export function createScheduledTriageJob(
 
     const now = new Date();
     const result = emptyJobResult();
+    const { isExplicitRun, taskTrigger, trigger, webhookInputJson } =
+      resolveAutomationRunContext(opts.context);
     const runtime = await getAutomationRuntime(config.automationKey);
     const eligibleDeployments = await findEligibleDeploymentContexts(runtime);
 
@@ -129,7 +133,7 @@ export function createScheduledTriageJob(
         if (
           !frequency ||
           frequency === 'off' ||
-          (frequency === 'on_demand' && !opts.manualTrigger)
+          (frequency === 'on_demand' && !isExplicitRun)
         ) {
           result.skippedReason = 'Automation is disabled.';
           skipped++;
@@ -165,7 +169,7 @@ export function createScheduledTriageJob(
         const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
         if (
-          !opts.manualTrigger &&
+          !isExplicitRun &&
           !isRunDue({
             now,
             timeZone: timezone,
@@ -194,7 +198,7 @@ export function createScheduledTriageJob(
           channelId,
           destination: reportDestination,
           runtime,
-          manualTrigger: opts.manualTrigger === true,
+          trigger,
         });
 
         if (scanTask.kind === 'skip') {
@@ -231,7 +235,7 @@ export function createScheduledTriageJob(
                   ? {
                       agentPromptText: appendAutomationWebhookInput(
                         payload.description,
-                        opts.webhookInputJson,
+                        webhookInputJson,
                       ),
                     }
                   : {}),
@@ -241,8 +245,7 @@ export function createScheduledTriageJob(
             initiator: { kind: 'automation', key: config.automationKey },
             workflow: 'scan',
             surface: 'system',
-            trigger:
-              opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
+            trigger: taskTrigger,
             visibility: 'hidden',
             ...(reportDestination.provider === 'slack'
               ? { channels: { slackChannelId: channelId } }
