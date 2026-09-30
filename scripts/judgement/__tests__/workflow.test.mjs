@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import YAML from 'yaml';
-import { check, exitCode } from '@roo-code/judgement';
+import { check, exitCode, matches } from '@roo-code/judgement';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 const workflow = YAML.parse(
@@ -23,6 +23,24 @@ const workflow = YAML.parse(
 );
 const script = (job, id) =>
   workflow.jobs[job].steps.find((step) => step.id === id).run;
+
+test('global prose rules exclude generated pnpm lockfiles', () => {
+  const policy = JSON.parse(
+    readFileSync(join(root, '.judgement/rules.json'), 'utf8'),
+  );
+
+  for (const id of ['criterion_7', 'criterion_8']) {
+    const criterion = policy.criteria.find((entry) => entry.id === id);
+    assert.ok(criterion);
+    assert.equal(matches('README.md', criterion.files), true);
+    assert.equal(matches('apps/web/src/page.tsx', criterion.files), true);
+    assert.equal(matches('pnpm-lock.yaml', criterion.files), false);
+    assert.equal(
+      matches('.docker/app/runtime-deps/api/pnpm-lock.yaml', criterion.files),
+      false,
+    );
+  }
+});
 
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'judgement-ci-'));
