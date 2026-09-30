@@ -587,6 +587,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.privateSessionsEnabled.mockResolvedValue(true);
+    mocks.isBrainEnabled.mockResolvedValue(false);
     mocks.isChatGptSubscriptionConnected.mockResolvedValue(false);
     mocks.isXaiSubscriptionConnected.mockResolvedValue(false);
     mocks.deploymentExperimentEnabled.mockResolvedValue(false);
@@ -6353,6 +6354,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       'conversation-1',
       'Prefers deploys on Fridays',
     );
+    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.any(Array),
+      expect.objectContaining({ brainEnabled: true }),
+    );
   });
 
   it('hands each settled human turn to the post-turn memory pass', async () => {
@@ -6475,6 +6481,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       error: 'This deployment has no Brain configured.',
     });
     expect(mocks.appendMemory).not.toHaveBeenCalled();
+    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.any(Array),
+      expect.objectContaining({ brainEnabled: false }),
+    );
   });
 
   it('surfaces a full conversation memory as a tool failure', async () => {
@@ -6871,6 +6882,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       {
         addRemoteMcpEnabled: true,
         automationLaunchCriteriaEnabled: false,
+        brainEnabled: false,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,
@@ -7791,6 +7803,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
 
     it('keeps the durable row recoverable when work runs before a reply', async () => {
+      mocks.isBrainEnabled.mockResolvedValue(true);
       mocks.appendMemory.mockResolvedValue({ saved: true });
       let result: unknown;
       mocks.generateText.mockImplementationOnce(

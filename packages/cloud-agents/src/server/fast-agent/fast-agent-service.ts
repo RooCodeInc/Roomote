@@ -6568,6 +6568,7 @@ export async function answerFastAgentQuestion({
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
             addRemoteMcpEnabled: !platformEvent,
             automationLaunchCriteriaEnabled: automationLaunchGateRequired,
+            brainEnabled: await isBrainEnabled(),
             ...(toolApprovalRules
               ? {
                   toolApprovalPermission: integrationToolApprovalRulesToConfig(

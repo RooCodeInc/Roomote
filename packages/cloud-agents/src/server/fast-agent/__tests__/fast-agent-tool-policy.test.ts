@@ -186,6 +186,19 @@ describe('getFastAgentNativeAcpKind', () => {
     ).toBe(false);
   });
 
+  it('exposes memory saving only when the Brain is enabled', () => {
+    const name = FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory;
+
+    expect(FAST_AGENT_NATIVE_TOOL_FILTER[name]).toBe(false);
+    expect(buildFastAgentToolFilter([], {})[name]).toBe(false);
+    expect(buildFastAgentToolFilter([], { brainEnabled: false })[name]).toBe(
+      false,
+    );
+    expect(buildFastAgentToolFilter([], { brainEnabled: true })[name]).toBe(
+      true,
+    );
+  });
+
   it.each(FAST_AGENT_NATIVE_TOOL_CATALOG)(
     'maps every catalogued tool (%s) to its ACP kind',
     ({ name, kind }) => {
