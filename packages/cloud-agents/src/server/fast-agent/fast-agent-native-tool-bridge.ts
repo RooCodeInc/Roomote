@@ -1645,6 +1645,7 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
     automationLaunchCriteriaEnabled?: boolean;
+    brainEnabled?: boolean;
     /**
      * Per-tool approval rules in OpenCode config-permission shape, applied to the parent build agent
      * and the helper subagents in the generated per-conversation config.
@@ -1731,6 +1732,7 @@ export async function getFastAgentNativeToolRuntime(
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
               automationLaunchCriteriaEnabled:
                 options.automationLaunchCriteriaEnabled,
+              brainEnabled: options.brainEnabled,
             },
           ),
           ...toolApprovalAgentEntries,
