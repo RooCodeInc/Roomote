@@ -131,7 +131,19 @@ describe('Slack membership welcome', () => {
     await welcome();
     await welcome();
     expect(postMessage).toHaveBeenCalledTimes(1);
-    expect(postMessage.mock.calls[0]![0].text).toContain('Hi humans');
+    expect(postMessage.mock.calls[0]![0]).toMatchObject({
+      channel: 'CJOINED',
+      text: expect.stringContaining('Hi humans, Roomote here.'),
+      blocks: [
+        {
+          type: 'markdown',
+          text: expect.stringContaining('Hi humans, Roomote here.'),
+        },
+      ],
+    });
+    expect(postMessage.mock.calls[0]![0].text).not.toContain(
+      `<@${installation.botUserId}>`,
+    );
     expect(await db.query.deploymentSettings.findFirst()).toBeUndefined();
   });
 
