@@ -99,6 +99,33 @@ describe('PendingIntegrationToolApprovals', () => {
     ).toBeInTheDocument();
   });
 
+  it('asks about a batch of parallel calls on one card and lists each call', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <PendingIntegrationToolApprovals
+          sessionId="session-1"
+          pending={[
+            {
+              ...pending[0]!,
+              argsSummary: {
+                parallelCalls: [{ channel: 'C1' }, { channel: 'C2' }],
+              },
+            },
+          ]}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByText('Let Mock Slack run these 2 calls?'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(
+      screen.getByText(/"channel": "C1"[\s\S]*"channel": "C2"/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/parallelCalls/)).not.toBeInTheDocument();
+  });
+
   it('disables every decision while the request is being submitted', async () => {
     let resolveFetch: ((response: Response) => void) | undefined;
     fetchMock.mockImplementationOnce(

@@ -884,19 +884,53 @@ describe('parallel calls in one script', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([]);
+    vi.mocked(insertIntegrationToolApproval).mockResolvedValue({
+      approvalId: 'batch-approval',
+      integrationId: 'mock-slack',
+      toolName: 'post_message',
+      argsSummary: { parallelCalls: [{ channel: 'C1' }, { channel: 'C2' }] },
+      status: 'pending',
+      taskId: null,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      createdAt: new Date().toISOString(),
+    });
   });
 
-  it('refuses when a person would have to approve one of several calls', async () => {
-    const h = parallelHelpers();
-    bridgeFor(false).handleAsk({ ...ask, requestId: 'manual' }, h);
-    await vi.waitFor(() =>
-      expect(h.reply).toHaveBeenCalledWith(
-        'manual',
-        'reject',
-        expect.stringContaining('one call at a time'),
-      ),
-    );
-    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
+  it('asks about several calls with one card, and runs or stops them together', async () => {
+    const decide = (status: 'approved' | 'rejected') =>
+      vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+        status,
+      } as never);
+    for (const status of ['approved', 'rejected'] as const) {
+      vi.mocked(insertIntegrationToolApproval).mockClear();
+      decide(status);
+      vi.mocked(markIntegrationToolApprovalConsumed).mockResolvedValue(true);
+      const bridge = bridgeFor(false);
+      const first = parallelHelpers();
+      const second = parallelHelpers();
+      bridge.handleAsk({ ...ask, requestId: `${status}-a` }, first);
+      bridge.handleAsk({ ...ask, requestId: `${status}-b` }, second);
+      const expected =
+        status === 'approved'
+          ? ['once', undefined]
+          : ['reject', 'The requester rejected this tool call.'];
+      await vi.waitFor(() => {
+        expect(first.reply).toHaveBeenCalledWith(`${status}-a`, ...expected);
+        expect(second.reply).toHaveBeenCalledWith(`${status}-b`, ...expected);
+      });
+      // One card, listing every call in the batch.
+      expect(insertIntegrationToolApproval).toHaveBeenCalledTimes(1);
+      expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          argsSummary: {
+            parallelCalls: [{ channel: 'C1' }, { channel: 'C2' }],
+          },
+        }),
+      );
+    }
+    // The approved card was consumed once for the whole batch.
+    expect(markIntegrationToolApprovalConsumed).toHaveBeenCalledTimes(1);
   });
 
   it('shares one assessment per call across the asks of one script', async () => {
@@ -997,16 +1031,28 @@ describe('parallel calls in one script', () => {
         mode: 'on',
         evaluation: { recommendation: 'ask', answers: {}, evaluatedAt: '' },
       });
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
     const oneRisky = parallelHelpers();
     bridgeFor(true).handleAsk({ ...ask, requestId: 'one-risky' }, oneRisky);
     await vi.waitFor(() =>
       expect(oneRisky.reply).toHaveBeenCalledWith(
         'one-risky',
         'reject',
-        expect.stringContaining('one call at a time'),
+        'The requester rejected this tool call.',
       ),
     );
-    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
+    // One call Auto would not run makes the batch ask, with Auto's reason.
+    expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        argsSummary: {
+          parallelCalls: [{ channel: 'C1' }, { channel: 'C2' }],
+        },
+        autoEvaluation: expect.objectContaining({ recommendation: 'ask' }),
+      }),
+    );
   });
 });
 

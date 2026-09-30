@@ -30,6 +30,7 @@ import {
   redactIntegrationToolArgs,
   type FastAgentSurface,
   type IntegrationToolApprovalMetadata,
+  type IntegrationToolAutoEvaluation,
   type IntegrationToolPolicyMetadata,
   type IntegrationToolSessionOverrideMetadata,
 } from '@roomote/types';
@@ -64,6 +65,8 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
  *   call with changed arguments is a new ask by construction.
  */
 const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
+
+type CardDecision = 'approved' | 'rejected' | 'expired' | 'invalid' | 'aborted';
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
 /**
  * An open session page renews its presence every 10 seconds, and a page that
@@ -467,6 +470,64 @@ export function createFastAgentToolApprovalBridge(input: {
     string,
     ReturnType<typeof resolveIntegrationToolAutoDecision>
   >();
+  // Parallel calls that need a person share one card listing all of them:
+  // allowing it runs the whole batch, rejecting it stops the whole batch.
+  const batchCards = new Map<string, Promise<CardDecision>>();
+
+  /**
+   * Record one approval card, notify chat surfaces, and wait for the
+   * owner's decision. An approved card is consumed here, once, before any
+   * call runs.
+   */
+  const awaitCardDecision = async (card: {
+    tool: MountedIntegrationTool;
+    nativeRequestId: string;
+    argsFingerprint: string;
+    argsSummary: unknown;
+    autoEvaluation?: IntegrationToolAutoEvaluation;
+  }): Promise<CardDecision> => {
+    const approval = await insertIntegrationToolApproval(
+      { sessionId: input.sessionId, userId: input.userId },
+      {
+        integrationId: card.tool.integrationId,
+        toolName: card.tool.toolName,
+        nativeRequestId: card.nativeRequestId,
+        argsFingerprint: card.argsFingerprint,
+        argsSummary: card.argsSummary,
+        ...(card.autoEvaluation ? { autoEvaluation: card.autoEvaluation } : {}),
+      },
+    );
+    if (input.notify && !notifiedApprovalIds.has(approval.approvalId)) {
+      notifiedApprovalIds.add(approval.approvalId);
+      await input.notify(approval);
+    }
+    const deadline = Date.parse(approval.expiresAt);
+    for (;;) {
+      if (input.signal?.aborted) return 'aborted';
+      const row = await getIntegrationToolApproval(approval.approvalId);
+      if (!row || row.status === 'rejected' || row.status === 'cancelled') {
+        return 'rejected';
+      }
+      if (row.status === 'expired') return 'expired';
+      if (row.status === 'approved') {
+        // Consume before relaying: only the first relay of an approved,
+        // unclaimed decision reaches OpenCode; a cancelled or
+        // double-claimed row fails closed instead of executing twice.
+        const consumed = await markIntegrationToolApprovalConsumed({
+          approvalId: approval.approvalId,
+          requesterUserId: input.userId,
+        });
+        return consumed ? 'approved' : 'invalid';
+      }
+      if (Date.now() >= deadline) {
+        await expireIntegrationToolApproval(approval.approvalId);
+        return 'expired';
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, INTEGRATION_TOOL_APPROVAL_POLL_MS),
+      );
+    }
+  };
 
   const ownerIsPresent = async (): Promise<boolean> => {
     if (isFastAgentApprovalChatSurface(input.surface)) return true;
@@ -600,18 +661,6 @@ export function createFastAgentToolApprovalBridge(input: {
         return;
       }
       const { tool, args, parallel } = resolution;
-      const rejectParallel = async () => {
-        console.warn(
-          `[Fast Agent] Tool approval ask ${ask.requestId} for ${ask.permission} cannot be told apart from parallel calls to the same tool; failing closed.`,
-        );
-        await helpers
-          .reply(
-            ask.requestId,
-            'reject',
-            `Several calls to ${tool.toolName} started at the same time and this one needs approval, which has to show exactly one call, so none of them ran. Retry now with one call at a time: await each call before starting the next.`,
-          )
-          .catch(() => undefined);
-      };
       const argsSummary = redactIntegrationToolArgs(args ?? null);
       const argsFingerprint = fingerprintIntegrationToolCall({
         integrationId: tool.integrationId,
@@ -641,13 +690,6 @@ export function createFastAgentToolApprovalBridge(input: {
         input.autoToolKeys?.has(
           integrationToolPolicyKey(tool.integrationId, tool.toolName),
         ) === true;
-      // Parallel calls with different arguments: a card could show only one
-      // of them, so a tool that needs a person refuses; Auto may still run
-      // them when every one of them is routine (below).
-      if (parallel && !allowedForSession && !autoAssessed) {
-        await rejectParallel();
-        return;
-      }
       const [recentUserMessages, explicitApprovalOutcomes] = autoAssessed
         ? await Promise.all([
             input.resolveSessionUserMessages?.() ?? [],
@@ -704,15 +746,11 @@ export function createFastAgentToolApprovalBridge(input: {
         // This ask is one of these calls; it runs only if every one of them
         // would run on its own.
         const results = await Promise.all(parallel.map(assessShared));
+        // Any call Auto would not run makes the batch ask the owner.
         auto =
           results.find((result) => result.mode === 'off') ??
-          (results.every((result) => result.action === 'approve')
-            ? results[0]
-            : undefined);
-        if (!auto) {
-          await rejectParallel();
-          return;
-        }
+          results.find((result) => result.action !== 'approve') ??
+          results[0];
       } else if (autoAssessed) {
         auto = await assessShared(args);
       }
@@ -788,86 +826,49 @@ export function createFastAgentToolApprovalBridge(input: {
         await helpers.reply(ask.requestId, 'once');
         return;
       }
-      const approval = await insertIntegrationToolApproval(
-        { sessionId: input.sessionId, userId: input.userId },
-        {
-          integrationId: tool.integrationId,
-          toolName: tool.toolName,
-          nativeRequestId: ask.requestId,
-          argsFingerprint,
-          argsSummary,
-          ...(auto?.action === 'ask'
-            ? { autoEvaluation: auto.evaluation }
-            : {}),
-        },
-      );
-      if (input.notify && !notifiedApprovalIds.has(approval.approvalId)) {
-        notifiedApprovalIds.add(approval.approvalId);
-        await input.notify(approval);
+      const card = {
+        tool,
+        nativeRequestId: ask.requestId,
+        argsFingerprint,
+        argsSummary,
+        ...(auto?.action === 'ask' ? { autoEvaluation: auto.evaluation } : {}),
+      };
+      let decision: CardDecision;
+      if (parallel) {
+        const batchKey = JSON.stringify([
+          ask.callId ?? ask.requestId,
+          tool.integrationId,
+          tool.toolName,
+          parallel,
+        ]);
+        let shared = batchCards.get(batchKey);
+        if (!shared) {
+          shared = awaitCardDecision(card);
+          batchCards.set(batchKey, shared);
+        }
+        decision = await shared;
+      } else {
+        decision = await awaitCardDecision(card);
       }
-      const deadline = Date.parse(approval.expiresAt);
-      for (;;) {
-        if (input.signal?.aborted) return;
-        const row = await getIntegrationToolApproval(approval.approvalId);
-        if (!row || row.status === 'rejected' || row.status === 'cancelled') {
-          await helpers
-            .reply(
-              ask.requestId,
-              'reject',
-              'The requester rejected this tool call.',
-            )
-            .catch(() => undefined);
-          return;
-        }
-        if (row.status === 'expired') {
-          await helpers
-            .reply(
-              ask.requestId,
-              'reject',
-              'The requester did not answer in time; the tool call was not run.',
-            )
-            .catch(() => undefined);
-          return;
-        }
-        if (row.status === 'approved') {
-          // Consume before relaying: only the first relay of an approved,
-          // unclaimed decision reaches OpenCode; a cancelled or
-          // double-claimed row fails closed instead of executing twice.
-          const consumed = await markIntegrationToolApprovalConsumed({
-            approvalId: approval.approvalId,
-            requesterUserId: input.userId,
-          });
-          if (consumed) {
-            // An undeliverable `once` is not swallowed: it reaches the
-            // failure handler below, which rejects the ask so the session is
-            // never left paused on a call that cannot be resumed.
-            await helpers.reply(ask.requestId, 'once', undefined);
-            return;
-          }
-          await helpers
-            .reply(
-              ask.requestId,
-              'reject',
-              'The approval for this tool call is no longer valid.',
-            )
-            .catch(() => undefined);
-          return;
-        }
-        if (Date.now() >= deadline) {
-          await expireIntegrationToolApproval(approval.approvalId);
-          await helpers
-            .reply(
-              ask.requestId,
-              'reject',
-              'The requester did not answer in time; the tool call was not run.',
-            )
-            .catch(() => undefined);
-          return;
-        }
-        await new Promise((resolve) =>
-          setTimeout(resolve, INTEGRATION_TOOL_APPROVAL_POLL_MS),
-        );
+      if (decision === 'aborted') return;
+      if (decision === 'approved') {
+        // An undeliverable `once` is not swallowed: it reaches the failure
+        // handler below, which rejects the ask so the session is never left
+        // paused on a call that cannot be resumed.
+        await helpers.reply(ask.requestId, 'once', undefined);
+        return;
       }
+      await helpers
+        .reply(
+          ask.requestId,
+          'reject',
+          decision === 'expired'
+            ? 'The requester did not answer in time; the tool call was not run.'
+            : decision === 'invalid'
+              ? 'The approval for this tool call is no longer valid.'
+              : 'The requester rejected this tool call.',
+        )
+        .catch(() => undefined);
     })().catch((error) => {
       console.warn(
         `[Fast Agent] Tool approval bridge failed for ${ask.permission}: ${
