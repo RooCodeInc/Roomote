@@ -168,7 +168,12 @@ export function getCustomAutomationNextRunAt(params: {
   lastRunAt: Date | null;
   now?: Date;
 }): Date | null {
-  if (!params.enabled || params.scheduleMode === 'off') return null;
+  if (
+    !params.enabled ||
+    params.scheduleMode === 'off' ||
+    params.scheduleMode === 'on_demand'
+  )
+    return null;
 
   const now = params.now ?? new Date();
   if (params.scheduleMode === 'cron') {

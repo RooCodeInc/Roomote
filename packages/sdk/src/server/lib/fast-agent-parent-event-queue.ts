@@ -44,6 +44,7 @@ import {
   FastAgentParentEventDeliveryError,
   type FastAgentParentEvent,
 } from './fast-agent-parent-event';
+import { sanitizeFastAgentParentEventJson } from './fast-agent-parent-event-json';
 import { retryFastAgentStartup } from './task-runs/fast-agent-startup-retry';
 
 export const FAST_AGENT_PARENT_EVENT_QUEUE_NAME = 'fast-agent-parent-events';
@@ -172,6 +173,30 @@ export function buildFastAgentParentEventKey(params: {
   return hash.digest('hex');
 }
 
+type FastAgentParentEventAdmission = {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  eventKey: string;
+};
+
+/** Normalize every durable admission before deriving any related identity. */
+export function normalizeFastAgentParentEvent(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+}): FastAgentParentEventAdmission {
+  const parent = sanitizeFastAgentParentEventJson(
+    params.parent,
+  ) as FastAgentParent;
+  const event = sanitizeFastAgentParentEventJson(
+    params.event,
+  ) as FastAgentParentEvent;
+  return {
+    parent,
+    event,
+    eventKey: buildFastAgentParentEventKey({ parent, event }),
+  };
+}
+
 async function addWakeupJob(request: FastAgentParentEventQueueRequest) {
   await getFastAgentParentEventQueue().add('deliver', request, {
     jobId: request.eventKey,
@@ -233,34 +258,34 @@ export async function enqueueFastAgentParentEvent(params: {
   event: FastAgentParentEvent;
   retryTaskStartRunId?: number;
 }): Promise<{ eventKey: string; queued: true }> {
+  const { parent, event, eventKey } = normalizeFastAgentParentEvent(params);
   const admissionStartedAt = Date.now();
-  const eventKey = buildFastAgentParentEventKey(params);
   await db
     .insert(fastAgentParentEvents)
     .values({
-      conversationId: params.parent.sessionId,
+      conversationId: parent.sessionId,
       eventKey,
-      parent: params.parent,
-      event: params.event,
+      parent,
+      event,
       retryTaskStartRunId: params.retryTaskStartRunId,
     })
     .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
 
-  if (params.event.type === 'child_message') {
-    const admittedAtMs = params.event.admittedAtMs ?? Date.now();
-    const turnId = buildEventClientMessageSeed(params.event);
+  if (event.type === 'child_message') {
+    const admittedAtMs = event.admittedAtMs ?? Date.now();
+    const turnId = buildEventClientMessageSeed(event);
     const eventId = `${turnId}:user`;
     await db
       .insert(fastAgentMessages)
       .values({
-        conversationId: params.parent.sessionId,
+        conversationId: parent.sessionId,
         eventId,
         turnId,
         turnSeq: 0,
         ts: admittedAtMs,
         eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
         role: 'tool',
-        contentBlocks: [{ type: 'text', text: params.event.message }],
+        contentBlocks: [{ type: 'text', text: event.message }],
         metadata: {
           visibleInTranscript: true,
           taskReportAdmittedAtMs: admittedAtMs,
@@ -270,39 +295,36 @@ export async function enqueueFastAgentParentEvent(params: {
           toolCallId: eventId,
           status: 'completed',
           rawInput: {
-            taskId: params.event.taskId,
-            runId: params.event.runId,
-            messageId: params.event.messageId,
-            purpose: params.event.purpose,
+            taskId: event.taskId,
+            runId: event.runId,
+            messageId: event.messageId,
+            purpose: event.purpose,
           },
-          output: params.event.message,
+          output: event.message,
         },
-        source: params.parent.conversation.surface,
+        source: parent.conversation.surface,
       })
       .onConflictDoNothing({
         target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
       });
-    void publishFastAgentSessionRefresh(params.parent.sessionId, {
+    void publishFastAgentSessionRefresh(parent.sessionId, {
       type: 'task_report_admitted',
       eventId,
-      taskId: params.event.taskId,
+      taskId: event.taskId,
       admittedAtMs,
     });
   }
 
   wakeFastAgentParentEvent({
-    conversationId: params.parent.sessionId,
+    conversationId: parent.sessionId,
     eventKey,
   });
 
   console.info(
     formatSingleLineLog('[FastAgentParentEventQueue] Event admitted.', {
       eventKey,
-      eventType: params.event.type,
-      purpose:
-        params.event.type === 'child_message'
-          ? params.event.purpose
-          : undefined,
+      eventType: event.type,
+      purpose: event.type === 'child_message' ? event.purpose : undefined,
       admissionDurationMs: boundedDurationMs(admissionStartedAt),
     }),
   );
@@ -339,7 +361,7 @@ export async function enqueueFastAgentParentEventForRun(params: {
   event: FastAgentPullRequestOpenedEvent;
   runId: number;
 }): Promise<{ eventKey: string; queued: boolean }> {
-  const eventKey = buildFastAgentParentEventKey(params);
+  const { parent, event, eventKey } = normalizeFastAgentParentEvent(params);
   const queued = await db.transaction(async (tx) => {
     const [run] = await tx
       .select({ status: taskRuns.status })
@@ -354,10 +376,10 @@ export async function enqueueFastAgentParentEventForRun(params: {
     await tx
       .insert(fastAgentParentEvents)
       .values({
-        conversationId: params.parent.sessionId,
+        conversationId: parent.sessionId,
         eventKey,
-        parent: params.parent,
-        event: params.event,
+        parent,
+        event,
       })
       .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
     return true;
@@ -365,7 +387,7 @@ export async function enqueueFastAgentParentEventForRun(params: {
 
   if (queued) {
     wakeFastAgentParentEvent({
-      conversationId: params.parent.sessionId,
+      conversationId: parent.sessionId,
       eventKey,
     });
   }
@@ -515,18 +537,35 @@ async function markDiscarded(id: string, error: unknown) {
     .where(eq(fastAgentParentEvents.id, id));
 }
 
-function getAutomationLaunchClaim(event: FastAgentParentEvent) {
+function getAutomationOutcomeIdentity(
+  event: FastAgentParentEvent,
+): { id: string; lastRunAt: Date; launchClaimedAt?: Date } | null {
   if (event.type !== 'automation_triggered') return null;
 
   const prefix = `${event.automationId}:`;
   if (!event.eventId.startsWith(prefix)) return null;
+
+  if (event.trigger === 'webhook') {
+    if (!event.eventId.startsWith(`${prefix}webhook:`)) return null;
+  }
+
+  const occurrenceAt = event.occurrenceAt
+    ? new Date(event.occurrenceAt)
+    : event.trigger === 'webhook'
+      ? new Date()
+      : new Date(event.eventId.slice(prefix.length));
+  if (Number.isNaN(occurrenceAt.getTime())) return null;
+
+  if (event.trigger === 'webhook') {
+    return { id: event.automationId, lastRunAt: occurrenceAt };
+  }
 
   const launchClaimedAt = new Date(
     event.launchClaimedAt ?? event.eventId.slice(prefix.length),
   );
   if (Number.isNaN(launchClaimedAt.getTime())) return null;
 
-  return { id: event.automationId, launchClaimedAt };
+  return { id: event.automationId, launchClaimedAt, lastRunAt: occurrenceAt };
 }
 
 async function finalizeAutomationLaunch(
@@ -534,11 +573,11 @@ async function finalizeAutomationLaunch(
   status: 'succeeded' | 'failed',
   error?: unknown,
 ) {
-  const claim = getAutomationLaunchClaim(event);
-  if (!claim) return;
+  const outcomeIdentity = getAutomationOutcomeIdentity(event);
+  if (!outcomeIdentity) return;
 
   await recordCustomAutomationRunOutcome(db, {
-    ...claim,
+    ...outcomeIdentity,
     status,
     ...(status === 'failed'
       ? { error: error instanceof Error ? error.message : String(error) }

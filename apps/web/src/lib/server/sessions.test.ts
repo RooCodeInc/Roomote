@@ -2,6 +2,7 @@ import {
   automations,
   customAutomations,
   db,
+  environmentFactory,
   eq,
   ensureSessionForFastConversation,
   ensureSessionForTask,
@@ -16,6 +17,7 @@ import {
   sessionFactory,
   sessionParticipants,
   sessions,
+  sessionStatusJudgments,
   sessionTasks,
   taskArtifacts,
   taskFactory,
@@ -27,6 +29,7 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  HAS_PULL_REQUEST_FILTER_VALUE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   RunStatus,
 } from '@roomote/types';
@@ -236,6 +239,75 @@ describe('unified Session queries', () => {
     await expect(
       getSessionById({ ...otherAuth, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id });
+  });
+
+  it('hydrates only the latest applied judgment without changing runtime status', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      cachedStatus: 'ready',
+    });
+    const auth = { userId: owner.id, isAdmin: false };
+    try {
+      await db.insert(sessionStatusJudgments).values([
+        {
+          sessionId: session.id,
+          sourceEventId: 'turn-1',
+          generation: 1,
+          sourceKind: 'fast_turn',
+          state: 'applied',
+          outcome: 'done',
+          confidence: 0.97,
+        },
+        {
+          sessionId: session.id,
+          sourceEventId: 'turn-2',
+          generation: 2,
+          sourceKind: 'fast_turn',
+          state: 'ignored',
+          outcome: 'unclear',
+          confidence: 0.4,
+        },
+      ]);
+
+      const hidden = await getSessions(auth, { ids: [session.id] });
+      expect(hidden.sessions[0]?.judgedStatus).toBeNull();
+
+      const listed = await getSessions(auth, {
+        ids: [session.id],
+        includeJudgedStatus: true,
+      });
+      expect(listed.sessions[0]).toMatchObject({
+        cachedStatus: 'ready',
+        judgedStatus: null,
+      });
+
+      await db
+        .delete(sessionStatusJudgments)
+        .where(eq(sessionStatusJudgments.sessionId, session.id));
+      await db.insert(sessionStatusJudgments).values({
+        sessionId: session.id,
+        sourceEventId: 'turn-3',
+        generation: 3,
+        sourceKind: 'fast_turn',
+        state: 'applied',
+        outcome: 'done',
+        confidence: 0.97,
+      });
+
+      const latest = await getSessions(auth, {
+        ids: [session.id],
+        includeJudgedStatus: true,
+      });
+      expect(latest.sessions[0]).toMatchObject({
+        cachedStatus: 'ready',
+        judgedStatus: 'done',
+      });
+    } finally {
+      await db.delete(sessions).where(eq(sessions.id, session.id));
+      await db.delete(users).where(eq(users.id, owner.id));
+    }
   });
 
   it.each(['task', 'fast'] as const)(
@@ -570,6 +642,83 @@ describe('unified Session queries', () => {
     });
   });
 
+  it('filters archive state with non-archived as the default', async () => {
+    const live = await sessionFactory.create({
+      title: 'Archive filter live',
+      activityAt: 200,
+    });
+    const archived = await sessionFactory.create({
+      title: 'Archive filter archived',
+      activityAt: 100,
+      archivedAt: new Date(),
+    });
+    const ids = [live.id, archived.id];
+    const auth = { userId: crypto.randomUUID(), isAdmin: true };
+
+    await expect(getSessions(auth, { ids })).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: live.id })],
+    });
+    await expect(
+      getSessions(auth, { ids, archive: 'archived' }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: archived.id })],
+    });
+    expect(
+      (await getSessions(auth, { ids, archive: 'all' })).sessions.map(
+        (session) => session.id,
+      ),
+    ).toEqual([live.id, archived.id]);
+  });
+
+  it('filters board statuses using the same derived lane semantics', async () => {
+    const manualDone = await sessionFactory.create({
+      title: 'Board status manual done',
+      activityAt: 300,
+      cachedStatus: 'active',
+      manualStatus: 'done',
+    });
+    const judgedDone = await sessionFactory.create({
+      title: 'Board status judged done',
+      activityAt: 200,
+      cachedStatus: 'ready',
+    });
+    const ready = await sessionFactory.create({
+      title: 'Board status ready',
+      activityAt: 100,
+      cachedStatus: null,
+    });
+    await db.insert(sessionStatusJudgments).values({
+      sessionId: judgedDone.id,
+      sourceEventId: 'board-filter-turn',
+      generation: 1,
+      sourceKind: 'fast_turn',
+      state: 'applied',
+      outcome: 'done',
+      confidence: 0.97,
+    });
+    const ids = [manualDone.id, judgedDone.id, ready.id];
+    const auth = { userId: crypto.randomUUID(), isAdmin: true };
+
+    const done = await getSessions(auth, {
+      ids,
+      status: 'done',
+      includeJudgedStatus: true,
+    });
+    expect(done.sessions.map((session) => session.id)).toEqual([
+      manualDone.id,
+      judgedDone.id,
+    ]);
+
+    const readyResult = await getSessions(auth, {
+      ids,
+      status: 'ready',
+      includeJudgedStatus: true,
+    });
+    expect(readyResult.sessions.map((session) => session.id)).toEqual([
+      ready.id,
+    ]);
+  });
+
   it('lists only owned Sessions in descending activity order', async () => {
     const owner = await userFactory.create();
     const other = await userFactory.create();
@@ -888,6 +1037,147 @@ describe('unified Session queries', () => {
     expect((await getSessions(auth, { ids })).sessions).toHaveLength(7);
   });
 
+  it('filters Sessions by task-run environments and the Has PR sentinel', async () => {
+    const owner = await userFactory.create();
+    const environment = await environmentFactory.create({
+      createdByUserId: owner.id,
+      name: `Session filter environment ${crypto.randomUUID()}`,
+    });
+    const otherEnvironment = await environmentFactory.create({
+      createdByUserId: owner.id,
+      name: `Session filter other environment ${crypto.randomUUID()}`,
+    });
+    const matchingSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 400,
+    });
+    const environmentOnlySession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 300,
+    });
+    const otherEnvironmentSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 200,
+    });
+    const noTaskSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 100,
+    });
+    const [matchingTask, environmentOnlyTask, otherEnvironmentTask] =
+      await Promise.all([
+        taskFactory.create({
+          initiatorUserId: owner.id,
+          repositoryName: 'sessions-filter/environment-repository',
+          state: 'completed',
+        }),
+        taskFactory.create({
+          initiatorUserId: owner.id,
+          repositoryName: 'sessions-filter/environment-repository',
+          state: 'completed',
+        }),
+        taskFactory.create({
+          initiatorUserId: owner.id,
+          repositoryName: 'sessions-filter/other-environment-repository',
+          state: 'completed',
+        }),
+      ]);
+    await db.insert(sessionTasks).values([
+      {
+        sessionId: matchingSession.id,
+        taskId: matchingTask.id,
+        origin: 'direct_launch',
+      },
+      {
+        sessionId: environmentOnlySession.id,
+        taskId: environmentOnlyTask.id,
+        origin: 'direct_launch',
+      },
+      {
+        sessionId: otherEnvironmentSession.id,
+        taskId: otherEnvironmentTask.id,
+        origin: 'direct_launch',
+      },
+    ]);
+    await Promise.all([
+      runFactory.create({
+        taskId: matchingTask.id,
+        status: RunStatus.Completed,
+        payload: {
+          repo: 'sessions-filter/environment-repository',
+          description: 'Matching environment task',
+          environmentId: environment.id,
+        },
+      }),
+      runFactory.create({
+        taskId: environmentOnlyTask.id,
+        status: RunStatus.Completed,
+        payload: {
+          repo: 'sessions-filter/environment-repository',
+          description: 'Environment-only task',
+          environmentId: environment.id,
+        },
+      }),
+      runFactory.create({
+        taskId: otherEnvironmentTask.id,
+        status: RunStatus.Completed,
+        payload: {
+          repo: 'sessions-filter/other-environment-repository',
+          description: 'Other environment task',
+          environmentId: otherEnvironment.id,
+        },
+      }),
+    ]);
+    await db.insert(taskPullRequests).values({
+      taskId: matchingTask.id,
+      prUrl: 'https://github.com/sessions-filter/environment-repository/pull/1',
+      prNumber: 1,
+      repository: 'sessions-filter/environment-repository',
+      sourceControlProvider: 'github',
+      host: 'github.com',
+      status: 'open',
+    });
+
+    const auth = { userId: owner.id, isAdmin: false };
+    const ids = [
+      matchingSession.id,
+      environmentOnlySession.id,
+      otherEnvironmentSession.id,
+      noTaskSession.id,
+    ];
+    await expect(
+      getSessions(auth, {
+        ids,
+        repository: `env:${environment.id}`,
+      }),
+    ).resolves.toMatchObject({
+      sessions: [
+        expect.objectContaining({ id: matchingSession.id }),
+        expect.objectContaining({ id: environmentOnlySession.id }),
+      ],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: HAS_PULL_REQUEST_FILTER_VALUE,
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: matchingSession.id })],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        repository: `env:${environment.id}`,
+        pullRequest: HAS_PULL_REQUEST_FILTER_VALUE,
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: matchingSession.id })],
+    });
+  });
+
   it('lists only distinct visible sources within the list scope', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
@@ -916,6 +1206,12 @@ describe('unified Session queries', () => {
     await expect(
       getSessionSources({ userId: owner.id, isAdmin: false }),
     ).resolves.toEqual(['web']);
+    await expect(
+      getSessionSources({ userId: owner.id, isAdmin: false }, 'archived'),
+    ).resolves.toEqual(['slack']);
+    await expect(
+      getSessionSources({ userId: owner.id, isAdmin: false }, 'all'),
+    ).resolves.toEqual(['slack', 'web']);
   });
 
   it('aggregates direct and attached-task inference costs exactly once', async () => {

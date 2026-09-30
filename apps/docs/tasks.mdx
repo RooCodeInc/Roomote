@@ -31,9 +31,12 @@ Before you dive into details, check the basics:
 ## Sessions and task status
 
 Use the sessions page to scan shared work and filter it by lifecycle.
-Roomote places sessions in **Active**, **Needs input**, **Blocked**, or **Ready**
-from their current task, goal, and run state, so your team does not need to
-maintain a separate status field.
+By default, Roomote places sessions in **Active**, **Needs input**, **Blocked**,
+or **Ready** from their current task, goal, and run state, so your team does not
+need to maintain a separate status field. The Sessions board also shows
+**Done**. **Done** is an informational outcome; it does not close, cancel, or
+archive the session. See [Sessions](/fast-sessions) for the board and status
+details.
 
 Each session card shows its owner and participants, recent activity, delegated
 execution count, workspace or pull-request context, aggregate cost, and unread
@@ -128,6 +131,59 @@ its operational details.
 Generated HTML artifacts open in a sandboxed **Preview** by default. Switch to
 **Code** to inspect the saved HTML source without executing it in the page that
 runs the Roomote dashboard.
+
+## Repository judge policies
+
+Roomote installs [Judgement](https://github.com/RooCodeInc/judgement) as a Git
+pre-commit check in task repositories, including repositories checked out during
+a task. Add `.judgement/rules.json` to define your business rules:
+
+```json
+{
+  "criteria": [
+    {
+      "id": "ui-copy",
+      "rule": "Do not include descriptions of functionality in UI text.",
+      "files": ["apps/web/**/*.tsx"],
+      "threshold": 0.85
+    }
+  ]
+}
+```
+
+`criteria` must be non-empty. Each `rule` is required. `files` selects changed
+files using repository-relative globs; omit it to check all changed files.
+Optional `context` globs include supporting files. `threshold` ranges from `0`
+to `1` and defaults to `0.85`. A policy already in the base commit applies to
+the proposed change, so editing the policy cannot weaken that same check.
+
+Select Jev through [TypeSafe](/providers/inference/typesafe), OpenRouter, or
+Vercel AI Gateway in the judgment-model settings. Provider keys remain on the
+Roomote API. Hooks work in agent commands and the task terminal without a
+provider key in the shell. The Roomote judgment model is not eligible for these checks.
+
+Judgement runs after existing pre-commit hooks and checks the exact staged
+snapshot. Unstaged fixes cannot hide a staged violation. Confirmed violations
+and invalid policies block the commit, with feedback in the command output.
+Task completion no longer triggers a separate judge or repair loop.
+
+The local check has a three-second execution budget. Timeouts, unavailable
+models, and unresolved evidence produce an **incomplete** result and allow the
+commit. Roomote does not cache remote judgments because the deployment's model
+selection can change during a task. No policy means no model request.
+
+Large changes are split without silently dropping their middle sections.
+Each changed file is checked independently with explicitly selected `context`
+files. Write rules local to a file; repository-wide inventory or aggregate
+rules are outside the supported scope. Evidence that does not fit the budget,
+unsupported binary content, and uncertain results remain incomplete.
+
+Git hooks can be bypassed. For enforcement before merge, configure Judgement's
+strict CI command and require its status check in your repository. Strict mode
+fails on incomplete results. See the project's [setup and CI guide](https://github.com/RooCodeInc/judgement#ci-and-strict-checks)
+for installation and base/head comparison examples. Roomote does not install a
+required CI check automatically. If repository setup replaces Git's
+`core.hooksPath`, reinstall the Judgement wrapper afterward.
 
 CSV and TSV artifacts use abstract table thumbnails in the gallery and open as
 tables by default. The preview keeps the first row as data unless you turn on

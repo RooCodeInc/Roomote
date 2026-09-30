@@ -126,6 +126,7 @@ describe('GET /auth/dev-login', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+    vi.stubEnv('OPENROUTER_API_KEY', '');
     envMock.APP_ENV = 'development';
     envMock.R_APP_URL = 'http://localhost:3000';
     envMock.WEB_DEV_LOGIN_EMAIL = 'local@roomote.dev';

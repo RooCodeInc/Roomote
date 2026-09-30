@@ -1,0 +1,182 @@
+---
+title: Custom automations
+icon: square-pen
+description: Create recurring or on-demand Roomote work with your own prompt, routing, model, and destination.
+---
+
+Custom automations are saved Roomote agent workflows for work your deployment
+needs but does not ship as a built-in automation. Members can create and manage
+their own custom automations on the **Automations** page or through a Roomote
+conversation. Administrators can manage every custom automation, including one
+without a creator.
+
+## Create a custom automation
+
+Open **Automations**, choose the custom automation action, and configure:
+
+- a clear **name**
+- the **prompt** Roomote should run
+- a cadence such as `every hour`, `every 6 hours`, `daily`, or `weekly`, or
+  **On-demand** when it should run only manually or through a webhook
+- an optional **preferred environment**: a named environment, **All
+  repositories**, or **Blank slate**; leave it as **Let Roomote decide** for
+  normal routing
+- an optional **model** override for the automation's session
+- an optional **effort** override: `low`, `medium`, `high`, `extra high`, or `max`
+  when the selected model supports configurable reasoning
+- an optional **report destination**: a channel or direct message through Slack,
+  Discord, Teams, or Telegram, or a private Email destination when AgentMail is
+  configured
+
+The automation row summarizes its cadence, workspace target, report destination,
+creator, and most recent run. Select **Configure** to edit it.
+
+## Ownership and visibility
+
+Members can list, inspect, edit, enable or disable, delete, and run the custom
+automations they own. Administrators can perform those actions on every custom
+automation. These management rules apply in the dashboard and in Roomote chat.
+
+Viewing a run is different from managing its automation. Any signed-in member
+with a session link can view that session's timeline and linked task transcripts,
+logs, and artifacts, including a run created by another member. The link does
+not grant management or execution permission, make the session public, or
+change list and filter visibility.
+
+Runs execute as the automation's creator. An automation without an active
+creator cannot run until an administrator re-saves it. Email destinations use
+the owner's account identity; verification is required to reply or initiate
+work by email, not to receive the report.
+
+## Execution targets
+
+The preferred environment is a routing hint for the session and any delegated
+task:
+
+- **Let Roomote decide** uses normal conversation-first routing.
+- A named environment prepares its configured repositories and services first.
+- **All repositories** starts with the active repository index and checks out
+  only the repositories the task needs; it does not provision every repository's
+  services on every run.
+- **Blank slate** starts with no repositories checked out and no environment
+  services. When source control is connected, the agent can still check out an
+  authorized repository on demand.
+
+Named-environment and repository-scoped runs prepare their selected repositories
+first, but can use the same checkout mechanism for other authorized active
+repositories without provisioning another environment's services. Without a
+report destination, a run remains a stored web session and does not post
+externally.
+
+## Schedules
+
+Choose a built-in cadence for common recurring work. For a custom cadence,
+choose **Custom schedule** and enter either a standard five-field cron
+expression or natural language such as `weekdays at 9am`. Roomote previews the
+interpreted schedule before saving and asks for clarification when the
+recurrence is ambiguous. Custom schedules do not support seconds or cron
+macros. The deployment's admin-only [scheduling timezone](/automation-configuration#scheduling-timezone)
+applies to every scheduled automation.
+
+Set the schedule to `on_demand` when the automation should run only from
+**Run now** or an enabled [webhook](/automation-webhooks).
+
+## What each run does
+
+Every run is a session. On each due tick, Roomote opens a session with the saved
+prompt exactly as if a teammate had typed it. The session can answer using
+integrations, or delegate a normal task when repository or workspace work is
+needed. The preferred environment guides that delegation, and the task reports
+back to the session.
+
+Runs deliver to their configured Slack, Discord, Microsoft Teams, Telegram, or
+Email destination. Chat destinations can be a channel or a direct message to
+the automation owner; Email is private only. Each run has a distinct session
+that links back to the web app. A session transcript shows the configured prompt
+and delegated task cards, and a signed-in teammate can continue it from the
+dashboard. Chat replies continue the same session in the originating thread or
+conversation. Email replies continue the same mail thread only from the owner's
+account email and after the provider checks the reply.
+
+When a destination is reachable, Roomote reports actionable or important
+findings, meaningful completed results, blockers, and questions that need input.
+Routine success, healthy status, and no-change results stay silent unless the
+prompt explicitly asks for them. In Slack, the first report starts a thread;
+later updates continue that thread. There is no progress chatter between
+reports. Unless the prompt asks for another format, reports lead with the
+result, stay concise, and use short Markdown headings and bullets when there
+are several findings.
+
+In Slack, automation reports use structured cards with links to the task,
+related pull requests, and automation settings when available. Completed runs
+also show their trigger or schedule, model, estimated inference cost, and
+elapsed time.
+
+If a destination is disconnected or cannot be resolved, check the automation's
+latest run error in the dashboard. A run can skip or fail before execution when
+its configuration or launch state prevents it from starting.
+
+## Suggested follow-up tasks
+
+When creating an automation through Roomote chat, ask for **suggested tasks** or
+**launchable follow-ups** when qualifying findings should become tasks that
+teammates can start from the report. Asking only for a summary or list of action
+items keeps those actions as report text. Launchable suggestions require a chat
+report destination.
+
+Each suggestion can select its own named environment, **All repositories**,
+**Blank slate**, or **Let Roomote decide** target. Repository-specific
+suggestions from **All repositories** start in a matching named environment when
+one is available. Suggestions can accompany the session report after a
+delegated task finishes, not only its initial response. Accepting one keeps the
+follow-up in the originating report's context. In Slack, each accepted
+suggestion starts a separate top-level execution thread and session; retrying
+that suggestion reuses its execution thread.
+
+## Run and review
+
+Use **Run now** on any enabled automation, regardless of its schedule, to test
+the current prompt, routing, model, and destination. Each card has its own run
+state, so starting one custom automation does not prevent another from running.
+A queued result confirms that Roomote accepted a session turn; it does not
+promise a task ID or completed coding work.
+
+After the run starts, follow the session or configured destination. Review the
+same evidence as manually started work: transcript, logs, diffs, previews,
+artifacts, and final summary. Eligible output can also appear in the [Results
+inbox](/automation-results), where a teammate can prepare and launch a follow-up
+session.
+
+## Webhooks
+
+While editing an enabled custom automation, enable webhooks to generate a
+private URL that starts the same configured run on an HTTP `POST`. Keep the URL
+secret like a password. The complete request contract, body formats, limits,
+rate limits, and curl examples are in [Automation webhooks](/automation-webhooks).
+
+An empty webhook body runs the saved prompt unchanged. A `text/plain` or JSON
+body is a one-run, untrusted instruction and never changes the saved prompt.
+Disabling the webhook, rotating its URL, disabling the automation, deleting it,
+or losing its active owner prevents future requests from starting runs.
+
+## Manage custom automations in chat
+
+Members can manage their own custom automations conversationally, and admins
+can manage all custom automations, through the `manage_custom_automations` tool.
+The flow can list eligible destinations and models, inspect an automation,
+resolve a schedule, create, update, delete, or run an enabled automation
+immediately. Lists omit stored prompts; after choosing an automation, Roomote
+can inspect its prompt by exact ID.
+
+Set the schedule to `on_demand` for manual or webhook-only work. Use the model
+list before selecting an override. Model IDs preserve the configured inference
+route: `openrouter/...` targets OpenRouter, while `openai/...` uses the
+deployment's OpenAI route, including a connected ChatGPT subscription when
+configured. Set reasoning effort alongside a model when you need a specific
+provider-supported thinking budget.
+
+## Recipes
+
+See [Schedule maintenance](/cookbook/scheduled-housekeeping) for copyable
+custom automation prompts, or [Draft product updates](/cookbook/product-updates-newsletter)
+for a custom MCP server and a natural-language schedule.

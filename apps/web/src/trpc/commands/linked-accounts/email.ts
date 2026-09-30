@@ -2,6 +2,7 @@ import {
   authUsers,
   db,
   eq,
+  isAgentMailCloudManaged,
   resolveAgentMailRuntimeCredentials,
 } from '@roomote/db/server';
 import { AgentMailApiClient } from '@roomote/communication';
@@ -47,7 +48,8 @@ export async function getLinkedEmailAccountsCommand(auth: UserAuthSuccess) {
     emailEnabled ? resolveAgentMailRuntimeCredentials() : Promise.resolve(null),
   ]);
   const verificationDeliveryAvailable = Boolean(
-    emailEnabled && credentials?.apiKey && credentials.inboxId,
+    emailEnabled &&
+    ((credentials?.apiKey && credentials.inboxId) || isAgentMailCloudManaged()),
   );
   let inboxEmail: string | null = null;
 

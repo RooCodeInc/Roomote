@@ -408,7 +408,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         userId: params.userId,
         conversation,
       }),
-      postReply: async ({ message, toolApproval }) => {
+      postReply: async ({ message, toolApproval, imageArtifactIds = [] }) => {
         if (toolApproval) {
           const result = await provider.postMessage({
             ...conversation.replyTarget,
@@ -417,6 +417,10 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           });
           return { messageId: result.messageId };
         }
+        const images = await resolveFastAgentSessionImages({
+          artifactIds: imageArtifactIds,
+          sessionId: session.id,
+        });
         const quote = pendingReplyQuote.peek(buildMarkdownReplyQuote);
         const footerText = buildFastSessionReplyFooterText({
           provider: 'discord',
@@ -443,6 +447,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
               ...conversation.replyTarget,
               text: textWithFooter,
               textFormat: 'markdown',
+              ...(images.length ? { images } : {}),
             });
             activity.reassert();
             return {
@@ -451,6 +456,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                 textWithFooter,
                 footerText,
               }),
+              ...(images.length ? { images } : {}),
               refresh: { footerText, channelId: footerMessageChannelId },
             };
           },
@@ -478,8 +484,14 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       threadId: conversation.replyTarget.threadId,
       sessionId: session.id,
       footerContext,
-      postReplacement: (text) =>
-        adapter.postReply({ purpose: 'closeout', message: text }),
+      resolveImages: (artifactIds) =>
+        resolveFastAgentSessionImages({ artifactIds, sessionId: session.id }),
+      postReplacement: (text, artifactIds) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: text,
+          ...(artifactIds?.length ? { imageArtifactIds: artifactIds } : {}),
+        }),
     });
     adapter.replaceReply = async (handle, reply) => {
       const result = await replaceReply(handle, reply);

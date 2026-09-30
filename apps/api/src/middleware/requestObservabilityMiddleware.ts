@@ -4,6 +4,7 @@ import { routePath } from 'hono/route';
 import { Env } from '@roomote/env';
 
 import { recordRequestEndpointMetric } from '../monitoring/request-endpoint-metrics';
+import { redactCustomAutomationWebhookPath } from '../sensitive-path';
 
 const EXCLUDED_REQUEST_METRICS_PATHS = new Set([
   '/',
@@ -59,13 +60,13 @@ export const requestObservabilityMiddleware: MiddlewareHandler = async (
     throw error;
   } finally {
     const durationMs = Date.now() - startedAt;
-    const path = c.req.path;
+    const path = redactCustomAutomationWebhookPath(c.req.path);
     const status = thrownError ? 500 : c.res.status;
 
     if (!EXCLUDED_REQUEST_METRICS_PATHS.has(path)) {
       recordRequestEndpointMetric({
         method: c.req.method,
-        route: resolveRequestMetricsRoute(c, path),
+        route: resolveRequestMetricsRoute(c, c.req.path),
         status,
         durationMs,
       });

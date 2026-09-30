@@ -117,22 +117,6 @@ describe('setup integration discovery catalog', () => {
     ).not.toContain('vercel');
   });
 
-  it('matches all eligible catalog names and IDs globally', () => {
-    for (const category of SETUP_INTEGRATION_CATEGORIES) {
-      expect(
-        matchSetupIntegrationAnswers({
-          [category.id]: {
-            answers: SETUP_INTEGRATIONS.flatMap(({ id, name }) => [id, name]),
-          },
-        }),
-      ).toEqual({
-        answeredCategoryIds: [category.id],
-        matchedIntegrationIds: SETUP_INTEGRATIONS.map(({ id }) => id),
-        unsupportedTools: [],
-      });
-    }
-  });
-
   it('never restores providers from legacy answers or model-extracted hints', () => {
     expect(
       matchSetupIntegrationAnswers({

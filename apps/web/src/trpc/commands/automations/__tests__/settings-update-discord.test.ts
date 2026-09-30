@@ -503,7 +503,9 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
 
     await triggerAutomationCommand(adminAuth, { automationKey: 'suggester' });
 
-    expect(mockRunAutomationNow).toHaveBeenCalledWith('suggester', {});
+    expect(mockRunAutomationNow).toHaveBeenCalledWith('suggester', {
+      context: { trigger: 'manual' },
+    });
   });
 
   it('roundtrips CI rules, preserves unrelated/omitted-field saves, and clears to all explicitly', async () => {
@@ -546,7 +548,9 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     await triggerAutomationCommand(adminAuth, {
       automationKey: 'ci_failure_triage',
     });
-    expect(mockRunAutomationNow).toHaveBeenCalledWith('ci_failure_triage', {});
+    expect(mockRunAutomationNow).toHaveBeenCalledWith('ci_failure_triage', {
+      context: { trigger: 'manual' },
+    });
     await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({
@@ -626,6 +630,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       automationKey: 'ci_failure_triage',
     });
     expect(mockRunAutomationNow).toHaveBeenCalledWith('ci_failure_triage', {
+      context: { trigger: 'manual' },
       destination: expect.objectContaining({ channelId: 'C123LEGACY' }),
     });
   });
@@ -1092,6 +1097,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     });
 
     expect(mockRunAutomationNow).toHaveBeenCalledWith('release_announcements', {
+      context: { trigger: 'manual' },
       destination: expect.objectContaining({
         provider: 'discord',
         channelId: 'D-RELEASES',

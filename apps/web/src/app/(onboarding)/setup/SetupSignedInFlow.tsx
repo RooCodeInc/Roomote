@@ -60,15 +60,27 @@ export function SetupSignedInFlow() {
     canGoBack,
     readSetupSearchParams,
     commitSetupUrl,
+    syncUrl,
     status,
     isLoading,
     isError,
-  } = useSetupFlow({ enabled: isSignedIn && isAdmin });
+  } = useSetupFlow({
+    enabled: isSignedIn && isAdmin,
+    // setup.status drives the redirect Home below and is cached separately
+    // from the flow status, so its completion signal gates URL sync too.
+    // Wait for it to settle so a stale flow status cannot rewrite /setup
+    // while that redirect is starting.
+    syncUrl:
+      !setupStatus.isLoading && setupStatus.data?.setupCompletedAt == null,
+  });
 
   const selectedModelProvider =
     pendingModelProvider ?? status?.setupNewState.modelProvider;
 
   useEffect(() => {
+    // Leave the URL alone once setup is complete so this sync cannot
+    // supersede the redirect Home below.
+    if (!syncUrl) return;
     const params = readSetupSearchParams();
     if (selectedModelProvider) {
       if (params.get('modelProvider') === selectedModelProvider) return;
@@ -78,7 +90,7 @@ export function SetupSignedInFlow() {
       params.delete('modelProvider');
     }
     commitSetupUrl(params);
-  }, [commitSetupUrl, readSetupSearchParams, selectedModelProvider]);
+  }, [commitSetupUrl, readSetupSearchParams, selectedModelProvider, syncUrl]);
 
   const shouldEvaluateSetupRedirect = isSignedIn && isAdmin;
   const setupRedirectPath =

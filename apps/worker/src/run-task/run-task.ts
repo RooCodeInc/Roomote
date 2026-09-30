@@ -84,6 +84,8 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { installZeroCli } from '../commands/setup/agent-clis';
+import { buildJevgrepTerminalEnv, setupJevgrep } from './jevgrep';
+import { buildJudgementTerminalEnv, setupJudgement } from './judgement-proxy';
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
@@ -114,6 +116,7 @@ import {
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
+import { installRepositoryJudgement } from './repository-judgement';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -733,6 +736,8 @@ export const runTask = async ({
     logger,
     getResult: () => taskRun.result,
   };
+  let closeJudgementProxy: (() => Promise<void>) | undefined;
+  let closeJevgrepProxy: (() => Promise<void>) | undefined;
 
   try {
     const harnessType = resolveWorkerCodingHarness(taskRun.harness);
@@ -947,6 +952,25 @@ export const runTask = async ({
 
     const homeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
+    await setupJudgement({
+      runtimeEnv,
+      logger,
+      registerCleanup: (close) => {
+        closeJudgementProxy = close;
+      },
+    });
+
+    const jevgrepEnabled = await setupJevgrep({
+      runId: taskRun.id,
+      homeDir,
+      trpcUrl: workerEnv.trpcUrl,
+      runtimeEnv,
+      logger,
+      registerCleanup: (close) => {
+        closeJevgrepProxy = close;
+      },
+    });
+
     // Admin opt-in for Zero: only install the CLI / activate the skill when
     // the Integrations page has Zero enabled for the deployment.
     let zeroIntegrationEnabled = false;
@@ -988,6 +1012,7 @@ export const runTask = async ({
       excludeSkillNames: [
         ...FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
         ...(zeroIntegrationEnabled ? [] : ['zero']),
+        ...(jevgrepEnabled ? [] : ['jevgrep']),
       ],
     });
 
@@ -1147,6 +1172,9 @@ export const runTask = async ({
       runId: taskRun.id,
       logger,
     });
+    for (const repositoryPath of Object.values(repoPaths ?? {})) {
+      await installRepositoryJudgement(repositoryPath, logger);
+    }
     const persistRuntimeState = createRuntimeStatePersister(
       taskRun.id,
       recordWorkerRuntimeEvent,
@@ -2233,7 +2261,15 @@ export const runTask = async ({
       port: SANDBOX_SERVER_PORT,
       workingDirectory: workspacePath,
       harnessLogger: logger,
-      userEnv: () => workerEnv.buildUserFacingEnv(),
+      userEnv: () =>
+        buildJudgementTerminalEnv(
+          buildJevgrepTerminalEnv(
+            workerEnv.buildUserFacingEnv(),
+            runtimeEnv,
+            homeDir,
+          ),
+          runtimeEnv,
+        ),
       harness,
       harnessManager,
       runId: taskRun.id,
@@ -2567,6 +2603,8 @@ export const runTask = async ({
       : resolvedResult;
   } finally {
     activeWorkerCrashContext = null;
+    await closeJudgementProxy?.();
+    await closeJevgrepProxy?.();
   }
 };
 

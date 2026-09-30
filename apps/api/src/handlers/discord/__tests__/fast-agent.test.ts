@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   resolveSuggestionConversation: vi.fn(),
   resolveChannel: vi.fn(),
   getSession: vi.fn(),
+  resolveSessionImages: vi.fn(),
 }));
 
 vi.mock('../../tasks/suggestion-launch.js', () => ({
@@ -73,6 +74,7 @@ vi.mock('@roomote/sdk/server', () => ({
   wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
+  resolveFastAgentSessionImages: mocks.resolveSessionImages,
 }));
 
 vi.mock('@roomote/communication/discord-event', () => ({
@@ -166,6 +168,7 @@ describe('processDiscordFastAgentMessage', () => {
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.fetchHistory.mockResolvedValue([]);
     mocks.getMessage.mockReturnValue({ id: 'source-1' });
+    mocks.resolveSessionImages.mockResolvedValue([]);
     mocks.reply.mockResolvedValue({
       provider: 'discord',
       channelId: 'channel-1',
@@ -401,6 +404,11 @@ describe('processDiscordFastAgentMessage', () => {
     const provider = {
       editMessage: vi.fn().mockResolvedValue(undefined),
     };
+    const resolvedImage = {
+      url: 'https://roomote.example.com/artifacts/image-1.png',
+      altText: 'proof.png',
+      contentType: 'image/png',
+    };
     mocks.answerQuestion.mockImplementationOnce(
       async ({
         adapter,
@@ -417,9 +425,11 @@ describe('processDiscordFastAgentMessage', () => {
           purpose: 'progress',
           message: 'Retrying connection to the inference provider.',
         });
+        mocks.resolveSessionImages.mockResolvedValueOnce([resolvedImage]);
         await adapter.replaceReply(handle, {
           purpose: 'closeout',
           message: 'Connection restored.',
+          imageArtifactIds: ['image-1'],
         });
         return 'Connection restored.';
       },
@@ -448,12 +458,63 @@ describe('processDiscordFastAgentMessage', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ currentMessageId: 'source-1' }),
     );
-    expect(provider.editMessage).toHaveBeenCalledWith({
-      channelId: 'channel-1',
-      messageId: 'retry-1',
-      text: 'Connection restored.\n\n-# Reply anytime · [Open in Roomote](https://roomote.example.com/sessions/fast-session-1?utm_source=discord&utm_medium=link&utm_campaign=discord.fast_reply)',
-    });
+    expect(provider.editMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        messageId: 'retry-1',
+        text: 'Connection restored.\n\n-# Reply anytime · [Open in Roomote](https://roomote.example.com/sessions/fast-session-1?utm_source=discord&utm_medium=link&utm_campaign=discord.fast_reply)',
+        images: [resolvedImage],
+      }),
+    );
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('resolves and delivers selected image artifacts in direct Discord Fast replies', async () => {
+    const resolvedImage = {
+      url: 'https://roomote.example.com/artifacts/image-1.png',
+      altText: 'proof.png',
+      contentType: 'image/png',
+    };
+    mocks.resolveSessionImages.mockResolvedValueOnce([resolvedImage]);
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => Promise<unknown> };
+      }) => {
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'The screenshot is attached.',
+          imageArtifactIds: ['image-1'],
+        });
+        return null;
+      },
+    );
+
+    await processDiscordFastAgentMessage({
+      eventId: 'event-1',
+      question: 'Show the screenshot',
+      sender: { id: 'discord-user-1', username: 'matt' } as never,
+      senderUserId: 'user-1',
+      provider: { editMessage: vi.fn().mockResolvedValue(undefined) } as never,
+      applicationId: 'application-1',
+      channel: {
+        channelId: 'channel-1',
+        guildId: null,
+        isDirectMessage: true,
+        isThread: false,
+      } as never,
+      metadata: { communicationChannelId: 'channel-1' } as never,
+      conversationId: 'channel-1',
+    });
+
+    expect(mocks.resolveSessionImages).toHaveBeenCalledWith({
+      artifactIds: ['image-1'],
+      sessionId: 'fast-session-1',
+    });
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ images: [resolvedImage] }),
+    );
   });
 
   it('allows silence only for an undirected turn with another human participant', async () => {

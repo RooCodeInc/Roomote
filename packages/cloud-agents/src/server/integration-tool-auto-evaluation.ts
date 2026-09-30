@@ -20,16 +20,17 @@ import {
   evaluateDecisionModel,
   resolveDecisionModel,
 } from './typesafe-judgment';
+import { getDecisionModelRequirements } from './judgment-decision-policy';
 
 const AUTO_EVALUATION_TIMEOUT_MS = 20_000;
 /**
- * Only Jev assesses tool calls for now: the model Roomote trains has not been
- * evaluated on this decision, so a deployment on it gets no Auto (every call
- * asks, as with no model at all) until it has been.
+ * Which judgment models may assess tool calls, from the decision policy: Jev,
+ * or the Roomote judgment model when the deployment selected it. The helper
+ * model never does.
  */
-export const AUTO_DECISION_REQUIREMENTS = {
-  excludeRoomoteModel: true,
-} as const;
+export const AUTO_DECISION_REQUIREMENTS = getDecisionModelRequirements(
+  'integration-tool-auto-evaluation',
+);
 
 /**
  * Auto mode is a risk assessment of one paused tool call: is it risky enough
@@ -49,7 +50,7 @@ export const RISK_LEVELS = [
   'Deletes, overwrites, or otherwise loses data or access that is hard to recover.',
 ] as const;
 
-const QUESTIONS = {
+export const INTEGRATION_TOOL_AUTO_QUESTIONS = {
   risk: {
     type: 'score',
     instructions:
@@ -323,7 +324,8 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       null;
     // A question with nothing to judge against is not asked: the guidance
     // one without guidance, the request one without a request.
-    const { guidanceFlagsRisk, matchesRequest, ...core } = QUESTIONS;
+    const { guidanceFlagsRisk, matchesRequest, ...core } =
+      INTEGRATION_TOOL_AUTO_QUESTIONS;
     const questions = {
       ...core,
       ...((input.userRequest ||
@@ -343,6 +345,7 @@ export async function evaluateIntegrationToolAutoDecision(input: {
           ? 'The target task was not launched by the current session and the user did not name it.'
           : undefined;
     const answers = await evaluateDecisionModel({
+      decision: 'integration-tool-auto-evaluation',
       state: {
         call: {
           integration: input.integrationId,
@@ -430,19 +433,24 @@ export type IntegrationToolAutoState = {
 };
 
 export async function resolveIntegrationToolAutoState(): Promise<IntegrationToolAutoState> {
-  const [enabled, settings, model] = await Promise.all([
+  // Some callers import this module only for the model requirements; defer Env
+  // initialization until the Auto state is actually resolved.
+  const [enabled, settings, nightlyExperimentsEnabled] = await Promise.all([
     isDeploymentExperimentEnabled('integrationToolAutoApprovals'),
     getIntegrationToolAutoSettings(),
-    resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(() => null),
+    import('@roomote/env').then(({ Env, isEnvFlagEnabled }) =>
+      isEnvFlagEnabled(Env.R_NIGHTLY_EXPERIMENTS_ENABLED),
+    ),
   ]);
+  if (!nightlyExperimentsEnabled || !enabled) {
+    return { mode: 'off', settings, model: null };
+  }
+
+  const model = await resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(
+    () => null,
+  );
   const hosted = model?.kind === 'judgment';
-  const mode = !enabled
-    ? 'off'
-    : settings.mode === 'on'
-      ? 'on'
-      : hosted
-        ? 'shadow'
-        : 'off';
+  const mode = settings.mode === 'on' ? 'on' : hosted ? 'shadow' : 'off';
   return { mode, settings, model: model?.kind ?? null };
 }
 

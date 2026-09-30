@@ -1,3 +1,13 @@
+vi.mock('../judgement-proxy', async (original) => ({
+  ...(await original<typeof import('../judgement-proxy')>()),
+  setupJudgement: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../jevgrep', async (original) => ({
+  ...(await original<typeof import('../jevgrep')>()),
+  setupJevgrep: vi.fn().mockResolvedValue(false),
+}));
+
 import { EventEmitter } from 'node:events';
 
 const {
@@ -79,9 +89,11 @@ const {
     taskFinishedAt: undefined,
     taskAbortedAt: undefined,
   })),
-  createServerMock: vi.fn(() => ({
-    close: vi.fn().mockResolvedValue(undefined),
-  })),
+  createServerMock: vi.fn(
+    (_options: { userEnv: () => Record<string, string> }) => ({
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  ),
   drainSlackMessagesMock: vi
     .fn()
     .mockResolvedValue({ resumed: false, reason: 'no_pending_messages' }),
@@ -107,10 +119,21 @@ const {
   installZeroCliMock: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('node:fs', () => ({
-  existsSync: existsSyncMock,
-  mkdirSync: mkdirSyncMock,
-  writeFileSync: writeFileSyncMock,
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+
+  return {
+    ...actual,
+    existsSync: existsSyncMock,
+    mkdirSync: mkdirSyncMock,
+    writeFileSync: writeFileSyncMock,
+  };
+});
+
+vi.mock('../../commands/utils/scrub-sandbox-secrets', () => ({
+  scrubSandboxSecretsBeforeSnapshot: vi
+    .fn()
+    .mockResolvedValue({ failedSteps: [] }),
 }));
 
 vi.mock('../../mcp/roomote-mcp-server/chat-reply-satisfaction', () => ({
@@ -305,6 +328,7 @@ import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import { resolveWorkerReleaseMetadata } from '../../monitoring/worker-release-metadata';
 import type { HarnessManagerCallbacks } from '../../sandbox-server/lib/harness-manager';
 import { getDefaultKeepaliveMs } from '../completion';
+import { setupJevgrep } from '../jevgrep';
 import { runTask } from '../run-task';
 import type { EnvironmentSetupSettledOutcome } from '../types';
 
@@ -649,6 +673,10 @@ describe('runTask', () => {
   });
 
   it('always enables the terminal runtime env and sandbox server', async () => {
+    vi.mocked(setupJevgrep).mockImplementationOnce(async ({ runtimeEnv }) => {
+      runtimeEnv.R_JEVGREP_GATEWAY_URL = 'https://api.example.test/jevgrep';
+      return true;
+    });
     await runTask({
       taskRun: {
         id: 110,
@@ -696,6 +724,14 @@ describe('runTask', () => {
         allowTerminal: true,
       }),
     );
+    const terminalEnv = createServerMock.mock.calls.at(-1)?.[0].userEnv();
+    expect(terminalEnv).toEqual(
+      expect.objectContaining({
+        R_JEVGREP_GATEWAY_URL: 'https://api.example.test/jevgrep',
+      }),
+    );
+    expect(terminalEnv?.PATH).toContain('/.roomote/jevgrep/bin:');
+    expect(terminalEnv).not.toHaveProperty('ROOMOTE_CLOUD_TOKEN');
   });
 
   it('keeps the task terminal enabled while clearing only reserved reply context env vars', async () => {
@@ -4526,7 +4562,7 @@ describe('runTask', () => {
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
-        excludeSkillNames: ['doctor', 'zero'],
+        excludeSkillNames: ['doctor', 'zero', 'jevgrep'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(

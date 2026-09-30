@@ -134,6 +134,27 @@ describe('McpToolManagementDialog tool approvals', () => {
     }
   });
 
+  it('keeps explicit manual approvals available while Auto is off', () => {
+    renderDialog();
+
+    const search = within(
+      screen.getByRole('group', {
+        name: 'Approval mode for web_search_exa',
+      }),
+    );
+    fireEvent.click(search.getByRole('button', { name: 'Always ask' }));
+    fireEvent.click(search.getByRole('button', { name: 'Disable' }));
+
+    expect(state.setModeCalls).toEqual([
+      { integrationId: 'exa', toolName: 'web_search_exa', mode: 'ask' },
+      { integrationId: 'exa', toolName: 'web_search_exa', mode: 'reject' },
+    ]);
+    expect(search.getByRole('button', { name: 'Always allow' })).toBeEnabled();
+    expect(
+      search.queryByRole('button', { name: 'Auto' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('does not fire the admin-only policy query while the dialog is closed or for non-admin viewers', () => {
     state.autoEnabled = true;
     state.policiesQueryEnabled = undefined;

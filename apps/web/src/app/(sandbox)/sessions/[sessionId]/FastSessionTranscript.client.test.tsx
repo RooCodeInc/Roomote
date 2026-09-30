@@ -2,6 +2,7 @@ import {
   act,
   createEvent,
   fireEvent,
+  cleanup,
   render,
   screen,
   within,
@@ -64,6 +65,7 @@ const {
   openTasksPanel,
   narrationState,
   composerSuggestionState,
+  slackReferencesState,
   voiceStatusQuery,
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
@@ -84,6 +86,14 @@ const {
   narrationState: { enabled: false },
   composerSuggestionState: {
     data: undefined as { suggestion: string; messageCount: number } | undefined,
+  },
+  slackReferencesState: {
+    data: undefined as
+      | {
+          users: Record<string, { name: string; profileUrl: string | null }>;
+          channels: Record<string, { name: string; url: string | null }>;
+        }
+      | undefined,
   },
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
@@ -244,7 +254,12 @@ vi.mock('@/trpc/client', () => ({
 // these tests exercise the transcript, not suggestions.
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: () => ({ data: composerSuggestionState.data }),
+  useQuery: (options: { queryKey?: readonly unknown[] }) => ({
+    data:
+      options.queryKey?.[0] === 'slack.resolveUsers'
+        ? slackReferencesState.data
+        : composerSuggestionState.data,
+  }),
   useQueryClient: () => ({ invalidateQueries }),
 }));
 
@@ -434,6 +449,7 @@ beforeEach(() => {
   );
   narrationState.enabled = false;
   composerSuggestionState.data = undefined;
+  slackReferencesState.data = undefined;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
   invalidateQueries.mockReset();
@@ -471,6 +487,48 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  it('renders resolved Slack references in assistant output', async () => {
+    cleanup();
+    slackReferencesState.data = {
+      users: {
+        U123: {
+          name: 'Maya',
+          profileUrl: 'https://acme.slack.com/team/U123',
+        },
+      },
+      channels: {
+        C456: {
+          name: 'ops',
+          url: 'https://acme.slack.com/archives/C456',
+        },
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="fast-session"
+        initialMessages={[
+          textMessage({
+            id: 'assistant-slack-references',
+            role: 'assistant',
+            text: 'Post in <#C456> and ask <@U123>.',
+            ts: 1,
+          }),
+        ]}
+      />,
+    );
+
+    expect(await screen.findByRole('link', { name: '#ops' })).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/archives/C456',
+    );
+    expect(await screen.findByRole('link', { name: '@Maya' })).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/team/U123',
+    );
+    cleanup();
+  });
+
   /**
    * A completed `prepare_integration_key` call at `ts` that created
    * `pendingRef`, persisted as the tool returns it or under a result wrapper.
@@ -808,6 +866,7 @@ describe('FastSessionTranscript', () => {
     userName = null,
     userEmail = null,
     userImageUrl = null,
+    turnSource,
   }: {
     id: string;
     role: 'user' | 'assistant';
@@ -820,6 +879,7 @@ describe('FastSessionTranscript', () => {
     userName?: string | null;
     userEmail?: string | null;
     userImageUrl?: string | null;
+    turnSource?: 'human' | 'platform_event';
   }) => ({
     id,
     eventId: `${id}:event`,
@@ -836,6 +896,7 @@ describe('FastSessionTranscript', () => {
       visibleInTranscript: visible,
       ...(inputKind ? { inputKind } : {}),
       ...(userId ? { userId } : {}),
+      ...(turnSource ? { turnSource } : {}),
     },
     payload: {},
     source: 'web',
@@ -998,13 +1059,15 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    const summary = screen.getByText('Saved to memory');
-    expect(summary).toBeInTheDocument();
-    expect(summary.closest('details')).not.toHaveAttribute('open');
-    fireEvent.click(summary);
-    expect(summary.closest('details')).toHaveAttribute('open');
+    const toolHeader = screen.getByRole('button', {
+      name: 'Saved to memory Completed',
+    });
+    expect(toolHeader).toBeInTheDocument();
+    expect(toolHeader).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toolHeader);
+    expect(toolHeader).toHaveAttribute('aria-expanded', 'true');
     expect(
-      screen.getByText('Staging deploys use the release branch.'),
+      screen.getByText(/Staging deploys use the release branch\./),
     ).toBeInTheDocument();
   });
 
@@ -1038,7 +1101,9 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(screen.getByText('Saved to memory')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Saved to memory Completed' }),
+    ).toBeInTheDocument();
   });
 
   it('restores each Session draft and scroll position without focusing after a direct switch', () => {
@@ -3650,6 +3715,66 @@ describe('FastSessionTranscript', () => {
       ).not.toBeInTheDocument();
     },
   );
+
+  it('recalls only visible persisted human prompts in transcript order', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First user prompt',
+            ts: 1,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Assistant reply',
+            ts: 2,
+          }),
+          textMessage({
+            id: 'platform-1',
+            role: 'user',
+            text: 'Platform event',
+            ts: 3,
+            turnSource: 'platform_event',
+          }),
+          textMessage({
+            id: 'user-2',
+            role: 'user',
+            text: '  Latest user prompt\n',
+            ts: 4,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'hidden-user',
+            role: 'user',
+            text: 'Hidden prompt',
+            ts: 5,
+            visible: false,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'blank-user',
+            role: 'user',
+            text: ' \n ',
+            ts: 6,
+            turnSource: 'human',
+          }),
+        ]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveValue('  Latest user prompt\n');
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveValue('First user prompt');
+  });
 
   it('shows a later suggestion hint on the focused composer after a successful send', async () => {
     composerSuggestionState.data = {

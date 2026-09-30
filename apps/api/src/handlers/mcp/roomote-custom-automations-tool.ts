@@ -1,10 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   buildManageCustomAutomationsRequest,
   compactManageCustomAutomationsResult,
+  getManageCustomAutomationsTool,
   type ManageCustomAutomationsInput,
 } from '@roomote/types';
+
+import { isDeploymentExperimentEnabled } from '@roomote/db/server';
 
 import { customAutomationsRouter } from '../custom-automations';
 import {
@@ -17,6 +19,7 @@ import type { McpAuth } from './middleware';
 async function invokeManageCustomAutomations(
   auth: McpAuth,
   params: ManageCustomAutomationsInput,
+  launchCriteriaEnabled: boolean,
 ) {
   const built = buildManageCustomAutomationsRequest(params);
   if (!built.ok) {
@@ -42,22 +45,35 @@ async function invokeManageCustomAutomations(
     payload: compactManageCustomAutomationsResult(
       params.action,
       result.payload,
+      { includeLaunchCriteria: launchCriteriaEnabled },
     ),
   });
 }
 
-export function registerRoomoteCustomAutomationsTool(
+export async function registerRoomoteCustomAutomationsTool(
   server: McpServer,
   auth: McpAuth,
-): void {
+): Promise<void> {
+  let launchCriteriaEnabled = false;
+  try {
+    launchCriteriaEnabled = await isDeploymentExperimentEnabled(
+      'automationLaunchCriteria',
+    );
+  } catch (error) {
+    console.warn(
+      `[MCP] Could not read custom automation launch-criteria experiment; hiding its fields: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const tool = getManageCustomAutomationsTool(launchCriteriaEnabled);
   server.registerTool(
-    MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+    tool.name,
     {
-      title: MANAGE_CUSTOM_AUTOMATIONS_TOOL.title,
-      description: MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
-      inputSchema: MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
-      annotations: MANAGE_CUSTOM_AUTOMATIONS_TOOL.annotations,
+      title: tool.title,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      annotations: tool.annotations,
     },
-    (params) => invokeManageCustomAutomations(auth, params),
+    (params: ManageCustomAutomationsInput) =>
+      invokeManageCustomAutomations(auth, params, launchCriteriaEnabled),
   );
 }

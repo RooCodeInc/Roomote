@@ -47,11 +47,15 @@ vi.mock('../judgment-capture', () => ({
 
 import {
   evaluateTypeSafeJudgments,
+  evaluateTypeSafeJudgmentsWithUsage,
   evaluateDecisionModel,
   resetDecisionModelCache,
   resolveDecisionModel,
   resetJudgmentBackendCache,
+  resolveJudgmentBackend,
+  testJudgmentBackend,
 } from '../typesafe-judgment';
+import type { JudgmentDecisionId } from '../judgment-decision-catalog';
 
 const questions = {
   urgent: { type: 'noul', instructions: 'Does this convey urgency?' },
@@ -127,6 +131,110 @@ describe('evaluateTypeSafeJudgments', () => {
     vi.restoreAllMocks();
   });
 
+  it.each(['typesafe', 'openrouter', 'vercel'] as const)(
+    'returns only normalized token usage for %s evaluations',
+    async (provider) => {
+      mockGetJudgmentSelection.mockResolvedValue(provider);
+      mockKeys({
+        R_TYPESAFE_API_KEY: 'ts-key',
+        OPENROUTER_API_KEY: 'or-key',
+        AI_GATEWAY_API_KEY: 'gateway-key',
+      });
+      const answers = { urgent: { type: 'noul', noul: 0.8 } };
+      mockFetchResponse({
+        answers:
+          provider === 'vercel'
+            ? { urgent: { type: 'boolean', probability: 0.8 } }
+            : answers,
+        usage:
+          provider === 'vercel'
+            ? { inputTokens: 120, outputTokens: 8, totalTokens: 128 }
+            : { input_tokens: 120, output_tokens: 8, total_tokens: 128 },
+        privateMetadata: 'must not escape the judgment service',
+      });
+      expect(
+        await evaluateTypeSafeJudgmentsWithUsage({
+          state: 'source',
+          questions: { urgent: questions.urgent },
+          skipShadow: true,
+        }),
+      ).toEqual({
+        answers,
+        usage: { inputTokens: 120, outputTokens: 8, totalTokens: 128 },
+      });
+      expect(mockRecordLlmUsage).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    undefined,
+    {
+      input_tokens: -1,
+      output_tokens: 1.5,
+      total_tokens: Number.MAX_SAFE_INTEGER + 1,
+    },
+  ])(
+    'does not invent token counts for missing or invalid usage',
+    async (usage) => {
+      mockFetchResponse({ answers: directAnswers, usage });
+      const result = await evaluateTypeSafeJudgmentsWithUsage({
+        state: 'source',
+        questions,
+      });
+      expect(result?.answers).toEqual(directAnswers);
+      expect(result?.usage.inputTokens).toBeUndefined();
+      expect(result?.usage.outputTokens).toBeUndefined();
+      expect(result?.usage.totalTokens).toBeUndefined();
+    },
+  );
+
+  it.each(['off', 'roomote'])(
+    'fresh source evaluations stop after switching a cached Jev backend to %s',
+    async (selection) => {
+      mockGetJudgmentSelection.mockResolvedValue('typesafe');
+      expect((await resolveJudgmentBackend())?.provider).toBe('typesafe');
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+      mockGetJudgmentSelection.mockResolvedValue(selection);
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      // The ordinary cache is still warm, as on another API process.
+      expect((await resolveJudgmentBackend())?.provider).toBe('typesafe');
+      expect(
+        (await resolveJudgmentBackend({ bypassCache: true }))?.provider,
+      ).toBe(selection === 'roomote' ? 'roomote' : undefined);
+      expect(
+        await evaluateTypeSafeJudgments({
+          state: 'repository source',
+          questions,
+          excludeRoomoteModel: true,
+          bypassBackendCache: true,
+        }),
+      ).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fresh source evaluations use the newly selected provider and its current key', async () => {
+    mockKeys({ R_TYPESAFE_API_KEY: 'old-key', OPENROUTER_API_KEY: 'new-key' });
+    mockGetJudgmentSelection.mockResolvedValue('typesafe');
+    await resolveJudgmentBackend();
+    mockGetJudgmentSelection.mockResolvedValue('openrouter');
+    const fetchMock = mockFetchResponse({ answers: directAnswers });
+    await evaluateTypeSafeJudgments({
+      state: 'repository source',
+      questions,
+      excludeRoomoteModel: true,
+      bypassBackendCache: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/alpha/decisions',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer new-key' }),
+      }),
+    );
+  });
+
   describe('Roomote judgment upstream', () => {
     const upstreamAnswers = {
       urgent: { type: 'noul', noul: 0.92 },
@@ -158,7 +266,11 @@ describe('evaluateTypeSafeJudgments', () => {
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
       await expect(
-        evaluateTypeSafeJudgments({ state: { text: 'hi' }, questions }),
+        evaluateTypeSafeJudgments({
+          state: { text: 'hi' },
+          questions,
+          decision: 'fast-agent-launch-model',
+        }),
       ).resolves.toEqual({
         urgent: { type: 'noul', noul: 0.92 },
         team: { ...upstreamAnswers.team, confidence: 0.9 },
@@ -178,13 +290,31 @@ describe('evaluateTypeSafeJudgments', () => {
       expect((init.signal as AbortSignal | undefined)?.aborted).toBe(false);
     });
 
+    it('does not ask the Roomote model for a decision not approved for it', async () => {
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
+
+      await expect(
+        evaluateTypeSafeJudgments({
+          state: 'hi',
+          questions,
+          decision: 'a-new-decision' as JudgmentDecisionId,
+        }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('sends no Authorization header for an upstream without a key', async () => {
       mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
       mockKeys({});
       mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
-      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+      await evaluateTypeSafeJudgments({
+        state: 'hi',
+        questions,
+        decision: 'fast-agent-launch-model',
+      });
 
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(init.headers).not.toHaveProperty('Authorization');
@@ -193,7 +323,11 @@ describe('evaluateTypeSafeJudgments', () => {
     it('leaves a TypeSafe key in charge when not selected', async () => {
       const fetchMock = mockFetchResponse({ answers: directAnswers });
 
-      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+      await evaluateTypeSafeJudgments({
+        state: 'hi',
+        questions,
+        decision: 'fast-agent-launch-model',
+      });
 
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
         'https://api.typesafe.ai/v1/systemone',
@@ -204,7 +338,11 @@ describe('evaluateTypeSafeJudgments', () => {
       mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
 
-      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+      await evaluateTypeSafeJudgments({
+        state: 'hi',
+        questions,
+        decision: 'fast-agent-launch-model',
+      });
 
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
         'https://judgment.internal.test/v1/decisions',
@@ -230,7 +368,11 @@ describe('evaluateTypeSafeJudgments', () => {
       });
 
       await expect(
-        evaluateTypeSafeJudgments({ state: 'hi', questions }),
+        evaluateTypeSafeJudgments({
+          state: 'hi',
+          questions,
+          decision: 'fast-agent-launch-model',
+        }),
       ).rejects.toThrow('missing a valid answer');
     });
   });
@@ -377,7 +519,11 @@ describe('evaluateTypeSafeJudgments', () => {
         },
       });
 
-      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+      await evaluateTypeSafeJudgments({
+        state: 'hi',
+        questions,
+        decision: 'fast-agent-launch-model',
+      });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -645,12 +791,90 @@ describe('evaluateTypeSafeJudgments', () => {
       ).resolves.toEqual(directAnswers);
     });
 
+    it('defaults a decision without a Roomote-model policy to Jev-only', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await expect(
+        evaluateDecisionModel({
+          // Every catalog decision is registered; a new one would not be yet.
+          decision: 'a-new-decision' as JudgmentDecisionId,
+          state: 'hi',
+          questions,
+        }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps judge.json criteria on Jev without Roomote shadowing', async () => {
+      mockGetJudgmentSelection.mockResolvedValue('typesafe');
+      mockEnv.R_JUDGMENT_SHADOW = 'on';
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+      const state = {
+        path: 'apps/web/src/Example.tsx',
+        patch: '+<p>Save your work.</p>',
+        finalContent: '<p>Save your work.</p>',
+        criteria: [
+          {
+            id: 'criterion_0',
+            rule: 'Do not describe functionality in UI text.',
+          },
+        ],
+      };
+
+      await expect(
+        evaluateDecisionModel({
+          decision: 'judge-file-criterion',
+          state,
+          questions,
+          skipShadow: true,
+        }),
+      ).resolves.toEqual(directAnswers);
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        'https://api.typesafe.ai/v1/systemone',
+      ]);
+    });
+
+    it('does not ask the Roomote model for judge.json decisions', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await expect(
+        evaluateDecisionModel({
+          decision: 'judge-file-criterion',
+          state: 'changed repository file',
+          questions,
+        }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('allows the Roomote model for a trained decision', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await expect(
+        evaluateDecisionModel({
+          decision: 'fast-agent-launch-model',
+          state: 'hi',
+          questions,
+        }),
+      ).resolves.toEqual(directAnswers);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('skips the decision on the Roomote-run model, even when cached', async () => {
       mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
       mockGetJudgmentSelection.mockResolvedValue('roomote');
       const fetchMock = mockFetchResponse({ answers: directAnswers });
 
-      await expect(resolveDecisionModel()).resolves.toMatchObject({
+      await expect(
+        resolveDecisionModel({ decision: 'fast-agent-launch-model' }),
+      ).resolves.toMatchObject({
         kind: 'judgment',
         roomoteModel: true,
       });
@@ -688,6 +912,22 @@ describe('evaluateTypeSafeJudgments', () => {
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     });
 
+    it('keeps source retrieval on Jev when shadowing is enabled', async () => {
+      mockEnv.R_JUDGMENT_SHADOW = 'on';
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+      const answers = { urgent: { type: 'noul', noul: 0.92 } };
+      const fetchMock = mockFetchResponse({ answers });
+      await expect(
+        evaluateTypeSafeJudgments({
+          state: 'repository source',
+          questions: { urgent: questions.urgent },
+          excludeRoomoteModel: true,
+          skipShadow: true,
+        }),
+      ).resolves.toEqual(answers);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('does not fall back to the helper model', async () => {
       mockKeys({});
       mockGetJudgmentSelection.mockResolvedValue('off');
@@ -712,7 +952,11 @@ describe('evaluateTypeSafeJudgments', () => {
     });
 
     await expect(
-      evaluateDecisionModel({ state: 'hi', questions }),
+      evaluateDecisionModel({
+        state: 'hi',
+        questions,
+        decision: 'fast-agent-launch-model',
+      }),
     ).resolves.toEqual(directAnswers);
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -730,7 +974,11 @@ describe('evaluateTypeSafeJudgments', () => {
       object: { answers: directAnswers },
     });
 
-    await evaluateDecisionModel({ state: 'hi', questions });
+    await evaluateDecisionModel({
+      state: 'hi',
+      questions,
+      decision: 'fast-agent-launch-model',
+    });
 
     const call = mockGenerateTrackedNonTaskObject.mock.calls.at(-1)![0] as {
       prompt: string;
@@ -1074,5 +1322,95 @@ describe('evaluateTypeSafeJudgments', () => {
     ).resolves.toEqual({
       severity: { type: 'score', score: 1.4, confidence: 0.7 },
     });
+  });
+});
+
+describe('testJudgmentBackend', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetJudgmentBackendCache();
+    resetDecisionModelCache();
+    mockEnv.R_JUDGMENT_MODEL = undefined;
+    mockEnv.R_JUDGMENT_UPSTREAM_URL = undefined;
+    mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
+    mockEnv.R_JUDGMENT_SHADOW = undefined;
+    mockGetJudgmentSelection.mockResolvedValue(null);
+    mockRecordLlmUsage.mockResolvedValue({ recorded: true });
+    mockIsJudgmentCaptureEnabled.mockReturnValue(false);
+    mockKeys({ R_TYPESAFE_API_KEY: 'ts-key' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('asks the configured backend without shadowing or capturing the decision', async () => {
+    mockIsJudgmentCaptureEnabled.mockReturnValue(true);
+    mockEnv.R_JUDGMENT_SHADOW = 'on';
+    mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+    const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+    const result = await testJudgmentBackend({
+      state: 'hi',
+      questions,
+      target: 'configured',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      provider: 'typesafe',
+      answers: directAnswers,
+      invalid: [],
+    });
+    // One request: the Roomote upstream is not called as a shadow.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockCaptureJudgment).not.toHaveBeenCalled();
+  });
+
+  it('asks the Roomote upstream directly while Jev is the configured backend', async () => {
+    mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
+    const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+    const result = await testJudgmentBackend({
+      state: 'hi',
+      questions,
+      target: 'roomote',
+    });
+
+    expect(result).toMatchObject({ ok: true, provider: 'roomote' });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://judgment.internal.test/v1/decisions',
+    );
+  });
+
+  it('reports a missing backend and invalid answers instead of throwing', async () => {
+    await expect(
+      testJudgmentBackend({ state: 'hi', questions, target: 'roomote' }),
+    ).resolves.toMatchObject({ ok: false, provider: null });
+
+    mockFetchResponse({
+      answers: {
+        urgent: { type: 'noul', noul: 1.4 },
+        team: directAnswers.team,
+      },
+    });
+    await expect(
+      testJudgmentBackend({ state: 'hi', questions, target: 'configured' }),
+    ).resolves.toMatchObject({ ok: true, invalid: ['urgent'] });
+  });
+
+  it('reports an HTTP failure as a category, never the response body', async () => {
+    mockFetchResponse({ error: 'secret detail' }, { status: 503 });
+
+    const result = await testJudgmentBackend({
+      state: 'hi',
+      questions,
+      target: 'configured',
+    });
+
+    expect(result).toMatchObject({ ok: false, error: 'http_503' });
+    expect(JSON.stringify(result)).not.toContain('secret detail');
   });
 });

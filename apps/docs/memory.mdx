@@ -117,9 +117,9 @@ complete list.
 
 ## Turning it on
 
-Memory runs as its own service alongside Roomote, reachable only on your
-deployment's internal network. On the hosted templates (Railway, Render,
-Coolify) that service is already there after a deploy, sitting idle.
+Memory runs alongside Roomote on your deployment's internal network. On the
+hosted templates (Railway, Render, Coolify), the memory component is already
+there after a deploy, sitting idle.
 
 New Roomote Cloud deployments enable memory when initial setup completes.
 Existing deployments keep their current setting. Administrators can change it
@@ -134,7 +134,7 @@ key from then on.
 Semantic recall still needs embeddings. Those come from an OpenRouter or
 OpenAI key — a memory-specific `R_BRAIN_*` key to bill memory separately, or
 the deployment's general provider key once memory is enabled — or from a
-self-run embeddings upstream (below). The memory service holds no provider
+self-run embeddings upstream (below). Memory holds no provider
 key of its own: it asks Roomote for embeddings and synthesis, and Roomote
 forwards them. Changing a key later takes effect on memory's next request,
 with no redeploy.
@@ -171,38 +171,31 @@ without a provider prefix.
 While memory is disabled, it stays inert. Agents are not told it exists,
 and nothing is ingested.
 
-Roomote schedules one maintenance pass each night. It retrieves a bounded,
-source-balanced evidence set from gbrain, produces a cited digest of material
-effective-dated since the previous successful pass, then stores it under
-`daily/digests/` in both the searchable index and the persistent Markdown
-corpus. The digest
-focuses on concrete decisions, shipped work, blockers, commitments, and
-cross-source connections rather than generating a reflection for every raw
-page. Each page records how many Slack, task, GitHub, and Notion or meeting
-pages were considered and cited, so missing source coverage is visible.
+Roomote schedules one maintenance pass each night. It reviews a bounded,
+source-balanced set of memories and produces cited daily summaries of material
+effective since the previous successful pass. The summaries focus on concrete
+decisions, shipped work, blockers, commitments, and cross-source connections
+rather than generating a reflection for every raw page. Each summary records
+how many Slack, task, GitHub, and Notion or meeting pages were considered and
+cited, so missing source coverage is visible.
 
-Beginning Tuesday, the same pass also updates
-`weekly/summaries/<year>-W<week>`. That bounded synthesis connects durable
-decisions, unresolved blockers, commitments, and recurring or superseded
-information across the week's available daily digests. Roomote reads those
-digest pages by their exact slugs and supplies their content as the complete
-evidence set, so raw or historical memory pages cannot enter the weekly pass.
+Beginning Tuesday, the same pass also updates a weekly summary. It connects
+durable decisions, unresolved blockers, commitments, and recurring or
+superseded information across the available daily summaries. The weekly pass
+uses those bounded summaries as its evidence set, so raw or historical pages
+cannot enter it unexpectedly.
 
-The daily cutoff trails active ingestion and overlaps the previous pass so
-collector writes around the nightly boundary are reconsidered. gbrain's
-durable worker still owns structural maintenance such as link extraction,
-fact consolidation, embedding catch-up, orphan checks, and purging. Roomote
-does not run gbrain's prediction-proposal and calibration queue unattended;
-that upstream feature requires an operator review workflow before proposals
-become canonical memory.
+The nightly cutoff trails active ingestion and overlaps the previous pass so
+late-arriving source changes are reconsidered. Structural indexing,
+consolidation, embedding catch-up, orphan checks, and cleanup continue in the
+background. Roomote does not turn uncertain suggestions into shared memory
+without an operator review.
 
 <Note>
   Self-hosted Compose deployments start memory from the `brain` profile, so
   add `brain` to `COMPOSE_PROFILES` in your environment file to bring the
-  container up, then enable memory in settings. Production installs pull
-  `ghcr.io/roocodeinc/roomote-gbrain` with the same `v*` release tag as Roomote;
-  a complete custom image reference can be pinned with `GBRAIN_IMAGE`.
-  Everything after that is the same.
+  memory component up, then enable memory in settings. Keep that component on
+  the same Roomote release as the rest of the deployment.
 </Note>
 
 ## Seeing what it knows
@@ -267,7 +260,7 @@ and filing. A task memory written this way says so, grows turn by turn, and is
 replaced if the agent records its own. Turns that look sensitive, try to plant
 approvals or bypass rules, or repeat what was already saved are skipped,
 trivial task work keeps the plain completion line unless it came with a
-correction, and [private sessions](/private-sessions) and private tasks are
+correction, and [private sessions](/fast-sessions#private-sessions) and private tasks are
 never checked.
 
 Additional memory integrations, such as Supermemory, can also provide shared
@@ -313,8 +306,9 @@ it takes effect on the next request with nothing to restart.
 
   Changing it later is not silently applied: memory keeps its original
   model and width, and reports the mismatch in its logs on every start.
-  Moving existing memory to a different embedding model means re-embedding
-  the whole corpus with `gbrain migrate embeddings`.
+  Moving existing memory to a different embedding model requires a full
+  re-embedding migration; it is not an in-place setting change. Follow the
+  maintenance procedure for your deployment before changing the model.
 </Warning>
 
 ## If you turned memory on later
@@ -326,31 +320,30 @@ start, enables semantic recall, and embeds whatever it already holds. It logs
 `semantic recall enabled` when it does.
 
 That repair runs once and is safe, since memory in this state has no
-embeddings to lose and its pages are preserved. If it cannot complete, the
-service logs the commands to run by hand and keeps serving in the meantime,
+embeddings to lose and its pages are preserved. If it cannot complete, startup
+logs list the commands to run by hand and memory keeps serving in the meantime,
 matching on keywords alone.
 
 ## Operating it
 
 - **Back up both memory stores together.** The Railway template schedules
   backups for the memory volume. On supported self-hosted installs, `roomote
-  backup` includes both the `gbrain_data` volume and the isolated `gbrain`
-  database when memory is enabled. The volume holds the Markdown system of
-  record; Postgres holds the searchable index, extracted facts, and durable
-  maintenance jobs. Restoring only one can leave the storage layout and index
-  inconsistent, so keep them at the same backup consistency point.
+  backup` includes the memory volume and its searchable database when memory is
+  enabled. The volume holds the Markdown system of record; the database holds
+  the searchable index, extracted facts, and durable maintenance state.
+  Restoring only one can leave the storage layout and index inconsistent, so
+  keep them at the same backup consistency point.
 - **Losing memory is recoverable only from connected sources.** If both stores
   are recreated, Roomote can reset ingestion checkpoints and backfill task
   history and connected integrations, but user-saved facts and generated
   synthesis may not be reproducible. The deployment starts cold until the
   backfill finishes.
-- **The filesystem cutover rebuilds older memory once.** The first start of a
-  filesystem-backed image replaces a Postgres-only memory service instead of
-  trying to merge the old index into an empty checkout. Roomote then repopulates
-  it from its connected sources.
-- **Memory has no public service route.** It is never exposed to the internet,
+- **A storage cutover rebuilds older memory once.** When a deployment changes
+  how memory stores its corpus, Roomote repopulates the searchable index from
+  the connected sources instead of merging incompatible storage formats.
+- **Memory is not a public endpoint.** It is never exposed to the internet,
   and task sandboxes reach it only through Roomote's API with their run token,
   which grants read access only.
 - **To run with no memory at all**, leave memory disabled in settings.
-  Deployments that want to reclaim the resources entirely can delete the
-  Memory service from their compose file or template.
+  Deployments that want to reclaim the resources entirely can remove the
+  memory component from their Compose file or hosting template.

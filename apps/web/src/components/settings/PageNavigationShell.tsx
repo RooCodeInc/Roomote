@@ -52,7 +52,7 @@ export function PageNavigationShell<T extends string = string>({
     <div
       className={cn(
         'relative flex h-full min-h-0 w-full flex-1 flex-col gap-6 overflow-x-hidden overflow-y-auto px-4 py-6 md:py-8 lg:flex-row lg:items-start',
-        boundedContentOnDesktop && 'md:overflow-y-hidden',
+        boundedContentOnDesktop && 'md:overflow-y-hidden md:pb-0',
       )}
     >
       {!hideNavigation && (

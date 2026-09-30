@@ -510,14 +510,16 @@ function UseRecommendedDefaultsAction({
                   <CommandItem
                     key={preset.id}
                     value={`${provider.label} ${preset.label}`}
-                    aria-label={`${provider.label}: ${preset.label}${preset.default ? ' (default)' : ''}`}
+                    aria-label={`${provider.label}: ${preset.label}${preset.default && preset.label !== 'Default' ? ' (default)' : ''}`}
                     onSelect={() => {
                       setOpen(false);
                       onSelectProvider(provider, preset);
                     }}
                   >
                     {preset.label}
-                    {preset.default && ' (default)'}
+                    {preset.default &&
+                      preset.label !== 'Default' &&
+                      ' (default)'}
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -2045,12 +2047,14 @@ export function ModelSettingsSection({
         const model = mappingModelOptionsByRole[role].find(
           (option) => option.id === modelId,
         );
-        const reasoningEffort =
-          model?.metadata?.supportsReasoning === false
-            ? null
-            : (currentRoles[role].reasoningEffort ??
-              status?.reasoningEffort ??
-              DEFAULT_MODEL_ROLE_REASONING_EFFORTS[role]);
+        const requestedReasoningEffort =
+          currentRoles[role].reasoningEffort ??
+          status?.reasoningEffort ??
+          DEFAULT_MODEL_ROLE_REASONING_EFFORTS[role];
+        const reasoningEffort = normalizeReasoningEffortForModel(
+          requestedReasoningEffort,
+          model?.metadata,
+        );
 
         return [role, { modelId: modelId ?? '', reasoningEffort }];
       }),

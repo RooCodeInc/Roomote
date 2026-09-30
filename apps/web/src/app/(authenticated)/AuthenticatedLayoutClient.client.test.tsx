@@ -109,6 +109,7 @@ describe('AuthenticatedLayoutClient', () => {
   });
 
   it('redirects incomplete admins to setup before rendering the page', async () => {
+    mockPathname = '/missing';
     useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
       data:
         options.queryKey[0] === 'setup.sessionStatus'
@@ -134,7 +135,41 @@ describe('AuthenticatedLayoutClient', () => {
     });
   });
 
+  it.each([
+    '/',
+    '/sessions',
+    '/tasks',
+    '/cloud-agents',
+    '/automations',
+    '/results',
+    '/analytics',
+  ])('keeps %s accessible while admin setup is incomplete', (pathname) => {
+    mockPathname = pathname;
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: false }
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: false,
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Navigation content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.getByText('Navigation content')).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
   it('redirects incomplete admins to their persisted setup Session', async () => {
+    mockPathname = '/missing';
     useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
       data:
         options.queryKey[0] === 'setup.sessionStatus'
@@ -185,6 +220,7 @@ describe('AuthenticatedLayoutClient', () => {
   });
 
   it('keeps non-setup pages gated while an incomplete admin setup-session lookup is pending', () => {
+    mockPathname = '/missing';
     useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
       data:
         options.queryKey[0] === 'setup.sessionStatus'

@@ -1,0 +1,91 @@
+import {
+  db,
+  eq,
+  sessionFactory,
+  sessionTasks,
+  sessions,
+  taskFactory,
+  touchSessionActivity,
+  userFactory,
+} from '@roomote/db/server';
+import type { UserAuthSuccess } from '@/types';
+
+import { sessionStatusInputSchema, setSessionStatusCommand } from './index';
+
+describe('setSessionStatusCommand', () => {
+  async function fixture() {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      cachedStatus: 'ready',
+    });
+    const task = await taskFactory.create({
+      state: 'active',
+      initiatorUserId: owner.id,
+    });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+    const auth = {
+      userId: owner.id,
+      isAdmin: false,
+    } as UserAuthSuccess;
+    return { auth, owner, session };
+  }
+
+  it('persists manual done without changing the lifecycle cache and denies strangers', async () => {
+    const { auth, owner, session } = await fixture();
+    const stranger = await userFactory.create();
+
+    await expect(
+      setSessionStatusCommand(auth, session.id, 'done'),
+    ).resolves.toMatchObject({
+      id: session.id,
+      cachedStatus: 'ready',
+      manualStatus: 'done',
+    });
+    await touchSessionActivity(db, session.id, 100);
+    await expect(
+      db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
+    ).resolves.toMatchObject({
+      cachedStatus: 'ready',
+      manualStatus: 'done',
+    });
+
+    await expect(
+      setSessionStatusCommand(
+        { userId: stranger.id, isAdmin: false } as UserAuthSuccess,
+        session.id,
+        'done',
+      ),
+    ).resolves.toBeNull();
+    expect(owner.id).not.toBe(stranger.id);
+  });
+
+  it('validates every board status as a manual status', async () => {
+    const { auth, session } = await fixture();
+
+    expect(
+      sessionStatusInputSchema.safeParse({
+        sessionId: session.id,
+        status: 'active',
+      }).success,
+    ).toBe(true);
+    await expect(
+      setSessionStatusCommand(auth, session.id, 'active'),
+    ).resolves.toMatchObject({
+      id: session.id,
+      cachedStatus: 'active',
+      manualStatus: 'active',
+    });
+    expect(
+      sessionStatusInputSchema.safeParse({
+        sessionId: session.id,
+        status: 'done',
+      }).success,
+    ).toBe(true);
+  });
+});

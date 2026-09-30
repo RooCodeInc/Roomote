@@ -1,0 +1,96 @@
+{
+  "ruleId": "criterion_7",
+  "examples": [
+    {
+      "name": "Mid-sentence plural task",
+      "path": "docs/tasks.md",
+      "before": "Review the remaining work.\n",
+      "after": "Review the remaining Tasks before continuing.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Mid-sentence singular session",
+      "path": "docs/tasks.md",
+      "before": "Open the work history.\n",
+      "after": "Open the Session history.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Task at the beginning of a sentence",
+      "path": "docs/tasks.md",
+      "before": "View the result here.\n",
+      "after": "Task results appear here.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Quoted visible UI text",
+      "path": "docs/tasks.md",
+      "before": "Choose the history view.\n",
+      "after": "Choose \"Session History\" from the menu.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Heading in title case",
+      "path": "docs/tasks.md",
+      "before": "## History\nDetails are below.\n",
+      "after": "## Task History\nDetails are below.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Ordinary session noun",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "Inspect the Session timeline before retrying.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Ordinary plural sessions",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "You can search recent Sessions by name.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Ordinary task noun",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "The Task output appears below.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Ordinary plural tasks",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "Archive completed Tasks after review.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Quoted control with context",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "Select the control labeled \"Task Queue\".\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Title case heading",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "## Session Timeline\nInspect recent activity here.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Sentence start plural",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "Sessions remain available after completion.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Code identifier",
+      "path": "apps/web/src/types/task-summary.ts",
+      "before": "Read the guidance below.\n",
+      "after": "export type TaskSummary = { sessionCount: number };\n",
+      "expected": "pass"
+    }
+  ]
+}

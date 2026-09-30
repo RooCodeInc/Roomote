@@ -20,6 +20,7 @@ import {
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_DESTINATIONS_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
+  CHAT_MESSAGE_SEND_TOOL_NAME,
   CHAT_REACTION_EMOJI_TOOL_NAME,
   FAST_EXECUTION,
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
@@ -76,6 +77,7 @@ import {
   claimSessionGoalContinuation,
   getSessionGoalForConversation,
   getDeploymentTaskModelOptions,
+  isDeploymentExperimentEnabled,
   getSessionForFastConversation,
   getSessionForTask,
   getActiveRecipeVerificationTaskId,
@@ -87,6 +89,8 @@ import {
   isXaiSubscriptionConnected,
   markSessionGoalForConversation,
   releaseSessionGoalContinuation,
+  createSessionStatusJudgmentRequest,
+  settleSessionStatusJudgmentTurn,
   sql,
   touchSessionActivity,
   withEnvironmentVerificationRetryLock,
@@ -277,6 +281,7 @@ import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
+  type FastAgentAutomationToolResult,
   type FastAgentHumanInput,
   type FastAgentInputPreset,
   isFastAgentCommunicationConversation,
@@ -463,6 +468,34 @@ async function setFastSessionResponding(
   });
 }
 
+async function beginFastTurnStatusJudgment(
+  fastConversationId: string,
+  turnId: string,
+): Promise<void> {
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  if (!session) return;
+  await createSessionStatusJudgmentRequest(db, {
+    sessionId: session.id,
+    sourceEventId: turnId,
+    sourceKind: 'fast_turn',
+    state: 'awaiting_settlement',
+  });
+}
+
+async function settleFastTurnStatusJudgment(
+  fastConversationId: string,
+  turnId: string,
+  visible: boolean,
+): Promise<void> {
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  if (!session) return;
+  await settleSessionStatusJudgmentTurn(db, {
+    sessionId: session.id,
+    sourceEventId: turnId,
+    visible,
+  });
+}
+
 function buildFastAgentTurnId({
   currentMessageId,
 }: {
@@ -519,6 +552,10 @@ const launchTaskArgsSchema = z.object({
     .enum(['standard', 'environment_setup', 'environment_verification'])
     .optional()
     .default('standard'),
+});
+
+const automationLaunchCriteriaArgsSchema = z.object({
+  findingsReport: z.string().trim().min(1).max(12_000),
 });
 
 const ensureEnvironmentArgsSchema = z.object({
@@ -1940,6 +1977,8 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  automationLaunchCriteriaRequired = false,
+  automationLaunchRootRequired = false,
   platformEventTimestampMs,
   automationReport = false,
   taskCommunicationTriage,
@@ -1988,6 +2027,10 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** True only for a custom automation occurrence with a saved launch rule. */
+  automationLaunchCriteriaRequired?: boolean;
+  /** A continued automation run cannot safely report until this root exists. */
+  automationLaunchRootRequired?: boolean;
   /** Original durable admission time for a projected platform receipt. */
   platformEventTimestampMs?: number;
   /** The settling delegated task ran for a custom automation; its closeout is
@@ -2059,6 +2102,27 @@ export async function answerFastAgentQuestion({
     userId,
   });
   const platformEvent = turnSource === 'platform_event';
+  const automationReply =
+    platformEvent && (platformEventKind === 'automation' || automationReport);
+  const automationLaunchCriteriaExperimentEnabled =
+    await isDeploymentExperimentEnabled('automationLaunchCriteria').catch(
+      (error: unknown) => {
+        console.warn(
+          `[Fast Agent] Could not read custom automation launch-criteria experiment: ${formatErrorForLog(error)}`,
+        );
+        return false;
+      },
+    );
+  const automationLaunchGateRequired =
+    platformEvent &&
+    platformEventKind === 'automation' &&
+    automationLaunchCriteriaExperimentEnabled &&
+    automationLaunchCriteriaRequired;
+  let automationLaunchGateState: 'pending' | 'continued' | 'stopped' =
+    automationLaunchGateRequired ? 'pending' : 'continued';
+  let automationLaunchGateStopped = false;
+  const automationLaunchToolResults: FastAgentAutomationToolResult[] = [];
+  let automationLaunchToolResultBytes = 0;
   const resolvedDirectedAtRoomote =
     directedAtRoomote ?? (!platformEvent && !allowSilentAmbientReply);
   const humanInput = input ?? ({ type: 'message' } as const);
@@ -2602,7 +2666,9 @@ export async function answerFastAgentQuestion({
       ? promptText
       : promptText.startsWith(delivered)
         ? promptText.slice(delivered.length)
-        : replyTextTracker.unconsumedText();
+        : automationReply
+          ? promptText
+          : replyTextTracker.unconsumedText();
     replyTextTracker.consumeUnconsumed();
     return remainder;
   };
@@ -3696,6 +3762,13 @@ export async function answerFastAgentQuestion({
         );
       });
     }
+    if (substantiveHumanInput) {
+      await beginFastTurnStatusJudgment(session.id, turnId).catch((error) => {
+        console.warn(
+          `[sessions] Failed to invalidate the prior status judgment: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
     await setFastSessionResponding(
       session.id,
       true,
@@ -3905,6 +3978,8 @@ export async function answerFastAgentQuestion({
       platformEventHandling,
       platformEventVisibility,
       platformEventKind,
+      automationLaunchCriteriaRequired: automationLaunchGateRequired,
+      automationLaunchCriteriaExperimentEnabled,
       automationReport,
       ...(taskCommunicationTriage ? { taskCommunicationTriage } : {}),
       taskCommunicationTriageEnabled,
@@ -4338,6 +4413,124 @@ export async function answerFastAgentQuestion({
       // Next-turn durability is automatic: the refreshed integrations flow
       // into the runtime config written at the next turn's setup.
     };
+    const captureAutomationLaunchToolResult = (
+      call: FastAgentMcpToolCall,
+      result: unknown,
+    ): void => {
+      if (
+        !automationLaunchGateRequired ||
+        automationLaunchGateState !== 'pending'
+      ) {
+        return;
+      }
+
+      const sanitize = (value: unknown, depth = 0): unknown => {
+        if (typeof value === 'string') return redactSecrets(value);
+        if (Array.isArray(value)) {
+          return depth >= 6
+            ? '[truncated]'
+            : value.slice(0, 80).map((item) => sanitize(item, depth + 1));
+        }
+        if (!value || typeof value !== 'object') return value;
+        if (depth >= 6) return '[truncated]';
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .slice(0, 80)
+            .map(([key, item]) => [
+              key,
+              /(?:token|secret|password|passwd|api.?key|authorization|cookie)/iu.test(
+                key,
+              )
+                ? '[redacted]'
+                : sanitize(item, depth + 1),
+            ]),
+        );
+      };
+
+      let output: string;
+      try {
+        output = JSON.stringify(sanitize(result)) ?? String(result);
+      } catch {
+        output = String(result);
+      }
+      const maxEntryBytes = 4_000;
+      const maxTotalBytes = 20_000;
+      if (Buffer.byteLength(output, 'utf8') > maxEntryBytes) {
+        output = `${Buffer.from(output, 'utf8')
+          .subarray(0, maxEntryBytes - 32)
+          .toString('utf8')}…[truncated]`;
+      }
+      const entry: FastAgentAutomationToolResult = {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        result: output,
+      };
+      const entryBytes = Buffer.byteLength(output, 'utf8');
+      while (
+        automationLaunchToolResults.length >= 12 ||
+        automationLaunchToolResultBytes + entryBytes > maxTotalBytes
+      ) {
+        const removed = automationLaunchToolResults.shift();
+        if (!removed) break;
+        automationLaunchToolResultBytes -= Buffer.byteLength(
+          removed.result,
+          'utf8',
+        );
+      }
+      automationLaunchToolResults.push(entry);
+      automationLaunchToolResultBytes += entryBytes;
+    };
+    const evaluateAutomationLaunchGate = async (
+      findingsReport: string,
+      instructionVersion = currentInstructionVersion,
+    ): Promise<'continue' | 'stop'> => {
+      if (!automationLaunchGateRequired) return 'continue';
+      if (automationLaunchGateState === 'stopped') return 'stop';
+      if (automationLaunchGateState === 'continued') return 'continue';
+
+      let decision: 'continue' | 'stop' = 'continue';
+      try {
+        decision =
+          (
+            await adapter.evaluateAutomationLaunchCriteria?.({
+              findingsReport: findingsReport.slice(0, 12_000),
+              rawToolResults: [...automationLaunchToolResults],
+            })
+          )?.decision ?? 'continue';
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Automation launch evaluation failed open: ${formatErrorForLog(error)}`,
+        );
+      }
+
+      if (decision === 'stop') {
+        automationLaunchGateState = 'stopped';
+        automationLaunchGateStopped = true;
+        closedInstructionVersions.add(instructionVersion);
+        return 'stop';
+      }
+
+      try {
+        const updatedConversation = await adapter.prepareAutomationLaunch?.();
+        if (updatedConversation) conversation = updatedConversation;
+      } catch (error) {
+        if (automationLaunchRootRequired) {
+          console.warn(
+            `[Fast Agent] Required automation destination root creation failed; aborting the run: ${formatErrorForLog(error)}`,
+          );
+          throw error;
+        }
+        // A provider root is best effort after a continue. The automation
+        // still runs, and its adapter can use the rootless route if creation
+        // failed. Some destinations, such as Telegram DMs, require the root
+        // to keep the report in the automation's thread.
+        console.warn(
+          `[Fast Agent] Deferred automation destination setup failed; continuing with the existing route: ${formatErrorForLog(error)}`,
+        );
+      }
+      automationLaunchGateState = 'continued';
+      return 'continue';
+    };
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
     ): Promise<unknown> => {
@@ -4358,6 +4551,19 @@ export async function answerFastAgentQuestion({
             success: false,
             error:
               'This platform event may only be presented to the user with a closeout.',
+          };
+        }
+
+        if (
+          automationLaunchGateRequired &&
+          automationLaunchGateState !== 'continued' &&
+          call.integrationId === ROOMOTE_MCP_ID &&
+          call.toolName === CHAT_MESSAGE_SEND_TOOL_NAME
+        ) {
+          return {
+            success: false,
+            error:
+              'Call evaluate_automation_launch_criteria before sending a chat message.',
           };
         }
 
@@ -4495,10 +4701,12 @@ export async function answerFastAgentQuestion({
           );
         }
         const response = { success: true, result };
+        captureAutomationLaunchToolResult(call, response);
         await finishCanonicalToolEvent(canonicalToolEvent, response);
         return response;
       } catch (error) {
         const failure = toolFailure(error);
+        captureAutomationLaunchToolResult(call, failure);
         if (canonicalToolEvent) {
           await finishCanonicalToolEvent(canonicalToolEvent, failure);
         }
@@ -4734,7 +4942,24 @@ export async function answerFastAgentQuestion({
             };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Gather the evidence needed for the saved launch criteria and call evaluate_automation_launch_criteria before sending a reply.',
+              };
+            }
             const args = chatReplyArgsSchema.parse(call.args);
+            if (automationReply && args.message === undefined) {
+              return {
+                success: false,
+                error:
+                  'Automation replies require an explicit message containing only the finished announcement, result, or clarification. Call send_chat_reply again with message; omit progress narration and tool activity.',
+              };
+            }
             if (args.message === undefined) await waitForSettledReplyText();
             const message = (
               args.message ?? replyTextTracker.unconsumedText()
@@ -4976,6 +5201,17 @@ export async function answerFastAgentQuestion({
               };
             }
 
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before creating an environment or starting delegated work.',
+              };
+            }
+
             try {
               await adapter.assertTaskLaunch?.();
             } catch (error) {
@@ -5068,6 +5304,16 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before showing a widget.',
+              };
+            }
             const args = showWidgetArgsSchema.parse(call.args);
             const result = await prepareShowWidget(args);
             if (!result.success) {
@@ -5106,6 +5352,16 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before launching delegated work.',
+              };
+            }
             const args = launchTaskArgsSchema.parse(call.args);
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
@@ -5338,6 +5594,16 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before starting a pull request review.',
+              };
+            }
             const args = reviewPullRequestArgsSchema.parse(call.args);
             const conversationTarget =
               getConversationPullRequestTarget(conversation);
@@ -5715,6 +5981,16 @@ export async function answerFastAgentQuestion({
                 error: 'Task-start retry is unavailable for this turn.',
               };
             }
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before retrying delegated work.',
+              };
+            }
             if (retriedTaskStart) {
               return { success: false, error: 'Startup was already retried.' };
             }
@@ -5870,6 +6146,16 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before requesting a response from the automation owner.',
+              };
+            }
             if (conversation.surface !== 'web') {
               return {
                 success: false,
@@ -6017,6 +6303,18 @@ export async function answerFastAgentQuestion({
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool: {
             const args = callIntegrationToolArgsSchema.parse(call.args);
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued' &&
+              args.integrationId === ROOMOTE_MCP_ID &&
+              args.toolName === CHAT_MESSAGE_SEND_TOOL_NAME
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before sending a chat message.',
+              };
+            }
             if (isFastAgentNativeIntegration(args.integrationId)) {
               return nativeIntegrationError(args.integrationId);
             }
@@ -6025,6 +6323,32 @@ export async function answerFastAgentQuestion({
               toolName: args.toolName,
               args: args.args ?? {},
             });
+          }
+          case FAST_AGENT_NATIVE_TOOL_NAMES.evaluateAutomationLaunchCriteria: {
+            if (!automationLaunchGateRequired) {
+              return {
+                success: false,
+                error:
+                  'This automation has no saved launch criteria to evaluate.',
+              };
+            }
+            if (!adapter.evaluateAutomationLaunchCriteria) {
+              return {
+                success: false,
+                error:
+                  'The launch criteria check is unavailable for this automation session.',
+              };
+            }
+            const args = automationLaunchCriteriaArgsSchema.parse(call.args);
+            const decision = await evaluateAutomationLaunchGate(
+              args.findingsReport,
+              instructionVersion,
+            );
+            return {
+              success: true,
+              decision,
+              ...(decision === 'stop' ? { closed: true } : {}),
+            };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
@@ -6157,6 +6481,15 @@ export async function answerFastAgentQuestion({
         });
       }
       await settleDurableTurn();
+      await settleFastTurnStatusJudgment(
+        session.id,
+        turnId,
+        Boolean(lastVisibleMessage || visibleUpdatePosted),
+      ).catch((error) => {
+        console.warn(
+          `[sessions] Failed to queue the settled status judgment: ${formatErrorForLog(error)}`,
+        );
+      });
       await mirrorPendingMessages();
       await notifyUserAttention();
       return lastVisibleMessage;
@@ -6239,6 +6572,7 @@ export async function answerFastAgentQuestion({
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
             addRemoteMcpEnabled: !platformEvent,
+            automationLaunchCriteriaEnabled: automationLaunchGateRequired,
             ...(toolApprovalRules
               ? {
                   toolApprovalPermission: integrationToolApprovalRulesToConfig(
@@ -6906,6 +7240,22 @@ export async function answerFastAgentQuestion({
     });
 
     throwIfTurnCancelled();
+    if (
+      automationLaunchGateRequired &&
+      automationLaunchGateState === 'pending'
+    ) {
+      const findingsReport = resolveTerminalReplyText(promptText).trim();
+      await evaluateAutomationLaunchGate(
+        findingsReport || 'The session did not produce a findings report.',
+      );
+    }
+    if (automationLaunchGateStopped) {
+      closedInstructionVersions.add(currentInstructionVersion);
+      diagnostics.recordSilentCompletion();
+      await settleDurableTurn();
+      await mirrorPendingMessages();
+      return '';
+    }
     const terminalInstructionVersion =
       completedOpenCodeInstructionVersion ?? currentInstructionVersion;
     if (
@@ -6969,6 +7319,15 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    await settleFastTurnStatusJudgment(
+      session.id,
+      turnId,
+      Boolean(lastVisibleMessage || visibleUpdatePosted),
+    ).catch((error) => {
+      console.warn(
+        `[sessions] Failed to queue the settled status judgment: ${formatErrorForLog(error)}`,
+      );
+    });
     if (
       (substantiveHumanInput || steeredHumanRequests.length > 0) &&
       !setupSession &&
@@ -7146,6 +7505,16 @@ export async function answerFastAgentQuestion({
       }
       throw signal.reason instanceof Error ? signal.reason : error;
     }
+    if (
+      automationLaunchGateRequired &&
+      automationLaunchGateState === 'pending' &&
+      platformEvent
+    ) {
+      // The read/evaluate turn never reached a safe decision. Do not deliver
+      // an error or create work before the gate can continue; let the durable
+      // parent event retry the Session turn.
+      throw error;
+    }
     if (canonicalConversationId) {
       // The system-posted closeout below is mirrored to compatibility history,
       // not to OpenCode's live transcript. Force the next turn to bootstrap so
@@ -7241,6 +7610,17 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    if (canonicalConversationId) {
+      await settleFastTurnStatusJudgment(
+        canonicalConversationId,
+        turnId,
+        Boolean(lastVisibleMessage || visibleUpdatePosted),
+      ).catch((error) => {
+        console.warn(
+          `[sessions] Failed to queue the settled status judgment: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
     await notifyUserAttention();
     return lastVisibleMessage || message;
   } finally {

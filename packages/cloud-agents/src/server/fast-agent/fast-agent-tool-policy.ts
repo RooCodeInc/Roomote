@@ -23,6 +23,7 @@ export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
   [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: false,
   [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: false,
   [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: false,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.evaluateAutomationLaunchCriteria]: false,
 };
 
 export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
@@ -85,6 +86,7 @@ export function buildFastAgentToolFilter(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
+    automationLaunchCriteriaEnabled?: boolean;
   } = {},
 ): Record<string, boolean> {
   return {
@@ -96,6 +98,8 @@ export function buildFastAgentToolFilter(
       options.serviceCredentialToolsEnabled === true,
     [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]:
       options.addRemoteMcpEnabled === true,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.evaluateAutomationLaunchCriteria]:
+      options.automationLaunchCriteriaEnabled === true,
     ...(options.surface && options.surface !== 'web'
       ? {
           [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false,

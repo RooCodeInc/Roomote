@@ -354,6 +354,32 @@ describe('ResponsiveWorkspacePanels', () => {
       expect(animate).toHaveBeenCalled();
     });
 
+    it('drops panels for a narrower window before raising their minimum sizes', () => {
+      const narrowable = (
+        count: number,
+        layoutWidth: number,
+        minSize: number,
+      ) => (
+        <StrictMode>
+          <ResponsiveWorkspacePanels
+            isPanelOpen
+            layoutWidth={layoutWidth}
+            panelMinSize={minSize}
+            mainMinSize={minSize}
+            main={<textarea aria-label="Prompt" />}
+            panel={<input aria-label="Side input" />}
+            additionalPanels={['one', 'two']
+              .slice(0, count)
+              .map((id) => ({ id, content: <input aria-label={id} /> }))}
+          />
+        </StrictMode>
+      );
+      const view = render(narrowable(2, 1600, 20));
+      expect(() => view.rerender(narrowable(1, 1200, 30))).not.toThrow();
+      expect(view.queryByLabelText('two')).toBeNull();
+      expect(view.getAllByRole('separator')).toHaveLength(2);
+    });
+
     it('finishes an in-flight exit when measured width changes without changing capacity', () => {
       const view = render(workspace(true, true));
       view.rerender(workspace(true));

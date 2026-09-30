@@ -68,6 +68,8 @@ const mocks = vi.hoisted(() => ({
   listRecentFastAgentHumanUserPromptTexts: vi.fn(async () => []),
   loadTurnAttempt: vi.fn(),
   getUnifiedSession: vi.fn(),
+  createSessionStatusJudgmentRequest: vi.fn(),
+  settleSessionStatusJudgmentTurn: vi.fn(),
   prepareServiceCredential: vi.fn(),
   listServiceCredentialApprovals: vi.fn(),
   addRemoteMcp: vi.fn(),
@@ -123,6 +125,7 @@ const nativeToolNames = vi.hoisted(
       ensureEnvironment: 'ensure_environment',
       reportPlatformIssue: 'report_platform_issue',
       findIntegrationTools: 'find_integration_tools',
+      evaluateAutomationLaunchCriteria: 'evaluate_automation_launch_criteria',
       ignoreEvent: 'ignore_event',
       inspectImages: 'inspect_images',
       launchTask: 'launch_task',
@@ -273,6 +276,8 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   getSessionForFastConversation: mocks.getUnifiedSession,
+  createSessionStatusJudgmentRequest: mocks.createSessionStatusJudgmentRequest,
+  settleSessionStatusJudgmentTurn: mocks.settleSessionStatusJudgmentTurn,
   getSessionForTask: mocks.getSessionForTask,
   touchSessionActivity: mocks.touchSessionActivity,
   getActiveRecipeVerificationTaskId: mocks.getActiveRecipeVerificationTaskId,
@@ -836,6 +841,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
       'Reply in pirate style.',
+    );
+  });
+
+  it('creates and settles a semantic status request around the visible Fast turn', async () => {
+    mocks.getUnifiedSession.mockResolvedValue({
+      id: 'unified-session-1',
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.createSessionStatusJudgmentRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        sessionId: 'unified-session-1',
+        sourceEventId: '100.2',
+        sourceKind: 'fast_turn',
+        state: 'awaiting_settlement',
+      },
+    );
+    expect(mocks.settleSessionStatusJudgmentTurn).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        sessionId: 'unified-session-1',
+        sourceEventId: '100.2',
+        visible: true,
+      },
     );
   });
 
@@ -6842,6 +6873,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ]),
       {
         addRemoteMcpEnabled: true,
+        automationLaunchCriteriaEnabled: false,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,
@@ -11179,6 +11211,332 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('allows read-only integration evidence, then creates the root and permits work after continue', async () => {
+    const order: string[] = [];
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => {
+      order.push('launch');
+      return {
+        success: true,
+        taskId: 'task-after-gate',
+        kickoffDelivered: true,
+      };
+    });
+    const evaluateAutomationLaunchCriteria = vi.fn(
+      async ({ rawToolResults }) => {
+        order.push('evaluate');
+        expect(rawToolResults).toEqual([
+          expect.objectContaining({
+            integrationId: 'sentry',
+            toolName: 'search_issues',
+            result: expect.stringContaining('current regression'),
+          }),
+        ]);
+        return { decision: 'continue' as const };
+      },
+    );
+    const prepareAutomationLaunch = vi.fn(async () => {
+      order.push('root');
+    });
+    const adapter = callbacks({
+      launchTask,
+      evaluateAutomationLaunchCriteria,
+      prepareAutomationLaunch,
+      postReply: vi.fn(async (reply) => {
+        if (reply.purpose === 'closeout') order.push('reply');
+      }),
+    });
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'sentry',
+        name: 'Sentry',
+        description: 'Read Sentry issues.',
+        tools: [{ name: 'search_issues' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({
+      issue: 'current regression in checkout',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Do not send before the decision.',
+          }),
+        ).resolves.toMatchObject({ success: false });
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Do not start before the decision.',
+          }),
+        ).resolves.toMatchObject({ success: false });
+        await invokeMcpTool('sentry', 'search_issues', {});
+        await expect(
+          invokeTool(nativeToolNames.evaluateAutomationLaunchCriteria, {
+            findingsReport: 'Sentry shows a new checkout regression.',
+          }),
+        ).resolves.toMatchObject({ success: true, decision: 'continue' });
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Investigate the checkout regression.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The investigation has started.',
+        });
+        return '';
+      },
+    );
+
+    mocks.deploymentExperimentEnabled.mockResolvedValue(true);
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+      automationLaunchCriteriaRequired: true,
+    });
+
+    expect(evaluateAutomationLaunchCriteria).toHaveBeenCalledOnce();
+    expect(prepareAutomationLaunch).toHaveBeenCalledOnce();
+    expect(launchTask).toHaveBeenCalledOnce();
+    expect(order.indexOf('evaluate')).toBeLessThan(order.indexOf('root'));
+    expect(order.indexOf('root')).toBeLessThan(order.indexOf('launch'));
+    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.any(Array),
+      expect.objectContaining({ automationLaunchCriteriaEnabled: true }),
+    );
+  });
+
+  it('defers show_widget destination replies until automation criteria continue', async () => {
+    const order: string[] = [];
+    const evaluateAutomationLaunchCriteria = vi.fn(async () => {
+      order.push('evaluate');
+      return { decision: 'continue' as const };
+    });
+    const prepareAutomationLaunch = vi.fn(async () => {
+      order.push('root');
+    });
+    const postReply = vi.fn<FastAgentTurnAdapter['postReply']>(
+      async (reply) => {
+        order.push(`reply:${reply.purpose}`);
+      },
+    );
+    const adapter = callbacks({
+      evaluateAutomationLaunchCriteria,
+      prepareAutomationLaunch,
+      postReply,
+    });
+    const widgetArgs = {
+      html: '<p>Automation is ready.</p>',
+      title: 'Automation status',
+      textFallback: 'Automation is ready.',
+    };
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.showWidget, widgetArgs),
+        ).resolves.toMatchObject({
+          success: false,
+          error:
+            'Call evaluate_automation_launch_criteria before showing a widget.',
+        });
+        expect(postReply).not.toHaveBeenCalled();
+
+        await invokeTool(nativeToolNames.evaluateAutomationLaunchCriteria, {
+          findingsReport: 'The automation is ready to run.',
+        });
+        const result = await invokeTool(nativeToolNames.showWidget, widgetArgs);
+        expect(result).toMatchObject({ success: true, shown: true });
+        return 'The automation is proceeding.';
+      },
+    );
+
+    mocks.deploymentExperimentEnabled.mockResolvedValue(true);
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+      automationLaunchCriteriaRequired: true,
+    });
+
+    expect(order).toEqual([
+      'evaluate',
+      'root',
+      'reply:progress',
+      'reply:closeout',
+    ]);
+    expect(postReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'progress',
+        message: expect.stringContaining('[View widget]'),
+      }),
+    );
+  });
+
+  it('settles a confident gate stop quietly without creating a root or launching a task', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const prepareAutomationLaunch = vi.fn();
+    const adapter = callbacks({
+      launchTask,
+      prepareAutomationLaunch,
+      evaluateAutomationLaunchCriteria: vi.fn(async () => ({
+        decision: 'stop' as const,
+      })),
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'This must stay private to the session.',
+          }),
+        ).resolves.toMatchObject({ success: false });
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'This must not launch.',
+          }),
+        ).resolves.toMatchObject({ success: false });
+        await expect(
+          invokeTool(nativeToolNames.evaluateAutomationLaunchCriteria, {
+            findingsReport: 'No current regression was found.',
+          }),
+        ).resolves.toMatchObject({ success: true, decision: 'stop' });
+        return '';
+      },
+    );
+
+    mocks.deploymentExperimentEnabled.mockResolvedValue(true);
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'required',
+        automationLaunchCriteriaRequired: true,
+      }),
+    ).resolves.toBe('');
+
+    expect(launchTask).not.toHaveBeenCalled();
+    expect(adapter.postReply).not.toHaveBeenCalled();
+    expect(prepareAutomationLaunch).not.toHaveBeenCalled();
+    expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+  });
+
+  it('propagates a Telegram DM topic failure instead of continuing rootless', async () => {
+    const evaluateAutomationLaunchCriteria = vi.fn(async () => ({
+      decision: 'continue' as const,
+    }));
+    const prepareAutomationLaunch = vi.fn(async () => {
+      throw new Error('Telegram DM topic creation failed');
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const adapter = callbacks({
+      evaluateAutomationLaunchCriteria,
+      prepareAutomationLaunch,
+      launchTask,
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        return '';
+      },
+    );
+
+    mocks.deploymentExperimentEnabled.mockResolvedValue(true);
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'telegram',
+          workspaceId: 'telegram-dm-1',
+          conversationId: 'automation-1:occurrence-1',
+          replyTarget: { channelId: 'telegram-dm-1' },
+        },
+        adapter,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'required',
+        automationLaunchCriteriaRequired: true,
+        automationLaunchRootRequired: true,
+      }),
+    ).rejects.toThrow('Telegram DM topic creation failed');
+
+    expect(evaluateAutomationLaunchCriteria).toHaveBeenCalledOnce();
+    expect(prepareAutomationLaunch).toHaveBeenCalledOnce();
+    expect(launchTask).not.toHaveBeenCalled();
+    expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      surface: 'discord' as const,
+      workspaceId: 'guild-1',
+      conversationId: 'automation-discord',
+      replyTarget: { channelId: 'discord-channel-1' },
+    },
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      conversationId: 'automation-teams',
+      replyTarget: {
+        channelId: 'teams-channel-1',
+        serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      },
+    },
+  ])(
+    'keeps the $surface root deferred when its queued custom automation gate is disabled',
+    async (conversation) => {
+      const evaluateAutomationLaunchCriteria = vi.fn(async () => ({
+        decision: 'continue' as const,
+      }));
+      const prepareAutomationLaunch = vi.fn(async () => undefined);
+      const adapter = callbacks({
+        evaluateAutomationLaunchCriteria,
+        prepareAutomationLaunch,
+      });
+      mocks.deploymentExperimentEnabled.mockResolvedValue(false);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await expect(
+            invokeTool(nativeToolNames.evaluateAutomationLaunchCriteria, {
+              findingsReport: 'Saved criteria should not be evaluated.',
+            }),
+          ).resolves.toMatchObject({
+            success: false,
+            error: 'This automation has no saved launch criteria to evaluate.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: conversation as never,
+        adapter,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'optional',
+        automationLaunchCriteriaRequired: true,
+      });
+
+      expect(evaluateAutomationLaunchCriteria).not.toHaveBeenCalled();
+      expect(prepareAutomationLaunch).not.toHaveBeenCalled();
+      expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        expect.objectContaining({ automationLaunchCriteriaEnabled: false }),
+      );
+    },
+  );
+
   it('keeps an automation clarification eligible after delegated work starts', async () => {
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
@@ -12727,6 +13085,67 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).resolves.toBe('');
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
+
+  it('silently ignores an optional automation platform event', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.ignoreEvent, {
+          reason: 'No qualifying result to report.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'optional',
+        adapter,
+      }),
+    ).resolves.toBe('');
+    expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'keeps a Telegram no-op silent with launch criteria enabled=%s',
+    async (experimentEnabled) => {
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.ignoreEvent, {
+            reason: 'No qualifying result to report.',
+          });
+          return '';
+        },
+      );
+      mocks.deploymentExperimentEnabled.mockResolvedValue(experimentEnabled);
+      const prepareAutomationLaunch = vi.fn(async () => undefined);
+      const adapter = callbacks({ prepareAutomationLaunch });
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          platformEventKind: 'automation',
+          platformEventVisibility: 'optional',
+          automationLaunchRootRequired: true,
+          conversation: {
+            surface: 'telegram',
+            workspaceId: 'telegram-dm-1',
+            conversationId: 'automation-1:occurrence-1',
+            replyTarget: { channelId: 'telegram-dm-1' },
+          },
+          adapter,
+        }),
+      ).resolves.toBe('');
+      expect(adapter.postReply).not.toHaveBeenCalled();
+      expect(prepareAutomationLaunch).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects reaction side effects on non-reactable human reaction input', async () => {
     let reactionResult: unknown;
@@ -14330,6 +14749,97 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(rows.map((row) => row.eventId)).toEqual(
         streamed.map(([eventId]) => eventId),
       );
+    });
+
+    it.each([false, true])(
+      'requires an explicit automation report after narration (delegated=%s)',
+      async (automationReport) => {
+        const postReply = vi.fn().mockResolvedValue(undefined);
+        const announcement = 'Weekly duties: Alex on logs, Sam on releases.';
+        mocks.generateText.mockImplementation(
+          async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-1');
+            for (const [index, text] of [
+              "I'll check the previous assignments.",
+              'The history request timed out. I will retry.',
+              announcement,
+            ].entries()) {
+              options.onAssistantTextUpdated?.({
+                messageId: `message-${index}`,
+                partId: `part-${index}`,
+                text,
+                completed: true,
+              });
+            }
+            expect(
+              await invokeTool(nativeToolNames.sendChatReply, {
+                purpose: 'closeout',
+              }),
+            ).toMatchObject({
+              success: false,
+              error: expect.stringContaining('explicit message'),
+            });
+            expect(postReply).not.toHaveBeenCalled();
+            await invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'closeout',
+              message: announcement,
+            });
+            return announcement;
+          },
+        );
+        await answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          platformEventKind: automationReport ? 'delegated_task' : 'automation',
+          automationReport,
+          adapter: callbacks({ postReply }),
+        });
+        expect(postReply).toHaveBeenCalledExactlyOnceWith({
+          purpose: 'closeout',
+          message: announcement,
+        });
+        expect(persistedAssistantRows().at(-1)?.contentBlocks).toEqual([
+          { type: 'text', text: announcement },
+        ]);
+      },
+    );
+
+    it('uses only the final automation message for automatic closeout', async () => {
+      const postReply = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'earlier',
+            partId: 'earlier-text',
+            text: 'I will check the history.',
+            completed: true,
+          });
+          options.onAssistantTextUpdated?.({
+            messageId: 'final',
+            partId: 'final-text',
+            text: 'The weekly announcement.',
+            completed: true,
+          });
+          await options.onMessageCompleted?.({
+            id: 'final',
+            sessionId: 'opencode-session-1',
+            createdAtMs: 100,
+            completedAtMs: 200,
+          });
+          return 'The weekly announcement.';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        adapter: callbacks({ postReply }),
+      });
+      expect(postReply).toHaveBeenCalledExactlyOnceWith({
+        purpose: 'closeout',
+        message: 'The weekly announcement.',
+      });
     });
 
     it('rejects a reply call with nothing written and no message', async () => {

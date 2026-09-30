@@ -10,6 +10,7 @@ import { HTTP_INTEGRATIONS_BROKER } from '../mcp-provenance';
 
 import {
   createRoomoteAdvisorAgentPrompt,
+  createRoomoteExploreAgentPrompt,
   createRoomoteJudgeAgentPrompt,
   OPENCODE_IDENTITY_PLUGIN_SCRIPT,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
@@ -1446,9 +1447,13 @@ function createAdvisorModelInstructions(): string {
 function createExploreAgentConfig(options: {
   model: string;
   reasoningOptions?: Record<string, unknown> | null;
+  jevgrepSkillPath?: string;
 }): Record<string, unknown> {
   return {
     model: options.model,
+    ...(options.jevgrepSkillPath
+      ? { prompt: createRoomoteExploreAgentPrompt(options.jevgrepSkillPath) }
+      : {}),
     ...(options.reasoningOptions ? { options: options.reasoningOptions } : {}),
     // Redundant with the built-in explore agent's wildcard-deny permission
     // set, but kept explicit so every generated subagent override carries the
@@ -1667,10 +1672,16 @@ function resolveModelBackedOpenCodeConfig(
   };
   const exploreEffectiveModel = exploreModel ?? effectiveCodingModel;
   const exploreAgent =
-    exploreModel || exploreModelReasoningEffort
+    exploreModel ||
+    exploreModelReasoningEffort ||
+    runtimeEnv.R_JEVGREP_GATEWAY_URL
       ? {
           [ROOMOTE_OPENCODE_EXPLORE_AGENT_NAME]: createExploreAgentConfig({
             model: exploreEffectiveModel,
+            jevgrepSkillPath:
+              runtimeEnv.R_JEVGREP_GATEWAY_URL && runtimeEnv.HOME
+                ? path.join(runtimeEnv.HOME, '.agents/skills/jevgrep/SKILL.md')
+                : undefined,
             reasoningOptions: exploreModelReasoningEffort
               ? buildOpenCodeModelReasoningOptions(
                   exploreEffectiveModel,

@@ -890,11 +890,11 @@ async function resolveSlackMentionScopeTeamId(
 }
 
 /**
- * Resolves raw Slack user IDs referenced by `<@U…>` tokens in persisted
- * message text to display names and profile links for the web transcript.
- * The Brain Slack directory answers first; anything it does not know goes
- * through `users.info` with the installation's bot token. Unresolvable IDs
- * are omitted so the caller can fall back to the raw token.
+ * Resolves raw Slack user and channel IDs referenced by `<@U…>` and `<#C…>`
+ * tokens in persisted message text to display names and links for the web
+ * transcript. The Brain Slack directory answers users first; anything it does
+ * not know goes through Slack lookup APIs with the installation's bot token.
+ * Unresolvable IDs are omitted so the caller can fall back to the raw token.
  */
 export async function resolveSlackUsersCommand(
   auth: UserAuthSuccess,

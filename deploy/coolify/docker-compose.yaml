@@ -88,6 +88,12 @@ x-roomote-shared-env: &roomote-shared-env
   # alphanumeric value, which satisfies gbrain's >= 32 characters of
   # [A-Za-z0-9_-]; SERVICE_BASE64_* would not.
   R_GBRAIN_ADMIN_TOKEN: ${SERVICE_PASSWORD_64_GBRAINADMIN}
+  # The CPU decision model's address. Leave it empty and the judgment
+  # service below idles unused; set it to http://judgment:8080, then choose
+  # the Roomote judgment model in Settings > Models, to use it for routing and
+  # triage decisions. See "Enabling the decision model" in README.md.
+  R_JUDGMENT_UPSTREAM_URL: ${R_JUDGMENT_UPSTREAM_URL:-}
+  R_JUDGMENT_UPSTREAM_API_KEY: ${SERVICE_PASSWORD_64_JUDGMENT}
 
 services:
   postgres:
@@ -183,6 +189,25 @@ services:
       timeout: 5s
       retries: 12
       start_period: 60s
+
+  # Optional CPU decision model for routing and triage decisions. Internal
+  # only, like the Brain, and it runs unconditionally for the same reason
+  # (no `profiles`), idling at about 250 MB without its model until
+  # R_JUDGMENT_UPSTREAM_URL points at it. Delete this service and its volume
+  # if the deployment should not run one.
+  judgment:
+    image: ghcr.io/roocodeinc/roomote-judgment:develop
+    restart: unless-stopped
+    networks:
+      - default
+    volumes:
+      - judgment_models:/models
+    environment:
+      JUDGMENT_PRELOAD: 'false'
+      JUDGMENT_THREADS: ${JUDGMENT_CPUS:-4}
+      JUDGMENT_API_KEY: ${SERVICE_PASSWORD_64_JUDGMENT}
+    mem_limit: ${JUDGMENT_MEMORY_LIMIT:-4g}
+    cpus: ${JUDGMENT_CPUS:-4}
 
   docker-proxy:
     image: ghcr.io/tecnativa/docker-socket-proxy:v0.4.2@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
@@ -385,6 +410,8 @@ volumes:
   # The Brain's corpus. Back it up like pg_data; losing it is recoverable
   # (task history and integration sources re-ingest) but not free.
   gbrain_data:
+  # The decision model's download cache; safe to delete.
+  judgment_models:
 
 networks:
   # Named explicitly so the controller's DOCKER_WORKER_NETWORK value is

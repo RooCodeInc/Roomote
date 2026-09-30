@@ -18,7 +18,10 @@ import {
   workspaceRoutingSettingsSchema,
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+  customAutomationRunWhenSchema,
+  isBuiltInWebhookAutomationKey,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -80,6 +83,8 @@ import {
   getSessionTimeline,
   archiveSessionCommand,
   deleteSessionCommand,
+  setSessionStatusCommand,
+  sessionStatusInputSchema,
   stopSessionTasksCommand,
   listSessionPins,
   markSessionReadCommand,
@@ -228,9 +233,9 @@ import {
   updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
-  getDizzyExperimentEnabledCommand,
   getDeploymentExperimentsCommand,
   getNightlyExperimentsCommand,
+  getNightlyExperimentRuntimeCommand,
   setDeploymentExperimentCommand,
   setNightlyExperimentCommand,
 } from '../commands/deployment-experiments';
@@ -446,9 +451,15 @@ import {
   listAutomationDiscordChannelsCommand,
   listCustomAutomationsCommand,
   getCustomAutomationOptionsCommand,
+  getCustomAutomationWebhookCommand,
+  getBuiltInAutomationWebhookCommand,
+  rotateBuiltInAutomationWebhookCommand,
   resolveCustomAutomationScheduleCommand,
   listSlackChannelsCommand,
   triggerCustomAutomationCommand,
+  setCustomAutomationWebhookEnabledCommand,
+  setBuiltInAutomationWebhookEnabledCommand,
+  rotateCustomAutomationWebhookCommand,
   updateBackgroundAgentSettingsCommand,
   triggerAutomationCommand,
   updateCustomAutomationCommand,
@@ -509,6 +520,12 @@ import {
   saveJudgmentTypeSafeKeyCommand,
   setJudgmentModelSelectionCommand,
 } from '../commands/task-models/judgment-model';
+import {
+  getJudgmentDecisionCatalogCommand,
+  getJudgmentExamplePresetsCommand,
+  judgmentDecisionTestSchema,
+  testJudgmentDecisionCommand,
+} from '../commands/task-models/judgment-decision-tester';
 import {
   disconnectChatGptSubscriptionCommand,
   getChatGptSubscriptionStatusCommand,
@@ -701,6 +718,7 @@ const automationsRouter = createRouter({
         reviewerRelayUserIds: z.array(z.string()),
         conflictResolverFrequency: z.enum([
           'off',
+          'on_demand',
           'every_hour',
           'every_6_hours',
           'daily',
@@ -766,7 +784,7 @@ const automationsRouter = createRouter({
           .max(255)
           .nullable()
           .optional(),
-        managerStatsFrequency: z.enum(['off', 'weekly']),
+        managerStatsFrequency: z.enum(['off', 'daily', 'weekly', 'monthly']),
         managerStatsSlackChannel: z.string().trim().min(1).max(160).nullable(),
         managerStatsDiscordChannel: z
           .string()
@@ -774,7 +792,9 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
-        providerUsageLimitFrequency: z.enum(['off', 'every_hour']).optional(),
+        providerUsageLimitFrequency: z
+          .enum(['off', 'on_demand', 'every_hour'])
+          .optional(),
         providerUsageLimitThreshold: z
           .number()
           .int()
@@ -790,7 +810,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         providerUsageLimitDiscordChannel: z.string().nullable().optional(),
-        sentryTriageFrequency: z.enum(['off', 'daily', 'weekly']),
+        sentryTriageFrequency: z.enum(['off', 'on_demand', 'daily', 'weekly']),
         sentryTriageSlackChannel: z.string().trim().min(1).max(160).nullable(),
         sentryTriageDiscordChannel: z
           .string()
@@ -799,7 +819,12 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable(),
         sentryTriageProjectSlugs: z.string().max(4_000).nullable(),
-        dependabotTriageFrequency: z.enum(['off', 'daily', 'weekly']),
+        dependabotTriageFrequency: z.enum([
+          'off',
+          'on_demand',
+          'daily',
+          'weekly',
+        ]),
         dependabotTriageSlackChannel: z
           .string()
           .trim()
@@ -812,7 +837,9 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
-        codeqlTriageFrequency: z.enum(['off', 'daily', 'weekly']).optional(),
+        codeqlTriageFrequency: z
+          .enum(['off', 'on_demand', 'daily', 'weekly'])
+          .optional(),
         codeqlTriageSlackChannel: z
           .string()
           .trim()
@@ -832,7 +859,7 @@ const automationsRouter = createRouter({
         ...mergeAnnouncerDestinationInputShape,
         ...releaseAnnouncementsDestinationInputShape,
         issueFixerInstructions: z.string().max(8_000).nullable().optional(),
-        suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
+        suggesterFrequency: z.enum(['off', 'on_demand', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
         suggesterDiscordChannel: z
           .string()
@@ -853,7 +880,7 @@ const automationsRouter = createRouter({
         suggesterUseTeams: z.boolean().optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
         suggesterAdditionalRules: z.string().max(8000).nullable().optional(),
-        announcerFrequency: z.enum(['off', 'daily', 'weekly']),
+        announcerFrequency: z.enum(['off', 'on_demand', 'daily', 'weekly']),
         announcerSlackChannel: z.string().trim().min(1).max(160).nullable(),
         announcerDiscordChannel: z
           .string()
@@ -948,6 +975,43 @@ const automationsRouter = createRouter({
       triggerAutomationCommand(auth, input),
     ),
 
+  getBuiltInAutomationWebhook: protectedProcedure
+    .input(
+      z.object({
+        automationKey: z.string().refine(isBuiltInWebhookAutomationKey, {
+          message: 'This built-in automation does not support webhooks.',
+        }),
+      }),
+    )
+    .query(({ ctx: { auth }, input }) =>
+      getBuiltInAutomationWebhookCommand(auth, input),
+    ),
+
+  setBuiltInAutomationWebhookEnabled: protectedProcedure
+    .input(
+      z.object({
+        automationKey: z.string().refine(isBuiltInWebhookAutomationKey, {
+          message: 'This built-in automation does not support webhooks.',
+        }),
+        enabled: z.boolean(),
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) =>
+      setBuiltInAutomationWebhookEnabledCommand(auth, input),
+    ),
+
+  rotateBuiltInAutomationWebhook: protectedProcedure
+    .input(
+      z.object({
+        automationKey: z.string().refine(isBuiltInWebhookAutomationKey, {
+          message: 'This built-in automation does not support webhooks.',
+        }),
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) =>
+      rotateBuiltInAutomationWebhookCommand(auth, input),
+    ),
+
   listCustomAutomations: protectedProcedure.query(({ ctx: { auth } }) =>
     listCustomAutomationsCommand(auth),
   ),
@@ -971,6 +1035,7 @@ const automationsRouter = createRouter({
         resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
           'off',
+          'on_demand',
           'every_hour',
           'every_6_hours',
           'daily',
@@ -998,6 +1063,13 @@ const automationsRouter = createRouter({
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
+        launchCriteria: z
+          .string()
+          .trim()
+          .max(CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH)
+          .nullable()
+          .optional(),
+        runWhen: customAutomationRunWhenSchema.nullable().optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
@@ -1018,6 +1090,7 @@ const automationsRouter = createRouter({
         resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
           'off',
+          'on_demand',
           'every_hour',
           'every_6_hours',
           'daily',
@@ -1045,10 +1118,35 @@ const automationsRouter = createRouter({
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
+        launchCriteria: z
+          .string()
+          .trim()
+          .max(CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH)
+          .nullable()
+          .optional(),
+        runWhen: customAutomationRunWhenSchema.nullable().optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
       updateCustomAutomationCommand(auth, input),
+    ),
+
+  getCustomAutomationWebhook: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(({ ctx: { auth }, input }) =>
+      getCustomAutomationWebhookCommand(auth, input),
+    ),
+
+  setCustomAutomationWebhookEnabled: protectedProcedure
+    .input(z.object({ id: z.string().uuid(), enabled: z.boolean() }))
+    .mutation(({ ctx: { auth }, input }) =>
+      setCustomAutomationWebhookEnabledCommand(auth, input),
+    ),
+
+  rotateCustomAutomationWebhook: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ ctx: { auth }, input }) =>
+      rotateCustomAutomationWebhookCommand(auth, input),
     ),
 
   deleteCustomAutomation: protectedProcedure
@@ -2620,6 +2718,21 @@ export const appRouter = createRouter({
         .mutation(({ ctx: { auth }, input }) =>
           setJudgmentModelSelectionCommand(auth, input),
         ),
+
+      // Settings > Models > Test decisions (admin only).
+      decisionCatalog: protectedProcedure.query(({ ctx: { auth } }) =>
+        getJudgmentDecisionCatalogCommand(auth),
+      ),
+
+      examplePresets: protectedProcedure.query(({ ctx: { auth } }) =>
+        getJudgmentExamplePresetsCommand(auth),
+      ),
+
+      testDecision: protectedProcedure
+        .input(judgmentDecisionTestSchema)
+        .mutation(({ ctx: { auth }, input }) =>
+          testJudgmentDecisionCommand(auth, input),
+        ),
     }),
 
     discoverProviderModels: protectedProcedure
@@ -3444,6 +3557,11 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
       ),
+    setStatus: protectedProcedure
+      .input(sessionStatusInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setSessionStatusCommand(auth, input.sessionId, input.status),
+      ),
     stopTasks: protectedProcedure
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
@@ -3678,9 +3796,15 @@ export const appRouter = createRouter({
   }),
 
   nightlyExperiments: createRouter({
-    dizzyEnabled: protectedProcedure.query(({ ctx: { auth } }) =>
-      getDizzyExperimentEnabledCommand(auth),
-    ),
+    runtime: protectedProcedure
+      .input(
+        z.object({
+          id: z.enum(DEPLOYMENT_EXPERIMENT_IDS),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getNightlyExperimentRuntimeCommand(auth, input),
+      ),
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getNightlyExperimentsCommand(auth),
     ),

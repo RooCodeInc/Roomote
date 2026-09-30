@@ -1,0 +1,33 @@
+{
+  "ruleId": "criterion_3",
+  "examples": [
+    {
+      "name": "Expose error through a response header",
+      "path": "apps/api/src/handlers/report.ts",
+      "before": "export function fail(c, err) { return c.text(\"Request failed\", 500); }\n",
+      "after": "export function fail(c, err) { c.header(\"X-Debug-Error\", err.stack); return c.text(\"Request failed\", 500); }\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Stringify a caught error for the caller",
+      "path": "apps/api/src/handlers/report.ts",
+      "before": "export function fail(c, err) { return c.text(\"Report unavailable\", 500); }\n",
+      "after": "export function fail(c, err) { return c.text(String(err), 500); }\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Known safe authentication error",
+      "path": "apps/api/src/handlers/report.ts",
+      "before": "export function fail(c) { return c.json({}, 401); }\n",
+      "after": "export function fail(c) { return c.json({error:\"Sign in to continue.\"}, 401); }\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Bounded diagnostic with generic response",
+      "path": "apps/api/src/handlers/report.ts",
+      "before": "export function fail(c, log, err) { return c.json({error:err.message}, 500); }\n",
+      "after": "export function fail(c, log, err) { log.error({code:\"REPORT_FAILED\"}); return c.json({error:\"Report unavailable. Try again later.\"},500); }\n",
+      "expected": "pass"
+    }
+  ]
+}

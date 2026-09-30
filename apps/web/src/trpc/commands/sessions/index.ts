@@ -8,9 +8,11 @@ import {
   activeRunStatuses,
   ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
   RunStatus,
+  SESSION_MANUAL_STATUSES,
   SESSION_STATUSES,
   fastConversationMemorySlug,
   isExitedRunStatus,
+  type SessionManualStatus,
 } from '@roomote/types';
 import {
   and,
@@ -61,6 +63,9 @@ const TASK_STOP_WAIT_MS = 15_000;
 const TASK_STOP_POLL_MS = 100;
 
 export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
+export const sessionStatusInputSchema = sessionIdInputSchema.extend({
+  status: z.enum(SESSION_MANUAL_STATUSES),
+});
 
 type AccessibleSession = Awaited<ReturnType<typeof findAccessibleSession>>;
 
@@ -126,6 +131,17 @@ export async function stopSessionTasksCommand(
       ? {}
       : { failedCount: runs.length - stoppedCount }),
   };
+}
+
+export async function setSessionStatusCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+  status: SessionManualStatus,
+) {
+  const session = await findAccessibleSession(auth, sessionId);
+  if (!canManageSession(auth, session)) return null;
+
+  return updateSessionMetadata(auth, sessionId, { manualStatus: status });
 }
 
 export async function deleteSessionCommand(

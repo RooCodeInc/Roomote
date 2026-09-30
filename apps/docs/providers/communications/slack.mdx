@@ -248,7 +248,7 @@ direct messages to another member require workspace-scoped linked identities for
 both participants. Reactions remain scoped to the current inbound message. Roomote
 can also use MCP servers and user-scoped integrations that you are allowed to
 access and delegate repository work to Roomote tasks. Members can
-create and manage their own [custom automations](/automations#custom-automations)
+create and manage their own [custom automations](/custom-automations)
 through a session; deployment admins can manage all custom automations, including
 those without a creator. Built-in automations and deployment settings remain
 admin-only. Roomote does not read other
@@ -260,9 +260,10 @@ Eligible human discussion in an established Roomote Slack thread keeps reaching
 Roomote after another participant is mentioned. When a
 [judgment model](/models#judgment-model) is configured, every unmentioned
 reply from a linked member in a Roomote thread with more than one person is
-judged before it can start a turn: it routes when the model finds it is addressed to Roomote and is more
-than a closing acknowledgement, so messages meant for a colleague and simple
-acknowledgements stay silent. Without a judgment model, Roomote stays quiet
+judged before it can start a turn: it routes when the model finds it is
+addressed to Roomote. Messages meant for a colleague stay silent;
+acknowledgements addressed to Roomote reach the session, which then decides
+whether a response is warranted. Without a judgment model, Roomote stays quiet
 around peer discussion unless directly addressed. Direct mentions always work.
 
 Every Roomote reply ends with a compact footer: **Reply anytime**, a plain

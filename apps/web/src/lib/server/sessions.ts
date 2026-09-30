@@ -12,6 +12,7 @@ import {
   fastAgentMessages,
   gte,
   getSessionGoal,
+  getLatestSessionStatusJudgments,
   gt,
   ilike,
   inArray,
@@ -37,7 +38,10 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  HAS_PULL_REQUEST_FILTER_VALUE,
   LINEAR_SESSION_ACTOR_PREFIX,
+  type SessionBoardColumn,
+  type SessionManualStatus,
   type BackgroundAutomationKey,
 } from '@roomote/types';
 import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
@@ -57,10 +61,12 @@ import {
 
 type SessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 export type SessionScope = 'all' | 'tasks' | 'reviews' | 'automations';
+export type SessionArchiveFilter = 'archived' | 'non-archived' | 'all';
 
 type SessionListInput = {
   scope?: SessionScope;
-  status?: 'active' | 'needs_input' | 'blocked' | 'ready';
+  status?: SessionBoardColumn;
+  archive?: SessionArchiveFilter;
   user?: string | null;
   repository?: string | null;
   pullRequest?: string | null;
@@ -70,6 +76,7 @@ type SessionListInput = {
   q?: string | null;
   ids?: string[];
   ownedOnly?: boolean;
+  includeJudgedStatus?: boolean;
   before?: string | null;
   limit?: number;
 };
@@ -165,6 +172,23 @@ function taskExistsCondition(
           eq(sessionTasks.sessionId, sessions.id),
           isNull(tasks.deletedAt),
           condition,
+        ),
+      ),
+  );
+}
+
+function taskEnvironmentExistsCondition(environmentId: string) {
+  return exists(
+    db
+      .select({ one: sql`1` })
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .innerJoin(taskRuns, eq(taskRuns.taskId, sessionTasks.taskId))
+      .where(
+        and(
+          eq(sessionTasks.sessionId, sessions.id),
+          isNull(tasks.deletedAt),
+          sql`${taskRuns.payload}->>'environmentId' = ${environmentId}`,
         ),
       ),
   );
@@ -331,7 +355,6 @@ async function getSessionSearchSnippets(
       where ${inArray(sessions.id, sessionIds)}
         and ${accessCondition}
         and ${eq(sessions.visibility, 'visible')}
-        and ${isNull(sessions.archivedAt)}
         and ${inArray(fastAgentMessages.role, ['user', 'assistant'])}
         and case
           when ${fastAgentMessages.metadata} ->> 'visibleInTranscript' is not null
@@ -355,7 +378,6 @@ async function getSessionSearchSnippets(
       where ${inArray(sessions.id, sessionIds)}
         and ${accessCondition}
         and ${eq(sessions.visibility, 'visible')}
-        and ${isNull(sessions.archivedAt)}
         and ${isNull(tasks.deletedAt)}
         and ${inArray(taskMessages.role, ['user', 'assistant'])}
         and case
@@ -409,22 +431,110 @@ function listConditions(
 ) {
   const cursor = decodeCursor(input.before);
   const scope = input.scope ?? 'all';
+  const archive = input.archive ?? 'non-archived';
   const period = input.period ?? 'all';
   const pullRequest = input.pullRequest
     ? parsePullRequestFilterValue(input.pullRequest)
     : null;
+  const repositoryFilter = input.repository
+    ? input.repository.startsWith('env:')
+      ? taskEnvironmentExistsCondition(input.repository.slice(4))
+      : taskExistsCondition(eq(tasks.repositoryName, input.repository))
+    : undefined;
+  const hasPullRequestFilter =
+    input.pullRequest === HAS_PULL_REQUEST_FILTER_VALUE;
+  const hasPullRequestCondition = hasPullRequestFilter
+    ? exists(
+        db
+          .select({ one: sql`1` })
+          .from(sessionTasks)
+          .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+          .innerJoin(
+            taskPullRequests,
+            eq(taskPullRequests.taskId, sessionTasks.taskId),
+          )
+          .where(
+            and(
+              eq(sessionTasks.sessionId, sessions.id),
+              isNull(tasks.deletedAt),
+              isNotNull(taskPullRequests.repository),
+              isNotNull(taskPullRequests.prNumber),
+            ),
+          ),
+      )
+    : undefined;
+  const latestJudgmentOutcome = sql<string | null>`(
+    select case
+      when judgment.state = 'applied' then judgment.outcome
+      else null
+    end
+    from session_status_judgments as judgment
+    where judgment.session_id = ${sessions.id}
+    order by judgment.generation desc
+    limit 1
+  )`;
+  const settledStatus = or(
+    eq(sessions.cachedStatus, 'ready'),
+    isNull(sessions.cachedStatus),
+  );
+  const boardStatusCondition = (() => {
+    if (!input.includeJudgedStatus || !input.status) return undefined;
+
+    switch (input.status) {
+      case 'active':
+        return and(
+          isNull(sessions.manualStatus),
+          eq(sessions.cachedStatus, 'active'),
+        );
+      case 'needs_input':
+      case 'blocked':
+        return or(
+          eq(sessions.manualStatus, input.status),
+          and(
+            isNull(sessions.manualStatus),
+            or(
+              eq(sessions.cachedStatus, input.status),
+              and(settledStatus, eq(latestJudgmentOutcome, input.status)),
+            ),
+          ),
+        );
+      case 'done':
+        return or(
+          eq(sessions.manualStatus, 'done'),
+          and(
+            isNull(sessions.manualStatus),
+            settledStatus,
+            eq(latestJudgmentOutcome, 'done'),
+          ),
+        );
+      case 'ready':
+        return or(
+          eq(sessions.manualStatus, 'ready'),
+          and(
+            isNull(sessions.manualStatus),
+            settledStatus,
+            sql`coalesce(${latestJudgmentOutcome}, '') not in ('done', 'blocked', 'needs_input')`,
+          ),
+        );
+    }
+  })();
 
   return and(
     sessionListScope(auth),
     input.ownedOnly ? sessionOwnerScope(auth) : undefined,
     eq(sessions.visibility, 'visible'),
-    isNull(sessions.archivedAt),
+    archive === 'archived'
+      ? isNotNull(sessions.archivedAt)
+      : archive === 'all'
+        ? undefined
+        : isNull(sessions.archivedAt),
     input.ids ? inArray(sessions.id, input.ids) : undefined,
-    input.status === 'ready'
-      ? or(eq(sessions.cachedStatus, 'ready'), isNull(sessions.cachedStatus))
-      : input.status
-        ? eq(sessions.cachedStatus, input.status)
-        : undefined,
+    boardStatusCondition ??
+      (input.status === 'ready'
+        ? or(eq(sessions.cachedStatus, 'ready'), isNull(sessions.cachedStatus))
+        : input.status && input.status !== 'done'
+          ? eq(sessions.cachedStatus, input.status)
+          : undefined),
     input.user ? sessionCreatorCondition(input.user) : undefined,
     input.source
       ? eq(sessions.sourceSurface, input.source as never)
@@ -463,10 +573,9 @@ function listConditions(
       ? taskExistsCondition(eq(tasks.workflow, 'pr_review'))
       : undefined,
     scope === 'automations' ? eq(sessions.ownerKind, 'automation') : undefined,
-    input.repository
-      ? taskExistsCondition(eq(tasks.repositoryName, input.repository))
-      : undefined,
+    repositoryFilter,
     input.model ? taskExistsCondition(eq(tasks.model, input.model)) : undefined,
+    hasPullRequestCondition,
     pullRequest
       ? exists(
           db
@@ -543,6 +652,9 @@ const baseSelection = {
   visibility: sessions.visibility,
   activityAt: sessions.activityAt,
   cachedStatus: sessions.cachedStatus,
+  manualStatus: sessions.manualStatus,
+  manualStatusSetAt: sessions.manualStatusSetAt,
+  inactivityDueAt: sessions.inactivityDueAt,
   respondingUntil: sessions.respondingUntil,
   archivedAt: sessions.archivedAt,
   createdAt: sessions.createdAt,
@@ -593,12 +705,15 @@ async function hydrateSessionRows(
   options: {
     /** Skip the linked-tasks query when the caller already fetched them. */
     preloadedLinkedTasks?: HydratedLinkedTask[];
+    /** Board judgments are only loaded when the board view needs them. */
+    includeJudgedStatus?: boolean;
   } = {},
 ) {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => row.id);
   const [
     linkedTasks,
+    judgmentRows,
     linkedPullRequests,
     participants,
     directSessionUsage,
@@ -626,6 +741,9 @@ async function hydrateSessionRows(
         .where(
           and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)),
         ),
+    options.includeJudgedStatus
+      ? getLatestSessionStatusJudgments(db, ids)
+      : Promise.resolve([]),
     db
       .select({
         sessionId: sessionTasks.sessionId,
@@ -776,6 +894,9 @@ async function hydrateSessionRows(
   ]);
 
   const pinned = new Set(pins.map((pin) => pin.sessionId));
+  const judgmentBySession = new Map(
+    judgmentRows.map((judgment) => [judgment.sessionId, judgment]),
+  );
   const artifactsBySession = new Map<string, SessionListArtifact[]>();
   for (const artifact of [...linkedTaskArtifacts, ...directSessionArtifacts]) {
     if (!artifact.sessionId) continue;
@@ -832,6 +953,11 @@ async function hydrateSessionRows(
     const sessionArtifacts = artifactsBySession.get(row.id) ?? [];
     return {
       ...row,
+      judgedStatus:
+        options.includeJudgedStatus &&
+        judgmentBySession.get(row.id)?.state === 'applied'
+          ? (judgmentBySession.get(row.id)?.outcome ?? null)
+          : null,
       canManage:
         row.privacy === 'private'
           ? row.privateOwnerUserId === auth.userId
@@ -882,7 +1008,9 @@ export async function getSessions(auth: SessionAuth, input: SessionListInput) {
   const page = pageRows.map(({ searchRank: _searchRank, ...row }) => row);
   const last = pageRows.at(-1);
   const [hydratedSessions, searchSnippets] = await Promise.all([
-    hydrateSessionRows(auth, page),
+    hydrateSessionRows(auth, page, {
+      includeJudgedStatus: input.includeJudgedStatus,
+    }),
     getSessionSearchSnippets(
       auth,
       page.map((session) => session.id),
@@ -901,7 +1029,10 @@ export async function getSessions(auth: SessionAuth, input: SessionListInput) {
   };
 }
 
-export async function getSessionSources(auth: SessionAuth) {
+export async function getSessionSources(
+  auth: SessionAuth,
+  archive: SessionArchiveFilter = 'non-archived',
+) {
   const rows = await db
     .selectDistinct({ source: sessions.sourceSurface })
     .from(sessions)
@@ -909,7 +1040,11 @@ export async function getSessionSources(auth: SessionAuth) {
       and(
         sessionListScope(auth),
         eq(sessions.visibility, 'visible'),
-        isNull(sessions.archivedAt),
+        archive === 'archived'
+          ? isNotNull(sessions.archivedAt)
+          : archive === 'all'
+            ? undefined
+            : isNull(sessions.archivedAt),
       ),
     )
     .orderBy(asc(sessions.sourceSurface));
@@ -1319,7 +1454,11 @@ export async function getSessionForTask(auth: SessionAuth, taskId: string) {
 export async function updateSessionMetadata(
   auth: SessionAuth,
   sessionId: string,
-  changes: { title?: string; archivedAt?: Date | null },
+  changes: {
+    title?: string;
+    archivedAt?: Date | null;
+    manualStatus?: SessionManualStatus | null;
+  },
 ) {
   const updatedAt = new Date();
   const updated = await db.transaction(async (tx) => {
@@ -1327,6 +1466,15 @@ export async function updateSessionMetadata(
       .update(sessions)
       .set({
         ...changes,
+        ...(changes.manualStatus === undefined
+          ? {}
+          : {
+              ...(changes.manualStatus === 'done'
+                ? {}
+                : { cachedStatus: changes.manualStatus }),
+              manualStatusSetAt:
+                changes.manualStatus === null ? null : updatedAt,
+            }),
         ...(changes.title === undefined
           ? {}
           : { titleEditedByUserAt: updatedAt }),

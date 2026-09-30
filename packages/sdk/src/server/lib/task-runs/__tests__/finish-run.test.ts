@@ -128,7 +128,12 @@ function makeTxSelectChain() {
 }
 
 const mockDbSelect = vi.fn().mockImplementation(() => makeSelectChain());
-const mockDbUpdateWhere = vi.fn().mockResolvedValue(undefined);
+const mockDbUpdateReturning = vi.fn().mockResolvedValue([{ id: 'task-1' }]);
+const mockDbUpdateWhere = vi.fn().mockImplementation(() =>
+  Object.assign(Promise.resolve(undefined), {
+    returning: (...args: unknown[]) => mockDbUpdateReturning(...args),
+  }),
+);
 const mockDbUpdateSet = vi.fn().mockReturnValue({
   where: (...args: unknown[]) => mockDbUpdateWhere(...args),
 });

@@ -19,9 +19,10 @@ account and API key; Roomote Cloud provisions managed credentials.
 Email is off by default. Set `R_EMAIL_CHANNEL_ENABLED=true` in the
 deployment's environment and restart. Until then the provider does not
 appear in settings, inbound webhook deliveries are acknowledged and dropped,
-and Roomote never sends email. New Roomote Cloud deployments receive a managed
-`<workspace-slug>@roomote.me` inbox by default; older deployments remain
-disabled until Roomote enables them.
+and Roomote never sends email. New Roomote Cloud deployments have a managed
+`<workspace-slug>@roomote.me` inbox by default. Roomote Cloud creates it the
+first time the deployment sends an email, such as a verification email or a
+notification. Older deployments stay disabled until Roomote enables them.
 
 Enabling the channel gives the deployment an email sender for the first
 time, so new password sign-ups also receive a verification email (see

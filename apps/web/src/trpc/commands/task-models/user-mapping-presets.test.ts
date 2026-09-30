@@ -209,6 +209,42 @@ describe('user task model mapping presets', () => {
     ).rejects.toThrow('Invalid: coding');
   });
 
+  it('uses the Advisor label for the legacy planning role in validation errors', async () => {
+    const settings = buildSettingsData();
+    mockGetTaskModelSettings.mockResolvedValue({
+      ...settings,
+      models: settings.models.map((model) =>
+        model.id === CODING_MODEL_ID
+          ? {
+              ...model,
+              metadata: {
+                supportsReasoning: true,
+                supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+              },
+            }
+          : model.id === HELPER_MODEL_ID
+            ? {
+                ...model,
+                metadata: {
+                  supportsReasoning: true,
+                  supportedReasoningEfforts: ['low'],
+                },
+              }
+            : model,
+      ),
+    });
+    const user = await userFactory.create();
+
+    await expect(
+      createUserTaskModelMappingPresetCommand(buildAuth(user.id), {
+        name: 'Advisor validation',
+        roles: buildRoles({ planning: HELPER_MODEL_ID }, { planning: 'high' }),
+      }),
+    ).rejects.toThrow(
+      'Choose a reasoning level supported by each selected model. Invalid: advisor.',
+    );
+  });
+
   it('validates preset names and the complete role mapping on the server', async () => {
     const user = await userFactory.create();
     const auth = buildAuth(user.id);

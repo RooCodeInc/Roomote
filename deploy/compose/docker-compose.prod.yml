@@ -626,6 +626,33 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Optional CPU decision model (judgment sidecar). Opt-in via
+  # COMPOSE_PROFILES=judgment, then point Roomote at it with
+  # R_JUDGMENT_UPSTREAM_URL=http://judgment:8080. It serves
+  # roomote/roomote-judgment-gliner (a public, fine-tuned GLiNER 2.5 model)
+  # unless JUDGMENT_MODEL names another checkpoint, and keeps the download in
+  # its volume. Internal-only: no published ports and no Caddy route. By
+  # default it uses the same registry, namespace, and release tag as the app
+  # image; JUDGMENT_IMAGE can override the complete ref. The memory and CPU
+  # caps bound what inference can take from the host.
+  judgment:
+    profiles:
+      - judgment
+    image: ${JUDGMENT_IMAGE:-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-judgment:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}}
+    restart: unless-stopped
+    networks: [default]
+    environment:
+      JUDGMENT_MODEL: ${JUDGMENT_MODEL:-roomote/roomote-judgment-gliner}
+      HF_TOKEN: ${JUDGMENT_HF_TOKEN:-}
+      JUDGMENT_API_KEY: ${R_JUDGMENT_UPSTREAM_API_KEY:-}
+      JUDGMENT_THREADS: ${JUDGMENT_CPUS:-4}
+    mem_limit: ${JUDGMENT_MEMORY_LIMIT:-4g}
+    cpus: ${JUDGMENT_CPUS:-4}
+    volumes:
+      - judgment_models:/models
+    security_opt:
+      - no-new-privileges:true
+
   preview-proxy:
     <<: *roomote-service
     image: *roomote-app-image
@@ -682,6 +709,7 @@ volumes:
   caddy_config:
   gbrain_data:
   infinity_cache:
+  judgment_models:
 
 networks:
   default:

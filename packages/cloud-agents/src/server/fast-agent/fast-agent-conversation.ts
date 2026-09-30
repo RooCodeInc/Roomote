@@ -205,6 +205,16 @@ export type FastAgentInputPreset =
   | 'setup_starter_tasks'
   | 'setup_integrations';
 
+export type FastAgentAutomationToolResult = {
+  integrationId: string;
+  toolName: string;
+  result: string;
+};
+
+export type FastAgentAutomationLaunchCriteriaDecision = {
+  decision: 'continue' | 'stop';
+};
+
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
@@ -215,6 +225,13 @@ export type FastAgentTurnAdapter = {
    * readiness conditions that the model prompt alone must not enforce.
    */
   assertTaskLaunch?: () => Promise<void>;
+  /** Evaluates a criteria-bearing custom automation after its own evidence gathering. */
+  evaluateAutomationLaunchCriteria?: (input: {
+    findingsReport: string;
+    rawToolResults: FastAgentAutomationToolResult[];
+  }) => Promise<FastAgentAutomationLaunchCriteriaDecision>;
+  /** Materializes any deferred provider root after the launch decision continues. */
+  prepareAutomationLaunch?: () => Promise<FastAgentConversation | void>;
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
   /** Surfaces with a streaming API render the reply as it is written. */
   createReplyStream?: () => FastAgentReplyStream;

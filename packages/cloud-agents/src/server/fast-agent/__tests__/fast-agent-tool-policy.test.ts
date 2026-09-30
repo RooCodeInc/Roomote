@@ -36,6 +36,20 @@ describe('buildFastAgentToolFilter', () => {
 });
 
 describe('getFastAgentNativeAcpKind', () => {
+  it('exposes the launch criteria tool only for gated automation turns', () => {
+    const name = FAST_AGENT_NATIVE_TOOL_NAMES.evaluateAutomationLaunchCriteria;
+    expect(buildFastAgentToolFilter([], { surface: 'slack' })[name]).toBe(
+      false,
+    );
+    expect(
+      buildFastAgentToolFilter([], {
+        surface: 'slack',
+        automationLaunchCriteriaEnabled: true,
+      })[name],
+    ).toBe(true);
+    expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[name]).toBe(false);
+  });
+
   it('keeps integration discovery and approval setup available', () => {
     const filter = buildFastAgentToolFilter([], {
       surface: 'web',

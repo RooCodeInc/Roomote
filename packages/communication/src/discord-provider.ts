@@ -12,7 +12,7 @@ import type {
 } from './provider';
 
 export const DISCORD_MAX_MESSAGE_LENGTH = 2_000;
-const DISCORD_MAX_EMBEDS_PER_MESSAGE = 10;
+export const DISCORD_MAX_EMBEDS_PER_MESSAGE = 10;
 const DEFAULT_DISCORD_API_BASE_URL = 'https://discord.com/api/v10';
 const DEFAULT_DISCORD_TIMEOUT_MS = 10_000;
 const DEFAULT_DISCORD_MAX_RETRIES = 2;
@@ -616,6 +616,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     messageId: string;
     text: string;
     buttons?: CommunicationMessageButton[][];
+    images?: Array<{ url: string; altText: string }>;
     /** Footer-only edits must not clear interactive controls on the carrier. */
     preserveButtons?: boolean;
   }): Promise<void> {
@@ -624,12 +625,25 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         'Discord edited message text cannot exceed 2000 characters.',
       );
     }
+    if ((input.images?.length ?? 0) > DISCORD_MAX_EMBEDS_PER_MESSAGE) {
+      throw new Error(
+        `Discord edited messages support at most ${DISCORD_MAX_EMBEDS_PER_MESSAGE} images.`,
+      );
+    }
     await this.request(
       'PATCH',
       `/channels/${input.channelId}/messages/${input.messageId}`,
       {
         content: input.text,
         allowed_mentions: { parse: [] },
+        ...(input.images
+          ? {
+              embeds: input.images.map((image) => ({
+                description: image.altText.slice(0, 4_096),
+                image: { url: image.url },
+              })),
+            }
+          : {}),
         ...(input.preserveButtons
           ? {}
           : { components: buildDiscordComponents(input.buttons) ?? [] }),
@@ -1121,10 +1135,16 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     interactionToken: string;
     text: string;
     buttons?: CommunicationMessageButton[][];
+    images?: Array<{ url: string; altText: string }>;
   }): Promise<CommunicationPostMessageResult> {
     if (input.text.length > DISCORD_MAX_MESSAGE_LENGTH) {
       throw new Error(
         'Discord interaction response text cannot exceed 2000 characters.',
+      );
+    }
+    if ((input.images?.length ?? 0) > DISCORD_MAX_EMBEDS_PER_MESSAGE) {
+      throw new Error(
+        `Discord interaction responses support at most ${DISCORD_MAX_EMBEDS_PER_MESSAGE} images.`,
       );
     }
     const message = await this.request<DiscordApiMessage>(
@@ -1134,6 +1154,14 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         content: input.text,
         allowed_mentions: { parse: [] },
         components: buildDiscordComponents(input.buttons) ?? [],
+        ...(input.images?.length
+          ? {
+              embeds: input.images.map((image) => ({
+                description: image.altText.slice(0, 4_096),
+                image: { url: image.url },
+              })),
+            }
+          : {}),
       },
       {
         retryNetworkErrors: true,

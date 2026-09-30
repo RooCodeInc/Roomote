@@ -136,3 +136,10 @@ img[src*='/favicon.svg'] {
 .dark img[src*='/favicon.svg'] {
   filter: invert(1);
 }
+
+/* Hide Mintlify's decorative status widget on narrow pages so it cannot cover copy. */
+@media (max-width: 767px) {
+  [role='status'][aria-live='polite'][class~='z-999'] {
+    display: none;
+  }
+}

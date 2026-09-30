@@ -1,9 +1,11 @@
 import {
-  DEPLOYMENT_EXPERIMENT_AUDIENCE,
+  DEPLOYMENT_EXPERIMENT_CONFIG,
   DEPLOYMENT_EXPERIMENT_IDS,
-  DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
   DEPLOYMENT_METADATA_BOOLEAN_CONFIG,
   type DeploymentExperimentAudience,
+  type DeploymentExperimentDescriptor,
+  type DeploymentExperimentId,
+  type DeploymentExperimentRuntimeId,
   type DeploymentExperimentValues,
 } from './config';
 import { normalizeMetadataRecord } from './deployment-previews';
@@ -15,13 +17,14 @@ export type {
   MetadataRecord,
 } from './types';
 export {
-  DEPLOYMENT_EXPERIMENT_AUDIENCE,
   DEPLOYMENT_EXPERIMENT_AUDIENCES,
+  DEPLOYMENT_EXPERIMENT_CONFIG,
   DEPLOYMENT_EXPERIMENT_IDS,
-  DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
   DEPLOYMENT_METADATA_BOOLEAN_CONFIG,
   type DeploymentExperimentAudience,
+  type DeploymentExperimentDescriptor,
   type DeploymentExperimentId,
+  type DeploymentExperimentRuntimeId,
   type DeploymentExperimentValues,
 } from './config';
 export { normalizeMetadataRecord } from './deployment-previews';
@@ -53,7 +56,7 @@ export function getDeploymentExperimentValues(
   return Object.fromEntries(
     DEPLOYMENT_EXPERIMENT_IDS.map((id) => [
       id,
-      normalizedMetadata[DEPLOYMENT_EXPERIMENT_METADATA_KEYS[id]] === true,
+      normalizedMetadata[DEPLOYMENT_EXPERIMENT_CONFIG[id].metadataKey] === true,
     ]),
   ) as DeploymentExperimentValues;
 }
@@ -61,18 +64,31 @@ export function getDeploymentExperimentValues(
 export function getDeploymentExperimentAudience(
   id: string,
 ): DeploymentExperimentAudience | undefined {
-  if (!Object.hasOwn(DEPLOYMENT_EXPERIMENT_AUDIENCE, id)) return undefined;
+  return getDeploymentExperimentConfig(id)?.audience;
+}
 
-  return DEPLOYMENT_EXPERIMENT_AUDIENCE[
-    id as keyof typeof DEPLOYMENT_EXPERIMENT_AUDIENCE
-  ];
+export function getDeploymentExperimentConfig(
+  id: string,
+): DeploymentExperimentDescriptor | undefined {
+  if (!Object.hasOwn(DEPLOYMENT_EXPERIMENT_CONFIG, id)) return undefined;
+
+  return DEPLOYMENT_EXPERIMENT_CONFIG[id as DeploymentExperimentId];
+}
+
+export function isDeploymentExperimentRuntimeReadable(
+  id: string,
+): id is DeploymentExperimentRuntimeId {
+  const config = getDeploymentExperimentConfig(id);
+  return (
+    config?.audience === 'internal-nightly' && config.runtimeReadable === true
+  );
 }
 
 export function getDeploymentExperimentIdsForAudience(
   audience: DeploymentExperimentAudience,
 ) {
   return DEPLOYMENT_EXPERIMENT_IDS.filter(
-    (id) => getDeploymentExperimentAudience(id) === audience,
+    (id) => DEPLOYMENT_EXPERIMENT_CONFIG[id].audience === audience,
   );
 }
 

@@ -181,6 +181,28 @@ describe('createMergedPullRequestAuditJob eligibility gate', () => {
     expect(mockGetAutomationRuntime).toHaveBeenCalledWith('security_auditor');
     expect(result.skippedReason).toBe('Automation is disabled.');
   });
+
+  it('uses a bounded daily window for an explicit on-demand run', async () => {
+    mockHasAnyActiveRepository.mockResolvedValue(true);
+    mockListConnectedCommunicationProviders.mockResolvedValue(['teams']);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'teams',
+      channelId: 'manager-channel',
+    });
+    mockGetAutomationRuntime.mockResolvedValue({
+      enabled: true,
+      scheduleMode: 'on_demand',
+      lastRunAt: null,
+      scanCursor: null,
+      settings: {},
+    });
+
+    const result = await job({ context: { trigger: 'manual' } });
+
+    expect(result.skippedReason).toBe(
+      'No merged pull requests in the scan window.',
+    );
+  });
 });
 
 describe('buildMergedPullRequestTaskContext', () => {
@@ -192,7 +214,7 @@ describe('buildMergedPullRequestTaskContext', () => {
         channelId: 'C123',
       } as never,
       hasMorePullRequests: false,
-      manualTrigger: false,
+      trigger: 'scheduled',
       mergedPullRequests: [
         {
           repositoryId: '11111111-1111-4111-8111-111111111111',

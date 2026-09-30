@@ -628,6 +628,23 @@ describe('daily pull request activity', () => {
       { label: 'Mar 13', createdPullRequests: 1, mergedPullRequests: 0 },
     ]);
   });
+
+  it('uses the configured calendar period for daily and monthly digests', () => {
+    expect(
+      getManagerStatsWindowStart(
+        new Date('2026-03-13T20:00:00.000Z'),
+        'America/New_York',
+        'daily',
+      ),
+    ).toEqual(new Date('2026-03-13T04:00:00.000Z'));
+    expect(
+      getManagerStatsWindowStart(
+        new Date('2026-03-31T20:00:00.000Z'),
+        'America/New_York',
+        'monthly',
+      ),
+    ).toEqual(new Date('2026-03-01T05:00:00.000Z'));
+  });
 });
 
 function repositoryRow(overrides: Partial<RepositoryRow>): RepositoryRow {

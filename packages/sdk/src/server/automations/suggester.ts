@@ -38,6 +38,8 @@ import {
 } from './suggester-dispatch';
 import {
   emptyJobResult,
+  resolveAutomationRunContext,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -154,12 +156,14 @@ async function countOpenSuggestions(): Promise<number> {
 }
 
 export async function suggesterJob(
-  opts: AutomationRunOpts = {},
+  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting suggester evaluator`);
 
   const now = new Date();
   const result = emptyJobResult();
+  const { isExplicitRun, taskTrigger, webhookInputJson } =
+    resolveAutomationRunContext(opts.context);
   const runtime = await getAutomationRuntime('suggester');
   const eligibleDeployments = await findEligibleDeployments(runtime);
 
@@ -183,8 +187,13 @@ export async function suggesterJob(
         }));
       const channelId = destination?.channelId;
       const rules = getAutomationAdditionalRules(runtime.settings);
+      const isExplicitOnDemandRun = isExplicitRun && frequency === 'on_demand';
 
-      if (!frequency || frequency === 'off' || !(frequency in WINDOW_DAYS)) {
+      if (
+        !frequency ||
+        frequency === 'off' ||
+        (!isExplicitOnDemandRun && !(frequency in WINDOW_DAYS))
+      ) {
         result.skippedReason = 'Automation is disabled.';
         skipped++;
         continue;
@@ -218,7 +227,7 @@ export async function suggesterJob(
       const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
       if (
-        !opts.manualTrigger &&
+        !isExplicitRun &&
         !isRunDue({
           now,
           timeZone: timezone,
@@ -384,7 +393,8 @@ export async function suggesterJob(
               ),
           ),
           repositoryPartitions: [...partitions.values()],
-          triggerKind: opts.manualTrigger ? 'manual' : 'scheduled',
+          triggerKind: taskTrigger === 'schedule' ? 'scheduled' : taskTrigger,
+          webhookInputJson,
           destinationPayloadFields:
             buildDestinationTaskPayloadFields(reportDestination),
         });

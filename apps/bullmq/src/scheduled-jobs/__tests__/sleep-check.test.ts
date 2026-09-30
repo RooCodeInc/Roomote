@@ -212,7 +212,8 @@ import { resolveComputeProviderEnvValues } from '@roomote/db/server';
  * Order matters: the first resolved value maps to the dueJobs query,
  * the second to the staleWorkerJobs query, the third to the booting jobs
  * that never emitted a heartbeat, the fourth to the provider hard-timeout
- * backstop query, and the fifth to never-started runs that have no instance.
+ * backstop query, the fifth to never-started runs that have no instance, and
+ * the sixth to finished runs that may have left a sandbox running.
  */
 function mockJobQueries({
   dueJobs = [],
@@ -220,12 +221,14 @@ function mockJobQueries({
   bootingJobs = [],
   hardLimitJobs = [],
   neverStartedWithoutInstance = [],
+  finishedRunsWithSandbox = [],
 }: {
   dueJobs?: unknown[];
   staleJobs?: unknown[];
   bootingJobs?: unknown[];
   hardLimitJobs?: unknown[];
   neverStartedWithoutInstance?: unknown[];
+  finishedRunsWithSandbox?: unknown[];
 }) {
   const normalizedDueJobs = dueJobs.map((job) =>
     job && typeof job === 'object' && !('sleepAt' in job) && !Array.isArray(job)
@@ -243,7 +246,8 @@ function mockJobQueries({
     .mockResolvedValueOnce(staleJobs)
     .mockResolvedValueOnce(bootingJobs)
     .mockResolvedValueOnce(normalizedHardLimitJobs)
-    .mockResolvedValueOnce(neverStartedWithoutInstance);
+    .mockResolvedValueOnce(neverStartedWithoutInstance)
+    .mockResolvedValueOnce(finishedRunsWithSandbox);
 }
 
 describe('sleepTaskRunNow', () => {
@@ -455,14 +459,12 @@ describe('sleepCheckJob', () => {
 
     await sleepCheckJob();
 
-    // Due, stale worker, booting, hard limit, and never-started runs that
-    // have no instance.
-    expect(selectLimitFn).toHaveBeenCalledTimes(5);
-    expect(selectLimitFn).toHaveBeenNthCalledWith(1, 500);
-    expect(selectLimitFn).toHaveBeenNthCalledWith(2, 500);
-    expect(selectLimitFn).toHaveBeenNthCalledWith(3, 500);
-    expect(selectLimitFn).toHaveBeenNthCalledWith(4, 500);
-    expect(selectLimitFn).toHaveBeenNthCalledWith(5, 500);
+    // Due, stale worker, booting, hard limit, never-started runs that have
+    // no instance, and finished runs that may have left a sandbox running.
+    expect(selectLimitFn).toHaveBeenCalledTimes(6);
+    for (let call = 1; call <= 6; call += 1) {
+      expect(selectLimitFn).toHaveBeenNthCalledWith(call, 500);
+    }
   });
 
   it('orders bounded due and stale scans by the oldest actionable timestamp', async () => {
@@ -2276,5 +2278,93 @@ describe('sleepCheckJob', () => {
         signal: 'sandbox-destroy',
       }),
     );
+  });
+});
+
+describe('sleepCheckJob finished-run sandbox cleanup', () => {
+  const finishedRun = {
+    id: 8027,
+    payloadKind: TaskPayloadKind.StandardTask,
+    status: RunStatus.Failed,
+    taskPhase: null,
+    machineId: 'sb-leaked',
+    vendor: 'roomote',
+    taskId: 'task-leaked',
+    snapshotRequestedAt: null,
+    sandboxCmdId: null,
+    sleepAt: null,
+    sleepRequestedAt: null,
+    startedAt: new Date(Date.now() - 60 * 60 * 1_000),
+    workerHeartbeatAt: new Date(Date.now() - 60 * 60 * 1_000),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSleepCheckClientCache();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    selectFn.mockReturnValue({ from: fromFn });
+    fromFn.mockReturnValue({ where: selectWhereFn });
+    selectWhereFn.mockReturnValue({ orderBy: selectOrderByFn });
+    selectOrderByFn.mockReturnValue({ limit: selectLimitFn });
+    selectLimitFn.mockResolvedValue([]);
+    updateFn.mockReturnValue({ set: setFn });
+    setFn.mockReturnValue({ where: updateWhereFn });
+    returningFn.mockResolvedValue([{ id: finishedRun.id }]);
+    mockCreateComputeProviderClient.mockImplementation(() => ({
+      destroyInstance: mockDestroyInstance,
+      getInstanceStatus: mockGetInstanceStatus,
+    }));
+    mockCreateComputeProviderMutationEventRecorder.mockReturnValue(
+      mockRecordMutation,
+    );
+    mockRecordMutation.mockResolvedValue(undefined);
+    mockRecordTaskRunEvent.mockResolvedValue(undefined);
+    mockDestroyInstance.mockResolvedValue({});
+  });
+
+  it('destroys a sandbox still running under a failed run', async () => {
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockJobQueries({ finishedRunsWithSandbox: [finishedRun] });
+
+    await sleepCheckJob();
+
+    expect(setFn).toHaveBeenCalledWith({ sleepRequestedAt: expect.any(Date) });
+    expect(mockDestroyInstance).toHaveBeenCalledWith({
+      instanceId: 'sb-leaked',
+    });
+    expect(mockFinishRun).not.toHaveBeenCalled();
+  });
+
+  it('leaves an already-stopped sandbox alone and keeps the run claimed', async () => {
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+    mockJobQueries({ finishedRunsWithSandbox: [finishedRun] });
+
+    await sleepCheckJob();
+
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+    expect(setFn).not.toHaveBeenCalledWith({ sleepRequestedAt: null });
+  });
+
+  it('skips a run another sweep already claimed', async () => {
+    returningFn.mockResolvedValue([]);
+    mockJobQueries({ finishedRunsWithSandbox: [finishedRun] });
+
+    await sleepCheckJob();
+
+    expect(mockGetInstanceStatus).not.toHaveBeenCalled();
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+  });
+
+  it('releases the claim when the provider cannot be reached, so the next sweep retries', async () => {
+    mockGetInstanceStatus.mockRejectedValue(new Error('broker unavailable'));
+    mockJobQueries({ finishedRunsWithSandbox: [finishedRun] });
+
+    await sleepCheckJob();
+
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+    expect(setFn).toHaveBeenCalledWith({ sleepRequestedAt: null });
   });
 });

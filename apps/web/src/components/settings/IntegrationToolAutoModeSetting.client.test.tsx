@@ -146,4 +146,22 @@ describe('IntegrationToolAutoModeSetting', () => {
       policy: 'Existing guidance',
     });
   });
+
+  it('only allows Auto-on when the resolved model is Jev', () => {
+    state.settings = {
+      mode: 'off',
+      policy: '',
+      model: { kind: 'helper', model: 'openai/gpt-test' },
+    };
+    const { rerender } = render(<IntegrationToolAutoModeSetting />);
+    expect(
+      screen.getByRole('switch', { name: 'Enable auto-approval' }),
+    ).toBeDisabled();
+
+    state.settings = { mode: 'off', policy: '', model: { kind: 'judgment' } };
+    rerender(<IntegrationToolAutoModeSetting />);
+    expect(
+      screen.getByRole('switch', { name: 'Enable auto-approval' }),
+    ).toBeEnabled();
+  });
 });

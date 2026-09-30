@@ -26,20 +26,33 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 
 ## Build
 
-- `pnpm lint` — oxfmt format check + monorepo oxlint + residual ESLint in web and worker
-- `pnpm check-types` — TypeScript type checking
+- `pnpm lint:fast` — normal broad lint path: monorepo oxlint + residual ESLint in web and worker
+- `pnpm check-types:fast` — normal broad type-check path
+- `pnpm lint` and `pnpm check-types` — formatting-inclusive full static validation when explicitly requested
 - `pnpm format` — oxfmt formatting
 
 ## Validation
 
-- `pnpm test` — Vitest across all workspaces
+- Default to targeted test files or the narrowest package-scoped test command that covers the change.
 - Targeted tests: `pnpm exec dotenvx run -f .env.test -- pnpm --filter <package> exec vitest run path/to/file.test.ts`
+- `pnpm test` — Full repository Vitest suite; it is very slow, so run it rarely and only when a concrete reason requires full-suite coverage.
 - If `pnpm` is missing or resolves to the wrong version, run `mise install` and retry the command with `mise exec --`
-- `pnpm lint && pnpm check-types` — Full static analysis
-- `pnpm lint:fast && pnpm check-types:fast && pnpm knip` — Matches the full pre-push suite (pre-push runs the same gates in parallel after oxlint)
-- `pnpm check` — Runs lint + check-types + test + knip
+- `pnpm lint:fast && pnpm check-types:fast && pnpm knip` — Normal broad validation; matches the full pre-push suite (pre-push runs the same gates in parallel after oxlint)
+- `pnpm lint && pnpm check-types` — Full static analysis when a concrete reason requires broader validation
+- `pnpm check` — Full repo gate when a concrete reason requires the full gate; runs lint + check-types + test + knip
 - If `pnpm lint` fails because of formatting, run `pnpm format` and rerun `pnpm lint`
 - Pre-commit hooks: `lint-staged` (oxfmt on staged files). Pre-push: `node scripts/pre-push-checks.mjs` (oxlint, then web/worker residual ESLint + `check-types:fast` + knip in parallel).
+
+## Test guidance
+
+- Read the affected package's `package.json` and `vitest.config.*` before selecting package-scoped tests.
+- Do not pass test-file paths to root test commands; use the targeted package command above.
+- Pair focused tests with the affected package's typecheck when a local package change requires it.
+- For server-side integration paths where auth, queries, transactions, or persistence semantics matter, use the real test database, reuse available `@roomote/db/server` factories, and verify database state after mutations.
+- In orchestration or payload-shaping unit tests, mock collaborators at the boundary instead of using database mocks to prove SQL behavior.
+- For visual-only UI changes, use the smallest relevant static checks and visual proof; add UI automation only for behavioral contracts, not incidental styling or markup.
+- Do not add `vitest` global imports where the package config already enables `globals`.
+- Include matching build or CI-equivalent validation when a change touches Docker/build plumbing.
 
 ## Working notes
 

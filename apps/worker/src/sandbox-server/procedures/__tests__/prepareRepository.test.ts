@@ -1,3 +1,7 @@
+import { installRepositoryJudgement } from '../../../run-task/repository-judgement';
+vi.mock('../../../run-task/repository-judgement', () => ({
+  installRepositoryJudgement: vi.fn(),
+}));
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -272,6 +276,9 @@ describe('prepareRepository procedure', () => {
       });
 
       expect(prepareSpy).toHaveBeenCalledTimes(1);
+      expect(installRepositoryJudgement).toHaveBeenCalledWith(
+        result.repositoryPath,
+      );
       expect(result).toMatchObject({
         success: true,
         repositoryFullName: 'acme/web',
@@ -367,6 +374,7 @@ describe('prepareRepository procedure', () => {
     });
 
     expect(prepareSpy).not.toHaveBeenCalled();
+    expect(installRepositoryJudgement).toHaveBeenCalledWith(repoPath);
     expect(result).toMatchObject({
       success: true,
       repositoryPath: repoPath,

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { Context, Next } from 'hono';
 import {
   getLegacyRoomoteMcpResourceUrl,
@@ -741,6 +743,69 @@ describe('route policy enforcement', () => {
   });
 
   describe('webhook routes', () => {
+    it('routes custom automation URL credentials through the public rate-limited webhook policy', async () => {
+      const automationId = '11111111-1111-4111-8111-111111111111';
+      const path = `/api/webhooks/custom-automations/${automationId}/bad-token`;
+      expect(findRoutePolicyRule(path)).toMatchObject({
+        name: 'webhook-custom-automation',
+        policy: 'webhook',
+        rateLimits: [
+          { keySource: 'client', limit: 60, windowSeconds: 60 },
+          {
+            keySource: 'webhook-credential',
+            limit: 15,
+            windowSeconds: 60,
+          },
+        ],
+      });
+
+      const response = await createApiApp().request(`http://localhost${path}`, {
+        method: 'GET',
+      });
+      expect(response.status).toBe(405);
+      expect(response.headers.get('cache-control')).toBe('no-store, private');
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    });
+
+    it('rate limits each URL credential before starting webhook work', async () => {
+      const automationId = '22222222-2222-4222-8222-222222222222';
+      const token = 'A'.repeat(43);
+      const credentialHash = createHash('sha256').update(token).digest('hex');
+      seedRateLimitBucket(
+        'webhook-custom-automation',
+        'webhook-credential',
+        credentialHash,
+        60,
+        15,
+      );
+      const response = await createApiApp().request(
+        `http://localhost/api/webhooks/custom-automations/${automationId}/${token}`,
+        { method: 'POST' },
+      );
+
+      expect(response.status).toBe(429);
+      expect(response.headers.get('cache-control')).toBe('no-store, private');
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    });
+
+    it('keeps a per-client cap across webhook credentials', async () => {
+      const automationId = '33333333-3333-4333-8333-333333333333';
+      seedRateLimitBucket(
+        'webhook-custom-automation',
+        'client',
+        'unknown',
+        60,
+        60,
+      );
+      const response = await createApiApp().request(
+        `http://localhost/api/webhooks/custom-automations/${automationId}/${'B'.repeat(43)}`,
+        { method: 'POST' },
+      );
+
+      expect(response.status).toBe(429);
+      expect(response.headers.get('cache-control')).toBe('no-store, private');
+    });
+
     it('exempts the secret-authenticated Discord worker route from shared IP limits', () => {
       expect(
         findRoutePolicyRule('/api/internal/discord/events/process'),
