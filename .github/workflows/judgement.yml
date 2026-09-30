@@ -132,7 +132,9 @@ jobs:
           case "$result" in
             0) echo 'coverage=complete' >> "$GITHUB_OUTPUT" ;;
             3)
-              # Incomplete coverage is not a rule violation. Keep it visible.
+              # All incomplete results are non-blocking, including evidence or
+              # inference failures caught by the checker. Confirmed violations
+              # take precedence and exit 1, even with partial coverage.
               echo 'coverage=incomplete' >> "$GITHUB_OUTPUT"
               echo '::warning::Judgement found no violations, but coverage is incomplete. See the check log.'
               echo 'Judgement found no violations, but coverage is incomplete. See the check log for unresolved rules.' >> "$GITHUB_STEP_SUMMARY"
