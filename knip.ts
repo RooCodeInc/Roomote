@@ -27,7 +27,8 @@ const config: KnipConfig = {
     'apps/dev': {
       project: ['src/**/*.ts'],
       ignore: ['src/services/worker-release.ts'],
-      ignoreBinaries: ['pm2', 'ngrok'],
+      // tar is supplied by the host and used to inspect worker release archives.
+      ignoreBinaries: ['pm2', 'ngrok', 'tar'],
     },
     // Self-contained Mintlify docs site. It has no TypeScript project; the
     // `mint` CLI is installed globally.

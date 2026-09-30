@@ -158,6 +158,8 @@ find "$TAG/dist" -type f -name '*.map' -delete
 # Packaged skills source folders live outside .agents/ so they don't pollute the
 # agent home. activateSkillsFolder() copies the selected one into .agents/skills/.
 [ -d "packages/cloud-agents/src/server/workflows/skills" ] && cp -r packages/cloud-agents/src/server/workflows/skills "$TAG/.packaged-skills"
+# Use the skill shipped with the same pinned package as the bundled CLI.
+cp -R apps/worker/dist/skills/judgement "$TAG/.packaged-skills/standard/judgement"
 echo "$VERSION" > "$TAG/VERSION"
 echo "${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}" > "$TAG/COMMIT"
 echo "$NODE_PTY_VERSION" > "$TAG/NODE_PTY_VERSION"

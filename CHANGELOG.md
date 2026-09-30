@@ -2,6 +2,31 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.15.0 (2026-09-30)
+
+Roomote 1.15 makes sessions and automation runs easier to follow while adding opt-in Judgement repository rules, prompt history, and more reliable approval and resume flows.
+
+### Highlights
+
+- Successful manual automation launches now link directly to the exact session they started, making it easier to follow the run and any delegated work.
+- Admins can now opt into Judgement repository rules under Experimental settings to give coding tasks a Jev-backed skill and command for authoring, testing, calibrating, and enforcing repository-specific checks.
+- Task and session composers can now recall earlier prompts with ArrowUp while preserving multiline editing, input-method composition, and suggestion behavior.
+- The Sessions board now supports mouse, touch, and keyboard drag-and-drop status changes, archive filtering, and per-lane filters for faster session triage.
+
+### Minor changes
+
+- Successful manual automation launches now link directly to the exact session they started, making it easier to follow the run and any delegated work.
+- Admins can now opt into Judgement repository rules under Experimental settings to give coding tasks a Jev-backed skill and command for authoring, testing, calibrating, and enforcing repository-specific checks.
+- Task and session composers can now recall earlier prompts with ArrowUp while preserving multiline editing, input-method composition, and suggestion behavior.
+- The Sessions board now supports mouse, touch, and keyboard drag-and-drop status changes, archive filtering, and per-lane filters for faster session triage.
+
+### Patch changes
+
+- Fix tool approvals failing for tool calls made without arguments, which were rejected instead of asking for approval.
+- Automation sessions with an open Roomote-created pull request now remain in Needs input until the pull request is reviewed, merged, or closed.
+- Follow-ups on existing tasks no longer fail with a source-control token error after a repository in the task's workspace is deleted or removed from the GitHub App.
+- Apply tool approval choices to integration calls that a session's subagents make, so those calls ask for approval like any other.
+
 ## 1.14.0 (2026-09-30)
 
 Roomote 1.14 expands automation triggers and session workflows while adding GPT-6.1 Sol and staged repository Judgement checks.

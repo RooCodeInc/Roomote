@@ -952,8 +952,9 @@ export const runTask = async ({
 
     const homeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
-    await setupJudgement({
+    const judgementEnabled = await setupJudgement({
       runtimeEnv,
+      homeDir,
       logger,
       registerCleanup: (close) => {
         closeJudgementProxy = close;
@@ -1013,6 +1014,7 @@ export const runTask = async ({
         ...FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
         ...(zeroIntegrationEnabled ? [] : ['zero']),
         ...(jevgrepEnabled ? [] : ['jevgrep']),
+        ...(judgementEnabled ? [] : ['judgement']),
       ],
     });
 
@@ -2269,6 +2271,7 @@ export const runTask = async ({
             homeDir,
           ),
           runtimeEnv,
+          homeDir,
         ),
       harness,
       harnessManager,

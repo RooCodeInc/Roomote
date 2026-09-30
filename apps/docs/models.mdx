@@ -352,6 +352,21 @@ same decisions for calibration while Jev remains the selected route. Many
 deployments already have OpenRouter or Vercel AI Gateway keys for task
 inference, and selecting those routes sends decision text to that provider.
 
+Enable **Judgement repository rules** under **Settings → Experimental** to give
+coding tasks the **Judgement** skill and `judgement` command on their next run.
+The experiment is off by default and requires a configured Jev route and provider
+key. You can ask a Roomote agent to prevent a recurring repository mistake, such as “add a rule
+so we stop introducing this wording.” The skill helps it scope a rule, add labeled
+examples, and test the cutoff. Judgement uses your configured Jev provider; no
+additional task API key or skill installation is needed.
+
+The command supports `check`, `test`, `calibrate`, `capture`, and `compare`.
+Rules and examples live in the repository's `.judgement/` directory. Calibration
+makes inference requests; capturing examples and comparing saved reports do not.
+The skill is unavailable when a supported Jev route is not configured or setup
+fails. It does not automatically add rules or change which CI checks are required.
+For deployment-wide conversational preferences, use [Agent Guidance](/agent-guidance).
+
 Enable **Jevgrep code search** under **Settings → Experimental** to give coding tasks
 [Jevgrep](https://github.com/dzhng/jevgrep) (`jg`) and its agent skill for finding
 relevant code from natural-language questions. This experiment is off by default

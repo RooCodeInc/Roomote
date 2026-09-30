@@ -44,6 +44,8 @@ import { resolveAutomationRepositoryDestination } from './ci-failure-triage-rout
 import {
   appendAutomationWebhookInput,
   emptyJobResult,
+  resolveAutomationRunContext,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -323,12 +325,14 @@ Do not send an acknowledgement or progress update. Treat later replies in this t
 }
 
 export async function announcerJob(
-  opts: AutomationRunOpts = {},
+  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting announcer evaluator`);
 
   const now = new Date();
   const result = emptyJobResult();
+  const { isExplicitRun, taskTrigger, webhookInputJson } =
+    resolveAutomationRunContext(opts.context);
   const runtime = await getAutomationRuntime('announcer');
   const eligibleDeployments = await findEligibleDeployments(runtime);
 
@@ -344,13 +348,12 @@ export async function announcerJob(
   for (const deployment of eligibleDeployments) {
     try {
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
-      const isManualOnDemandRun =
-        opts.manualTrigger === true && frequency === 'on_demand';
+      const isExplicitOnDemandRun = isExplicitRun && frequency === 'on_demand';
 
       if (
         !frequency ||
         frequency === 'off' ||
-        (!isManualOnDemandRun && !(frequency in WINDOW_DAYS))
+        (!isExplicitOnDemandRun && !(frequency in WINDOW_DAYS))
       ) {
         result.skippedReason = 'Automation is disabled.';
         skipped++;
@@ -394,7 +397,7 @@ export async function announcerJob(
       const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
       if (
-        !opts.manualTrigger &&
+        !isExplicitRun &&
         !isRunDue({
           now,
           timeZone: timezone,
@@ -516,7 +519,7 @@ export async function announcerJob(
                   recentThreadFeedback,
                   routingInstructions: rules?.instructions,
                 }),
-                opts.webhookInputJson,
+                webhookInputJson,
               ),
               ...buildDestinationTaskPayloadFields(destination),
               backgroundAutomationKey: 'announcer',
@@ -532,7 +535,7 @@ export async function announcerJob(
           initiator: { kind: 'automation', key: 'announcer' },
           workflow: 'standard',
           surface: 'system',
-          trigger: opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
+          trigger: taskTrigger,
           ...(destination.provider === 'slack'
             ? { channels: { slackChannelId: channelId } }
             : {}),

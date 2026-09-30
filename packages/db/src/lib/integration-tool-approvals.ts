@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { and, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 
 import type {
   IntegrationToolApprovalMetadata,
@@ -349,7 +349,7 @@ export async function insertIntegrationToolApproval(
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
-        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
         expiresAt: sql`clock_timestamp() + ${INTEGRATION_TOOL_APPROVAL_WINDOW_MINUTES} * interval '1 minute'`,
       })
       .onConflictDoNothing({
@@ -393,6 +393,51 @@ export async function listPendingIntegrationToolApprovals(context: {
     )
     .orderBy(integrationToolApprovalRequests.createdAt);
   return rows.map(approvalMetadata);
+}
+
+/**
+ * Recent decisions made by the Session owner on that Session's own calls.
+ * Task calls and model-generated Auto outcomes are deliberately excluded: a
+ * human's decision about one paused call is context, never authorization for
+ * another call.
+ */
+export async function listRecentIntegrationToolApprovalOutcomes(context: {
+  sessionId: string;
+  userId: string;
+}): Promise<
+  Array<{
+    integrationId: string;
+    toolName: string;
+    outcome: 'approved' | 'rejected';
+  }>
+> {
+  const rows = await db
+    .select({
+      integrationId: integrationToolApprovalRequests.integrationId,
+      toolName: integrationToolApprovalRequests.toolName,
+      status: integrationToolApprovalRequests.status,
+    })
+    .from(integrationToolApprovalRequests)
+    .where(
+      and(
+        eq(integrationToolApprovalRequests.sessionId, context.sessionId),
+        eq(integrationToolApprovalRequests.requesterUserId, context.userId),
+        eq(integrationToolApprovalRequests.decidedByUserId, context.userId),
+        isNull(integrationToolApprovalRequests.taskId),
+        inArray(integrationToolApprovalRequests.status, [
+          'consumed',
+          'rejected',
+        ]),
+      ),
+    )
+    .orderBy(desc(integrationToolApprovalRequests.decidedAt))
+    .limit(6);
+
+  return rows.map((row) => ({
+    integrationId: row.integrationId,
+    toolName: row.toolName,
+    outcome: row.status === 'rejected' ? 'rejected' : 'approved',
+  }));
 }
 
 /** Executor-side read while waiting for the requester's decision. */
@@ -612,7 +657,7 @@ export async function insertAutoApprovedIntegrationToolApproval(
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
-        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
         status: 'approved',
         decidedByUserId: input.decidedBy === 'model' ? null : owner.id,
         decidedAt: sql`clock_timestamp()`,
@@ -657,7 +702,7 @@ export async function insertAutoRejectedIntegrationToolApproval(
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
-        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
         status: 'auto_rejected',
         decidedByUserId: null,
         decidedAt: sql`clock_timestamp()`,
@@ -748,7 +793,7 @@ export async function recordIntegrationToolShadowEvaluation(input: {
     taskId: input.taskId,
     integrationId: input.integrationId,
     toolName: input.toolName,
-    argsSummary: redactIntegrationToolArgs(input.argsSummary),
+    argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
     evaluation: input.evaluation,
   });
 }

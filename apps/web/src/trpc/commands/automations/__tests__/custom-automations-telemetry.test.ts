@@ -350,6 +350,7 @@ describe('custom automation ownership', () => {
     mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
     mocks.resolveDefaultAutomationTarget.mockResolvedValue(null);
     mocks.isDeploymentExperimentEnabled.mockResolvedValue(true);
+    mocks.runCustomAutomationNow.mockResolvedValue({ outcome: 'completed' });
   });
 
   it('returns only member-safe connection flags and timezone without reading admin settings', async () => {
@@ -553,7 +554,9 @@ describe('custom automation ownership', () => {
       const auth = isAdmin ? adminAuth : memberAuth;
       await triggerCustomAutomationCommand(auth, input);
       await deleteCustomAutomationCommand(auth, input);
-      expect(mocks.runCustomAutomationNow).toHaveBeenCalledWith(input.id);
+      expect(mocks.runCustomAutomationNow).toHaveBeenCalledWith(input.id, {
+        trigger: 'manual',
+      });
       expect(mocks.deleteCustomAutomation).toHaveBeenCalledWith(input.id);
     },
   );

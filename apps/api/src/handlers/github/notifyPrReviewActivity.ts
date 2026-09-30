@@ -6,6 +6,7 @@ import {
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
   isReviewSummaryInProgress,
+  parseReviewSummaryResultMetadata,
 } from '@roomote/cloud-agents/server';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
@@ -339,7 +340,7 @@ function sanitizeReviewSummaryStatus(statusContent: string): string {
 
 /**
  * Parses the head SHA out of the review-summary marker line, e.g.
- * `<!-- roomote-review-summary sha=abc1234 mode=initial version=2 phase=reviewed -->`.
+ * `<!-- roomote-review-summary sha=abc1234 mode=initial version=3 phase=reviewed outcome=clean finding_count=0 -->`.
  * Requires at least a short-sha (7 hex chars), matching
  * parseReviewSummaryMarkerSha. SHA remains the first attribute for mixed-version
  * compatibility with older webhook consumers.
@@ -377,7 +378,7 @@ function getReviewOutcome(
     return 'findings_remain';
   }
   if (
-    /\bno (?:code|new) issues? found\b/i.test(summary) ||
+    /\bno (?:new )?(?:code )?issues? found\b/i.test(summary) ||
     /\ball \d+ issues? addressed\b/i.test(summary)
   ) {
     return 'clean';
@@ -524,7 +525,15 @@ function buildPrReviewSummaryLifecycle(
   if (!summary) {
     return null;
   }
-  const findingCount = getReviewFindingCount(body, summary);
+  const markerResult = parseReviewSummaryResultMetadata(body);
+  const findingCount =
+    markerResult.format === 'structured'
+      ? (markerResult.result?.findingCount ?? null)
+      : getReviewFindingCount(body, summary);
+  const outcome =
+    markerResult.format === 'structured'
+      ? (markerResult.result?.outcome ?? null)
+      : getReviewOutcome(summary, findingCount);
 
   return {
     kind: 'completed',
@@ -547,7 +556,7 @@ function buildPrReviewSummaryLifecycle(
           ...(reviewTaskId ? { reviewTaskId } : {}),
           reviewResult: {
             reviewKind: getReviewSummaryMarkerMode(body),
-            outcome: getReviewOutcome(summary, findingCount),
+            outcome,
             findingCount,
             approvalStatus: getReviewApprovalStatus(summary),
             headSha: markerSha,

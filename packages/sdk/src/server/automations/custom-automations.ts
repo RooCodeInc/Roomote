@@ -46,9 +46,12 @@ import {
 import { DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL, isRunDue } from './scheduling-utils';
 import {
   emptyJobResult,
+  resolveAutomationRunContext,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunNowResult,
   type AutomationRunOpts,
+  type ExplicitAutomationRunContext,
 } from './types';
 import { SlackNotifier } from '@roomote/slack';
 import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
@@ -547,7 +550,7 @@ async function runFastCustomAutomation(params: {
   reuseExistingDestinationRoot: boolean;
   /** Environment the automation was configured for, offered to the turn as a hint. */
   preferredEnvironmentId: string | null;
-}): Promise<void> {
+}): Promise<string> {
   if (!params.automation.createdByUserId) {
     throw new Error('Fast automation run-as user is not configured.');
   }
@@ -618,6 +621,7 @@ async function runFastCustomAutomation(params: {
       parent: { sessionId: session.id, conversation },
       event,
     });
+    return session.id;
   } catch (error) {
     await reportFastAutomationStartupFailure({
       automation: params.automation,
@@ -762,9 +766,12 @@ async function launchCustomAutomationRow(
   automation: CustomAutomation,
   opts: AutomationRunOpts,
   scheduleContext?: ResolvedDeploymentTimeZone,
-): Promise<AutomationJobResult> {
-  const result = emptyJobResult();
+): Promise<AutomationJobResult & { sessionId?: string }> {
+  const result: AutomationJobResult & { sessionId?: string } = emptyJobResult();
   const frequency = getCustomAutomationFrequency(automation);
+  const { isExplicitRun, isManualRun, taskTrigger, webhookInputJson } =
+    resolveAutomationRunContext(opts.context);
+  const webhookTrigger = taskTrigger === 'webhook';
 
   if (!automation.enabled) {
     result.skippedReason = 'Automation is disabled.';
@@ -772,7 +779,7 @@ async function launchCustomAutomationRow(
   }
 
   if (
-    !opts.manualTrigger &&
+    !isExplicitRun &&
     (automation.scheduleMode === 'off' ||
       automation.scheduleMode === 'on_demand' ||
       (automation.scheduleMode !== 'cron' && frequency === 'off'))
@@ -781,7 +788,7 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  if (!opts.manualTrigger) {
+  if (!isExplicitRun) {
     const timezone = scheduleContext ?? (await resolveDeploymentTimeZone());
     const now = new Date();
     const cronBaseline = new Date(
@@ -827,7 +834,6 @@ async function launchCustomAutomationRow(
     }
   }
 
-  const webhookTrigger = opts.trigger === 'webhook';
   if (
     !webhookTrigger &&
     automation.launchClaimedAt &&
@@ -946,7 +952,7 @@ async function launchCustomAutomationRow(
 
   const isManualRetry =
     !webhookTrigger &&
-    opts.manualTrigger === true &&
+    isManualRun &&
     Boolean(automation.lastError && automation.lastRunAt);
   const eventClaimedAt = webhookTrigger
     ? new Date()
@@ -970,17 +976,17 @@ async function launchCustomAutomationRow(
           ),
         );
     }
-    await runFastCustomAutomation({
+    result.sessionId = await runFastCustomAutomation({
       automation,
       prompt: buildCustomAutomationRunPrompt(
         automation.prompt,
-        opts.trigger === 'webhook' ? opts.webhookInputJson : undefined,
+        webhookInputJson,
       ),
       destination,
       eventId,
       occurrenceAt,
       launchClaimedAt,
-      trigger: opts.trigger ?? (opts.manualTrigger ? 'manual' : 'schedule'),
+      trigger: taskTrigger,
       reuseExistingDestinationRoot: isManualRetry,
       preferredEnvironmentId,
     });
@@ -1015,7 +1021,7 @@ async function launchCustomAutomationRow(
 }
 
 export async function customAutomationsJob(
-  opts: AutomationRunOpts = {},
+  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting custom automations evaluator`);
 
@@ -1079,8 +1085,7 @@ export async function customAutomationsJob(
 
 export async function runCustomAutomationNow(
   id: string,
-  trigger: 'manual' | 'webhook' = 'manual',
-  webhookInputJson?: string,
+  context: ExplicitAutomationRunContext,
 ): Promise<AutomationRunNowResult> {
   const automation = await getCustomAutomationById(id);
 
@@ -1098,11 +1103,7 @@ export async function runCustomAutomationNow(
 
   try {
     const result = await launchCustomAutomationRow(automation, {
-      manualTrigger: true,
-      trigger,
-      ...(trigger === 'webhook' && webhookInputJson
-        ? { webhookInputJson }
-        : {}),
+      context,
     });
 
     if (result.launchedTaskId) {
@@ -1118,7 +1119,12 @@ export async function runCustomAutomationNow(
     }
 
     if (result.queued) {
-      return { outcome: 'queued' };
+      return {
+        outcome: 'queued',
+        ...(context.trigger === 'manual' && result.sessionId
+          ? { sessionId: result.sessionId }
+          : {}),
+      };
     }
 
     if (result.completed) {

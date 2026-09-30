@@ -45,13 +45,16 @@ describe('JUDGMENT_DECISION_CATALOG', () => {
     expect(SESSION_STATUS_JUDGMENT_QUESTIONS.outcome.instructions).toContain(
       'Manual-status precedence:',
     );
+    expect(SESSION_STATUS_JUDGMENT_QUESTIONS.outcome.instructions).toContain(
+      'All three authoritative signals are required',
+    );
     expect(SESSION_STATUS_JUDGMENT_QUESTIONS.outcome.criteria).toEqual({
-      open: 'The request is still being worked on, and Roomote can continue without a concrete answer, decision, or action from the user. It can remain open while the user independently verifies an artifact or reviews a PR; use needs_input only when a user answer, decision, or action is required before Roomote can continue.',
-      done: 'The requested answer or work was actually delivered, with no unfinished promise or active child task, or the inactivity precedence rule applies. A current manual status or live-work safeguard still prevents an automatic done outcome.',
+      open: 'The request is still being worked on, and Roomote can continue without a concrete answer, decision, or action from the user. Active Roomote-owned work remains open even if a PR already exists; use needs_input only when a user answer, decision, review, approval, or verification is required before the next step.',
+      done: 'The requested answer or work was actually delivered, with no unfinished promise or active child task, or the inactivity precedence rule applies. For a user-requested task whose full objective was to open a PR, an actually created PR can complete the request even while that PR remains open. A current manual status or live-work safeguard still prevents an automatic done outcome.',
       blocked:
         'The requested work cannot continue because of a real external dependency or failure that needs follow-up; use needs_input instead when a user answer, decision, or action is required.',
       needs_input:
-        'Roomote is waiting for a concrete answer, decision, or action from the user before it can continue.',
+        'Roomote is waiting for a concrete answer, decision, review, approval, verification, or other action from the user before it can continue. This includes a settled automation-originated handoff with a Roomote-created open PR awaiting user review, but never a PR by itself.',
       unclear:
         'The visible request and results do not provide enough evidence to choose another outcome confidently.',
     });

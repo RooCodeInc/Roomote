@@ -1645,9 +1645,10 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
     automationLaunchCriteriaEnabled?: boolean;
+    brainEnabled?: boolean;
     /**
-     * Per-tool approval rules in OpenCode config-permission shape, applied to the parent build agent
-     * and the helper subagents in the generated per-conversation config.
+     * Per-tool approval rules in OpenCode config-permission shape, applied to every agent in the
+     * generated per-conversation config, subagents included.
      * Rules live in config rather than the session ruleset so a policy
      * change never strands stale state in a persisted session: this file is
      * rewritten every turn, and a policy change disposes the directory's
@@ -1700,10 +1701,15 @@ export async function getFastAgentNativeToolRuntime(
   );
   runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
   runtime.codeModeIntegrationsActive = true;
-  // Approval rules apply to the parent build agent and to the helper
-  // subagents. OpenCode merges this per-directory config over the shared
-  // server config, so a permission-only entry extends the existing advisor
-  // and judge definitions instead of replacing them.
+  // Approval rules apply to every agent: the top-level permission covers any
+  // subagent the model starts (including OpenCode's built-in ones), which
+  // would otherwise call integration tools under the default allow. Session
+  // calls are not gated at the proxy, so these native asks are the only
+  // gate. The build, advisor, and judge entries repeat the rules because an
+  // agent's own permission takes precedence over the top-level one. OpenCode
+  // merges this per-directory config over the shared server config, so a
+  // permission-only entry extends the existing advisor and judge definitions
+  // instead of replacing them.
   const toolApprovalAgentEntries = options.toolApprovalPermission
     ? {
         permission: options.toolApprovalPermission,
@@ -1712,6 +1718,7 @@ export async function getFastAgentNativeToolRuntime(
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
+      ...toolApprovalAgentEntries,
       // Keep the parent's fail-closed filter on its agent rather than on the
       // session. OpenCode copies session deny rules into task-created child
       // sessions, which would otherwise give advisor and judge the parent's
@@ -1731,6 +1738,7 @@ export async function getFastAgentNativeToolRuntime(
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
               automationLaunchCriteriaEnabled:
                 options.automationLaunchCriteriaEnabled,
+              brainEnabled: options.brainEnabled,
             },
           ),
           ...toolApprovalAgentEntries,

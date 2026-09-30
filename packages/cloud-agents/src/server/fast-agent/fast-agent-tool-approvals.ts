@@ -14,6 +14,7 @@ import {
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
   listIntegrationToolPolicies,
+  listRecentIntegrationToolApprovalOutcomes,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
@@ -21,6 +22,7 @@ import {
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
 import {
+  describeIntegrationToolAutoAbsentDenial,
   integrationToolModeIsAutoAssessed,
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
@@ -36,6 +38,7 @@ import {
   describeIntegrationToolAutoDeny,
   resolveIntegrationToolAutoDecision,
   resolveIntegrationToolAutoState,
+  type IntegrationToolAutoSessionContext,
 } from '../integration-tool-auto-evaluation';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
@@ -62,6 +65,12 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
  */
 const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
+/**
+ * An open session page renews its presence every 10 seconds, and a page that
+ * just opened can briefly drop it. The owner counts as away only when a
+ * second lookup, a full renewal later, still finds nobody.
+ */
+const SESSION_PRESENCE_RECHECK_MS = 11_000;
 
 async function isFastAgentLaunchedTask(
   sessionId: string,
@@ -221,17 +230,15 @@ export function integrationToolApprovalRulesToConfig(
 
 /**
  * Whether the live per-directory OpenCode instance must be disposed so its
- * cached agent state is rebuilt from the freshly rewritten config. Approval
- * rules ride in the generated per-conversation config, which every turn
- * rewrites, and OpenCode's own servers are disposable child processes: after
- * a Roomote restart there is no live instance at all, and the next turn's
- * instance boots from the current config. A dispose is therefore only needed
- * when the same process previously booted the instance with different rules
- * (`recordedHash` set and unequal). An unknown record after a restart is
- * fresh state, not stale state, and must not dispose — that would be a
- * false-positive cache break.
+ * cached agent state is rebuilt from the freshly rewritten tool config.
+ * OpenCode's own servers are disposable child processes: after a Roomote
+ * restart there is no live instance, and the next turn boots from the current
+ * config. A dispose is therefore only needed when this process previously
+ * booted the instance with a different fingerprint (`recordedHash` set and
+ * unequal). An unknown record after a restart is fresh state, not stale state,
+ * and must not dispose — that would be a false-positive cache break.
  */
-export function shouldDisposeInstanceForToolApprovalRules(input: {
+export function shouldDisposeInstanceForToolConfig(input: {
   recordedHash: string | null | undefined;
   currentHash: string | null;
 }): boolean {
@@ -408,7 +415,9 @@ export function createFastAgentToolApprovalBridge(input: {
    */
   autoToolKeys?: Set<string>;
   /** Resolve the latest human request for each Auto assessment; steers can arrive mid-turn. */
-  resolveUserRequest?: () => string | undefined;
+  resolveUserRequest?: () => string | undefined | Promise<string | undefined>;
+  /** Human-authored request history from this Session, never a parent task. */
+  resolveSessionUserMessages?: () => string[] | Promise<string[]>;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   signal?: AbortSignal;
@@ -425,6 +434,14 @@ export function createFastAgentToolApprovalBridge(input: {
 
   const ownerIsPresent = async (): Promise<boolean> => {
     if (isFastAgentApprovalChatSurface(input.surface)) return true;
+    if (await lookUpOwnerPresence()) return true;
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, SESSION_PRESENCE_RECHECK_MS);
+      timer.unref?.();
+    });
+    return lookUpOwnerPresence();
+  };
+  const lookUpOwnerPresence = async (): Promise<boolean> => {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
@@ -562,13 +579,30 @@ export function createFastAgentToolApprovalBridge(input: {
         input.autoToolKeys?.has(
           integrationToolPolicyKey(tool.integrationId, tool.toolName),
         ) === true;
+      const [recentUserMessages, explicitApprovalOutcomes] = autoAssessed
+        ? await Promise.all([
+            input.resolveSessionUserMessages?.() ?? [],
+            // This query is keyed to this Session and owner, and excludes
+            // task approvals and model decisions. A lookup failure removes
+            // historical context; it cannot authorize a call by itself.
+            listRecentIntegrationToolApprovalOutcomes({
+              sessionId: input.sessionId,
+              userId: input.userId,
+            }).catch(() => []),
+          ])
+        : [[], []];
+      const sessionContext: IntegrationToolAutoSessionContext | undefined =
+        autoAssessed
+          ? { recentUserMessages, explicitApprovalOutcomes }
+          : undefined;
       const auto = autoAssessed
         ? await resolveIntegrationToolAutoDecision({
             integrationId: tool.integrationId,
             toolName: tool.toolName,
             toolDescription: tool.description,
             args,
-            userRequest: input.resolveUserRequest?.(),
+            userRequest: await input.resolveUserRequest?.(),
+            sessionContext,
             readContent: recovered?.readContent,
             isSessionLaunchedTask: (taskId) =>
               isFastAgentLaunchedTask(input.sessionId, taskId),
@@ -609,9 +643,9 @@ export function createFastAgentToolApprovalBridge(input: {
           .reply(
             ask.requestId,
             'reject',
-            `Auto mode blocked this tool call because ${describeIntegrationToolAutoDeny(
-              auto.evaluation,
-            )} and the session owner was away. The call was not run. The session owner can allow this tool from its call in the transcript.`,
+            describeIntegrationToolAutoAbsentDenial(
+              describeIntegrationToolAutoDeny(auto.evaluation),
+            ),
           )
           .catch(() => undefined);
         return;

@@ -14,7 +14,11 @@ const JUDGMENT_DECISION_POLICY: Record<string, { roomoteModel: boolean }> = {
   'channel-launch-gate': { roomoteModel: true },
   'requested-work-kind': { roomoteModel: true },
   'agentmail-auto-reply': { roomoteModel: true },
-  'integration-tool-auto-evaluation': { roomoteModel: true },
+  // Auto approves calls on its own, so an answer it cannot trust is unsafe,
+  // not just wrong. The Roomote judgment model misjudges whether a call
+  // matches the request, and it only sees the first 8,000 characters of the
+  // state, which can drop the content an injection check depends on.
+  'integration-tool-auto-evaluation': { roomoteModel: false },
   'session-status-judgment': { roomoteModel: true },
   'custom-automation-launch-gate': { roomoteModel: true },
 };

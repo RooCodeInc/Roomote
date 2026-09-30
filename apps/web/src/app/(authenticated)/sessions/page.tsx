@@ -6,6 +6,7 @@ import {
   getSessionStatusLabel,
   SESSION_BOARD_COLUMNS,
   SESSION_STATUSES,
+  type SessionBoardColumn as SessionBoardColumnStatus,
   type SessionStatus,
 } from '@roomote/types';
 
@@ -14,6 +15,7 @@ import { authorize } from '@/lib/server/auth-context';
 import {
   getSessions,
   getSessionSources,
+  type SessionArchiveFilter,
   type SessionScope,
 } from '@/lib/server/sessions';
 import { Empty, EmptyDescription, EmptyHeader } from '@/components/system';
@@ -25,6 +27,8 @@ import {
   SessionBoardCard,
   SessionBoardColumn,
 } from './SessionBoard';
+
+const SESSIONS_PAGE_SIZE = 100;
 
 export default async function SessionsPage({
   searchParams,
@@ -41,6 +45,7 @@ export default async function SessionsPage({
     pullRequest?: string;
     source?: string;
     model?: string;
+    archive?: string;
   }>;
 }) {
   const [authorizedUser, params = {}] = await Promise.all([
@@ -57,11 +62,17 @@ export default async function SessionsPage({
   )
     ? (params.scope as SessionScope)
     : 'all';
-  const status = (SESSION_STATUSES as readonly string[]).includes(
-    params.status ?? '',
-  )
-    ? (params.status as SessionStatus)
+  const status = (view === 'board'
+    ? SESSION_BOARD_COLUMNS
+    : SESSION_STATUSES
+  ).includes(params.status as never)
+    ? (params.status as SessionStatus | SessionBoardColumnStatus)
     : undefined;
+  const archive = ['archived', 'non-archived', 'all'].includes(
+    params.archive ?? '',
+  )
+    ? (params.archive as SessionArchiveFilter)
+    : 'non-archived';
   const timePeriod = parseTimePeriodParam(period ?? null, 'all');
   const [result, sources] = await Promise.all([
     getSessions(authorizedUser, {
@@ -75,9 +86,11 @@ export default async function SessionsPage({
       pullRequest: params.pullRequest,
       source: params.source,
       model: params.model,
+      archive,
       includeJudgedStatus: view === 'board',
+      limit: SESSIONS_PAGE_SIZE,
     }),
-    getSessionSources(authorizedUser),
+    getSessionSources(authorizedUser, archive),
   ]);
   const boardColumns =
     view === 'board'
@@ -91,7 +104,7 @@ export default async function SessionsPage({
                 judgmentStatus: session.judgedStatus,
               }) === column,
           ),
-        })).filter(({ sessions }) => sessions.length > 0)
+        }))
       : [];
   const olderParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -116,9 +129,12 @@ export default async function SessionsPage({
           source={params.source ?? 'all'}
           sourceOptions={sources}
           model={params.model ?? null}
+          archive={archive}
         />
       </div>
-      <main className="min-h-0 flex-1 overflow-y-auto bg-background">
+      <main
+        className={`min-h-0 flex-1 overflow-y-auto bg-background ${view === 'board' ? 'md:flex md:flex-col md:overflow-hidden' : ''}`}
+      >
         {result.sessions.length === 0 ? (
           <Empty>
             <EmptyHeader>
@@ -133,18 +149,21 @@ export default async function SessionsPage({
                 column={column}
                 label={getSessionStatusLabel(column)}
                 count={columnSessions.length}
+                statusFilter={status}
               >
                 {columnSessions.map((session) => (
                   <SessionBoardCard
                     key={session.id}
                     sessionId={session.id}
                     column={column}
+                    canManage={session.canManage ?? false}
+                    title={session.title}
                   >
                     <SessionCard
                       session={session}
                       viewerUserId={authorizedUser.userId}
                       query={q}
-                      hideBlockedBadge
+                      hideAttentionBadges
                     />
                   </SessionBoardCard>
                 ))}

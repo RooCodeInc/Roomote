@@ -8,6 +8,7 @@ import {
   desc,
   eq,
   ensureCustomAutomationWebhookToken,
+  ensureSessionForTask,
   fastAgentConversations,
   getDeploymentTaskModelOptions,
   getBackgroundAgentSettingsForDeployment,
@@ -34,7 +35,6 @@ import {
   runCustomAutomationNow,
   canStartAgentMailConversationWithUser,
   validateCronExpression,
-  type AutomationRunNowResult,
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
@@ -558,9 +558,14 @@ export async function deleteCustomAutomationCommand(
 export async function triggerCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: { id: string },
-): Promise<AutomationRunNowResult> {
+) {
   await getOwnedAutomation(auth, input.id);
-  return runCustomAutomationNow(input.id);
+  const result = await runCustomAutomationNow(input.id, { trigger: 'manual' });
+
+  if (result.outcome !== 'launched') return result;
+
+  const session = await ensureSessionForTask(db, { taskId: result.taskId });
+  return { ...result, sessionId: session.id };
 }
 
 function buildCustomAutomationWebhookUrl(id: string, token: string): string {

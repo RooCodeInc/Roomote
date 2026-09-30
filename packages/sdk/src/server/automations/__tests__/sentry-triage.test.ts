@@ -65,7 +65,7 @@ type TriageConfig = {
     channelId: string;
     destination: { provider: 'slack'; channelId: string };
     runtime: Record<string, unknown>;
-    manualTrigger: boolean;
+    trigger: 'scheduled' | 'manual' | 'webhook';
   }) => Promise<
     | { kind: 'scan'; payloads: Record<string, unknown>[] }
     | { kind: 'skip'; reason: string }
@@ -89,7 +89,7 @@ function buildScanTaskParams() {
     channelId: 'C123MANAGER',
     destination: { provider: 'slack' as const, channelId: 'C123MANAGER' },
     runtime: { scheduleMode: 'daily', instructions: null, settings: {} },
-    manualTrigger: false,
+    trigger: 'scheduled' as const,
   };
 }
 
@@ -215,7 +215,7 @@ describe('sentryTriageJob buildScanTask', () => {
     const result = await config.buildScanTask({
       ...buildScanTaskParams(),
       runtime: { scheduleMode: 'on_demand', instructions: null, settings: {} },
-      manualTrigger: true,
+      trigger: 'manual',
     });
 
     expect(result.kind).toBe('scan');
@@ -224,6 +224,28 @@ describe('sentryTriageJob buildScanTask', () => {
     }
     expect(String(result.payloads[0]!.description)).toContain(
       '<scan_window>last 1 day</scan_window>',
+    );
+    expect(String(result.payloads[0]!.description)).toContain(
+      '<trigger>manual</trigger>',
+    );
+  });
+
+  it('preserves webhook attribution in the scan prompt', async () => {
+    mockGetActiveRepositoryFullNames.mockResolvedValue(['acme/api']);
+    mockBuildRepositoryCoverage.mockResolvedValue([
+      { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
+    ]);
+    mockPartitionActiveRepositoriesByProvider.mockResolvedValue([]);
+
+    const result = await config.buildScanTask({
+      ...buildScanTaskParams(),
+      trigger: 'webhook',
+    });
+
+    expect(result.kind).toBe('scan');
+    if (result.kind !== 'scan') throw new Error('expected a scan build');
+    expect(String(result.payloads[0]!.description)).toContain(
+      '<trigger>webhook</trigger>',
     );
   });
 });

@@ -1,6 +1,7 @@
 import {
   db,
   eq,
+  ensureAutomationRows,
   fastAgentConversations,
   inArray,
   fastAgentMessages,
@@ -9,6 +10,7 @@ import {
   sessions,
   taskFactory,
   sessionTasks,
+  taskPullRequests,
   userFactory,
   tasks,
   users,
@@ -34,6 +36,8 @@ const sessionIds: string[] = [];
 const conversationIds: string[] = [];
 const taskIds: string[] = [];
 const userIds: string[] = [];
+
+beforeAll(() => ensureAutomationRows(db));
 
 afterEach(async () => {
   evaluateMock.mockReset();
@@ -161,6 +165,11 @@ describe('processSessionStatusJudgmentBatch', () => {
     const state = evaluation?.[0].state as {
       latestVisibleUserMessageAt: string | null;
       recentMessages: Array<{ text: string }>;
+      sessionOrigin: { kind: string; automation: string | null };
+      roomoteWorkState: string;
+      reviewHandoff: {
+        automationInitiatedRoomoteCreatedOpenPullRequest: boolean;
+      };
     };
     expect(state.latestVisibleUserMessageAt).toBe(
       new Date(visibleUserTs).toISOString(),
@@ -168,6 +177,11 @@ describe('processSessionStatusJudgmentBatch', () => {
     expect(state.recentMessages.map((message) => message.text)).toEqual([
       'What does this service do?',
     ]);
+    expect(state.sessionOrigin).toEqual({ kind: 'user', automation: null });
+    expect(state.roomoteWorkState).toBe('settled');
+    expect(state.reviewHandoff).toEqual({
+      automationInitiatedRoomoteCreatedOpenPullRequest: false,
+    });
     const [judgment] = await db
       .select()
       .from(sessionStatusJudgments)
@@ -178,6 +192,112 @@ describe('processSessionStatusJudgmentBatch', () => {
       .from(sessions)
       .where(eq(sessions.id, session.id));
     expect(persistedSession?.cachedStatus).toBe('ready');
+  });
+
+  it('deterministically marks a settled automation-created PR handoff as needing input', async () => {
+    const session = await sessionFactory.create({
+      ownerKind: 'automation',
+      ownerUserId: null,
+      ownerAutomation: 'custom_automation',
+      cachedStatus: 'ready',
+    });
+    sessionIds.push(session.id);
+    const task = await taskFactory.create({
+      state: 'completed',
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'custom_automation',
+    });
+    taskIds.push(task.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+    await db.insert(taskPullRequests).values({
+      taskId: task.id,
+      prUrl: `https://github.com/acme/example/pull/${task.id}`,
+      prNumber: 42,
+      repository: 'acme/example',
+      status: 'draft',
+      createdByRoomote: true,
+    });
+    await db.insert(sessionStatusJudgments).values({
+      sessionId: session.id,
+      sourceEventId: 'automation-task-terminal',
+      generation: 1,
+      sourceKind: 'task_terminal',
+      state: 'pending',
+    });
+
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
+
+    expect(evaluateMock).not.toHaveBeenCalled();
+    const [judgment] = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(eq(sessionStatusJudgments.sessionId, session.id));
+    expect(judgment).toMatchObject({
+      state: 'applied',
+      outcome: 'needs_input',
+      confidence: 1,
+    });
+  });
+
+  it('does not treat a human-requested PR in an automation-owned session as an automation handoff', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'automation',
+      ownerUserId: null,
+      ownerAutomation: 'custom_automation',
+      cachedStatus: 'ready',
+    });
+    sessionIds.push(session.id);
+    const task = await taskFactory.create({
+      state: 'completed',
+      initiatorKind: 'user',
+      initiatorUserId: user.id,
+      initiatorAutomation: null,
+    });
+    taskIds.push(task.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'follow_up',
+    });
+    await db.insert(taskPullRequests).values({
+      taskId: task.id,
+      prUrl: `https://github.com/acme/example/pull/${task.id}`,
+      prNumber: 43,
+      repository: 'acme/example',
+      status: 'open',
+      createdByRoomote: true,
+    });
+    await db.insert(sessionStatusJudgments).values({
+      sessionId: session.id,
+      sourceEventId: 'human-follow-up-terminal',
+      generation: 1,
+      sourceKind: 'task_terminal',
+      state: 'pending',
+    });
+    highConfidenceDone();
+
+    await processSessionStatusJudgmentBatch(undefined, {
+      sessionIds: [session.id],
+    });
+
+    expect(evaluateMock).toHaveBeenCalledOnce();
+    expect(evaluateMock.mock.calls[0]?.[0].state.reviewHandoff).toEqual({
+      automationInitiatedRoomoteCreatedOpenPullRequest: false,
+    });
+    const [judgment] = await db
+      .select()
+      .from(sessionStatusJudgments)
+      .where(eq(sessionStatusJudgments.sessionId, session.id));
+    expect(judgment).toMatchObject({ state: 'applied', outcome: 'done' });
   });
 
   it('does not apply a done result while a linked task is active', async () => {

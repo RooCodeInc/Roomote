@@ -4562,7 +4562,7 @@ describe('runTask', () => {
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
-        excludeSkillNames: ['doctor', 'zero', 'jevgrep'],
+        excludeSkillNames: ['doctor', 'zero', 'jevgrep', 'judgement'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(

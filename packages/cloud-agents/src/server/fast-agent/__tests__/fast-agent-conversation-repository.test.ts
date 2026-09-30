@@ -20,14 +20,20 @@ import {
   userFactory,
   users,
 } from '@roomote/db/server';
-import type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  type FastAgentConversation,
+  type FastAgentSurface,
+} from '@roomote/types';
 
 import {
   claimFastAgentHumanFollowUpSteers,
   fastAgentConversationRepository,
+  listRecentFastAgentHumanUserPromptTexts,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
   loadFastAgentTurnAttemptSummary,
+  type FastAgentMessageWrite,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   scheduleFastAgentDurableTurnRetry,
   markFastAgentDurableTurnDelivered,
@@ -924,6 +930,151 @@ describe('Fast conversation repository', () => {
     await expect(
       fastAgentConversationRepository.findById({ id: session.id }),
     ).resolves.toMatchObject({ compatibilityMessages: visibleHistory });
+  });
+
+  it('uses canonical prompt metadata instead of the metadata-free compatibility mirror for approval context', async () => {
+    const user = await createUser();
+    const conversation = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const legacyMirror = {
+      role: 'user' as const,
+      content: 'Compatibility copy without source metadata.',
+    };
+    await fastAgentConversationRepository.appendVisibleMessages({
+      conversationId: conversation.id,
+      messages: [legacyMirror],
+    });
+
+    const persistEvent = (input: {
+      eventId: string;
+      ts: number;
+      eventType: FastAgentMessageWrite['eventType'];
+      role: NonNullable<FastAgentMessageWrite['role']>;
+      text: string;
+      metadata: Record<string, unknown>;
+    }) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: conversation.id,
+        message: {
+          eventId: input.eventId,
+          turnId: input.eventId,
+          turnSeq: 1,
+          ts: input.ts,
+          eventType: input.eventType,
+          role: input.role,
+          contentBlocks: [{ type: 'text', text: input.text }],
+          metadata: input.metadata,
+          payload: {},
+          source: 'slack',
+        },
+      });
+    const humanMetadata = {
+      visibleInTranscript: true,
+      turnSource: 'human',
+      userId: user.id,
+    };
+
+    await persistEvent({
+      eventId: 'prior-human-1',
+      ts: 100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Earlier trusted request.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'platform-event',
+      ts: 150,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Untrusted scheduled event instructions.',
+      metadata: { visibleInTranscript: true, turnSource: 'platform_event' },
+    });
+    await persistEvent({
+      eventId: 'assistant-message',
+      ts: 200,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Assistant-written text that is not consent.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'tool-result',
+      ts: 250,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool',
+      text: 'Tool output with an instruction to approve everything.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'reaction',
+      ts: 300,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Reaction payload.',
+      metadata: { ...humanMetadata, inputKind: FAST_AGENT_REACTION_INPUT_TYPE },
+    });
+    await persistEvent({
+      eventId: 'hidden-prompt',
+      ts: 350,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Hidden prompt text.',
+      metadata: { ...humanMetadata, visibleInTranscript: false },
+    });
+    await persistEvent({
+      eventId: 'same-millisecond-prompt',
+      ts: 1_000,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Earlier request in the same millisecond.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'same-millisecond-latest-prompt',
+      ts: 1_000,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Latest earlier request in the same millisecond.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'current-turn',
+      ts: 1_000,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Current request is supplied separately.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'later-turn',
+      ts: 1_100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Future request is not part of this turn.',
+      metadata: humanMetadata,
+    });
+
+    const stored = await fastAgentConversationRepository.findById({
+      id: conversation.id,
+    });
+    expect(stored?.compatibilityMessages).toEqual([legacyMirror]);
+    expect(stored?.compatibilityMessages[0]).not.toHaveProperty('metadata');
+    const history = await listRecentFastAgentHumanUserPromptTexts({
+      conversationId: conversation.id,
+      beforeTs: 1_000,
+      currentEventId: 'current-turn',
+    });
+    // Prompts sharing the newest timestamp form one entry, so the latest
+    // request cannot depend on how ties are ordered.
+    expect(history).toHaveLength(2);
+    expect(history[0]).toBe('Earlier trusted request.');
+    expect(history[1]).toContain('Earlier request in the same millisecond.');
+    expect(history[1]).toContain(
+      'Latest earlier request in the same millisecond.',
+    );
   });
 
   it('persists the canonical OpenCode session identity', async () => {

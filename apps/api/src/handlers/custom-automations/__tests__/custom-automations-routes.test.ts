@@ -511,7 +511,9 @@ describe('custom-automations MCP routes', () => {
         automationId: 'automation-1',
       });
 
-      expect(mockRunCustomAutomationNow).toHaveBeenCalledWith('automation-1');
+      expect(mockRunCustomAutomationNow).toHaveBeenCalledWith('automation-1', {
+        trigger: 'manual',
+      });
       expect(result).toMatchObject({
         structuredContent: { outcome: 'queued' },
       });

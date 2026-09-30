@@ -156,13 +156,14 @@ describe('createScheduledTriageJob', () => {
     });
 
     const result = await job({
-      manualTrigger: true,
-      trigger: 'webhook',
-      webhookInputJson: '{"issue":"test"}',
+      context: {
+        trigger: 'webhook',
+        webhookInputJson: '{"issue":"test"}',
+      },
     });
 
     expect(buildScanTask).toHaveBeenCalledWith(
-      expect.objectContaining({ manualTrigger: true }),
+      expect.objectContaining({ trigger: 'webhook' }),
     );
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({

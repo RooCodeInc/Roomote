@@ -248,7 +248,7 @@ describe('conflictScanJob', () => {
       managerSlackChannelId: null,
     });
 
-    const result = await conflictScanJob({ manualTrigger: true });
+    const result = await conflictScanJob({ context: { trigger: 'manual' } });
 
     expect(result.skippedReason).toBe('No labeled conflict candidates found.');
     expect(mockIsRepoSkipped).toHaveBeenCalledWith('Roomote/example-app');

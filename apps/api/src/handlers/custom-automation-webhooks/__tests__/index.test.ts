@@ -57,11 +57,10 @@ describe('custom automation webhook trigger', () => {
     expect(await response.json()).toEqual({ accepted: true });
     expect(response.headers.get('cache-control')).toBe('no-store, private');
     expect(response.headers.get('referrer-policy')).toBe('no-referrer');
-    expect(mocks.runAutomation).toHaveBeenCalledWith(
-      AUTOMATION_ID,
-      'webhook',
-      JSON.stringify(body),
-    );
+    expect(mocks.runAutomation).toHaveBeenCalledWith(AUTOMATION_ID, {
+      trigger: 'webhook',
+      webhookInputJson: JSON.stringify(body),
+    });
   });
 
   it('keeps an empty POST body as a trigger-only run', async () => {
@@ -70,7 +69,9 @@ describe('custom automation webhook trigger', () => {
     });
 
     expect(response.status).toBe(202);
-    expect(mocks.runAutomation).toHaveBeenCalledWith(AUTOMATION_ID, 'webhook');
+    expect(mocks.runAutomation).toHaveBeenCalledWith(AUTOMATION_ID, {
+      trigger: 'webhook',
+    });
   });
 
   it('accepts text/plain bodies as a one-run instruction', async () => {
@@ -81,11 +82,12 @@ describe('custom automation webhook trigger', () => {
     });
 
     expect(response.status).toBe(202);
-    expect(mocks.runAutomation).toHaveBeenCalledWith(
-      AUTOMATION_ID,
-      'webhook',
-      JSON.stringify('Review issue #42 and summarize the failure.'),
-    );
+    expect(mocks.runAutomation).toHaveBeenCalledWith(AUTOMATION_ID, {
+      trigger: 'webhook',
+      webhookInputJson: JSON.stringify(
+        'Review issue #42 and summarize the failure.',
+      ),
+    });
   });
 
   it.each([

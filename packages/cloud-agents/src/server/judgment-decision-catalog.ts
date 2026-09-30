@@ -175,6 +175,11 @@ export const JUDGMENT_DECISION_DEFINITIONS = {
       evaluationTime: '2026-09-28T00:00:00.000Z',
       latestVisibleUserMessageAt: '2026-09-28T00:00:00.000Z',
       manualStatusChangedAt: null,
+      sessionOrigin: { kind: 'user', automation: null },
+      roomoteWorkState: 'waiting_for_user',
+      reviewHandoff: {
+        automationInitiatedRoomoteCreatedOpenPullRequest: false,
+      },
       objective: 'Fix the flaky checkout test and open a pull request.',
       recentMessages: [
         {
@@ -359,6 +364,7 @@ export const JUDGMENT_DECISION_DEFINITIONS = {
       readContent: null,
       deploymentGuidance: 'Comments on our own Linear issues are routine.',
     },
+    note: 'Roomote asks this of Jev only; the Roomote judgment model does not answer it.',
   },
 } satisfies Record<string, JudgmentDecision>;
 

@@ -1752,9 +1752,14 @@ describe('runCustomAutomationNow', () => {
       reasoningEffort: 'xhigh',
     } as never);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
-    expect(result).toEqual({ outcome: 'queued' });
+    expect(result).toEqual({
+      outcome: 'queued',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
     expect(fastMocks.getSession).toHaveBeenCalledWith(
       expect.objectContaining({
         initialModel: 'anthropic/claude-sonnet-5',
@@ -1798,8 +1803,14 @@ describe('runCustomAutomationNow', () => {
     });
     const secondWebhookInputJson = JSON.stringify('Review issue #42.');
     const [firstResult, secondResult] = await Promise.all([
-      runCustomAutomationNow(automation.id, 'webhook', firstWebhookInputJson),
-      runCustomAutomationNow(automation.id, 'webhook', secondWebhookInputJson),
+      runCustomAutomationNow(automation.id, {
+        trigger: 'webhook',
+        webhookInputJson: firstWebhookInputJson,
+      }),
+      runCustomAutomationNow(automation.id, {
+        trigger: 'webhook',
+        webhookInputJson: secondWebhookInputJson,
+      }),
     ]);
 
     expect(firstResult).toEqual({ outcome: 'queued' });
@@ -1844,9 +1855,14 @@ describe('runCustomAutomationNow', () => {
     ] as never);
     fastMocks.slackIsAppInChannel.mockResolvedValue(true);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
-    expect(result).toEqual({ outcome: 'queued' });
+    expect(result).toEqual({
+      outcome: 'queued',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
       conversation: expect.objectContaining({
@@ -1860,7 +1876,9 @@ describe('runCustomAutomationNow', () => {
   it('skips manual run when a concurrent launch holds the claim', async () => {
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(null);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result).toEqual({
       outcome: 'skipped',
@@ -1874,7 +1892,9 @@ describe('runCustomAutomationNow', () => {
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
     fastMocks.enqueueParentEvent.mockRejectedValueOnce(new Error('queue down'));
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result.outcome).toBe('failed');
     expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(db, {
@@ -1911,9 +1931,14 @@ describe('runCustomAutomationNow', () => {
       teamId: 'T123',
     } as never);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
-    expect(result).toEqual({ outcome: 'queued' });
+    expect(result).toEqual({
+      outcome: 'queued',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
       conversation: {
@@ -1958,9 +1983,14 @@ describe('runCustomAutomationNow', () => {
     });
     fastMocks.isManagedTelegramTopic.mockResolvedValue(true);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
-    expect(result).toEqual({ outcome: 'queued' });
+    expect(result).toEqual({
+      outcome: 'queued',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
     expect(fastMocks.isManagedTelegramTopic).toHaveBeenCalledWith({
       sessionId: '33333333-3333-4333-8333-333333333333',
       workspaceId: 'telegram-dm-1',
@@ -2007,9 +2037,14 @@ describe('runCustomAutomationNow', () => {
     } as never);
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(recoveryClaim);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
-    expect(result).toEqual({ outcome: 'queued' });
+    expect(result).toEqual({
+      outcome: 'queued',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
@@ -2028,7 +2063,9 @@ describe('runCustomAutomationNow', () => {
       enabled: false,
     } as never);
 
-    const result = await runCustomAutomationNow(automation.id);
+    const result = await runCustomAutomationNow(automation.id, {
+      trigger: 'manual',
+    });
 
     expect(result.outcome).toBe('failed');
     expect(fastMocks.enqueueParentEvent).not.toHaveBeenCalled();

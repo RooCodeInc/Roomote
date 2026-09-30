@@ -3014,6 +3014,7 @@ export function Integrations({
                     <Button
                       type="button"
                       size="sm"
+                      aria-label={`Add ${item.name}`}
                       onClick={() => {
                         setIsCatalogOpen(false);
                         item.onAction?.();

@@ -65,6 +65,7 @@ const mocks = vi.hoisted(() => ({
   revokeDurableReplay: vi.fn(),
   scheduleDurableRetry: vi.fn(),
   findActiveRetryNotice: vi.fn(),
+  listRecentFastAgentHumanUserPromptTexts: vi.fn(async () => []),
   loadTurnAttempt: vi.fn(),
   getUnifiedSession: vi.fn(),
   createSessionStatusJudgmentRequest: vi.fn(),
@@ -206,6 +207,8 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   revokeFastAgentDurableTurnReplay: mocks.revokeDurableReplay,
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
+  listRecentFastAgentHumanUserPromptTexts:
+    mocks.listRecentFastAgentHumanUserPromptTexts,
   loadFastAgentTurnAttemptSummary: mocks.loadTurnAttempt,
 }));
 
@@ -587,6 +590,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.privateSessionsEnabled.mockResolvedValue(true);
+    mocks.isBrainEnabled.mockResolvedValue(false);
     mocks.isChatGptSubscriptionConnected.mockResolvedValue(false);
     mocks.isXaiSubscriptionConnected.mockResolvedValue(false);
     mocks.deploymentExperimentEnabled.mockResolvedValue(false);
@@ -6353,6 +6357,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       'conversation-1',
       'Prefers deploys on Fridays',
     );
+    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.any(Array),
+      expect.objectContaining({ brainEnabled: true }),
+    );
   });
 
   it('hands each settled human turn to the post-turn memory pass', async () => {
@@ -6475,6 +6484,79 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       error: 'This deployment has no Brain configured.',
     });
     expect(mocks.appendMemory).not.toHaveBeenCalled();
+    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.any(Array),
+      expect.objectContaining({ brainEnabled: false }),
+    );
+  });
+
+  it.each([
+    ['enables', false, true],
+    ['disables', true, false],
+  ] as const)(
+    'refreshes a warm OpenCode instance when Brain %s',
+    async (_label, initialBrainEnabled, nextBrainEnabled) => {
+      mocks.getSession.mockResolvedValue({
+        id: `brain-toggle-${initialBrainEnabled}`,
+        compatibilityMessages: [],
+        openCodeSessionId: 'persisted-session',
+      });
+      mocks.isBrainEnabled
+        .mockResolvedValueOnce(initialBrainEnabled)
+        .mockResolvedValueOnce(nextBrainEnabled)
+        .mockResolvedValueOnce(nextBrainEnabled);
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(mocks.generateText.mock.calls[1]?.[2]).toMatchObject({
+        disposeInstanceBeforeSession: { completed: false },
+      });
+      expect(mocks.generateText.mock.calls[2]?.[2]).toMatchObject({
+        disposeInstanceBeforeSession: { completed: false },
+      });
+      expect(mocks.getNativeRuntime.mock.calls[1]?.[2]).toMatchObject({
+        brainEnabled: nextBrainEnabled,
+      });
+    },
+  );
+
+  it('records the config that successfully refreshed the warm OpenCode instance', async () => {
+    mocks.getSession.mockResolvedValue({
+      id: 'brain-toggle-success',
+      compatibilityMessages: [],
+      openCodeSessionId: 'persisted-session',
+    });
+    mocks.isBrainEnabled
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        if (options.disposeInstanceBeforeSession) {
+          options.disposeInstanceBeforeSession.completed = true;
+        }
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Done.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.generateText.mock.calls[1]?.[2]).toMatchObject({
+      disposeInstanceBeforeSession: { completed: true },
+    });
+    expect(mocks.generateText.mock.calls[2]?.[2]).not.toHaveProperty(
+      'disposeInstanceBeforeSession',
+    );
   });
 
   it('surfaces a full conversation memory as a tool failure', async () => {
@@ -6871,6 +6953,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       {
         addRemoteMcpEnabled: true,
         automationLaunchCriteriaEnabled: false,
+        brainEnabled: false,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,
@@ -7791,6 +7874,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
 
     it('keeps the durable row recoverable when work runs before a reply', async () => {
+      mocks.isBrainEnabled.mockResolvedValue(true);
       mocks.appendMemory.mockResolvedValue({ saved: true });
       let result: unknown;
       mocks.generateText.mockImplementationOnce(

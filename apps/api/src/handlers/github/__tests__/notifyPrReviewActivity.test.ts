@@ -72,7 +72,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     const markerVersion = marker?.match(/\bversion=(\d+)\b/i)?.[1];
     const markerPhase = marker?.match(/\bphase=(reviewing|reviewed)\b/i)?.[1];
 
-    if (markerVersion === '2' && markerPhase) {
+    if ((markerVersion === '2' || markerVersion === '3') && markerPhase) {
       return markerPhase.toLowerCase() === 'reviewing';
     }
 
@@ -91,6 +91,39 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     return /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.|I am reviewing the updated PR head now\.)/i.test(
       firstLine,
     );
+  },
+  parseReviewSummaryResultMetadata: (body: string) => {
+    const marker = body.match(
+      /<!--\s*roomote-review-summary\b([^>]*)-->/i,
+    )?.[1];
+    const version = marker?.match(/\bversion=([^\s]+)\b/)?.[1];
+    if (version === undefined || version === '1' || version === '2') {
+      return { format: 'legacy' };
+    }
+    const outcome = marker?.match(/\boutcome=([^\s]+)\b/)?.[1];
+    const count = marker?.match(/\bfinding_count=([^\s]+)\b/)?.[1];
+    const phase = marker?.match(/\bphase=([^\s]+)\b/)?.[1];
+    const findingCount =
+      count !== undefined && /^(?:0|[1-9]\d*)$/.test(count)
+        ? Number.parseInt(count, 10)
+        : null;
+    const validOutcome =
+      outcome === 'clean' ||
+      outcome === 'findings_remain' ||
+      outcome === 'incomplete';
+    const consistent =
+      validOutcome &&
+      findingCount !== null &&
+      !(outcome === 'clean' && findingCount !== 0) &&
+      !(outcome === 'findings_remain' && findingCount === 0);
+
+    return {
+      format: 'structured',
+      result:
+        version === '3' && phase === 'reviewed' && consistent
+          ? { outcome, findingCount }
+          : null,
+    };
   },
 }));
 
@@ -735,6 +768,85 @@ describe('buildPrReviewSummaryNotification', () => {
       kind: 'review_summary',
       summary: '1 minor doc note; no blocking issues.',
       roomoteAuthored: true,
+    });
+  });
+
+  it.each([
+    'No code issues found.',
+    'No new issues found.',
+    'No new code issues found.',
+  ])('classifies the clean review status %j', (status) => {
+    const body = TERMINAL_SUMMARY_BODY.replace(
+      '1 minor doc note; no blocking issues. [See task](https://roomote.dev/task/x)',
+      status,
+    ).replace('- [ ] Update the doc comment', '');
+
+    expect(
+      buildPrReviewSummaryNotification(summaryPayload({ body }))?.input.event,
+    ).toMatchObject({
+      kind: 'review_summary',
+      reviewResult: {
+        outcome: 'clean',
+        findingCount: null,
+      },
+    });
+  });
+
+  it('uses structured clean metadata when visible wording changes', () => {
+    const body = TERMINAL_SUMMARY_BODY.replace(
+      '<!-- roomote-review-summary sha=f0c89ce4 mode=initial -->',
+      '<!-- roomote-review-summary sha=f0c89ce4 mode=initial version=3 phase=reviewed outcome=clean finding_count=0 -->',
+    )
+      .replace(
+        '1 minor doc note; no blocking issues. [See task](https://roomote.dev/task/x)',
+        'Review complete. The presentation can change freely.',
+      )
+      .replace('- [ ] Update the doc comment', '');
+
+    expect(
+      buildPrReviewSummaryNotification(summaryPayload({ body }))?.input.event,
+    ).toMatchObject({
+      reviewResult: { outcome: 'clean', findingCount: 0 },
+    });
+  });
+
+  it('lets structured findings override clean-looking prose', () => {
+    const body = TERMINAL_SUMMARY_BODY.replace(
+      '<!-- roomote-review-summary sha=f0c89ce4 mode=initial -->',
+      '<!-- roomote-review-summary sha=f0c89ce4 mode=initial version=3 phase=reviewed outcome=findings_remain finding_count=2 -->',
+    )
+      .replace(
+        '1 minor doc note; no blocking issues. [See task](https://roomote.dev/task/x)',
+        'No code issues found.',
+      )
+      .replace('- [ ] Update the doc comment', '');
+
+    expect(
+      buildPrReviewSummaryNotification(summaryPayload({ body }))?.input.event,
+    ).toMatchObject({
+      reviewResult: { outcome: 'findings_remain', findingCount: 2 },
+    });
+  });
+
+  it.each([
+    'outcome=clean',
+    'finding_count=0',
+    'outcome=clean finding_count=1',
+  ])('fails closed for malformed v3 result metadata: %s', (metadata) => {
+    const body = TERMINAL_SUMMARY_BODY.replace(
+      '<!-- roomote-review-summary sha=f0c89ce4 mode=initial -->',
+      `<!-- roomote-review-summary sha=f0c89ce4 mode=initial version=3 phase=reviewed ${metadata} -->`,
+    )
+      .replace(
+        '1 minor doc note; no blocking issues. [See task](https://roomote.dev/task/x)',
+        'No code issues found.',
+      )
+      .replace('- [ ] Update the doc comment', '');
+
+    expect(
+      buildPrReviewSummaryNotification(summaryPayload({ body }))?.input.event,
+    ).toMatchObject({
+      reviewResult: { outcome: null, findingCount: null },
     });
   });
 

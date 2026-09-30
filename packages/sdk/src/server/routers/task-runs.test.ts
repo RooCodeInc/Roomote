@@ -260,6 +260,53 @@ describe('taskRunsRouter queue message guards', () => {
     expect(jevgrepMocks.backend).not.toHaveBeenCalled();
   });
 
+  it.each(['typesafe', 'openrouter', 'vercel'])(
+    'enables Judgement for configured %s with its experiment enabled',
+    async (provider) => {
+      jevgrepMocks.experiment.mockImplementation(
+        async (id) => id === 'judgement',
+      );
+      jevgrepMocks.backend.mockResolvedValue({
+        provider,
+        apiKey: 'server-only-key',
+      });
+      expect(
+        await createRunCaller().isRepositoryJudgementEnabled({ runId: 42 }),
+      ).toBe(true);
+      expect(jevgrepMocks.backend).toHaveBeenCalledWith({ bypassCache: true });
+      expect(jevgrepMocks.experiment).toHaveBeenCalledWith('judgement');
+    },
+  );
+
+  it.each([undefined, { provider: 'roomote', apiKey: 'server-only-key' }])(
+    'hides Judgement when no supported Jev backend is configured',
+    async (backend) => {
+      jevgrepMocks.experiment.mockResolvedValue(true);
+      jevgrepMocks.backend.mockResolvedValue(backend);
+      expect(
+        await createRunCaller().isRepositoryJudgementEnabled({ runId: 42 }),
+      ).toBe(false);
+    },
+  );
+
+  it('hides Judgement when its experiment is disabled', async () => {
+    jevgrepMocks.experiment.mockResolvedValue(false);
+    expect(
+      await createRunCaller().isRepositoryJudgementEnabled({ runId: 42 }),
+    ).toBe(false);
+    expect(jevgrepMocks.backend).not.toHaveBeenCalled();
+  });
+
+  it('scopes the Judgement capability check to the authenticated run', async () => {
+    await expect(
+      createRunCaller().isRepositoryJudgementEnabled({ runId: 43 }),
+    ).rejects.toThrow();
+    await expect(
+      createAuthCaller().isRepositoryJudgementEnabled({ runId: 42 }),
+    ).rejects.toThrow();
+    expect(jevgrepMocks.backend).not.toHaveBeenCalled();
+  });
+
   it('validates and authorizes bounded repository judgments', async () => {
     const request = {
       kind: 'judge' as const,

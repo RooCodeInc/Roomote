@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import { sdk } from '@roomote/sdk/client';
 import {
+  describeIntegrationToolAutoAbsentDenial,
   toIntegrationToolUserRequest,
   type TaskIntegrationToolApprovals,
 } from '@roomote/types';
@@ -227,7 +228,7 @@ export function createTaskToolApprovalRelay(options: {
       await reply(
         ask,
         'reject',
-        `Auto mode blocked this tool call because ${result.reason} and the session owner was away. The call was not run. The session owner can allow this tool from its call in the transcript.`,
+        describeIntegrationToolAutoAbsentDenial(result.reason),
       );
       return;
     }

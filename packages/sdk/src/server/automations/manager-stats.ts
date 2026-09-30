@@ -38,6 +38,8 @@ import { resolveDeploymentTimeZone } from './custom-automation-schedule';
 import { isManagerStatsRunDueOnLocalPeriod } from './scheduling-utils';
 import {
   emptyJobResult,
+  resolveAutomationRunContext,
+  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -269,12 +271,13 @@ async function postManagerStatsViaCommunicationAdapter(params: {
 }
 
 export async function managerStatsJob(
-  opts: AutomationRunOpts = {},
+  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting manager stats job`);
 
   const now = new Date();
   const result = emptyJobResult();
+  const { isExplicitRun } = resolveAutomationRunContext(opts.context);
   const runtime = await getAutomationRuntime('manager_stats');
   const eligibleDeployments = await findEligibleDeployments(runtime);
 
@@ -326,7 +329,7 @@ export async function managerStatsJob(
       const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
       if (
-        !opts.manualTrigger &&
+        !isExplicitRun &&
         !isManagerStatsRunDueOnLocalPeriod({
           now,
           timeZone: timezone,

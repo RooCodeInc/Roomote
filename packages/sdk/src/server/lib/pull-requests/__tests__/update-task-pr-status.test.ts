@@ -1,19 +1,23 @@
 const {
   mockLinkedTasks,
+  mockCreateSessionStatusJudgmentRequest,
   mockDbSelect,
   mockEnqueueTaskSleep,
   mockReconcileAutomationResultAcceptance,
   mockReturning,
   mockRequeueBrainMemoryEventsForTasks,
+  mockGetSessionForTask,
   mockSyncTaskStateFromRuns,
   mockTransaction,
 } = vi.hoisted(() => {
   const mockLinkedTasks = vi.fn();
+  const mockCreateSessionStatusJudgmentRequest = vi.fn();
   const mockDbSelect = vi.fn();
   const mockEnqueueTaskSleep = vi.fn();
   const mockReconcileAutomationResultAcceptance = vi.fn();
   const mockReturning = vi.fn();
   const mockRequeueBrainMemoryEventsForTasks = vi.fn();
+  const mockGetSessionForTask = vi.fn();
   const mockSyncTaskStateFromRuns = vi.fn();
   const mockTransaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
     callback({
@@ -39,11 +43,13 @@ const {
 
   return {
     mockLinkedTasks,
+    mockCreateSessionStatusJudgmentRequest,
     mockDbSelect,
     mockEnqueueTaskSleep,
     mockReconcileAutomationResultAcceptance,
     mockReturning,
     mockRequeueBrainMemoryEventsForTasks,
+    mockGetSessionForTask,
     mockSyncTaskStateFromRuns,
     mockTransaction,
   };
@@ -62,6 +68,9 @@ vi.mock('@roomote/db/server', async () => {
       mockRequeueBrainMemoryEventsForTasks(...args),
     reconcileAutomationResultAcceptance: (...args: unknown[]) =>
       mockReconcileAutomationResultAcceptance(...args),
+    createSessionStatusJudgmentRequest: (...args: unknown[]) =>
+      mockCreateSessionStatusJudgmentRequest(...args),
+    getSessionForTask: (...args: unknown[]) => mockGetSessionForTask(...args),
     syncTaskStateFromRuns: (...args: unknown[]) =>
       mockSyncTaskStateFromRuns(...args),
   };
@@ -91,6 +100,8 @@ describe('updateTaskPrStatus', () => {
     mockEnqueueTaskSleep.mockResolvedValue(true);
     mockReconcileAutomationResultAcceptance.mockResolvedValue(false);
     mockRequeueBrainMemoryEventsForTasks.mockResolvedValue(0);
+    mockGetSessionForTask.mockResolvedValue(null);
+    mockCreateSessionStatusJudgmentRequest.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -264,6 +275,56 @@ describe('updateTaskPrStatus', () => {
 
     expect(mockSyncTaskStateFromRuns).not.toHaveBeenCalled();
     expect(mockLinkedTasks).not.toHaveBeenCalled();
+  });
+
+  it.each(['merged', 'closed'] as const)(
+    'requeues Session status when a Roomote-created pull request becomes %s',
+    async (status) => {
+      mockReturning.mockResolvedValue([
+        { taskId: 'task-1', createdByRoomote: true },
+        { taskId: 'task-2', createdByRoomote: false },
+      ]);
+      mockLinkedTasks.mockResolvedValue([
+        { taskId: 'task-1', createdByRoomote: true },
+        { taskId: 'task-2', createdByRoomote: false },
+      ]);
+      mockGetSessionForTask.mockResolvedValue({ id: 'session-1' });
+      mockDbSelect.mockReturnValue({
+        from: () => ({ where: () => Promise.resolve([]) }),
+      });
+
+      await updateTaskPrStatus('github', 'owner/repo', 42, status, {
+        host: 'github.com',
+      });
+
+      expect(mockGetSessionForTask).toHaveBeenCalledTimes(1);
+      expect(mockGetSessionForTask).toHaveBeenCalledWith(
+        expect.any(Object),
+        'task-1',
+      );
+      expect(mockCreateSessionStatusJudgmentRequest).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          sessionId: 'session-1',
+          sourceEventId: expect.stringContaining(`:${status}:`),
+          sourceKind: 'task_terminal',
+          state: 'pending',
+        }),
+      );
+    },
+  );
+
+  it('does not requeue Session status for a non-Roomote PR association', async () => {
+    mockReturning.mockResolvedValue([
+      { taskId: 'task-1', createdByRoomote: false },
+    ]);
+
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed', {
+      host: 'github.com',
+    });
+
+    expect(mockGetSessionForTask).not.toHaveBeenCalled();
+    expect(mockCreateSessionStatusJudgmentRequest).not.toHaveBeenCalled();
   });
   it('re-ingests the memories of every task whose PR just merged', async () => {
     mockReturning.mockResolvedValue([

@@ -1,4 +1,10 @@
 import { createServer } from 'node:http';
+import { delimiter } from 'node:path';
+import {
+  clearJudgementCommand,
+  installJudgementCommand,
+  judgementBinDir,
+} from './judgement-command';
 import { getRequestListener } from '@hono/node-server';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -73,6 +79,11 @@ export async function startJudgementProxy(env: NodeJS.ProcessEnv) {
     throw new Error('Judgement proxy failed to listen');
   return {
     endpoint: `http://127.0.0.1:${address.port}/judge`,
+    isEnabled: () =>
+      client.taskRuns.isRepositoryJudgementEnabled.query(
+        { runId },
+        { signal: AbortSignal.timeout(5000) },
+      ),
     close: async () => {
       shutdown.abort();
       await new Promise<void>((resolve) => {
@@ -85,6 +96,7 @@ export async function startJudgementProxy(env: NodeJS.ProcessEnv) {
 
 export async function setupJudgement(options: {
   runtimeEnv: NodeJS.ProcessEnv;
+  homeDir?: string;
   logger: Pick<Console, 'warn'>;
   registerCleanup: (close: () => Promise<void>) => void;
 }) {
@@ -93,19 +105,25 @@ export async function setupJudgement(options: {
   options.runtimeEnv.R_JUDGEMENT_MANAGED = '1';
   delete options.runtimeEnv.R_JUDGEMENT_GATEWAY_URL;
   try {
+    if (options.homeDir) clearJudgementCommand(options.homeDir);
     const proxy = await startJudgementProxy(options.runtimeEnv);
     options.registerCleanup(proxy.close);
     options.runtimeEnv.R_JUDGEMENT_GATEWAY_URL = proxy.endpoint;
+    if (!options.homeDir || !(await proxy.isEnabled())) return false;
+    installJudgementCommand(options.homeDir, options.runtimeEnv);
+    return true;
   } catch {
     options.logger.warn(
-      '[judgement] Local inference proxy unavailable; repository checks will report incomplete.',
+      '[judgement] Managed Judgement setup incomplete; the skill is unavailable.',
     );
+    return false;
   }
 }
 
 export function buildJudgementTerminalEnv(
   userEnv: Record<string, string>,
   runtimeEnv: Record<string, string>,
+  homeDir?: string,
 ): Record<string, string> {
   const env = { ...userEnv };
   delete env.ROOMOTE_CLOUD_TOKEN;
@@ -116,5 +134,10 @@ export function buildJudgementTerminalEnv(
   if (runtimeEnv.R_JUDGEMENT_MANAGED === '1') env.R_JUDGEMENT_MANAGED = '1';
   if (runtimeEnv.R_JUDGEMENT_GATEWAY_URL)
     env.R_JUDGEMENT_GATEWAY_URL = runtimeEnv.R_JUDGEMENT_GATEWAY_URL;
+  if (homeDir && runtimeEnv.R_JUDGEMENT_GATEWAY_URL) {
+    env.PATH = [judgementBinDir(homeDir), env.PATH]
+      .filter(Boolean)
+      .join(delimiter);
+  }
   return env;
 }
