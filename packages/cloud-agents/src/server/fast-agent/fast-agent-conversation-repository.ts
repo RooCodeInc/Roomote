@@ -489,11 +489,15 @@ const FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT = 80;
 
 /**
  * Read the human-authored prompts that were already in the Session before its
- * current UserPrompt. Timestamps are milliseconds and can tie, so the current
- * prompt is excluded by its event id rather than by a strict time bound. The N-1 `compatibility_messages` mirror intentionally
+ * current UserPrompt. The N-1 `compatibility_messages` mirror intentionally
  * omits event metadata, so `fast_agent_messages` is the trust source for
  * distinguishing human requests from platform events and other transcript
  * content.
+ *
+ * Timestamps are milliseconds and there is no causal cursor across turns, so
+ * the current prompt is excluded by its event id, and prompts sharing a
+ * timestamp are returned as one entry. Callers that take the newest entry as
+ * the request then see every prompt that could be the latest one.
  */
 export async function listRecentFastAgentHumanUserPromptTexts(input: {
   conversationId: string;
@@ -501,7 +505,10 @@ export async function listRecentFastAgentHumanUserPromptTexts(input: {
   currentEventId: string;
 }): Promise<string[]> {
   const rows = await db
-    .select({ contentBlocks: fastAgentMessages.contentBlocks })
+    .select({
+      ts: fastAgentMessages.ts,
+      contentBlocks: fastAgentMessages.contentBlocks,
+    })
     .from(fastAgentMessages)
     .where(
       and(
@@ -515,8 +522,7 @@ export async function listRecentFastAgentHumanUserPromptTexts(input: {
         sql`coalesce(${fastAgentMessages.metadata}->>'visibleInTranscript', 'true') <> 'false'`,
       ),
     )
-    // turnSeq restarts every turn, so same-millisecond prompts from different
-    // turns are ordered by when they were written.
+    // Order within a shared timestamp only affects how a grouped entry reads.
     .orderBy(
       desc(fastAgentMessages.ts),
       desc(fastAgentMessages.createdAt),
@@ -525,13 +531,21 @@ export async function listRecentFastAgentHumanUserPromptTexts(input: {
     )
     .limit(FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT);
 
-  return rows.reverse().flatMap((row) => {
+  const groups: Array<{ ts: number; texts: string[] }> = [];
+  for (const row of rows.reverse()) {
     const text = row.contentBlocks
       .flatMap((block) => (block.type === 'text' ? [block.text] : []))
       .join('\n')
       .trim();
-    return text ? [text] : [];
-  });
+    if (!text) continue;
+    const last = groups.at(-1);
+    if (last?.ts === row.ts) {
+      last.texts.push(text);
+    } else {
+      groups.push({ ts: row.ts, texts: [text] });
+    }
+  }
+  return groups.map((group) => group.texts.join('\n\n'));
 }
 
 async function findFastAgentTurnPrompt(

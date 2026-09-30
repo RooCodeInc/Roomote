@@ -1062,17 +1062,19 @@ describe('Fast conversation repository', () => {
     });
     expect(stored?.compatibilityMessages).toEqual([legacyMirror]);
     expect(stored?.compatibilityMessages[0]).not.toHaveProperty('metadata');
-    await expect(
-      listRecentFastAgentHumanUserPromptTexts({
-        conversationId: conversation.id,
-        beforeTs: 1_000,
-        currentEventId: 'current-turn',
-      }),
-    ).resolves.toEqual([
-      'Earlier trusted request.',
-      'Earlier request in the same millisecond.',
+    const history = await listRecentFastAgentHumanUserPromptTexts({
+      conversationId: conversation.id,
+      beforeTs: 1_000,
+      currentEventId: 'current-turn',
+    });
+    // Prompts sharing the newest timestamp form one entry, so the latest
+    // request cannot depend on how ties are ordered.
+    expect(history).toHaveLength(2);
+    expect(history[0]).toBe('Earlier trusted request.');
+    expect(history[1]).toContain('Earlier request in the same millisecond.');
+    expect(history[1]).toContain(
       'Latest earlier request in the same millisecond.',
-    ]);
+    );
   });
 
   it('persists the canonical OpenCode session identity', async () => {
