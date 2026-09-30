@@ -2,6 +2,7 @@ import type { MetadataBooleanDescriptor } from './types';
 
 export const DEPLOYMENT_EXPERIMENT_IDS = [
   'jevgrep',
+  'judgement',
   'privateSessions',
   'browserNotifications',
   'integrationToolAutoApprovals',
@@ -35,6 +36,10 @@ export const DEPLOYMENT_EXPERIMENT_CONFIG = {
   jevgrep: {
     audience: 'customer-preview',
     metadataKey: 'jevgrep_experiment_enabled',
+  },
+  judgement: {
+    audience: 'customer-preview',
+    metadataKey: 'judgement_experiment_enabled',
   },
   privateSessions: {
     audience: 'customer-preview',
@@ -90,6 +95,12 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     group: null,
     description:
       'Use Jevgrep to collect code context in coding tasks when Jev is configured. Disabled by default; absent means disabled.',
+  },
+  [DEPLOYMENT_EXPERIMENT_CONFIG.judgement.metadataKey]: {
+    kind: 'deployment-control',
+    group: null,
+    description:
+      'Make the Judgement skill and command available to coding tasks when Jev is configured. Disabled by default; absent means disabled.',
   },
   deployment_disabled: {
     kind: 'deployment-control',

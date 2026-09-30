@@ -1088,6 +1088,15 @@ export const taskRunsRouter = router({
     },
   ),
 
+  isRepositoryJudgementEnabled: runTokenOnlyScoped(
+    z.object({ runId: z.number() }),
+    'runId',
+  ).query(async () => {
+    if (!(await isDeploymentExperimentEnabled('judgement'))) return false;
+    const backend = await resolveJudgmentBackend({ bypassCache: true });
+    return Boolean(backend && backend.provider !== 'roomote');
+  }),
+
   evaluateRepositoryJudgement: runTokenOnlyScoped(
     z
       .object({ runId: z.number(), request: repositoryJudgementRequestSchema })

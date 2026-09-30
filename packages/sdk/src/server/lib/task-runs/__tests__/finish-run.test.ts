@@ -234,6 +234,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     ),
   parseReviewSummaryMarkerSha: (body: string) =>
     body.match(/roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1],
+  parseReviewSummaryResultMetadata: () => ({ format: 'legacy' }),
   getMarkedSection: ({
     content,
     startMarker,

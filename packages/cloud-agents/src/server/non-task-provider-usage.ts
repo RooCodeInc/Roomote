@@ -447,7 +447,11 @@ export interface NonTaskOpenCodePermissionAskHelpers {
   }) => Promise<
     | {
         input?: unknown;
-        toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        toolCalls?: Array<{
+          tool?: unknown;
+          input?: unknown;
+          status?: unknown;
+        }>;
         /** Completed tool results earlier in the paused call's turn. */
         readContent?: string;
       }
@@ -473,7 +477,7 @@ export function findPausedOpenCodeToolCall(
 ):
   | {
       input?: unknown;
-      toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+      toolCalls?: Array<{ tool?: unknown; input?: unknown; status?: unknown }>;
       readContent?: string;
     }
   | undefined {
@@ -502,7 +506,11 @@ export function findPausedOpenCodeToolCall(
             .filter(
               (entry): entry is Record<string, unknown> => entry !== undefined,
             )
-            .map((entry) => ({ tool: entry.tool, input: entry.input }))
+            .map((entry) => ({
+              tool: entry.tool,
+              input: entry.input,
+              ...(entry.status === undefined ? {} : { status: entry.status }),
+            }))
         : undefined;
       return {
         input: state?.input,

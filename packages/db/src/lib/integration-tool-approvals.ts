@@ -349,7 +349,7 @@ export async function insertIntegrationToolApproval(
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
-        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
         expiresAt: sql`clock_timestamp() + ${INTEGRATION_TOOL_APPROVAL_WINDOW_MINUTES} * interval '1 minute'`,
       })
       .onConflictDoNothing({
@@ -663,7 +663,7 @@ export async function insertAutoApprovedIntegrationToolApproval(
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
-        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
         status: 'approved',
         decidedByUserId: input.decidedBy === 'model' ? null : owner.id,
         decidedAt: sql`clock_timestamp()`,
@@ -708,7 +708,7 @@ export async function insertAutoRejectedIntegrationToolApproval(
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
-        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
         status: 'auto_rejected',
         decidedByUserId: null,
         decidedAt: sql`clock_timestamp()`,
@@ -799,7 +799,7 @@ export async function recordIntegrationToolShadowEvaluation(input: {
     taskId: input.taskId,
     integrationId: input.integrationId,
     toolName: input.toolName,
-    argsSummary: redactIntegrationToolArgs(input.argsSummary),
+    argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
     evaluation: input.evaluation,
   });
 }

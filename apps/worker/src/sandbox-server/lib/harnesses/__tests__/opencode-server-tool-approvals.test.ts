@@ -152,6 +152,11 @@ describe('createTaskToolApprovalRelay', () => {
         ),
       }),
     );
+    expect(client.replyPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.not.stringContaining('transcript'),
+      }),
+    );
   });
 
   it('rejects when nobody can approve, the tool is unknown, or the relay fails', async () => {

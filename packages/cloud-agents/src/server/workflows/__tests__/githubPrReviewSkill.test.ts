@@ -143,10 +143,10 @@ describe('review-code GitHub workflow paths', () => {
     expect(skillContent).not.toContain('gh issue view');
     expect(skillContent).not.toContain('gh api');
     expect(skillContent).toContain(
-      '<!-- roomote-review-summary sha=[HEAD_SHA] mode=initial agent=[CLOUD_AGENT_ID] version=2 phase=[reviewing|reviewed] -->',
+      '<!-- roomote-review-summary sha=[HEAD_SHA] mode=initial agent=[CLOUD_AGENT_ID] version=3 phase=[reviewing|reviewed] -->',
     );
     expect(skillContent).toContain(
-      'this marker phase is the authoritative lifecycle signal',
+      'This marker metadata, not visible prose, is the authoritative lifecycle and result signal',
     );
     expect(skillContent).toContain(
       'If no marker-based summary comment exists, use a backward-compatible legacy fallback',
@@ -391,7 +391,7 @@ describe('review-code GitHub workflow paths', () => {
     );
     expect(skillContent).toContain('Re-reviewing new commits now.');
     expect(skillContent).toContain(
-      'patch its hidden summary marker to `version=2 phase=reviewing` and update its status block immediately',
+      'patch its hidden summary marker to `version=3 phase=reviewing`, remove any terminal `outcome` and `finding_count` attributes',
     );
     expect(skillContent).toContain(
       '`<!-- roomote-review-status:start -->` and `<!-- roomote-review-status:end -->`',

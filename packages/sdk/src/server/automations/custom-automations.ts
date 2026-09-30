@@ -550,7 +550,7 @@ async function runFastCustomAutomation(params: {
   reuseExistingDestinationRoot: boolean;
   /** Environment the automation was configured for, offered to the turn as a hint. */
   preferredEnvironmentId: string | null;
-}): Promise<void> {
+}): Promise<string> {
   if (!params.automation.createdByUserId) {
     throw new Error('Fast automation run-as user is not configured.');
   }
@@ -621,6 +621,7 @@ async function runFastCustomAutomation(params: {
       parent: { sessionId: session.id, conversation },
       event,
     });
+    return session.id;
   } catch (error) {
     await reportFastAutomationStartupFailure({
       automation: params.automation,
@@ -765,8 +766,8 @@ async function launchCustomAutomationRow(
   automation: CustomAutomation,
   opts: AutomationRunOpts,
   scheduleContext?: ResolvedDeploymentTimeZone,
-): Promise<AutomationJobResult> {
-  const result = emptyJobResult();
+): Promise<AutomationJobResult & { sessionId?: string }> {
+  const result: AutomationJobResult & { sessionId?: string } = emptyJobResult();
   const frequency = getCustomAutomationFrequency(automation);
   const { isExplicitRun, isManualRun, taskTrigger, webhookInputJson } =
     resolveAutomationRunContext(opts.context);
@@ -975,7 +976,7 @@ async function launchCustomAutomationRow(
           ),
         );
     }
-    await runFastCustomAutomation({
+    result.sessionId = await runFastCustomAutomation({
       automation,
       prompt: buildCustomAutomationRunPrompt(
         automation.prompt,
@@ -1118,7 +1119,12 @@ export async function runCustomAutomationNow(
     }
 
     if (result.queued) {
-      return { outcome: 'queued' };
+      return {
+        outcome: 'queued',
+        ...(context.trigger === 'manual' && result.sessionId
+          ? { sessionId: result.sessionId }
+          : {}),
+      };
     }
 
     if (result.completed) {

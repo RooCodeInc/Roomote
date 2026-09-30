@@ -89,8 +89,8 @@ export function emptyJobResult(): AutomationJobResult {
  * Result surfaced to the settings UI for a synchronous manual Run now.
  */
 export type AutomationRunNowResult =
-  | { outcome: 'launched'; taskId: string }
-  | { outcome: 'queued' }
+  | { outcome: 'launched'; taskId: string; sessionId?: string }
+  | { outcome: 'queued'; sessionId?: string }
   | { outcome: 'completed' }
   | { outcome: 'skipped'; reason: string }
   | { outcome: 'failed'; error: string };

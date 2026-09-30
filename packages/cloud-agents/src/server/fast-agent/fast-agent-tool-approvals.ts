@@ -22,6 +22,7 @@ import {
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
 import {
+  describeIntegrationToolAutoAbsentDenial,
   integrationToolModeIsAutoAssessed,
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
@@ -29,6 +30,7 @@ import {
   redactIntegrationToolArgs,
   type FastAgentSurface,
   type IntegrationToolApprovalMetadata,
+  type IntegrationToolAutoEvaluation,
   type IntegrationToolPolicyMetadata,
   type IntegrationToolSessionOverrideMetadata,
 } from '@roomote/types';
@@ -63,7 +65,15 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
  *   call with changed arguments is a new ask by construction.
  */
 const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
+
+type CardDecision = 'approved' | 'rejected' | 'expired' | 'invalid' | 'aborted';
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
+/**
+ * An open session page renews its presence every 10 seconds, and a page that
+ * just opened can briefly drop it. The owner counts as away only when a
+ * second lookup, a full renewal later, still finds nobody.
+ */
+const SESSION_PRESENCE_RECHECK_MS = 11_000;
 
 async function isFastAgentLaunchedTask(
   sessionId: string,
@@ -271,7 +281,11 @@ type FastAgentToolApprovalHelpers = {
   }) => Promise<
     | {
         input?: unknown;
-        toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        toolCalls?: Array<{
+          tool?: unknown;
+          input?: unknown;
+          status?: unknown;
+        }>;
         readContent?: string;
       }
     | undefined
@@ -290,25 +304,52 @@ type FastAgentToolApprovalHelpers = {
  * tool calls with their structured inputs, so the card shows the gated
  * child call's own arguments. A plain MCP call shows its input directly.
  */
+/** A child call that has not finished, so an ask can be for it. */
+function isOpenChildCall(entry: { status?: unknown }): boolean {
+  return entry.status !== 'completed' && entry.status !== 'error';
+}
+
+/**
+ * The arguments of the call an ask paused, or every argument set it could be.
+ * A code-mode script can call the same tool more than once, and every ask it
+ * raises carries the same outer call id. Only calls still running can be the
+ * paused one: one such call, or several with identical arguments, identifies
+ * the arguments. Several with different arguments (calls started together,
+ * such as with `Promise.all`) cannot be told apart, so the caller gets all of
+ * them rather than a guess that would show and assess another call.
+ */
 export function extractApprovalCallArgs(
   recovered:
     | {
         input?: unknown;
-        toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        toolCalls?: Array<{
+          tool?: unknown;
+          input?: unknown;
+          status?: unknown;
+        }>;
       }
     | undefined,
   tool: { serverName: string; toolName: string },
-): unknown {
-  if (!recovered) return undefined;
+): { args: unknown; concurrent?: number } | { candidates: unknown[] } {
+  if (!recovered) return { args: undefined };
   const dottedChildName = `${tool.serverName}.${tool.toolName}`;
-  // One script can call the same tool more than once. Child calls are
-  // recorded as they run, so the paused call is the most recent match, not
-  // the first; showing the first would put an earlier call's arguments on
-  // this ask's card and audit row.
-  const child = [...(recovered.toolCalls ?? [])]
-    .reverse()
-    .find((entry) => entry.tool === dottedChildName);
-  return child ? child.input : recovered.input;
+  const matches = (recovered.toolCalls ?? []).filter(
+    (entry) => entry.tool === dottedChildName,
+  );
+  if (matches.length === 0) return { args: recovered.input };
+  const open = matches.filter(isOpenChildCall);
+  // Nothing still running: the most recent call is the paused one.
+  const candidates = open.length > 0 ? open : matches.slice(-1);
+  const distinct = new Map<string, unknown>();
+  for (const entry of candidates) {
+    distinct.set(JSON.stringify(entry.input ?? null), entry.input);
+  }
+  return distinct.size === 1
+    ? {
+        args: candidates[0]!.input,
+        ...(candidates.length > 1 ? { concurrent: candidates.length } : {}),
+      }
+    : { candidates: [...distinct.values()] };
 }
 
 /**
@@ -429,9 +470,83 @@ export function createFastAgentToolApprovalBridge(input: {
   }
   const handledRequestIds = new Set<string>();
   const notifiedApprovalIds = new Set<string>();
+  // Calls running together in one script raise one ask each, and an ask may
+  // not say which of them it is. Sharing one assessment per call (script,
+  // tool, arguments) keeps their decisions the same; otherwise one ask could
+  // refuse and fail the whole script.
+  const sharedAssessments = new Map<
+    string,
+    ReturnType<typeof resolveIntegrationToolAutoDecision>
+  >();
+  // Parallel calls that need a person share one card listing all of them:
+  // allowing it runs the whole batch, rejecting it stops the whole batch.
+  const batchCards = new Map<string, Promise<CardDecision>>();
+
+  /**
+   * Record one approval card, notify chat surfaces, and wait for the
+   * owner's decision. An approved card is consumed here, once, before any
+   * call runs.
+   */
+  const awaitCardDecision = async (card: {
+    tool: MountedIntegrationTool;
+    nativeRequestId: string;
+    argsFingerprint: string;
+    argsSummary: unknown;
+    autoEvaluation?: IntegrationToolAutoEvaluation;
+  }): Promise<CardDecision> => {
+    const approval = await insertIntegrationToolApproval(
+      { sessionId: input.sessionId, userId: input.userId },
+      {
+        integrationId: card.tool.integrationId,
+        toolName: card.tool.toolName,
+        nativeRequestId: card.nativeRequestId,
+        argsFingerprint: card.argsFingerprint,
+        argsSummary: card.argsSummary,
+        ...(card.autoEvaluation ? { autoEvaluation: card.autoEvaluation } : {}),
+      },
+    );
+    if (input.notify && !notifiedApprovalIds.has(approval.approvalId)) {
+      notifiedApprovalIds.add(approval.approvalId);
+      await input.notify(approval);
+    }
+    const deadline = Date.parse(approval.expiresAt);
+    for (;;) {
+      if (input.signal?.aborted) return 'aborted';
+      const row = await getIntegrationToolApproval(approval.approvalId);
+      if (!row || row.status === 'rejected' || row.status === 'cancelled') {
+        return 'rejected';
+      }
+      if (row.status === 'expired') return 'expired';
+      if (row.status === 'approved') {
+        // Consume before relaying: only the first relay of an approved,
+        // unclaimed decision reaches OpenCode; a cancelled or
+        // double-claimed row fails closed instead of executing twice.
+        const consumed = await markIntegrationToolApprovalConsumed({
+          approvalId: approval.approvalId,
+          requesterUserId: input.userId,
+        });
+        return consumed ? 'approved' : 'invalid';
+      }
+      if (Date.now() >= deadline) {
+        await expireIntegrationToolApproval(approval.approvalId);
+        return 'expired';
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, INTEGRATION_TOOL_APPROVAL_POLL_MS),
+      );
+    }
+  };
 
   const ownerIsPresent = async (): Promise<boolean> => {
     if (isFastAgentApprovalChatSurface(input.surface)) return true;
+    if (await lookUpOwnerPresence()) return true;
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, SESSION_PRESENCE_RECHECK_MS);
+      timer.unref?.();
+    });
+    return lookUpOwnerPresence();
+  };
+  const lookUpOwnerPresence = async (): Promise<boolean> => {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
@@ -480,26 +595,52 @@ export function createFastAgentToolApprovalBridge(input: {
     recovered:
       | {
           input?: unknown;
-          toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+          toolCalls?: Array<{
+            tool?: unknown;
+            input?: unknown;
+            status?: unknown;
+          }>;
         }
       | undefined,
-  ): { tool: ToolIdentity; args: unknown } | null => {
+  ):
+    | {
+        tool: ToolIdentity;
+        args: unknown;
+        /** Different calls running together; the ask could be any of them. */
+        parallel?: unknown[];
+        /** Identical calls running together, which share one decision. */
+        concurrent?: boolean;
+      }
+    | { unresolved: 'identity' } => {
     const candidates = toolsByKey.get(permission) ?? [];
     if (candidates.length === 1) {
       const tool = candidates[0]!;
-      return { tool, args: extractApprovalCallArgs(recovered, tool) };
+      const call = extractApprovalCallArgs(recovered, tool);
+      return 'candidates' in call
+        ? {
+            tool,
+            // A list, which tool arguments (always an object) never are.
+            args: call.candidates,
+            parallel: call.candidates,
+          }
+        : {
+            tool,
+            args: call.args,
+            ...(call.concurrent ? { concurrent: true } : {}),
+          };
     }
     const matchingChildren = (recovered?.toolCalls ?? []).filter(
       (entry) =>
         typeof entry.tool === 'string' &&
-        flattenDottedChildName(entry.tool) === permission,
+        flattenDottedChildName(entry.tool) === permission &&
+        isOpenChildCall(entry),
     );
     if (matchingChildren.length === 1) {
       const child = matchingChildren[0]!;
       const tool = toolByDottedName.get(child.tool as string);
       if (tool) return { tool, args: child.input };
     }
-    return null;
+    return { unresolved: 'identity' };
   };
 
   /**
@@ -524,7 +665,7 @@ export function createFastAgentToolApprovalBridge(input: {
         })
         .catch(() => undefined);
       const resolution = resolveToolForAsk(ask.permission, recovered);
-      if (!resolution) {
+      if ('unresolved' in resolution) {
         // Never show the requester a card for a different tool than the one
         // that would execute, and never let an ambiguous call through.
         console.warn(
@@ -539,7 +680,7 @@ export function createFastAgentToolApprovalBridge(input: {
           .catch(() => undefined);
         return;
       }
-      const { tool, args } = resolution;
+      const { tool, args, parallel, concurrent } = resolution;
       const argsSummary = redactIntegrationToolArgs(args ?? null);
       const argsFingerprint = fingerprintIntegrationToolCall({
         integrationId: tool.integrationId,
@@ -592,28 +733,57 @@ export function createFastAgentToolApprovalBridge(input: {
               ...(agentMessage ? { agentMessageRepliedTo: agentMessage } : {}),
             }
           : undefined;
-      const auto = autoAssessed
-        ? await resolveIntegrationToolAutoDecision({
-            integrationId: tool.integrationId,
-            toolName: tool.toolName,
-            toolDescription: tool.description,
-            args,
-            userRequest: await input.resolveUserRequest?.(),
-            sessionContext,
-            readContent: recovered?.readContent,
-            isSessionLaunchedTask: (taskId) =>
-              isFastAgentLaunchedTask(input.sessionId, taskId),
-            userId: input.userId,
-          }).catch(() => ({
-            action: 'ask' as const,
-            mode: 'on' as const,
-            evaluation: {
-              recommendation: 'ask' as const,
-              unavailable: 'error' as const,
-              evaluatedAt: new Date().toISOString(),
-            },
-          }))
-        : undefined;
+      const assess = async (callArgs: unknown) =>
+        resolveIntegrationToolAutoDecision({
+          integrationId: tool.integrationId,
+          toolName: tool.toolName,
+          toolDescription: tool.description,
+          args: callArgs,
+          userRequest: await input.resolveUserRequest?.(),
+          sessionContext,
+          readContent: recovered?.readContent,
+          isSessionLaunchedTask: (taskId) =>
+            isFastAgentLaunchedTask(input.sessionId, taskId),
+          userId: input.userId,
+        }).catch(() => ({
+          action: 'ask' as const,
+          mode: 'on' as const,
+          evaluation: {
+            recommendation: 'ask' as const,
+            unavailable: 'error' as const,
+            evaluatedAt: new Date().toISOString(),
+          },
+        }));
+      const assessShared = (callArgs: unknown) => {
+        const key = JSON.stringify([
+          ask.callId ?? ask.requestId,
+          tool.integrationId,
+          tool.toolName,
+          callArgs ?? null,
+        ]);
+        let assessment = sharedAssessments.get(key);
+        if (!assessment) {
+          assessment = assess(callArgs);
+          sharedAssessments.set(key, assessment);
+          // Only calls waiting at the same time share it; a later call in
+          // the same script is assessed again, with whatever changed since.
+          void assessment.finally(() => sharedAssessments.delete(key));
+        }
+        return assessment;
+      };
+      let auto: Awaited<ReturnType<typeof assess>> | undefined;
+      if (autoAssessed && parallel) {
+        // This ask is one of these calls; it runs only if every one of them
+        // would run on its own.
+        const results = await Promise.all(parallel.map(assessShared));
+        // Any call Auto would not run makes the batch ask the owner.
+        auto =
+          results.find((result) => result.mode === 'off') ??
+          results.find((result) => result.action !== 'approve') ??
+          results[0];
+      } else if (autoAssessed) {
+        auto = await assessShared(args);
+      }
       // A default tool asked under a rule compiled while Auto was on, after
       // Auto went off: it runs as it always has, and there is nothing to
       // record.
@@ -640,9 +810,9 @@ export function createFastAgentToolApprovalBridge(input: {
           .reply(
             ask.requestId,
             'reject',
-            `Auto mode blocked this tool call because ${describeIntegrationToolAutoDeny(
-              auto.evaluation,
-            )} and the session owner was away. The call was not run. The session owner can allow this tool from its call in the transcript.`,
+            describeIntegrationToolAutoAbsentDenial(
+              describeIntegrationToolAutoDeny(auto.evaluation),
+            ),
           )
           .catch(() => undefined);
         return;
@@ -686,86 +856,51 @@ export function createFastAgentToolApprovalBridge(input: {
         await helpers.reply(ask.requestId, 'once');
         return;
       }
-      const approval = await insertIntegrationToolApproval(
-        { sessionId: input.sessionId, userId: input.userId },
-        {
-          integrationId: tool.integrationId,
-          toolName: tool.toolName,
-          nativeRequestId: ask.requestId,
-          argsFingerprint,
-          argsSummary,
-          ...(auto?.action === 'ask'
-            ? { autoEvaluation: auto.evaluation }
-            : {}),
-        },
-      );
-      if (input.notify && !notifiedApprovalIds.has(approval.approvalId)) {
-        notifiedApprovalIds.add(approval.approvalId);
-        await input.notify(approval);
+      const card = {
+        tool,
+        nativeRequestId: ask.requestId,
+        argsFingerprint,
+        argsSummary,
+        ...(auto?.action === 'ask' ? { autoEvaluation: auto.evaluation } : {}),
+      };
+      let decision: CardDecision;
+      if (parallel || concurrent) {
+        const batchKey = JSON.stringify([
+          ask.callId ?? ask.requestId,
+          tool.integrationId,
+          tool.toolName,
+          parallel ?? [args ?? null],
+        ]);
+        let shared = batchCards.get(batchKey);
+        if (!shared) {
+          shared = awaitCardDecision(card);
+          batchCards.set(batchKey, shared);
+          // A decided card never covers calls that start later.
+          void shared.finally(() => batchCards.delete(batchKey));
+        }
+        decision = await shared;
+      } else {
+        decision = await awaitCardDecision(card);
       }
-      const deadline = Date.parse(approval.expiresAt);
-      for (;;) {
-        if (input.signal?.aborted) return;
-        const row = await getIntegrationToolApproval(approval.approvalId);
-        if (!row || row.status === 'rejected' || row.status === 'cancelled') {
-          await helpers
-            .reply(
-              ask.requestId,
-              'reject',
-              'The requester rejected this tool call.',
-            )
-            .catch(() => undefined);
-          return;
-        }
-        if (row.status === 'expired') {
-          await helpers
-            .reply(
-              ask.requestId,
-              'reject',
-              'The requester did not answer in time; the tool call was not run.',
-            )
-            .catch(() => undefined);
-          return;
-        }
-        if (row.status === 'approved') {
-          // Consume before relaying: only the first relay of an approved,
-          // unclaimed decision reaches OpenCode; a cancelled or
-          // double-claimed row fails closed instead of executing twice.
-          const consumed = await markIntegrationToolApprovalConsumed({
-            approvalId: approval.approvalId,
-            requesterUserId: input.userId,
-          });
-          if (consumed) {
-            // An undeliverable `once` is not swallowed: it reaches the
-            // failure handler below, which rejects the ask so the session is
-            // never left paused on a call that cannot be resumed.
-            await helpers.reply(ask.requestId, 'once', undefined);
-            return;
-          }
-          await helpers
-            .reply(
-              ask.requestId,
-              'reject',
-              'The approval for this tool call is no longer valid.',
-            )
-            .catch(() => undefined);
-          return;
-        }
-        if (Date.now() >= deadline) {
-          await expireIntegrationToolApproval(approval.approvalId);
-          await helpers
-            .reply(
-              ask.requestId,
-              'reject',
-              'The requester did not answer in time; the tool call was not run.',
-            )
-            .catch(() => undefined);
-          return;
-        }
-        await new Promise((resolve) =>
-          setTimeout(resolve, INTEGRATION_TOOL_APPROVAL_POLL_MS),
-        );
+      if (decision === 'aborted') return;
+      if (decision === 'approved') {
+        // An undeliverable `once` is not swallowed: it reaches the failure
+        // handler below, which rejects the ask so the session is never left
+        // paused on a call that cannot be resumed.
+        await helpers.reply(ask.requestId, 'once', undefined);
+        return;
       }
+      await helpers
+        .reply(
+          ask.requestId,
+          'reject',
+          decision === 'expired'
+            ? 'The requester did not answer in time; the tool call was not run.'
+            : decision === 'invalid'
+              ? 'The approval for this tool call is no longer valid.'
+              : 'The requester rejected this tool call.',
+        )
+        .catch(() => undefined);
     })().catch((error) => {
       console.warn(
         `[Fast Agent] Tool approval bridge failed for ${ask.permission}: ${

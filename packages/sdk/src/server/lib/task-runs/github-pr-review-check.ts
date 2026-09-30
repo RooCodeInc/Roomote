@@ -13,6 +13,7 @@ import {
   getTaskUrl,
   isReviewSummaryInProgress,
   isSafetyNetReviewStatusLine,
+  parseReviewSummaryResultMetadata,
   parseReviewSummaryMarkerSha,
   REVIEW_CHECKLIST_END_MARKER,
   REVIEW_CHECKLIST_START_MARKER,
@@ -835,6 +836,31 @@ export function getGithubPrReviewCheckResult(input: {
     startMarker: REVIEW_CHECKLIST_START_MARKER,
     endMarker: REVIEW_CHECKLIST_END_MARKER,
   });
+  const markerResult = parseReviewSummaryResultMetadata(
+    classification.reviewSummaryBody,
+  );
+  if (markerResult.format === 'structured') {
+    if (!markerResult.result || markerResult.result.outcome === 'incomplete') {
+      return {
+        conclusion: 'failure',
+        title: 'Roomote review result unavailable',
+        summary: 'The task completed without publishing a valid review result.',
+      };
+    }
+    if (markerResult.result.outcome === 'findings_remain') {
+      return {
+        conclusion: 'failure',
+        title: 'Roomote found issues',
+        summary:
+          'The review has unresolved findings. Open the review summary for details.',
+      };
+    }
+    return {
+      conclusion: 'success',
+      title: 'Roomote review passed',
+      summary: 'Roomote found no unresolved issues in this review.',
+    };
+  }
   const hasUnresolvedFindings = /^\s*[-*]\s+\[\s\]/im.test(checklist ?? '');
   return hasUnresolvedFindings
     ? {

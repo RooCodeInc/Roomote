@@ -134,9 +134,11 @@ runs the Roomote dashboard.
 
 ## Repository judge policies
 
-Roomote installs [Judgement](https://github.com/RooCodeInc/judgement) as a Git
-pre-commit check in task repositories, including repositories checked out during
-a task. Add `.judgement/rules.json` to define your business rules:
+Admins can enable **Judgement repository rules** under **Settings >
+Experimental** when a supported Jev route is configured. Coding tasks then
+receive [Judgement](https://github.com/RooCodeInc/judgement) as a Git pre-commit
+check on their next run, including for repositories checked out during a task. Add
+`.judgement/rules.json` to define your business rules:
 
 ```json
 {
@@ -179,9 +181,12 @@ rules are outside the supported scope. Evidence that does not fit the budget,
 unsupported binary content, and uncertain results remain incomplete.
 
 Git hooks can be bypassed. For enforcement before merge, configure Judgement's
-strict CI command and require its status check in your repository. Strict mode
-fails on incomplete results. See the project's [setup and CI guide](https://github.com/RooCodeInc/judgement#ci-and-strict-checks)
-for installation and base/head comparison examples. Roomote does not install a
+strict CI command and require its status check in your repository. Confirmed
+violations and invalid configuration fail the check. Incomplete coverage without
+a confirmed violation passes with a warning so provider outages and bounded
+evidence do not become false violations. See the project's [setup and CI
+guide](https://github.com/RooCodeInc/judgement#ci-and-strict-checks) for
+installation and base/head comparison examples. Roomote does not install a
 required CI check automatically. If repository setup replaces Git's
 `core.hooksPath`, reinstall the Judgement wrapper afterward.
 

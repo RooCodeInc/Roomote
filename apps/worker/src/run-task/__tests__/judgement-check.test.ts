@@ -1,19 +1,27 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-const { mutate, createClientMock, headersMock } = vi.hoisted(() => ({
-  mutate: vi.fn(),
-  createClientMock: vi.fn(),
-  headersMock: vi.fn(),
-}));
+const { mutate, createClientMock, headersMock, enabled, resolveCli } =
+  vi.hoisted(() => ({
+    mutate: vi.fn(),
+    enabled: vi.fn(),
+    resolveCli: vi.fn(),
+    createClientMock: vi.fn(),
+    headersMock: vi.fn(),
+  }));
 vi.mock('@roomote/sdk/client', () => ({
   createClient: createClientMock,
   buildWorkerHeaders: headersMock,
 }));
-import { checkRepositoryJudgement } from '../judgement-check';
+vi.mock('../repository-judgement', () => ({ resolveJudgementCli: resolveCli }));
+import { runCli } from '@roo-code/judgement';
+import {
+  evaluateTaskJudgement,
+  checkRepositoryJudgement,
+} from '../judgement-check';
 import {
   startJudgementProxy,
   buildJudgementTerminalEnv,
@@ -34,7 +42,10 @@ const env = {
 beforeEach(async () => {
   vi.clearAllMocks();
   createClientMock.mockReturnValue({
-    taskRuns: { evaluateRepositoryJudgement: { mutate } },
+    taskRuns: {
+      evaluateRepositoryJudgement: { mutate },
+      isRepositoryJudgementEnabled: { query: enabled },
+    },
   });
   mutate.mockResolvedValue({
     kind: 'answered',
@@ -60,6 +71,7 @@ it('uses scoped credentials and sends bounded evidence with cancellation', async
   const report = await checkRepositoryJudgement(
     { R_JUDGEMENT_GATEWAY_URL: proxy.endpoint },
     cwd,
+    { deadlineMs: 10_000 },
   );
   expect(report.status).toBe('violation');
   const options = createClientMock.mock.calls[0]![0];
@@ -177,4 +189,86 @@ it('clears stale endpoints and registers task cleanup', async () => {
   expect(buildJudgementTerminalEnv({ R_JUDGEMENT_MANAGED: '1' }, {})).toEqual(
     {},
   );
+});
+
+it('offers the full CLI only when configured, and removes commands when configuration is disabled', async () => {
+  const cli = join(cwd, 'bundled-cli.mjs');
+  await writeFile(cli, 'console.log(JSON.stringify(process.argv.slice(2)))');
+  resolveCli.mockReturnValue(cli);
+  enabled.mockResolvedValue(true);
+  const runtimeEnv = { ...env, PATH: '/bin' };
+  const cleanups: (() => Promise<void>)[] = [];
+  const options = {
+    runtimeEnv,
+    homeDir: cwd,
+    logger: { warn: vi.fn() },
+    registerCleanup: (close: () => Promise<void>) => cleanups.push(close),
+  };
+  try {
+    expect(await setupJudgement(options)).toBe(true);
+    expect(enabled).toHaveBeenCalledWith(
+      { runId: 42 },
+      { signal: expect.any(AbortSignal) },
+    );
+    const terminal = buildJudgementTerminalEnv(
+      { PATH: '/bin' },
+      runtimeEnv,
+      cwd,
+    );
+    const launcher = join(cwd, '.roomote/judgement/bin/judgement');
+    const result = await exec(launcher, ['test', '--rule', 'criterion_1'], {
+      env: terminal,
+    });
+    expect(JSON.parse(result.stdout)).toEqual([
+      'test',
+      '--rule',
+      'criterion_1',
+    ]);
+    expect(terminal.PATH).toContain(join(cwd, '.roomote/judgement/bin'));
+    expect(terminal).not.toHaveProperty('ROOMOTE_CLOUD_TOKEN');
+    enabled.mockResolvedValue(false);
+    expect(await setupJudgement(options)).toBe(false);
+    await expect(access(launcher)).rejects.toThrow();
+    enabled.mockRejectedValue(new Error('private-configuration-details'));
+    expect(await setupJudgement(options)).toBe(false);
+    expect(JSON.stringify(options.logger.warn.mock.calls)).not.toContain(
+      'private-configuration-details',
+    );
+  } finally {
+    await Promise.all(cleanups.map((close) => close()));
+  }
+});
+
+it('runs shared rule examples through the task proxy without exposing credentials', async () => {
+  await mkdir(join(cwd, '.judgement/examples'));
+  await writeFile(
+    join(cwd, '.judgement/examples/criterion_1.json'),
+    JSON.stringify({
+      ruleId: 'criterion_1',
+      examples: [
+        {
+          name: 'capital',
+          path: 'example.ts',
+          before: 'session',
+          after: 'Session',
+          expected: 'violation',
+        },
+      ],
+    }),
+  );
+  const stdout: string[] = [];
+  const code = await runCli(
+    ['test', '--rule', 'criterion_1', '--repeats', '1', '--format', 'json'],
+    {
+      cwd,
+      stdout: (value) => {
+        stdout.push(value);
+      },
+      evaluate: (request, signal) =>
+        evaluateTaskJudgement(request, signal, env),
+    },
+  );
+  expect(code).toBe(0);
+  expect(JSON.parse(stdout.join('')).status).toBe('pass');
+  expect(mutate).toHaveBeenCalled();
 });

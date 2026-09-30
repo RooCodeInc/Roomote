@@ -67,12 +67,25 @@ describe('metadata descriptions', () => {
       }),
     ).toEqual({
       jevgrep: false,
+      judgement: false,
       privateSessions: true,
       browserNotifications: false,
       integrationToolAutoApprovals: false,
       sessionTaskCommunicationTriage: false,
       automationLaunchCriteria: true,
     });
+  });
+
+  it('requires explicit opt-in for Judgement', () => {
+    expect(getDeploymentExperimentValues(undefined).judgement).toBe(false);
+    expect(
+      getDeploymentExperimentValues({ judgement_experiment_enabled: 'true' })
+        .judgement,
+    ).toBe(false);
+    expect(
+      getDeploymentExperimentValues({ judgement_experiment_enabled: true })
+        .judgement,
+    ).toBe(true);
   });
 
   it('requires an explicit supported audience for every experiment', () => {

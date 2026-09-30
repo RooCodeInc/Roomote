@@ -310,15 +310,26 @@ function CustomAutomationRunButton({
 
         switch (result.outcome) {
           case 'launched':
-            toast.success(`Running ${automation.name} now`, {
+            toast.success(`Running ${automation.name} now ·`, {
               action: {
-                label: 'View task',
-                onClick: () => window.open(`/task/${result.taskId}`, '_blank'),
+                label: 'Follow session',
+                onClick: () =>
+                  window.open(`/sessions/${result.sessionId}`, '_blank'),
               },
             });
             break;
           case 'queued':
-            toast.success(`${automation.name} was queued to run.`);
+            if (result.sessionId) {
+              toast.success(`Running ${automation.name} now ·`, {
+                action: {
+                  label: 'Follow session',
+                  onClick: () =>
+                    window.open(`/sessions/${result.sessionId}`, '_blank'),
+                },
+              });
+            } else {
+              toast.success(`${automation.name} was queued to run.`);
+            }
             break;
           case 'completed':
             toast.success(`${automation.name} ran successfully.`);

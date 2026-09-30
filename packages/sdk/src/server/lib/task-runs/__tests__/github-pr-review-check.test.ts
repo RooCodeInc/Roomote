@@ -1029,6 +1029,45 @@ describe('GitHub PR review check lifecycle', () => {
 });
 
 describe('getGithubPrReviewCheckResult', () => {
+  it('uses structured clean metadata independently of visible prose', () => {
+    expect(
+      getGithubPrReviewCheckResult({
+        runStatus: RunStatus.Completed,
+        reviewSummaryBody:
+          '<!-- roomote-review-summary sha=abc1234 version=3 phase=reviewed outcome=clean finding_count=0 -->\n<!-- roomote-review-status:start -->\nReview finished without concerns.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n- [ ] Stale presentation text\n<!-- roomote-review-checklist:end -->',
+        safetyNetFinalized: false,
+      }),
+    ).toMatchObject({ conclusion: 'success' });
+  });
+
+  it('lets structured findings override clean-looking prose and checklist', () => {
+    expect(
+      getGithubPrReviewCheckResult({
+        runStatus: RunStatus.Completed,
+        reviewSummaryBody:
+          '<!-- roomote-review-summary sha=abc1234 version=3 phase=reviewed outcome=findings_remain finding_count=2 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        safetyNetFinalized: false,
+      }),
+    ).toMatchObject({ conclusion: 'failure', title: 'Roomote found issues' });
+  });
+
+  it.each([
+    'outcome=clean',
+    'finding_count=0',
+    'outcome=clean finding_count=1',
+  ])('fails closed for malformed v3 metadata: %s', (metadata) => {
+    expect(
+      getGithubPrReviewCheckResult({
+        runStatus: RunStatus.Completed,
+        reviewSummaryBody: `<!-- roomote-review-summary sha=abc1234 version=3 phase=reviewed ${metadata} -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->`,
+        safetyNetFinalized: false,
+      }),
+    ).toMatchObject({
+      conclusion: 'failure',
+      title: 'Roomote review result unavailable',
+    });
+  });
+
   it('passes a completed review with no unresolved findings', () => {
     expect(
       getGithubPrReviewCheckResult({
