@@ -477,7 +477,7 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(config.agent.build.tools['foo_bar__roomote_2_*']).toBe(true);
   });
 
-  it('writes tool approval permission entries for the build agent and helper subagents', async () => {
+  it('writes tool approval permission entries for every agent, subagents included', async () => {
     const runtime = await getFastAgentNativeToolRuntime(
       'code-mode-tool-approval-permission',
       [
@@ -509,6 +509,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(config.agent.judge.permission).toEqual(
       config.agent.build.permission,
     );
+    // Any other subagent the model starts (OpenCode's built-in ones too)
+    // inherits the top-level rules instead of the default allow.
+    expect(config.permission).toEqual(config.agent.build.permission);
     expect(runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBe('1');
   });
 
@@ -530,6 +533,7 @@ describe('Fast native OpenCode tool bridge', () => {
       await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
     );
     expect(config.agent.build.permission).toBeUndefined();
+    expect(config.permission).toBeUndefined();
     expect(config.agent.advisor).toBeUndefined();
     expect(config.agent.judge).toBeUndefined();
     expect(runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBe('1');
