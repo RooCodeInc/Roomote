@@ -35,16 +35,13 @@ function integrationDisplayName(integrationId: string): string {
 
 /**
  * The calls of a batch card: several calls to one tool that ran together.
- * The server records them under one namespaced key and nothing else.
+ * The server records them as a list, which a single call's arguments (always
+ * an object) never are.
  */
 function parallelCalls(argsSummary: unknown): unknown[] | null {
-  if (!argsSummary || typeof argsSummary !== 'object') return null;
-  const keys = Object.keys(argsSummary);
-  if (keys.length !== 1 || keys[0] !== 'roomote.parallelCalls') return null;
-  const calls = (argsSummary as Record<string, unknown>)[
-    'roomote.parallelCalls'
-  ];
-  return Array.isArray(calls) && calls.length > 1 ? calls : null;
+  return Array.isArray(argsSummary) && argsSummary.length > 1
+    ? argsSummary
+    : null;
 }
 
 function approvalPrompt(item: IntegrationToolApprovalMetadata): string {

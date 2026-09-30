@@ -65,11 +65,6 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
  *   call with changed arguments is a new ask by construction.
  */
 const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
-/**
- * The approval arguments of a batch of parallel calls. Namespaced so a tool
- * argument of its own cannot be read as a batch.
- */
-const PARALLEL_CALLS_ARGS_KEY = 'roomote.parallelCalls';
 
 type CardDecision = 'approved' | 'rejected' | 'expired' | 'invalid' | 'aborted';
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
@@ -335,7 +330,7 @@ export function extractApprovalCallArgs(
       }
     | undefined,
   tool: { serverName: string; toolName: string },
-): { args: unknown } | { candidates: unknown[] } {
+): { args: unknown; concurrent?: number } | { candidates: unknown[] } {
   if (!recovered) return { args: undefined };
   const dottedChildName = `${tool.serverName}.${tool.toolName}`;
   const matches = (recovered.toolCalls ?? []).filter(
@@ -350,7 +345,10 @@ export function extractApprovalCallArgs(
     distinct.set(JSON.stringify(entry.input ?? null), entry.input);
   }
   return distinct.size === 1
-    ? { args: candidates[0]!.input }
+    ? {
+        args: candidates[0]!.input,
+        ...(candidates.length > 1 ? { concurrent: candidates.length } : {}),
+      }
     : { candidates: [...distinct.values()] };
 }
 
@@ -600,7 +598,14 @@ export function createFastAgentToolApprovalBridge(input: {
         }
       | undefined,
   ):
-    | { tool: ToolIdentity; args: unknown; parallel?: unknown[] }
+    | {
+        tool: ToolIdentity;
+        args: unknown;
+        /** Different calls running together; the ask could be any of them. */
+        parallel?: unknown[];
+        /** Identical calls running together, which share one decision. */
+        concurrent?: boolean;
+      }
     | { unresolved: 'identity' } => {
     const candidates = toolsByKey.get(permission) ?? [];
     if (candidates.length === 1) {
@@ -609,10 +614,15 @@ export function createFastAgentToolApprovalBridge(input: {
       return 'candidates' in call
         ? {
             tool,
-            args: { [PARALLEL_CALLS_ARGS_KEY]: call.candidates },
+            // A list, which tool arguments (always an object) never are.
+            args: call.candidates,
             parallel: call.candidates,
           }
-        : { tool, args: call.args };
+        : {
+            tool,
+            args: call.args,
+            ...(call.concurrent ? { concurrent: true } : {}),
+          };
     }
     const matchingChildren = (recovered?.toolCalls ?? []).filter(
       (entry) =>
@@ -665,7 +675,7 @@ export function createFastAgentToolApprovalBridge(input: {
           .catch(() => undefined);
         return;
       }
-      const { tool, args, parallel } = resolution;
+      const { tool, args, parallel, concurrent } = resolution;
       const argsSummary = redactIntegrationToolArgs(args ?? null);
       const argsFingerprint = fingerprintIntegrationToolCall({
         integrationId: tool.integrationId,
@@ -842,12 +852,12 @@ export function createFastAgentToolApprovalBridge(input: {
         ...(auto?.action === 'ask' ? { autoEvaluation: auto.evaluation } : {}),
       };
       let decision: CardDecision;
-      if (parallel) {
+      if (parallel || concurrent) {
         const batchKey = JSON.stringify([
           ask.callId ?? ask.requestId,
           tool.integrationId,
           tool.toolName,
-          parallel,
+          parallel ?? [args ?? null],
         ]);
         let shared = batchCards.get(batchKey);
         if (!shared) {

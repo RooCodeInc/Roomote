@@ -817,7 +817,8 @@ describe('extractApprovalCallArgs', () => {
         tool,
       ),
     ).toEqual({ candidates: [{ channel: 'a' }, { channel: 'b' }] });
-    // Identical arguments are the same call as far as approval goes.
+    // Identical arguments are one call for approval, flagged as running
+    // together so their asks share a decision.
     expect(
       extractApprovalCallArgs(
         {
@@ -826,7 +827,7 @@ describe('extractApprovalCallArgs', () => {
         },
         tool,
       ),
-    ).toEqual({ args: { channel: 'a' } });
+    ).toEqual({ args: { channel: 'a' }, concurrent: 2 });
     // Finished calls are not candidates.
     expect(
       extractApprovalCallArgs(
@@ -888,9 +889,7 @@ describe('parallel calls in one script', () => {
       approvalId: 'batch-approval',
       integrationId: 'mock-slack',
       toolName: 'post_message',
-      argsSummary: {
-        'roomote.parallelCalls': [{ channel: 'C1' }, { channel: 'C2' }],
-      },
+      argsSummary: [{ channel: 'C1' }, { channel: 'C2' }],
       status: 'pending',
       taskId: null,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -925,9 +924,7 @@ describe('parallel calls in one script', () => {
       expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          argsSummary: {
-            'roomote.parallelCalls': [{ channel: 'C1' }, { channel: 'C2' }],
-          },
+          argsSummary: [{ channel: 'C1' }, { channel: 'C2' }],
         }),
       );
     }
@@ -994,6 +991,38 @@ describe('parallel calls in one script', () => {
     expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledTimes(1);
   });
 
+  it('asks about identical calls running together with one card', async () => {
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'approved',
+    } as never);
+    vi.mocked(markIntegrationToolApprovalConsumed).mockResolvedValue(true);
+    const identical = () => ({
+      fetchCallArgs: vi.fn(async () => ({
+        input: { code: 'Promise.all' },
+        toolCalls: [1, 2].map(() => ({
+          tool: 'mock-slack.post_message',
+          input: { channel: 'C1' },
+          status: 'running',
+        })),
+      })),
+      reply: vi.fn(async () => undefined),
+    });
+    const bridge = bridgeFor(false);
+    const first = identical();
+    const second = identical();
+    bridge.handleAsk({ ...ask, requestId: 'twin-a' }, first);
+    bridge.handleAsk({ ...ask, requestId: 'twin-b' }, second);
+    await vi.waitFor(() => {
+      expect(first.reply).toHaveBeenCalledWith('twin-a', 'once', undefined);
+      expect(second.reply).toHaveBeenCalledWith('twin-b', 'once', undefined);
+    });
+    expect(insertIntegrationToolApproval).toHaveBeenCalledTimes(1);
+    expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ argsSummary: { channel: 'C1' } }),
+    );
+  });
+
   it('assesses a later identical call in the same script again', async () => {
     vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
       action: 'approve',
@@ -1049,9 +1078,7 @@ describe('parallel calls in one script', () => {
     expect(insertAutoApprovedIntegrationToolApproval).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        argsSummary: {
-          'roomote.parallelCalls': [{ channel: 'C1' }, { channel: 'C2' }],
-        },
+        argsSummary: [{ channel: 'C1' }, { channel: 'C2' }],
       }),
     );
 
@@ -1083,9 +1110,7 @@ describe('parallel calls in one script', () => {
     expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        argsSummary: {
-          'roomote.parallelCalls': [{ channel: 'C1' }, { channel: 'C2' }],
-        },
+        argsSummary: [{ channel: 'C1' }, { channel: 'C2' }],
         autoEvaluation: expect.objectContaining({ recommendation: 'ask' }),
       }),
     );

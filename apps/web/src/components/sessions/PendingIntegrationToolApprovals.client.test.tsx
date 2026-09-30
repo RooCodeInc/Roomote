@@ -107,9 +107,7 @@ describe('PendingIntegrationToolApprovals', () => {
           pending={[
             {
               ...pending[0]!,
-              argsSummary: {
-                'roomote.parallelCalls': [{ channel: 'C1' }, { channel: 'C2' }],
-              },
+              argsSummary: [{ channel: 'C1' }, { channel: 'C2' }],
             },
           ]}
         />
