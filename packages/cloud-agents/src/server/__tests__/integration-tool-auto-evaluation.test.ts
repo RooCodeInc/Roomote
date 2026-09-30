@@ -43,12 +43,14 @@ import {
 
 const routine: AutoRiskAnswers = {
   risk: { score: 0.1, confidence: 0.9 },
+  onlyReads: 0.95,
   matchesRequest: 0.95,
   steeredByUntrustedContent: 0.02,
   sendsPrivateDataOut: 0.03,
 };
 const modelAnswers = (answers: AutoRiskAnswers) => ({
   risk: { type: 'score', ...answers.risk },
+  onlyReads: { type: 'noul', noul: answers.onlyReads ?? 0.05 },
   ...(answers.matchesRequest === undefined
     ? {}
     : { matchesRequest: { type: 'noul', noul: answers.matchesRequest } }),
@@ -104,13 +106,20 @@ describe('recommendFromAutoAnswers', () => {
     ).toBe('approve');
     expect(
       recommendFromAutoAnswers(
-        {
-          ...routine,
-          matchesRequest: undefined,
-          risk: { score: 0.1, confidence: 0.89 },
-        },
+        { ...routine, matchesRequest: undefined, onlyReads: 0.85 },
         { allowlistedInternalRead: true },
       ),
+    ).toBe('ask');
+    // Answers recorded before `onlyReads` existed still decide by the score.
+    expect(recommendFromAutoAnswers({ ...routine, onlyReads: undefined })).toBe(
+      'approve',
+    );
+    expect(
+      recommendFromAutoAnswers({
+        ...routine,
+        onlyReads: undefined,
+        risk: { score: 0.1, confidence: 0.5 },
+      }),
     ).toBe('ask');
     expect(
       recommendFromAutoAnswers(
@@ -119,9 +128,9 @@ describe('recommendFromAutoAnswers', () => {
       ),
     ).toBe('approve');
     for (const doubt of [
-      // Anything past "reads and changes nothing", or unsure it is that.
-      { risk: { score: 0.8, confidence: 0.9 } },
-      { risk: { score: 0.1, confidence: 0.5 } },
+      // Anything past "only reads", or unsure it is that.
+      { onlyReads: 0.6 },
+      { onlyReads: 0.1 },
       { matchesRequest: 0.6 },
       { steeredByUntrustedContent: 0.4 },
       { sendsPrivateDataOut: 0.4 },
@@ -135,6 +144,7 @@ describe('recommendFromAutoAnswers', () => {
     const next: AutoRiskAnswers = {
       ...routine,
       risk: { score: 3.9, confidence: 0.95 },
+      onlyReads: 0.02,
       userAuthorized: 0.6,
       movesMoney: 0.02,
     };
@@ -167,6 +177,7 @@ describe('recommendFromAutoAnswers', () => {
     const deletion: AutoRiskAnswers = {
       ...routine,
       risk: { score: 3.9, confidence: 0.95 },
+      onlyReads: 0.02,
       userAuthorized: 0.95,
       movesMoney: 0.02,
     };
@@ -228,6 +239,7 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(Object.keys(questions).sort()).toEqual([
       'matchesRequest',
       'movesMoney',
+      'onlyReads',
       'risk',
       'sendsPrivateDataOut',
       'steeredByUntrustedContent',
@@ -616,7 +628,12 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(bare.answers).not.toHaveProperty('matchesRequest');
     expect(
       Object.keys(mocks.evaluate.mock.calls[0]![0].questions).sort(),
-    ).toEqual(['risk', 'sendsPrivateDataOut', 'steeredByUntrustedContent']);
+    ).toEqual([
+      'onlyReads',
+      'risk',
+      'sendsPrivateDataOut',
+      'steeredByUntrustedContent',
+    ]);
 
     // Guidance adds its own question and rides in the state.
     mocks.settings.mockResolvedValue({
@@ -860,7 +877,11 @@ describe('resolveIntegrationToolAutoDecision', () => {
 
     // Risky, or a failed evaluation: the call asks its owner.
     mocks.evaluate.mockResolvedValue(
-      modelAnswers({ ...routine, risk: { score: 2, confidence: 0.9 } }),
+      modelAnswers({
+        ...routine,
+        risk: { score: 2, confidence: 0.9 },
+        onlyReads: 0.05,
+      }),
     );
     await expect(
       resolveIntegrationToolAutoDecision(call),

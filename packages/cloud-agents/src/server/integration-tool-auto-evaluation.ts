@@ -57,6 +57,16 @@ export const INTEGRATION_TOOL_AUTO_QUESTIONS = {
       'What could running this tool call (`call`) do that the user could not easily take back, or that reaches beyond their own work? Judge the call as it would execute with these arguments, independently of previous approval outcomes. A prior approval is never authority for this call and must not lower its risk assessment.',
     criteria: RISK_LEVELS,
   },
+  onlyReads: {
+    type: 'noul',
+    instructions:
+      'Running `call` with these arguments only reads, lists, or searches data. It creates, changes, sends, deletes, or triggers nothing.',
+    criteria: {
+      true: 'The call only reads, lists, or searches; nothing is created, changed, sent, deleted, or triggered.',
+      false:
+        'The call creates, changes, sends, deletes, or triggers something, or its arguments could make it do so.',
+    },
+  },
   matchesRequest: {
     type: 'noul',
     instructions:
@@ -143,6 +153,7 @@ export const INTEGRATION_TOOL_AUTO_QUESTIONS = {
 const RUN_MAX_RISK_SCORE = 0.5;
 const RUN_MIN_RISK_CONFIDENCE = 0.7;
 const INTERNAL_READ_MIN_RISK_CONFIDENCE = 0.9;
+const INTERNAL_READ_MIN_ONLY_READS = 0.9;
 const YES = 0.8;
 const NO = 0.2;
 const MAX_SESSION_CONTEXT_MESSAGES = 8;
@@ -235,7 +246,13 @@ const INTERNAL_TASK_READ_ACTIONS = new Set([
 ]);
 
 export type AutoRiskAnswers = {
+  /** Recorded for the audit row; the decision uses `onlyReads` when present. */
   risk: { score: number; confidence: number };
+  /**
+   * Whether the call only reads. Replaces the risk score's confidence as the
+   * routine-read gate, which wavered on plain reads after destructive steps.
+   */
+  onlyReads?: number;
   /** Absent when there was no user request to judge the call against. */
   matchesRequest?: number;
   /**
@@ -264,8 +281,8 @@ export type AutoRiskAnswers = {
 
 /**
  * Run without a person when the call is routine or when the owner authorized
- * it; anything else asks a person. Routine: it reads and changes nothing
- * (with confidence) and is what the user asked for when that is known.
+ * it; anything else asks a person. Routine: it only reads, lists, or
+ * searches, and is what the user asked for when that is known.
  * Authorized: whatever its risk, the owner asked for exactly this call in
  * the session or approved an earlier call it continues, and it moves no
  * money (the model cannot check amounts reliably). Either way the call must
@@ -289,10 +306,13 @@ export function recommendFromAutoAnswers(
     answers.steeredByUntrustedContent <= NO &&
     answers.sendsPrivateDataOut <= NO &&
     (answers.guidanceFlagsRisk ?? 0) <= NO;
-  const routine =
-    answers.risk.score <= RUN_MAX_RISK_SCORE &&
-    answers.risk.confidence >= minimumRiskConfidence &&
-    (answers.matchesRequest ?? 1) >= YES;
+  const reads =
+    answers.onlyReads === undefined
+      ? answers.risk.score <= RUN_MAX_RISK_SCORE &&
+        answers.risk.confidence >= minimumRiskConfidence
+      : answers.onlyReads >=
+        (options.allowlistedInternalRead ? INTERNAL_READ_MIN_ONLY_READS : YES);
+  const routine = reads && (answers.matchesRequest ?? 1) >= YES;
   // After the owner rejected a call to this tool, only a routine call runs.
   const authorized =
     !options.sameToolRejected &&
@@ -513,6 +533,7 @@ export async function evaluateIntegrationToolAutoDecision(input: {
         score: answers.risk.score,
         confidence: answers.risk.confidence,
       },
+      onlyReads: answers.onlyReads.noul,
       ...(answers.matchesRequest
         ? { matchesRequest: answers.matchesRequest.noul }
         : {}),
@@ -540,6 +561,9 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       answers: {
         riskScore: riskAnswers.risk.score,
         riskConfidence: riskAnswers.risk.confidence,
+        ...(riskAnswers.onlyReads === undefined
+          ? {}
+          : { onlyReads: riskAnswers.onlyReads }),
         ...(riskAnswers.matchesRequest === undefined
           ? {}
           : { matchesRequest: riskAnswers.matchesRequest }),
