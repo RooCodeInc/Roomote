@@ -29,6 +29,7 @@ import {
 import {
   claimFastAgentHumanFollowUpSteers,
   fastAgentConversationRepository,
+  findFastAgentRepliesBeforeHumanPrompt,
   listRecentFastAgentHumanUserPromptTexts,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
@@ -1075,6 +1076,122 @@ describe('Fast conversation repository', () => {
     expect(history[1]).toContain(
       'Latest earlier request in the same millisecond.',
     );
+  });
+
+  it('finds what the agent said between the previous human prompt and the current one', async () => {
+    const user = await createUser();
+    const conversation = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const persist = (input: {
+      eventId: string;
+      ts: number;
+      eventType: FastAgentMessageWrite['eventType'];
+      role: NonNullable<FastAgentMessageWrite['role']>;
+      text: string;
+      metadata: Record<string, unknown>;
+    }) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: conversation.id,
+        message: {
+          eventId: input.eventId,
+          turnId: input.eventId,
+          turnSeq: 1,
+          ts: input.ts,
+          eventType: input.eventType,
+          role: input.role,
+          contentBlocks: [{ type: 'text', text: input.text }],
+          metadata: input.metadata,
+          payload: {},
+          source: 'slack',
+        },
+      });
+    const human = { visibleInTranscript: true, turnSource: 'human' };
+    const reply = { visibleInTranscript: true, purpose: 'closeout' };
+    await persist({
+      eventId: 'old-reply',
+      ts: 50,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'An older answer.',
+      metadata: reply,
+    });
+    await persist({
+      eventId: 'previous-prompt',
+      ts: 100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Can you clean up my Drafts folder?',
+      metadata: human,
+    });
+    await persist({
+      eventId: 'retry-notice',
+      ts: 150,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Retrying the model.',
+      metadata: { ...reply, inferenceRetryNotice: true },
+    });
+    await persist({
+      eventId: 'hidden-reply',
+      ts: 160,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Hidden draft.',
+      metadata: { ...reply, visibleInTranscript: false },
+    });
+    await persist({
+      eventId: 'progress',
+      ts: 170,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Looking at the folder.',
+      metadata: { visibleInTranscript: true, purpose: 'progress' },
+    });
+    await persist({
+      eventId: 'proposal',
+      ts: 200,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'I found 3 old drafts. Delete them?',
+      metadata: reply,
+    });
+    await persist({
+      eventId: 'current',
+      ts: 300,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'yeah go ahead',
+      metadata: human,
+    });
+    await persist({
+      eventId: 'later-reply',
+      ts: 400,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Done.',
+      metadata: reply,
+    });
+
+    await expect(
+      findFastAgentRepliesBeforeHumanPrompt({
+        conversationId: conversation.id,
+        beforeTs: 300,
+        currentEventId: 'current',
+      }),
+    ).resolves.toBe(
+      'Looking at the folder.\n\nI found 3 old drafts. Delete them?',
+    );
+
+    // The first prompt sees what the agent said before it.
+    await expect(
+      findFastAgentRepliesBeforeHumanPrompt({
+        conversationId: conversation.id,
+        beforeTs: 100,
+        currentEventId: 'previous-prompt',
+      }),
+    ).resolves.toBe('An older answer.');
   });
 
   it('persists the canonical OpenCode session identity', async () => {

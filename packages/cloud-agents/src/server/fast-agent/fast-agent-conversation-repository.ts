@@ -486,6 +486,8 @@ export type FastAgentUnresolvedRequest = {
 
 const UNRESOLVED_REQUEST_CHAIN_LIMIT = 8;
 const FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT = 80;
+// The agent's last few visible replies are enough to see what it proposed.
+const FAST_AGENT_REPLIED_TO_MESSAGE_LIMIT = 3;
 
 /**
  * Read the human-authored prompts that were already in the Session before its
@@ -546,6 +548,64 @@ export async function listRecentFastAgentHumanUserPromptTexts(input: {
     }
   }
   return groups.map((group) => group.texts.join('\n\n'));
+}
+
+/**
+ * What the agent said to the owner between their previous message and the
+ * current one: its visible replies, oldest first. Auto reads it to learn what
+ * a short answer such as "yes, go ahead" agreed to. Retry notices and hidden
+ * rows are skipped.
+ */
+export async function findFastAgentRepliesBeforeHumanPrompt(input: {
+  conversationId: string;
+  beforeTs: number;
+  currentEventId: string;
+}): Promise<string | undefined> {
+  const [previousPrompt] = await db
+    .select({ ts: fastAgentMessages.ts })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        lt(fastAgentMessages.ts, input.beforeTs),
+        ne(fastAgentMessages.eventId, input.currentEventId),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        eq(fastAgentMessages.role, 'user'),
+        sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts))
+    .limit(1);
+  const rows = await db
+    .select({ contentBlocks: fastAgentMessages.contentBlocks })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        gt(fastAgentMessages.ts, previousPrompt?.ts ?? 0),
+        lte(fastAgentMessages.ts, input.beforeTs),
+        eq(
+          fastAgentMessages.eventType,
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ),
+        eq(fastAgentMessages.role, 'assistant'),
+        sql`coalesce(${fastAgentMessages.metadata}->>'visibleInTranscript', 'true') <> 'false'`,
+        sql`coalesce(${fastAgentMessages.metadata}->>'inferenceRetryNotice', 'false') <> 'true'`,
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
+    .limit(FAST_AGENT_REPLIED_TO_MESSAGE_LIMIT);
+  const text = rows
+    .reverse()
+    .map((row) =>
+      row.contentBlocks
+        .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+        .join('\n')
+        .trim(),
+    )
+    .filter(Boolean)
+    .join('\n\n');
+  return text || undefined;
 }
 
 async function findFastAgentTurnPrompt(

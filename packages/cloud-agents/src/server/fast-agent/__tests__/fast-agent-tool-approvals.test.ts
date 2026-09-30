@@ -1110,8 +1110,8 @@ describe('tool approval bridge', () => {
       requesterUserId: 'user-id',
     });
 
-    // A later call in the same Session is judged independently. The prior
-    // approval is visible as history, not as a reusable grant.
+    // A later call in the same session is still assessed. The prior
+    // approval is context for the model, never a skipped assessment.
     const nextCall = helpers();
     createFastAgentToolApprovalBridge({
       sessionId: 'session-id',
@@ -1146,6 +1146,55 @@ describe('tool approval bridge', () => {
         },
       }),
     );
+  });
+
+  it('gives the assessment what the agent proposed before the owner replied', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    const bridgeWith = (
+      resolveAgentMessageRepliedTo: () => Promise<string | undefined>,
+    ) =>
+      createFastAgentToolApprovalBridge({
+        sessionId: 'session-id',
+        userId: 'user-id',
+        surface: 'web',
+        integrations,
+        autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+        resolveUserRequest: () => 'yeah go ahead',
+        resolveSessionUserMessages: () => ['yeah go ahead'],
+        resolveAgentMessageRepliedTo,
+      });
+
+    const withPlan = helpers();
+    bridgeWith(
+      async () => 'Want me to post the release note in #eng?',
+    ).handleAsk({ ...ask, requestId: 'plan-1' }, withPlan);
+    await vi.waitFor(() =>
+      expect(withPlan.reply).toHaveBeenCalledWith('plan-1', 'once'),
+    );
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sessionContext: expect.objectContaining({
+          agentMessageRepliedTo: 'Want me to post the release note in #eng?',
+        }),
+      }),
+    );
+
+    // A failed lookup leaves the proposal out rather than failing the ask.
+    const failed = helpers();
+    bridgeWith(async () => {
+      throw new Error('db down');
+    }).handleAsk({ ...ask, requestId: 'plan-2' }, failed);
+    await vi.waitFor(() =>
+      expect(failed.reply).toHaveBeenCalledWith('plan-2', 'once'),
+    );
+    expect(
+      vi.mocked(resolveIntegrationToolAutoDecision).mock.lastCall![0]
+        .sessionContext,
+    ).not.toHaveProperty('agentMessageRepliedTo');
   });
 
   it('uses the shared neutral-masked argument view for the approval card and audit summary', async () => {

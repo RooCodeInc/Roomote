@@ -58,6 +58,17 @@ const modelAnswers = (answers: AutoRiskAnswers) => ({
   ...(answers.movesMoney === undefined
     ? {}
     : { movesMoney: { type: 'noul', noul: answers.movesMoney } }),
+  ...(answers.continuesApprovedCall === undefined
+    ? {}
+    : {
+        continuesApprovedCall: {
+          type: 'noul',
+          noul: answers.continuesApprovedCall,
+        },
+      }),
+  ...(answers.agreedToPlan === undefined
+    ? {}
+    : { agreedToPlan: { type: 'noul', noul: answers.agreedToPlan } }),
   steeredByUntrustedContent: {
     type: 'noul',
     noul: answers.steeredByUntrustedContent,
@@ -118,6 +129,38 @@ describe('recommendFromAutoAnswers', () => {
     ] satisfies Partial<AutoRiskAnswers>[]) {
       expect(recommendFromAutoAnswers({ ...routine, ...doubt })).toBe('ask');
     }
+  });
+
+  it('runs the next item of approved work or of a plan the owner agreed to', () => {
+    const next: AutoRiskAnswers = {
+      ...routine,
+      risk: { score: 3.9, confidence: 0.95 },
+      userAuthorized: 0.6,
+      movesMoney: 0.02,
+    };
+    expect(recommendFromAutoAnswers(next)).toBe('ask');
+    expect(
+      recommendFromAutoAnswers({ ...next, continuesApprovedCall: 0.9 }),
+    ).toBe('approve');
+    expect(recommendFromAutoAnswers({ ...next, agreedToPlan: 0.9 })).toBe(
+      'approve',
+    );
+    // After the owner rejected a call to this tool, only routine calls run.
+    for (const authorized of [
+      { userAuthorized: 0.95 },
+      { continuesApprovedCall: 0.9 },
+      { agreedToPlan: 0.9 },
+    ]) {
+      expect(
+        recommendFromAutoAnswers(
+          { ...next, ...authorized },
+          { sameToolRejected: true },
+        ),
+      ).toBe('ask');
+    }
+    expect(recommendFromAutoAnswers(routine, { sameToolRejected: true })).toBe(
+      'approve',
+    );
   });
 
   it('runs a risky call the owner authorized, unless it moves money or is unsafe', () => {
@@ -190,6 +233,72 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       'steeredByUntrustedContent',
       'userAuthorized',
     ]);
+  });
+
+  it('asks the continuation and plan questions only when code finds what they need', async () => {
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    const deleteCall = {
+      ...call,
+      toolName: 'delete_file',
+      args: { fileId: 'Drafts/draft-2.docx' },
+      userRequest: 'yeah go ahead',
+    };
+    const approvedSameTool = {
+      integrationId: 'linear',
+      toolName: 'delete_file',
+      outcome: 'approved' as const,
+      arguments: { fileId: 'Drafts/draft-1.docx' },
+    };
+    const ask = async (sessionContext: Record<string, unknown>) => {
+      mocks.evaluate.mockClear();
+      await evaluateIntegrationToolAutoDecision({
+        ...deleteCall,
+        sessionContext,
+      });
+      return Object.keys(mocks.evaluate.mock.calls[0]![0].questions);
+    };
+
+    // No approval of this tool and no proposal: neither question.
+    const bare = await ask({ recentUserMessages: ['clean up Drafts'] });
+    expect(bare).not.toContain('continuesApprovedCall');
+    expect(bare).not.toContain('agreedToPlan');
+
+    // An approval of a different tool does not count.
+    expect(
+      await ask({
+        explicitApprovalOutcomes: [
+          { ...approvedSameTool, toolName: 'list_files' },
+        ],
+      }),
+    ).not.toContain('continuesApprovedCall');
+
+    // An approval of this tool: continuation is asked.
+    expect(
+      await ask({ explicitApprovalOutcomes: [approvedSameTool] }),
+    ).toContain('continuesApprovedCall');
+
+    // A proposal the owner replied to: the plan question is asked, and the
+    // proposal reaches the model.
+    const withPlan = await ask({
+      recentUserMessages: ['yeah go ahead'],
+      agentMessageRepliedTo: 'I found 3 old drafts. Delete them one by one?',
+    });
+    expect(withPlan).toContain('agreedToPlan');
+    expect(
+      mocks.evaluate.mock.calls[0]![0].state.sessionContext
+        .agentMessageRepliedTo,
+    ).toBe('I found 3 old drafts. Delete them one by one?');
+
+    // A rejection of this tool turns both off.
+    const afterRejection = await ask({
+      agentMessageRepliedTo: 'Delete them?',
+      explicitApprovalOutcomes: [
+        approvedSameTool,
+        { ...approvedSameTool, outcome: 'rejected' as const },
+      ],
+    });
+    expect(afterRejection).not.toContain('continuesApprovedCall');
+    expect(afterRejection).not.toContain('agreedToPlan');
   });
 
   it('runs a deletion the owner asked for and records why', async () => {

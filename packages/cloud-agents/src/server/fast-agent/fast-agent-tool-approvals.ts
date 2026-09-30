@@ -411,6 +411,11 @@ export function createFastAgentToolApprovalBridge(input: {
   resolveUserRequest?: () => string | undefined | Promise<string | undefined>;
   /** Human-authored request history from this Session, never a parent task. */
   resolveSessionUserMessages?: () => string[] | Promise<string[]>;
+  /**
+   * What the agent said before the owner's latest message, so Auto can tell
+   * what a reply such as "yes, go ahead" agreed to. Human turns only.
+   */
+  resolveAgentMessageRepliedTo?: () => Promise<string | undefined>;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   signal?: AbortSignal;
@@ -564,21 +569,28 @@ export function createFastAgentToolApprovalBridge(input: {
         input.autoToolKeys?.has(
           integrationToolPolicyKey(tool.integrationId, tool.toolName),
         ) === true;
-      const [recentUserMessages, explicitApprovalOutcomes] = autoAssessed
-        ? await Promise.all([
-            input.resolveSessionUserMessages?.() ?? [],
-            // This query is keyed to this Session and owner, and excludes
-            // task approvals and model decisions. A lookup failure removes
-            // historical context; it cannot authorize a call by itself.
-            listRecentIntegrationToolApprovalOutcomes({
-              sessionId: input.sessionId,
-              userId: input.userId,
-            }).catch(() => []),
-          ])
-        : [[], []];
+      const [recentUserMessages, explicitApprovalOutcomes, agentMessage] =
+        autoAssessed
+          ? await Promise.all([
+              input.resolveSessionUserMessages?.() ?? [],
+              // This query is keyed to this Session and owner, and excludes
+              // task approvals and model decisions. A lookup failure removes
+              // historical context; it cannot authorize a call by itself.
+              listRecentIntegrationToolApprovalOutcomes({
+                sessionId: input.sessionId,
+                userId: input.userId,
+              }).catch(() => []),
+              // Context only: a lookup failure means "go ahead" covers nothing.
+              input.resolveAgentMessageRepliedTo?.().catch(() => undefined),
+            ])
+          : [[], [], undefined];
       const sessionContext: IntegrationToolAutoSessionContext | undefined =
         autoAssessed
-          ? { recentUserMessages, explicitApprovalOutcomes }
+          ? {
+              recentUserMessages,
+              explicitApprovalOutcomes,
+              ...(agentMessage ? { agentMessageRepliedTo: agentMessage } : {}),
+            }
           : undefined;
       const auto = autoAssessed
         ? await resolveIntegrationToolAutoDecision({
