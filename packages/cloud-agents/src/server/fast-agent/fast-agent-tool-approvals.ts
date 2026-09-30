@@ -22,6 +22,7 @@ import {
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
 import {
+  describeIntegrationToolAutoAbsentDenial,
   integrationToolModeIsAutoAssessed,
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
@@ -628,9 +629,9 @@ export function createFastAgentToolApprovalBridge(input: {
           .reply(
             ask.requestId,
             'reject',
-            `Auto mode blocked this tool call because ${describeIntegrationToolAutoDeny(
-              auto.evaluation,
-            )} and the session owner was away. The call was not run. The session owner can allow this tool from its call in the transcript.`,
+            describeIntegrationToolAutoAbsentDenial(
+              describeIntegrationToolAutoDeny(auto.evaluation),
+            ),
           )
           .catch(() => undefined);
         return;
