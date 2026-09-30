@@ -217,9 +217,9 @@ export function createScheduledTriageJob(
           continue;
         }
 
-        // Automation scans run as the deployment service principal; a manual
-        // trigger is still an automation launch, just with a manual trigger
-        // kind on the task record. Non-Slack destinations ride along as
+        // Automation scans run as the deployment service principal; explicit
+        // runs remain automation launches with their trigger kind preserved on
+        // the task record. Non-Slack destinations ride along as
         // communication payload fields so the surface-generic worker tools
         // target the destination conversation. Multi-provider builders return
         // one payload per provider partition; each launches its own run.

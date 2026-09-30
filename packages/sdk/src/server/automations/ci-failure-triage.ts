@@ -87,7 +87,7 @@ export async function ciFailureTriageJob(
   const { isExplicitRun } = resolveAutomationRunContext(opts.context);
   if (!isExplicitRun) {
     result.skippedReason =
-      'CI failure triage is webhook-driven; only manual Run now is supported offline.';
+      'CI failure triage is webhook-driven; only explicit runs are supported offline.';
     return result;
   }
 
