@@ -51,7 +51,7 @@ const CREATED_AT = '2026-08-26T13:44:18.000Z';
 const COMPLETED_AT = '2026-08-26T13:48:07.000Z';
 
 const IN_PROGRESS_BODY = [
-  `<!-- roomote-review-summary sha=${REVIEW_HEAD_SHA} mode=sync version=2 phase=reviewing -->`,
+  `<!-- roomote-review-summary sha=${REVIEW_HEAD_SHA} mode=sync cycle=cycle-1688 version=2 phase=reviewing -->`,
   '<!-- roomote-review-status:start -->',
   'I am reviewing the updated PR head now.',
   '<!-- roomote-review-status:end -->',
@@ -61,7 +61,7 @@ const IN_PROGRESS_BODY = [
 ].join('\n');
 
 const TERMINAL_BODY = [
-  `<!-- roomote-review-summary sha=${REVIEW_HEAD_SHA} mode=sync version=2 phase=reviewed -->`,
+  `<!-- roomote-review-summary sha=${REVIEW_HEAD_SHA} mode=sync cycle=cycle-1688 version=2 phase=reviewed -->`,
   '<!-- roomote-review-status:start -->',
   '1 issue outstanding. [See task](https://roomote.dev/task/reviewtask)',
   '<!-- roomote-review-status:end -->',
@@ -124,7 +124,7 @@ describe('PR review-summary lifecycle replay', () => {
     setConfiguredGitHubAppSlugCache(null);
   });
 
-  it('opens the in-progress cycle and enqueues only the terminal finding', async () => {
+  it('ignores in-progress status and enqueues only the terminal finding', async () => {
     await queuePrReviewSummaryNotification(
       summaryPayload({
         body: IN_PROGRESS_BODY,
@@ -132,7 +132,7 @@ describe('PR review-summary lifecycle replay', () => {
       }),
     );
 
-    expect(mockStartPrReviewNotificationCycle).toHaveBeenCalledOnce();
+    expect(mockStartPrReviewNotificationCycle).not.toHaveBeenCalled();
     expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
 
     await queuePrReviewSummaryNotification(

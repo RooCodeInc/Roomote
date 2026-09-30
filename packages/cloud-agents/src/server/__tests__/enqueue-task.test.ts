@@ -4,6 +4,7 @@
 // stamping, resume semantics, enqueue-time PR linkage, and pr_review queue
 // scope dedup.
 import Redis from 'ioredis-mock';
+import { randomUUID } from 'node:crypto';
 
 const { mockGenerateLlmTaskTitle } = vi.hoisted(() => ({
   mockGenerateLlmTaskTitle: vi.fn().mockResolvedValue('Generated title'),
@@ -43,6 +44,7 @@ import {
   taskRuns,
   taskMessages,
   taskPullRequests,
+  prReviewCycles,
   taskRunEvents,
   deploymentSettings,
   fastAgentConversations,
@@ -82,6 +84,7 @@ import { getPrSha } from '../workflows/utils';
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
 const createdRepositoryIds: string[] = [];
+const createdReviewCycleIds: string[] = [];
 
 const explicitWorkKind = {
   kind: 'implement',
@@ -229,6 +232,12 @@ afterAll(async () => {
     await db
       .delete(repositories)
       .where(inArray(repositories.id, createdRepositoryIds));
+  }
+
+  if (createdReviewCycleIds.length > 0) {
+    await db
+      .delete(prReviewCycles)
+      .where(inArray(prReviewCycles.cycleId, createdReviewCycleIds));
   }
 
   if (createdUserIds.length > 0) {
@@ -2317,6 +2326,103 @@ describe('enqueueTask PR linkage', () => {
     expect(prRows[0]!.prSha).toBe('a'.repeat(40));
     expect(prRows[0]!.prBaseRef).toBe('main');
     expect(prRows[0]!.prBaseSha).toBe('b'.repeat(40));
+  });
+
+  it('admits one review cycle atomically and reuses it on an idempotent retry', async () => {
+    const reviewCycleId = `cycle-${randomUUID()}`;
+    const prTask = {
+      type: TaskPayloadKind.GithubPrReview,
+      requestedWorkKindDecision: explicitWorkKind,
+      payload: {
+        repo: 'acme/cycles',
+        prNumber: 177,
+        prTitle: 'Review cycles',
+        prUrl: 'https://github.com/acme/cycles/pull/177',
+        headSha: 'a'.repeat(40),
+        reviewCycleId,
+        launchIdempotencyKey: reviewCycleId,
+      },
+    } as Extract<TaskSpec, { type: 'github_pr_review' }>;
+    const input = {
+      task: prTask,
+      initiator: {
+        kind: 'automation' as const,
+        key: 'review_code' as const,
+        actor: { externalId: '4242', displayName: 'octocat' },
+      },
+      workflow: 'pr_review' as const,
+      surface: 'github' as const,
+      trigger: 'webhook' as const,
+      prLinkage: {
+        provider: 'github' as const,
+        repository: 'acme/cycles',
+        prNumber: 177,
+        prUrl: 'https://github.com/acme/cycles/pull/177',
+        prTitle: 'Review cycles',
+        prSha: 'a'.repeat(40),
+      },
+    };
+    const firstRun = await enqueueTask(input, {
+      enqueue: false,
+      skipEarlyTitleGeneration: true,
+    });
+    createdTaskIds.push(firstRun.taskId);
+    createdReviewCycleIds.push(reviewCycleId);
+
+    const replays = await Promise.all([
+      enqueueTask(input, {
+        enqueue: false,
+        skipEarlyTitleGeneration: true,
+      }),
+      enqueueTask(input, {
+        enqueue: false,
+        skipEarlyTitleGeneration: true,
+      }),
+    ]);
+    expect(replays.map((run) => run.id)).toEqual([firstRun.id, firstRun.id]);
+    await expect(
+      db.query.prReviewCycles.findMany({
+        where: eq(prReviewCycles.cycleId, reviewCycleId),
+      }),
+    ).resolves.toHaveLength(1);
+
+    const failedCycleId = `cycle-failed-${randomUUID()}`;
+    createdReviewCycleIds.push(failedCycleId);
+    await expect(
+      enqueueTask(
+        {
+          ...input,
+          task: {
+            ...prTask,
+            payload: {
+              ...prTask.payload,
+              prNumber: 178,
+              prUrl: 'https://github.com/acme/cycles/pull/178',
+              reviewCycleId: failedCycleId,
+              launchIdempotencyKey: failedCycleId,
+            },
+          },
+          prLinkage: {
+            ...input.prLinkage,
+            prNumber: 178,
+            prUrl: 'https://github.com/acme/cycles/pull/178',
+            prSha: 'b'.repeat(40),
+          },
+        },
+        {
+          enqueue: false,
+          skipEarlyTitleGeneration: true,
+          afterCreateInTransaction: async () => {
+            throw new Error('admission failed');
+          },
+        },
+      ),
+    ).rejects.toThrow('admission failed');
+    await expect(
+      db.query.prReviewCycles.findMany({
+        where: eq(prReviewCycles.cycleId, failedCycleId),
+      }),
+    ).resolves.toHaveLength(0);
   });
 
   it('rejects pr_review launches without prLinkage', async () => {

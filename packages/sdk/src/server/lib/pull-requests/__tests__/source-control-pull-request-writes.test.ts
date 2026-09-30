@@ -2265,6 +2265,46 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
       });
     });
 
+    it('stamps the admitted review cycle onto Roomote inline comments', async () => {
+      mockRepositoriesFindFirst.mockResolvedValue(githubRepoRow);
+      mockCreateGitHubToken.mockResolvedValue('github-token');
+      const get = vi
+        .fn()
+        .mockResolvedValue({ data: { head: { sha: 'headsha123' } } });
+      const createReviewComment = vi.fn().mockResolvedValue({
+        data: { id: 3003, html_url: null },
+      });
+      mockGetOctokit.mockReturnValue({
+        rest: { pulls: { get, createReviewComment } },
+      });
+
+      await writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun(
+          {
+            repo: 'acme/backend',
+            sourceControlProvider: 'github',
+            reviewCycleId: 'cycle-123',
+          },
+          TaskPayloadKind.GithubPrReview,
+        ),
+        input: {
+          action: 'create_pull_request_review_comment',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          path: 'src/index.ts',
+          line: 42,
+          body: 'Missing error handling here.',
+          sourceControlProvider: 'github',
+        },
+      });
+
+      expect(createReviewComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: '<!-- roomote-review-cycle id=cycle-123 -->\nMissing error handling here.',
+        }),
+      );
+    });
+
     it('passes a GitHub multi-line range through as start_line and start_side', async () => {
       mockRepositoriesFindFirst.mockResolvedValue(githubRepoRow);
       mockCreateGitHubToken.mockResolvedValue('github-token');

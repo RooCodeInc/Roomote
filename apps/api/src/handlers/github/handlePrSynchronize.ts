@@ -11,6 +11,7 @@ import {
 } from '@roomote/types';
 import {
   db,
+  recordPrReviewCycleStateInTransaction,
   taskPullRequests,
   taskRuns,
   tasks,
@@ -38,6 +39,7 @@ import { getGitHubAutomationTargets } from './getGitHubAutomationTargets';
 import { getBackgroundGithubTaskProperties } from './backgroundGithubTaskProperties';
 import { getCurrentGitHubPrHeadSha } from './currentPrHead';
 import { getReviewTaskRelayPayload } from './reviewTaskRelayPayload';
+import { buildGithubPrReviewCycleId } from './review-cycle';
 
 async function findActiveReviewRun(repository: string, prNumber: number) {
   const [activeRun] = await db
@@ -118,12 +120,15 @@ async function findExistingReviewTask(repository: string, prNumber: number) {
   return existingTask;
 }
 
-export async function handlePrSynchronize({
-  installation,
-  repository,
-  pull_request: pr,
-  sender,
-}: WebhookPullRequestSynchronize): Promise<WebhookResponse> {
+export async function handlePrSynchronize(
+  {
+    installation,
+    repository,
+    pull_request: pr,
+    sender,
+  }: WebhookPullRequestSynchronize,
+  options?: { admissionId?: string },
+): Promise<WebhookResponse> {
   if (pr.locked) {
     return { status: 'error', message: 'PR is locked' };
   }
@@ -190,6 +195,13 @@ export async function handlePrSynchronize({
         );
       }
 
+      const reviewCycleId = buildGithubPrReviewCycleId({
+        repository: repository.full_name,
+        prNumber: pr.number,
+        headSha,
+        admissionId: options?.admissionId,
+      });
+
       const activeReviewRun = await findActiveReviewRun(
         repository.full_name,
         pr.number,
@@ -250,12 +262,22 @@ export async function handlePrSynchronize({
                 payload: {
                   ...lockedRun.payload,
                   headSha,
+                  reviewCycleId,
                   branchName: pr.head.ref,
                   prTitle: pr.title,
                   prUrl: pr.html_url,
                 },
               })
               .where(eq(taskRuns.id, lockedRun.id));
+            await recordPrReviewCycleStateInTransaction(tx, {
+              sourceControlProvider: 'github',
+              repository: repository.full_name,
+              prNumber: pr.number,
+              reviewHeadSha: headSha,
+              cycleId: reviewCycleId,
+              phase: 'open',
+              observedAt: new Date(),
+            });
 
             return { kind: 'pending_updated' as const };
           });
@@ -277,12 +299,23 @@ export async function handlePrSynchronize({
           // it seeds `previous_review_head_sha` in the follow-up prompt, so
           // the newest observed head needs its own field for a review that
           // finishes before the relay lands.
-          await db
-            .update(taskRuns)
-            .set({
-              payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || jsonb_build_object('latestObservedHeadSha', ${headSha}::text)`,
-            })
-            .where(eq(taskRuns.id, followUpRun.id));
+          await db.transaction(async (tx) => {
+            await tx
+              .update(taskRuns)
+              .set({
+                payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || jsonb_build_object('latestObservedHeadSha', ${headSha}::text, 'reviewCycleId', ${reviewCycleId}::text)`,
+              })
+              .where(eq(taskRuns.id, followUpRun.id));
+            await recordPrReviewCycleStateInTransaction(tx, {
+              sourceControlProvider: 'github',
+              repository: repository.full_name,
+              prNumber: pr.number,
+              reviewHeadSha: headSha,
+              cycleId: reviewCycleId,
+              phase: 'open',
+              observedAt: new Date(),
+            });
+          });
 
           const relayPayload = await getReviewTaskRelayPayload({
             repository: repository.full_name,
@@ -303,6 +336,7 @@ export async function handlePrSynchronize({
             prNumber: pr.number,
             previousHeadSha: followUpRun.prSha,
             eventHeadSha: headSha,
+            reviewCycleId,
             fallback: {
               task: {
                 type: TaskPayloadKind.GithubPrReviewSync,
@@ -313,6 +347,8 @@ export async function handlePrSynchronize({
                   prTitle: pr.title,
                   prUrl: pr.html_url,
                   headSha,
+                  reviewCycleId,
+                  launchIdempotencyKey: reviewCycleId,
                   branchName: pr.head.ref,
                   ...relayPayload,
                 },
@@ -347,6 +383,7 @@ export async function handlePrSynchronize({
               headSha,
               taskId: followUpRun.taskId,
               runId: followUpRun.id,
+              reviewCycleId,
               status: 'in_progress',
               signal: releaseLaunchLock.signal,
             });
@@ -417,6 +454,8 @@ export async function handlePrSynchronize({
             prTitle: pr.title,
             prUrl: pr.html_url,
             headSha,
+            reviewCycleId,
+            launchIdempotencyKey: reviewCycleId,
             branchName: pr.head.ref,
             ...relayPayload,
           } satisfies TaskPayload<
@@ -458,6 +497,7 @@ export async function handlePrSynchronize({
           headSha,
           taskId: launch.taskId,
           runId: launch.id,
+          reviewCycleId,
           signal: releaseLaunchLock.signal,
         });
       }

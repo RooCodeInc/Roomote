@@ -57,6 +57,7 @@ export const activePrReviewFollowUpRequestSchema = z.object({
   prNumber: z.number().int().positive(),
   previousHeadSha: z.string().nullable(),
   eventHeadSha: z.string(),
+  reviewCycleId: z.string().trim().min(1).optional(),
   fallback: z.object({
     task: githubPullRequestReviewSyncSchema,
     initiatorActor: z.object({

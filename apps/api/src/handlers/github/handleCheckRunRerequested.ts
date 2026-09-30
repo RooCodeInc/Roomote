@@ -61,7 +61,7 @@ export async function handleCheckRunRerequested(
     check_run_id: requestedCheck.id,
   });
   const owningRunId = Number(
-    /^roomote-review:(\d+)$/.exec(check.external_id ?? '')?.[1],
+    /^roomote-review:(\d+)(?::[^:]+)?$/.exec(check.external_id ?? '')?.[1],
   );
 
   if (
@@ -130,6 +130,7 @@ export async function handleCheckRunRerequested(
       isExplicitReviewRequest: true,
       expectedGithubCheckRunId: check.id,
       expectedHeadSha: check.head_sha,
+      admissionId: `check:${check.id}`,
     },
   );
 }

@@ -55,6 +55,7 @@ import {
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
   projectPendingPrReviewEventsForAssociation,
+  recordPrReviewCycleStateInTransaction,
   isChatInitiationProvider,
   recordUserChatInitiationProvider,
   recordTaskStartParallelCount,
@@ -1056,6 +1057,39 @@ const PR_SCOPED_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> = new Set([
   TaskPayloadKind.GithubPrReviewSync,
 ]);
 
+async function persistAdmittedGithubPrReviewCycle(
+  tx: DatabaseTransaction,
+  taskRun: TaskRun,
+): Promise<void> {
+  if (
+    taskRun.payloadKind !== TaskPayloadKind.GithubPrReview &&
+    taskRun.payloadKind !== TaskPayloadKind.GithubPrReviewSync
+  ) {
+    return;
+  }
+
+  const payload = (taskRun.payload ?? {}) as Record<string, unknown>;
+  const reviewCycleId =
+    typeof payload.reviewCycleId === 'string' ? payload.reviewCycleId : null;
+  const repository = typeof payload.repo === 'string' ? payload.repo : null;
+  const prNumber =
+    typeof payload.prNumber === 'number' ? payload.prNumber : null;
+  const headSha = typeof payload.headSha === 'string' ? payload.headSha : null;
+  if (!reviewCycleId || !repository || !prNumber || !headSha) {
+    return;
+  }
+
+  await recordPrReviewCycleStateInTransaction(tx, {
+    sourceControlProvider: 'github',
+    repository,
+    prNumber,
+    reviewHeadSha: headSha,
+    cycleId: reviewCycleId,
+    phase: 'open',
+    observedAt: taskRun.createdAt,
+  });
+}
+
 export const PR_REVIEW_SYNC_DEBOUNCE_MS = 5_000;
 
 export function resolvePrReviewQueuePolicy({
@@ -1945,6 +1979,8 @@ async function enqueueFreshLaunch(
       if (!insertedRun) {
         throw new Error('Failed to create `task_runs` record.');
       }
+
+      await persistAdmittedGithubPrReviewCycle(tx, insertedRun);
 
       if (options.afterCreateInTransaction) {
         await options.afterCreateInTransaction(tx, insertedRun);

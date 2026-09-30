@@ -164,6 +164,7 @@ export const activePrReviewFollowUpJob = async (
     prNumber: data.prNumber,
     previousHeadSha: data.previousHeadSha,
     eventHeadSha: data.eventHeadSha,
+    reviewCycleId: data.reviewCycleId,
   });
 
   if (!isExitedRunStatus(run.status)) {
@@ -201,6 +202,8 @@ export const activePrReviewFollowUpJob = async (
       port: run.port ?? undefined,
       sourceSnapshotId: run.snapshotId,
       sourceRunId: run.id,
+      reviewCycleId: data.reviewCycleId,
+      launchIdempotencyKey: data.reviewCycleId,
       ...(selectedRepositories ? { selectedRepositories } : {}),
       resumePrompt: prompt,
       resumePromptSource: 'github-pr-synchronize',

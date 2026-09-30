@@ -111,6 +111,8 @@ export const prReviewActivityEventSchema = z.object({
   checkName: z.string().optional(),
   /** Stable provider identity for a non-Roomote automated reviewer. */
   automatedAuthorId: z.string().optional(),
+  /** Canonical review-cycle identity stamped by the review producer. */
+  reviewCycleId: z.string().trim().min(1).optional(),
   /** Provider ID of the parent comment when this event is a thread reply. */
   inReplyToId: z.string().optional(),
   /** Untrusted review text retained for notification triage. */
