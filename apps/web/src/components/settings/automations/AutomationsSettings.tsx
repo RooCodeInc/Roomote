@@ -1532,6 +1532,7 @@ function BuiltInWebhookSetting({
 }) {
   const trpc = useTRPC();
   const [editing, setEditing] = useState(false);
+  const [retryingAfterError, setRetryingAfterError] = useState(false);
   const [webhookState, setWebhookState] = useState<{
     enabled: boolean;
     url: string | null;
@@ -1565,17 +1566,23 @@ function BuiltInWebhookSetting({
 
   if (!isBuiltInWebhookAutomationKey(automationKey)) return null;
 
+  const initialLoadFailed =
+    webhookQuery.data === undefined &&
+    (webhookQuery.isError || retryingAfterError);
+
   if (!editing) {
     return (
       <SettingSummaryRow
         icon={RadioTower}
         label="Webhooks"
         value={
-          webhookQuery.isPending
-            ? 'Loading...'
-            : webhookState.enabled
-              ? 'Enabled'
-              : 'Disabled'
+          initialLoadFailed
+            ? 'Unavailable'
+            : webhookQuery.isPending
+              ? 'Loading...'
+              : webhookState.enabled
+                ? 'Enabled'
+                : 'Disabled'
         }
         onEdit={() => setEditing(true)}
       />
@@ -1585,61 +1592,89 @@ function BuiltInWebhookSetting({
   const busy = setMutation.isPending || rotateMutation.isPending;
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3">
-        <Switch
-          id={`${automationKey}-webhook-enabled`}
-          checked={webhookState.enabled}
-          disabled={!automationEnabled || busy || webhookQuery.isPending}
-          aria-label={`${automationKey} webhook enabled`}
-          onCheckedChange={(enabled) =>
-            setMutation.mutate({ automationKey, enabled })
-          }
-        />
-        <Label htmlFor={`${automationKey}-webhook-enabled`}>
-          Enable webhook
-        </Label>
-      </div>
-      {webhookState.enabled && webhookState.url ? (
-        <div className="relative min-w-0">
-          <Input
-            type="url"
-            aria-label="Webhook URL"
-            autoComplete="off"
-            spellCheck={false}
-            readOnly
-            value={webhookState.url}
-            className="min-w-0 w-full pr-20 font-mono text-xs"
-          />
-          <div className="absolute inset-y-1 right-1 flex items-center gap-1">
-            <CopyIconButton
-              className="size-7"
-              content={webhookState.url}
-              tooltip="Copy webhook URL"
-              aria-label="Copy webhook URL"
-              disabled={busy}
-            />
-            <BasicTooltip content="Rotate webhook URL; revoke the old URL">
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="size-7"
-                aria-label="Rotate webhook URL"
-                disabled={busy}
-                onClick={() => rotateMutation.mutate({ automationKey })}
-              >
-                <RefreshCw />
-              </Button>
-            </BasicTooltip>
-          </div>
+      {initialLoadFailed ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1 text-sm"
+        >
+          <p className="text-muted-foreground">
+            Failed to load webhook settings.
+          </p>
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            disabled={webhookQuery.isFetching || retryingAfterError}
+            onClick={() => {
+              setRetryingAfterError(true);
+              void webhookQuery
+                .refetch()
+                .finally(() => setRetryingAfterError(false));
+            }}
+          >
+            Retry
+          </Button>
         </div>
-      ) : null}
-      {!automationEnabled ? (
-        <p className="text-xs text-muted-foreground">
-          Enable the automation from its list switch before enabling this
-          webhook.
-        </p>
-      ) : null}
+      ) : (
+        <>
+          <div className="flex items-center gap-3">
+            <Switch
+              id={`${automationKey}-webhook-enabled`}
+              checked={webhookState.enabled}
+              disabled={!automationEnabled || busy || webhookQuery.isPending}
+              aria-label={`${automationKey} webhook enabled`}
+              onCheckedChange={(enabled) =>
+                setMutation.mutate({ automationKey, enabled })
+              }
+            />
+            <Label htmlFor={`${automationKey}-webhook-enabled`}>
+              Enable webhook
+            </Label>
+          </div>
+          {webhookState.enabled && webhookState.url ? (
+            <div className="relative min-w-0">
+              <Input
+                type="url"
+                aria-label="Webhook URL"
+                autoComplete="off"
+                spellCheck={false}
+                readOnly
+                value={webhookState.url}
+                className="min-w-0 w-full pr-20 font-mono text-xs"
+              />
+              <div className="absolute inset-y-1 right-1 flex items-center gap-1">
+                <CopyIconButton
+                  className="size-7"
+                  content={webhookState.url}
+                  tooltip="Copy webhook URL"
+                  aria-label="Copy webhook URL"
+                  disabled={busy}
+                />
+                <BasicTooltip content="Rotate webhook URL; revoke the old URL">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    aria-label="Rotate webhook URL"
+                    disabled={busy}
+                    onClick={() => rotateMutation.mutate({ automationKey })}
+                  >
+                    <RefreshCw />
+                  </Button>
+                </BasicTooltip>
+              </div>
+            </div>
+          ) : null}
+          {!automationEnabled ? (
+            <p className="text-xs text-muted-foreground">
+              Enable the automation from its list switch before enabling this
+              webhook.
+            </p>
+          ) : null}
+        </>
+      )}
       <Button
         type="button"
         variant="link"
