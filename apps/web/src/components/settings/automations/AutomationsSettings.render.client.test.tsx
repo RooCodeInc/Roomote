@@ -46,6 +46,11 @@ const state = vi.hoisted(() => ({
     enabled: boolean;
     url: string | null;
   },
+  builtInAutomationWebhookPending: false,
+  builtInAutomationWebhookError: false,
+  builtInAutomationWebhookFetching: false,
+  builtInAutomationWebhookLoaded: true,
+  builtInAutomationWebhookRefetch: vi.fn(),
   customAutomationTimeZone: 'UTC' as string | undefined,
   customAutomationDefaultTarget: undefined as
     | {
@@ -462,9 +467,13 @@ vi.mock('@tanstack/react-query', () => ({
     }
     if (key1 === 'getBuiltInAutomationWebhook') {
       return {
-        isPending: false,
-        isError: false,
-        data: state.builtInAutomationWebhookFallback,
+        isPending: state.builtInAutomationWebhookPending,
+        isError: state.builtInAutomationWebhookError,
+        isFetching: state.builtInAutomationWebhookFetching,
+        data: state.builtInAutomationWebhookLoaded
+          ? state.builtInAutomationWebhookFallback
+          : undefined,
+        refetch: state.builtInAutomationWebhookRefetch,
       };
     }
 
@@ -1047,6 +1056,11 @@ describe('AutomationsSettings', () => {
     state.nextUpdateSettingsResult = null;
     state.customAutomationRunPendingId = null;
     state.customAutomationWebhookSettings = null;
+    state.builtInAutomationWebhookFallback = { enabled: false, url: null };
+    state.builtInAutomationWebhookPending = false;
+    state.builtInAutomationWebhookError = false;
+    state.builtInAutomationWebhookFetching = false;
+    state.builtInAutomationWebhookLoaded = true;
     state.automationLaunchCriteriaEnabled = false;
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
@@ -1282,6 +1296,64 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText('Destination', { exact: true }),
     ).toBeInTheDocument();
+  });
+
+  it('distinguishes an unavailable built-in webhook setting and retries it', async () => {
+    state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
+    state.builtInAutomationWebhookError = true;
+    state.builtInAutomationWebhookLoaded = false;
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Manager Stats/,
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Manager Stats' });
+    expect(within(dialog).getByText('Unavailable')).toBeInTheDocument();
+    editSummaryRow('Webhooks');
+    expect(
+      within(dialog).getByText('Failed to load webhook settings.'),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole('switch', {
+        name: 'manager_stats webhook enabled',
+      }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Retry' }));
+    expect(state.builtInAutomationWebhookRefetch).toHaveBeenCalledOnce();
+  });
+
+  it('keeps cached built-in webhook settings visible after a refetch failure', async () => {
+    state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
+    state.builtInAutomationWebhookFallback = {
+      enabled: true,
+      url: 'https://roomote.example/api/webhooks/automations/manager-stats/token',
+    };
+    state.builtInAutomationWebhookError = true;
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Manager Stats/,
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Manager Stats' });
+    expect(await within(dialog).findByText('Enabled')).toBeInTheDocument();
+    editSummaryRow('Webhooks');
+    expect(
+      within(dialog).getByRole('switch', {
+        name: 'manager_stats webhook enabled',
+      }),
+    ).toBeChecked();
+    expect(
+      within(dialog).getByRole('textbox', { name: 'Webhook URL' }),
+    ).toHaveValue(
+      'https://roomote.example/api/webhooks/automations/manager-stats/token',
+    );
   });
 
   it('keeps Suggest Ideas and Summarize Merged PRs setup available without a default destination', async () => {
