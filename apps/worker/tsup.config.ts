@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { cp, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { defineConfig } from 'tsup';
@@ -31,6 +32,16 @@ export default defineConfig({
   keepNames: true,
   clean: true,
   outDir: 'dist',
+  async onSuccess() {
+    const packageRoot = dirname(
+      dirname(nodeRequire.resolve('@roo-code/judgement')),
+    );
+    const target = join('dist', 'skills', 'judgement');
+    await mkdir(dirname(target), { recursive: true });
+    await cp(join(packageRoot, 'skills', 'judgement'), target, {
+      recursive: true,
+    });
+  },
   // Bundle everything including CJS packages.
   noExternal: [/.*/],
   platform: 'node',

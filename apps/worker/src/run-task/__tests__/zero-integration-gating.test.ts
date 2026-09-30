@@ -7,6 +7,7 @@ vi.mock('../jevgrep', () => ({
   setupJevgrep: vi.fn().mockResolvedValue(false),
 }));
 
+import { setupJudgement } from '../judgement-proxy';
 import { setupJevgrep } from '../jevgrep';
 import { EventEmitter } from 'node:events';
 
@@ -299,7 +300,7 @@ describe('Zero integration runtime gating', () => {
     expect(installZeroCliMock).not.toHaveBeenCalled();
     expect(activateSkillsFolderMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        excludeSkillNames: ['doctor', 'zero', 'jevgrep'],
+        excludeSkillNames: ['doctor', 'zero', 'jevgrep', 'judgement'],
       }),
     );
   });
@@ -323,7 +324,7 @@ describe('Zero integration runtime gating', () => {
     expect(installZeroCliMock).toHaveBeenCalledTimes(1);
     expect(activateSkillsFolderMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        excludeSkillNames: ['doctor', 'jevgrep'],
+        excludeSkillNames: ['doctor', 'jevgrep', 'judgement'],
       }),
     );
   });
@@ -348,3 +349,28 @@ it('activates Jevgrep only after runtime setup succeeds', async () => {
     }),
   );
 });
+
+it.each([true, false])(
+  'activates Judgement only after supported runtime setup: %s',
+  async (enabled) => {
+    vi.mocked(setupJudgement).mockResolvedValueOnce(enabled);
+    await runTask({
+      ...baseRunTaskArgs(),
+      taskRun: {
+        id: 302,
+        taskId: 'task-judgement',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+    });
+    expect(activateSkillsFolderMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        excludeSkillNames: enabled
+          ? expect.not.arrayContaining(['judgement'])
+          : expect.arrayContaining(['judgement']),
+      }),
+    );
+  },
+);
