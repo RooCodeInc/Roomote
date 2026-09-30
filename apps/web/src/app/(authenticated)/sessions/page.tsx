@@ -91,7 +91,7 @@ export default async function SessionsPage({
                 judgmentStatus: session.judgedStatus,
               }) === column,
           ),
-        })).filter(({ sessions }) => sessions.length > 0)
+        }))
       : [];
   const olderParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -139,6 +139,8 @@ export default async function SessionsPage({
                     key={session.id}
                     sessionId={session.id}
                     column={column}
+                    canManage={session.canManage ?? false}
+                    title={session.title}
                   >
                     <SessionCard
                       session={session}

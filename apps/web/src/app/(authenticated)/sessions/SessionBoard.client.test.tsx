@@ -1,7 +1,14 @@
 import { render, waitFor } from '@testing-library/react';
 import type { HTMLAttributes, ReactNode } from 'react';
 
-const motionState = vi.hoisted(() => ({ reducedMotion: false }));
+const motionState = vi.hoisted(() => ({
+  reducedMotion: false,
+  statusMutation: { isPending: false, mutate: vi.fn() },
+}));
+
+vi.mock('@/components/sessions/use-session-status-mutation', () => ({
+  useSessionStatusMutation: () => motionState.statusMutation,
+}));
 
 vi.mock('motion/react', async () => {
   const { createElement, forwardRef } = await import('react');
@@ -66,15 +73,18 @@ import {
   SessionBoardCard,
   SessionBoardColumn,
 } from './SessionBoard';
+import type { SessionBoardColumn as SessionBoardColumnStatus } from '@roomote/types';
 import { announceSessionBoardMove } from '@/components/sessions/session-board-motion';
 
-function renderBoard(columns: Record<string, string[]>) {
+function renderBoard(
+  columns: Partial<Record<SessionBoardColumnStatus, string[]>>,
+) {
   return (
     <SessionBoard>
       {Object.entries(columns).map(([column, sessionIds]) => (
         <SessionBoardColumn
           key={column}
-          column={column}
+          column={column as SessionBoardColumnStatus}
           label={column}
           count={sessionIds.length}
         >
@@ -82,7 +92,8 @@ function renderBoard(columns: Record<string, string[]>) {
             <SessionBoardCard
               key={sessionId}
               sessionId={sessionId}
-              column={column}
+              column={column as SessionBoardColumnStatus}
+              title={sessionId}
             >
               <a href={`/sessions/${sessionId}`}>{sessionId}</a>
             </SessionBoardCard>

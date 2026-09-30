@@ -2,7 +2,7 @@
 
 import { useState, type SyntheticEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   getSessionStatusLabel,
@@ -12,8 +12,8 @@ import {
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
-import { announceSessionBoardMove } from '@/components/sessions/session-board-motion';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
+import { useSessionStatusMutation } from '@/components/sessions/use-session-status-mutation';
 import {
   Activity,
   Archive,
@@ -52,7 +52,6 @@ export function SessionActions({
 }) {
   const trpc = useTRPC();
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const currentStatus = status ?? 'ready';
   const stopTasks = useMutation(
@@ -115,34 +114,7 @@ export function SessionActions({
       onError: () => toast.error('Failed to delete session.'),
     }),
   );
-  const setStatus = useMutation(
-    trpc.sessions.setStatus.mutationOptions({
-      onSuccess: (result, variables) => {
-        if (!result) {
-          toast.error('Failed to update session status.');
-          return;
-        }
-        const nextStatus = (variables as { status: SessionManualStatus })
-          .status;
-        announceSessionBoardMove(sessionId, nextStatus);
-        toast.success(
-          `Session marked as ${getSessionStatusLabel(nextStatus)}.`,
-        );
-        void queryClient.invalidateQueries({
-          queryKey: trpc.sessions.byId.queryKey({ sessionId }),
-        });
-        void queryClient.invalidateQueries({
-          queryKey: trpc.sessions.list.queryKey(),
-        });
-        void queryClient.invalidateQueries({
-          queryKey: trpc.sessions.search.queryKey(),
-        });
-        router.refresh();
-      },
-      onError: (error) =>
-        toast.error(error.message || 'Failed to update session status.'),
-    }),
-  );
+  const setStatus = useSessionStatusMutation();
   const isPending =
     stopTasks.isPending ||
     archiveSession.isPending ||
