@@ -118,7 +118,7 @@ export const integrationToolAutoSettingsSchema = z.object({
 });
 
 /**
- * What the agent is told when Auto denies a call because the Session owner
+ * What the agent is told when Auto denies a call because the session owner
  * was away. A denied call leaves nothing in the transcript to allow later,
  * so this points the agent at what the owner can actually do.
  */
