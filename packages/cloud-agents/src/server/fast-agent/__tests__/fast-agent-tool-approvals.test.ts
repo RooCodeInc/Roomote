@@ -747,7 +747,7 @@ describe('extractApprovalCallArgs', () => {
 
   it('returns a plain call input directly', () => {
     expect(extractApprovalCallArgs({ input: { channel: 'C1' } }, tool)).toEqual(
-      { channel: 'C1' },
+      { args: { channel: 'C1' } },
     );
   });
 
@@ -765,15 +765,17 @@ describe('extractApprovalCallArgs', () => {
         },
         tool,
       ),
-    ).toEqual({ channel: 'C1', text: 'hi' });
+    ).toEqual({ args: { channel: 'C1', text: 'hi' } });
   });
 
   it('falls back to the script when the child call is not tracked', () => {
     const code = { code: 'return 1' };
     expect(
       extractApprovalCallArgs({ input: code, toolCalls: [] }, tool),
-    ).toEqual(code);
-    expect(extractApprovalCallArgs(undefined, tool)).toBeUndefined();
+    ).toEqual({ args: code });
+    expect(extractApprovalCallArgs(undefined, tool)).toEqual({
+      args: undefined,
+    });
   });
 
   it('shows the paused call, not an earlier call to the same tool in one script', () => {
@@ -782,14 +784,189 @@ describe('extractApprovalCallArgs', () => {
         {
           input: { code: 'two calls' },
           toolCalls: [
-            { tool: 'mock-slack.post_message', input: { channel: 'first' } },
+            {
+              tool: 'mock-slack.post_message',
+              input: { channel: 'first' },
+              status: 'completed',
+            },
             { tool: 'mock-slack.read_channel', input: { channel: 'other' } },
-            { tool: 'mock-slack.post_message', input: { channel: 'second' } },
+            {
+              tool: 'mock-slack.post_message',
+              input: { channel: 'second' },
+              status: 'running',
+            },
           ],
         },
         tool,
       ),
-    ).toEqual({ channel: 'second' });
+    ).toEqual({ args: { channel: 'second' } });
+  });
+
+  it('cannot tell apart calls to the same tool started together', () => {
+    const running = (channel: string) => ({
+      tool: 'mock-slack.post_message',
+      input: { channel },
+      status: 'running',
+    });
+    expect(
+      extractApprovalCallArgs(
+        {
+          input: { code: 'Promise.all' },
+          toolCalls: [running('a'), running('b')],
+        },
+        tool,
+      ),
+    ).toEqual({ candidates: [{ channel: 'a' }, { channel: 'b' }] });
+    // Identical arguments are the same call as far as approval goes.
+    expect(
+      extractApprovalCallArgs(
+        {
+          input: { code: 'Promise.all' },
+          toolCalls: [running('a'), running('a')],
+        },
+        tool,
+      ),
+    ).toEqual({ args: { channel: 'a' } });
+    // Finished calls are not candidates.
+    expect(
+      extractApprovalCallArgs(
+        {
+          input: { code: 'Promise.all' },
+          toolCalls: [{ ...running('a'), status: 'error' }, running('b')],
+        },
+        tool,
+      ),
+    ).toEqual({ args: { channel: 'b' } });
+  });
+});
+
+describe('parallel calls in one script', () => {
+  const ask = {
+    requestId: 'req-1',
+    sessionId: 'opencode-session',
+    permission: codeModeToolKey('mock-slack', 'post_message'),
+    messageId: 'message-1',
+    callId: 'call-1',
+  };
+  const parallelHelpers = () => ({
+    fetchCallArgs: vi.fn(async () => ({
+      input: { code: 'Promise.all' },
+      toolCalls: [
+        {
+          tool: 'mock-slack.post_message',
+          input: { channel: 'C1' },
+          status: 'running',
+        },
+        {
+          tool: 'mock-slack.post_message',
+          input: { channel: 'C2' },
+          status: 'running',
+        },
+      ],
+    })),
+    reply: vi.fn(async () => undefined),
+  });
+  const bridgeFor = (auto: boolean) =>
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      ...(auto
+        ? {
+            autoToolKeys: new Set([
+              JSON.stringify(['mock-slack', 'post_message']),
+            ]),
+          }
+        : {}),
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([]);
+  });
+
+  it('refuses when a person would have to approve one of several calls', async () => {
+    const h = parallelHelpers();
+    bridgeFor(false).handleAsk({ ...ask, requestId: 'manual' }, h);
+    await vi.waitFor(() =>
+      expect(h.reply).toHaveBeenCalledWith(
+        'manual',
+        'reject',
+        expect.stringContaining('one call at a time'),
+      ),
+    );
+    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
+  });
+
+  it('shares one assessment per call across the asks of one script', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    const bridge = bridgeFor(true);
+    const first = parallelHelpers();
+    const second = parallelHelpers();
+    bridge.handleAsk({ ...ask, requestId: 'ask-a' }, first);
+    bridge.handleAsk({ ...ask, requestId: 'ask-b' }, second);
+    await vi.waitFor(() => {
+      expect(first.reply).toHaveBeenCalledWith('ask-a', 'once');
+      expect(second.reply).toHaveBeenCalledWith('ask-b', 'once');
+    });
+    // Two calls, two assessments, not one set per ask.
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledTimes(2);
+  });
+
+  it('runs them under Auto only when every one of them would run', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    const approved = parallelHelpers();
+    bridgeFor(true).handleAsk({ ...ask, requestId: 'all-ok' }, approved);
+    await vi.waitFor(() =>
+      expect(approved.reply).toHaveBeenCalledWith('all-ok', 'once'),
+    );
+    // Each call was assessed with its own arguments.
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ args: { channel: 'C1' } }),
+    );
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ args: { channel: 'C2' } }),
+    );
+    expect(insertAutoApprovedIntegrationToolApproval).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        argsSummary: {
+          parallelCalls: [{ channel: 'C1' }, { channel: 'C2' }],
+        },
+      }),
+    );
+
+    vi.mocked(resolveIntegrationToolAutoDecision)
+      .mockReset()
+      .mockResolvedValueOnce({
+        action: 'approve',
+        mode: 'on',
+        evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+      })
+      .mockResolvedValueOnce({
+        action: 'ask',
+        mode: 'on',
+        evaluation: { recommendation: 'ask', answers: {}, evaluatedAt: '' },
+      });
+    const oneRisky = parallelHelpers();
+    bridgeFor(true).handleAsk({ ...ask, requestId: 'one-risky' }, oneRisky);
+    await vi.waitFor(() =>
+      expect(oneRisky.reply).toHaveBeenCalledWith(
+        'one-risky',
+        'reject',
+        expect.stringContaining('one call at a time'),
+      ),
+    );
+    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
   });
 });
 

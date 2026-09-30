@@ -278,7 +278,11 @@ type FastAgentToolApprovalHelpers = {
   }) => Promise<
     | {
         input?: unknown;
-        toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        toolCalls?: Array<{
+          tool?: unknown;
+          input?: unknown;
+          status?: unknown;
+        }>;
         readContent?: string;
       }
     | undefined
@@ -297,25 +301,49 @@ type FastAgentToolApprovalHelpers = {
  * tool calls with their structured inputs, so the card shows the gated
  * child call's own arguments. A plain MCP call shows its input directly.
  */
+/** A child call that has not finished, so an ask can be for it. */
+function isOpenChildCall(entry: { status?: unknown }): boolean {
+  return entry.status !== 'completed' && entry.status !== 'error';
+}
+
+/**
+ * The arguments of the call an ask paused, or every argument set it could be.
+ * A code-mode script can call the same tool more than once, and every ask it
+ * raises carries the same outer call id. Only calls still running can be the
+ * paused one: one such call, or several with identical arguments, identifies
+ * the arguments. Several with different arguments (calls started together,
+ * such as with `Promise.all`) cannot be told apart, so the caller gets all of
+ * them rather than a guess that would show and assess another call.
+ */
 export function extractApprovalCallArgs(
   recovered:
     | {
         input?: unknown;
-        toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        toolCalls?: Array<{
+          tool?: unknown;
+          input?: unknown;
+          status?: unknown;
+        }>;
       }
     | undefined,
   tool: { serverName: string; toolName: string },
-): unknown {
-  if (!recovered) return undefined;
+): { args: unknown } | { candidates: unknown[] } {
+  if (!recovered) return { args: undefined };
   const dottedChildName = `${tool.serverName}.${tool.toolName}`;
-  // One script can call the same tool more than once. Child calls are
-  // recorded as they run, so the paused call is the most recent match, not
-  // the first; showing the first would put an earlier call's arguments on
-  // this ask's card and audit row.
-  const child = [...(recovered.toolCalls ?? [])]
-    .reverse()
-    .find((entry) => entry.tool === dottedChildName);
-  return child ? child.input : recovered.input;
+  const matches = (recovered.toolCalls ?? []).filter(
+    (entry) => entry.tool === dottedChildName,
+  );
+  if (matches.length === 0) return { args: recovered.input };
+  const open = matches.filter(isOpenChildCall);
+  // Nothing still running: the most recent call is the paused one.
+  const candidates = open.length > 0 ? open : matches.slice(-1);
+  const distinct = new Map<string, unknown>();
+  for (const entry of candidates) {
+    distinct.set(JSON.stringify(entry.input ?? null), entry.input);
+  }
+  return distinct.size === 1
+    ? { args: candidates[0]!.input }
+    : { candidates: [...distinct.values()] };
 }
 
 /**
@@ -431,6 +459,13 @@ export function createFastAgentToolApprovalBridge(input: {
   }
   const handledRequestIds = new Set<string>();
   const notifiedApprovalIds = new Set<string>();
+  // Parallel calls in one script raise one ask each, and each ask could be
+  // any of them. Sharing one assessment per call keeps their decisions the
+  // same; otherwise one ask could refuse and fail the whole script.
+  const parallelAssessments = new Map<
+    string,
+    ReturnType<typeof resolveIntegrationToolAutoDecision>
+  >();
 
   const ownerIsPresent = async (): Promise<boolean> => {
     if (isFastAgentApprovalChatSurface(input.surface)) return true;
@@ -490,26 +525,40 @@ export function createFastAgentToolApprovalBridge(input: {
     recovered:
       | {
           input?: unknown;
-          toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+          toolCalls?: Array<{
+            tool?: unknown;
+            input?: unknown;
+            status?: unknown;
+          }>;
         }
       | undefined,
-  ): { tool: ToolIdentity; args: unknown } | null => {
+  ):
+    | { tool: ToolIdentity; args: unknown; parallel?: unknown[] }
+    | { unresolved: 'identity' } => {
     const candidates = toolsByKey.get(permission) ?? [];
     if (candidates.length === 1) {
       const tool = candidates[0]!;
-      return { tool, args: extractApprovalCallArgs(recovered, tool) };
+      const call = extractApprovalCallArgs(recovered, tool);
+      return 'candidates' in call
+        ? {
+            tool,
+            args: { parallelCalls: call.candidates },
+            parallel: call.candidates,
+          }
+        : { tool, args: call.args };
     }
     const matchingChildren = (recovered?.toolCalls ?? []).filter(
       (entry) =>
         typeof entry.tool === 'string' &&
-        flattenDottedChildName(entry.tool) === permission,
+        flattenDottedChildName(entry.tool) === permission &&
+        isOpenChildCall(entry),
     );
     if (matchingChildren.length === 1) {
       const child = matchingChildren[0]!;
       const tool = toolByDottedName.get(child.tool as string);
       if (tool) return { tool, args: child.input };
     }
-    return null;
+    return { unresolved: 'identity' };
   };
 
   /**
@@ -534,7 +583,7 @@ export function createFastAgentToolApprovalBridge(input: {
         })
         .catch(() => undefined);
       const resolution = resolveToolForAsk(ask.permission, recovered);
-      if (!resolution) {
+      if ('unresolved' in resolution) {
         // Never show the requester a card for a different tool than the one
         // that would execute, and never let an ambiguous call through.
         console.warn(
@@ -549,7 +598,19 @@ export function createFastAgentToolApprovalBridge(input: {
           .catch(() => undefined);
         return;
       }
-      const { tool, args } = resolution;
+      const { tool, args, parallel } = resolution;
+      const rejectParallel = async () => {
+        console.warn(
+          `[Fast Agent] Tool approval ask ${ask.requestId} for ${ask.permission} cannot be told apart from parallel calls to the same tool; failing closed.`,
+        );
+        await helpers
+          .reply(
+            ask.requestId,
+            'reject',
+            `Several calls to ${tool.toolName} started at the same time and this one needs approval, which has to show exactly one call, so none of them ran. Retry now with one call at a time: await each call before starting the next.`,
+          )
+          .catch(() => undefined);
+      };
       const argsSummary = redactIntegrationToolArgs(args ?? null);
       const argsFingerprint = fingerprintIntegrationToolCall({
         integrationId: tool.integrationId,
@@ -579,6 +640,13 @@ export function createFastAgentToolApprovalBridge(input: {
         input.autoToolKeys?.has(
           integrationToolPolicyKey(tool.integrationId, tool.toolName),
         ) === true;
+      // Parallel calls with different arguments: a card could show only one
+      // of them, so a tool that needs a person refuses; Auto may still run
+      // them when every one of them is routine (below).
+      if (parallel && !allowedForSession && !autoAssessed) {
+        await rejectParallel();
+        return;
+      }
       const [recentUserMessages, explicitApprovalOutcomes] = autoAssessed
         ? await Promise.all([
             input.resolveSessionUserMessages?.() ?? [],
@@ -595,28 +663,54 @@ export function createFastAgentToolApprovalBridge(input: {
         autoAssessed
           ? { recentUserMessages, explicitApprovalOutcomes }
           : undefined;
-      const auto = autoAssessed
-        ? await resolveIntegrationToolAutoDecision({
-            integrationId: tool.integrationId,
-            toolName: tool.toolName,
-            toolDescription: tool.description,
-            args,
-            userRequest: await input.resolveUserRequest?.(),
-            sessionContext,
-            readContent: recovered?.readContent,
-            isSessionLaunchedTask: (taskId) =>
-              isFastAgentLaunchedTask(input.sessionId, taskId),
-            userId: input.userId,
-          }).catch(() => ({
-            action: 'ask' as const,
-            mode: 'on' as const,
-            evaluation: {
-              recommendation: 'ask' as const,
-              unavailable: 'error' as const,
-              evaluatedAt: new Date().toISOString(),
-            },
-          }))
-        : undefined;
+      const assess = async (callArgs: unknown) =>
+        resolveIntegrationToolAutoDecision({
+          integrationId: tool.integrationId,
+          toolName: tool.toolName,
+          toolDescription: tool.description,
+          args: callArgs,
+          userRequest: await input.resolveUserRequest?.(),
+          sessionContext,
+          readContent: recovered?.readContent,
+          isSessionLaunchedTask: (taskId) =>
+            isFastAgentLaunchedTask(input.sessionId, taskId),
+          userId: input.userId,
+        }).catch(() => ({
+          action: 'ask' as const,
+          mode: 'on' as const,
+          evaluation: {
+            recommendation: 'ask' as const,
+            unavailable: 'error' as const,
+            evaluatedAt: new Date().toISOString(),
+          },
+        }));
+      let auto: Awaited<ReturnType<typeof assess>> | undefined;
+      if (autoAssessed && parallel) {
+        // This ask is one of these calls; it runs only if every one of them
+        // would run on its own.
+        const results = await Promise.all(
+          parallel.map((candidate) => {
+            const key = `${ask.callId ?? ask.requestId}:${JSON.stringify(candidate ?? null)}`;
+            let assessment = parallelAssessments.get(key);
+            if (!assessment) {
+              assessment = assess(candidate);
+              parallelAssessments.set(key, assessment);
+            }
+            return assessment;
+          }),
+        );
+        auto =
+          results.find((result) => result.mode === 'off') ??
+          (results.every((result) => result.action === 'approve')
+            ? results[0]
+            : undefined);
+        if (!auto) {
+          await rejectParallel();
+          return;
+        }
+      } else if (autoAssessed) {
+        auto = await assess(args);
+      }
       // A default tool asked under a rule compiled while Auto was on, after
       // Auto went off: it runs as it always has, and there is nothing to
       // record.
