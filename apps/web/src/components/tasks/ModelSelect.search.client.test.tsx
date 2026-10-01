@@ -215,6 +215,34 @@ describe('ModelSelect real controls', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
+  it('allows wheel scrolling when portaled from a modal dialog', async () => {
+    render(
+      <Dialog open>
+        <DialogContent aria-describedby={undefined}>
+          <DialogTitle>Choose a model</DialogTitle>
+          <ModelSelect onValueChange={vi.fn()} />
+        </DialogContent>
+      </Dialog>,
+    );
+    fireEvent.click(screen.getByRole('combobox'));
+
+    const list = screen.getByRole('listbox');
+    Object.defineProperties(list, {
+      clientHeight: { configurable: true, value: 300 },
+      scrollHeight: { configurable: true, value: 600 },
+    });
+    const wheelEvent = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 100,
+    });
+
+    await waitFor(() => {
+      screen.getAllByRole('option')[0]?.dispatchEvent(wheelEvent);
+      expect(wheelEvent.defaultPrevented).toBe(false);
+    });
+  });
+
   it('preserves the trigger label, selected default label and empty label', () => {
     const { rerender } = render(
       <ModelSelect
