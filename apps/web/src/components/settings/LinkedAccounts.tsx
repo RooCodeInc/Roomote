@@ -904,6 +904,7 @@ export function LinkedAccounts() {
     slackInstallation.isPending ||
     linearInstallation.isPending ||
     microsoftTeamsAccount.isPending ||
+    telegramAccount.isPending ||
     discordAccount.isPending ||
     deploymentEnablements.isPending ||
     userConnections.isPending;
