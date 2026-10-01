@@ -759,6 +759,84 @@ describe('lookupTaskModelCommand', () => {
     );
   });
 
+  it('prunes fallback selections when their model is disabled', async () => {
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          select: vi.fn(() => ({
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                limit: vi.fn(() => ({
+                  for: vi.fn(async () => [
+                    {
+                      taskModelSettings: null,
+                      modelFallbackConfig: {
+                        enabled: true,
+                        roles: {
+                          helper: {
+                            modelId: 'openrouter/z-ai/glm-5.2',
+                            reasoningEffort: 'low',
+                          },
+                          vision: {
+                            modelId: 'openai/gpt-5.6',
+                            reasoningEffort: 'medium',
+                          },
+                        },
+                      },
+                    },
+                  ]),
+                })),
+              })),
+            })),
+          })),
+          insert: mockInsertDeploymentSettings,
+        }),
+    );
+
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: 'openai/gpt-5.6',
+          displayName: 'GPT 5.6',
+          family: 'GPT',
+        },
+        {
+          id: 'z-ai/glm-5.2',
+          displayName: 'GLM 5.2',
+          family: 'GLM',
+        },
+      ],
+      allowedModelIds: ['openai/gpt-5.6'],
+      defaultModelId: 'openai/gpt-5.6',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          modelFallbackConfig: {
+            enabled: true,
+            roles: {
+              vision: {
+                modelId: 'openai/gpt-5.6',
+                reasoningEffort: 'medium',
+              },
+            },
+          },
+        }),
+      }),
+    );
+  });
+
   it('persists normalized coding-model routing rules', async () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'OPENROUTER_API_KEY',

@@ -1588,7 +1588,7 @@ export async function updateTaskModelSettingsCommand(
     });
     const nextModelFallbackConfig = pruneModelFallbackConfig(
       persisted?.modelFallbackConfig,
-      (modelId) => knownModelIds.has(modelId),
+      (modelId) => allowedModelIds.includes(modelId),
     );
 
     await tx

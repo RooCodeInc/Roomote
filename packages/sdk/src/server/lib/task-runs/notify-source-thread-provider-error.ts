@@ -410,7 +410,11 @@ export async function maybeNotifySourceThreadOfModelFallback(input: {
     getModelFallbackNoticeFromMessageData(asRecord(input.envelope.payload));
   if (!notice) return;
 
-  const text = `Switching to fallback model: ${notice.fromProvider} failed (${notice.errorSummary}). Continuing with ${notice.toModelId}.`;
+  const safeNotice = {
+    ...notice,
+    errorSummary: redactSecrets(notice.errorSummary).trim(),
+  };
+  const text = `Switching to fallback model: ${safeNotice.fromProvider} failed (${safeNotice.errorSummary}). Continuing with ${safeNotice.toModelId}.`;
   try {
     const run = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, input.runId),
@@ -427,7 +431,7 @@ export async function maybeNotifySourceThreadOfModelFallback(input: {
           taskId: run.taskId,
           runId: run.id,
           messageTs: input.envelope.ts,
-          fallback: notice,
+          fallback: safeNotice,
           taskUrl: getTaskUrl({
             taskId: run.taskId,
             utm: {

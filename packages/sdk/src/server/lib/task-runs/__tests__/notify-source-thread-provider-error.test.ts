@@ -213,7 +213,8 @@ function makeFallbackEnvelope(ts = 1_700_000_000_001) {
         trigger: 'immediate',
         fromProvider: 'openai',
         fromModelId: 'openai/gpt-5.4',
-        errorSummary: 'The provider ran out of credits.',
+        errorSummary:
+          'The provider rejected api_key=sk-secret after running out of credits.',
         toProvider: 'anthropic',
         toModelId: 'anthropic/claude-sonnet-4',
         toReasoningEffort: 'high',
@@ -454,8 +455,15 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
         taskId: 'task-1',
         runId: 7,
         messageTs: 44,
-        fallback: (envelope.metadata as Record<string, unknown>)
-          .modelFallbackNotice,
+        fallback: {
+          ...(
+            envelope.metadata as {
+              modelFallbackNotice: Record<string, unknown>;
+            }
+          ).modelFallbackNotice,
+          errorSummary:
+            'The provider rejected api_key=[redacted] after running out of credits.',
+        },
         taskUrl: 'https://example.com/task',
       },
     });
