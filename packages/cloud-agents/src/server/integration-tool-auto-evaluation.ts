@@ -164,6 +164,13 @@ const NO = 0.2;
  * different job does not match the request).
  */
 const AUTHORIZED_WITH_MATCH = 0.75;
+/**
+ * No authorization counts for a call that plainly is not what the request
+ * is about. The next item of a different job can reach the authorization
+ * cutoff on continuation alone in some runs, but scores far below this on
+ * matching the request; calls the owner did authorize score well above it.
+ */
+const AUTHORIZED_MIN_MATCH = 0.5;
 const MAX_SESSION_CONTEXT_MESSAGES = 8;
 const MAX_SESSION_CONTEXT_MESSAGE_LENGTH = 1_500;
 const MAX_SESSION_CONTEXT_LENGTH = 6_000;
@@ -338,6 +345,7 @@ export function recommendFromAutoAnswers(
   );
   const authorized =
     !options.sameToolRejected &&
+    (answers.matchesRequest ?? 1) >= AUTHORIZED_MIN_MATCH &&
     (authorization >= YES ||
       (authorization >= AUTHORIZED_WITH_MATCH &&
         (answers.matchesRequest ?? 0) >= YES)) &&

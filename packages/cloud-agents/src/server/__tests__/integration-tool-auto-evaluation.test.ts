@@ -205,6 +205,23 @@ describe('recommendFromAutoAnswers', () => {
         matchesRequest: 0.25,
       }),
     ).toBe('ask');
+    // Even at the full bar, a call that plainly is not what the request is
+    // about asks: an approval of one item is not a request for another job.
+    expect(
+      recommendFromAutoAnswers({
+        ...write,
+        continuesApprovedCall: 0.85,
+        matchesRequest: 0.3,
+      }),
+    ).toBe('ask');
+    // With no request to match, the full bar still authorizes.
+    expect(
+      recommendFromAutoAnswers({
+        ...write,
+        continuesApprovedCall: 0.85,
+        matchesRequest: undefined,
+      }),
+    ).toBe('approve');
     // With no request to match, only the full bar counts.
     expect(
       recommendFromAutoAnswers({
