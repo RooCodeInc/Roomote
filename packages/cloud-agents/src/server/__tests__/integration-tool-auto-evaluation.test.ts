@@ -390,22 +390,20 @@ describe('evaluateIntegrationToolAutoDecision', () => {
         .agentMessageRepliedTo,
     ).toBe('I found 3 old drafts. Delete them one by one?');
 
-    // Continuing an approved batch gives an unreadable identifier the
-    // benefit of the doubt; a plan does not, so its items must be ones the
-    // plan named or clearly included. A check on a finished step counts as
-    // part of the request, and granting extra access is a stronger action.
+    // An identifier the model cannot read is never assumed to be one of the
+    // items: a batch or plan item must be one the session shows. A check on
+    // a finished step counts as part of the request, and granting extra
+    // access is a stronger action.
     await ask({
       recentUserMessages: ['yeah go ahead'],
       agentMessageRepliedTo: 'I found 3 old drafts. Delete them one by one?',
       explicitApprovalOutcomes: [approvedSameTool],
     });
     const asked = mocks.evaluate.mock.calls[0]![0].questions;
-    expect(asked.continuesApprovedCall.instructions).toContain(
-      'You usually cannot see that list',
-    );
-    expect(asked.agreedToPlan.instructions).not.toContain(
-      'identifier you cannot read meaning into',
-    );
+    for (const question of [asked.continuesApprovedCall, asked.agreedToPlan]) {
+      expect(question.instructions).not.toContain('cannot read meaning into');
+      expect(question.instructions).not.toContain('cannot see that list');
+    }
     expect(asked.matchesRequest.instructions).toContain(
       'a check on a step it just took',
     );
