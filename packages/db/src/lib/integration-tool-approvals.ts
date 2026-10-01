@@ -525,6 +525,28 @@ export async function decideIntegrationToolApproval(
   },
 ): Promise<IntegrationToolApprovalMetadata> {
   return db.transaction(async (tx) => {
+    if (input.decision === 'rejected') {
+      // Taken before the rejection is written and held until it commits, so
+      // an Auto claim of the same tool either finishes first or sees it.
+      const [target] = await tx
+        .select({
+          integrationId: integrationToolApprovalRequests.integrationId,
+          toolName: integrationToolApprovalRequests.toolName,
+        })
+        .from(integrationToolApprovalRequests)
+        .where(
+          and(
+            eq(integrationToolApprovalRequests.id, input.approvalId),
+            eq(integrationToolApprovalRequests.sessionId, context.sessionId),
+          ),
+        );
+      if (target) {
+        await lockToolRejections(tx, {
+          sessionId: context.sessionId,
+          ...target,
+        });
+      }
+    }
     const [row] = await tx
       .update(integrationToolApprovalRequests)
       .set({
@@ -544,15 +566,6 @@ export async function decideIntegrationToolApproval(
       .returning();
     if (!row) {
       throw new IntegrationToolApprovalUnavailableError('approval_not_found');
-    }
-    if (input.decision === 'rejected') {
-      // Held until this rejection commits, so an Auto claim of the same tool
-      // that runs after it sees the rejection.
-      await lockToolRejections(tx, {
-        sessionId: context.sessionId,
-        integrationId: row.integrationId,
-        toolName: row.toolName,
-      });
     }
     // "Don't ask again this session": the same authority check that accepted
     // this decision also records the session-scoped allow, so the override

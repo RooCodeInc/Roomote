@@ -474,6 +474,28 @@ describe('auto-approved reservations', () => {
     await expect(guarded(other.approvalId, 'other_tool')).resolves.toBe(true);
   });
 
+  it('makes a rejection wait for an Auto claim of the same tool in progress', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const pending = await insertPending(context);
+    const order: string[] = [];
+    let rejection: Promise<unknown> | undefined;
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${sessionId}:${call.integrationId}:${call.toolName}`}, 0))`,
+      );
+      rejection = decideIntegrationToolApproval(context, {
+        approvalId: pending.approvalId,
+        decision: 'rejected',
+      }).then(() => order.push('rejected'));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      order.push('claim committed');
+    });
+    await rejection;
+    expect(order).toEqual(['claim committed', 'rejected']);
+  });
+
   it('waits for a rejection in progress and then loses the claim to it', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
@@ -490,6 +512,9 @@ describe('auto-approved reservations', () => {
     let claim: Promise<boolean> | undefined;
     // The owner's rejection is mid-transaction when Auto tries to claim.
     await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${sessionId}:${call.integrationId}:${call.toolName}`}, 0))`,
+      );
       await tx
         .update(integrationToolApprovalRequests)
         .set({
@@ -498,9 +523,6 @@ describe('auto-approved reservations', () => {
           decidedAt: sql`clock_timestamp()`,
         })
         .where(eq(integrationToolApprovalRequests.id, pending.approvalId));
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${sessionId}:${call.integrationId}:${call.toolName}`}, 0))`,
-      );
       claim = claimAutoApprovedIntegrationToolApproval({
         approvalId: reserved.approvalId,
         requesterUserId: userId,
