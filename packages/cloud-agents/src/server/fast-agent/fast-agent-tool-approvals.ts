@@ -804,6 +804,30 @@ export function createFastAgentToolApprovalBridge(input: {
         await helpers.reply(ask.requestId, 'once');
         return;
       }
+      // The owner may have rejected a call to this tool while this one was
+      // being assessed (two calls in flight together). Check again right
+      // before running so that rejection still makes this call ask.
+      if (
+        auto?.mode === 'on' &&
+        auto.action === 'approve' &&
+        !toolRejectedInSession &&
+        (await hasRejectedIntegrationToolInSession({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          integrationId: tool.integrationId,
+          toolName: tool.toolName,
+        }).catch(() => true))
+      ) {
+        auto = {
+          ...auto,
+          action: 'ask',
+          evaluation: {
+            ...auto.evaluation,
+            recommendation: 'ask',
+            reason: 'the session owner rejected a call to this tool',
+          },
+        };
+      }
       if (auto?.action === 'ask' && !(await ownerIsPresent())) {
         // The audit row is born terminal `auto_rejected` with the assessment;
         // if it cannot be written the outer handler rejects the ask instead
