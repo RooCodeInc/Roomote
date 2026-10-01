@@ -329,7 +329,10 @@ export type AutoRiskAnswers = {
 /**
  * Run without a person when the call is routine or when the owner authorized
  * it; anything else asks a person. Routine: it only reads, lists, or
- * searches, and is what the user asked for when that is known.
+ * searches. A read changes nothing, so it does not have to be something the
+ * user asked for; what the agent then does with what it read is judged on the
+ * call that does it. The one read that must match the request is of a task
+ * another session launched.
  * Authorized: whatever its risk, the owner asked for exactly this call in
  * the session or approved an earlier call it continues, and it moves no
  * money (the model cannot check amounts reliably). A slightly less certain
@@ -347,6 +350,8 @@ export function recommendFromAutoAnswers(
     sameToolRejected?: boolean;
     /** The call names an item nothing in the session identifies. */
     unverifiedTarget?: boolean;
+    /** The call reads a task this session did not launch. */
+    readNeedsRequestMatch?: boolean;
   } = {},
 ): IntegrationToolAutoEvaluation['recommendation'] {
   const minimumRiskConfidence = options.allowlistedInternalRead
@@ -362,7 +367,12 @@ export function recommendFromAutoAnswers(
         answers.risk.confidence >= minimumRiskConfidence
       : answers.onlyReads >=
         (options.allowlistedInternalRead ? INTERNAL_READ_MIN_ONLY_READS : YES);
-  const routine = reads && (answers.matchesRequest ?? 1) >= YES;
+  // Answers recorded before `onlyReads` existed keep the rule they were
+  // recorded under.
+  const routine =
+    reads &&
+    ((answers.onlyReads !== undefined && !options.readNeedsRequestMatch) ||
+      (answers.matchesRequest ?? 1) >= YES);
   // After the owner rejected a call to this tool, only a routine call runs.
   const continuation =
     (answers.matchesRequest ?? 1) >= CONTINUATION_MIN_MATCH
@@ -576,11 +586,13 @@ export async function evaluateIntegrationToolAutoDecision(input: {
     };
     // A code-verified fact, so the model need not guess whether a task read
     // is about the task the user means.
+    const readsOtherSessionTask =
+      !internalReadAllowlist &&
+      isTaskTargetedRead(input.integrationId, input.toolName, input.args);
     const targetTaskScope =
       internalReadAllowlist === 'session_task'
         ? 'The target task was launched by and is linked to the current session.'
-        : !internalReadAllowlist &&
-            isTaskTargetedRead(input.integrationId, input.toolName, input.args)
+        : readsOtherSessionTask
           ? 'The target task was not launched by the current session and the user did not name it.'
           : undefined;
     const answers = await evaluateDecisionModel({
@@ -643,6 +655,7 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       allowlistedInternalRead,
       sameToolRejected,
       unverifiedTarget: unverifiedIdentifier !== undefined,
+      readNeedsRequestMatch: readsOtherSessionTask,
     });
     return {
       recommendation,
@@ -652,6 +665,7 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       recommendFromAutoAnswers(riskAnswers, {
         allowlistedInternalRead,
         sameToolRejected,
+        readNeedsRequestMatch: readsOtherSessionTask,
       }) === 'approve'
         ? {
             reason:

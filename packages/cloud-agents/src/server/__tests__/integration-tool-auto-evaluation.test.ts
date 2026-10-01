@@ -186,7 +186,7 @@ describe('findUnverifiedIdentifier', () => {
 });
 
 describe('recommendFromAutoAnswers', () => {
-  it('runs only a routine call the user asked for; every doubt asks', () => {
+  it('runs a call that only reads; any doubt that it is safe asks', () => {
     expect(recommendFromAutoAnswers(routine)).toBe('approve');
     // With no request to judge against, the other signals decide.
     expect(
@@ -219,13 +219,58 @@ describe('recommendFromAutoAnswers', () => {
       // Anything past "only reads", or unsure it is that.
       { onlyReads: 0.6 },
       { onlyReads: 0.1 },
-      { matchesRequest: 0.6 },
       { steeredByUntrustedContent: 0.4 },
       { sendsPrivateDataOut: 0.4 },
       { guidanceFlagsRisk: 0.5 },
     ] satisfies Partial<AutoRiskAnswers>[]) {
       expect(recommendFromAutoAnswers({ ...routine, ...doubt })).toBe('ask');
     }
+    // A read does not have to be something the user asked for: it changes
+    // nothing, and what happens to what it read is judged on a later call.
+    expect(recommendFromAutoAnswers({ ...routine, matchesRequest: 0.05 })).toBe(
+      'approve',
+    );
+    // It still asks when it follows planted instructions, sends data out,
+    // or the deployment's guidance names it.
+    for (const unsafe of [
+      { steeredByUntrustedContent: 0.4 },
+      { sendsPrivateDataOut: 0.4 },
+      { guidanceFlagsRisk: 0.5 },
+    ] satisfies Partial<AutoRiskAnswers>[]) {
+      expect(
+        recommendFromAutoAnswers({
+          ...routine,
+          matchesRequest: 0.05,
+          ...unsafe,
+        }),
+      ).toBe('ask');
+    }
+    // A read of a task another session launched must still match.
+    expect(
+      recommendFromAutoAnswers(
+        { ...routine, matchesRequest: 0.6 },
+        { readNeedsRequestMatch: true },
+      ),
+    ).toBe('ask');
+    expect(
+      recommendFromAutoAnswers(routine, { readNeedsRequestMatch: true }),
+    ).toBe('approve');
+    // An off-request write is not a read: it still asks.
+    expect(
+      recommendFromAutoAnswers({
+        ...routine,
+        onlyReads: 0.05,
+        matchesRequest: 0.05,
+      }),
+    ).toBe('ask');
+    // Answers recorded before `onlyReads` existed keep the request match.
+    expect(
+      recommendFromAutoAnswers({
+        ...routine,
+        onlyReads: undefined,
+        matchesRequest: 0.6,
+      }),
+    ).toBe('ask');
   });
 
   it('runs the next item of approved work or of a plan the owner agreed to', () => {
@@ -658,7 +703,8 @@ describe('evaluateIntegrationToolAutoDecision', () => {
 
   it('uses bounded same-session human context and the redacted arguments of decided calls', async () => {
     mocks.evaluate.mockResolvedValue(
-      modelAnswers({ ...routine, matchesRequest: 0.3 }),
+      // A write the session does not ask for.
+      modelAnswers({ ...routine, onlyReads: 0.05, matchesRequest: 0.3 }),
     );
     const recentUserMessages = Array.from(
       { length: 10 },
@@ -723,6 +769,33 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     const { state } = mocks.evaluate.mock.calls[0]![0];
     expect(state.userRequest).toBe('Inspect the deployment logs.');
     expect(state).not.toHaveProperty('sessionContext');
+  });
+
+  it('runs an integration read the user did not ask for, and still asks when it is unsafe', async () => {
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({ ...routine, matchesRequest: 0.1 }),
+    );
+    const read = {
+      integrationId: 'gdrive',
+      toolName: 'read_file_content',
+      args: { fileId: 'Q3-board-deck.pptx' },
+      userRequest: 'Move the Q3 deck into Archive.',
+    };
+    await expect(
+      evaluateIntegrationToolAutoDecision(read),
+    ).resolves.toMatchObject({ recommendation: 'approve' });
+
+    // The same read asks when it follows an instruction planted in content.
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({
+        ...routine,
+        matchesRequest: 0.1,
+        steeredByUntrustedContent: 0.7,
+      }),
+    );
+    await expect(
+      evaluateIntegrationToolAutoDecision(read),
+    ).resolves.toMatchObject({ recommendation: 'ask' });
   });
 
   it('skips request matching only for in-scope internal task reads', async () => {
