@@ -173,6 +173,69 @@ describe('recommendFromAutoAnswers', () => {
     );
   });
 
+  it('accepts a slightly less certain authorization only when the call also matches the request', () => {
+    const write: AutoRiskAnswers = {
+      ...routine,
+      risk: { score: 3.9, confidence: 0.95 },
+      onlyReads: 0.02,
+      matchesRequest: 0.9,
+      movesMoney: 0.02,
+    };
+    // Each authorization signal counts at the lower bar with a matching call.
+    for (const authorization of [
+      { userAuthorized: 0.76 },
+      { continuesApprovedCall: 0.76 },
+      { agreedToPlan: 0.76 },
+    ]) {
+      expect(recommendFromAutoAnswers({ ...write, ...authorization })).toBe(
+        'approve',
+      );
+    }
+    // Below the lower bar it asks, however well the call matches: a wider
+    // grant than the owner asked for scores here.
+    expect(recommendFromAutoAnswers({ ...write, userAuthorized: 0.71 })).toBe(
+      'ask',
+    );
+    // At the lower bar but not matching the request it asks: the next item
+    // of a different job scores here.
+    expect(
+      recommendFromAutoAnswers({
+        ...write,
+        continuesApprovedCall: 0.78,
+        matchesRequest: 0.25,
+      }),
+    ).toBe('ask');
+    // With no request to match, only the full bar counts.
+    expect(
+      recommendFromAutoAnswers({
+        ...write,
+        userAuthorized: 0.78,
+        matchesRequest: undefined,
+      }),
+    ).toBe('ask');
+    // Money, an unsafe signal, and a rejection of the tool still ask.
+    expect(
+      recommendFromAutoAnswers({
+        ...write,
+        userAuthorized: 0.78,
+        movesMoney: 0.5,
+      }),
+    ).toBe('ask');
+    expect(
+      recommendFromAutoAnswers({
+        ...write,
+        userAuthorized: 0.78,
+        steeredByUntrustedContent: 0.5,
+      }),
+    ).toBe('ask');
+    expect(
+      recommendFromAutoAnswers(
+        { ...write, userAuthorized: 0.78 },
+        { sameToolRejected: true },
+      ),
+    ).toBe('ask');
+  });
+
   it('runs a risky call the owner authorized, unless it moves money or is unsafe', () => {
     const deletion: AutoRiskAnswers = {
       ...routine,
