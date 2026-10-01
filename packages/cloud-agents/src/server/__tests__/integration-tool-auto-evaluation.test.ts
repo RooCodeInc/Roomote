@@ -127,6 +127,30 @@ describe('findUnverifiedIdentifier', () => {
     ).toBe('rec_9xQ2a');
   });
 
+  it('does not accept an identifier that only appears inside a longer one', () => {
+    const longer =
+      'deals [{"id":"99210345"},{"id":"19921034"}] issue ENG-123 and PENG-12, uuid e5a1c9d3-7b4f-4628-8f0e-2d6b3a1c9e57a';
+    expect(findUnverifiedIdentifier({ dealId: '9921034' }, longer)).toBe(
+      '9921034',
+    );
+    expect(findUnverifiedIdentifier({ issueKey: 'ENG-12' }, longer)).toBe(
+      'ENG-12',
+    );
+    expect(
+      findUnverifiedIdentifier(
+        { id: 'e5a1c9d3-7b4f-4628-8f0e-2d6b3a1c9e57' },
+        longer,
+      ),
+    ).toBe('e5a1c9d3-7b4f-4628-8f0e-2d6b3a1c9e57');
+    // Punctuation around a whole value is fine.
+    expect(
+      findUnverifiedIdentifier(
+        { dealId: '9921034', issue_number: 1182 },
+        'see /deals/9921034, and #1182.',
+      ),
+    ).toBeUndefined();
+  });
+
   it('passes identifiers the session shows, whatever their case', () => {
     expect(
       findUnverifiedIdentifier({ channelId: 'c04tmp0001' }, evidence),

@@ -63,8 +63,9 @@ const OPAQUE_IDENTIFIER_PATTERNS = [
  * the agent read. Nobody can tell what such an identifier refers to, so the
  * call cannot be one the owner authorized. Only values that look like
  * identifiers count: under an id-like key or of an opaque shape, with a
- * digit and no whitespace. Presence is a plain substring match; whether a
- * present identifier is the right item is the model's question.
+ * digit and no whitespace. The identifier must appear as a whole value, not
+ * inside a longer one; whether a present identifier is the right item is the
+ * model's question.
  */
 export function findUnverifiedIdentifier(
   args: unknown,
@@ -90,7 +91,12 @@ export function findUnverifiedIdentifier(
       IDENTIFIER_KEY.test(key) ||
       OPAQUE_IDENTIFIER_PATTERNS.some((pattern) => pattern.test(text));
     if (!looksLikeIdentifier) return undefined;
-    return haystack.includes(text.toLowerCase()) ? undefined : text;
+    // As a whole value: a longer identifier that merely contains this one
+    // (9921034 inside 99210345) does not identify it.
+    const whole = new RegExp(
+      `(?<![a-z0-9])${text.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`,
+    );
+    return whole.test(haystack) ? undefined : text;
   };
   const visit = (
     key: string,
