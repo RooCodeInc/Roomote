@@ -390,6 +390,28 @@ describe('evaluateIntegrationToolAutoDecision', () => {
         .agentMessageRepliedTo,
     ).toBe('I found 3 old drafts. Delete them one by one?');
 
+    // The wording gives an unreadable identifier the benefit of the doubt
+    // when the work covers a set, counts a check on a finished step as part
+    // of the request, and names granting extra access as a stronger action.
+    await ask({
+      recentUserMessages: ['yeah go ahead'],
+      agentMessageRepliedTo: 'I found 3 old drafts. Delete them one by one?',
+      explicitApprovalOutcomes: [approvedSameTool],
+    });
+    const asked = mocks.evaluate.mock.calls[0]![0].questions;
+    expect(asked.continuesApprovedCall.instructions).toContain(
+      'You usually cannot see that list',
+    );
+    expect(asked.agreedToPlan.instructions).toContain(
+      'an identifier you cannot read meaning into is taken as one of them',
+    );
+    expect(asked.matchesRequest.instructions).toContain(
+      'a check on a step it just took',
+    );
+    expect(asked.userAuthorized.instructions).toContain(
+      'granting more access than asked for',
+    );
+
     // A rejection of this tool turns both off.
     const afterRejection = await ask({
       agentMessageRepliedTo: 'Delete them?',
@@ -782,6 +804,11 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     });
     expect(questions.guidanceFlagsRisk.criteria.false).toContain(
       'performs a different action than the ones named',
+    );
+    // Guidance limited to a place or kind of thing does not flag the same
+    // action elsewhere.
+    expect(questions.guidanceFlagsRisk.criteria.false).toContain(
+      'outside the place or kind of thing the guidance limits itself to',
     );
   });
 
