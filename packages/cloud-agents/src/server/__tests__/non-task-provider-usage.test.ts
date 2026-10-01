@@ -898,6 +898,20 @@ describe('resolveOpenCodeSmallModel', () => {
     await expect(run(unanswered)).rejects.toThrow('instance unavailable');
     expect(permissionListMock).toHaveBeenCalledTimes(4);
     expect(unanswered).not.toHaveBeenCalled();
+
+    // The event stream itself cannot be reopened: the prompt fails too.
+    eventSubscribeMock
+      .mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: 'server.instance.disposed' as const,
+            properties: { directory: '/tmp/roomote-fast-native-test' },
+          };
+        })(),
+      })
+      .mockRejectedValueOnce(new Error('event stream unavailable'));
+    await expect(run(unanswered)).rejects.toThrow('event stream unavailable');
+    expect(unanswered).not.toHaveBeenCalled();
   });
 
   it('records completed Fast OpenCode usage with a stable event key', async () => {

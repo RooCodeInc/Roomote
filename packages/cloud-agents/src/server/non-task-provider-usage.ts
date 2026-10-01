@@ -1698,6 +1698,13 @@ async function runNonTaskSdkPrompt(
           );
           return (await subscribeToEvents()).stream;
         },
+        // Without a stream nothing can answer an ask, so the prompt stops
+        // rather than wait on one.
+        onResubscribeFailed: (error) => {
+          rejectSessionError(
+            new NonTaskOpenCodePromptError(error, promptErrorLabel),
+          );
+        },
         // An ask raised while no stream was open was never relayed, and the
         // reopened stream will not repeat it. The lookup can fail while the
         // new instance is still settling, so it is retried; if the pending
