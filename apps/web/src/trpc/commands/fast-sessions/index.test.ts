@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   getUnifiedSession: vi.fn(),
   privateSessionsEnabled: vi.fn(),
   autoExperimentEnabled: vi.fn(),
+  autoCanAssess: vi.fn(),
   setSessionAuto: vi.fn(),
   startSessionGoal: vi.fn(),
   getFastSessionTasks: vi.fn(),
@@ -80,6 +81,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('./auto-tool-approvals', () => ({
   isAutoToolApprovalsExperimentEnabled: mocks.autoExperimentEnabled,
+  canAssessAutoToolApprovals: mocks.autoCanAssess,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -784,6 +786,7 @@ describe('startFastSessionCommand', () => {
     mocks.getUnifiedSession.mockResolvedValue({ id: 'unified-session-1' });
     mocks.privateSessionsEnabled.mockResolvedValue(true);
     mocks.autoExperimentEnabled.mockResolvedValue(true);
+    mocks.autoCanAssess.mockResolvedValue(true);
     mocks.setSessionAuto.mockResolvedValue(true);
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
@@ -843,8 +846,19 @@ describe('startFastSessionCommand', () => {
     ).rejects.toThrow('Auto tool approvals are not enabled.');
     expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
 
-    // A pinned task would start before Auto could be turned on.
+    // Nothing can assess calls: the first tool call would only pause.
     mocks.autoExperimentEnabled.mockResolvedValue(true);
+    mocks.autoCanAssess.mockResolvedValue(false);
+    await expect(
+      startFastSessionCommand(auth, {
+        text: 'Triage the open bugs',
+        autoToolApprovals: true,
+      }),
+    ).rejects.toThrow('Auto isn’t available yet.');
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
+
+    // A pinned task would start before Auto could be turned on.
+    mocks.autoCanAssess.mockResolvedValue(true);
     await expect(
       startFastSessionCommand(auth, {
         text: 'Fix the flaky test',

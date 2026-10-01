@@ -28,9 +28,12 @@ export async function isAutoToolApprovalsExperimentEnabled(
   );
 }
 
-// Auto needs a hosted judgment model; the helper-model fallback would be an
-// LLM call per tool call, so it is never used.
-async function canAssess(): Promise<boolean> {
+/**
+ * Whether Auto has something to assess calls with. Auto needs a hosted
+ * judgment model; the helper-model fallback would be an LLM call per tool
+ * call, so it is never used.
+ */
+export async function canAssessAutoToolApprovals(): Promise<boolean> {
   const model = await resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(
     () => null,
   );
@@ -49,7 +52,7 @@ export async function getFastSessionAutoToolApprovalsCommand(
     return { available: false, enabled: false, suspended: false };
   }
   const [available, state] = await Promise.all([
-    canAssess(),
+    canAssessAutoToolApprovals(),
     input.sessionId
       ? getIntegrationToolAutoForSession({
           sessionId: input.sessionId,
@@ -75,7 +78,7 @@ export async function setFastSessionAutoToolApprovalsCommand(
     });
   }
   // Turning it off always works, so a session is never stuck with Auto on.
-  if (input.enabled && !(await canAssess())) {
+  if (input.enabled && !(await canAssessAutoToolApprovals())) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
       message: 'Auto isn’t available yet.',

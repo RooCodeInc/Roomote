@@ -93,7 +93,10 @@ import {
 } from '@/lib/server/artifact-signature';
 import type { PinnedFastSessionLaunchInput } from './input';
 import { startPinnedFastSessionLaunch } from './pinned-launch';
-import { isAutoToolApprovalsExperimentEnabled } from './auto-tool-approvals';
+import {
+  canAssessAutoToolApprovals,
+  isAutoToolApprovalsExperimentEnabled,
+} from './auto-tool-approvals';
 
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
@@ -477,11 +480,15 @@ export async function startFastSessionCommand(
   ) {
     throw new Error('Private sessions are not enabled for this deployment.');
   }
-  if (
-    input.autoToolApprovals &&
-    !(await isAutoToolApprovalsExperimentEnabled(auth))
-  ) {
-    throw new Error('Auto tool approvals are not enabled.');
+  if (input.autoToolApprovals) {
+    if (!(await isAutoToolApprovalsExperimentEnabled(auth))) {
+      throw new Error('Auto tool approvals are not enabled.');
+    }
+    // The same rule as choosing Auto mid-session: without something to
+    // assess calls with, the first tool call would only pause the session.
+    if (!(await canAssessAutoToolApprovals())) {
+      throw new Error('Auto isn’t available yet.');
+    }
   }
   if (input.pinnedLaunch) {
     if (input.autoToolApprovals) {

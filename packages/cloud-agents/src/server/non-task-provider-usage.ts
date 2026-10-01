@@ -39,6 +39,10 @@ import {
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 const NON_TASK_SESSION_ABORT_TIMEOUT_MS = 5_000;
 const NON_TASK_USAGE_EVENT_BARRIER_TIMEOUT_MS = 1_000;
+// After an instance refresh the pending permission asks are read again; the
+// new instance may still be settling, so a failed read is retried briefly.
+const PENDING_PERMISSION_LOOKUP_RETRIES = 3;
+const PENDING_PERMISSION_LOOKUP_RETRY_DELAY_MS = 200;
 const NON_TASK_USAGE_RECONCILE_TIMEOUT_MS = 5_000;
 type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
@@ -1694,14 +1698,44 @@ async function runNonTaskSdkPrompt(
           );
           return (await subscribeToEvents()).stream;
         },
-        // An ask raised while no stream was open was never relayed.
+        // An ask raised while no stream was open was never relayed, and the
+        // reopened stream will not repeat it. The lookup can fail while the
+        // new instance is still settling, so it is retried; if the pending
+        // asks cannot be read at all, the prompt fails here rather than wait
+        // on an ask nobody will answer.
         onResubscribed: async () => {
           if (!options.onPermissionAsked) return;
-          const pending = await client.permission.list(
-            { directory: sessionDirectory },
-            { signal: eventAbortController.signal },
-          );
-          for (const ask of pending.data ?? []) relayPermissionAsk(ask);
+          for (let attempt = 0; ; attempt += 1) {
+            const pending = await client.permission
+              .list(
+                { directory: sessionDirectory },
+                { signal: eventAbortController.signal },
+              )
+              .catch((error: unknown) => ({ data: undefined, error }));
+            if (eventAbortController.signal.aborted) return;
+            if (!pending.error && pending.data) {
+              for (const ask of pending.data) relayPermissionAsk(ask);
+              return;
+            }
+            if (attempt >= PENDING_PERMISSION_LOOKUP_RETRIES) {
+              rejectSessionError(
+                new NonTaskOpenCodePromptError(
+                  pending.error ??
+                    new Error(
+                      'OpenCode pending permission asks could not be read.',
+                    ),
+                  promptErrorLabel,
+                ),
+              );
+              return;
+            }
+            await new Promise((resolve) =>
+              setTimeout(
+                resolve,
+                PENDING_PERMISSION_LOOKUP_RETRY_DELAY_MS * (attempt + 1),
+              ),
+            );
+          }
         },
         signal: eventAbortController.signal,
       });
