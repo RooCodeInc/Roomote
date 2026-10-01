@@ -70,13 +70,13 @@ export async function resolveProxyToolApprovalBlocks(input: {
   resolveActingUserId: () => Promise<string | null>;
   /** The run token's task, for its Session's overrides. */
   resolveTaskId?: () => Promise<string | null>;
-  /** The request's headers, for the Fast conversation a Session's call names. */
+  /** The request's headers, for the Fast conversation a session's call names. */
   requestHeaders?: Headers;
 }): Promise<ProxyToolApprovals> {
   const blocks = new Map<string, ProxyToolApprovalBlock>();
   const result: ProxyToolApprovals = { blocks, shadowDefaultTools: false };
-  // Auto is the Session owner's choice for that Session, so find the call's
-  // Session first: a task's, or the one behind the conversation it names.
+  // Auto is the session owner's choice for that session, so find the call's
+  // session first: a task's, or the one behind the conversation it names.
   const taskId =
     input.tokenType === 'run' ? await input.resolveTaskId?.() : null;
   const fastConversationId =

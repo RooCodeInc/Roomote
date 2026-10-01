@@ -211,7 +211,7 @@ describe('resolveProxyToolApprovalBlocks', () => {
       resolveTaskId: async () => 'task-1',
     });
     expect(task.defaultBlock).toBe('needs_approval');
-    // Auto is read for the task's own Session, whose owner turned it on.
+    // Auto is read for the task's own session, whose owner turned it on.
     expect(mockAutoState).toHaveBeenCalledWith({ sessionId: 'session-1' });
     expect(blocksOf(task)).toEqual({
       get_issue: 'allow',
@@ -232,8 +232,8 @@ describe('resolveProxyToolApprovalBlocks', () => {
     expect(session.defaultBlock).toBeUndefined();
   });
 
-  it('follows Auto for the Session each call belongs to', async () => {
-    // Auto is on for one Session only; everything else is shadowed.
+  it('follows Auto for the session each call belongs to', async () => {
+    // Auto is on for one session only; everything else is shadowed.
     mockAutoState.mockImplementation(async (scope) => ({
       mode: scope?.sessionId === 'session-on' ? 'on' : 'shadow',
     }));
@@ -243,7 +243,7 @@ describe('resolveProxyToolApprovalBlocks', () => {
       'x-roomote-fast-conversation-id': conversationId,
     });
 
-    // A task in a Session with Auto off runs its default tools ungated.
+    // A task in a session with Auto off runs its default tools ungated.
     mockSessionForTask.mockResolvedValue({ id: 'session-off' });
     const taskOff = await resolveProxyToolApprovalBlocks({
       integrationId: 'linear',
@@ -254,7 +254,7 @@ describe('resolveProxyToolApprovalBlocks', () => {
     expect(taskOff.defaultBlock).toBeUndefined();
     expect(taskOff.shadowDefaultTools).toBe(true);
 
-    // A task with no Session has no owner to have turned Auto on.
+    // A task with no session has no owner to have turned Auto on.
     mockSessionForTask.mockResolvedValue(null);
     const orphan = await resolveProxyToolApprovalBlocks({
       integrationId: 'linear',
@@ -265,7 +265,7 @@ describe('resolveProxyToolApprovalBlocks', () => {
     expect(orphan.defaultBlock).toBeUndefined();
     expect(mockAutoState).toHaveBeenLastCalledWith({ sessionId: undefined });
 
-    // A Session's own call names its conversation: with Auto on there it was
+    // A session's own call names its conversation: with Auto on there it was
     // already assessed natively, so the proxy does not shadow it again.
     mockSessionForFastConversation.mockResolvedValue({ id: 'session-on' });
     const sessionOn = await resolveProxyToolApprovalBlocks({
@@ -281,7 +281,7 @@ describe('resolveProxyToolApprovalBlocks', () => {
     expect(sessionOn.shadowDefaultTools).toBe(false);
     expect(sessionOn.defaultBlock).toBeUndefined();
 
-    // The shadow assessment is recorded against the same Session.
+    // The shadow assessment is recorded against the same session.
     mockSessionForFastConversation.mockResolvedValue({ id: 'session-off' });
     const sessionOff = await resolveProxyToolApprovalBlocks({
       integrationId: 'linear',

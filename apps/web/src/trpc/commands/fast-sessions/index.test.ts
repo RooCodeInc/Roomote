@@ -810,13 +810,13 @@ describe('startFastSessionCommand', () => {
     mocks.dbSelectLimit.mockResolvedValue([]);
   });
 
-  it('leaves Auto off unless the owner starts the Session with it on', async () => {
+  it('leaves Auto off unless the owner starts the session with it on', async () => {
     await startFastSessionCommand(auth, { text: 'Triage the open bugs' });
     expect(mocks.setSessionAuto).not.toHaveBeenCalled();
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
-  it('turns Auto on for the new Session before its first turn is scheduled', async () => {
+  it('turns Auto on for the new session before its first turn is scheduled', async () => {
     await startFastSessionCommand(auth, {
       text: 'Triage the open bugs',
       autoToolApprovals: true,
@@ -856,7 +856,7 @@ describe('startFastSessionCommand', () => {
     );
     expect(mocks.startPinnedLaunch).not.toHaveBeenCalled();
 
-    // The Session is not this user's to change.
+    // The session is not this user's to change.
     mocks.setSessionAuto.mockResolvedValue(false);
     await expect(
       startFastSessionCommand(auth, {

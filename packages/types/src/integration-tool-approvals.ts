@@ -83,10 +83,10 @@ export interface IntegrationToolApprovalMetadata {
 }
 
 /**
- * Auto mode. It is the Session owner's choice for one Session and starts
+ * Auto mode. It is the session owner's choice for one session and starts
  * off; the stored `mode` here is the earlier deployment-wide switch, which no
  * longer turns Auto on and is kept only so the previous release reads what it
- * wrote. With Auto on for a Session, every call to a tool nobody has made a
+ * wrote. With Auto on for a session, every call to a tool nobody has made a
  * choice about (the default mode) is risk-assessed by the decision model
  * first; a routine call runs, anything else asks the Session owner when they
  * are present and is blocked with a tool error when they are away. A manual

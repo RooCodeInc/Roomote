@@ -175,7 +175,7 @@ describe('resolveTaskIntegrationToolApprovals', () => {
     expect(mocks.overrides).toHaveBeenCalledWith('session-1');
   });
 
-  it("makes every default tool ask natively while Auto is on for the task's Session", async () => {
+  it("makes every default tool ask natively while Auto is on for the task's session", async () => {
     mocks.autoState.mockResolvedValue({ mode: 'on' });
     mocks.deploymentPolicies.mockResolvedValue([
       policy('delete_issue', 'always_allow'),
@@ -190,7 +190,7 @@ describe('resolveTaskIntegrationToolApprovals', () => {
       linear_delete_issue: 'allow',
     });
     expect(compiled?.autoServers).toEqual(['linear']);
-    // Auto is the Session owner's choice, so a task follows its Session.
+    // Auto is the session owner's choice, so a task follows its session.
     expect(mocks.autoState).toHaveBeenCalledWith({ sessionId: 'session-1' });
   });
 });

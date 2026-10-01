@@ -598,7 +598,7 @@ describe('FastSessionTranscript', () => {
     createdAt: new Date(ts),
   });
 
-  it('shows the Auto switch under the composer to the Session owner only', () => {
+  it('shows the Auto switch under the composer to the session owner only', () => {
     autoToolApprovals.state = {
       available: true,
       enabled: false,
@@ -616,7 +616,7 @@ describe('FastSessionTranscript', () => {
     );
     const toggle = screen.getByRole('switch', { name: 'Auto-approval' });
     expect(toggle).not.toBeChecked();
-    // Approvals are keyed on the unified Session, not the Fast conversation.
+    // Approvals are keyed on the unified session, not the Fast conversation.
     expect(autoToolApprovals.sessionIds).toContain('canonical-session');
     expect(
       screen
@@ -627,7 +627,7 @@ describe('FastSessionTranscript', () => {
     expect(autoToolApprovals.setEnabled).toHaveBeenCalledWith(true);
     unmount();
 
-    // Someone else's Session: nothing to turn on.
+    // Someone else's session: nothing to turn on.
     render(
       <FastSessionTranscript
         sessionId="fast-conversation"

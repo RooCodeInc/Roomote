@@ -33,7 +33,7 @@ export function useNewSessionAutoToolApprovals() {
  * undefined while the experiment is off or the state has not loaded.
  */
 export function useSessionAutoToolApprovals(
-  /** The unified Session, which approvals are keyed on. */
+  /** The unified session, which approvals are keyed on. */
   sessionId: string,
 ) {
   const { enabled: experimentEnabled } =

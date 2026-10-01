@@ -98,13 +98,13 @@ export const startFastSessionInputSchema = z
     pinnedLaunch: pinnedFastSessionLaunchSchema.optional(),
     /** Open the Session for a voice call; any text is the pre-typed message. */
     voiceCall: z.boolean().optional(),
-    /** Start the Session with Auto tool approvals on; it is off otherwise. */
+    /** Start the session with Auto tool approvals on; it is off otherwise. */
     autoToolApprovals: z.boolean().optional(),
   })
   .superRefine(requireFastSessionContent);
 
 export const fastSessionAutoToolApprovalsInputSchema = z.object({
-  /** The unified Session; omitted for one that has not started yet. */
+  /** The unified session; omitted for one that has not started yet. */
   sessionId: z.string().uuid().optional(),
 });
 

@@ -69,7 +69,7 @@ export function SessionAutoToolApprovals({
   sessionId,
   className,
 }: {
-  /** The unified Session, which approvals are keyed on. */
+  /** The unified session, which approvals are keyed on. */
   sessionId: string;
   className?: string;
 }) {

@@ -505,7 +505,7 @@ describe('resolveFastAgentToolApprovalRules', () => {
     ]);
   });
 
-  it('asks about every default tool once Auto is on for the Session', async () => {
+  it('asks about every default tool once Auto is on for the session', async () => {
     vi.mocked(resolveIntegrationToolAutoState).mockResolvedValueOnce({
       mode: 'on',
       settings: { mode: 'off', policy: '' },
@@ -517,7 +517,7 @@ describe('resolveFastAgentToolApprovalRules', () => {
       integrations,
       sessionId: 'session-id',
     });
-    // Auto is this Session owner's choice, so its state is read for it.
+    // Auto is this session owner's choice, so its state is read for it.
     expect(resolveIntegrationToolAutoState).toHaveBeenCalledWith({
       sessionId: 'session-id',
     });

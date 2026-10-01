@@ -1053,7 +1053,7 @@ describe('Auto suspension for a session', () => {
 });
 
 describe('Auto for a session', () => {
-  it('is off until the owner turns it on, for that Session only', async () => {
+  it('is off until the owner turns it on, for that session only', async () => {
     const userId = await user();
     const otherUserId = await user();
     const sessionId = await ownedSession(userId);
@@ -1101,7 +1101,7 @@ describe('Auto for a session', () => {
     ).resolves.toBe(false);
   });
 
-  it('resumes a stopped Session when the owner turns it on again', async () => {
+  it('resumes a stopped session when the owner turns it on again', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
     await setIntegrationToolAutoForSession({
@@ -1133,7 +1133,7 @@ describe('Auto for a session', () => {
     ).resolves.toEqual({ enabled: true, suspended: false });
   });
 
-  it('is off for a Session that does not exist', async () => {
+  it('is off for a session that does not exist', async () => {
     await expect(
       isIntegrationToolAutoEnabledForSession(
         '00000000-0000-4000-8000-000000000000',
