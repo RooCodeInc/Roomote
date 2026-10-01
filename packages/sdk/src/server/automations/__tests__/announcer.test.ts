@@ -1,3 +1,7 @@
+const SCHEDULED_RUN_OPTS = {
+  context: { trigger: 'scheduled' },
+} as const;
+
 const {
   slackInstallationsTable,
   taskPullRequestsTable,
@@ -329,7 +333,7 @@ describe('announcerJob non-Slack posting', () => {
       instructions: null,
       destination: null,
     }));
-    const result = await announcerJob();
+    const result = await announcerJob(SCHEDULED_RUN_OPTS);
     expect(result.completed).toBe(true);
     expect(result.errors).toEqual([]);
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);

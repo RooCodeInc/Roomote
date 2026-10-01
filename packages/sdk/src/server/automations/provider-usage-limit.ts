@@ -40,7 +40,6 @@ import {
 import {
   emptyJobResult,
   resolveAutomationRunContext,
-  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -330,7 +329,7 @@ async function postProviderUsageLimitViaCommunicationAdapter(params: {
 }
 
 export async function providerUsageLimitJob(
-  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
+  opts: AutomationRunOpts,
   dependencyOverrides: Partial<ProviderUsageLimitDependencies> = {},
 ): Promise<AutomationJobResult> {
   const dependencies = { ...defaultDependencies, ...dependencyOverrides };

@@ -45,7 +45,6 @@ import {
   appendAutomationWebhookInput,
   emptyJobResult,
   resolveAutomationRunContext,
-  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -325,7 +324,7 @@ Do not send an acknowledgement or progress update. Treat later replies in this t
 }
 
 export async function announcerJob(
-  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
+  opts: AutomationRunOpts,
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting announcer evaluator`);
 

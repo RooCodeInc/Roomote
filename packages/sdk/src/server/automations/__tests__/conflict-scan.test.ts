@@ -1,5 +1,9 @@
 import type { Mock } from 'vitest';
 
+const SCHEDULED_RUN_OPTS = {
+  context: { trigger: 'scheduled' },
+} as const;
+
 const {
   mockGetCommitCommittedAt,
   mockGetInstallationOctokit,
@@ -210,7 +214,7 @@ describe('conflictScanJob', () => {
   it('skips repos in GITHUB_AUTOMATED_SKIP_REPOS before scanning PRs', async () => {
     mockIsRepoSkipped.mockReturnValue(true);
 
-    await conflictScanJob();
+    await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(mockIsRepoSkipped).toHaveBeenCalledWith('Roomote/example-app');
     expect(mockGetInstallationOctokit).toHaveBeenCalledOnce();
@@ -224,7 +228,7 @@ describe('conflictScanJob', () => {
   it('continues scanning repos that are not skipped', async () => {
     mockIsRepoSkipped.mockReturnValue(false);
 
-    await conflictScanJob();
+    await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     const octokit = await mockGetInstallationOctokit.mock.results[0]!.value;
     expect(octokit.paginate).toHaveBeenCalledOnce();
@@ -257,7 +261,7 @@ describe('conflictScanJob', () => {
   it('records the pass outcome on the automations row', async () => {
     mockIsRepoSkipped.mockReturnValue(false);
 
-    await conflictScanJob();
+    await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
     expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
@@ -289,7 +293,7 @@ describe('conflictScanJob', () => {
       managerSlackChannelId: null,
     });
 
-    const result = await conflictScanJob();
+    const result = await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(result.skippedReason).toBe('Automation is disabled.');
     expect(mockGetInstallationOctokit).not.toHaveBeenCalled();
@@ -333,7 +337,7 @@ describe('conflictScanJob', () => {
     };
     mockGetInstallationOctokit.mockResolvedValueOnce(octokit);
 
-    await conflictScanJob();
+    await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(mockFindActiveGitHubBranchWork).toHaveBeenCalledWith({
       repoFullName: 'Roomote/example-app',
@@ -377,7 +381,7 @@ describe('conflictScanJob', () => {
     };
     mockGetInstallationOctokit.mockResolvedValueOnce(octokit);
 
-    await conflictScanJob();
+    await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(mockGetCommitCommittedAt).toHaveBeenCalledWith({
       octokit,
@@ -427,7 +431,7 @@ describe('conflictScanJob', () => {
     };
     mockGetInstallationOctokit.mockResolvedValueOnce(octokit);
 
-    await conflictScanJob();
+    await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(mockGetCommitCommittedAt).toHaveBeenCalledWith({
       octokit,
@@ -470,7 +474,7 @@ describe('conflictScanJob', () => {
     };
     mockGetInstallationOctokit.mockResolvedValueOnce(octokit);
 
-    const result = await conflictScanJob();
+    const result = await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -539,7 +543,7 @@ describe('conflictScanJob', () => {
     };
     mockGetInstallationOctokit.mockResolvedValueOnce(octokit);
 
-    await conflictScanJob();
+    await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(octokit.rest.pulls.get).not.toHaveBeenCalled();
     expect(mockGetCommitCommittedAt).not.toHaveBeenCalled();
@@ -603,7 +607,7 @@ describe('conflictScanJob', () => {
     });
     mockEnqueueTask.mockResolvedValueOnce({ id: 9, taskId: 'task-9' });
 
-    const result = await conflictScanJob();
+    const result = await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(mockListOpenPullRequests).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -698,7 +702,7 @@ describe('conflictScanJob', () => {
     });
     mockEnqueueTask.mockResolvedValueOnce({ id: 10, taskId: 'task-10' });
 
-    await conflictScanJob();
+    await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(mockListOpenPullRequests).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -743,7 +747,7 @@ describe('conflictScanJob', () => {
     });
     mockEnqueueTask.mockResolvedValueOnce({ id: 9, taskId: 'task-9' });
 
-    await conflictScanJob();
+    await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     // The active-run dedup guard constrains on the association host column
     // (exact host OR legacy NULL host), so an active run recorded for a
@@ -821,7 +825,7 @@ describe('conflictScanJob', () => {
     });
     mockEnqueueTask.mockResolvedValueOnce({ id: 10, taskId: 'task-10' });
 
-    await conflictScanJob();
+    await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(mockGetPullRequestDetails).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -882,7 +886,7 @@ describe('conflictScanJob', () => {
     });
     mockEnqueueTask.mockResolvedValueOnce({ id: 11, taskId: 'task-11' });
 
-    const result = await conflictScanJob();
+    const result = await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     // The provider-neutral scan still ran and launched work.
     expect(result.launchedTaskId).toBe('task-11');
@@ -936,7 +940,7 @@ describe('conflictScanJob', () => {
     });
     mockEnqueueTask.mockResolvedValueOnce({ id: 12, taskId: 'task-12' });
 
-    const result = await conflictScanJob();
+    const result = await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(result.launchedTaskId).toBe('task-12');
     expect(result.errors).toEqual([]);
@@ -970,7 +974,7 @@ describe('conflictScanJob', () => {
       warnings: [],
     });
 
-    const result = await conflictScanJob();
+    const result = await conflictScanJob(SCHEDULED_RUN_OPTS);
 
     expect(mockGetPullRequestDetails).not.toHaveBeenCalled();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
