@@ -20,6 +20,12 @@ import {
   evaluateDecisionModel,
   resolveDecisionModel,
 } from './typesafe-judgment';
+import {
+  boundToolResults,
+  findUnverifiedIdentifier,
+  IDENTIFIER_AWARE_QUESTIONS,
+  type IntegrationToolAutoToolResult,
+} from './integration-tool-auto-identifiers';
 import { getDecisionModelRequirements } from './judgment-decision-policy';
 
 const AUTO_EVALUATION_TIMEOUT_MS = 20_000;
@@ -178,6 +184,11 @@ const MAX_SESSION_CONTEXT_MESSAGE_LENGTH = 1_500;
 const MAX_SESSION_CONTEXT_LENGTH = 6_000;
 const MAX_SESSION_APPROVAL_OUTCOMES = 6;
 
+export {
+  findUnverifiedIdentifier,
+  type IntegrationToolAutoToolResult,
+} from './integration-tool-auto-identifiers';
+
 export type IntegrationToolAutoSessionContext = {
   /** Human-authored messages from this Session only, oldest first. */
   recentUserMessages?: readonly string[];
@@ -200,6 +211,13 @@ export type IntegrationToolAutoSessionContext = {
    * up separately so it holds after the rejection leaves the recent outcomes.
    */
   toolRejectedInSession?: boolean;
+  /**
+   * Results of integration tools the agent ran earlier in this session,
+   * oldest first, including earlier turns. They show what an identifier in
+   * the call refers to (a listing that maps ids to names). They are outside
+   * content: nothing written in them is a request or an approval.
+   */
+  recentToolResults?: readonly IntegrationToolAutoToolResult[];
 };
 
 function boundSessionContext(
@@ -256,11 +274,15 @@ function boundSessionContext(
           .trim()
           .slice(-MAX_SESSION_CONTEXT_MESSAGE_LENGTH)
       : '';
+  // Evidence only: with no request or decision to check against, tool
+  // results alone say nothing about what the owner wants.
+  const recentToolResults = boundToolResults(context.recentToolResults);
   return {
     recentUserMessages,
     explicitApprovalOutcomes,
     ...(agentMessageRepliedTo ? { agentMessageRepliedTo } : {}),
     ...(toolRejectedInSession ? { toolRejectedInSession } : {}),
+    ...(recentToolResults.length > 0 ? { recentToolResults } : {}),
   };
 }
 
@@ -323,6 +345,8 @@ export function recommendFromAutoAnswers(
     allowlistedInternalRead?: boolean;
     /** The owner rejected a call to this tool in the session. */
     sameToolRejected?: boolean;
+    /** The call names an item nothing in the session identifies. */
+    unverifiedTarget?: boolean;
   } = {},
 ): IntegrationToolAutoEvaluation['recommendation'] {
   const minimumRiskConfidence = options.allowlistedInternalRead
@@ -349,8 +373,10 @@ export function recommendFromAutoAnswers(
     continuation,
     answers.agreedToPlan ?? 0,
   );
+  // Nobody asked for an item nothing in the session identifies.
   const authorized =
     !options.sameToolRejected &&
+    !options.unverifiedTarget &&
     (authorization >= YES ||
       (authorization >= AUTHORIZED_WITH_MATCH &&
         (answers.matchesRequest ?? 0) >= YES)) &&
@@ -471,21 +497,46 @@ export async function evaluateIntegrationToolAutoDecision(input: {
         evaluatedAt,
       };
     }
+    // Checked only when the caller supplies what the agent read in the
+    // session, against everything it supplied (not just the bounded part the
+    // model sees).
+    const rawContext = input.sessionContext;
+    const unverifiedIdentifier = rawContext?.recentToolResults
+      ? findUnverifiedIdentifier(
+          input.args ?? null,
+          [
+            input.userRequest,
+            ...(rawContext.recentUserMessages ?? []),
+            rawContext.agentMessageRepliedTo,
+            JSON.stringify(rawContext.explicitApprovalOutcomes ?? []),
+            input.readContent,
+            ...rawContext.recentToolResults.flatMap((result) => [
+              JSON.stringify(result.arguments ?? null),
+              result.output,
+            ]),
+          ]
+            .filter((part): part is string => typeof part === 'string')
+            .join('\n'),
+        )
+      : undefined;
     const deploymentGuidance =
       (input.deploymentGuidance ??
         (await getIntegrationToolAutoSettings()).policy) ||
       null;
     // A question with nothing to judge against is not asked: the guidance
     // one without guidance, the request one without a request.
+    const { guidanceFlagsRisk, matchesRequest, movesMoney, ...rest } =
+      INTEGRATION_TOOL_AUTO_QUESTIONS;
     const {
-      guidanceFlagsRisk,
-      matchesRequest,
-      userAuthorized,
-      continuesApprovedCall,
-      agreedToPlan,
-      movesMoney,
+      userAuthorized: _userAuthorized,
+      continuesApprovedCall: _continuesApprovedCall,
+      agreedToPlan: _agreedToPlan,
       ...core
-    } = INTEGRATION_TOOL_AUTO_QUESTIONS;
+    } = rest;
+    // Without the session's tool results there is nothing to check an
+    // identifier against, so those callers keep the plain wording.
+    const { userAuthorized, continuesApprovedCall, agreedToPlan } =
+      rawContext?.recentToolResults ? IDENTIFIER_AWARE_QUESTIONS : rest;
     const hasRequest =
       Boolean(input.userRequest) ||
       (sessionContext?.recentUserMessages?.length ?? 0) > 0;
@@ -588,11 +639,25 @@ export async function evaluateIntegrationToolAutoDecision(input: {
         ? { guidanceFlagsRisk: answers.guidanceFlagsRisk.noul }
         : {}),
     };
+    const recommendation = recommendFromAutoAnswers(riskAnswers, {
+      allowlistedInternalRead,
+      sameToolRejected,
+      unverifiedTarget: unverifiedIdentifier !== undefined,
+    });
     return {
-      recommendation: recommendFromAutoAnswers(riskAnswers, {
+      recommendation,
+      // Say why when the identifier check, not the model, made it ask.
+      ...(unverifiedIdentifier !== undefined &&
+      recommendation === 'ask' &&
+      recommendFromAutoAnswers(riskAnswers, {
         allowlistedInternalRead,
         sameToolRejected,
-      }),
+      }) === 'approve'
+        ? {
+            reason:
+              'the call names an item that nothing in the session identifies',
+          }
+        : {}),
       answers: {
         riskScore: riskAnswers.risk.score,
         riskConfidence: riskAnswers.risk.confidence,

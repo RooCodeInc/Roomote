@@ -44,6 +44,7 @@ import {
   resolveIntegrationToolAutoDecision,
   resolveIntegrationToolAutoState,
   type IntegrationToolAutoSessionContext,
+  type IntegrationToolAutoToolResult,
 } from '../integration-tool-auto-evaluation';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
@@ -461,6 +462,11 @@ export function createFastAgentToolApprovalBridge(input: {
    * what a reply such as "yes, go ahead" agreed to. Human turns only.
    */
   resolveAgentMessageRepliedTo?: () => Promise<string | undefined>;
+  /**
+   * Results of integration tools the agent ran recently in this session,
+   * oldest first, so Auto can tell what an identifier in a call refers to.
+   */
+  resolveRecentToolResults?: () => Promise<IntegrationToolAutoToolResult[]>;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   /**
@@ -755,6 +761,7 @@ export function createFastAgentToolApprovalBridge(input: {
         explicitApprovalOutcomes,
         agentMessage,
         toolRejectedInSession,
+        recentToolResults,
       ] = autoAssessed
         ? await Promise.all([
             input.resolveSessionUserMessages?.() ?? [],
@@ -774,8 +781,12 @@ export function createFastAgentToolApprovalBridge(input: {
               integrationId: tool.integrationId,
               toolName: tool.toolName,
             }).catch(() => true),
+            // Evidence only. A failed lookup supplies none, so a call that
+            // names an identifier nothing else shows asks. Undefined when
+            // this bridge was not given a way to read results at all.
+            input.resolveRecentToolResults?.().catch(() => []),
           ])
-        : [[], [], undefined, false];
+        : [[], [], undefined, false, undefined];
       const sessionContext: IntegrationToolAutoSessionContext | undefined =
         autoAssessed
           ? {
@@ -783,6 +794,7 @@ export function createFastAgentToolApprovalBridge(input: {
               explicitApprovalOutcomes,
               ...(agentMessage ? { agentMessageRepliedTo: agentMessage } : {}),
               ...(toolRejectedInSession ? { toolRejectedInSession } : {}),
+              ...(recentToolResults ? { recentToolResults } : {}),
             }
           : undefined;
       const assess = async (callArgs: unknown) =>

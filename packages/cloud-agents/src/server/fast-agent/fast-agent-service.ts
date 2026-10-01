@@ -202,6 +202,7 @@ import {
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentRepliesBeforeHumanPrompt,
+  findRecentFastAgentToolResults,
   listRecentFastAgentHumanUserPromptTexts,
   claimFastAgentHumanFollowUpSteers,
   markFastAgentDurableTurnDelivered,
@@ -6768,6 +6769,10 @@ export async function answerFastAgentQuestion({
                               currentEventId: userEvent.eventId,
                             })
                           : undefined,
+                      resolveRecentToolResults: () =>
+                        findRecentFastAgentToolResults({
+                          conversationId: session.id,
+                        }),
                       signal: promptSignal,
                       // Auto stopped for this session: say so in the thread
                       // and end the turn. The notice closes the instruction,
