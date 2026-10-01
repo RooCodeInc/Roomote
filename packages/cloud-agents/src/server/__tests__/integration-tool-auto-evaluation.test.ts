@@ -1232,7 +1232,7 @@ describe('resolveIntegrationToolAutoState', () => {
   });
 
   it('is off for every session until its owner turns it on', async () => {
-    // The deployment-wide setting no longer turns Auto on for anyone.
+    // The deployment-wide setting does not turn Auto on.
     mocks.settings.mockResolvedValue({ mode: 'on', policy: '' });
     await expect(
       resolveIntegrationToolAutoState(session),

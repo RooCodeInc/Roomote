@@ -52,8 +52,8 @@ export function IntegrationToolAutoModeSetting() {
   );
   if (!settings.data) return null;
 
-  // The stored mode no longer turns Auto on; it is kept as saved so the
-  // previous release still reads what it wrote.
+  // The stored mode does not turn Auto on. It is saved back unchanged for
+  // N-1 rollback compatibility.
   const mode = settings.data.mode;
   // Auto needs a hosted judgment model; the helper-model fallback would be
   // an LLM call per tool call, so it is never used.

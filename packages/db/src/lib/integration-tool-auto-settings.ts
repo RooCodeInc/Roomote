@@ -16,9 +16,9 @@ const LEGACY_METADATA_KEY = 'integration_tool_auto';
  * Deployment-wide Auto settings for tool approvals, kept with the other
  * deployment settings: the guidance every assessment reads. Auto itself is
  * turned on per session by its owner (`setIntegrationToolAutoForSession`), so
- * the stored mode decides nothing; it stays as saved for the previous
- * release. The nightly key intentionally does not inherit the former
- * customer-preview mode or its guidance's on/off state.
+ * the stored mode decides nothing; it stays as saved for N-1 rollback
+ * compatibility. The nightly key intentionally does not inherit the
+ * customer-preview key's mode.
  */
 const DEFAULTS: IntegrationToolAutoSettings = { mode: 'off', policy: '' };
 
