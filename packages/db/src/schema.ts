@@ -4493,6 +4493,11 @@ export const sessions = pgTable(
     // status. 'done' is intentionally valid here but not in cached_status.
     manualStatus: text('manual_status').$type<SessionManualStatus>(),
     manualStatusSetAt: timestamp('manual_status_set_at'),
+    /**
+     * When Auto tool approvals stopped for this session because a call could
+     * not be assessed. From then on its default tools ask a person.
+     */
+    autoToolApprovalsSuspendedAt: timestamp('auto_tool_approvals_suspended_at'),
     inactivityDueAt: timestamp('inactivity_due_at'),
     // Fast-conversation responding lease: while this is in the future, status
     // recomputation treats the conversation as actively responding. TTL-based

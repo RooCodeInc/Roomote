@@ -129,6 +129,14 @@ export function describeIntegrationToolAutoAbsentDenial(
 }
 
 /**
+ * What the agent is told when Auto stops for its session because a call
+ * could not be assessed. The call does not run, the owner is told in the
+ * thread, and later calls ask them.
+ */
+export const INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE =
+  'Auto approvals are paused for this session because calls cannot be checked right now, so this call was not run. Stop here: do not retry it or call other tools. The session owner has been told; when they reply, tools will ask them before running.';
+
+/**
  * A decision model's risk assessment of one Auto-gated call, recorded on the
  * call's audit row. In shadow mode it decides nothing. The assessment can
  * recommend running the call or asking its owner.

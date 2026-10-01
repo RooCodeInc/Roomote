@@ -659,6 +659,7 @@ const baseSelection = {
   manualStatusSetAt: sessions.manualStatusSetAt,
   inactivityDueAt: sessions.inactivityDueAt,
   respondingUntil: sessions.respondingUntil,
+  autoToolApprovalsSuspendedAt: sessions.autoToolApprovalsSuspendedAt,
   archivedAt: sessions.archivedAt,
   createdAt: sessions.createdAt,
   updatedAt: sessions.updatedAt,

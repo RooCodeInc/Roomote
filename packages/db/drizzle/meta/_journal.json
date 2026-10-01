@@ -897,6 +897,13 @@
       "when": 1790675830722,
       "tag": "0127_harsh_silvermane",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1790789915082,
+      "tag": "0128_cooing_madripoor",
+      "breakpoints": true
     }
   ]
 }

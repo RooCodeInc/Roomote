@@ -24,6 +24,8 @@ import {
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
   listRecentIntegrationToolApprovalOutcomes,
+  isIntegrationToolAutoSuspendedForSession,
+  suspendIntegrationToolAutoForSession,
   listPendingIntegrationToolApprovals,
   markIntegrationToolApprovalConsumed,
   recordIntegrationToolAutoEvaluation,
@@ -847,6 +849,31 @@ describe('listRecentIntegrationToolApprovalOutcomes', () => {
         },
       ]),
     );
+  });
+});
+
+describe('Auto suspension for a session', () => {
+  it('suspends once, stays suspended, and leaves other Sessions alone', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const otherSessionId = await ownedSession(userId);
+
+    await expect(
+      isIntegrationToolAutoSuspendedForSession(sessionId),
+    ).resolves.toBe(false);
+    await expect(suspendIntegrationToolAutoForSession(sessionId)).resolves.toBe(
+      true,
+    );
+    // Only the first caller stops it, so the notice is posted once.
+    await expect(suspendIntegrationToolAutoForSession(sessionId)).resolves.toBe(
+      false,
+    );
+    await expect(
+      isIntegrationToolAutoSuspendedForSession(sessionId),
+    ).resolves.toBe(true);
+    await expect(
+      isIntegrationToolAutoSuspendedForSession(otherSessionId),
+    ).resolves.toBe(false);
   });
 });
 
