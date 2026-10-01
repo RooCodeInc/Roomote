@@ -414,7 +414,10 @@ export async function maybeNotifySourceThreadOfModelFallback(input: {
     ...notice,
     errorSummary: redactSecrets(notice.errorSummary).trim(),
   };
-  const text = `Switching to fallback model: ${safeNotice.fromProvider} failed (${safeNotice.errorSummary}). Continuing with ${safeNotice.toModelId}.`;
+  // Provider prose stays in the task transcript and the redacted owning-session
+  // event. Direct customer channels receive only Roomote-controlled text so a
+  // provider cannot inject Markdown, mentions, or links into the conversation.
+  const text = `Switching to fallback model: ${safeNotice.fromProvider} failed. Continuing with ${safeNotice.toModelId}.`;
   try {
     const run = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, input.runId),

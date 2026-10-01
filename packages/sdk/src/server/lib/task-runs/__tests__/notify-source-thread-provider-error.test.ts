@@ -471,6 +471,36 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     expect(mockSlackPostMessage).not.toHaveBeenCalled();
   });
 
+  it('does not post provider-supplied Markdown in a direct fallback notice', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun({ payload: discordPayload }));
+    const envelope = makeFallbackEnvelope(45);
+    const notice = (
+      envelope.metadata as {
+        modelFallbackNotice: Record<string, unknown>;
+      }
+    ).modelFallbackNotice;
+    notice.errorSummary =
+      '[click here](https://attacker.example)\n<@everyone> api_key=sk-secret';
+
+    await maybeNotifySourceThreadOfModelFallback({
+      runId: 7,
+      taskId: 'task-1',
+      envelope,
+    });
+
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          'Switching to fallback model: openai failed. Continuing with anthropic/claude-sonnet-4.',
+        ),
+      }),
+    );
+    const postedText = mockDiscordPostMessage.mock.calls[0]?.[0]?.text;
+    expect(postedText).not.toContain('attacker.example');
+    expect(postedText).not.toContain('@everyone');
+    expect(postedText).not.toContain('sk-secret');
+  });
+
   it('does not notify the Session for a transient provider retry notice', async () => {
     await notify({
       ...makeEnvelope({ location: 'none' }),
