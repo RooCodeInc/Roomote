@@ -18,18 +18,17 @@ import {
   ChevronDown,
   ChevronRight,
   MessageCircleQuestionMark,
-  Scale,
   ToggleButton,
   type LucideIcon,
 } from '@/components/system';
 
 /**
  * The stored choices a tool can be given. A tool nobody has made a choice
- * about has no row. With Auto tool approvals on (experimental), that default
- * is Auto: a row shows it as nothing pressed, pressing the selected choice
- * again returns to it, and the group row also offers Auto so a whole group
- * can be returned to it in one step. With Auto off, the default simply runs,
- * so it shows as Always allow.
+ * about has no row. With Auto tool approvals available (experimental), that
+ * default follows each session's tool approvals mode: it shows as nothing
+ * pressed, and pressing the selected choice again returns to it, on a tool's
+ * row and on a group's. Without Auto, the default simply runs, so it shows
+ * as Always allow.
  */
 type ApprovalModeOption = {
   mode: IntegrationToolPolicyMode;
@@ -52,10 +51,6 @@ const STORED_MODES: ApprovalModeOption[] = [
   },
   { mode: 'reject', label: 'Disable', tooltip: 'Disable', icon: Ban },
 ];
-const BULK_MODES: ApprovalModeOption[] = [
-  { mode: 'allow', label: 'Auto', tooltip: 'Auto', icon: Scale },
-  ...STORED_MODES,
-];
 
 /**
  * Per-tool approval mode: one click per tool, with the current mode visible without opening anything.
@@ -66,13 +61,11 @@ function IntegrationToolApprovalModeControl({
   toolName,
   value,
   disabled,
-  options = STORED_MODES,
   onChange,
 }: {
   toolName: string;
   value?: IntegrationToolPolicyMode;
   disabled?: boolean;
-  options?: ApprovalModeOption[];
   onChange: (mode: IntegrationToolPolicyMode) => void;
 }) {
   return (
@@ -81,7 +74,7 @@ function IntegrationToolApprovalModeControl({
       aria-label={`Approval mode for ${toolName}`}
       className="flex shrink-0 items-center"
     >
-      {options.map(({ mode, label, tooltip, icon: Icon }) => {
+      {STORED_MODES.map(({ mode, label, tooltip, icon: Icon }) => {
         const checked = mode === value;
         return (
           <BasicTooltip key={mode} content={tooltip}>
@@ -93,9 +86,8 @@ function IntegrationToolApprovalModeControl({
                 aria-label={label}
                 disabled={disabled}
                 onPressedChange={() => {
-                  // Pressing the selected choice again returns to Auto.
-                  if (!checked) onChange(mode);
-                  else if (mode !== 'allow') onChange('allow');
+                  // Pressing the selected choice again returns to the default.
+                  onChange(checked ? 'allow' : mode);
                 }}
               >
                 <Icon aria-hidden="true" />
@@ -141,15 +133,13 @@ function groupIntegrationToolsByAccess<T extends GroupableTool>(
 /**
  * One tool group. A titled group collapses; an untitled one (unclassified
  * tools) is just the list. For a viewer who can manage the policies the
- * header carries the same button row, plus Auto while it is available,
- * applying to every tool in the group; a mixed group leaves every choice
- * unpressed.
+ * header carries the same button row, applying to every tool in the group; a
+ * mixed group leaves every choice unpressed.
  */
 function IntegrationToolApprovalGroup({
   title,
   count,
   modes,
-  options,
   disabled,
   onChangeAll,
   children,
@@ -159,8 +149,6 @@ function IntegrationToolApprovalGroup({
   count: number;
   /** The group's per-tool modes, or undefined while approvals are inactive. */
   modes?: IntegrationToolPolicyMode[];
-  /** The group row's choices: Auto is among them only while it is available. */
-  options?: ApprovalModeOption[];
   disabled?: boolean;
   onChangeAll?: (mode: IntegrationToolPolicyMode) => void;
   children: ReactNode;
@@ -178,7 +166,6 @@ function IntegrationToolApprovalGroup({
         toolName={`all ${title?.toLowerCase() ?? 'tools'}`}
         value={sharedMode}
         disabled={disabled}
-        options={options ?? BULK_MODES}
         onChange={onChangeAll}
       />
     ) : null;
@@ -276,7 +263,6 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
           {...(active
             ? {
                 modes: group.tools.map((tool) => shownMode(modeFor(tool))),
-                options: autoAvailable ? BULK_MODES : STORED_MODES,
                 onChangeAll: (mode: IntegrationToolPolicyMode) =>
                   policies.setModes(
                     integrationId,
