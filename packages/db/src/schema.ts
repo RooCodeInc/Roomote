@@ -4502,6 +4502,13 @@ export const sessions = pgTable(
      * not be assessed. From then on its default tools ask a person.
      */
     autoToolApprovalsSuspendedAt: timestamp('auto_tool_approvals_suspended_at'),
+    /**
+     * Whether the session owner turned Auto tool approvals on for this
+     * session. Off until they do: Auto is a per-session choice.
+     */
+    autoToolApprovalsEnabled: boolean('auto_tool_approvals_enabled')
+      .notNull()
+      .default(false),
     inactivityDueAt: timestamp('inactivity_due_at'),
     // Fast-conversation responding lease: while this is in the future, status
     // recomputation treats the conversation as actively responding. TTL-based

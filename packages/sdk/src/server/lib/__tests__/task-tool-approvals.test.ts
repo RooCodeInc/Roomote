@@ -175,7 +175,7 @@ describe('resolveTaskIntegrationToolApprovals', () => {
     expect(mocks.overrides).toHaveBeenCalledWith('session-1');
   });
 
-  it('makes every default tool ask natively while Auto is on', async () => {
+  it("makes every default tool ask natively while Auto is on for the task's Session", async () => {
     mocks.autoState.mockResolvedValue({ mode: 'on' });
     mocks.deploymentPolicies.mockResolvedValue([
       policy('delete_issue', 'always_allow'),
@@ -190,6 +190,8 @@ describe('resolveTaskIntegrationToolApprovals', () => {
       linear_delete_issue: 'allow',
     });
     expect(compiled?.autoServers).toEqual(['linear']);
+    // Auto is the Session owner's choice, so a task follows its Session.
+    expect(mocks.autoState).toHaveBeenCalledWith({ sessionId: 'session-1' });
   });
 });
 
@@ -227,7 +229,10 @@ describe('requestTaskToolApproval', () => {
         '<environment-instructions>Use pnpm.</environment-instructions>\n<request>File the bug.</request>',
     });
     expect(mocks.resolveAuto).toHaveBeenCalledWith(
-      expect.objectContaining({ userRequest: 'File the bug.' }),
+      expect.objectContaining({
+        userRequest: 'File the bug.',
+        sessionId: 'session-1',
+      }),
     );
     expect(mocks.latestUserRequest).not.toHaveBeenCalled();
   });
@@ -350,6 +355,9 @@ describe('requestTaskToolApproval', () => {
     mocks.autoState.mockResolvedValue({ mode: 'off' });
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({
       outcome: 'not_required',
+    });
+    expect(mocks.autoState).toHaveBeenLastCalledWith({
+      sessionId: 'session-1',
     });
   });
 

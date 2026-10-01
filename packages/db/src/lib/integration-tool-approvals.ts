@@ -729,6 +729,74 @@ export async function suspendIntegrationToolAutoForSession(
   return rows.length > 0;
 }
 
+/**
+ * Turn Auto on or off for one session, as its owner. Turning it on also
+ * lifts an earlier stop (see `suspendIntegrationToolAutoForSession`), so the
+ * owner can start Auto again once calls can be assessed. Returns false when
+ * the session is not this user's.
+ */
+export async function setIntegrationToolAutoForSession(input: {
+  sessionId: string;
+  userId: string;
+  enabled: boolean;
+}): Promise<boolean> {
+  const rows = await db
+    .update(sessions)
+    .set({
+      autoToolApprovalsEnabled: input.enabled,
+      ...(input.enabled ? { autoToolApprovalsSuspendedAt: null } : {}),
+    })
+    .where(
+      and(
+        eq(sessions.id, input.sessionId),
+        eq(sessions.ownerUserId, input.userId),
+      ),
+    )
+    .returning({ id: sessions.id });
+  return rows.length > 0;
+}
+
+/**
+ * Auto's state for one session, as its owner sees it. Null when the session
+ * is not this user's.
+ */
+export async function getIntegrationToolAutoForSession(input: {
+  sessionId: string;
+  userId: string;
+}): Promise<{ enabled: boolean; suspended: boolean } | null> {
+  const [row] = await db
+    .select({
+      enabled: sessions.autoToolApprovalsEnabled,
+      suspendedAt: sessions.autoToolApprovalsSuspendedAt,
+    })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.id, input.sessionId),
+        eq(sessions.ownerUserId, input.userId),
+      ),
+    )
+    .limit(1);
+  return row
+    ? { enabled: row.enabled, suspended: row.suspendedAt != null }
+    : null;
+}
+
+/**
+ * Whether the session owner has Auto on for this session. Off for a session
+ * that does not exist: Auto never runs without an owner's choice.
+ */
+export async function isIntegrationToolAutoEnabledForSession(
+  sessionId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ enabled: sessions.autoToolApprovalsEnabled })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return row?.enabled === true;
+}
+
 /** Whether Auto has stopped for this session; see `suspendIntegrationToolAutoForSession`. */
 export async function isIntegrationToolAutoSuspendedForSession(
   sessionId: string,

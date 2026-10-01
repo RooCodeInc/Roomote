@@ -505,16 +505,20 @@ describe('resolveFastAgentToolApprovalRules', () => {
     ]);
   });
 
-  it('asks about every default tool once Auto mode is on', async () => {
+  it('asks about every default tool once Auto is on for the Session', async () => {
     vi.mocked(resolveIntegrationToolAutoState).mockResolvedValueOnce({
       mode: 'on',
-      settings: { mode: 'on', policy: '' },
+      settings: { mode: 'off', policy: '' },
       model: 'judgment',
     });
     vi.mocked(listIntegrationToolPolicies).mockResolvedValueOnce([]);
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValueOnce([]);
     const resolved = await resolveFastAgentToolApprovalRules({
       integrations,
+      sessionId: 'session-id',
+    });
+    // Auto is this Session owner's choice, so its state is read for it.
+    expect(resolveIntegrationToolAutoState).toHaveBeenCalledWith({
       sessionId: 'session-id',
     });
     expect(resolved?.rules).toHaveLength(3);
@@ -1373,6 +1377,7 @@ describe('tool approval bridge', () => {
         toolName: 'post_message',
         args: { channel: 'C1', text: 'hi' },
         userRequest: 'Tell the team we shipped.',
+        sessionId: 'session-id',
       }),
     );
     expect(insertIntegrationToolApproval).not.toHaveBeenCalled();

@@ -22,6 +22,8 @@ type FastSessionSubmission = {
   reasoningEffort?: ReasoningEffort | null;
   /** Open the Session for a voice call; it may start with nothing typed. */
   voiceCall?: boolean;
+  /** Start the Session with Auto tool approvals on. */
+  autoToolApprovals?: boolean;
 };
 
 export function useFastSessionLauncher(options?: {

@@ -21,6 +21,7 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
 let currentEnvironmentsPending = false;
 let currentBrainConfigured = false;
 let currentPrivateSessionsExperimentEnabled = false;
+let currentAutoToolApprovalsOffer = { shown: false, available: false };
 let currentHomeSuggestions: string[] = [];
 let currentHomeSuggestionsHasData = true;
 let currentHomeSuggestionsPending = false;
@@ -147,6 +148,10 @@ vi.mock('@/hooks/usePrivateSessionsExperiment', () => ({
   usePrivateSessionsExperiment: () => ({
     enabled: currentPrivateSessionsExperimentEnabled,
   }),
+}));
+
+vi.mock('@/hooks/useSessionAutoToolApprovals', () => ({
+  useNewSessionAutoToolApprovals: () => currentAutoToolApprovalsOffer,
 }));
 
 vi.mock('@/hooks/useLiveVoice', () => ({
@@ -338,6 +343,7 @@ describe('Home', () => {
     currentEnvironmentsPending = false;
     currentBrainConfigured = false;
     currentPrivateSessionsExperimentEnabled = false;
+    currentAutoToolApprovalsOffer = { shown: false, available: false };
     currentHomeSuggestions = [];
     currentHomeSuggestionsHasData = true;
     currentHomeSuggestionsPending = false;
@@ -439,6 +445,54 @@ describe('Home', () => {
         text: 'Test prompt',
       }),
     );
+  });
+
+  it('offers Auto under the composer, off until chosen for this session', async () => {
+    const { unmount } = render(<NewTaskForm initialPrompt="First prompt" />);
+    // Not offered outside the experiment.
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    unmount();
+
+    currentAutoToolApprovalsOffer = { shown: true, available: true };
+    render(<NewTaskForm initialPrompt="First prompt" />);
+    const toggle = screen.getByRole('switch', { name: 'Auto-approval' });
+    expect(toggle).not.toBeChecked();
+    // Under the composer: after the submit button in the document.
+    expect(
+      screen
+        .getByRole('button', { name: 'Submit prompt' })
+        .compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalled());
+    expect(mockStartFastSession.mock.calls[0]![0]).not.toHaveProperty(
+      'autoToolApprovals',
+    );
+  });
+
+  it('starts the session with Auto on when the switch is on', async () => {
+    currentAutoToolApprovalsOffer = { shown: true, available: true };
+    render(<NewTaskForm initialPrompt="First prompt" />);
+    fireEvent.click(screen.getByRole('switch', { name: 'Auto-approval' }));
+    expect(screen.getByRole('switch', { name: 'Auto-approval' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({ autoToolApprovals: true }),
+      );
+    });
+  });
+
+  it('cannot turn Auto on while nothing can assess calls', () => {
+    currentAutoToolApprovalsOffer = { shown: true, available: false };
+    render(<NewTaskForm initialPrompt="First prompt" />);
+    expect(
+      screen.getByRole('switch', { name: 'Auto-approval' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText('Auto mode isn’t available yet.'),
+    ).toBeInTheDocument();
   });
 
   it('retains the private Session selection and sends it with creation', async () => {

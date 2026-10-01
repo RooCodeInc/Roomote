@@ -15,6 +15,9 @@ import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useFastSessionLauncher } from '@/hooks/task-runs';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperiment';
+import { useNewSessionAutoToolApprovals } from '@/hooks/useSessionAutoToolApprovals';
+
+import { AutoToolApprovalsSwitch } from '@/components/sessions/SessionAutoToolApprovals';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
 import {
@@ -82,6 +85,11 @@ export function NewTaskForm({
   );
   const { enabled: privateSessionsEnabled } = usePrivateSessionsExperiment();
   const privateModeActive = privateSessionsEnabled && privateSession;
+  // Auto is a per-session choice and starts off for every new session.
+  const [autoToolApprovals, setAutoToolApprovals] = useState(false);
+  const autoOffer = useNewSessionAutoToolApprovals();
+  const autoActive =
+    autoOffer.shown && autoOffer.available && autoToolApprovals;
 
   useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
@@ -131,6 +139,7 @@ export function NewTaskForm({
             ? { reasoningEffort: selectedReasoningEffort }
             : {}),
           ...(privateModeActive ? { privacy: 'private' as const } : {}),
+          ...(autoActive ? { autoToolApprovals: true } : {}),
           voiceCall: true,
         },
         { voice: true },
@@ -140,6 +149,7 @@ export function NewTaskForm({
     openingVoiceSession,
     promptText,
     privateModeActive,
+    autoActive,
     selectedModelOverrideId,
     selectedReasoningEffort,
   ]);
@@ -187,6 +197,7 @@ export function NewTaskForm({
         attachmentTexts: submission.attachmentTexts,
         model: selectedModelOverrideId,
         ...(privateModeActive ? { privacy: 'private' as const } : {}),
+        ...(autoActive ? { autoToolApprovals: true } : {}),
         ...(selectedReasoningEffort !== undefined
           ? { reasoningEffort: selectedReasoningEffort }
           : {}),
@@ -197,6 +208,7 @@ export function NewTaskForm({
       selectedModelOverrideId,
       selectedReasoningEffort,
       privateModeActive,
+      autoActive,
     ],
   );
 
@@ -268,6 +280,14 @@ export function NewTaskForm({
           ) : null
         }
       />
+      {autoOffer.shown ? (
+        <AutoToolApprovalsSwitch
+          checked={autoActive}
+          available={autoOffer.available}
+          disabled={isBusy}
+          onCheckedChange={setAutoToolApprovals}
+        />
+      ) : null}
       {fastSessionError ? (
         <div role="alert" className="flex items-center gap-2 px-3 py-2 text-sm">
           <AlertCircle

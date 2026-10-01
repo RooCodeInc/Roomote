@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
   privateSessionsEnabled: vi.fn(),
+  autoExperimentEnabled: vi.fn(),
+  setSessionAuto: vi.fn(),
   startSessionGoal: vi.fn(),
   getFastSessionTasks: vi.fn(),
   hasQueuedMessages: vi.fn(),
@@ -73,6 +75,11 @@ vi.mock('@roomote/db/server', () => ({
   getSessionForFastConversation: mocks.getUnifiedSession,
   ensureSessionForFastConversation: mocks.getUnifiedSession,
   isPrivateSessionsExperimentEnabled: mocks.privateSessionsEnabled,
+  setIntegrationToolAutoForSession: mocks.setSessionAuto,
+}));
+
+vi.mock('./auto-tool-approvals', () => ({
+  isAutoToolApprovalsExperimentEnabled: mocks.autoExperimentEnabled,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -776,6 +783,8 @@ describe('startFastSessionCommand', () => {
     mocks.launchTask.mockResolvedValue({ success: true, taskId: 'task-1' });
     mocks.getUnifiedSession.mockResolvedValue({ id: 'unified-session-1' });
     mocks.privateSessionsEnabled.mockResolvedValue(true);
+    mocks.autoExperimentEnabled.mockResolvedValue(true);
+    mocks.setSessionAuto.mockResolvedValue(true);
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
       created: true,
@@ -799,6 +808,63 @@ describe('startFastSessionCommand', () => {
       where: () => ({ limit: mocks.dbSelectLimit }),
     });
     mocks.dbSelectLimit.mockResolvedValue([]);
+  });
+
+  it('leaves Auto off unless the owner starts the Session with it on', async () => {
+    await startFastSessionCommand(auth, { text: 'Triage the open bugs' });
+    expect(mocks.setSessionAuto).not.toHaveBeenCalled();
+    expect(mocks.after).toHaveBeenCalledOnce();
+  });
+
+  it('turns Auto on for the new Session before its first turn is scheduled', async () => {
+    await startFastSessionCommand(auth, {
+      text: 'Triage the open bugs',
+      autoToolApprovals: true,
+    });
+    expect(mocks.setSessionAuto).toHaveBeenCalledWith({
+      sessionId: 'unified-session-1',
+      userId: 'user-1',
+      enabled: true,
+    });
+    expect(mocks.after).toHaveBeenCalledOnce();
+    expect(mocks.setSessionAuto.mock.invocationCallOrder[0]!).toBeLessThan(
+      mocks.after.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('does not run a first turn unchecked when Auto was asked for and cannot be on', async () => {
+    // Outside the experiment nothing is created at all.
+    mocks.autoExperimentEnabled.mockResolvedValue(false);
+    await expect(
+      startFastSessionCommand(auth, {
+        text: 'Triage the open bugs',
+        autoToolApprovals: true,
+      }),
+    ).rejects.toThrow('Auto tool approvals are not enabled.');
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
+
+    // A pinned task would start before Auto could be turned on.
+    mocks.autoExperimentEnabled.mockResolvedValue(true);
+    await expect(
+      startFastSessionCommand(auth, {
+        text: 'Fix the flaky test',
+        autoToolApprovals: true,
+        pinnedLaunch: { launchId: 'launch-1', repo: 'acme/web' },
+      }),
+    ).rejects.toThrow(
+      'Auto cannot be turned on when starting a pinned environment task.',
+    );
+    expect(mocks.startPinnedLaunch).not.toHaveBeenCalled();
+
+    // The Session is not this user's to change.
+    mocks.setSessionAuto.mockResolvedValue(false);
+    await expect(
+      startFastSessionCommand(auth, {
+        text: 'Triage the open bugs',
+        autoToolApprovals: true,
+      }),
+    ).rejects.toThrow('Could not turn Auto on for this session.');
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 
   it('recovers an idempotent Session without scheduling its first turn twice', async () => {

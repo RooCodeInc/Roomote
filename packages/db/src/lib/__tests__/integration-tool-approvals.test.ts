@@ -25,7 +25,10 @@ import {
   listIntegrationToolSessionOverrides,
   hasRejectedIntegrationToolInSession,
   listRecentIntegrationToolApprovalOutcomes,
+  getIntegrationToolAutoForSession,
+  isIntegrationToolAutoEnabledForSession,
   isIntegrationToolAutoSuspendedForSession,
+  setIntegrationToolAutoForSession,
   suspendIntegrationToolAutoForSession,
   listPendingIntegrationToolApprovals,
   markIntegrationToolApprovalConsumed,
@@ -1045,6 +1048,96 @@ describe('Auto suspension for a session', () => {
     ).resolves.toBe(true);
     await expect(
       isIntegrationToolAutoSuspendedForSession(otherSessionId),
+    ).resolves.toBe(false);
+  });
+});
+
+describe('Auto for a session', () => {
+  it('is off until the owner turns it on, for that Session only', async () => {
+    const userId = await user();
+    const otherUserId = await user();
+    const sessionId = await ownedSession(userId);
+    const otherSessionId = await ownedSession(userId);
+
+    await expect(
+      isIntegrationToolAutoEnabledForSession(sessionId),
+    ).resolves.toBe(false);
+    await expect(
+      getIntegrationToolAutoForSession({ sessionId, userId }),
+    ).resolves.toEqual({ enabled: false, suspended: false });
+
+    // Only the owner can change it, or even see it.
+    await expect(
+      setIntegrationToolAutoForSession({
+        sessionId,
+        userId: otherUserId,
+        enabled: true,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      getIntegrationToolAutoForSession({ sessionId, userId: otherUserId }),
+    ).resolves.toBeNull();
+    await expect(
+      isIntegrationToolAutoEnabledForSession(sessionId),
+    ).resolves.toBe(false);
+
+    await expect(
+      setIntegrationToolAutoForSession({ sessionId, userId, enabled: true }),
+    ).resolves.toBe(true);
+    await expect(
+      isIntegrationToolAutoEnabledForSession(sessionId),
+    ).resolves.toBe(true);
+    await expect(
+      isIntegrationToolAutoEnabledForSession(otherSessionId),
+    ).resolves.toBe(false);
+
+    await setIntegrationToolAutoForSession({
+      sessionId,
+      userId,
+      enabled: false,
+    });
+    await expect(
+      isIntegrationToolAutoEnabledForSession(sessionId),
+    ).resolves.toBe(false);
+  });
+
+  it('resumes a stopped Session when the owner turns it on again', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    await setIntegrationToolAutoForSession({
+      sessionId,
+      userId,
+      enabled: true,
+    });
+    await suspendIntegrationToolAutoForSession(sessionId);
+    await expect(
+      getIntegrationToolAutoForSession({ sessionId, userId }),
+    ).resolves.toEqual({ enabled: true, suspended: true });
+
+    // Turning it off leaves the stop in place; turning it on lifts it.
+    await setIntegrationToolAutoForSession({
+      sessionId,
+      userId,
+      enabled: false,
+    });
+    await expect(
+      isIntegrationToolAutoSuspendedForSession(sessionId),
+    ).resolves.toBe(true);
+    await setIntegrationToolAutoForSession({
+      sessionId,
+      userId,
+      enabled: true,
+    });
+    await expect(
+      getIntegrationToolAutoForSession({ sessionId, userId }),
+    ).resolves.toEqual({ enabled: true, suspended: false });
+  });
+
+  it('is off for a Session that does not exist', async () => {
+    await expect(
+      isIntegrationToolAutoEnabledForSession(
+        '00000000-0000-4000-8000-000000000000',
+      ),
     ).resolves.toBe(false);
   });
 });

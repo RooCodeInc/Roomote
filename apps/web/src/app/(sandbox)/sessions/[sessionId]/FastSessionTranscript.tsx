@@ -109,6 +109,7 @@ import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/s
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
 import { PendingIntegrationToolApprovals } from '@/components/sessions/PendingIntegrationToolApprovals';
+import { SessionAutoToolApprovals } from '@/components/sessions/SessionAutoToolApprovals';
 import { useSessionIntegrationToolApprovals } from '@/hooks/useSessionIntegrationToolApprovals';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
 import { useSessionTitlePropagation } from './use-session-title-propagation';
@@ -2382,6 +2383,12 @@ export function FastSessionTranscript({
                 modelSelectionRef.current = selection;
               }}
             />
+            {secretSessionId ? (
+              <SessionAutoToolApprovals
+                sessionId={secretSessionId}
+                className="border-t border-border/60"
+              />
+            ) : null}
             {replyError ? (
               <Alert
                 variant="destructive"

@@ -1002,6 +1002,7 @@ export function createMcpProxy(config: McpProxyConfig) {
           tokenType: auth.tokenType,
           resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(auth),
           resolveTaskId: () => resolveRunTokenTaskId(auth),
+          requestHeaders: c.req.raw.headers,
         });
       } catch (error) {
         // Fail closed: an unreadable policy must not let a gated tool run.

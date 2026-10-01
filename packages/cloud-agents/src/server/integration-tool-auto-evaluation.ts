@@ -1,6 +1,7 @@
 import {
   getIntegrationToolAutoSettings,
   isDeploymentExperimentEnabled,
+  isIntegrationToolAutoEnabledForSession,
   recordIntegrationToolShadowEvaluation,
 } from '@roomote/db/server';
 import type {
@@ -707,18 +708,18 @@ export async function evaluateIntegrationToolAutoDecision(input: {
 }
 
 /**
- * What Auto mode is doing right now. Auto is experimental on its own
- * (`integrationToolAutoApprovals`); per-tool approvals are not. With the
- * experiment off nothing is assessed, not even in the background, and tools
- * nobody has made a choice about run as they always have. `on` is the
- * experiment plus the setting:
- * every default tool call is gated and must be assessed before it runs. `on`
- * does not imply a hosted judgment model is configured — the On control is
- * disabled without one, but the setting can outlive the model, and callers
- * must treat `on` without a judgment model as an ask for a present owner and
- * a denial for an absent owner. `shadow` is the same assessment recorded
- * without acting, while Auto is off and a hosted model is there to do it
- * cheaply.
+ * What Auto mode is doing right now for one session. Auto is experimental on
+ * its own (`integrationToolAutoApprovals`); per-tool approvals are not. With
+ * the experiment off nothing is assessed, not even in the background, and
+ * tools nobody has made a choice about run as they always have. `on` is the
+ * experiment plus the session owner's choice for that session, which starts
+ * off: every default tool call in the session is gated and must be assessed
+ * before it runs. Without a session there is no owner to have chosen, so the
+ * state is never `on`. `on` does not imply a hosted judgment model is
+ * configured, so callers must treat `on` without a judgment model as an ask
+ * for a present owner and a denial for an absent owner. `shadow` is the same
+ * assessment recorded without acting, while Auto is off for the session and a
+ * hosted model is there to do it cheaply.
  */
 export type IntegrationToolAutoState = {
   mode: 'off' | 'shadow' | 'on';
@@ -726,7 +727,12 @@ export type IntegrationToolAutoState = {
   model: 'judgment' | 'helper' | null;
 };
 
-export async function resolveIntegrationToolAutoState(): Promise<IntegrationToolAutoState> {
+export async function resolveIntegrationToolAutoState(
+  scope: {
+    /** The session the call belongs to, whose owner turns Auto on. */
+    sessionId?: string | null;
+  } = {},
+): Promise<IntegrationToolAutoState> {
   // Some callers import this module only for the model requirements; defer Env
   // initialization until the Auto state is actually resolved.
   const [enabled, settings, nightlyExperimentsEnabled] = await Promise.all([
@@ -740,11 +746,14 @@ export async function resolveIntegrationToolAutoState(): Promise<IntegrationTool
     return { mode: 'off', settings, model: null };
   }
 
-  const model = await resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(
-    () => null,
-  );
+  const [model, onForSession] = await Promise.all([
+    resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(() => null),
+    scope.sessionId
+      ? isIntegrationToolAutoEnabledForSession(scope.sessionId)
+      : Promise.resolve(false),
+  ]);
   const hosted = model?.kind === 'judgment';
-  const mode = settings.mode === 'on' ? 'on' : hosted ? 'shadow' : 'off';
+  const mode = onForSession ? 'on' : hosted ? 'shadow' : 'off';
   return { mode, settings, model: model?.kind ?? null };
 }
 
@@ -759,13 +768,15 @@ export function recordIntegrationToolShadowEvaluationInBackground(input: {
   args: unknown;
   userId: string | null;
   taskId: string | null;
+  /** The session the call belongs to; it is not shadowed while Auto is on there. */
+  sessionId?: string | null;
   /**
    * What the user last asked for, looked up only while shadowing; the
    * assessment runs without it when there is none or the lookup fails.
    */
   resolveUserRequest?: () => Promise<string | undefined>;
 }): void {
-  void resolveIntegrationToolAutoState()
+  void resolveIntegrationToolAutoState({ sessionId: input.sessionId })
     .then(async (state) => {
       if (state.mode !== 'shadow') return;
       const userRequest = await input
@@ -828,12 +839,16 @@ export function describeIntegrationToolAutoDeny(
  * routine enough to run; anything else — a risky assessment, an evaluation
  * error, or Auto on without a judgment model to assess with — asks the owner.
  * Presence decides whether that ask becomes a card or a denial. Only `off`
- * (Auto disabled) lets the call run unassessed.
+ * (Auto not on for the session) lets the call run unassessed.
  */
 export async function resolveIntegrationToolAutoDecision(
-  input: Parameters<typeof evaluateIntegrationToolAutoDecision>[0],
+  input: Parameters<typeof evaluateIntegrationToolAutoDecision>[0] & {
+    /** The session the call belongs to, whose owner turns Auto on. */
+    sessionId: string;
+  },
 ): Promise<IntegrationToolAutoDecision> {
-  const state = await resolveIntegrationToolAutoState();
+  const { sessionId, ...call } = input;
+  const state = await resolveIntegrationToolAutoState({ sessionId });
   if (state.mode !== 'on') return { action: 'run', mode: 'off' };
   if (state.model !== 'judgment') {
     // Auto is on but nothing can assess the call. The helper model fallback is
@@ -850,7 +865,7 @@ export async function resolveIntegrationToolAutoDecision(
     };
   }
   const evaluation = await evaluateIntegrationToolAutoDecision({
-    ...input,
+    ...call,
     deploymentGuidance: state.settings.policy,
   });
   return evaluation.recommendation === 'approve'

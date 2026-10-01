@@ -48,6 +48,24 @@ vi.mock('@/hooks/useSessionIntegrationToolApprovals', () => ({
   }),
 }));
 
+const autoToolApprovals = vi.hoisted(() => ({
+  state: undefined as
+    | { available: boolean; enabled: boolean; suspended: boolean }
+    | undefined,
+  setEnabled: vi.fn(),
+  sessionIds: [] as string[],
+}));
+vi.mock('@/hooks/useSessionAutoToolApprovals', () => ({
+  useSessionAutoToolApprovals: (sessionId: string) => {
+    autoToolApprovals.sessionIds.push(sessionId);
+    return {
+      state: autoToolApprovals.state,
+      isSaving: false,
+      setEnabled: autoToolApprovals.setEnabled,
+    };
+  },
+}));
+
 vi.mock('./CapabilityOfferCard', () => ({
   CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
     <div>Capability offer: {offer.capability}</div>
@@ -578,6 +596,49 @@ describe('FastSessionTranscript', () => {
     nativeSessionId: 'opencode-1',
     nativeMessageId: null,
     createdAt: new Date(ts),
+  });
+
+  it('shows the Auto switch under the composer to the Session owner only', () => {
+    autoToolApprovals.state = {
+      available: true,
+      enabled: false,
+      suspended: false,
+    };
+    autoToolApprovals.sessionIds.length = 0;
+    autoToolApprovals.setEnabled.mockClear();
+    const { unmount } = render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const toggle = screen.getByRole('switch', { name: 'Auto-approval' });
+    expect(toggle).not.toBeChecked();
+    // Approvals are keyed on the unified Session, not the Fast conversation.
+    expect(autoToolApprovals.sessionIds).toContain('canonical-session');
+    expect(
+      screen
+        .getByPlaceholderText('Message agent')
+        .compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(autoToolApprovals.setEnabled).toHaveBeenCalledWith(true);
+    unmount();
+
+    // Someone else's Session: nothing to turn on.
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(
+      screen.queryByRole('switch', { name: 'Auto-approval' }),
+    ).not.toBeInTheDocument();
+    autoToolApprovals.state = undefined;
   });
 
   it('shows a pending-key card for the owner and opens the key dialog from it', async () => {

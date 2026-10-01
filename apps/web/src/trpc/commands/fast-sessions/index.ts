@@ -44,6 +44,7 @@ import {
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
   isPrivateSessionsExperimentEnabled,
+  setIntegrationToolAutoForSession,
   sql,
 } from '@roomote/db/server';
 import {
@@ -92,6 +93,7 @@ import {
 } from '@/lib/server/artifact-signature';
 import type { PinnedFastSessionLaunchInput } from './input';
 import { startPinnedFastSessionLaunch } from './pinned-launch';
+import { isAutoToolApprovalsExperimentEnabled } from './auto-tool-approvals';
 
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
@@ -462,6 +464,7 @@ export async function startFastSessionCommand(
     privacy?: 'shared' | 'private';
     pinnedLaunch?: PinnedFastSessionLaunchInput;
     voiceCall?: boolean;
+    autoToolApprovals?: boolean;
   },
 ): Promise<{
   sessionId: string;
@@ -474,7 +477,19 @@ export async function startFastSessionCommand(
   ) {
     throw new Error('Private sessions are not enabled for this deployment.');
   }
+  if (
+    input.autoToolApprovals &&
+    !(await isAutoToolApprovalsExperimentEnabled(auth))
+  ) {
+    throw new Error('Auto tool approvals are not enabled.');
+  }
   if (input.pinnedLaunch) {
+    if (input.autoToolApprovals) {
+      // The task would start before Auto could be turned on for its session.
+      throw new Error(
+        'Auto cannot be turned on when starting a pinned environment task.',
+      );
+    }
     if (input.privacy === 'private') {
       throw new Error(
         'Private sessions cannot start as pinned environment tasks.',
@@ -507,6 +522,18 @@ export async function startFastSessionCommand(
     reasoningEffort: null,
   });
   const unifiedSession = await ensureSessionForFastConversation(db, session.id);
+  // Before the first turn, so its tool calls are already assessed. The
+  // owner asked for the check; without it the turn must not run.
+  if (
+    input.autoToolApprovals &&
+    !(await setIntegrationToolAutoForSession({
+      sessionId: unifiedSession.id,
+      userId: auth.userId,
+      enabled: true,
+    }))
+  ) {
+    throw new Error('Could not turn Auto on for this session.');
+  }
 
   const kickoffTurnId = input.conversationId
     ? `web-kickoff:${session.id}`
