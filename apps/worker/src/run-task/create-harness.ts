@@ -5,6 +5,9 @@ import {
   buildTaskModelRoleOverrideEnv,
   getHarnessModelOverride,
   isReasoningEffort,
+  isPrReviewRun,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  MODEL_FALLBACK_AGENT_ROLES,
   type EnvironmentMcpServers,
   type LaunchCodingHarness,
 } from '@roomote/types';
@@ -141,6 +144,47 @@ export async function createHarness({
       Object.keys(modelRoleOverrideEnv).length > 0
         ? { ...harnessCommandEnv, ...modelRoleOverrideEnv }
         : harnessCommandEnv;
+    const fallbackRole = isPrReviewRun(taskRun)
+      ? ('codeReview' as const)
+      : ('coding' as const);
+    const fallbackDescriptor = TASK_MODEL_ROLE_DESCRIPTORS[fallbackRole];
+    const fallbackModel =
+      spawnRuntimeEnv[fallbackDescriptor.fallbackModelEnvVar];
+    const fallbackReasoningEffortValue =
+      spawnRuntimeEnv[fallbackDescriptor.fallbackReasoningEnvVar];
+    const fallbackReasoningEffort = isReasoningEffort(
+      fallbackReasoningEffortValue,
+    )
+      ? fallbackReasoningEffortValue
+      : undefined;
+    const agentFallbacks = Object.fromEntries(
+      Object.entries(MODEL_FALLBACK_AGENT_ROLES).flatMap(
+        ([agentType, role]) => {
+          const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+          const activeModelId = spawnRuntimeEnv[descriptor.modelEnvVar];
+          const agentFallbackModel =
+            spawnRuntimeEnv[descriptor.fallbackModelEnvVar];
+          const effort = spawnRuntimeEnv[descriptor.fallbackReasoningEnvVar];
+          return activeModelId &&
+            agentFallbackModel &&
+            activeModelId !== agentFallbackModel
+            ? [
+                [
+                  agentType,
+                  {
+                    role,
+                    activeModelId,
+                    fallbackModel: agentFallbackModel,
+                    ...(isReasoningEffort(effort)
+                      ? { fallbackReasoningEffort: effort }
+                      : {}),
+                  },
+                ],
+              ]
+            : [];
+        },
+      ),
+    );
 
     const commonOptions = {
       workspacePath,
@@ -166,6 +210,16 @@ export async function createHarness({
         : undefined,
       ...(modelOverride ? { modelOverride } : {}),
       ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),
+      ...(fallbackModel
+        ? {
+            fallbackModel,
+            fallbackReasoningEffort,
+            fallbackRole,
+            activeModelId:
+              modelOverride ?? spawnRuntimeEnv[fallbackDescriptor.modelEnvVar],
+          }
+        : {}),
+      ...(Object.keys(agentFallbacks).length > 0 ? { agentFallbacks } : {}),
     };
 
     return await startOpenCodeServerHarness({

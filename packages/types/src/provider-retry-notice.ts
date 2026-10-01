@@ -1,8 +1,67 @@
 import { asBoolean, asFiniteNumber, asRecord, asString } from './primitives';
+import { isReasoningEffort, type ReasoningEffort } from './task-runs';
+import { TASK_MODEL_ROLES, type TaskModelRole } from './model-provider-config';
+import type { ModelFallbackTrigger } from './model-fallbacks';
 
 export const PROVIDER_RETRY_NOTICE_PAYLOAD_KEY = 'providerRetryNotice' as const;
 export const TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY =
   'terminalProviderError' as const;
+export const MODEL_FALLBACK_NOTICE_PAYLOAD_KEY = 'modelFallbackNotice' as const;
+
+export type ModelFallbackNotice = {
+  role: TaskModelRole;
+  trigger: ModelFallbackTrigger;
+  fromProvider: string;
+  fromModelId: string;
+  errorSummary: string;
+  toProvider: string;
+  toModelId: string;
+  toReasoningEffort: ReasoningEffort | null;
+};
+
+export function parseModelFallbackNotice(
+  value: unknown,
+): ModelFallbackNotice | null {
+  const record = asRecord(value);
+  const role = asString(record?.role);
+  const trigger = asString(record?.trigger);
+  const fromProvider = asString(record?.fromProvider)?.trim();
+  const fromModelId = asString(record?.fromModelId)?.trim();
+  const errorSummary = asString(record?.errorSummary)?.trim();
+  const toProvider = asString(record?.toProvider)?.trim();
+  const toModelId = asString(record?.toModelId)?.trim();
+  if (
+    !role ||
+    !TASK_MODEL_ROLES.includes(role as TaskModelRole) ||
+    (trigger !== 'immediate' && trigger !== 'after_retries') ||
+    !fromProvider ||
+    !fromModelId ||
+    !errorSummary ||
+    !toProvider ||
+    !toModelId
+  )
+    return null;
+  return {
+    role: role as TaskModelRole,
+    trigger,
+    fromProvider,
+    fromModelId,
+    errorSummary,
+    toProvider,
+    toModelId,
+    toReasoningEffort: isReasoningEffort(record?.toReasoningEffort)
+      ? record.toReasoningEffort
+      : null,
+  };
+}
+
+export function getModelFallbackNoticeFromMessageData(
+  data: Record<string, unknown> | null | undefined,
+): ModelFallbackNotice | null {
+  return data
+    ? parseModelFallbackNotice(data[MODEL_FALLBACK_NOTICE_PAYLOAD_KEY])
+    : null;
+}
 
 export type TerminalProviderError = {
   /** Short redacted provider error safe to display in the task transcript. */

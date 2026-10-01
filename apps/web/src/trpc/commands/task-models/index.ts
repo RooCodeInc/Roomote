@@ -41,6 +41,7 @@ import {
   isOpenAiCompatibleProviderId,
   isTaskModelIdDisabled,
   normalizeOpenAiCompatibleConnectionSlug,
+  normalizeModelFallbackConfig,
   normalizeOptionalReasoningEffort,
   normalizeSetupNewState,
   normalizeTaskModelId,
@@ -56,10 +57,12 @@ import type {
   TaskModelMetadata,
   TaskModelOption,
   TaskModelRole,
+  ModelFallbackConfig,
 } from '@roomote/types';
 
 import {
   getDeploymentRuntimeModelConfig,
+  getDeploymentModelFallbackConfig,
   getDeploymentTaskModelSettings,
 } from '@/lib/server/task-models';
 import {
@@ -139,6 +142,7 @@ type TaskModelSettingsResult = {
     family: string;
   }>;
   codingModelRoutingRules: CodingModelRoutingRule[];
+  modelFallbacks: ModelFallbackConfig;
 };
 
 type TaskModelSuggestionResult = {
@@ -226,6 +230,7 @@ export async function getTaskModelSettingsCommand(
   const [
     settings,
     persistedRuntimeModelConfig,
+    modelFallbacks,
     persistedEnvVarNames,
     chatgptConnected,
     githubCopilotConnected,
@@ -234,6 +239,7 @@ export async function getTaskModelSettingsCommand(
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
+    getDeploymentModelFallbackConfig(),
     getPersistedEnvironmentVariableNames(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
@@ -322,7 +328,68 @@ export async function getTaskModelSettingsCommand(
       family,
     })),
     codingModelRoutingRules: settings.codingModelRoutingRules ?? [],
+    modelFallbacks,
   };
+}
+
+export async function updateModelFallbackConfigCommand(
+  auth: UserAuthSuccess,
+  input: ModelFallbackConfig,
+): Promise<{ success: true; modelFallbacks: ModelFallbackConfig }> {
+  assertAdmin(auth);
+  const [settings, runtimeModelConfig] = await Promise.all([
+    getDeploymentTaskModelSettings(),
+    getDeploymentRuntimeModelConfig(),
+  ]);
+  const enabledModels = new Map(
+    getEnabledTaskModels(settings).map((model) => [model.id, model]),
+  );
+  const runtimeModels = resolveRuntimeModelStatus({
+    settingsDefaultModelId: settings.defaultModelId,
+    persisted: runtimeModelConfig,
+  });
+  const normalized = normalizeModelFallbackConfig(input);
+
+  for (const role of TASK_MODEL_ROLES) {
+    const fallback = normalized.roles[role];
+    if (!fallback) continue;
+    const model = enabledModels.get(fallback.modelId);
+    if (!model)
+      throw new Error(`Choose an enabled fallback model for ${role}.`);
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    const activeModel =
+      runtimeModels[descriptor.runtimeStatusKey].effectiveModelId ??
+      runtimeModels.codingModel.effectiveModelId;
+    if (fallback.modelId === activeModel) {
+      throw new Error(
+        `The ${role} fallback must differ from its default model.`,
+      );
+    }
+    const metadata = model.metadata;
+    if (fallback.reasoningEffort && metadata?.supportsReasoning === false) {
+      throw new Error(
+        `${model.displayName} does not support reasoning levels.`,
+      );
+    }
+    if (
+      fallback.reasoningEffort &&
+      metadata?.supportedReasoningEfforts &&
+      !metadata.supportedReasoningEfforts.includes(fallback.reasoningEffort)
+    ) {
+      throw new Error(
+        `${model.displayName} does not support that reasoning level.`,
+      );
+    }
+  }
+
+  await db
+    .insert(deploymentSettings)
+    .values({ id: DEFAULT_DEPLOYMENT_ID, modelFallbackConfig: normalized })
+    .onConflictDoUpdate({
+      target: deploymentSettings.id,
+      set: { modelFallbackConfig: normalized, updatedAt: new Date() },
+    });
+  return { success: true, modelFallbacks: normalized };
 }
 
 type TaskModelRoleDefault = {

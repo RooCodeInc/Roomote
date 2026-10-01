@@ -214,6 +214,10 @@ export const recordMessageEnvelope = (
   options: AppRouterInput['taskRuns']['recordMessageEnvelope'],
 ) => client.taskRuns.recordMessageEnvelope.mutate(options);
 
+export const applyModelFallback = (
+  options: AppRouterInput['taskRuns']['applyModelFallback'],
+) => client.taskRuns.applyModelFallback.mutate(options);
+
 export const claimShowWidgetFallbackDelivery = (
   options: AppRouterInput['taskRuns']['claimShowWidgetFallbackDelivery'],
 ) => client.taskRuns.claimShowWidgetFallbackDelivery.mutate(options);

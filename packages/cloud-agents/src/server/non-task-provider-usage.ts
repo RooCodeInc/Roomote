@@ -18,6 +18,12 @@ import {
   toBedrockMantleRuntimeModelId,
   type ReasoningEffort,
 } from '@roomote/types';
+import {
+  classifyModelFallbackTrigger,
+  getDisplayModelProviderId,
+  MODEL_FALLBACK_PROVIDER_ERROR_RETRIES,
+} from '@roomote/types';
+import { captureInstanceEvent } from '@roomote/telemetry/server';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
@@ -2120,35 +2126,32 @@ async function runNonTaskSdkPrompt(
 export async function generateTrackedNonTaskText(
   params: GenerateTrackedNonTaskTextParams,
 ): Promise<string> {
-  const runtime = await resolveNonTaskModelRuntime(
-    params.model,
-    params.modelRole,
-  );
-  const model = await resolveModelForInputModality(params, runtime);
-
-  const data = await runNonTaskSdkPrompt(
-    params,
-    { ...runtime, model },
-    {
-      system: params.system,
-      parts: [
-        {
-          type: 'text',
-          text: buildOpenCodePrompt({
-            prompt: params.prompt,
-            maxOutputTokens: params.maxOutputTokens,
-          }),
-        },
-        ...(params.files ?? []).map((file) => ({
-          type: 'file' as const,
-          mime: file.mime,
-          ...(file.filename ? { filename: file.filename } : {}),
-          url: file.url,
-        })),
-      ],
-    },
-    { promptErrorLabel: 'OpenCode text prompt failed' },
-  );
+  const data = await runControlPlaneWithFallback(params, async (runtime) => {
+    const model = await resolveModelForInputModality(params, runtime);
+    return runNonTaskSdkPrompt(
+      params,
+      { ...runtime, model },
+      {
+        system: params.system,
+        parts: [
+          {
+            type: 'text',
+            text: buildOpenCodePrompt({
+              prompt: params.prompt,
+              maxOutputTokens: params.maxOutputTokens,
+            }),
+          },
+          ...(params.files ?? []).map((file) => ({
+            type: 'file' as const,
+            mime: file.mime,
+            ...(file.filename ? { filename: file.filename } : {}),
+            url: file.url,
+          })),
+        ],
+      },
+      { promptErrorLabel: 'OpenCode text prompt failed' },
+    );
+  });
 
   const text = data.parts
     .filter(
@@ -2164,6 +2167,61 @@ export async function generateTrackedNonTaskText(
   }
 
   return text;
+}
+
+async function runControlPlaneWithFallback<T>(
+  params: GenerateTrackedNonTaskBaseParams,
+  execute: (
+    runtime: Awaited<ReturnType<typeof resolveNonTaskModelRuntime>>,
+  ) => Promise<T>,
+): Promise<T> {
+  const role = params.modelRole ?? 'small';
+  let runtime = await resolveNonTaskModelRuntime(params.model, role);
+  const fallbackEnvVar =
+    role === 'orchestration'
+      ? 'R_ORCHESTRATION_MODEL_FALLBACK'
+      : role === 'small'
+        ? 'R_SMALL_MODEL_FALLBACK'
+        : undefined;
+  const fallbackModel = fallbackEnvVar
+    ? runtime.resolvedModelRuntimeEnv[fallbackEnvVar]
+    : undefined;
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await execute(runtime);
+    } catch (error) {
+      const trigger = classifyModelFallbackTrigger(error, {
+        retriesUsed: attempt - 1,
+      });
+      if (
+        trigger &&
+        fallbackModel &&
+        fallbackModel !== runtime.catalogModelId
+      ) {
+        const fromModel = runtime.catalogModelId;
+        runtime = await resolveNonTaskModelRuntime(fallbackModel, 'primary');
+        const fromProvider = getDisplayModelProviderId(fromModel) ?? 'opencode';
+        const toProvider =
+          getDisplayModelProviderId(runtime.catalogModelId) ?? 'opencode';
+        void captureInstanceEvent('model_fallback_switched', {
+          fromProvider,
+          fromModel,
+          toProvider,
+          toModel: runtime.catalogModelId,
+        });
+        return execute(runtime);
+      }
+      const failure = classifyNonTaskInferenceError(error);
+      if (
+        !fallbackModel ||
+        !failure.retryable ||
+        attempt > MODEL_FALLBACK_PROVIDER_ERROR_RETRIES
+      ) {
+        throw error;
+      }
+    }
+  }
 }
 
 export async function generateTrackedNonTaskTextInOpenCodeSession(
@@ -2247,36 +2305,33 @@ async function generateTrackedNonTaskObjectWithSdk<
 >(
   params: GenerateTrackedNonTaskObjectParams<TSchema>,
 ): Promise<{ object: z.output<TSchema> }> {
-  const resolvedRuntime = await resolveNonTaskModelRuntime(
-    params.model,
-    params.modelRole,
-  );
-
-  const data = await runNonTaskSdkPrompt(
-    params,
-    resolvedRuntime,
-    {
-      system: params.system,
-      format: {
-        type: 'json_schema',
-        schema: buildNonTaskStructuredOutputJsonSchema(params.schema),
-        retryCount:
-          params.structuredOutputRetryCount ??
-          DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
-      },
-      parts: [
-        {
-          type: 'text',
-          text: buildOpenCodePrompt({
-            prompt: params.prompt,
-            maxOutputTokens: params.maxOutputTokens,
-          }),
+  const data = await runControlPlaneWithFallback(params, (resolvedRuntime) =>
+    runNonTaskSdkPrompt(
+      params,
+      resolvedRuntime,
+      {
+        system: params.system,
+        format: {
+          type: 'json_schema',
+          schema: buildNonTaskStructuredOutputJsonSchema(params.schema),
+          retryCount:
+            params.structuredOutputRetryCount ??
+            DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
         },
-      ],
-    },
-    {
-      promptErrorLabel: `OpenCode structured prompt failed (model ${resolvedRuntime.model})`,
-    },
+        parts: [
+          {
+            type: 'text',
+            text: buildOpenCodePrompt({
+              prompt: params.prompt,
+              maxOutputTokens: params.maxOutputTokens,
+            }),
+          },
+        ],
+      },
+      {
+        promptErrorLabel: `OpenCode structured prompt failed (model ${resolvedRuntime.model})`,
+      },
+    ),
   );
 
   const structured = (data.info as { structured?: unknown }).structured;

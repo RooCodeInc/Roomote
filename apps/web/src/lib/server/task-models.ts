@@ -1,8 +1,10 @@
 import { db, deploymentSettings, eq } from '@roomote/db/server';
 import {
   type DeploymentModelConfig,
+  type ModelFallbackConfig,
   getTaskModelDisplayName,
   normalizeDeploymentModelConfig,
+  normalizeModelFallbackConfig,
   normalizeTaskModelSettings,
 } from '@roomote/types';
 
@@ -17,6 +19,15 @@ export async function getDeploymentTaskModelSettings() {
   });
 
   return normalizeTaskModelSettings(deployment?.taskModelSettings);
+}
+
+export async function getDeploymentModelFallbackConfig(): Promise<ModelFallbackConfig> {
+  const deployment = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+    columns: { modelFallbackConfig: true },
+  });
+
+  return normalizeModelFallbackConfig(deployment?.modelFallbackConfig);
 }
 
 export async function getDeploymentRuntimeModelConfig(): Promise<DeploymentModelConfig> {

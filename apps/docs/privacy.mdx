@@ -47,7 +47,8 @@ When anonymous telemetry is enabled, your deployment sends:
   the provider type and, where Roomote can determine it from deployment state,
   whether it was configured before the wizard. Other events include
   non-identifying facts like the harness, model, source surface, and sandbox
-  provider used. Session events include bounded outcome and retry counts;
+  provider used. Model fallback events include only the previous and replacement
+  provider and model names. Session events include bounded outcome and retry counts;
   setup and response phase durations; aggregate model-request and token-usage
   counts; prompt-size, context-size, environment, integration, and active-task
   counts; and whether a turn is the session's first human message. They do not

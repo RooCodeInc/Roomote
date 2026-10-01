@@ -39,6 +39,7 @@ import type {
   DeploymentAccessPolicy,
   DeploymentComputeConfig,
   DeploymentModelConfig,
+  ModelFallbackConfig,
   CodingHarness,
   RunEventDetails,
   RunEventSource,
@@ -277,6 +278,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   runtimeModelConfig: jsonb(
     'runtime_model_config',
   ).$type<DeploymentModelConfig>(),
+  modelFallbackConfig: jsonb(
+    'model_fallback_config',
+  ).$type<ModelFallbackConfig>(),
   runtimeComputeConfig: jsonb(
     'runtime_compute_config',
   ).$type<DeploymentComputeConfig>(),

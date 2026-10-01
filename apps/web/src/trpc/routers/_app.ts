@@ -42,8 +42,10 @@ import {
   integrationToolPolicyUpsertSchema,
   integrationToolPoliciesUpsertSchema,
   taskModelMetadataSchema,
+  TASK_MODEL_ROLES,
   userTaskModelMappingPresetCreateSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
+  type TaskModelRole,
 } from '@roomote/types';
 
 import {
@@ -507,6 +509,7 @@ import {
   saveTaskModelProviderCommand,
   suggestTaskModelsCommand,
   updateTaskModelSettingsCommand,
+  updateModelFallbackConfigCommand,
 } from '../commands/task-models';
 import {
   createUserTaskModelMappingPresetCommand,
@@ -2864,6 +2867,23 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         updateTaskModelSettingsCommand(auth, input),
+      ),
+
+    updateFallbacks: protectedProcedure
+      .input(
+        z.object({
+          enabled: z.boolean(),
+          roles: z.record(
+            z.enum(TASK_MODEL_ROLES as [TaskModelRole, ...TaskModelRole[]]),
+            z.object({
+              modelId: z.string().trim().min(1),
+              reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable(),
+            }),
+          ),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateModelFallbackConfigCommand(auth, input),
       ),
   }),
 

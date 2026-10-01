@@ -1,0 +1,1 @@
+ALTER TABLE "deployment_settings" ADD COLUMN "model_fallback_config" jsonb;
