@@ -11,6 +11,7 @@ import {
 } from '@roomote/types';
 import { db, eq, getTaskHumanOwnerUserIds, taskRuns } from '@roomote/db/server';
 import { Agent } from 'undici';
+import { findTaskRunByRunTokenClaims } from '@roomote/sdk/server';
 import {
   assertEgressUrlAllowed,
   createGuardedConnectOptions,
@@ -232,20 +233,17 @@ export async function resolveRunTokenTaskId(
 }
 
 /**
- * Validates that the run token's run still exists. No principal equality
+ * Validates that the run token targets an active task run. No principal equality
  * check: the run-scoped token IS the authorization (only that run's sandbox
  * holds it). The token's userId is mint-time attribution while
  * `task_runs.actingUserId` is current-steering attribution — web steer and
  * follow-up delivery mutate the acting user mid-run, so the two legitimately
  * diverge and must not be compared for authorization.
  */
-async function verifyTaskRunTokenTargetExists(
+async function verifyTaskRunTokenTargetIsActive(
   auth: RunTokenContext,
 ): Promise<Response | null> {
-  const taskRun = await db.query.taskRuns.findFirst({
-    columns: { id: true },
-    where: eq(taskRuns.id, auth.runId),
-  });
+  const taskRun = await findTaskRunByRunTokenClaims(auth);
 
   if (!taskRun) {
     return jsonRpcErrorResponse(
@@ -261,7 +259,7 @@ async function verifyTaskRunTokenTargetExists(
 export async function assertTaskRunTokenTargetExists(
   auth: RunTokenContext,
 ): Promise<void> {
-  const validationError = await verifyTaskRunTokenTargetExists(auth);
+  const validationError = await verifyTaskRunTokenTargetIsActive(auth);
 
   if (!validationError) {
     return;
@@ -797,7 +795,7 @@ export function createMcpProxy(config: McpProxyConfig) {
     resolveCredentials,
     timeoutMs = 30_000,
     allowAuthTokens = false,
-    validateTaskRunToken = verifyTaskRunTokenTargetExists,
+    validateTaskRunToken = verifyTaskRunTokenTargetIsActive,
     allowedToolNames,
     statelessUpstream = false,
     stripToolSchemaPatterns: shouldStripToolSchemaPatterns = false,

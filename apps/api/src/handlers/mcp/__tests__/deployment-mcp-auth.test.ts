@@ -1,22 +1,27 @@
-import type {
-  AuthTokenContext,
-  McpAccessTokenContext,
-  RunTokenContext,
+import {
+  RunStatus,
+  type AuthTokenContext,
+  type McpAccessTokenContext,
+  type RunTokenContext,
 } from '@roomote/types';
 
-const { mockFindTaskRun, mockEq } = vi.hoisted(() => ({
-  mockFindTaskRun: vi.fn(),
+const { mockEq, mockFindTaskRunByRunTokenClaims } = vi.hoisted(() => ({
   mockEq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
+  mockFindTaskRunByRunTokenClaims: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      taskRuns: { findFirst: mockFindTaskRun },
+      taskRuns: { findFirst: vi.fn() },
     },
   },
   taskRuns: { id: 'taskRuns.id' },
   eq: mockEq,
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  findTaskRunByRunTokenClaims: mockFindTaskRunByRunTokenClaims,
 }));
 
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
@@ -44,7 +49,7 @@ function createRunToken(overrides?: Partial<RunTokenContext>): RunTokenContext {
 describe.each(providers)('%s deployment-scoped MCP auth', (providerName) => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFindTaskRun.mockResolvedValue({ id: 42 });
+    mockFindTaskRunByRunTokenClaims.mockResolvedValue({ id: 42 });
   });
 
   it('rejects missing authentication', async () => {
@@ -66,7 +71,6 @@ describe.each(providers)('%s deployment-scoped MCP auth', (providerName) => {
     await expect(
       resolveDeploymentMcpAuth(authToken, providerName),
     ).resolves.toEqual({ userId: 'user-1', tokenType: 'auth' });
-    expect(mockFindTaskRun).not.toHaveBeenCalled();
   });
 
   it('accepts run tokens when the target task run exists', async () => {
@@ -79,14 +83,24 @@ describe.each(providers)('%s deployment-scoped MCP auth', (providerName) => {
       tokenType: 'run',
       runId: 42,
     });
-    expect(mockFindTaskRun).toHaveBeenCalledWith({
-      columns: { id: true },
-      where: { column: 'taskRuns.id', value: 42 },
-    });
+    expect(mockFindTaskRunByRunTokenClaims).toHaveBeenCalledWith(runToken);
   });
 
+  it.each([RunStatus.Completed, RunStatus.Failed, RunStatus.Canceled])(
+    'rejects terminal run status %s',
+    async () => {
+      mockFindTaskRunByRunTokenClaims.mockResolvedValue(null);
+
+      await expect(
+        resolveDeploymentMcpAuth(createRunToken(), providerName),
+      ).rejects.toMatchObject({
+        httpStatus: 404,
+        message: 'Task run not found for this MCP token',
+      });
+    },
+  );
+
   it('keeps deployment-principal run tokens independent of the acting user', async () => {
-    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: 'user-2' });
     const runToken = createRunToken({
       userId: null,
       principal: 'deployment',
@@ -98,7 +112,7 @@ describe.each(providers)('%s deployment-scoped MCP auth', (providerName) => {
   });
 
   it('rejects run tokens whose target task run no longer exists', async () => {
-    mockFindTaskRun.mockResolvedValue(undefined);
+    mockFindTaskRunByRunTokenClaims.mockResolvedValue(undefined);
 
     await expect(
       resolveDeploymentMcpAuth(createRunToken(), providerName),

@@ -1,4 +1,4 @@
-import { db, eq, taskRuns } from '@roomote/db/server';
+import { findTaskRunByRunTokenClaims } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
 
@@ -20,10 +20,7 @@ export async function resolveDeploymentMcpAuth(
   }
 
   if (isRunTokenContext(authContext)) {
-    const taskRun = await db.query.taskRuns.findFirst({
-      columns: { id: true },
-      where: eq(taskRuns.id, authContext.runId),
-    });
+    const taskRun = await findTaskRunByRunTokenClaims(authContext);
 
     if (!taskRun) {
       throw new McpProxyError(404, 'Task run not found for this MCP token');
