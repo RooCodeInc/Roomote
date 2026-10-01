@@ -2386,7 +2386,7 @@ export function FastSessionTranscript({
             {secretSessionId ? (
               <SessionAutoToolApprovals
                 sessionId={secretSessionId}
-                className="border-t border-border/60"
+                className="mx-auto w-full max-w-4xl pt-0 pb-3"
               />
             ) : null}
             {replyError ? (

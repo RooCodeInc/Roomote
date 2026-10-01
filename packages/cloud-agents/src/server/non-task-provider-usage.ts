@@ -28,6 +28,7 @@ import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
 import { decodeInferenceErrorEnvelope } from './inference-error-envelope';
+import { streamOpenCodeEventsAcrossDisposal } from './opencode-event-stream';
 import {
   DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
   leaseOpenCodeSdkServer,
@@ -1528,6 +1529,34 @@ async function runNonTaskSdkPrompt(
         }
       },
     };
+    // One ask is relayed once, however it is learned of: its event, or the
+    // pending list read after the event stream had to be reopened.
+    const relayedPermissionAskIds = new Set<string>();
+    const relayPermissionAsk = (ask: {
+      id: string;
+      sessionID: string;
+      permission: string;
+      tool?: { messageID?: string; callID?: string };
+    }) => {
+      if (relayedPermissionAskIds.has(ask.id)) return;
+      relayedPermissionAskIds.add(ask.id);
+      try {
+        options.onPermissionAsked?.(
+          {
+            requestId: ask.id,
+            sessionId: ask.sessionID,
+            permission: ask.permission,
+            ...(ask.tool?.messageID ? { messageId: ask.tool.messageID } : {}),
+            ...(ask.tool?.callID ? { callId: ask.tool.callID } : {}),
+          },
+          permissionAskHelpers,
+        );
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+    };
     let sessionId = options.session?.id;
     if (sessionId && options.validateSession) {
       const validateStartedAtMs = Date.now();
@@ -1650,14 +1679,35 @@ async function runNonTaskSdkPrompt(
     // through OpenCode's whole backoff, or time out, instead of failing fast.
     try {
       const subscribeStartedAtMs = Date.now();
-      const subscription = await client.event.subscribe(
-        { directory: sessionDirectory },
-        { signal: eventAbortController.signal },
-      );
+      const subscribeToEvents = () =>
+        client.event.subscribe(
+          { directory: sessionDirectory },
+          { signal: eventAbortController.signal },
+        );
+      const subscription = await subscribeToEvents();
       setupTiming.eventSubscribeMs = Date.now() - subscribeStartedAtMs;
+      const events = streamOpenCodeEventsAcrossDisposal({
+        stream: subscription.stream,
+        resubscribe: async () => {
+          console.info(
+            '[NonTaskProviderUsage] OpenCode instance was disposed mid-prompt; reopening its event stream.',
+          );
+          return (await subscribeToEvents()).stream;
+        },
+        // An ask raised while no stream was open was never relayed.
+        onResubscribed: async () => {
+          if (!options.onPermissionAsked) return;
+          const pending = await client.permission.list(
+            { directory: sessionDirectory },
+            { signal: eventAbortController.signal },
+          );
+          for (const ask of pending.data ?? []) relayPermissionAsk(ask);
+        },
+        signal: eventAbortController.signal,
+      });
       eventMonitor = (async () => {
         try {
-          for await (const event of subscription.stream) {
+          for await (const event of events) {
             if (
               (event.type === 'session.created' ||
                 event.type === 'session.updated') &&
@@ -1835,27 +1885,7 @@ async function runNonTaskSdkPrompt(
               // and native reply), never by this monitor: a consumer
               // failure must not reject the prompt stream, and the pause
               // itself is the intended behavior.
-              try {
-                const properties = event.properties;
-                options.onPermissionAsked?.(
-                  {
-                    requestId: properties.id,
-                    sessionId: properties.sessionID,
-                    permission: properties.permission,
-                    ...(properties.tool?.messageID
-                      ? { messageId: properties.tool.messageID }
-                      : {}),
-                    ...(properties.tool?.callID
-                      ? { callId: properties.tool.callID }
-                      : {}),
-                  },
-                  permissionAskHelpers,
-                );
-              } catch (error) {
-                console.warn(
-                  `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
-                );
-              }
+              relayPermissionAsk(event.properties);
             } else if (
               event.type === 'session.error' &&
               event.properties.sessionID === sessionId
