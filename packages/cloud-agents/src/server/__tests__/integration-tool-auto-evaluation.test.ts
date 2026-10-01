@@ -479,6 +479,9 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       recentUserMessages: ['yeah go ahead'],
       agentMessageRepliedTo: 'I found 3 old drafts. Delete them one by one?',
       explicitApprovalOutcomes: [approvedSameTool],
+      recentToolResults: [
+        { tool: 'linear.list_files', output: 'Drafts/draft-2.docx' },
+      ],
     });
     const asked = mocks.evaluate.mock.calls[0]![0].questions;
     for (const question of [
@@ -513,6 +516,22 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(asked.userAuthorized.instructions).toContain(
       'granting more access than asked for',
     );
+
+    // A caller that supplies no tool results (a task) keeps the plain
+    // wording: there is nothing to check an identifier against.
+    await ask({
+      recentUserMessages: ['yeah go ahead'],
+      agentMessageRepliedTo: 'I found 3 old drafts. Delete them one by one?',
+      explicitApprovalOutcomes: [approvedSameTool],
+    });
+    const plain = mocks.evaluate.mock.calls[0]![0].questions;
+    for (const question of [
+      plain.continuesApprovedCall,
+      plain.agreedToPlan,
+      plain.userAuthorized,
+    ]) {
+      expect(question.instructions).not.toContain('recentToolResults');
+    }
 
     // A rejection of this tool turns both off.
     const afterRejection = await ask({
