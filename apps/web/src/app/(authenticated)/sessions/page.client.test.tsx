@@ -111,6 +111,48 @@ describe('Sessions list', () => {
     );
   });
 
+  it('offers to clear filters when no sessions match', async () => {
+    sessionStatusState.current = [];
+
+    render(
+      await SessionsPage({
+        searchParams: Promise.resolve({ q: 'no-match' }),
+      }),
+    );
+
+    expect(screen.getByText('No sessions match your filters.')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Clear filters' })).toHaveAttribute(
+      'href',
+      '/sessions',
+    );
+  });
+
+  it('preserves the board view when clearing filters', async () => {
+    sessionStatusState.current = [];
+
+    render(
+      await SessionsPage({
+        searchParams: Promise.resolve({ q: 'no-match', view: 'board' }),
+      }),
+    );
+
+    expect(screen.getByRole('link', { name: 'Clear filters' })).toHaveAttribute(
+      'href',
+      '/sessions?view=board',
+    );
+  });
+
+  it('distinguishes a genuinely empty Sessions workspace', async () => {
+    sessionStatusState.current = [];
+
+    render(await SessionsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText('No sessions yet.')).toBeVisible();
+    expect(
+      screen.queryByRole('link', { name: 'Clear filters' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('exposes the board from a direct URL without a deployment flag', async () => {
     const { container } = render(
       await SessionsPage({

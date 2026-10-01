@@ -74,6 +74,11 @@ export default async function SessionsPage({
     ? (params.archive as SessionArchiveFilter)
     : 'non-archived';
   const timePeriod = parseTimePeriodParam(period ?? null, 'all');
+  const hasAppliedFilters = Object.entries(params).some(
+    ([key, value]) => key !== 'view' && Boolean(value),
+  );
+  const clearFiltersHref =
+    view === 'board' ? '/sessions?view=board' : '/sessions';
   const [result, sources] = await Promise.all([
     getSessions(authorizedUser, {
       before,
@@ -138,7 +143,24 @@ export default async function SessionsPage({
         {result.sessions.length === 0 ? (
           <Empty>
             <EmptyHeader>
-              <EmptyDescription>No sessions found.</EmptyDescription>
+              {hasAppliedFilters ? (
+                <>
+                  <EmptyDescription>
+                    No sessions match your filters.
+                  </EmptyDescription>
+                  <EmptyDescription>
+                    <Link
+                      href={clearFiltersHref}
+                      className="font-semibold hover:underline"
+                    >
+                      Clear filters
+                    </Link>{' '}
+                    to show all sessions.
+                  </EmptyDescription>
+                </>
+              ) : (
+                <EmptyDescription>No sessions yet.</EmptyDescription>
+              )}
             </EmptyHeader>
           </Empty>
         ) : view === 'board' ? (
