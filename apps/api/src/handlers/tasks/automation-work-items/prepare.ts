@@ -1,6 +1,12 @@
 import crypto from 'node:crypto';
 
-import { db, environments, inArray } from '@roomote/db/server';
+import {
+  and,
+  db,
+  environmentRepositoryMappings,
+  environments,
+  inArray,
+} from '@roomote/db/server';
 import type {
   AutomationWorkItemDisposition,
   WorkspaceReadiness,
@@ -61,10 +67,10 @@ function buildAutomationWorkItemFingerprint(params: {
 function prepareAutomationWorkItem(params: {
   workItem: AutomationWorkItemInput;
   repositoryIds: string[];
-  candidateRepositorySet: Set<string>;
-  environmentsById: Map<string, { id: string; config: unknown }>;
+  candidateRepositoryIdsByName: Map<string, string[]>;
+  environmentsById: Map<string, { id: string; repositoryIds: Set<string> }>;
 }): PreparedAutomationWorkItem {
-  const { workItem, candidateRepositorySet, environmentsById } = params;
+  const { workItem, candidateRepositoryIdsByName, environmentsById } = params;
   const targetRepositoryFullName =
     workItem.targetRepositoryFullName?.trim() || null;
   const targetEnvironmentId = workItem.targetEnvironmentId ?? null;
@@ -73,7 +79,7 @@ function prepareAutomationWorkItem(params: {
 
   if (
     targetRepositoryFullName &&
-    !candidateRepositorySet.has(targetRepositoryFullName)
+    !candidateRepositoryIdsByName.has(targetRepositoryFullName)
   ) {
     automationWorkItemValidationError(
       `Work item "${workItem.title}" targets repository "${targetRepositoryFullName}", which is not part of this automation run.`,
@@ -144,18 +150,10 @@ function prepareAutomationWorkItem(params: {
         `Work item "${workItem.title}" targets missing environment "${targetEnvironmentId}".`,
       );
     } else {
-      const configuredRepositories =
-        environment.config &&
-        typeof environment.config === 'object' &&
-        'repositories' in environment.config &&
-        Array.isArray(environment.config.repositories)
-          ? environment.config.repositories
-          : [];
-
-      const includesTargetRepository = configuredRepositories.some(
-        (repository) =>
-          repository?.repository?.toLowerCase?.() ===
-          targetRepositoryFullName.toLowerCase(),
+      const targetRepositoryIds =
+        candidateRepositoryIdsByName.get(targetRepositoryFullName) ?? [];
+      const includesTargetRepository = targetRepositoryIds.some(
+        (repositoryId) => environment.repositoryIds.has(repositoryId),
       );
 
       if (!includesTargetRepository) {
@@ -224,9 +222,12 @@ export async function resolvePreparedAutomationWorkItems(params: {
   workItems: AutomationWorkItemInput[];
   candidateRepositories: ResolvedRepository[];
 }): Promise<PreparedAutomationWorkItem[]> {
-  const candidateRepositorySet = new Set(
-    params.candidateRepositories.map((repository) => repository.fullName),
-  );
+  const candidateRepositoryIdsByName = new Map<string, string[]>();
+  for (const repository of params.candidateRepositories) {
+    const ids = candidateRepositoryIdsByName.get(repository.fullName) ?? [];
+    ids.push(repository.id);
+    candidateRepositoryIdsByName.set(repository.fullName, ids);
+  }
   const repositoryIds = params.candidateRepositories.map(
     (repository) => repository.id,
   );
@@ -240,26 +241,56 @@ export async function resolvePreparedAutomationWorkItems(params: {
     ),
   ];
 
-  const environmentsById =
-    targetEnvironmentIds.length === 0
-      ? new Map<string, { id: string; config: unknown }>()
-      : new Map(
-          (
-            await db
-              .select({
-                id: environments.id,
-                config: environments.config,
-              })
-              .from(environments)
-              .where(inArray(environments.id, targetEnvironmentIds))
-          ).map((environment) => [environment.id, environment]),
-        );
+  const environmentsById = new Map<
+    string,
+    { id: string; repositoryIds: Set<string> }
+  >();
+  if (targetEnvironmentIds.length > 0) {
+    const [environmentRows, mappingRows] = await Promise.all([
+      db
+        .select({ id: environments.id })
+        .from(environments)
+        .where(inArray(environments.id, targetEnvironmentIds)),
+      repositoryIds.length === 0
+        ? []
+        : db
+            .select({
+              environmentId: environmentRepositoryMappings.environmentId,
+              repositoryId: environmentRepositoryMappings.repositoryId,
+            })
+            .from(environmentRepositoryMappings)
+            .where(
+              and(
+                inArray(
+                  environmentRepositoryMappings.environmentId,
+                  targetEnvironmentIds,
+                ),
+                inArray(
+                  environmentRepositoryMappings.repositoryId,
+                  repositoryIds,
+                ),
+              ),
+            ),
+    ]);
+
+    for (const environment of environmentRows) {
+      environmentsById.set(environment.id, {
+        id: environment.id,
+        repositoryIds: new Set(),
+      });
+    }
+    for (const mapping of mappingRows) {
+      environmentsById
+        .get(mapping.environmentId)
+        ?.repositoryIds.add(mapping.repositoryId);
+    }
+  }
 
   return params.workItems.map((workItem) =>
     prepareAutomationWorkItem({
       workItem,
       repositoryIds,
-      candidateRepositorySet,
+      candidateRepositoryIdsByName,
       environmentsById,
     }),
   );

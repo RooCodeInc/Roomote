@@ -18,13 +18,17 @@ describe('buildRepositoryCoverage', () => {
       {
         id: 'environment-1',
         name: 'Shared environment',
+        repositories: [{ id: 'repository-api', name: 'Acme/API' }],
         repositoryNames: ['Acme/API'],
         config: { repositories: [] },
       },
     ]);
 
     await expect(
-      buildRepositoryCoverage(['acme/api', 'acme/web']),
+      buildRepositoryCoverage([
+        { repositoryId: 'repository-api', repositoryFullName: 'acme/api' },
+        { repositoryId: 'repository-web', repositoryFullName: 'acme/web' },
+      ]),
     ).resolves.toEqual([
       {
         repositoryFullName: 'acme/api',
@@ -39,12 +43,17 @@ describe('buildRepositoryCoverage', () => {
       {
         id: 'environment-specific',
         name: 'Specific',
+        repositories: [{ id: 'repository-api', name: 'acme/api' }],
         repositoryNames: ['acme/api'],
         config: { repositories: [{ repository: 'acme/api' }] },
       },
       {
         id: 'environment-primary',
         name: 'Primary',
+        repositories: [
+          { id: 'repository-api', name: 'acme/api' },
+          { id: 'repository-web', name: 'acme/web' },
+        ],
         repositoryNames: ['acme/api', 'acme/web'],
         config: {
           repositories: [
@@ -56,6 +65,10 @@ describe('buildRepositoryCoverage', () => {
       {
         id: 'environment-secondary',
         name: 'Secondary',
+        repositories: [
+          { id: 'repository-web', name: 'acme/web' },
+          { id: 'repository-api', name: 'acme/api' },
+        ],
         repositoryNames: ['acme/web', 'acme/api'],
         config: {
           repositories: [
@@ -66,10 +79,47 @@ describe('buildRepositoryCoverage', () => {
       },
     ]);
 
-    await expect(buildRepositoryCoverage(['acme/api'])).resolves.toEqual([
+    await expect(
+      buildRepositoryCoverage([
+        { repositoryId: 'repository-api', repositoryFullName: 'acme/api' },
+      ]),
+    ).resolves.toEqual([
       {
         repositoryFullName: 'acme/api',
         targetEnvironmentId: 'environment-specific',
+      },
+    ]);
+  });
+
+  it('does not cross-match same-name repositories from different providers or hosts', async () => {
+    mockGetAvailableEnvironments.mockResolvedValue([
+      {
+        id: 'environment-github',
+        name: 'GitHub environment',
+        repositories: [{ id: 'repository-github', name: 'acme/api' }],
+        repositoryNames: ['acme/api'],
+        config: { repositories: [{ repository: 'acme/api' }] },
+      },
+      {
+        id: 'environment-gitlab',
+        name: 'GitLab environment',
+        repositories: [{ id: 'repository-gitlab', name: 'acme/api' }],
+        repositoryNames: ['acme/api'],
+        config: { repositories: [{ repository: 'acme/api' }] },
+      },
+    ]);
+
+    await expect(
+      buildRepositoryCoverage([
+        {
+          repositoryId: 'repository-gitlab',
+          repositoryFullName: 'acme/api',
+        },
+      ]),
+    ).resolves.toEqual([
+      {
+        repositoryFullName: 'acme/api',
+        targetEnvironmentId: 'environment-gitlab',
       },
     ]);
   });

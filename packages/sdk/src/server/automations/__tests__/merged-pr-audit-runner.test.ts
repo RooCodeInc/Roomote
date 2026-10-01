@@ -13,6 +13,7 @@ const {
   mockResolveAutomationRepositoryDestination,
   mockLoadAutomationThreadFeedbackReport,
   mockEnqueueTask,
+  mockBuildRepositoryCoverage,
 } = vi.hoisted(() => ({
   slackInstallationsTable: {
     id: 'slackInstallations.id',
@@ -29,6 +30,7 @@ const {
   mockResolveAutomationRepositoryDestination: vi.fn(),
   mockLoadAutomationThreadFeedbackReport: vi.fn(),
   mockEnqueueTask: vi.fn(),
+  mockBuildRepositoryCoverage: vi.fn(async () => []),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -85,7 +87,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  buildRepositoryCoverage: vi.fn(async () => []),
+  buildRepositoryCoverage: mockBuildRepositoryCoverage,
   enqueueTask: mockEnqueueTask,
   formatRepositoryEnvironmentLines: vi.fn(
     (
@@ -356,6 +358,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
       promptText: null,
       debugSnippet: undefined,
     });
+    mockBuildRepositoryCoverage.mockResolvedValue([]);
     let enqueueCount = 0;
     mockEnqueueTask.mockImplementation(async () => ({
       taskId: `task-${enqueueCount++}`,
@@ -627,6 +630,24 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
         params.mergedPullRequests.map((pullRequest) => pullRequest.prNumber),
       );
       expect(manifests).toEqual([[1], [2]]);
+      expect(mockBuildRepositoryCoverage.mock.calls).toEqual([
+        [
+          [
+            {
+              repositoryId: 'repo-gitlab-gitlab.host-a.example',
+              repositoryFullName: 'acme/shared',
+            },
+          ],
+        ],
+        [
+          [
+            {
+              repositoryId: 'repo-gitlab-gitlab.host-b.example',
+              repositoryFullName: 'acme/shared',
+            },
+          ],
+        ],
+      ]);
 
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('skipping 1 merged PR entries'),

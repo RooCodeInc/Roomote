@@ -8,21 +8,26 @@ export type RepositoryCoverage = {
   targetEnvironmentId?: string;
 };
 
+export type RepositoryCoverageInput = {
+  repositoryId: string;
+  repositoryFullName: string;
+};
+
 type EnvironmentBackedRepositoryCoverage = RepositoryCoverage & {
   targetEnvironmentId: string;
 };
 
 export async function buildRepositoryCoverage(
-  repositoryFullNames: string[],
+  repositories: RepositoryCoverageInput[],
 ): Promise<RepositoryCoverage[]> {
   const environments = await getAvailableEnvironments();
 
-  return repositoryFullNames.map((repositoryFullName) => {
+  return repositories.map(({ repositoryId, repositoryFullName }) => {
     const normalizedRepositoryName = repositoryFullName.toLowerCase();
     const matches = environments
       .filter((environment) =>
-        environment.repositoryNames.some(
-          (name) => name.toLowerCase() === normalizedRepositoryName,
+        environment.repositories?.some(
+          (repository) => repository.id === repositoryId,
         ),
       )
       .sort((left, right) =>

@@ -14,6 +14,7 @@ import {
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
+  sourceControlProviders,
   type SentryTriageFrequency,
   type SourceControlProvider,
   type SuggestedTasksTask,
@@ -26,7 +27,7 @@ import {
   type ResolvedAutomationDestination,
 } from './destination';
 import {
-  getActiveRepositoryFullNames,
+  getActiveRepositoriesForProviders,
   partitionActiveRepositoriesByProvider,
 } from './github-deployment-scope';
 import {
@@ -163,9 +164,15 @@ export const sentryTriageJob = createScheduledTriageJob({
       return { kind: 'skip', reason: 'frequency is off' };
     }
 
-    const selectedRepositories = await getActiveRepositoryFullNames();
-    const repositoryCoverage =
-      await buildRepositoryCoverage(selectedRepositories);
+    const activeRepositories = await getActiveRepositoriesForProviders(
+      sourceControlProviders,
+    );
+    const repositoryCoverage = await buildRepositoryCoverage(
+      activeRepositories.map((repository) => ({
+        repositoryId: repository.id,
+        repositoryFullName: repository.fullName,
+      })),
+    );
     const environmentBackedRepositories = getEnvironmentBackedCoverage(
       repositoryCoverage,
     ).map((coverage) => coverage.repositoryFullName);

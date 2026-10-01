@@ -54,25 +54,6 @@ export async function getActiveRepositoryFullNames(): Promise<string[]> {
   );
 }
 
-export async function getActiveGitHubRepositoryFullNames(): Promise<string[]> {
-  const rows = await db
-    .select({
-      fullName: repositories.fullName,
-    })
-    .from(repositories)
-    .where(
-      and(
-        eq(repositories.isActive, true),
-        eq(repositories.sourceControlProvider, 'github'),
-      ),
-    )
-    .orderBy(repositories.fullName);
-
-  return [...new Set(rows.map((row) => row.fullName).filter(Boolean))].sort(
-    (left, right) => left.localeCompare(right),
-  );
-}
-
 export type ActiveRepositoryProviderPartition = {
   provider: SourceControlProvider;
   host: string | null;
