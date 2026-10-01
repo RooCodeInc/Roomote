@@ -685,12 +685,14 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       'Anything sent to customers is high risk.',
     );
     expect(questions.guidanceFlagsRisk).toBeDefined();
+    // The question is about what this call does, so a read on the way to a
+    // flagged action is not flagged.
     expect(questions.guidanceFlagsRisk.criteria).toEqual({
-      true: expect.stringContaining('specifically marks'),
-      false: expect.stringContaining('is silent'),
+      true: expect.stringContaining('This call itself performs'),
+      false: expect.stringContaining('step toward a flagged action'),
     });
     expect(questions.guidanceFlagsRisk.criteria.false).toContain(
-      'flags a different kind of action',
+      'performs a different action than the ones named',
     );
   });
 
