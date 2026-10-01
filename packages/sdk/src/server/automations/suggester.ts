@@ -39,7 +39,6 @@ import {
 import {
   emptyJobResult,
   resolveAutomationRunContext,
-  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -156,7 +155,7 @@ async function countOpenSuggestions(): Promise<number> {
 }
 
 export async function suggesterJob(
-  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
+  opts: AutomationRunOpts,
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting suggester evaluator`);
 

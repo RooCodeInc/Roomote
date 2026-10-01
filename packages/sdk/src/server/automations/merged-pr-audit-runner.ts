@@ -51,7 +51,6 @@ import {
   appendAutomationWebhookInput,
   emptyJobResult,
   resolveAutomationRunContext,
-  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -782,9 +781,9 @@ async function processDeployment(
 
 export function createMergedPullRequestAuditJob(
   config: MergedPullRequestAuditConfig,
-): (opts?: AutomationRunOpts) => Promise<AutomationJobResult> {
+): (opts: AutomationRunOpts) => Promise<AutomationJobResult> {
   return async function mergedPullRequestAuditJob(
-    opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
+    opts: AutomationRunOpts,
   ): Promise<AutomationJobResult> {
     const logPrefix = getLogPrefix(config.automationKey);
     console.log(

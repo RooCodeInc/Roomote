@@ -1,3 +1,7 @@
+const SCHEDULED_RUN_OPTS = {
+  context: { trigger: 'scheduled' },
+} as const;
+
 const {
   mockDbSelect,
   mockGetAutomationRuntime,
@@ -112,7 +116,7 @@ describe('createScheduledTriageJob', () => {
       }),
     });
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
     expect(mockEnqueueTask.mock.calls[0]![0]).toMatchObject({
@@ -185,7 +189,7 @@ describe('createScheduledTriageJob', () => {
       buildScanTask: async () => ({ kind: 'scan', payloads: [] }),
     });
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(result.launchedTaskId).toBeNull();
@@ -229,7 +233,7 @@ describe('createScheduledTriageJob', () => {
     const result = await createScheduledTriageJob({
       automationKey: 'sentry_triage',
       buildScanTask,
-    })();
+    })(SCHEDULED_RUN_OPTS);
     expect(mockIsRunDue).toHaveBeenCalledTimes(1);
     expect(buildScanTask).toHaveBeenCalledTimes(1);
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);

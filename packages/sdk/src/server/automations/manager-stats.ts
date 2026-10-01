@@ -39,7 +39,6 @@ import { isManagerStatsRunDueOnLocalPeriod } from './scheduling-utils';
 import {
   emptyJobResult,
   resolveAutomationRunContext,
-  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -271,7 +270,7 @@ async function postManagerStatsViaCommunicationAdapter(params: {
 }
 
 export async function managerStatsJob(
-  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
+  opts: AutomationRunOpts,
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting manager stats job`);
 

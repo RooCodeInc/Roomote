@@ -7,13 +7,12 @@ import {
 } from './destination';
 import {
   emptyJobResult,
-  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
 
 export async function releaseAnnouncementsJob(
-  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
+  opts: AutomationRunOpts,
 ): Promise<AutomationJobResult> {
   const result = emptyJobResult();
   const runtime = await getAutomationRuntime('release_announcements');
