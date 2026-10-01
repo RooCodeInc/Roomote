@@ -214,6 +214,15 @@ describe('recommendFromAutoAnswers', () => {
         matchesRequest: 0.3,
       }),
     ).toBe('ask');
+    // A plan the owner agreed to is judged on its own: "go ahead" need not
+    // match anything by itself.
+    expect(
+      recommendFromAutoAnswers({
+        ...write,
+        agreedToPlan: 0.85,
+        matchesRequest: 0.3,
+      }),
+    ).toBe('approve');
     // With no request to match, the full bar still authorizes.
     expect(
       recommendFromAutoAnswers({

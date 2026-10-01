@@ -165,12 +165,14 @@ const NO = 0.2;
  */
 const AUTHORIZED_WITH_MATCH = 0.75;
 /**
- * No authorization counts for a call that plainly is not what the request
- * is about. The next item of a different job can reach the authorization
+ * Continuing an approved call does not count for a call that plainly is not
+ * what the request is about. The next item of a different job can reach the
  * cutoff on continuation alone in some runs, but scores far below this on
- * matching the request; calls the owner did authorize score well above it.
+ * matching the request; real continuations score well above it. A plan the
+ * owner agreed to is judged on its own: a reply such as "go ahead" need not
+ * match anything by itself.
  */
-const AUTHORIZED_MIN_MATCH = 0.5;
+const CONTINUATION_MIN_MATCH = 0.5;
 const MAX_SESSION_CONTEXT_MESSAGES = 8;
 const MAX_SESSION_CONTEXT_MESSAGE_LENGTH = 1_500;
 const MAX_SESSION_CONTEXT_LENGTH = 6_000;
@@ -338,14 +340,17 @@ export function recommendFromAutoAnswers(
         (options.allowlistedInternalRead ? INTERNAL_READ_MIN_ONLY_READS : YES);
   const routine = reads && (answers.matchesRequest ?? 1) >= YES;
   // After the owner rejected a call to this tool, only a routine call runs.
+  const continuation =
+    (answers.matchesRequest ?? 1) >= CONTINUATION_MIN_MATCH
+      ? (answers.continuesApprovedCall ?? 0)
+      : 0;
   const authorization = Math.max(
     answers.userAuthorized ?? 0,
-    answers.continuesApprovedCall ?? 0,
+    continuation,
     answers.agreedToPlan ?? 0,
   );
   const authorized =
     !options.sameToolRejected &&
-    (answers.matchesRequest ?? 1) >= AUTHORIZED_MIN_MATCH &&
     (authorization >= YES ||
       (authorization >= AUTHORIZED_WITH_MATCH &&
         (answers.matchesRequest ?? 0) >= YES)) &&
