@@ -110,13 +110,13 @@ function buildMarkdownNotificationText(
   run: NotifiedRun,
   error: string,
   source: string,
+  fallbackNotice: boolean,
 ): string {
   const taskUrl = getTaskUrl({
     taskId: run.taskId,
     utm: { campaign: run.payloadKind, source },
   });
 
-  const fallbackNotice = error.startsWith('Switching to fallback model:');
   return [
     fallbackNotice ? error : TASK_TURN_PROVIDER_ERROR_TEXT,
     fallbackNotice ? null : `**Error details:** ${error}`,
@@ -126,7 +126,11 @@ function buildMarkdownNotificationText(
     .join('\n\n');
 }
 
-async function notifyTeams(run: NotifiedRun, error: string): Promise<boolean> {
+async function notifyTeams(
+  run: NotifiedRun,
+  error: string,
+  fallbackNotice: boolean,
+): Promise<boolean> {
   const provider =
     await createTeamsCommunicationProviderFromRuntimeCredentials();
 
@@ -156,7 +160,7 @@ async function notifyTeams(run: NotifiedRun, error: string): Promise<boolean> {
     serviceUrl,
     ...(threadId ? { threadId } : {}),
     ...(replyToMessageId ? { replyToMessageId } : {}),
-    text: buildMarkdownNotificationText(run, error, 'teams'),
+    text: buildMarkdownNotificationText(run, error, 'teams', fallbackNotice),
     textFormat: 'markdown',
   });
 
@@ -172,6 +176,7 @@ async function notifyThreadedMarkdownProvider(
   run: NotifiedRun,
   error: string,
   provider: 'discord' | 'telegram' | 'agentmail',
+  fallbackNotice: boolean,
 ): Promise<boolean> {
   const adapter =
     provider === 'discord'
@@ -203,7 +208,7 @@ async function notifyThreadedMarkdownProvider(
     channelId,
     ...(threadId ? { threadId } : {}),
     ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
-    text: buildMarkdownNotificationText(run, error, provider),
+    text: buildMarkdownNotificationText(run, error, provider, fallbackNotice),
     textFormat: 'markdown',
   });
 
@@ -215,7 +220,11 @@ async function notifyThreadedMarkdownProvider(
  * never touches the started message or its Cancel button: the task is still
  * live and resumable, so its controls must stay usable.
  */
-async function notifySlack(run: NotifiedRun, error: string): Promise<boolean> {
+async function notifySlack(
+  run: NotifiedRun,
+  error: string,
+  fallbackNotice: boolean,
+): Promise<boolean> {
   const slackInstallation = await db.query.slackInstallations.findFirst({
     where: and(eq(slackInstallations.isActive, true)),
   });
@@ -236,7 +245,6 @@ async function notifySlack(run: NotifiedRun, error: string): Promise<boolean> {
     return false;
   }
 
-  const fallbackNotice = error.startsWith('Switching to fallback model:');
   const text = fallbackNotice
     ? error
     : `:warning: ${escapeSlackMrkdwnText(error)}`;
@@ -354,21 +362,27 @@ async function notifySourceThreadOfTerminalProviderError(input: {
   }
 
   let delivered = false;
+  const fallbackNotice = input.preformatted === true;
 
   try {
     switch (provider) {
       case 'slack':
-        delivered = await notifySlack(run, error);
+        delivered = await notifySlack(run, error, fallbackNotice);
         break;
       case 'teams':
-        delivered = await notifyTeams(run, error);
+        delivered = await notifyTeams(run, error, fallbackNotice);
         break;
       case 'discord':
       case 'telegram':
       case 'agentmail':
         // Email threads get the same threaded markdown notice; the adapter
         // resolves the reply route from the conversation id in threadId.
-        delivered = await notifyThreadedMarkdownProvider(run, error, provider);
+        delivered = await notifyThreadedMarkdownProvider(
+          run,
+          error,
+          provider,
+          fallbackNotice,
+        );
         break;
     }
   } finally {

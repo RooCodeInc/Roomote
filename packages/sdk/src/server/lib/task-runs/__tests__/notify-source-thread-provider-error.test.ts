@@ -503,6 +503,8 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     expect(postedText).not.toContain('sk-secret');
     expect(postedText).not.toContain('openai/@everyone');
     expect(postedText).not.toContain('attacker.example/provider');
+    expect(postedText).not.toContain('had to stop');
+    expect(postedText).not.toContain("reply and I'll pick it back up");
   });
 
   it('does not notify the Session for a transient provider retry notice', async () => {
