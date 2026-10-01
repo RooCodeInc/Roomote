@@ -474,6 +474,51 @@ describe('auto-approved reservations', () => {
     await expect(guarded(other.approvalId, 'other_tool')).resolves.toBe(true);
   });
 
+  it('waits for a rejection in progress and then loses the claim to it', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const reserved = await insertAutoApprovedIntegrationToolApproval(context, {
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: call.args,
+    });
+    const pending = await insertPending(context);
+
+    let claim: Promise<boolean> | undefined;
+    // The owner's rejection is mid-transaction when Auto tries to claim.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(integrationToolApprovalRequests)
+        .set({
+          status: 'rejected',
+          decidedByUserId: userId,
+          decidedAt: sql`clock_timestamp()`,
+        })
+        .where(eq(integrationToolApprovalRequests.id, pending.approvalId));
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${sessionId}:${call.integrationId}:${call.toolName}`}, 0))`,
+      );
+      claim = claimAutoApprovedIntegrationToolApproval({
+        approvalId: reserved.approvalId,
+        requesterUserId: userId,
+        unlessToolRejected: {
+          sessionId,
+          integrationId: call.integrationId,
+          toolName: call.toolName,
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    });
+
+    await expect(claim).resolves.toBe(false);
+    expect(
+      (await getIntegrationToolApproval(reserved.approvalId))?.status,
+    ).toBe('cancelled');
+  });
+
   it('inserts an unrelayed approved decision and claims it exactly once', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);

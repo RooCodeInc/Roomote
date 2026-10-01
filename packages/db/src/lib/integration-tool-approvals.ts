@@ -500,6 +500,19 @@ export async function getIntegrationToolApproval(
 }
 
 /**
+ * Serializes a rejection of a session's tool with Auto's claim of a call to
+ * the same tool: whichever commits first is the one the other sees.
+ */
+async function lockToolRejections(
+  tx: DatabaseOrTransaction,
+  tool: { sessionId: string; integrationId: string; toolName: string },
+): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${tool.sessionId}:${tool.integrationId}:${tool.toolName}`}, 0))`,
+  );
+}
+
+/**
  * Requester-only decision. The conditional update is the whole authority
  * check: wrong approver, already-decided (duplicate response), and expired
  * rows all match zero rows and fail closed.
@@ -532,6 +545,15 @@ export async function decideIntegrationToolApproval(
     if (!row) {
       throw new IntegrationToolApprovalUnavailableError('approval_not_found');
     }
+    if (input.decision === 'rejected') {
+      // Held until this rejection commits, so an Auto claim of the same tool
+      // that runs after it sees the rejection.
+      await lockToolRejections(tx, {
+        sessionId: context.sessionId,
+        integrationId: row.integrationId,
+        toolName: row.toolName,
+      });
+    }
     // "Don't ask again this session": the same authority check that accepted
     // this decision also records the session-scoped allow, so the override
     // can only ever come from the requester answering a real ask.
@@ -556,9 +578,15 @@ export async function decideIntegrationToolApproval(
 async function claimApprovedIntegrationToolApproval(
   input: { approvalId: string; requesterUserId: string },
   claimedStatus: 'consumed' | 'auto_approved',
-  condition?: SQL,
+  guard?: {
+    lock: (tx: DatabaseOrTransaction) => Promise<void>;
+    condition: SQL;
+  },
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
+    // Taken before the claim, so the claim's check reads after any
+    // conflicting decision that already holds the lock has committed.
+    await guard?.lock(tx);
     const [row] = await tx
       .update(integrationToolApprovalRequests)
       .set({ status: claimedStatus })
@@ -570,7 +598,7 @@ async function claimApprovedIntegrationToolApproval(
             input.requesterUserId,
           ),
           eq(integrationToolApprovalRequests.status, 'approved'),
-          condition,
+          guard?.condition,
         ),
       )
       .returning({ id: integrationToolApprovalRequests.id });
@@ -810,8 +838,8 @@ export async function claimAutoApprovedIntegrationToolApproval(input: {
   requesterUserId: string;
   /**
    * Fail the claim if the requester has rejected a call to this tool in the
-   * session. It is checked in the claim itself, so a rejection that commits
-   * before the call runs is never missed.
+   * session. The claim and rejections of the tool share a lock, so a
+   * rejection that commits before the claim is never missed.
    */
   unlessToolRejected?: {
     sessionId: string;
@@ -825,22 +853,25 @@ export async function claimAutoApprovedIntegrationToolApproval(input: {
     input,
     'auto_approved',
     tool
-      ? notExists(
-          db
-            .select({ id: rejection.id })
-            .from(rejection)
-            .where(
-              and(
-                eq(rejection.sessionId, tool.sessionId),
-                eq(rejection.requesterUserId, input.requesterUserId),
-                eq(rejection.decidedByUserId, input.requesterUserId),
-                isNull(rejection.taskId),
-                eq(rejection.integrationId, tool.integrationId),
-                eq(rejection.toolName, tool.toolName),
-                eq(rejection.status, 'rejected'),
+      ? {
+          lock: (tx) => lockToolRejections(tx, tool),
+          condition: notExists(
+            db
+              .select({ id: rejection.id })
+              .from(rejection)
+              .where(
+                and(
+                  eq(rejection.sessionId, tool.sessionId),
+                  eq(rejection.requesterUserId, input.requesterUserId),
+                  eq(rejection.decidedByUserId, input.requesterUserId),
+                  isNull(rejection.taskId),
+                  eq(rejection.integrationId, tool.integrationId),
+                  eq(rejection.toolName, tool.toolName),
+                  eq(rejection.status, 'rejected'),
+                ),
               ),
-            ),
-        )
+          ),
+        }
       : undefined,
   );
   if (!claimed && tool) {
