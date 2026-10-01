@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   record: vi.fn(async () => undefined),
   recordShadow: vi.fn(async () => undefined),
   settings: vi.fn(async () => ({ mode: 'off', policy: '' })),
+  sessionAuto: vi.fn(async (_sessionId: string) => false),
   experiment: vi.fn(async () => true),
   nightlyExperimentsEnabled: true as boolean | string,
   isEnvFlagEnabled: vi.fn(
@@ -18,6 +19,7 @@ vi.mock('../typesafe-judgment', () => ({
 vi.mock('@roomote/db/server', async () => ({
   getIntegrationToolAutoSettings: mocks.settings,
   isDeploymentExperimentEnabled: mocks.experiment,
+  isIntegrationToolAutoEnabledForSession: mocks.sessionAuto,
   recordIntegrationToolAutoEvaluation: mocks.record,
   recordIntegrationToolShadowEvaluation: mocks.recordShadow,
 }));
@@ -88,10 +90,13 @@ const call = {
   userRequest: 'What is open for ENG?',
   userId: 'user-1',
 };
+const session = { sessionId: 'session-1' };
+const sessionCall = { ...call, ...session };
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.settings.mockResolvedValue({ mode: 'off', policy: '' });
+  mocks.sessionAuto.mockResolvedValue(false);
   mocks.resolveModel.mockResolvedValue({ kind: 'judgment' });
   mocks.experiment.mockResolvedValue(true);
   mocks.nightlyExperimentsEnabled = true;
@@ -1177,31 +1182,44 @@ describe('resolveIntegrationToolAutoState', () => {
     );
   });
 
-  it('is on with the experiment and the setting, even when no judgment model is left', async () => {
-    mocks.settings.mockResolvedValue({ mode: 'on', policy: 'Reads are fine.' });
-    await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
+  it("is on with the experiment and the session owner's choice, even when no judgment model is left", async () => {
+    mocks.settings.mockResolvedValue({
+      mode: 'off',
+      policy: 'Reads are fine.',
+    });
+    mocks.sessionAuto.mockResolvedValue(true);
+    await expect(
+      resolveIntegrationToolAutoState(session),
+    ).resolves.toMatchObject({
       mode: 'on',
       model: 'judgment',
       settings: { policy: 'Reads are fine.' },
     });
+    expect(mocks.sessionAuto).toHaveBeenCalledWith('session-1');
 
-    // The setting can outlive the model: on stays on so callers ask or deny
+    // The choice can outlive the model: on stays on so callers ask or deny
     // based on presence instead of silently running unassessed calls. The
     // helper-model fallback is an LLM call per tool call: never implied.
     mocks.resolveModel.mockResolvedValue({ kind: 'helper', model: 'm' });
-    await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
+    await expect(
+      resolveIntegrationToolAutoState(session),
+    ).resolves.toMatchObject({
       mode: 'on',
       model: 'helper',
     });
     mocks.resolveModel.mockResolvedValue(null);
-    await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
+    await expect(
+      resolveIntegrationToolAutoState(session),
+    ).resolves.toMatchObject({
       mode: 'on',
       model: null,
     });
 
     mocks.resolveModel.mockResolvedValue({ kind: 'judgment' });
     mocks.experiment.mockResolvedValue(false);
-    await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
+    await expect(
+      resolveIntegrationToolAutoState(session),
+    ).resolves.toMatchObject({
       mode: 'off',
     });
     // Auto has an experiment of its own; per-tool approvals do not.
@@ -1213,11 +1231,38 @@ describe('resolveIntegrationToolAutoState', () => {
     });
   });
 
+  it('is off for every session until its owner turns it on', async () => {
+    // The deployment-wide setting does not turn Auto on.
+    mocks.settings.mockResolvedValue({ mode: 'on', policy: '' });
+    await expect(
+      resolveIntegrationToolAutoState(session),
+    ).resolves.toMatchObject({ mode: 'shadow' });
+
+    // One session's choice is not another's, and without a session there is
+    // no owner to have chosen.
+    mocks.sessionAuto.mockImplementation(
+      async (sessionId: string) => sessionId === 'session-1',
+    );
+    await expect(
+      resolveIntegrationToolAutoState({ sessionId: 'session-2' }),
+    ).resolves.toMatchObject({ mode: 'shadow' });
+    await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
+      mode: 'shadow',
+    });
+    await expect(
+      resolveIntegrationToolAutoState({ sessionId: null }),
+    ).resolves.toMatchObject({ mode: 'shadow' });
+    await expect(
+      resolveIntegrationToolAutoState(session),
+    ).resolves.toMatchObject({ mode: 'on' });
+  });
+
   it('keeps saved customer opt-ins off unless the deployment explicitly opts into nightly experiments', async () => {
     mocks.nightlyExperimentsEnabled = false;
     mocks.settings.mockResolvedValue({ mode: 'on', policy: 'Old guidance' });
+    mocks.sessionAuto.mockResolvedValue(true);
 
-    await expect(resolveIntegrationToolAutoState()).resolves.toEqual({
+    await expect(resolveIntegrationToolAutoState(session)).resolves.toEqual({
       mode: 'off',
       settings: { mode: 'on', policy: 'Old guidance' },
       model: null,
@@ -1228,8 +1273,11 @@ describe('resolveIntegrationToolAutoState', () => {
   it('treats a string false nightly flag as disabled when env validation is skipped', async () => {
     mocks.nightlyExperimentsEnabled = 'false';
     mocks.settings.mockResolvedValue({ mode: 'on', policy: 'Old guidance' });
+    mocks.sessionAuto.mockResolvedValue(true);
 
-    await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
+    await expect(
+      resolveIntegrationToolAutoState(session),
+    ).resolves.toMatchObject({
       mode: 'off',
       model: null,
     });
@@ -1318,9 +1366,13 @@ describe('recordIntegrationToolShadowEvaluationInBackground', () => {
     );
   });
 
-  it('records nothing while Auto is on or fully off', async () => {
-    mocks.settings.mockResolvedValue({ mode: 'on', policy: '' });
-    recordIntegrationToolShadowEvaluationInBackground(shadowCall);
+  it('records nothing while Auto is on for the session or fully off', async () => {
+    mocks.sessionAuto.mockResolvedValue(true);
+    recordIntegrationToolShadowEvaluationInBackground({
+      ...shadowCall,
+      ...session,
+    });
+    mocks.sessionAuto.mockResolvedValue(false);
     mocks.resolveModel.mockResolvedValue(null);
     recordIntegrationToolShadowEvaluationInBackground(shadowCall);
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -1331,21 +1383,24 @@ describe('recordIntegrationToolShadowEvaluationInBackground', () => {
 
 describe('resolveIntegrationToolAutoDecision', () => {
   it('runs unassessed unless on, and then runs only a routine call', async () => {
-    await expect(resolveIntegrationToolAutoDecision(call)).resolves.toEqual({
+    await expect(
+      resolveIntegrationToolAutoDecision(sessionCall),
+    ).resolves.toEqual({
       action: 'run',
       mode: 'off',
     });
     expect(mocks.evaluate).not.toHaveBeenCalled();
 
     mocks.settings.mockResolvedValue({
-      mode: 'on',
+      mode: 'off',
       policy: 'Reads are routine.',
     });
+    mocks.sessionAuto.mockResolvedValue(true);
     mocks.evaluate.mockResolvedValue(
       modelAnswers({ ...routine, guidanceFlagsRisk: 0.05 }),
     );
     await expect(
-      resolveIntegrationToolAutoDecision(call),
+      resolveIntegrationToolAutoDecision(sessionCall),
     ).resolves.toMatchObject({
       action: 'approve',
       mode: 'on',
@@ -1364,11 +1419,11 @@ describe('resolveIntegrationToolAutoDecision', () => {
       }),
     );
     await expect(
-      resolveIntegrationToolAutoDecision(call),
+      resolveIntegrationToolAutoDecision(sessionCall),
     ).resolves.toMatchObject({ action: 'ask', mode: 'on' });
     mocks.evaluate.mockResolvedValue(null);
     await expect(
-      resolveIntegrationToolAutoDecision(call),
+      resolveIntegrationToolAutoDecision(sessionCall),
     ).resolves.toMatchObject({
       action: 'ask',
       mode: 'on',
@@ -1377,10 +1432,10 @@ describe('resolveIntegrationToolAutoDecision', () => {
   });
 
   it('asks when Auto is on but no judgment model is configured', async () => {
-    mocks.settings.mockResolvedValue({ mode: 'on', policy: '' });
+    mocks.sessionAuto.mockResolvedValue(true);
     mocks.resolveModel.mockResolvedValue(null);
     await expect(
-      resolveIntegrationToolAutoDecision(call),
+      resolveIntegrationToolAutoDecision(sessionCall),
     ).resolves.toMatchObject({
       action: 'ask',
       mode: 'on',
@@ -1389,7 +1444,7 @@ describe('resolveIntegrationToolAutoDecision', () => {
     // The helper model is never used for tool-call assessment.
     mocks.resolveModel.mockResolvedValue({ kind: 'helper', model: 'm' });
     await expect(
-      resolveIntegrationToolAutoDecision(call),
+      resolveIntegrationToolAutoDecision(sessionCall),
     ).resolves.toMatchObject({ action: 'ask', mode: 'on' });
     expect(mocks.evaluate).not.toHaveBeenCalled();
   });

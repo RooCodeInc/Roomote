@@ -241,7 +241,7 @@ export async function resolveTaskIntegrationToolApprovals(input: {
         resolveServers: input.resolveServers,
         sessionId: session?.sessionId,
       }),
-      resolveIntegrationToolAutoState(),
+      resolveIntegrationToolAutoState({ sessionId: session?.sessionId }),
     ]);
   return compileTaskIntegrationToolApprovals({
     serverNames: Object.keys(servers),
@@ -330,7 +330,8 @@ export async function requestTaskToolApproval(input: {
     (await isIntegrationToolAutoSuspendedForSession(session.sessionId));
   if (
     autoSuspended &&
-    (await resolveIntegrationToolAutoState()).mode !== 'on'
+    (await resolveIntegrationToolAutoState({ sessionId: session.sessionId }))
+      .mode !== 'on'
   ) {
     return { outcome: 'not_required' };
   }
@@ -347,6 +348,7 @@ export async function requestTaskToolApproval(input: {
             )),
           userId: session.ownerUserId,
           taskId: session.taskId,
+          sessionId: session.sessionId,
         }).catch(() => ({
           action: 'ask' as const,
           mode: 'on' as const,

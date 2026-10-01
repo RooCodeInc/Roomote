@@ -21,6 +21,7 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
 let currentEnvironmentsPending = false;
 let currentBrainConfigured = false;
 let currentPrivateSessionsExperimentEnabled = false;
+let currentAutoToolApprovalsOffer = { shown: false, available: false };
 let currentHomeSuggestions: string[] = [];
 let currentHomeSuggestionsHasData = true;
 let currentHomeSuggestionsPending = false;
@@ -147,6 +148,10 @@ vi.mock('@/hooks/usePrivateSessionsExperiment', () => ({
   usePrivateSessionsExperiment: () => ({
     enabled: currentPrivateSessionsExperimentEnabled,
   }),
+}));
+
+vi.mock('@/hooks/useSessionAutoToolApprovals', () => ({
+  useNewSessionAutoToolApprovals: () => currentAutoToolApprovalsOffer,
 }));
 
 vi.mock('@/hooks/useLiveVoice', () => ({
@@ -338,6 +343,7 @@ describe('Home', () => {
     currentEnvironmentsPending = false;
     currentBrainConfigured = false;
     currentPrivateSessionsExperimentEnabled = false;
+    currentAutoToolApprovalsOffer = { shown: false, available: false };
     currentHomeSuggestions = [];
     currentHomeSuggestionsHasData = true;
     currentHomeSuggestionsPending = false;
@@ -438,6 +444,53 @@ describe('Home', () => {
         fastConversationId: '22222222-2222-4222-8222-222222222222',
         text: 'Test prompt',
       }),
+    );
+  });
+
+  it('offers the tool approvals mode in the composer, starting in Run', async () => {
+    const { unmount } = render(<NewTaskForm initialPrompt="First prompt" />);
+    // Not offered outside the experiment.
+    expect(
+      screen.queryByRole('button', { name: /^Tool approvals/ }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    currentAutoToolApprovalsOffer = { shown: true, available: true };
+    render(<NewTaskForm initialPrompt="First prompt" />);
+    expect(
+      screen.getByRole('button', { name: /^Tool approvals/ }),
+    ).toHaveTextContent('Run');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalled());
+    expect(mockStartFastSession.mock.calls[0]![0]).not.toHaveProperty(
+      'autoToolApprovals',
+    );
+  });
+
+  it('starts the session with Auto on when Auto is chosen', async () => {
+    currentAutoToolApprovalsOffer = { shown: true, available: true };
+    render(<NewTaskForm initialPrompt="First prompt" />);
+    fireEvent.click(screen.getByRole('button', { name: /^Tool approvals/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^Auto/ }));
+    expect(
+      screen.getByRole('button', { name: /^Tool approvals/ }),
+    ).toHaveTextContent('Auto');
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({ autoToolApprovals: true }),
+      );
+    });
+  });
+
+  it('cannot choose Auto while nothing can assess calls', () => {
+    currentAutoToolApprovalsOffer = { shown: true, available: false };
+    render(<NewTaskForm initialPrompt="First prompt" />);
+    fireEvent.click(screen.getByRole('button', { name: /^Tool approvals/ }));
+    expect(screen.getByRole('option', { name: /^Auto/ })).toBeDisabled();
+    expect(screen.getByRole('option', { name: /^Auto/ })).toHaveTextContent(
+      'Not available yet.',
     );
   });
 

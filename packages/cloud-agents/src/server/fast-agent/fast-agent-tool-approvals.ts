@@ -391,7 +391,7 @@ export async function resolveFastAgentToolApprovalRules(input: {
       input.sessionId
         ? listIntegrationToolSessionOverrides(input.sessionId)
         : Promise.resolve([]),
-      resolveIntegrationToolAutoState(),
+      resolveIntegrationToolAutoState({ sessionId: input.sessionId }),
     ]);
   // The Session owner's personal policies layer on the deployment ones; see
   // `resolveGoverningIntegrationToolPolicies` for the rule.
@@ -746,11 +746,12 @@ export function createFastAgentToolApprovalBridge(input: {
       const autoSuspended =
         autoCandidate &&
         (await isIntegrationToolAutoSuspendedForSession(input.sessionId));
-      // Auto turned off for the deployment since then: the tool runs as it
+      // Auto turned off for the session since then: the tool runs as it
       // always has, like any default tool asked under a stale rule.
       if (
         autoSuspended &&
-        (await resolveIntegrationToolAutoState()).mode !== 'on'
+        (await resolveIntegrationToolAutoState({ sessionId: input.sessionId }))
+          .mode !== 'on'
       ) {
         await helpers.reply(ask.requestId, 'once');
         return;
@@ -809,6 +810,7 @@ export function createFastAgentToolApprovalBridge(input: {
           isSessionLaunchedTask: (taskId) =>
             isFastAgentLaunchedTask(input.sessionId, taskId),
           userId: input.userId,
+          sessionId: input.sessionId,
         }).catch(() => ({
           action: 'ask' as const,
           mode: 'on' as const,

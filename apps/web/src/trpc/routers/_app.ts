@@ -63,8 +63,14 @@ import {
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
+  getFastSessionAutoToolApprovalsCommand,
+  setFastSessionAutoToolApprovalsCommand,
+} from '../commands/fast-sessions/auto-tool-approvals';
+import {
   deleteFastSessionQueuedMessageInputSchema,
   replyToFastSessionInputSchema,
+  fastSessionAutoToolApprovalsInputSchema,
+  setFastSessionAutoToolApprovalsInputSchema,
   fastSessionPrReviewActionInputSchema,
   fastSessionCapabilityOfferResponseInputSchema,
   startFastSessionInputSchema,
@@ -3414,6 +3420,16 @@ export const appRouter = createRouter({
       .input(updateFastSessionModelSelectionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         updateFastSessionModelSelectionCommand(auth, input),
+      ),
+    autoToolApprovals: protectedProcedure
+      .input(fastSessionAutoToolApprovalsInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionAutoToolApprovalsCommand(auth, input),
+      ),
+    setAutoToolApprovals: protectedProcedure
+      .input(setFastSessionAutoToolApprovalsInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setFastSessionAutoToolApprovalsCommand(auth, input),
       ),
     tasks: protectedProcedure
       .input(z.object({ sessionId: z.string().uuid() }))

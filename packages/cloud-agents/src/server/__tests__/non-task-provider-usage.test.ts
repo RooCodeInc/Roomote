@@ -668,6 +668,252 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('keeps relaying permission asks after the instance is disposed under the prompt', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    const ask = (id: string) => ({
+      id,
+      sessionID: 'session-1',
+      permission: 'workspace_pay_invoice',
+      tool: { messageID: `message-${id}`, callID: `call-${id}` },
+    });
+    // An ask raised while no stream was open is only in the pending list.
+    const permissionListMock = vi.fn(async () => ({
+      data: [ask('ask-in-gap')],
+      error: undefined,
+    }));
+    createOpencodeClientMock.mockReturnValue({
+      config: { providers: configProvidersMock },
+      event: { subscribe: eventSubscribeMock },
+      permission: { list: permissionListMock, reply: vi.fn() },
+      session: {
+        abort: sessionAbortMock,
+        children: sessionChildrenMock,
+        create: sessionCreateMock,
+        messages: sessionMessagesMock,
+        promptAsync: sessionPromptAsyncMock,
+        prompt: sessionPromptMock,
+      },
+    });
+    // A tool-configuration refresh disposes the instance just before the
+    // prompt, and that disposal closes the stream the prompt just opened.
+    eventSubscribeMock
+      .mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: 'server.instance.disposed' as const,
+            properties: { directory: '/tmp/roomote-fast-native-test' },
+          };
+        })(),
+      })
+      .mockImplementationOnce(async (_query, { signal }) => ({
+        stream: (async function* () {
+          // The reopened stream repeats the listed ask and adds a new one.
+          yield {
+            type: 'permission.asked' as const,
+            properties: ask('ask-in-gap'),
+          };
+          yield {
+            type: 'permission.asked' as const,
+            properties: ask('ask-live'),
+          };
+          await new Promise((resolve) =>
+            signal.addEventListener('abort', resolve, { once: true }),
+          );
+        })(),
+      }));
+    let markAsksRelayed!: () => void;
+    const asksRelayed = new Promise<void>((resolve) => {
+      markAsksRelayed = resolve;
+    });
+    const relayedAskIds: string[] = [];
+    const onPermissionAsked = vi.fn((request: { requestId: string }) => {
+      relayedAskIds.push(request.requestId);
+      if (relayedAskIds.length === 2) markAsksRelayed();
+    });
+    sessionPromptMock.mockImplementation(async () => {
+      await asksRelayed;
+      return {
+        data: {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            time: { created: 100, completed: 200 },
+          },
+          parts: [{ type: 'text', text: 'paid after approval' }],
+        },
+        error: undefined,
+      };
+    });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+    const disposeInstanceBeforeSession = { completed: false };
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'Pay the invoice.',
+          modelRole: 'primary',
+        },
+        {},
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          disposeInstanceBeforeSession,
+          onPermissionAsked,
+        },
+      ),
+    ).resolves.toBe('paid after approval');
+
+    expect(disposeInstanceBeforeSession.completed).toBe(true);
+    expect(eventSubscribeMock).toHaveBeenCalledTimes(2);
+    expect(permissionListMock).toHaveBeenCalledWith(
+      { directory: '/tmp/roomote-fast-native-test' },
+      { signal: expect.any(AbortSignal) },
+    );
+    // Each ask reaches the approval bridge exactly once.
+    expect(relayedAskIds).toEqual(['ask-in-gap', 'ask-live']);
+    expect(onPermissionAsked).toHaveBeenCalledWith(
+      {
+        requestId: 'ask-live',
+        sessionId: 'session-1',
+        permission: 'workspace_pay_invoice',
+        messageId: 'message-ask-live',
+        callId: 'call-ask-live',
+      },
+      expect.anything(),
+    );
+  });
+
+  it('retries the pending-ask lookup after a refresh and fails the prompt when it cannot be read', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    const ask = {
+      id: 'ask-in-gap',
+      sessionID: 'session-1',
+      permission: 'workspace_pay_invoice',
+    };
+    const permissionListMock = vi.fn();
+    createOpencodeClientMock.mockReturnValue({
+      config: { providers: configProvidersMock },
+      event: { subscribe: eventSubscribeMock },
+      permission: { list: permissionListMock, reply: vi.fn() },
+      session: {
+        abort: sessionAbortMock,
+        children: sessionChildrenMock,
+        create: sessionCreateMock,
+        messages: sessionMessagesMock,
+        promptAsync: sessionPromptAsyncMock,
+        prompt: sessionPromptMock,
+      },
+    });
+    const disposedThenOpen = () => {
+      eventSubscribeMock
+        .mockResolvedValueOnce({
+          stream: (async function* () {
+            yield {
+              type: 'server.instance.disposed' as const,
+              properties: { directory: '/tmp/roomote-fast-native-test' },
+            };
+          })(),
+        })
+        .mockImplementationOnce(async (_query, { signal }) => ({
+          // The reopened stream stays open and quiet until the prompt ends.
+          stream: (async function* () {
+            yield { type: 'server.connected' as const, properties: {} };
+            await new Promise((resolve) =>
+              signal.addEventListener('abort', resolve, { once: true }),
+            );
+          })(),
+        }));
+    };
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+    const run = (onPermissionAsked: () => void) =>
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'Pay the invoice.',
+          modelRole: 'primary',
+        },
+        {},
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          disposeInstanceBeforeSession: { completed: false },
+          onPermissionAsked,
+        },
+      );
+
+    // The new instance is still settling: one failed read, then the ask.
+    disposedThenOpen();
+    permissionListMock
+      .mockResolvedValueOnce({ data: undefined, error: { name: 'Busy' } })
+      .mockResolvedValueOnce({ data: [ask], error: undefined });
+    let markRelayed!: () => void;
+    const relayed = new Promise<void>((resolve) => {
+      markRelayed = resolve;
+    });
+    const onPermissionAsked = vi.fn(() => markRelayed());
+    sessionPromptMock.mockImplementation(async () => {
+      await relayed;
+      return {
+        data: {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            time: { created: 100, completed: 200 },
+          },
+          parts: [{ type: 'text', text: 'paid after approval' }],
+        },
+        error: undefined,
+      };
+    });
+    await expect(run(onPermissionAsked)).resolves.toBe('paid after approval');
+    expect(permissionListMock).toHaveBeenCalledTimes(2);
+    expect(onPermissionAsked).toHaveBeenCalledOnce();
+
+    // The pending asks cannot be read at all: the prompt fails instead of
+    // waiting on an ask nobody will answer.
+    disposedThenOpen();
+    permissionListMock.mockReset();
+    permissionListMock.mockRejectedValue(new Error('instance unavailable'));
+    sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+    const unanswered = vi.fn();
+    await expect(run(unanswered)).rejects.toThrow('instance unavailable');
+    expect(permissionListMock).toHaveBeenCalledTimes(4);
+    expect(unanswered).not.toHaveBeenCalled();
+
+    // The event stream itself cannot be reopened: the prompt fails too.
+    eventSubscribeMock
+      .mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: 'server.instance.disposed' as const,
+            properties: { directory: '/tmp/roomote-fast-native-test' },
+          };
+        })(),
+      })
+      .mockRejectedValueOnce(new Error('event stream unavailable'));
+    await expect(run(unanswered)).rejects.toThrow('event stream unavailable');
+    expect(unanswered).not.toHaveBeenCalled();
+  });
+
   it('records completed Fast OpenCode usage with a stable event key', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.4',

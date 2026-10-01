@@ -4,6 +4,7 @@ import {
   findLatestFastConversationUserRequest,
   findLatestTaskUserRequest,
   fingerprintIntegrationToolCall,
+  getSessionForFastConversation,
   getSessionForTask,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
@@ -34,6 +35,8 @@ export type ProxyToolApprovals = {
   defaultBlock?: 'needs_approval';
   /** Whether a call to a default tool should be shadow-assessed. */
   shadowDefaultTools: boolean;
+  /** The session the call belongs to, whose owner turns Auto on. */
+  sessionId?: string;
 };
 
 /**
@@ -67,10 +70,28 @@ export async function resolveProxyToolApprovalBlocks(input: {
   resolveActingUserId: () => Promise<string | null>;
   /** The run token's task, for its Session's overrides. */
   resolveTaskId?: () => Promise<string | null>;
+  /** The request's headers, for the Fast conversation a session's call names. */
+  requestHeaders?: Headers;
 }): Promise<ProxyToolApprovals> {
   const blocks = new Map<string, ProxyToolApprovalBlock>();
   const result: ProxyToolApprovals = { blocks, shadowDefaultTools: false };
-  const autoState = await resolveIntegrationToolAutoState();
+  // Auto is the session owner's choice for that session, so find the call's
+  // session first: a task's, or the one behind the conversation it names.
+  const taskId =
+    input.tokenType === 'run' ? await input.resolveTaskId?.() : null;
+  const fastConversationId =
+    input.tokenType === 'auth' && input.requestHeaders
+      ? readFastConversationIdHeader(input.requestHeaders)
+      : null;
+  const session = taskId
+    ? await getSessionForTask(db, taskId)
+    : fastConversationId
+      ? await getSessionForFastConversation(db, fastConversationId)
+      : null;
+  if (session) result.sessionId = session.id;
+  const autoState = await resolveIntegrationToolAutoState({
+    sessionId: session?.id,
+  });
   result.shadowDefaultTools = autoState.mode === 'shadow';
   if (autoState.mode === 'on' && input.tokenType === 'run') {
     result.defaultBlock = 'needs_approval';
@@ -98,8 +119,6 @@ export async function resolveProxyToolApprovalBlocks(input: {
   }
   const overrideModes = new Map<string, 'allow' | 'ask'>();
   if (input.tokenType === 'run') {
-    const taskId = await input.resolveTaskId?.();
-    const session = taskId ? await getSessionForTask(db, taskId) : null;
     const overrides = session
       ? await listIntegrationToolSessionOverrides(session.id)
       : [];
@@ -184,6 +203,7 @@ export function shadowProxyToolCall(
       : undefined;
   recordIntegrationToolShadowEvaluationInBackground({
     ...call,
+    sessionId: approvals.sessionId,
     ...(resolveUserRequest ? { resolveUserRequest } : {}),
   });
 }

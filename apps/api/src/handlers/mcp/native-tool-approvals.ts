@@ -60,6 +60,7 @@ export async function resolveNativeToolApprovalGuard(input: {
     tokenType: input.auth.tokenType,
     resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(input.auth),
     resolveTaskId: () => resolveRunTokenTaskId(input.auth),
+    requestHeaders: input.requestHeaders,
   });
 
   const inert =
