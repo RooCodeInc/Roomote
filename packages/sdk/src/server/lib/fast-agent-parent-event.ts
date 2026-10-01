@@ -73,6 +73,7 @@ import {
   type FastAgentScheduledWakeupEvent,
   type FastAgentSourceControlReplyTarget,
   type FastAgentParent,
+  type ModelFallbackNotice,
   type PullRequestStatus,
   RunStatus,
   type TaskRunErrorCode,
@@ -306,6 +307,14 @@ export type FastAgentParentEvent =
       taskUrl: string;
     }
   | {
+      type: 'task_model_fallback';
+      taskId: string;
+      runId: number;
+      messageTs: number;
+      fallback: ModelFallbackNotice;
+      taskUrl: string;
+    }
+  | {
       type: 'pull_request_opened';
       taskId: string;
       runId: number;
@@ -481,6 +490,8 @@ export function buildEventClientMessageSeed(
       return `fast-parent-settle:${event.runId}`;
     case 'task_turn_provider_error':
       return `fast-parent-task-turn-provider-error:${event.runId}:${event.messageTs}`;
+    case 'task_model_fallback':
+      return `fast-parent-task-model-fallback:${event.runId}:${event.messageTs}`;
   }
 }
 
@@ -3422,7 +3433,8 @@ export async function deliverFastAgentParentEventWithLock(
       platformEventHandling:
         params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected' ||
-        params.event.type === 'task_turn_provider_error'
+        params.event.type === 'task_turn_provider_error' ||
+        params.event.type === 'task_model_fallback'
           ? 'present_only'
           : 'default',
       platformEventVisibility:
@@ -3430,6 +3442,7 @@ export async function deliverFastAgentParentEventWithLock(
         (params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected' ||
         params.event.type === 'task_turn_provider_error' ||
+        params.event.type === 'task_model_fallback' ||
         (params.event.type === 'task_settled' &&
           params.parent.conversation.surface === 'web' &&
           !settleCloseoutAlreadyRelayed) ||

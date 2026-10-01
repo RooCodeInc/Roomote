@@ -1032,13 +1032,35 @@ function clearRuntimeModelForProvider(
   return modelId && isModelIdForProvider(modelId, providerId) ? null : modelId;
 }
 
+function pruneModelFallbackConfig(
+  rawConfig: unknown,
+  keepModelId: (modelId: string) => boolean,
+): ModelFallbackConfig | null {
+  if (rawConfig == null) return null;
+
+  const config = normalizeModelFallbackConfig(rawConfig);
+  return {
+    ...config,
+    roles: Object.fromEntries(
+      TASK_MODEL_ROLES.flatMap((role) => {
+        const fallback = config.roles[role];
+        return fallback && keepModelId(fallback.modelId)
+          ? [[role, fallback]]
+          : [];
+      }),
+    ),
+  };
+}
+
 function removeTaskModelsForProvider({
   settings,
   runtimeModelConfig,
+  modelFallbackConfig,
   providerId,
 }: {
   settings: ReturnType<typeof normalizeTaskModelSettings>;
   runtimeModelConfig: DeploymentModelConfig;
+  modelFallbackConfig: unknown;
   providerId: SetupModelProviderId;
 }) {
   const currentModels = settings.models ?? [];
@@ -1083,7 +1105,14 @@ function removeTaskModelsForProvider({
     ),
   } as DeploymentModelConfig;
 
-  return { taskModelSettings, runtimeModelConfig: nextRuntimeModelConfig };
+  return {
+    taskModelSettings,
+    runtimeModelConfig: nextRuntimeModelConfig,
+    modelFallbackConfig: pruneModelFallbackConfig(
+      modelFallbackConfig,
+      (modelId) => !isModelIdForProvider(modelId, providerId),
+    ),
+  };
 }
 
 export async function deleteTaskModelProviderCommand(
@@ -1115,6 +1144,7 @@ export async function deleteTaskModelProviderCommand(
       githubCopilotConnected,
       xaiSubscriptionConnected,
       persistedTaskModelSettings,
+      persistedDeployment,
     ] = await Promise.all([
       getDeploymentRuntimeModelConfig(),
       getPersistedEnvironmentVariableNames(tx),
@@ -1123,6 +1153,12 @@ export async function deleteTaskModelProviderCommand(
       isGitHubCopilotSubscriptionConnected(),
       isXaiSubscriptionConnected(),
       getDeploymentTaskModelSettings(),
+      tx
+        .select({ modelFallbackConfig: deploymentSettings.modelFallbackConfig })
+        .from(deploymentSettings)
+        .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
+        .limit(1)
+        .then(([row]) => row),
     ]);
 
     const providerSetup = buildSetupModelStatus({
@@ -1189,6 +1225,7 @@ export async function deleteTaskModelProviderCommand(
     const nextModelState = removeTaskModelsForProvider({
       settings: persistedTaskModelSettings,
       runtimeModelConfig: persistedRuntimeModelConfig,
+      modelFallbackConfig: persistedDeployment?.modelFallbackConfig,
       providerId: provider.id,
     });
     const nextSetupNewState = normalizeSetupNewState({
@@ -1206,6 +1243,7 @@ export async function deleteTaskModelProviderCommand(
         id: DEFAULT_DEPLOYMENT_ID,
         taskModelSettings: nextModelState.taskModelSettings,
         runtimeModelConfig: nextModelState.runtimeModelConfig,
+        modelFallbackConfig: nextModelState.modelFallbackConfig,
         setupNewState: nextSetupNewState,
         updatedAt: new Date(),
       })
@@ -1214,6 +1252,7 @@ export async function deleteTaskModelProviderCommand(
         set: {
           taskModelSettings: nextModelState.taskModelSettings,
           runtimeModelConfig: nextModelState.runtimeModelConfig,
+          modelFallbackConfig: nextModelState.modelFallbackConfig,
           setupNewState: nextSetupNewState,
           updatedAt: new Date(),
         },
@@ -1527,7 +1566,10 @@ export async function updateTaskModelSettingsCommand(
     // must be carried forward from the locked row so a concurrent sync
     // commit is not clobbered by a stale snapshot.
     const [persisted] = await tx
-      .select({ taskModelSettings: deploymentSettings.taskModelSettings })
+      .select({
+        taskModelSettings: deploymentSettings.taskModelSettings,
+        modelFallbackConfig: deploymentSettings.modelFallbackConfig,
+      })
       .from(deploymentSettings)
       .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
       .limit(1)
@@ -1544,6 +1586,10 @@ export async function updateTaskModelSettingsCommand(
         persisted?.taskModelSettings ?? null,
       ).catalogSyncedModelIds,
     });
+    const nextModelFallbackConfig = pruneModelFallbackConfig(
+      persisted?.modelFallbackConfig,
+      (modelId) => knownModelIds.has(modelId),
+    );
 
     await tx
       .insert(deploymentSettings)
@@ -1551,6 +1597,7 @@ export async function updateTaskModelSettingsCommand(
         id: DEFAULT_DEPLOYMENT_ID,
         taskModelSettings,
         runtimeModelConfig: nextRuntimeModelConfig,
+        modelFallbackConfig: nextModelFallbackConfig,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -1558,6 +1605,7 @@ export async function updateTaskModelSettingsCommand(
         set: {
           taskModelSettings,
           runtimeModelConfig: nextRuntimeModelConfig,
+          modelFallbackConfig: nextModelFallbackConfig,
           updatedAt: new Date(),
         },
       });

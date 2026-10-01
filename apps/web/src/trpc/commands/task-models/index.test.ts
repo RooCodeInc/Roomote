@@ -1684,9 +1684,12 @@ describe('task model provider commands', () => {
   function mockPersistedSetupNewState(
     setupNewState: unknown,
     taskModelSettings: unknown = null,
+    modelFallbackConfig: unknown = null,
   ) {
     const selectImplementation = () =>
-      buildSelectChainMock([{ setupNewState, taskModelSettings }]);
+      buildSelectChainMock([
+        { setupNewState, taskModelSettings, modelFallbackConfig },
+      ]);
 
     mockDbSelect.mockImplementation(selectImplementation);
     mockDbTransaction.mockImplementation(
@@ -2447,6 +2450,12 @@ describe('task model provider commands', () => {
         roomoteExploreModelReasoningEffort: null,
         roomotePlanningModelReasoningEffort: null,
       },
+      modelFallbackConfig: {
+        enabled: true,
+        roles: {
+          coding: { modelId: 'xai/grok-4.5', reasoningEffort: null },
+        },
+      },
     };
     mockFindDeploymentSettings.mockImplementation(async (options) => {
       const columns = (options as { columns?: Record<string, boolean> })
@@ -2461,7 +2470,11 @@ describe('task model provider commands', () => {
       };
     });
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue(['XAI_API_KEY']);
-    mockPersistedSetupNewState({ modelProvider: 'xai' });
+    mockPersistedSetupNewState(
+      { modelProvider: 'xai' },
+      null,
+      persistedRow.modelFallbackConfig,
+    );
 
     await deleteTaskModelProviderCommand(buildMockAuth(), {
       provider: 'xai',
@@ -2534,6 +2547,19 @@ describe('task model provider commands', () => {
           ];
         }),
       ),
+      modelFallbackConfig: {
+        enabled: true,
+        roles: {
+          coding: {
+            modelId: 'anthropic/claude-sonnet-4',
+            reasoningEffort: 'high',
+          },
+          vision: {
+            modelId: 'openrouter/openai/gpt-5.6-terra',
+            reasoningEffort: 'medium',
+          },
+        },
+      },
     };
     mockFindDeploymentSettings.mockImplementation(async (options) => {
       const columns = (options as { columns?: Record<string, boolean> })
@@ -2551,7 +2577,11 @@ describe('task model provider commands', () => {
       'ANTHROPIC_API_KEY',
       'OPENROUTER_API_KEY',
     ]);
-    mockPersistedSetupNewState({ modelProvider: 'anthropic' });
+    mockPersistedSetupNewState(
+      { modelProvider: 'anthropic' },
+      null,
+      persistedRow.modelFallbackConfig,
+    );
 
     await deleteTaskModelProviderCommand(buildMockAuth(), {
       provider: 'anthropic',
@@ -2578,6 +2608,15 @@ describe('task model provider commands', () => {
         role === 'vision' ? 'openrouter/openai/gpt-5.6-terra' : null,
       );
     }
+    expect(updateSet.modelFallbackConfig).toEqual({
+      enabled: true,
+      roles: {
+        vision: {
+          modelId: 'openrouter/openai/gpt-5.6-terra',
+          reasoningEffort: 'medium',
+        },
+      },
+    });
     expect(updateSet.setupNewState.modelProvider).toBeNull();
   });
 });

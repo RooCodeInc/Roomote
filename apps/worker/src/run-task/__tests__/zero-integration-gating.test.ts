@@ -45,7 +45,7 @@ const {
 } = vi.hoisted(() => ({
   activateSkillsFolderMock: vi.fn(() => false),
   createHarnessMock: vi.fn().mockResolvedValue({
-    harness: {},
+    harness: { on: vi.fn(), isConnected: false },
     getSubprocess: vi.fn(() => ({})),
     unsubscribe: vi.fn().mockResolvedValue(undefined),
     flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),
@@ -269,7 +269,7 @@ describe('Zero integration runtime gating', () => {
     getMcpServerConfigsMock.mockResolvedValue({ servers: {} });
     resolvePackagedSkillsFolderMock.mockReturnValue('standard');
     createHarnessMock.mockResolvedValue({
-      harness: {},
+      harness: { on: vi.fn(), isConnected: false },
       getSubprocess: vi.fn(() => ({})),
       unsubscribe: vi.fn().mockResolvedValue(undefined),
       flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),

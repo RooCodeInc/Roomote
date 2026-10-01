@@ -5065,6 +5065,48 @@ describe('deliverFastAgentParentEvent', () => {
     ).not.toBe(buildEventClientMessageSeed(event));
   });
 
+  it('presents task model fallbacks immediately without treating the task as settled', async () => {
+    const event = {
+      type: 'task_model_fallback' as const,
+      taskId: 'task-1',
+      runId: 42,
+      messageTs: 1_789_790_000_000,
+      fallback: {
+        role: 'coding' as const,
+        trigger: 'immediate' as const,
+        fromProvider: 'openai',
+        fromModelId: 'openai/gpt-5.4',
+        errorSummary: 'The provider ran out of credits.',
+        toProvider: 'anthropic',
+        toModelId: 'anthropic/claude-sonnet-4',
+        toReasoningEffort: 'high' as const,
+      },
+      taskUrl: 'https://roomote.example/task/task-1',
+    };
+    await deliverFastAgentParentEvent({ parent, event });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('"type":"task_model_fallback"'),
+        platformEventHandling: 'present_only',
+        platformEventVisibility: 'required',
+        turnSource: 'platform_event',
+      }),
+    );
+    expect(buildEventClientMessageSeed(event)).toBe(
+      'fast-parent-task-model-fallback:42:1789790000000',
+    );
+    expect(
+      buildEventClientMessageSeed({
+        ...event,
+        fallback: { ...event.fallback, errorSummary: 'New wording' },
+      }),
+    ).toBe(buildEventClientMessageSeed(event));
+    expect(
+      buildEventClientMessageSeed({ ...event, messageTs: event.messageTs + 1 }),
+    ).not.toBe(buildEventClientMessageSeed(event));
+  });
+
   it('skips a claimed pull request event that became terminal before delivery', async () => {
     mocks.findTaskRun.mockResolvedValueOnce({ status: 'completed' });
     const result = await deliverFastAgentParentEvent({

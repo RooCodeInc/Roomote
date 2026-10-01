@@ -105,7 +105,10 @@ vi.mock('../slack-task-run-routing', () => ({
     mockResolveSlackTaskRunRouting(...args),
 }));
 
-import { maybeNotifySourceThreadOfTerminalProviderError } from '../notify-source-thread-provider-error';
+import {
+  maybeNotifySourceThreadOfModelFallback,
+  maybeNotifySourceThreadOfTerminalProviderError,
+} from '../notify-source-thread-provider-error';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -198,6 +201,25 @@ function makeEnvelope({
   } as unknown as Parameters<
     typeof maybeNotifySourceThreadOfTerminalProviderError
   >[0]['envelope'];
+}
+
+function makeFallbackEnvelope(ts = 1_700_000_000_001) {
+  return {
+    ...makeEnvelope({ ts, location: 'none' }),
+    metadata: {
+      sessionId: 'session-1',
+      modelFallbackNotice: {
+        role: 'coding',
+        trigger: 'immediate',
+        fromProvider: 'openai',
+        fromModelId: 'openai/gpt-5.4',
+        errorSummary: 'The provider ran out of credits.',
+        toProvider: 'anthropic',
+        toModelId: 'anthropic/claude-sonnet-4',
+        toReasoningEffort: 'high',
+      },
+    },
+  } as Parameters<typeof maybeNotifySourceThreadOfModelFallback>[0]['envelope'];
 }
 
 function notify(envelope: ReturnType<typeof makeEnvelope>): Promise<void> {
@@ -402,6 +424,43 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
       mockEnqueueParentEvent.mock.calls[1],
     );
     expect(mockRedisSet).not.toHaveBeenCalled();
+  });
+
+  it('durably queues a model fallback notice for the owning Session', async () => {
+    const fastAgentParent = {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'C123', threadId: '100.001' },
+      },
+    };
+    mockFindFirstRun.mockResolvedValue(
+      makeRun({ payload: payload({ fastAgentParent }) }),
+    );
+    const envelope = makeFallbackEnvelope(44);
+
+    await maybeNotifySourceThreadOfModelFallback({
+      runId: 7,
+      taskId: 'task-1',
+      envelope,
+    });
+
+    expect(mockEnqueueParentEvent).toHaveBeenCalledWith({
+      parent: fastAgentParent,
+      event: {
+        type: 'task_model_fallback',
+        taskId: 'task-1',
+        runId: 7,
+        messageTs: 44,
+        fallback: (envelope.metadata as Record<string, unknown>)
+          .modelFallbackNotice,
+        taskUrl: 'https://example.com/task',
+      },
+    });
+    expect(mockRedisSet).not.toHaveBeenCalled();
+    expect(mockSlackPostMessage).not.toHaveBeenCalled();
   });
 
   it('does not notify the Session for a transient provider retry notice', async () => {

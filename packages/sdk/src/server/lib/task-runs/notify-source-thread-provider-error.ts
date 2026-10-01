@@ -412,6 +412,34 @@ export async function maybeNotifySourceThreadOfModelFallback(input: {
 
   const text = `Switching to fallback model: ${notice.fromProvider} failed (${notice.errorSummary}). Continuing with ${notice.toModelId}.`;
   try {
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.runId),
+      with: { task: true },
+    });
+    if (!run || run.taskId !== input.taskId) return;
+
+    const parent = getFastAgentParentFromPayload(run.payload);
+    if (parent) {
+      await enqueueFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'task_model_fallback',
+          taskId: run.taskId,
+          runId: run.id,
+          messageTs: input.envelope.ts,
+          fallback: notice,
+          taskUrl: getTaskUrl({
+            taskId: run.taskId,
+            utm: {
+              campaign: 'fast-delegation-model-fallback',
+              source: parent.conversation.surface,
+            },
+          }),
+        },
+      });
+      return;
+    }
+
     await notifySourceThreadOfTerminalProviderError({
       runId: input.runId,
       taskId: input.taskId,
