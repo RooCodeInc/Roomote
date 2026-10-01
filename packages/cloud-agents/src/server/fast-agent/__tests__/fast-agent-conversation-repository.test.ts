@@ -1288,6 +1288,28 @@ describe('Fast conversation repository', () => {
       },
     ]);
 
+    // A large result is cut to its head, and oversized arguments are left
+    // out, before anything is loaded.
+    await persist({
+      eventId: 'large',
+      ts: 250,
+      payload: {
+        ...mcp,
+        serverName: 'hubspot',
+        toolName: 'export_deals',
+        rawInput: { arguments: { filter: 'x'.repeat(3_000) } },
+        output: `first-row ${'y'.repeat(20_000)}`,
+      },
+    });
+    const withLarge = await findRecentFastAgentToolResults({
+      conversationId: conversation.id,
+    });
+    const large = withLarge.at(-1)!;
+    expect(large.tool).toBe('hubspot.export_deals');
+    expect(large.output).toHaveLength(8_000);
+    expect(large.output.startsWith('first-row')).toBe(true);
+    expect(large).not.toHaveProperty('arguments');
+
     // Only the most recent results are kept.
     for (let index = 0; index < 31; index += 1) {
       await persist({

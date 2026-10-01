@@ -609,6 +609,8 @@ export async function findFastAgentRepliesBeforeHumanPrompt(input: {
 }
 
 const FAST_AGENT_RECENT_TOOL_RESULT_LIMIT = 30;
+const FAST_AGENT_RECENT_TOOL_RESULT_OUTPUT_LENGTH = 8_000;
+const FAST_AGENT_RECENT_TOOL_RESULT_ARGUMENTS_LENGTH = 2_000;
 
 /**
  * Results of the integration tools the agent ran most recently in this
@@ -616,48 +618,49 @@ const FAST_AGENT_RECENT_TOOL_RESULT_LIMIT = 30;
  * an identifier in a paused call refers to (a listing that maps ids to
  * names): it checks an identifier against all of them and shows the model
  * the newest few. Unfinished calls and Roomote's own tools are skipped.
+ * Each output is cut to its head in the query, and oversized arguments are
+ * left out, so one call never loads more than a bounded amount of text.
  */
 export async function findRecentFastAgentToolResults(input: {
   conversationId: string;
 }): Promise<Array<{ tool: string; arguments?: unknown; output: string }>> {
+  const payload = fastAgentMessages.payload;
   const rows = await db
-    .select({ payload: fastAgentMessages.payload })
+    .select({
+      toolName: sql<
+        string | null
+      >`coalesce(${payload}->>'mcpToolName', ${payload}->>'toolName')`,
+      serverName: sql<
+        string | null
+      >`coalesce(${payload}->>'mcpServerName', ${payload}->>'serverName')`,
+      arguments: sql<unknown>`case when length((${payload}->'rawInput'->'arguments')::text) <= ${FAST_AGENT_RECENT_TOOL_RESULT_ARGUMENTS_LENGTH} then ${payload}->'rawInput'->'arguments' end`,
+      output: sql<
+        string | null
+      >`left(${payload}->>'output', ${FAST_AGENT_RECENT_TOOL_RESULT_OUTPUT_LENGTH})`,
+    })
     .from(fastAgentMessages)
     .where(
       and(
         eq(fastAgentMessages.conversationId, input.conversationId),
         eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.ToolResult),
-        sql`${fastAgentMessages.payload}->>'status' = 'completed'`,
-        sql`${fastAgentMessages.payload}->>'isMcp' = 'true'`,
-        sql`coalesce(${fastAgentMessages.payload}->>'isRoomoteNativeTool', 'false') <> 'true'`,
+        sql`${payload}->>'status' = 'completed'`,
+        sql`${payload}->>'isMcp' = 'true'`,
+        sql`coalesce(${payload}->>'isRoomoteNativeTool', 'false') <> 'true'`,
       ),
     )
     .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
     .limit(FAST_AGENT_RECENT_TOOL_RESULT_LIMIT);
   return rows.reverse().flatMap((row) => {
-    const payload = row.payload as Record<string, unknown>;
-    const toolName = payload.mcpToolName ?? payload.toolName;
-    const serverName = payload.mcpServerName ?? payload.serverName;
-    if (
-      typeof toolName !== 'string' ||
-      typeof payload.output !== 'string' ||
-      !payload.output.trim()
-    ) {
-      return [];
-    }
-    const rawInput = payload.rawInput;
-    const args =
-      rawInput && typeof rawInput === 'object' && 'arguments' in rawInput
-        ? (rawInput as { arguments?: unknown }).arguments
-        : undefined;
+    if (!row.toolName || !row.output?.trim()) return [];
     return [
       {
-        tool:
-          typeof serverName === 'string' && serverName
-            ? `${serverName}.${toolName}`
-            : toolName,
-        ...(args === undefined ? {} : { arguments: args }),
-        output: payload.output,
+        tool: row.serverName
+          ? `${row.serverName}.${row.toolName}`
+          : row.toolName,
+        ...(row.arguments === null || row.arguments === undefined
+          ? {}
+          : { arguments: row.arguments }),
+        output: row.output,
       },
     ];
   });
