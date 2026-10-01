@@ -759,6 +759,84 @@ describe('lookupTaskModelCommand', () => {
     );
   });
 
+  it('prunes fallback selections when their model is disabled', async () => {
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          select: vi.fn(() => ({
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                limit: vi.fn(() => ({
+                  for: vi.fn(async () => [
+                    {
+                      taskModelSettings: null,
+                      modelFallbackConfig: {
+                        enabled: true,
+                        roles: {
+                          helper: {
+                            modelId: 'openrouter/z-ai/glm-5.2',
+                            reasoningEffort: 'low',
+                          },
+                          vision: {
+                            modelId: 'openai/gpt-5.6',
+                            reasoningEffort: 'medium',
+                          },
+                        },
+                      },
+                    },
+                  ]),
+                })),
+              })),
+            })),
+          })),
+          insert: mockInsertDeploymentSettings,
+        }),
+    );
+
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: 'openai/gpt-5.6',
+          displayName: 'GPT 5.6',
+          family: 'GPT',
+        },
+        {
+          id: 'z-ai/glm-5.2',
+          displayName: 'GLM 5.2',
+          family: 'GLM',
+        },
+      ],
+      allowedModelIds: ['openai/gpt-5.6'],
+      defaultModelId: 'openai/gpt-5.6',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          modelFallbackConfig: {
+            enabled: true,
+            roles: {
+              vision: {
+                modelId: 'openai/gpt-5.6',
+                reasoningEffort: 'medium',
+              },
+            },
+          },
+        }),
+      }),
+    );
+  });
+
   it('persists normalized coding-model routing rules', async () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'OPENROUTER_API_KEY',
@@ -1684,9 +1762,12 @@ describe('task model provider commands', () => {
   function mockPersistedSetupNewState(
     setupNewState: unknown,
     taskModelSettings: unknown = null,
+    modelFallbackConfig: unknown = null,
   ) {
     const selectImplementation = () =>
-      buildSelectChainMock([{ setupNewState, taskModelSettings }]);
+      buildSelectChainMock([
+        { setupNewState, taskModelSettings, modelFallbackConfig },
+      ]);
 
     mockDbSelect.mockImplementation(selectImplementation);
     mockDbTransaction.mockImplementation(
@@ -2447,6 +2528,12 @@ describe('task model provider commands', () => {
         roomoteExploreModelReasoningEffort: null,
         roomotePlanningModelReasoningEffort: null,
       },
+      modelFallbackConfig: {
+        enabled: true,
+        roles: {
+          coding: { modelId: 'xai/grok-4.5', reasoningEffort: null },
+        },
+      },
     };
     mockFindDeploymentSettings.mockImplementation(async (options) => {
       const columns = (options as { columns?: Record<string, boolean> })
@@ -2461,7 +2548,11 @@ describe('task model provider commands', () => {
       };
     });
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue(['XAI_API_KEY']);
-    mockPersistedSetupNewState({ modelProvider: 'xai' });
+    mockPersistedSetupNewState(
+      { modelProvider: 'xai' },
+      null,
+      persistedRow.modelFallbackConfig,
+    );
 
     await deleteTaskModelProviderCommand(buildMockAuth(), {
       provider: 'xai',
@@ -2534,6 +2625,19 @@ describe('task model provider commands', () => {
           ];
         }),
       ),
+      modelFallbackConfig: {
+        enabled: true,
+        roles: {
+          coding: {
+            modelId: 'anthropic/claude-sonnet-4',
+            reasoningEffort: 'high',
+          },
+          vision: {
+            modelId: 'openrouter/openai/gpt-5.6-terra',
+            reasoningEffort: 'medium',
+          },
+        },
+      },
     };
     mockFindDeploymentSettings.mockImplementation(async (options) => {
       const columns = (options as { columns?: Record<string, boolean> })
@@ -2551,7 +2655,11 @@ describe('task model provider commands', () => {
       'ANTHROPIC_API_KEY',
       'OPENROUTER_API_KEY',
     ]);
-    mockPersistedSetupNewState({ modelProvider: 'anthropic' });
+    mockPersistedSetupNewState(
+      { modelProvider: 'anthropic' },
+      null,
+      persistedRow.modelFallbackConfig,
+    );
 
     await deleteTaskModelProviderCommand(buildMockAuth(), {
       provider: 'anthropic',
@@ -2578,6 +2686,15 @@ describe('task model provider commands', () => {
         role === 'vision' ? 'openrouter/openai/gpt-5.6-terra' : null,
       );
     }
+    expect(updateSet.modelFallbackConfig).toEqual({
+      enabled: true,
+      roles: {
+        vision: {
+          modelId: 'openrouter/openai/gpt-5.6-terra',
+          reasoningEffort: 'medium',
+        },
+      },
+    });
     expect(updateSet.setupNewState.modelProvider).toBeNull();
   });
 });

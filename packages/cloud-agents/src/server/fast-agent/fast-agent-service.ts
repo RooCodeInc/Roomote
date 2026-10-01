@@ -65,6 +65,9 @@ import {
   FIND_INTEGRATION_TOOLS_TOOL,
   LIST_REPOSITORIES_MAX_LIMIT,
   matchIntegrationTools,
+  classifyModelFallbackTrigger,
+  getDisplayModelProviderId,
+  MODEL_FALLBACK_NOTICE_PAYLOAD_KEY,
 } from '@roomote/types';
 import {
   and,
@@ -94,7 +97,10 @@ import {
   sql,
   touchSessionActivity,
   withEnvironmentVerificationRetryLock,
+  resolveEffectiveModelRuntimeEnv,
+  fastAgentConversations,
 } from '@roomote/db/server';
+import { captureInstanceEvent } from '@roomote/telemetry/server';
 import {
   buildFastSessionUrl,
   buildSelectedTaskSessionUrl,
@@ -955,6 +961,11 @@ type FastAgentInferenceRetryOptions = {
    */
   consumeRetryBudgetReset?: () => boolean;
   signal?: AbortSignal;
+  switchToFallback?: (
+    error: unknown,
+    failure: FastAgentInferenceFailure,
+    retriesUsed: number,
+  ) => Promise<boolean>;
 };
 
 /**
@@ -1314,6 +1325,16 @@ async function runFastAgentInferenceWithRetries<T>(
       }
 
       const failure = classifyNonTaskInferenceError(error);
+      if (
+        options.canRetry?.(error, failure) !== false &&
+        (await options.switchToFallback?.(error, failure, totalRetryCount))
+      ) {
+        totalRetryCount = 0;
+        rejectionRetryUsed = false;
+        retryNumber = -1;
+        await options.prepareRetry?.();
+        continue;
+      }
       if (
         failure.retryable &&
         totalRetryCount < FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN &&
@@ -3684,6 +3705,18 @@ export async function answerFastAgentQuestion({
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
+    let modelRuntimeEnv: Record<string, string> = {};
+    try {
+      modelRuntimeEnv = await resolveEffectiveModelRuntimeEnv();
+    } catch {
+      // A missing or unavailable fallback config preserves existing behavior.
+    }
+    let orchestrationFallbackModel =
+      modelRuntimeEnv.R_ORCHESTRATION_MODEL_FALLBACK;
+    const orchestrationFallbackReasoning =
+      modelRuntimeEnv['R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT'];
+    let orchestrationFallbackUsed = false;
+    const fallbackExpectedStoredModel = session.model;
     currentSessionPrivacy = session.privacy ?? 'shared';
     currentPrivateOwnerUserId = session.privateOwnerUserId ?? null;
     privateSessionsExperimentEnabled =
@@ -7188,6 +7221,105 @@ export async function answerFastAgentQuestion({
                   return false;
                 }
                 noteInferenceRecoveryProgress();
+                return true;
+              },
+              switchToFallback: async (error, _failure, retriesUsed) => {
+                if (
+                  orchestrationFallbackUsed ||
+                  !orchestrationFallbackModel ||
+                  orchestrationFallbackModel === model
+                ) {
+                  return false;
+                }
+                const trigger = classifyModelFallbackTrigger(error, {
+                  retriesUsed,
+                });
+                if (!trigger) return false;
+                const fromModel =
+                  model ?? modelRuntimeEnv.R_ORCHESTRATION_MODEL;
+                if (!fromModel) return false;
+                const nextReasoning = REASONING_EFFORT_VALUES.includes(
+                  orchestrationFallbackReasoning as ReasoningEffort,
+                )
+                  ? (orchestrationFallbackReasoning as ReasoningEffort)
+                  : null;
+                const fromProvider =
+                  getDisplayModelProviderId(fromModel) ?? 'opencode';
+                const toProvider =
+                  getDisplayModelProviderId(orchestrationFallbackModel) ??
+                  'opencode';
+                const errorSummary = redactSecrets(
+                  classifyNonTaskInferenceError(error).message,
+                ).slice(0, 280);
+                const notice = {
+                  role: 'orchestration' as const,
+                  trigger,
+                  fromProvider,
+                  fromModelId: fromModel,
+                  errorSummary,
+                  toProvider,
+                  toModelId: orchestrationFallbackModel,
+                  toReasoningEffort: nextReasoning,
+                };
+                const [updatedConversation] = await db
+                  .update(fastAgentConversations)
+                  .set({
+                    model: orchestrationFallbackModel,
+                    reasoningEffort: nextReasoning,
+                    updatedAt: new Date(),
+                  })
+                  .where(
+                    and(
+                      eq(fastAgentConversations.id, session.id),
+                      sql`${fastAgentConversations.model} is not distinct from ${fallbackExpectedStoredModel}`,
+                    ),
+                  )
+                  .returning({ id: fastAgentConversations.id });
+                if (!updatedConversation) return false;
+                try {
+                  await upsertFastAgentMessage({
+                    sessionId: session.id,
+                    insertOnly: true,
+                    message: {
+                      eventId: `${turnId}:model-fallback:0`,
+                      turnId,
+                      turnSeq: 1_999_999_999,
+                      ts: Date.now(),
+                      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+                      role: 'assistant',
+                      contentBlocks: [
+                        { type: 'text', text: 'Switching to fallback model' },
+                      ],
+                      metadata: {
+                        visibleInTranscript: true,
+                        [MODEL_FALLBACK_NOTICE_PAYLOAD_KEY]: notice,
+                      },
+                      payload: {
+                        text: 'Switching to fallback model',
+                        [MODEL_FALLBACK_NOTICE_PAYLOAD_KEY]: notice,
+                      },
+                      source: 'roomote',
+                    },
+                  });
+                  await adapter.postReply({
+                    purpose: 'progress',
+                    message: `Switching to fallback model: ${fromProvider} failed (${errorSummary}). Continuing with ${orchestrationFallbackModel}.`,
+                  });
+                } catch (noticeError) {
+                  console.warn(
+                    `[Fast Agent] Failed to persist or post model fallback notice: ${formatErrorForLog(noticeError)}`,
+                  );
+                }
+                void captureInstanceEvent('model_fallback_switched', {
+                  fromProvider,
+                  fromModel,
+                  toProvider,
+                  toModel: orchestrationFallbackModel,
+                });
+                model = orchestrationFallbackModel;
+                reasoningEffort = nextReasoning;
+                orchestrationFallbackUsed = true;
+                orchestrationFallbackModel = undefined;
                 return true;
               },
               prepareRetry: () => {

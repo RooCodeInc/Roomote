@@ -76,7 +76,7 @@ const {
   taskRunsUpdateRuntimeStateMock: vi.fn().mockResolvedValue({ updated: true }),
   taskRunsUpdateMock: vi.fn().mockResolvedValue(undefined),
   createHarnessMock: vi.fn().mockResolvedValue({
-    harness: {},
+    harness: { on: vi.fn(), isConnected: false },
     getSubprocess: vi.fn(() => ({})),
     unsubscribe: vi.fn().mockResolvedValue(undefined),
     flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),
@@ -394,7 +394,7 @@ describe('runTask', () => {
     removeTaskFollowUpMock.mockReset().mockResolvedValue(undefined);
 
     createHarnessMock.mockResolvedValue({
-      harness: {},
+      harness: { on: vi.fn(), isConnected: false },
       getSubprocess: vi.fn(() => ({})),
       unsubscribe: vi.fn().mockResolvedValue(undefined),
       flushPendingCompletionEvents: flushPendingCompletionEventsMock,
@@ -2041,6 +2041,8 @@ describe('runTask', () => {
     const requestReconnect = vi.fn().mockResolvedValue(undefined);
     createHarnessMock.mockResolvedValueOnce({
       harness: {
+        on: vi.fn(),
+        isConnected: false,
         requestReconnect,
       },
       getSubprocess: vi.fn(() => ({})),
@@ -2227,6 +2229,8 @@ describe('runTask', () => {
     const onStart = vi.fn().mockResolvedValue(undefined);
     createHarnessMock.mockResolvedValueOnce({
       harness: {
+        on: vi.fn(),
+        isConnected: false,
         requestReconnect: vi.fn().mockResolvedValue(undefined),
       },
       getSubprocess: vi.fn(() => ({})),
@@ -2626,6 +2630,8 @@ describe('runTask', () => {
     createHarnessMock.mockImplementationOnce(async () => {
       return {
         harness: {
+          on: vi.fn(),
+          isConnected: false,
           requestReconnect,
         },
         getSubprocess: vi.fn(() => ({})),
@@ -3537,6 +3543,8 @@ describe('runTask', () => {
 
     createHarnessMock.mockResolvedValueOnce({
       harness: {
+        on: vi.fn(),
+        isConnected: false,
         dispose: harnessDispose,
       },
       getSubprocess: vi.fn(() => currentSubprocess),

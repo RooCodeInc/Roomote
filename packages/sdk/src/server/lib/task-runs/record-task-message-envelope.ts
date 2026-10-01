@@ -51,7 +51,10 @@ import {
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 import { withSandboxServerRpcClient } from '../auth/sandbox-server-rpc';
 import { extractShowWidgetFallbackDelivery } from './show-widget-fallback-delivery';
-import { maybeNotifySourceThreadOfTerminalProviderError } from './notify-source-thread-provider-error';
+import {
+  maybeNotifySourceThreadOfModelFallback,
+  maybeNotifySourceThreadOfTerminalProviderError,
+} from './notify-source-thread-provider-error';
 import { syncTaskCommunicationThreadTitleBestEffort } from '../task-thread-title-sync';
 import { notifyPlatformIssueReport } from '../platform-issue-reporting';
 import { maybeScheduleTaskActivityDigest } from '../task-activity-digest';
@@ -850,6 +853,11 @@ export async function recordTaskMessageEnvelope(
   // Wait through durable Session admission before acknowledging the persisted
   // envelope. Direct chat delivery remains best effort inside the helper.
   await maybeNotifySourceThreadOfTerminalProviderError({
+    runId,
+    taskId,
+    envelope,
+  });
+  await maybeNotifySourceThreadOfModelFallback({
     runId,
     taskId,
     envelope,

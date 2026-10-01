@@ -284,7 +284,8 @@ must stay enabled, because Roomote uses it when a task does not request a
 specific model.
 
 Model settings affect new task starts. Running tasks and resumed snapshots keep
-the model that was selected when they started.
+the model that was selected when they started, except when a configured fallback
+switches a running task or session after a provider failure.
 
 ## Model roles
 
@@ -306,6 +307,35 @@ You do not need a separate model for every role. Set a specialized role to
 **Same as coding model** to inherit the default. Many teams start with one
 strong default model, then split out a faster orchestration or helper model, or
 a stronger review model, after they can see real usage.
+
+## Fallback models
+
+Admins can turn on **Fallback config** in **Settings > Models** and choose one
+enabled fallback model and reasoning level for each role. A fallback must differ
+from that role's effective default. Mapping presets change only the **Default**
+rows; they do not replace saved fallbacks.
+
+Roomote switches immediately when the active provider runs out of credits or
+quota, rejects credentials with a 401 or 403 response, or reports the model as
+unavailable with a 404 response. Other retryable provider failures, including
+rate limits and transient server errors, switch after three Roomote-level
+attempts. Safety refusals, context-length failures, output-length failures, and
+user aborts do not trigger a fallback. An HTML gateway or WAF 403 is treated as
+a transient provider failure rather than a credential rejection.
+
+After a switch, the task or session stays on the fallback for the rest of its
+life, including snapshot resumes. New tasks and sessions start on their defaults.
+Choosing another model manually takes precedence and re-arms fallback protection
+for that model. The transcript shows an expandable fallback row, and work started
+from a communications provider also receives one notice in its originating
+thread.
+
+Fallbacks cover task coding and review models, visual, explore, and advisor
+subagents, session orchestration, and Roomote's helper calls for titles,
+summaries, and routing. OpenCode's private helper calls inside a task sandbox,
+such as OpenCode-generated session titles, are not observable to Roomote and
+cannot trigger fallback. This error fallback is separate from **Same as coding
+model**, which only makes a role inherit the coding model before a request starts.
 
 ### Coding model routing rules
 
@@ -466,6 +496,8 @@ Changes apply from the next message: a turn that is already running finishes
 on the old settings, and the next turn (including its sub-agents) uses the new
 ones. Overrides persist for the life of the task, including snapshot resumes,
 and **Reset to defaults** returns every role to the deployment configuration.
+When Roomote switches after a provider failure, the model chip and session
+composer show the fallback immediately; a manual selection overrides it.
 
 You can also just ask the agent — for example "switch to Fable 5 with max
 reasoning for the rest of this task". The agent applies the same change
@@ -587,9 +619,12 @@ deployment. It helps admins compare models without relying on stale defaults.
   for the vision role.
 - **A model works from one provider but not another.** Check provider-specific
   credentials, rate limits, model availability, and model ID prefix.
+- **A task switched to a fallback model.** Check the failed provider's credits,
+  credentials, and model availability. The current task stays on the fallback;
+  a new task starts on the configured default.
 - **Work stops with "You seem to have run out of credits".** The provider
   reported that the account has no remaining credits or quota, or that a
-  ChatGPT subscription reached its usage limit. Roomote does not retry these
-  automatically, because retrying cannot succeed until the account changes.
-  Add credits or wait for the subscription limit to reset, or switch to a model
-  from another provider. Temporary rate limits are still retried automatically.
+  ChatGPT subscription reached its usage limit. If that role has an enabled
+  fallback, Roomote switches immediately; otherwise add credits, wait for the
+  subscription limit to reset, or switch to another provider. Temporary rate
+  limits are retried before fallback.

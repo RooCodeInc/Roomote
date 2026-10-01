@@ -136,7 +136,17 @@ type TaskModelRoleDescriptor = {
   settingsModelInputOptional: boolean;
   invalidModelMessage: string;
   includeInSandbox: boolean;
+  fallbackModelEnvVar: string;
+  fallbackReasoningEnvVar: string;
+  fallbackRuntime: readonly ModelFallbackRuntime[];
 };
+
+export type ModelFallbackRuntime =
+  | 'harness'
+  | 'subagent'
+  | 'fast'
+  | 'control-plane'
+  | 'opencode-internal';
 
 /**
  * Canonical persistence, environment, fallback, and Settings metadata for
@@ -158,6 +168,9 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
     settingsModelInputOptional: false,
     invalidModelMessage: 'Choose a valid default model.',
     includeInSandbox: true,
+    fallbackModelEnvVar: 'R_MODEL_FALLBACK',
+    fallbackReasoningEnvVar: 'R_MODEL_FALLBACK_REASONING_EFFORT',
+    fallbackRuntime: ['harness'],
   },
   orchestration: {
     modelConfigKey: 'roomoteOrchestrationModel',
@@ -173,6 +186,9 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
     settingsModelInputOptional: true,
     invalidModelMessage: 'Choose a valid orchestration model.',
     includeInSandbox: false,
+    fallbackModelEnvVar: 'R_ORCHESTRATION_MODEL_FALLBACK',
+    fallbackReasoningEnvVar: 'R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT',
+    fallbackRuntime: ['fast', 'control-plane'],
   },
   helper: {
     modelConfigKey: 'roomoteSmallModel',
@@ -188,6 +204,9 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
     settingsModelInputOptional: false,
     invalidModelMessage: 'Choose a valid helper model.',
     includeInSandbox: true,
+    fallbackModelEnvVar: 'R_SMALL_MODEL_FALLBACK',
+    fallbackReasoningEnvVar: 'R_SMALL_MODEL_FALLBACK_REASONING_EFFORT',
+    fallbackRuntime: ['control-plane', 'opencode-internal'],
   },
   vision: {
     modelConfigKey: 'roomoteVisionModel',
@@ -203,6 +222,9 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
     settingsModelInputOptional: false,
     invalidModelMessage: 'Choose a valid vision model.',
     includeInSandbox: true,
+    fallbackModelEnvVar: 'R_VISION_MODEL_FALLBACK',
+    fallbackReasoningEnvVar: 'R_VISION_MODEL_FALLBACK_REASONING_EFFORT',
+    fallbackRuntime: ['subagent'],
   },
   codeReview: {
     modelConfigKey: 'roomoteCodeReviewModel',
@@ -218,6 +240,9 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
     settingsModelInputOptional: false,
     invalidModelMessage: 'Choose a valid code review model.',
     includeInSandbox: true,
+    fallbackModelEnvVar: 'R_CODE_REVIEW_MODEL_FALLBACK',
+    fallbackReasoningEnvVar: 'R_CODE_REVIEW_MODEL_FALLBACK_REASONING_EFFORT',
+    fallbackRuntime: ['harness'],
   },
   explore: {
     modelConfigKey: 'roomoteExploreModel',
@@ -233,6 +258,9 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
     settingsModelInputOptional: true,
     invalidModelMessage: 'Choose a valid explore model.',
     includeInSandbox: true,
+    fallbackModelEnvVar: 'R_EXPLORE_MODEL_FALLBACK',
+    fallbackReasoningEnvVar: 'R_EXPLORE_MODEL_FALLBACK_REASONING_EFFORT',
+    fallbackRuntime: ['subagent'],
   },
   planning: {
     modelConfigKey: 'roomotePlanningModel',
@@ -248,6 +276,9 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
     settingsModelInputOptional: false,
     invalidModelMessage: 'Choose a valid advisor model.',
     includeInSandbox: true,
+    fallbackModelEnvVar: 'R_PLANNING_MODEL_FALLBACK',
+    fallbackReasoningEnvVar: 'R_PLANNING_MODEL_FALLBACK_REASONING_EFFORT',
+    fallbackRuntime: ['subagent'],
   },
 } as const satisfies Record<string, TaskModelRoleDescriptor>;
 

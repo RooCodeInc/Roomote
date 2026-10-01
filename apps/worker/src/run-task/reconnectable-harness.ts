@@ -60,6 +60,9 @@ interface BoundHarnessListeners {
   runtimeTurnCompleted: (event: AcpTurnCompletedEvent) => void;
   runtimeInferenceUsage: (event: HarnessInferenceUsageEvent) => void;
   commandError: (error: HarnessCommandError) => void;
+  modelFallbackRequested: (
+    request: HarnessEvents['modelFallbackRequested'][0],
+  ) => void;
   commandErrorUnsubscribe?: () => void;
 }
 
@@ -409,6 +412,10 @@ export class ReconnectableHarness
       commandError: (error) => {
         this.emit('commandError', error);
       },
+      modelFallbackRequested: (request) => {
+        if (harness !== this.currentHarness) return;
+        this.emit('modelFallbackRequested', request);
+      },
     };
 
     this.currentListeners = listeners;
@@ -421,6 +428,7 @@ export class ReconnectableHarness
     harness.on('runtimePersistedEnvelope', listeners.runtimePersistedEnvelope);
     harness.on('runtimeTurnCompleted', listeners.runtimeTurnCompleted);
     harness.on('runtimeInferenceUsage', listeners.runtimeInferenceUsage);
+    harness.on('modelFallbackRequested', listeners.modelFallbackRequested);
     listeners.commandErrorUnsubscribe = harness.subscribeCommandError?.(
       listeners.commandError,
     );
@@ -444,6 +452,7 @@ export class ReconnectableHarness
       );
       harness.off('runtimeTurnCompleted', listeners.runtimeTurnCompleted);
       harness.off('runtimeInferenceUsage', listeners.runtimeInferenceUsage);
+      harness.off('modelFallbackRequested', listeners.modelFallbackRequested);
       listeners.commandErrorUnsubscribe?.();
     }
 

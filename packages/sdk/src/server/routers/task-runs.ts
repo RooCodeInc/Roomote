@@ -5,6 +5,9 @@ import {
   evaluateRepositoryJudgement,
 } from '@roomote/cloud-agents/server/judge-file';
 import { resolveJudgmentBackend } from '@roomote/cloud-agents/server/typesafe-judgment';
+import { applyTaskModelSelectionToRun } from '@roomote/cloud-agents/server';
+import { captureInstanceEvent } from '@roomote/telemetry/server';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   db,
   eq,
@@ -30,6 +33,11 @@ import {
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   LLM_USAGE_COST_SOURCES,
   type AcpPersistedEnvelope,
+  ACP_ENVELOPE_EVENT_TYPES,
+  MODEL_FALLBACK_NOTICE_PAYLOAD_KEY,
+  getDisplayModelProviderId,
+  TASK_MODEL_ROLES,
+  type TaskModelRole,
 } from '@roomote/types';
 import {
   getCommunicationMessages,
@@ -266,6 +274,14 @@ function runTokenOnlyScoped<T extends z.ZodType>(
     });
 }
 
+const TASK_FALLBACK_ROLES = TASK_MODEL_ROLES.filter(
+  (role): role is Exclude<TaskModelRole, 'orchestration'> =>
+    role !== 'orchestration',
+) as [
+  Exclude<TaskModelRole, 'orchestration'>,
+  ...Array<Exclude<TaskModelRole, 'orchestration'>>,
+];
+
 export const taskRunsRouter = router({
   findFirstById: runScoped(z.number(), (id) => id).query(({ input }) =>
     findTaskRun(input),
@@ -418,6 +434,91 @@ export const taskRunsRouter = router({
       userId,
       envelope: input.envelope,
     });
+  }),
+  applyModelFallback: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      taskId: z.string(),
+      sessionId: z.string().optional(),
+      role: z.enum(TASK_FALLBACK_ROLES),
+      fromModelId: z.string().min(1),
+      toModelId: z.string().min(1),
+      toReasoningEffort: z
+        .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+        .nullable(),
+      errorSummary: z.string().min(1).max(280),
+      trigger: z.enum(['immediate', 'after_retries']),
+    }),
+    'runId',
+  ).mutation(async ({ ctx, input }) => {
+    const run = await findTaskRun(input.runId);
+    const payload = run?.payload;
+    const activeModel =
+      input.role === 'coding' || input.role === 'codeReview'
+        ? payload?.harnessModelOverrides?.['opencode-server']
+        : payload?.modelRoleOverrides?.[input.role]?.model;
+    if (activeModel && activeModel !== input.fromModelId) {
+      return { status: 'already_applied' as const };
+    }
+
+    const selection = await applyTaskModelSelectionToRun({
+      runId: input.runId,
+      role:
+        input.role === 'coding' || input.role === 'codeReview'
+          ? 'coding'
+          : input.role,
+      model: input.toModelId,
+      reasoningEffort: input.toReasoningEffort,
+      expectedModel: input.fromModelId,
+    });
+    if (!selection.applied) {
+      return { status: 'already_applied' as const };
+    }
+    const fromProvider =
+      getDisplayModelProviderId(input.fromModelId) ?? 'opencode';
+    const toProvider = getDisplayModelProviderId(input.toModelId) ?? 'opencode';
+    const safeErrorSummary = redactSecrets(input.errorSummary).slice(0, 280);
+    const notice = {
+      role: input.role,
+      trigger: input.trigger,
+      fromProvider,
+      fromModelId: input.fromModelId,
+      errorSummary: safeErrorSummary,
+      toProvider,
+      toModelId: input.toModelId,
+      toReasoningEffort: input.toReasoningEffort,
+    };
+    const envelope = {
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: 'Switching to fallback model' }],
+      metadata: {
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        [MODEL_FALLBACK_NOTICE_PAYLOAD_KEY]: notice,
+      },
+      payload: {
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        text: 'Switching to fallback model',
+        [MODEL_FALLBACK_NOTICE_PAYLOAD_KEY]: notice,
+      },
+    } as unknown as AcpPersistedEnvelope;
+    const userId =
+      'userId' in ctx.auth ? (ctx.auth.userId ?? undefined) : undefined;
+    await recordTaskMessageEnvelope({
+      runId: input.runId,
+      taskId: input.taskId,
+      userId,
+      envelope,
+    });
+    void captureInstanceEvent('model_fallback_switched', {
+      fromProvider,
+      fromModel: input.fromModelId,
+      toProvider,
+      toModel: input.toModelId,
+    });
+    return { status: 'applied' as const };
   }),
   recordInferenceUsage: runTokenOnlyScoped(
     z.object({

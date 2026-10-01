@@ -41,6 +41,7 @@ import {
   isOpenAiCompatibleProviderId,
   isTaskModelIdDisabled,
   normalizeOpenAiCompatibleConnectionSlug,
+  normalizeModelFallbackConfig,
   normalizeOptionalReasoningEffort,
   normalizeSetupNewState,
   normalizeTaskModelId,
@@ -56,10 +57,12 @@ import type {
   TaskModelMetadata,
   TaskModelOption,
   TaskModelRole,
+  ModelFallbackConfig,
 } from '@roomote/types';
 
 import {
   getDeploymentRuntimeModelConfig,
+  getDeploymentModelFallbackConfig,
   getDeploymentTaskModelSettings,
 } from '@/lib/server/task-models';
 import {
@@ -139,6 +142,7 @@ type TaskModelSettingsResult = {
     family: string;
   }>;
   codingModelRoutingRules: CodingModelRoutingRule[];
+  modelFallbacks: ModelFallbackConfig;
 };
 
 type TaskModelSuggestionResult = {
@@ -226,6 +230,7 @@ export async function getTaskModelSettingsCommand(
   const [
     settings,
     persistedRuntimeModelConfig,
+    modelFallbacks,
     persistedEnvVarNames,
     chatgptConnected,
     githubCopilotConnected,
@@ -234,6 +239,7 @@ export async function getTaskModelSettingsCommand(
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
+    getDeploymentModelFallbackConfig(),
     getPersistedEnvironmentVariableNames(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
@@ -322,7 +328,68 @@ export async function getTaskModelSettingsCommand(
       family,
     })),
     codingModelRoutingRules: settings.codingModelRoutingRules ?? [],
+    modelFallbacks,
   };
+}
+
+export async function updateModelFallbackConfigCommand(
+  auth: UserAuthSuccess,
+  input: ModelFallbackConfig,
+): Promise<{ success: true; modelFallbacks: ModelFallbackConfig }> {
+  assertAdmin(auth);
+  const [settings, runtimeModelConfig] = await Promise.all([
+    getDeploymentTaskModelSettings(),
+    getDeploymentRuntimeModelConfig(),
+  ]);
+  const enabledModels = new Map(
+    getEnabledTaskModels(settings).map((model) => [model.id, model]),
+  );
+  const runtimeModels = resolveRuntimeModelStatus({
+    settingsDefaultModelId: settings.defaultModelId,
+    persisted: runtimeModelConfig,
+  });
+  const normalized = normalizeModelFallbackConfig(input);
+
+  for (const role of TASK_MODEL_ROLES) {
+    const fallback = normalized.roles[role];
+    if (!fallback) continue;
+    const model = enabledModels.get(fallback.modelId);
+    if (!model)
+      throw new Error(`Choose an enabled fallback model for ${role}.`);
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    const activeModel =
+      runtimeModels[descriptor.runtimeStatusKey].effectiveModelId ??
+      runtimeModels.codingModel.effectiveModelId;
+    if (fallback.modelId === activeModel) {
+      throw new Error(
+        `The ${role} fallback must differ from its default model.`,
+      );
+    }
+    const metadata = model.metadata;
+    if (fallback.reasoningEffort && metadata?.supportsReasoning === false) {
+      throw new Error(
+        `${model.displayName} does not support reasoning levels.`,
+      );
+    }
+    if (
+      fallback.reasoningEffort &&
+      metadata?.supportedReasoningEfforts &&
+      !metadata.supportedReasoningEfforts.includes(fallback.reasoningEffort)
+    ) {
+      throw new Error(
+        `${model.displayName} does not support that reasoning level.`,
+      );
+    }
+  }
+
+  await db
+    .insert(deploymentSettings)
+    .values({ id: DEFAULT_DEPLOYMENT_ID, modelFallbackConfig: normalized })
+    .onConflictDoUpdate({
+      target: deploymentSettings.id,
+      set: { modelFallbackConfig: normalized, updatedAt: new Date() },
+    });
+  return { success: true, modelFallbacks: normalized };
 }
 
 type TaskModelRoleDefault = {
@@ -965,13 +1032,35 @@ function clearRuntimeModelForProvider(
   return modelId && isModelIdForProvider(modelId, providerId) ? null : modelId;
 }
 
+function pruneModelFallbackConfig(
+  rawConfig: unknown,
+  keepModelId: (modelId: string) => boolean,
+): ModelFallbackConfig | null {
+  if (rawConfig == null) return null;
+
+  const config = normalizeModelFallbackConfig(rawConfig);
+  return {
+    ...config,
+    roles: Object.fromEntries(
+      TASK_MODEL_ROLES.flatMap((role) => {
+        const fallback = config.roles[role];
+        return fallback && keepModelId(fallback.modelId)
+          ? [[role, fallback]]
+          : [];
+      }),
+    ),
+  };
+}
+
 function removeTaskModelsForProvider({
   settings,
   runtimeModelConfig,
+  modelFallbackConfig,
   providerId,
 }: {
   settings: ReturnType<typeof normalizeTaskModelSettings>;
   runtimeModelConfig: DeploymentModelConfig;
+  modelFallbackConfig: unknown;
   providerId: SetupModelProviderId;
 }) {
   const currentModels = settings.models ?? [];
@@ -1016,7 +1105,14 @@ function removeTaskModelsForProvider({
     ),
   } as DeploymentModelConfig;
 
-  return { taskModelSettings, runtimeModelConfig: nextRuntimeModelConfig };
+  return {
+    taskModelSettings,
+    runtimeModelConfig: nextRuntimeModelConfig,
+    modelFallbackConfig: pruneModelFallbackConfig(
+      modelFallbackConfig,
+      (modelId) => !isModelIdForProvider(modelId, providerId),
+    ),
+  };
 }
 
 export async function deleteTaskModelProviderCommand(
@@ -1048,6 +1144,7 @@ export async function deleteTaskModelProviderCommand(
       githubCopilotConnected,
       xaiSubscriptionConnected,
       persistedTaskModelSettings,
+      persistedDeployment,
     ] = await Promise.all([
       getDeploymentRuntimeModelConfig(),
       getPersistedEnvironmentVariableNames(tx),
@@ -1056,6 +1153,12 @@ export async function deleteTaskModelProviderCommand(
       isGitHubCopilotSubscriptionConnected(),
       isXaiSubscriptionConnected(),
       getDeploymentTaskModelSettings(),
+      tx
+        .select({ modelFallbackConfig: deploymentSettings.modelFallbackConfig })
+        .from(deploymentSettings)
+        .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
+        .limit(1)
+        .then(([row]) => row),
     ]);
 
     const providerSetup = buildSetupModelStatus({
@@ -1122,6 +1225,7 @@ export async function deleteTaskModelProviderCommand(
     const nextModelState = removeTaskModelsForProvider({
       settings: persistedTaskModelSettings,
       runtimeModelConfig: persistedRuntimeModelConfig,
+      modelFallbackConfig: persistedDeployment?.modelFallbackConfig,
       providerId: provider.id,
     });
     const nextSetupNewState = normalizeSetupNewState({
@@ -1139,6 +1243,7 @@ export async function deleteTaskModelProviderCommand(
         id: DEFAULT_DEPLOYMENT_ID,
         taskModelSettings: nextModelState.taskModelSettings,
         runtimeModelConfig: nextModelState.runtimeModelConfig,
+        modelFallbackConfig: nextModelState.modelFallbackConfig,
         setupNewState: nextSetupNewState,
         updatedAt: new Date(),
       })
@@ -1147,6 +1252,7 @@ export async function deleteTaskModelProviderCommand(
         set: {
           taskModelSettings: nextModelState.taskModelSettings,
           runtimeModelConfig: nextModelState.runtimeModelConfig,
+          modelFallbackConfig: nextModelState.modelFallbackConfig,
           setupNewState: nextSetupNewState,
           updatedAt: new Date(),
         },
@@ -1460,7 +1566,10 @@ export async function updateTaskModelSettingsCommand(
     // must be carried forward from the locked row so a concurrent sync
     // commit is not clobbered by a stale snapshot.
     const [persisted] = await tx
-      .select({ taskModelSettings: deploymentSettings.taskModelSettings })
+      .select({
+        taskModelSettings: deploymentSettings.taskModelSettings,
+        modelFallbackConfig: deploymentSettings.modelFallbackConfig,
+      })
       .from(deploymentSettings)
       .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
       .limit(1)
@@ -1477,6 +1586,10 @@ export async function updateTaskModelSettingsCommand(
         persisted?.taskModelSettings ?? null,
       ).catalogSyncedModelIds,
     });
+    const nextModelFallbackConfig = pruneModelFallbackConfig(
+      persisted?.modelFallbackConfig,
+      (modelId) => allowedModelIds.includes(modelId),
+    );
 
     await tx
       .insert(deploymentSettings)
@@ -1484,6 +1597,7 @@ export async function updateTaskModelSettingsCommand(
         id: DEFAULT_DEPLOYMENT_ID,
         taskModelSettings,
         runtimeModelConfig: nextRuntimeModelConfig,
+        modelFallbackConfig: nextModelFallbackConfig,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -1491,6 +1605,7 @@ export async function updateTaskModelSettingsCommand(
         set: {
           taskModelSettings,
           runtimeModelConfig: nextRuntimeModelConfig,
+          modelFallbackConfig: nextModelFallbackConfig,
           updatedAt: new Date(),
         },
       });
