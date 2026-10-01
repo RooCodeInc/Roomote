@@ -156,6 +156,23 @@ const INTERNAL_READ_MIN_RISK_CONFIDENCE = 0.9;
 const INTERNAL_READ_MIN_ONLY_READS = 0.9;
 const YES = 0.8;
 const NO = 0.2;
+/**
+ * Authorization may be a little less certain when the call also clearly
+ * matches the request: two independent signals agreeing. Measured over
+ * repeated runs, calls that must ask stay below this on one signal or the
+ * other (a wider grant than asked scores under it; the next item of a
+ * different job does not match the request).
+ */
+const AUTHORIZED_WITH_MATCH = 0.75;
+/**
+ * Continuing an approved call does not count for a call that plainly is not
+ * what the request is about. The next item of a different job can reach the
+ * cutoff on continuation alone in some runs, but scores far below this on
+ * matching the request; real continuations score well above it. A plan the
+ * owner agreed to is judged on its own: a reply such as "go ahead" need not
+ * match anything by itself.
+ */
+const CONTINUATION_MIN_MATCH = 0.5;
 const MAX_SESSION_CONTEXT_MESSAGES = 8;
 const MAX_SESSION_CONTEXT_MESSAGE_LENGTH = 1_500;
 const MAX_SESSION_CONTEXT_LENGTH = 6_000;
@@ -293,7 +310,8 @@ export type AutoRiskAnswers = {
  * searches, and is what the user asked for when that is known.
  * Authorized: whatever its risk, the owner asked for exactly this call in
  * the session or approved an earlier call it continues, and it moves no
- * money (the model cannot check amounts reliably). Either way the call must
+ * money (the model cannot check amounts reliably). A slightly less certain
+ * authorization counts when the call also matches the request. Either way the call must
  * not be steered by instructions planted in content the agent read, carry
  * private data outside the workspace, or be flagged by the deployment's
  * guidance. The model can only ever recommend running the call or asking a
@@ -322,11 +340,20 @@ export function recommendFromAutoAnswers(
         (options.allowlistedInternalRead ? INTERNAL_READ_MIN_ONLY_READS : YES);
   const routine = reads && (answers.matchesRequest ?? 1) >= YES;
   // After the owner rejected a call to this tool, only a routine call runs.
+  const continuation =
+    (answers.matchesRequest ?? 1) >= CONTINUATION_MIN_MATCH
+      ? (answers.continuesApprovedCall ?? 0)
+      : 0;
+  const authorization = Math.max(
+    answers.userAuthorized ?? 0,
+    continuation,
+    answers.agreedToPlan ?? 0,
+  );
   const authorized =
     !options.sameToolRejected &&
-    ((answers.userAuthorized ?? 0) >= YES ||
-      (answers.continuesApprovedCall ?? 0) >= YES ||
-      (answers.agreedToPlan ?? 0) >= YES) &&
+    (authorization >= YES ||
+      (authorization >= AUTHORIZED_WITH_MATCH &&
+        (answers.matchesRequest ?? 0) >= YES)) &&
     (answers.movesMoney ?? 1) <= NO;
   return safe && (routine || authorized) ? 'approve' : 'ask';
 }
