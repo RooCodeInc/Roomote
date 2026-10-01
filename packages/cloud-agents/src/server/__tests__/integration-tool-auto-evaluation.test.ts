@@ -390,6 +390,27 @@ describe('evaluateIntegrationToolAutoDecision', () => {
         .agentMessageRepliedTo,
     ).toBe('I found 3 old drafts. Delete them one by one?');
 
+    // An identifier the model cannot read is never assumed to be one of the
+    // items: a batch or plan item must be one the session shows. A check on
+    // a finished step counts as part of the request, and granting extra
+    // access is a stronger action.
+    await ask({
+      recentUserMessages: ['yeah go ahead'],
+      agentMessageRepliedTo: 'I found 3 old drafts. Delete them one by one?',
+      explicitApprovalOutcomes: [approvedSameTool],
+    });
+    const asked = mocks.evaluate.mock.calls[0]![0].questions;
+    for (const question of [asked.continuesApprovedCall, asked.agreedToPlan]) {
+      expect(question.instructions).not.toContain('cannot read meaning into');
+      expect(question.instructions).not.toContain('cannot see that list');
+    }
+    expect(asked.matchesRequest.instructions).toContain(
+      'a check on a step it just took',
+    );
+    expect(asked.userAuthorized.instructions).toContain(
+      'granting more access than asked for',
+    );
+
     // A rejection of this tool turns both off.
     const afterRejection = await ask({
       agentMessageRepliedTo: 'Delete them?',
@@ -782,6 +803,11 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     });
     expect(questions.guidanceFlagsRisk.criteria.false).toContain(
       'performs a different action than the ones named',
+    );
+    // Guidance limited to a place or kind of thing does not flag the same
+    // action elsewhere.
+    expect(questions.guidanceFlagsRisk.criteria.false).toContain(
+      'outside the place or kind of thing the guidance limits itself to',
     );
   });
 
