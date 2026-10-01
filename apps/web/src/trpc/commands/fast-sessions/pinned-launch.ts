@@ -131,6 +131,7 @@ export async function startPinnedFastSessionLaunch(
       ...(description.length > 0 ? { description } : {}),
       ...(input.images?.length ? { images: input.images } : {}),
       blank,
+      visibleInTranscript: true,
       ...(sourceControlProvider ? { sourceControlProvider } : {}),
       ...(evalSelection.harnessModelOverrides
         ? { harnessModelOverrides: evalSelection.harnessModelOverrides }

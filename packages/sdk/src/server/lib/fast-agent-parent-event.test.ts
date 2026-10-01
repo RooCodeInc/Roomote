@@ -1176,6 +1176,7 @@ describe('deliverFastAgentParentEvent', () => {
       teamDomain: 'acme',
       channelId: 'C123',
       threadTs: '100.001',
+      visibleInTranscript: false,
     });
     expect(mocks.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({

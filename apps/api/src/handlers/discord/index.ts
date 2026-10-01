@@ -1074,6 +1074,7 @@ async function processDiscordGatewayEvent(
       createAnchoredThread: false,
       ...(fastInteraction ? { interaction: fastInteraction } : {}),
       directedAtRoomote: true,
+      visibleInTranscript: true,
     });
     return { ok: true, fastAnswered: true, fastStartedNew: true };
   }
@@ -1107,6 +1108,7 @@ async function processDiscordGatewayEvent(
           isDiscordBotMentioned(message, resolved.botUserId),
         addressedToRoomote: unmentionedReplyAddressedToRoomote,
         peerConversationsEnabled,
+        visibleInTranscript: true,
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
     }
@@ -1172,6 +1174,7 @@ async function processDiscordGatewayEvent(
       ...(reactionTarget ? { anchorMessageId: reactionTarget.messageId } : {}),
       activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       directedAtRoomote: true,
+      visibleInTranscript: true,
     });
     return { ok: true, fastAnswered: true, fastDefaulted: true };
   }
