@@ -100,7 +100,7 @@ export const INTEGRATION_TOOL_AUTO_QUESTIONS = {
   agreedToPlan: {
     type: 'noul',
     instructions:
-      'The session owner’s latest message agrees to a plan the agent proposed in `sessionContext.agentMessageRepliedTo` (for example “yes, go ahead”), and this call is one of the actions that plan described: the same kind of action, with the same settings, on an item the plan named or clearly included (a range such as “draft-1 … draft-10” includes the items between, and when the plan covered several items an identifier you cannot read meaning into is taken as one of them unless the call or the session shows it is not). A call the plan did not describe, a different or stronger action (sending instead of drafting), different settings, or a reply that declines or narrows the plan does not count.',
+      'The session owner’s latest message agrees to a plan the agent proposed in `sessionContext.agentMessageRepliedTo` (for example “yes, go ahead”), and this call is one of the actions that plan described: the same kind of action, with the same settings, on an item the plan named or clearly included (a range such as “draft-1 … draft-10” includes the items between). A call the plan did not describe, a different or stronger action (sending instead of drafting), different settings, or a reply that declines or narrows the plan does not count.',
     criteria: {
       true: 'The owner agreed to the proposed plan and this call is one of the actions it described.',
       false:

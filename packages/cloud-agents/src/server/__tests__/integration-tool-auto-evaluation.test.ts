@@ -390,9 +390,10 @@ describe('evaluateIntegrationToolAutoDecision', () => {
         .agentMessageRepliedTo,
     ).toBe('I found 3 old drafts. Delete them one by one?');
 
-    // The wording gives an unreadable identifier the benefit of the doubt
-    // when the work covers a set, counts a check on a finished step as part
-    // of the request, and names granting extra access as a stronger action.
+    // Continuing an approved batch gives an unreadable identifier the
+    // benefit of the doubt; a plan does not, so its items must be ones the
+    // plan named or clearly included. A check on a finished step counts as
+    // part of the request, and granting extra access is a stronger action.
     await ask({
       recentUserMessages: ['yeah go ahead'],
       agentMessageRepliedTo: 'I found 3 old drafts. Delete them one by one?',
@@ -402,8 +403,8 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(asked.continuesApprovedCall.instructions).toContain(
       'You usually cannot see that list',
     );
-    expect(asked.agreedToPlan.instructions).toContain(
-      'an identifier you cannot read meaning into is taken as one of them',
+    expect(asked.agreedToPlan.instructions).not.toContain(
+      'identifier you cannot read meaning into',
     );
     expect(asked.matchesRequest.instructions).toContain(
       'a check on a step it just took',
