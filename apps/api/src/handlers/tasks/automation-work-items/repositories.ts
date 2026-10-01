@@ -32,17 +32,28 @@ export async function resolveRepositoryIdsForSuggestedTask(params: {
     .select({
       id: repositories.id,
       fullName: repositories.fullName,
+      sourceControlProvider: repositories.sourceControlProvider,
+      host: repositories.host,
     })
     .from(repositories)
     .where(inArray(repositories.fullName, repositoryFullNames));
 
-  const rowsByFullName = new Map(
-    rows.map((repository) => [repository.fullName, repository]),
-  );
+  const sourceControlHost = params.payload.sourceControlHost?.trim();
+  const scopedRows = rows.filter((repository) => {
+    const sourceControlProvider =
+      params.payload.sourceControlProvider ??
+      params.payload.repositoryProviders?.[repository.fullName];
 
-  return repositoryFullNames
-    .map((repositoryFullName) => rowsByFullName.get(repositoryFullName))
-    .filter((repository): repository is ResolvedRepository =>
-      Boolean(repository),
+    return (
+      (!sourceControlProvider ||
+        repository.sourceControlProvider === sourceControlProvider) &&
+      (!sourceControlHost || repository.host === sourceControlHost)
     );
+  });
+
+  return repositoryFullNames.flatMap((repositoryFullName) =>
+    scopedRows
+      .filter((repository) => repository.fullName === repositoryFullName)
+      .map(({ id, fullName }) => ({ id, fullName })),
+  );
 }

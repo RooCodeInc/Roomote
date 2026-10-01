@@ -4,6 +4,7 @@ import {
 } from './available-environments';
 
 export type RepositoryCoverage = {
+  repositoryId?: string;
   repositoryFullName: string;
   targetEnvironmentId?: string;
 };
@@ -13,13 +14,13 @@ export type RepositoryCoverageInput = {
   repositoryFullName: string;
 };
 
-type EnvironmentBackedRepositoryCoverage = RepositoryCoverage & {
-  targetEnvironmentId: string;
+type RepositoryCoverageWithIdentity = RepositoryCoverage & {
+  repositoryId: string;
 };
 
 export async function buildRepositoryCoverage(
   repositories: RepositoryCoverageInput[],
-): Promise<RepositoryCoverage[]> {
+): Promise<RepositoryCoverageWithIdentity[]> {
   const environments = await getAvailableEnvironments();
 
   return repositories.map(({ repositoryId, repositoryFullName }) => {
@@ -37,10 +38,12 @@ export async function buildRepositoryCoverage(
 
     return targetEnvironmentId
       ? {
+          repositoryId,
           repositoryFullName,
           targetEnvironmentId,
         }
       : {
+          repositoryId,
           repositoryFullName,
         };
   });
@@ -63,11 +66,11 @@ function compareEnvironmentCoverage(
   );
 }
 
-export function getEnvironmentBackedCoverage(
-  repositoryCoverage: RepositoryCoverage[],
-): EnvironmentBackedRepositoryCoverage[] {
+export function getEnvironmentBackedCoverage<T extends RepositoryCoverage>(
+  repositoryCoverage: T[],
+): Array<T & { targetEnvironmentId: string }> {
   return repositoryCoverage
-    .filter((coverage): coverage is EnvironmentBackedRepositoryCoverage =>
+    .filter((coverage): coverage is T & { targetEnvironmentId: string } =>
       Boolean(coverage.targetEnvironmentId),
     )
     .sort((left, right) =>

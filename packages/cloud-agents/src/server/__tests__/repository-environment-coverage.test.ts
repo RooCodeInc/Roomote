@@ -31,10 +31,11 @@ describe('buildRepositoryCoverage', () => {
       ]),
     ).resolves.toEqual([
       {
+        repositoryId: 'repository-api',
         repositoryFullName: 'acme/api',
         targetEnvironmentId: 'environment-1',
       },
-      { repositoryFullName: 'acme/web' },
+      { repositoryId: 'repository-web', repositoryFullName: 'acme/web' },
     ]);
   });
 
@@ -85,6 +86,7 @@ describe('buildRepositoryCoverage', () => {
       ]),
     ).resolves.toEqual([
       {
+        repositoryId: 'repository-api',
         repositoryFullName: 'acme/api',
         targetEnvironmentId: 'environment-specific',
       },
@@ -118,6 +120,7 @@ describe('buildRepositoryCoverage', () => {
       ]),
     ).resolves.toEqual([
       {
+        repositoryId: 'repository-gitlab',
         repositoryFullName: 'acme/api',
         targetEnvironmentId: 'environment-gitlab',
       },

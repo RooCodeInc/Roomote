@@ -173,9 +173,8 @@ export const sentryTriageJob = createScheduledTriageJob({
         repositoryFullName: repository.fullName,
       })),
     );
-    const environmentBackedRepositories = getEnvironmentBackedCoverage(
-      repositoryCoverage,
-    ).map((coverage) => coverage.repositoryFullName);
+    const environmentBackedRepositories =
+      getEnvironmentBackedCoverage(repositoryCoverage);
     const recentThreadFeedback = await loadAutomationThreadFeedbackReport({
       automationKey: 'sentry_triage',
       slackChannelId: channelId,
@@ -231,7 +230,7 @@ export const sentryTriageJob = createScheduledTriageJob({
     // with an explicit stamp. Without repositories in scope the run only
     // reports Sentry MCP blockers, so a single unpartitioned scan launches.
     const partitions = await partitionActiveRepositoriesByProvider(
-      environmentBackedRepositories,
+      environmentBackedRepositories.map((coverage) => coverage.repositoryId),
     );
 
     if (partitions.length === 0) {
@@ -249,12 +248,12 @@ export const sentryTriageJob = createScheduledTriageJob({
     return {
       kind: 'scan',
       payloads: partitions.map((partition) => {
-        const partitionNames = new Set(partition.repositoryFullNames);
+        const partitionRepositoryIds = new Set(partition.repositoryIds);
 
         return buildPayload({
           partitionRepositories: partition.repositoryFullNames,
           partitionCoverage: repositoryCoverage.filter((coverage) =>
-            partitionNames.has(coverage.repositoryFullName),
+            partitionRepositoryIds.has(coverage.repositoryId),
           ),
           providerStamp: {
             sourceControlProvider: partition.provider,

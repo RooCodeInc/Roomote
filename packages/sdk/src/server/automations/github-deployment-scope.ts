@@ -47,7 +47,7 @@ export async function getActiveRepositoryFullNames(): Promise<string[]> {
     })
     .from(repositories)
     .where(eq(repositories.isActive, true))
-    .orderBy(repositories.fullName);
+    .orderBy(repositories.fullName, repositories.id);
 
   return [...new Set(rows.map((row) => row.fullName).filter(Boolean))].sort(
     (left, right) => left.localeCompare(right),
@@ -57,6 +57,7 @@ export async function getActiveRepositoryFullNames(): Promise<string[]> {
 export type ActiveRepositoryProviderPartition = {
   provider: SourceControlProvider;
   host: string | null;
+  repositoryIds: string[];
   repositoryFullNames: string[];
 };
 
@@ -66,18 +67,19 @@ export type ActiveRepositoryProviderPartition = {
  * source-control token is minted for exactly one provider, and a scope that
  * spans providers otherwise falls back to the GitHub default and fails token
  * creation on the non-GitHub repositories. Partition order is deterministic:
- * the provider enum order, then host lexicographically. Names that no longer
+ * the provider enum order, then host lexicographically. IDs that no longer
  * match an active repository are dropped.
  */
 export async function partitionActiveRepositoriesByProvider(
-  repositoryFullNames: string[],
+  repositoryIds: string[],
 ): Promise<ActiveRepositoryProviderPartition[]> {
-  if (repositoryFullNames.length === 0) {
+  if (repositoryIds.length === 0) {
     return [];
   }
 
   const rows = await db
     .select({
+      id: repositories.id,
       fullName: repositories.fullName,
       sourceControlProvider: repositories.sourceControlProvider,
       host: repositories.host,
@@ -86,7 +88,7 @@ export async function partitionActiveRepositoriesByProvider(
     .where(
       and(
         eq(repositories.isActive, true),
-        inArray(repositories.fullName, repositoryFullNames),
+        inArray(repositories.id, repositoryIds),
       ),
     )
     .orderBy(repositories.fullName);
@@ -105,10 +107,14 @@ export async function partitionActiveRepositoriesByProvider(
       partitions.set(partitionKey, {
         provider: row.sourceControlProvider as SourceControlProvider,
         host: row.host,
+        repositoryIds: [row.id],
         repositoryFullNames: [row.fullName],
       });
-    } else if (!partition.repositoryFullNames.includes(row.fullName)) {
-      partition.repositoryFullNames.push(row.fullName);
+    } else {
+      partition.repositoryIds.push(row.id);
+      if (!partition.repositoryFullNames.includes(row.fullName)) {
+        partition.repositoryFullNames.push(row.fullName);
+      }
     }
   }
 

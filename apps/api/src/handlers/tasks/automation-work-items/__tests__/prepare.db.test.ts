@@ -16,6 +16,7 @@ import {
   AutomationWorkItemValidationError,
   resolvePreparedAutomationWorkItems,
 } from '../prepare';
+import { resolveRepositoryIdsForSuggestedTask } from '../repositories';
 
 describe('resolvePreparedAutomationWorkItems', () => {
   const userIds: string[] = [];
@@ -49,6 +50,7 @@ describe('resolvePreparedAutomationWorkItems', () => {
   async function createRepositoryAndEnvironment(params: {
     fullName: string;
     provider: 'gitlab' | 'gitea';
+    host?: string;
     configRepositories: string[];
   }) {
     const marker = randomUUID();
@@ -60,6 +62,7 @@ describe('resolvePreparedAutomationWorkItems', () => {
 
     const repository = await repositoryFactory.create({
       sourceControlProvider: params.provider,
+      host: params.host,
       fullName: params.fullName,
       linkedByUserId: user.id,
     });
@@ -152,6 +155,55 @@ describe('resolvePreparedAutomationWorkItems', () => {
         candidateRepositories: [
           { id: gitea.repository.id, fullName: gitea.repository.fullName },
         ],
+      }),
+    ).rejects.toThrow(AutomationWorkItemValidationError);
+  });
+
+  it('resolves same-name candidates using the automation provider and host', async () => {
+    const fullName = `acme/${randomUUID()}`;
+    const selected = await createRepositoryAndEnvironment({
+      fullName,
+      provider: 'gitlab',
+      host: 'gitlab.example.com',
+      configRepositories: [fullName],
+    });
+    const otherHost = await createRepositoryAndEnvironment({
+      fullName,
+      provider: 'gitlab',
+      host: 'gitlab.other.example',
+      configRepositories: [fullName],
+    });
+    await createRepositoryAndEnvironment({
+      fullName,
+      provider: 'gitea',
+      host: 'gitlab.example.com',
+      configRepositories: [fullName],
+    });
+
+    const candidateRepositories = await resolveRepositoryIdsForSuggestedTask({
+      payload: {
+        repo: '__all_repositories__',
+        selectedRepositories: [fullName],
+        sourceControlProvider: 'gitlab',
+        sourceControlHost: 'gitlab.example.com',
+        description: 'Audit the selected repository.',
+        trigger: 'scheduled',
+        suggestionSource: 'code_quality_auditor',
+      },
+    });
+
+    expect(candidateRepositories).toEqual([
+      { id: selected.repository.id, fullName },
+    ]);
+    await expect(
+      resolvePreparedAutomationWorkItems({
+        workItems: [
+          actWorkItem({
+            targetEnvironmentId: otherHost.environment.id,
+            targetRepositoryFullName: fullName,
+          }),
+        ],
+        candidateRepositories,
       }),
     ).rejects.toThrow(AutomationWorkItemValidationError);
   });
