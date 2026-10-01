@@ -481,6 +481,8 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     ).modelFallbackNotice;
     notice.errorSummary =
       '[click here](https://attacker.example)\n<@everyone> api_key=sk-secret';
+    notice.fromProvider = '[provider](https://attacker.example/provider)';
+    notice.toModelId = 'openai/@everyone';
 
     await maybeNotifySourceThreadOfModelFallback({
       runId: 7,
@@ -491,7 +493,7 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     expect(mockDiscordPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining(
-          'Switching to fallback model: openai failed. Continuing with anthropic/claude-sonnet-4.',
+          'Switching to a fallback model after the active provider failed. Continuing the task.',
         ),
       }),
     );
@@ -499,6 +501,8 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     expect(postedText).not.toContain('attacker.example');
     expect(postedText).not.toContain('@everyone');
     expect(postedText).not.toContain('sk-secret');
+    expect(postedText).not.toContain('openai/@everyone');
+    expect(postedText).not.toContain('attacker.example/provider');
   });
 
   it('does not notify the Session for a transient provider retry notice', async () => {
