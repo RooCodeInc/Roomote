@@ -608,13 +608,14 @@ export async function findFastAgentRepliesBeforeHumanPrompt(input: {
   return text || undefined;
 }
 
-const FAST_AGENT_RECENT_TOOL_RESULT_LIMIT = 8;
+const FAST_AGENT_RECENT_TOOL_RESULT_LIMIT = 30;
 
 /**
  * Results of the integration tools the agent ran most recently in this
  * conversation, oldest first and across turns. Auto reads them to tell what
  * an identifier in a paused call refers to (a listing that maps ids to
- * names). Unfinished calls and Roomote's own tools are skipped.
+ * names): it checks an identifier against all of them and shows the model
+ * the newest few. Unfinished calls and Roomote's own tools are skipped.
  */
 export async function findRecentFastAgentToolResults(input: {
   conversationId: string;

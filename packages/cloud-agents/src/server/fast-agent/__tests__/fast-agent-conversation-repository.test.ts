@@ -1289,7 +1289,7 @@ describe('Fast conversation repository', () => {
     ]);
 
     // Only the most recent results are kept.
-    for (let index = 0; index < 9; index += 1) {
+    for (let index = 0; index < 31; index += 1) {
       await persist({
         eventId: `later-${index}`,
         ts: 300 + index,
@@ -1304,9 +1304,9 @@ describe('Fast conversation repository', () => {
     const recent = await findRecentFastAgentToolResults({
       conversationId: conversation.id,
     });
-    expect(recent).toHaveLength(8);
+    expect(recent).toHaveLength(30);
     expect(recent[0]!.output).toBe('deal 1');
-    expect(recent.at(-1)!.output).toBe('deal 8');
+    expect(recent.at(-1)!.output).toBe('deal 30');
   });
 
   it('persists the canonical OpenCode session identity', async () => {

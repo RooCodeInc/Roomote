@@ -501,7 +501,11 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       'only in the place the request points at',
     );
     expect(asked.userAuthorized.instructions).toContain(
-      'an extra change riding along with the requested one',
+      'a second change made in the same call that the user did not ask for',
+    );
+    // A readable name that matches the request needs no lookup.
+    expect(asked.userAuthorized.instructions).toContain(
+      'A readable name or path that itself matches what the user asked for needs no lookup',
     );
     expect(asked.matchesRequest.instructions).toContain(
       'a check on a step it just took',
@@ -934,6 +938,18 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(unknown.reason).toBe(
       'the call names an item that nothing in the session identifies',
     );
+    // The check covers every result supplied, not only the newest few the
+    // model is shown.
+    const older = [
+      ...listing,
+      ...Array.from({ length: 12 }, (_, index) => ({
+        tool: 'hubspot.get_deal',
+        output: `deal ${index}`,
+      })),
+    ];
+    await expect(evaluate('9921034', older)).resolves.toMatchObject({
+      recommendation: 'approve',
+    });
     // No results at all were read: still nothing shows it.
     await expect(evaluate('9921034', [])).resolves.toMatchObject({
       recommendation: 'ask',
