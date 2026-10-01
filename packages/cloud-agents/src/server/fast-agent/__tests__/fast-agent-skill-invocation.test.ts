@@ -39,6 +39,27 @@ describe('Fast explicit skill invocation parsing', () => {
     ).toBe('thermonuclear');
   });
 
+  it('marks the partnership skill for Fast session loading', () => {
+    expect(
+      buildFastAgentExplicitSkillInvocationContext(
+        '$roomote-partnership\nDiscuss the evidence with me.',
+        'web',
+      ),
+    ).toBe('<explicit_skill_invocation name="roomote-partnership" />');
+  });
+
+  it('does not treat the required agent-authored prefix as a leading invocation', () => {
+    const request =
+      'Agent (on behalf of user): Please load your packaged `roomote-partnership` skill by exact name and confirm whether it loaded.';
+
+    expect(
+      parseFastAgentExplicitSkillInvocation(request, 'web'),
+    ).toBeUndefined();
+    expect(
+      buildFastAgentExplicitSkillInvocationContext(request, 'web'),
+    ).toBeUndefined();
+  });
+
   it('builds the trusted marker from Telegram text only after provider normalization', () => {
     expect(
       buildFastAgentExplicitSkillInvocationContext(

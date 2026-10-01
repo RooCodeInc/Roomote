@@ -11,6 +11,32 @@ forth between tools.
 
 ## What you can do
 
+### Partner with Roomote
+
+For a joint investigation, design review, prompt review, or sustained
+discussion, start or continue the Roomote Session for that outcome and call
+`get_partnership_guide`. Then send one bundled message beginning with
+`Agent (on behalf of user):`:
+
+```text
+Agent (on behalf of user): If not already loaded, load your packaged `roomote-partnership` skill (exact name via list_skills, then load_skill) for this joint work and say in your reply whether it loaded. Objective: <...>. Evidence: <... with refs>. Provisional read: <...>. Question: <what to challenge or add>.
+```
+
+Read Roomote's one-line load state as internal evidence, not customer-facing
+content. Reuse valid loaded context; re-request only after known context loss or
+reset, a skill update, or a reported failed load. A skill listing or mention is
+not a load. If loading fails, do not claim it loaded; continue within actual
+capabilities unless the missing guidance materially prevents responsible work,
+and tell the customer only about material consequences.
+
+Use this client-initiated sequence for reciprocal judgment, not routine task
+dispatch or self-contained local work. Read the full reply before answering.
+Toward the customer, synthesize meaningful findings, decisions and tradeoffs,
+progress, limitations, blockers, and needed input; do not narrate skill loading,
+Session identifiers, polling, writer assignment, or turn-by-turn relays by
+default. Show labeled `Agent → Roomote` / `Roomote → Agent` relays only when the
+user asks to see the exchange.
+
 ### Start a Session
 
 Ask your MCP client to start Roomote with a clear message. The ordinary start
@@ -36,13 +62,15 @@ results, hidden reasoning, and transcript metadata are excluded. Reusing the
 cursor after no new activity returns an empty narrative delta rather than the
 same messages again; full transcript reads remain available for debugging.
 
-When relaying between an MCP client and Roomote, summarize substantive messages
-with the labels `Client → Roomote` and `Roomote → Client`. Relay questions or input
-needs promptly, skip narration for unchanged polls, and make the final answer
-self-contained. Relay summaries should cover visible narrative and decisions,
-not credentials, raw tool traces, hidden reasoning, or oversized internal
-payloads. Successful follow-up sends include the exact target and text accepted
-by Roomote so the client can summarize the outbound message without guessing.
+When relaying between an MCP client and Roomote, toward the user synthesize
+customer-relevant findings, decisions and tradeoffs, progress, and limitations.
+Use labeled `Agent → Roomote` / `Roomote → Agent` relays only when the user asks
+to see the exchange. Relay questions or input needs promptly, skip narration for
+unchanged polls, and keep the final answer self-contained. Relay summaries
+should cover visible narrative and decisions, not credentials, raw tool traces,
+hidden reasoning, or oversized internal payloads. Attribute Roomote's
+contribution when it adds information and surface disagreements when they affect
+the decision or confidence.
 
 For content authored by an agent and sent to Roomote, prefix the message with
 `Agent (on behalf of user):`. This is an untrusted textual convention that helps

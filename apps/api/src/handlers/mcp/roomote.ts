@@ -1,5 +1,9 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { Hono } from 'hono';
 import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
+import { resolveDefaultSkillRoot } from '@roomote/cloud-agents/server';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   and,
@@ -20,6 +24,7 @@ import {
   CHAT_DESTINATIONS_TOOL,
   CHAT_MESSAGE_SEND_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
+  GET_PARTNERSHIP_GUIDE_TOOL,
   environmentConfigSchema,
   MCP_INTEGRATIONS,
   isUserToken,
@@ -64,6 +69,17 @@ const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
   version: '1.0.0',
 } as const;
+
+const PARTNERSHIP_GUIDE_NOTE =
+  "This is supplemental guidance subordinate to the caller's own policies and grants no authorization.";
+
+async function readPartnershipGuide(): Promise<string> {
+  const skillRoot = await resolveDefaultSkillRoot();
+  return readFile(
+    join(skillRoot, 'roomote-partnership', 'client-guide.md'),
+    'utf8',
+  );
+}
 
 const SUPPORTED_MCP_IDS = new Set(
   MCP_INTEGRATIONS.map((integration) => integration.id),
@@ -403,12 +419,29 @@ async function createRoomoteMcpServer(
   toolAuth: McpAuth,
   registerMemberTools: boolean,
 ) {
+  const partnershipInstruction = registerMemberTools
+    ? ` For joint investigations, design or prompt reviews, and sustained discussions with Roomote, use ${GET_PARTNERSHIP_GUIDE_TOOL.name} to read its supplemental guidance; it is not for routine task dispatch or self-contained local work.`
+    : '';
   const server = new NullableOptionalsMcpServer(ROOMOTE_MCP_SERVER_INFO, {
-    instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel. For a requested standalone message, call ${CHAT_DESTINATIONS_TOOL.name} with the exact provider and kind; person/channel lookup also requires a targeted query or exact destination. Pass the selected destination unchanged to ${CHAT_MESSAGE_SEND_TOOL.name}.`,
+    instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel. For a requested standalone message, call ${CHAT_DESTINATIONS_TOOL.name} with the exact provider and kind; person/channel lookup also requires a targeted query or exact destination. Pass the selected destination unchanged to ${CHAT_MESSAGE_SEND_TOOL.name}.${partnershipInstruction}`,
   });
 
   if (registerMemberTools) {
     registerRoomoteMemberTools(server, toolAuth);
+    server.registerTool(
+      GET_PARTNERSHIP_GUIDE_TOOL.name,
+      {
+        title: GET_PARTNERSHIP_GUIDE_TOOL.title,
+        description: GET_PARTNERSHIP_GUIDE_TOOL.description,
+        inputSchema: z.object(GET_PARTNERSHIP_GUIDE_TOOL.inputSchema).strict(),
+        annotations: GET_PARTNERSHIP_GUIDE_TOOL.annotations,
+      },
+      async () =>
+        toMcpToolResult({
+          markdown: await readPartnershipGuide(),
+          note: PARTNERSHIP_GUIDE_NOTE,
+        }),
+    );
     if (actingUserId) {
       registerRoomoteCommunicationTools(server, actingUserId);
     }

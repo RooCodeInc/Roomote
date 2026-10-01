@@ -36,6 +36,7 @@ export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
   'resolve-github-pr-merge-conflicts',
   'review-and-fix',
   'review-code',
+  'roomote-partnership',
   'security-auditor',
   'security-best-practices',
   'security-review',
