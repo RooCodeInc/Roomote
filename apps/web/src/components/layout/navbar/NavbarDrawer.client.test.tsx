@@ -81,7 +81,14 @@ vi.mock('@/components/system', () => ({
       </button>
     ),
   Drawer: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DrawerClose: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DrawerClose: ({
+    children,
+    ...props
+  }: ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode }) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
   DrawerContent: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
@@ -97,6 +104,17 @@ describe('NavbarDrawer', () => {
   beforeEach(() => {
     state.user.isAdmin = true;
     state.recentSessionsEnabled = false;
+  });
+
+  it('labels the mobile navigation controls', () => {
+    render(<NavbarDrawer />);
+
+    expect(
+      screen.getByRole('button', { name: 'Open navigation menu' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Close navigation menu' }),
+    ).toBeInTheDocument();
   });
 
   it('shows a settings link for members', () => {
