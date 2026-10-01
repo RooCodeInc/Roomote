@@ -49,7 +49,7 @@ describe('IntegrationToolAutoModeSetting', () => {
     render(<IntegrationToolAutoModeSetting />);
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(
-      screen.getByText(/off until you turn it on for a session/),
+      screen.getByText(/choose Auto from the tool approvals menu/),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: 'Integrations page' }),

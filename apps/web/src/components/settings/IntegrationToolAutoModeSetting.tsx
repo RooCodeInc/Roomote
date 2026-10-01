@@ -13,7 +13,7 @@ import { Button, Label, Textarea } from '@/components/system';
 
 const COPY = {
   description:
-    'Roomote can use a judgement model to decide whether a specific action requires approval. Auto-approval is off until you turn it on for a session, under its message box. You can configure granular approval for each tool in each integration in the ',
+    'Roomote can use a judgement model to decide whether a specific action requires approval. Every session starts in Run mode; choose Auto from the tool approvals menu in its message box. You can configure granular approval for each tool in each integration in the ',
   guidanceLabel: 'Additional instructions',
   guidanceHelp:
     'Describe what your deployment considers routine or risky. Optional.',

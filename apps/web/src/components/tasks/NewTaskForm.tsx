@@ -17,7 +17,7 @@ import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperiment';
 import { useNewSessionAutoToolApprovals } from '@/hooks/useSessionAutoToolApprovals';
 
-import { AutoToolApprovalsSwitch } from '@/components/sessions/SessionAutoToolApprovals';
+import { ToolApprovalsPicker } from '@/components/sessions/SessionToolApprovalsPicker';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
 import {
@@ -246,17 +246,28 @@ export function NewTaskForm({
             : undefined
         }
         tools={
-          <SessionModelSwitcher
-            model={selectedModelOverrideId ?? ''}
-            onModelChange={(model) =>
-              setSelectedModelOverrideId(model || undefined)
-            }
-            reasoningEffort={selectedReasoningEffort ?? null}
-            onReasoningEffortChange={setSelectedReasoningEffort}
-            defaultModelId={defaultModelId}
-            defaultReasoningEffort={defaultReasoningEffort}
-            size={modelSelectorSize}
-          />
+          <>
+            <SessionModelSwitcher
+              model={selectedModelOverrideId ?? ''}
+              onModelChange={(model) =>
+                setSelectedModelOverrideId(model || undefined)
+              }
+              reasoningEffort={selectedReasoningEffort ?? null}
+              onReasoningEffortChange={setSelectedReasoningEffort}
+              defaultModelId={defaultModelId}
+              defaultReasoningEffort={defaultReasoningEffort}
+              size={modelSelectorSize}
+            />
+            {autoOffer.shown ? (
+              <ToolApprovalsPicker
+                mode={autoActive ? 'auto' : 'run'}
+                available={autoOffer.available}
+                disabled={isBusy}
+                size={modelSelectorSize}
+                onModeChange={(mode) => setAutoToolApprovals(mode === 'auto')}
+              />
+            ) : null}
+          </>
         }
         submitLeadingAction={
           privateSessionsEnabled ? (
@@ -280,14 +291,6 @@ export function NewTaskForm({
           ) : null
         }
       />
-      {autoOffer.shown ? (
-        <AutoToolApprovalsSwitch
-          checked={autoActive}
-          available={autoOffer.available}
-          disabled={isBusy}
-          onCheckedChange={setAutoToolApprovals}
-        />
-      ) : null}
       {fastSessionError ? (
         <div role="alert" className="flex items-center gap-2 px-3 py-2 text-sm">
           <AlertCircle

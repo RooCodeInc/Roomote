@@ -447,22 +447,19 @@ describe('Home', () => {
     );
   });
 
-  it('offers Auto under the composer, off until chosen for this session', async () => {
+  it('offers the tool approvals mode in the composer, starting in Run', async () => {
     const { unmount } = render(<NewTaskForm initialPrompt="First prompt" />);
     // Not offered outside the experiment.
-    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /^Tool approvals/ }),
+    ).not.toBeInTheDocument();
     unmount();
 
     currentAutoToolApprovalsOffer = { shown: true, available: true };
     render(<NewTaskForm initialPrompt="First prompt" />);
-    const toggle = screen.getByRole('switch', { name: 'Auto-approval' });
-    expect(toggle).not.toBeChecked();
-    // Under the composer: after the submit button in the document.
     expect(
-      screen
-        .getByRole('button', { name: 'Submit prompt' })
-        .compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+      screen.getByRole('button', { name: /^Tool approvals/ }),
+    ).toHaveTextContent('Run');
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
     await waitFor(() => expect(mockStartFastSession).toHaveBeenCalled());
@@ -471,11 +468,14 @@ describe('Home', () => {
     );
   });
 
-  it('starts the session with Auto on when the switch is on', async () => {
+  it('starts the session with Auto on when Auto is chosen', async () => {
     currentAutoToolApprovalsOffer = { shown: true, available: true };
     render(<NewTaskForm initialPrompt="First prompt" />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Auto-approval' }));
-    expect(screen.getByRole('switch', { name: 'Auto-approval' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: /^Tool approvals/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^Auto/ }));
+    expect(
+      screen.getByRole('button', { name: /^Tool approvals/ }),
+    ).toHaveTextContent('Auto');
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
     await waitFor(() => {
       expect(mockStartFastSession).toHaveBeenCalledWith(
@@ -484,15 +484,14 @@ describe('Home', () => {
     });
   });
 
-  it('cannot turn Auto on while nothing can assess calls', () => {
+  it('cannot choose Auto while nothing can assess calls', () => {
     currentAutoToolApprovalsOffer = { shown: true, available: false };
     render(<NewTaskForm initialPrompt="First prompt" />);
-    expect(
-      screen.getByRole('switch', { name: 'Auto-approval' }),
-    ).toBeDisabled();
-    expect(
-      screen.getByText('Auto mode isn’t available yet.'),
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Tool approvals/ }));
+    expect(screen.getByRole('option', { name: /^Auto/ })).toBeDisabled();
+    expect(screen.getByRole('option', { name: /^Auto/ })).toHaveTextContent(
+      'Not available yet.',
+    );
   });
 
   it('retains the private Session selection and sends it with creation', async () => {

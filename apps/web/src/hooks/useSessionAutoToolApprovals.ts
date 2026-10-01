@@ -59,7 +59,7 @@ export function useSessionAutoToolApprovals(
           result,
         );
       },
-      onError: () => toast.error('Failed to update auto-approval.'),
+      onError: () => toast.error('Failed to update tool approvals.'),
     }),
   );
   return {

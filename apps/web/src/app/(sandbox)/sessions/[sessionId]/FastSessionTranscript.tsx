@@ -109,7 +109,6 @@ import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/s
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
 import { PendingIntegrationToolApprovals } from '@/components/sessions/PendingIntegrationToolApprovals';
-import { SessionAutoToolApprovals } from '@/components/sessions/SessionAutoToolApprovals';
 import { useSessionIntegrationToolApprovals } from '@/hooks/useSessionIntegrationToolApprovals';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
 import { useSessionTitlePropagation } from './use-session-title-propagation';
@@ -2382,13 +2381,8 @@ export function FastSessionTranscript({
               onModelSelectionChange={(selection) => {
                 modelSelectionRef.current = selection;
               }}
+              toolApprovalsSessionId={secretSessionId}
             />
-            {secretSessionId ? (
-              <SessionAutoToolApprovals
-                sessionId={secretSessionId}
-                className="mx-auto w-full max-w-4xl pt-0 pb-3"
-              />
-            ) : null}
             {replyError ? (
               <Alert
                 variant="destructive"
