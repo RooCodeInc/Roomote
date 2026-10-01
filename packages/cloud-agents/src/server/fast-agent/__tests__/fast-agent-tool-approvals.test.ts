@@ -2145,6 +2145,53 @@ describe('tool approval bridge', () => {
     expect(helperMocks.reply).not.toHaveBeenCalledWith(ask.requestId, 'once');
   });
 
+  it('gives Auto the recent tool results, and an empty list when the lookup fails', async () => {
+    const results = [
+      {
+        tool: 'mock-slack.list_channels',
+        output: '[{"id":"C1","name":"release"}]',
+      },
+    ];
+    const first = helpers();
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+      resolveSessionUserMessages: () => ['Please post the release update.'],
+      resolveRecentToolResults: async () => results,
+    }).handleAsk(ask, first);
+    await vi.waitFor(() =>
+      expect(resolveIntegrationToolAutoDecision).toHaveBeenCalled(),
+    );
+    expect(
+      vi.mocked(resolveIntegrationToolAutoDecision).mock.calls[0]![0]
+        .sessionContext,
+    ).toMatchObject({ recentToolResults: results });
+
+    vi.mocked(resolveIntegrationToolAutoDecision).mockClear();
+    const second = helpers();
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+      resolveSessionUserMessages: () => ['Please post the release update.'],
+      resolveRecentToolResults: async () => {
+        throw new Error('database unavailable');
+      },
+    }).handleAsk({ ...ask, requestId: 'lookup-failed' }, second);
+    await vi.waitFor(() =>
+      expect(resolveIntegrationToolAutoDecision).toHaveBeenCalled(),
+    );
+    expect(
+      vi.mocked(resolveIntegrationToolAutoDecision).mock.calls[0]![0]
+        .sessionContext,
+    ).toMatchObject({ recentToolResults: [] });
+  });
+
   it('never consults Auto for a tool the requester asked to decide themselves', async () => {
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
       { integrationId: 'mock-slack', toolName: 'post_message', mode: 'ask' },

@@ -30,6 +30,7 @@ import {
   claimFastAgentHumanFollowUpSteers,
   fastAgentConversationRepository,
   findFastAgentRepliesBeforeHumanPrompt,
+  findRecentFastAgentToolResults,
   listRecentFastAgentHumanUserPromptTexts,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
@@ -1192,6 +1193,120 @@ describe('Fast conversation repository', () => {
         currentEventId: 'previous-prompt',
       }),
     ).resolves.toBe('An older answer.');
+  });
+
+  it('returns the recent integration tool results of a conversation, oldest first', async () => {
+    const user = await createUser();
+    const conversation = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const persist = (input: {
+      eventId: string;
+      ts: number;
+      payload: Record<string, unknown>;
+    }) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: conversation.id,
+        message: {
+          eventId: input.eventId,
+          turnId: input.eventId,
+          turnSeq: 1,
+          ts: input.ts,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          role: 'assistant',
+          contentBlocks: [],
+          metadata: {},
+          payload: input.payload,
+          source: 'slack',
+        },
+      });
+    const mcp = {
+      kind: 'mcp',
+      isMcp: true,
+      isRoomoteNativeTool: false,
+      status: 'completed',
+    };
+    await persist({
+      eventId: 'list',
+      ts: 100,
+      payload: {
+        ...mcp,
+        serverName: 'hubspot',
+        toolName: 'search_deals',
+        rawInput: { arguments: { stage: 'contract' } },
+        output: '[{"id":"9921034","name":"Globex"}]',
+      },
+    });
+    await persist({
+      eventId: 'still-running',
+      ts: 150,
+      payload: {
+        ...mcp,
+        status: 'in_progress',
+        serverName: 'hubspot',
+        toolName: 'get_deal',
+        output: '',
+      },
+    });
+    await persist({
+      eventId: 'native',
+      ts: 160,
+      payload: {
+        kind: 'tool',
+        isMcp: false,
+        isRoomoteNativeTool: true,
+        status: 'completed',
+        toolName: 'send_chat_reply',
+        output: 'sent',
+      },
+    });
+    await persist({
+      eventId: 'get',
+      ts: 200,
+      payload: {
+        ...mcp,
+        mcpServerName: 'hubspot',
+        mcpToolName: 'get_deal',
+        rawInput: { arguments: { dealId: '9921034' } },
+        output: '{"id":"9921034","name":"Globex","stage":"contract"}',
+      },
+    });
+
+    await expect(
+      findRecentFastAgentToolResults({ conversationId: conversation.id }),
+    ).resolves.toEqual([
+      {
+        tool: 'hubspot.search_deals',
+        arguments: { stage: 'contract' },
+        output: '[{"id":"9921034","name":"Globex"}]',
+      },
+      {
+        tool: 'hubspot.get_deal',
+        arguments: { dealId: '9921034' },
+        output: '{"id":"9921034","name":"Globex","stage":"contract"}',
+      },
+    ]);
+
+    // Only the most recent results are kept.
+    for (let index = 0; index < 9; index += 1) {
+      await persist({
+        eventId: `later-${index}`,
+        ts: 300 + index,
+        payload: {
+          ...mcp,
+          serverName: 'hubspot',
+          toolName: 'get_deal',
+          output: `deal ${index}`,
+        },
+      });
+    }
+    const recent = await findRecentFastAgentToolResults({
+      conversationId: conversation.id,
+    });
+    expect(recent).toHaveLength(8);
+    expect(recent[0]!.output).toBe('deal 1');
+    expect(recent.at(-1)!.output).toBe('deal 8');
   });
 
   it('persists the canonical OpenCode session identity', async () => {

@@ -608,6 +608,60 @@ export async function findFastAgentRepliesBeforeHumanPrompt(input: {
   return text || undefined;
 }
 
+const FAST_AGENT_RECENT_TOOL_RESULT_LIMIT = 8;
+
+/**
+ * Results of the integration tools the agent ran most recently in this
+ * conversation, oldest first and across turns. Auto reads them to tell what
+ * an identifier in a paused call refers to (a listing that maps ids to
+ * names). Unfinished calls and Roomote's own tools are skipped.
+ */
+export async function findRecentFastAgentToolResults(input: {
+  conversationId: string;
+}): Promise<Array<{ tool: string; arguments?: unknown; output: string }>> {
+  const rows = await db
+    .select({ payload: fastAgentMessages.payload })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.ToolResult),
+        sql`${fastAgentMessages.payload}->>'status' = 'completed'`,
+        sql`${fastAgentMessages.payload}->>'isMcp' = 'true'`,
+        sql`coalesce(${fastAgentMessages.payload}->>'isRoomoteNativeTool', 'false') <> 'true'`,
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
+    .limit(FAST_AGENT_RECENT_TOOL_RESULT_LIMIT);
+  return rows.reverse().flatMap((row) => {
+    const payload = row.payload as Record<string, unknown>;
+    const toolName = payload.mcpToolName ?? payload.toolName;
+    const serverName = payload.mcpServerName ?? payload.serverName;
+    if (
+      typeof toolName !== 'string' ||
+      typeof payload.output !== 'string' ||
+      !payload.output.trim()
+    ) {
+      return [];
+    }
+    const rawInput = payload.rawInput;
+    const args =
+      rawInput && typeof rawInput === 'object' && 'arguments' in rawInput
+        ? (rawInput as { arguments?: unknown }).arguments
+        : undefined;
+    return [
+      {
+        tool:
+          typeof serverName === 'string' && serverName
+            ? `${serverName}.${toolName}`
+            : toolName,
+        ...(args === undefined ? {} : { arguments: args }),
+        output: payload.output,
+      },
+    ];
+  });
+}
+
 async function findFastAgentTurnPrompt(
   conversationId: string,
   turnId: string,

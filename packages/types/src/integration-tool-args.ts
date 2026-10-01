@@ -36,20 +36,25 @@ const PERCENT_ENCODED_RUN = /[^\s"'<>]*%[0-9A-Fa-f]{2}[^\s"'<>]*/g;
 const PRIVATE_KEY_BLOCK =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
 
+/** Mask recognized credentials in free text, leaving the rest in place. */
+export function maskIntegrationToolText(text: string): string {
+  let masked = text.replace(PRIVATE_KEY_BLOCK, MASKED_VALUE);
+  for (const pattern of SECRET_VALUE_PATTERNS) {
+    masked = masked.replace(new RegExp(pattern.source, 'g'), MASKED_VALUE);
+  }
+  // Percent-encoded credentials only match once decoded; mask the whole run.
+  return masked.replace(PERCENT_ENCODED_RUN, (run) =>
+    hasSecretShapedString(run) ? MASKED_VALUE : run,
+  );
+}
+
 /**
  * Tool results the agent read, prepared for the judgment model: recognized
  * credentials are masked in place (the surrounding text is the evidence) and
  * only the most recent text is kept, since the paused call follows it.
  */
 export function boundIntegrationToolReadContent(text: string): string {
-  let masked = text.replace(PRIVATE_KEY_BLOCK, MASKED_VALUE);
-  for (const pattern of SECRET_VALUE_PATTERNS) {
-    masked = masked.replace(new RegExp(pattern.source, 'g'), MASKED_VALUE);
-  }
-  // Percent-encoded credentials only match once decoded; mask the whole run.
-  masked = masked.replace(PERCENT_ENCODED_RUN, (run) =>
-    hasSecretShapedString(run) ? MASKED_VALUE : run,
-  );
+  const masked = maskIntegrationToolText(text);
   return masked.length > READ_CONTENT_MAX_LENGTH
     ? `[earlier content omitted]…${masked.slice(-READ_CONTENT_MAX_LENGTH)}`
     : masked;
