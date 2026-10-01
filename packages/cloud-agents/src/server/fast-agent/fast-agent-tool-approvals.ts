@@ -962,16 +962,33 @@ export function createFastAgentToolApprovalBridge(input: {
               : {}),
           },
         );
+        // An Auto approval loses to a rejection of this tool that commits
+        // before the claim, even one made after the check above.
+        const guardRejection =
+          !allowedForSession &&
+          auto?.action === 'approve' &&
+          !toolRejectedInSession;
         const claimed = await claimAutoApprovedIntegrationToolApproval({
           approvalId: reservation.approvalId,
           requesterUserId: input.userId,
+          ...(guardRejection
+            ? {
+                unlessToolRejected: {
+                  sessionId: input.sessionId,
+                  integrationId: tool.integrationId,
+                  toolName: tool.toolName,
+                },
+              }
+            : {}),
         });
         if (!claimed) {
           await helpers
             .reply(
               ask.requestId,
               'reject',
-              'Tool approvals were disabled; the call was not run.',
+              guardRejection
+                ? 'The call was not run: tool approvals were disabled, or the session owner just rejected a call to this tool. Ask them before trying it again.'
+                : 'Tool approvals were disabled; the call was not run.',
             )
             .catch(() => undefined);
           return;

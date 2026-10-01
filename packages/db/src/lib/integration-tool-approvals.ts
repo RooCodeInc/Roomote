@@ -1,6 +1,17 @@
 import { createHash } from 'node:crypto';
 
-import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  notExists,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 import type {
   IntegrationToolApprovalMetadata,
@@ -545,6 +556,7 @@ export async function decideIntegrationToolApproval(
 async function claimApprovedIntegrationToolApproval(
   input: { approvalId: string; requesterUserId: string },
   claimedStatus: 'consumed' | 'auto_approved',
+  condition?: SQL,
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -558,6 +570,7 @@ async function claimApprovedIntegrationToolApproval(
             input.requesterUserId,
           ),
           eq(integrationToolApprovalRequests.status, 'approved'),
+          condition,
         ),
       )
       .returning({ id: integrationToolApprovalRequests.id });
@@ -795,8 +808,54 @@ export async function insertAutoRejectedIntegrationToolApproval(
 export async function claimAutoApprovedIntegrationToolApproval(input: {
   approvalId: string;
   requesterUserId: string;
+  /**
+   * Fail the claim if the requester has rejected a call to this tool in the
+   * session. It is checked in the claim itself, so a rejection that commits
+   * before the call runs is never missed.
+   */
+  unlessToolRejected?: {
+    sessionId: string;
+    integrationId: string;
+    toolName: string;
+  };
 }): Promise<boolean> {
-  return claimApprovedIntegrationToolApproval(input, 'auto_approved');
+  const rejection = alias(integrationToolApprovalRequests, 'rejection');
+  const tool = input.unlessToolRejected;
+  const claimed = await claimApprovedIntegrationToolApproval(
+    input,
+    'auto_approved',
+    tool
+      ? notExists(
+          db
+            .select({ id: rejection.id })
+            .from(rejection)
+            .where(
+              and(
+                eq(rejection.sessionId, tool.sessionId),
+                eq(rejection.requesterUserId, input.requesterUserId),
+                eq(rejection.decidedByUserId, input.requesterUserId),
+                isNull(rejection.taskId),
+                eq(rejection.integrationId, tool.integrationId),
+                eq(rejection.toolName, tool.toolName),
+                eq(rejection.status, 'rejected'),
+              ),
+            ),
+        )
+      : undefined,
+  );
+  if (!claimed && tool) {
+    // A reservation that lost to a rejection never runs; close it.
+    await db
+      .update(integrationToolApprovalRequests)
+      .set({ status: 'cancelled' })
+      .where(
+        and(
+          eq(integrationToolApprovalRequests.id, input.approvalId),
+          eq(integrationToolApprovalRequests.status, 'approved'),
+        ),
+      );
+  }
+  return claimed;
 }
 
 /**

@@ -428,6 +428,52 @@ describe('expireIntegrationToolApproval', () => {
 });
 
 describe('auto-approved reservations', () => {
+  it('loses the claim to a rejection of the same tool in the session', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const reserve = (toolName: string) =>
+      insertAutoApprovedIntegrationToolApproval(context, {
+        integrationId: call.integrationId,
+        toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      });
+    const guarded = (approvalId: string, toolName: string) =>
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId,
+        requesterUserId: userId,
+        unlessToolRejected: {
+          sessionId,
+          integrationId: call.integrationId,
+          toolName,
+        },
+      });
+
+    // No rejection yet: the guarded claim succeeds.
+    const before = await reserve(call.toolName);
+    await expect(guarded(before.approvalId, call.toolName)).resolves.toBe(true);
+
+    // The owner rejects a call to the tool while another is reserved.
+    const reserved = await reserve(call.toolName);
+    const rejected = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: rejected.approvalId,
+      decision: 'rejected',
+    });
+    await expect(guarded(reserved.approvalId, call.toolName)).resolves.toBe(
+      false,
+    );
+    expect(
+      (await getIntegrationToolApproval(reserved.approvalId))?.status,
+    ).toBe('cancelled');
+
+    // Another tool is unaffected.
+    const other = await reserve('other_tool');
+    await expect(guarded(other.approvalId, 'other_tool')).resolves.toBe(true);
+  });
+
   it('inserts an unrelayed approved decision and claims it exactly once', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);

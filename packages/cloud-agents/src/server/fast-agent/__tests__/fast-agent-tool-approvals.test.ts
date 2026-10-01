@@ -2107,6 +2107,44 @@ describe('tool approval bridge', () => {
     );
   });
 
+  it('does not run an Auto approval that loses its claim to a rejection of the tool', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValueOnce({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    vi.mocked(claimAutoApprovedIntegrationToolApproval).mockResolvedValueOnce(
+      false,
+    );
+    const helperMocks = helpers();
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+      resolveSessionUserMessages: () => ['Please post the release update.'],
+    }).handleAsk(ask, helperMocks);
+
+    await vi.waitFor(() =>
+      expect(helperMocks.reply).toHaveBeenCalledWith(
+        ask.requestId,
+        'reject',
+        expect.stringContaining('just rejected a call to this tool'),
+      ),
+    );
+    expect(claimAutoApprovedIntegrationToolApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unlessToolRejected: {
+          sessionId: 'session-id',
+          integrationId: 'mock-slack',
+          toolName: 'post_message',
+        },
+      }),
+    );
+    expect(helperMocks.reply).not.toHaveBeenCalledWith(ask.requestId, 'once');
+  });
+
   it('never consults Auto for a tool the requester asked to decide themselves', async () => {
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
       { integrationId: 'mock-slack', toolName: 'post_message', mode: 'ask' },
