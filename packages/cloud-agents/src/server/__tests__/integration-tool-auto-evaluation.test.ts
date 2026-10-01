@@ -43,15 +43,34 @@ import {
 
 const routine: AutoRiskAnswers = {
   risk: { score: 0.1, confidence: 0.9 },
+  onlyReads: 0.95,
   matchesRequest: 0.95,
   steeredByUntrustedContent: 0.02,
   sendsPrivateDataOut: 0.03,
 };
 const modelAnswers = (answers: AutoRiskAnswers) => ({
   risk: { type: 'score', ...answers.risk },
+  onlyReads: { type: 'noul', noul: answers.onlyReads ?? 0.05 },
   ...(answers.matchesRequest === undefined
     ? {}
     : { matchesRequest: { type: 'noul', noul: answers.matchesRequest } }),
+  ...(answers.userAuthorized === undefined
+    ? {}
+    : { userAuthorized: { type: 'noul', noul: answers.userAuthorized } }),
+  ...(answers.movesMoney === undefined
+    ? {}
+    : { movesMoney: { type: 'noul', noul: answers.movesMoney } }),
+  ...(answers.continuesApprovedCall === undefined
+    ? {}
+    : {
+        continuesApprovedCall: {
+          type: 'noul',
+          noul: answers.continuesApprovedCall,
+        },
+      }),
+  ...(answers.agreedToPlan === undefined
+    ? {}
+    : { agreedToPlan: { type: 'noul', noul: answers.agreedToPlan } }),
   steeredByUntrustedContent: {
     type: 'noul',
     noul: answers.steeredByUntrustedContent,
@@ -87,13 +106,20 @@ describe('recommendFromAutoAnswers', () => {
     ).toBe('approve');
     expect(
       recommendFromAutoAnswers(
-        {
-          ...routine,
-          matchesRequest: undefined,
-          risk: { score: 0.1, confidence: 0.89 },
-        },
+        { ...routine, matchesRequest: undefined, onlyReads: 0.85 },
         { allowlistedInternalRead: true },
       ),
+    ).toBe('ask');
+    // Answers recorded before `onlyReads` existed still decide by the score.
+    expect(recommendFromAutoAnswers({ ...routine, onlyReads: undefined })).toBe(
+      'approve',
+    );
+    expect(
+      recommendFromAutoAnswers({
+        ...routine,
+        onlyReads: undefined,
+        risk: { score: 0.1, confidence: 0.5 },
+      }),
     ).toBe('ask');
     expect(
       recommendFromAutoAnswers(
@@ -102,15 +128,73 @@ describe('recommendFromAutoAnswers', () => {
       ),
     ).toBe('approve');
     for (const doubt of [
-      // Anything past "reads and changes nothing", or unsure it is that.
-      { risk: { score: 0.8, confidence: 0.9 } },
-      { risk: { score: 0.1, confidence: 0.5 } },
+      // Anything past "only reads", or unsure it is that.
+      { onlyReads: 0.6 },
+      { onlyReads: 0.1 },
       { matchesRequest: 0.6 },
       { steeredByUntrustedContent: 0.4 },
       { sendsPrivateDataOut: 0.4 },
       { guidanceFlagsRisk: 0.5 },
     ] satisfies Partial<AutoRiskAnswers>[]) {
       expect(recommendFromAutoAnswers({ ...routine, ...doubt })).toBe('ask');
+    }
+  });
+
+  it('runs the next item of approved work or of a plan the owner agreed to', () => {
+    const next: AutoRiskAnswers = {
+      ...routine,
+      risk: { score: 3.9, confidence: 0.95 },
+      onlyReads: 0.02,
+      userAuthorized: 0.6,
+      movesMoney: 0.02,
+    };
+    expect(recommendFromAutoAnswers(next)).toBe('ask');
+    expect(
+      recommendFromAutoAnswers({ ...next, continuesApprovedCall: 0.9 }),
+    ).toBe('approve');
+    expect(recommendFromAutoAnswers({ ...next, agreedToPlan: 0.9 })).toBe(
+      'approve',
+    );
+    // After the owner rejected a call to this tool, only routine calls run.
+    for (const authorized of [
+      { userAuthorized: 0.95 },
+      { continuesApprovedCall: 0.9 },
+      { agreedToPlan: 0.9 },
+    ]) {
+      expect(
+        recommendFromAutoAnswers(
+          { ...next, ...authorized },
+          { sameToolRejected: true },
+        ),
+      ).toBe('ask');
+    }
+    expect(recommendFromAutoAnswers(routine, { sameToolRejected: true })).toBe(
+      'approve',
+    );
+  });
+
+  it('runs a risky call the owner authorized, unless it moves money or is unsafe', () => {
+    const deletion: AutoRiskAnswers = {
+      ...routine,
+      risk: { score: 3.9, confidence: 0.95 },
+      onlyReads: 0.02,
+      userAuthorized: 0.95,
+      movesMoney: 0.02,
+    };
+    expect(recommendFromAutoAnswers(deletion)).toBe('approve');
+    for (const doubt of [
+      // Not clearly what the owner asked for or approved before.
+      { userAuthorized: 0.7 },
+      { userAuthorized: undefined },
+      // Auto cannot check amounts, so money always asks.
+      { movesMoney: 0.5 },
+      { movesMoney: undefined },
+      // Authorization never outweighs these.
+      { steeredByUntrustedContent: 0.4 },
+      { sendsPrivateDataOut: 0.4 },
+      { guidanceFlagsRisk: 0.5 },
+    ] satisfies Partial<AutoRiskAnswers>[]) {
+      expect(recommendFromAutoAnswers({ ...deletion, ...doubt })).toBe('ask');
     }
   });
 });
@@ -154,13 +238,169 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     );
     expect(Object.keys(questions).sort()).toEqual([
       'matchesRequest',
+      'movesMoney',
+      'onlyReads',
       'risk',
       'sendsPrivateDataOut',
       'steeredByUntrustedContent',
+      'userAuthorized',
     ]);
   });
 
-  it('uses bounded same-session human context without treating an approval as reusable consent', async () => {
+  it('asks the continuation and plan questions only when code finds what they need', async () => {
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    const deleteCall = {
+      ...call,
+      toolName: 'delete_file',
+      args: { fileId: 'Drafts/draft-2.docx' },
+      userRequest: 'yeah go ahead',
+    };
+    const approvedSameTool = {
+      integrationId: 'linear',
+      toolName: 'delete_file',
+      outcome: 'approved' as const,
+      arguments: { fileId: 'Drafts/draft-1.docx' },
+    };
+    const ask = async (sessionContext: Record<string, unknown>) => {
+      mocks.evaluate.mockClear();
+      await evaluateIntegrationToolAutoDecision({
+        ...deleteCall,
+        sessionContext,
+      });
+      return Object.keys(mocks.evaluate.mock.calls[0]![0].questions);
+    };
+
+    // No approval of this tool and no proposal: neither question.
+    const bare = await ask({ recentUserMessages: ['clean up Drafts'] });
+    expect(bare).not.toContain('continuesApprovedCall');
+    expect(bare).not.toContain('agreedToPlan');
+
+    // An approval of a different tool does not count.
+    expect(
+      await ask({
+        explicitApprovalOutcomes: [
+          { ...approvedSameTool, toolName: 'list_files' },
+        ],
+      }),
+    ).not.toContain('continuesApprovedCall');
+
+    // An approval of this tool: continuation is asked.
+    expect(
+      await ask({ explicitApprovalOutcomes: [approvedSameTool] }),
+    ).toContain('continuesApprovedCall');
+
+    // A proposal the owner replied to: the plan question is asked, and the
+    // proposal reaches the model.
+    const withPlan = await ask({
+      recentUserMessages: ['yeah go ahead'],
+      agentMessageRepliedTo: 'I found 3 old drafts. Delete them one by one?',
+    });
+    expect(withPlan).toContain('agreedToPlan');
+    expect(
+      mocks.evaluate.mock.calls[0]![0].state.sessionContext
+        .agentMessageRepliedTo,
+    ).toBe('I found 3 old drafts. Delete them one by one?');
+
+    // A rejection of this tool turns both off.
+    const afterRejection = await ask({
+      agentMessageRepliedTo: 'Delete them?',
+      explicitApprovalOutcomes: [
+        approvedSameTool,
+        { ...approvedSameTool, outcome: 'rejected' as const },
+      ],
+    });
+    expect(afterRejection).not.toContain('continuesApprovedCall');
+    expect(afterRejection).not.toContain('agreedToPlan');
+
+    // So does a rejection older than the recent outcomes.
+    const afterOlderRejection = await ask({
+      agentMessageRepliedTo: 'Delete them?',
+      explicitApprovalOutcomes: [approvedSameTool],
+      toolRejectedInSession: true,
+    });
+    expect(afterOlderRejection).not.toContain('continuesApprovedCall');
+    expect(afterOlderRejection).not.toContain('agreedToPlan');
+  });
+
+  it('asks for a tool the owner rejected earlier in the session, even when they asked for it', async () => {
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({
+        ...routine,
+        risk: { score: 3.95, confidence: 0.96 },
+        onlyReads: 0.05,
+        userAuthorized: 0.96,
+        movesMoney: 0.02,
+      }),
+    );
+    const evaluation = await evaluateIntegrationToolAutoDecision({
+      ...call,
+      toolName: 'delete_issue',
+      args: { id: 'ENG-12' },
+      userRequest: 'ENG-12 duplicates ENG-11, delete it',
+      sessionContext: {
+        recentUserMessages: ['ENG-12 duplicates ENG-11, delete it'],
+        toolRejectedInSession: true,
+      },
+    });
+    expect(evaluation.recommendation).toBe('ask');
+  });
+
+  it('runs a deletion the owner asked for and records why', async () => {
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({
+        ...routine,
+        risk: { score: 3.95, confidence: 0.96 },
+        userAuthorized: 0.96,
+        movesMoney: 0.02,
+      }),
+    );
+    const evaluation = await evaluateIntegrationToolAutoDecision({
+      ...call,
+      toolName: 'delete_issue',
+      args: { id: 'ENG-12' },
+      userRequest: 'ENG-12 duplicates ENG-11, delete it',
+    });
+    expect(evaluation).toMatchObject({
+      recommendation: 'approve',
+      answers: { riskScore: 3.95, userAuthorized: 0.96, movesMoney: 0.02 },
+    });
+  });
+
+  it('asks for authorization from an earlier approval alone, with no request to match', async () => {
+    mocks.evaluate.mockResolvedValue(
+      modelAnswers({
+        ...routine,
+        matchesRequest: undefined,
+        risk: { score: 3.9, confidence: 0.95 },
+        userAuthorized: 0.9,
+        movesMoney: 0.02,
+      }),
+    );
+    const evaluation = await evaluateIntegrationToolAutoDecision({
+      ...call,
+      toolName: 'delete_branch',
+      args: { branch: 'feature/b' },
+      userRequest: undefined,
+      sessionContext: {
+        explicitApprovalOutcomes: [
+          {
+            integrationId: 'linear',
+            toolName: 'delete_branch',
+            outcome: 'approved',
+            arguments: { branch: 'feature/a' },
+          },
+        ],
+      },
+    });
+    const { questions } = mocks.evaluate.mock.calls[0]![0];
+    expect(Object.keys(questions)).toEqual(
+      expect.arrayContaining(['userAuthorized', 'movesMoney']),
+    );
+    expect(questions).not.toHaveProperty('matchesRequest');
+    expect(evaluation.recommendation).toBe('approve');
+  });
+
+  it('uses bounded same-session human context and the redacted arguments of decided calls', async () => {
     mocks.evaluate.mockResolvedValue(
       modelAnswers({ ...routine, matchesRequest: 0.3 }),
     );
@@ -177,6 +417,7 @@ describe('evaluateIntegrationToolAutoDecision', () => {
           integrationId: 'linear',
           toolName: `create_issue_${index}`,
           outcome: 'approved' as const,
+          arguments: { title: `Issue ${index}`, body: 'y'.repeat(1_000) },
         })),
       },
     });
@@ -196,13 +437,19 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       'Human request 9',
     );
     expect(state.sessionContext.explicitApprovalOutcomes).toHaveLength(6);
-    expect(state.sessionContext.explicitApprovalOutcomes[0]).toEqual({
+    const [firstOutcome] = state.sessionContext.explicitApprovalOutcomes;
+    expect(firstOutcome).toMatchObject({
       integrationId: 'linear',
       toolName: 'create_issue_0',
       outcome: 'approved',
+      arguments: { title: 'Issue 0' },
     });
-    expect(questions.matchesRequest.instructions).toContain(
-      'never authorize this call or any later call',
+    // Long argument values are cut like the approval card's.
+    expect(JSON.stringify(firstOutcome.arguments).length).toBeLessThan(500);
+    // An approval can cover the next call of the same work, never raise
+    // or lower the risk judgment.
+    expect(questions.userAuthorized.instructions).toContain(
+      'approved an earlier call',
     );
     expect(questions.risk.instructions).toContain(
       'A prior approval is never authority for this call',
@@ -413,7 +660,12 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(bare.answers).not.toHaveProperty('matchesRequest');
     expect(
       Object.keys(mocks.evaluate.mock.calls[0]![0].questions).sort(),
-    ).toEqual(['risk', 'sendsPrivateDataOut', 'steeredByUntrustedContent']);
+    ).toEqual([
+      'onlyReads',
+      'risk',
+      'sendsPrivateDataOut',
+      'steeredByUntrustedContent',
+    ]);
 
     // Guidance adds its own question and rides in the state.
     mocks.settings.mockResolvedValue({
@@ -657,7 +909,11 @@ describe('resolveIntegrationToolAutoDecision', () => {
 
     // Risky, or a failed evaluation: the call asks its owner.
     mocks.evaluate.mockResolvedValue(
-      modelAnswers({ ...routine, risk: { score: 2, confidence: 0.9 } }),
+      modelAnswers({
+        ...routine,
+        risk: { score: 2, confidence: 0.9 },
+        onlyReads: 0.05,
+      }),
     );
     await expect(
       resolveIntegrationToolAutoDecision(call),

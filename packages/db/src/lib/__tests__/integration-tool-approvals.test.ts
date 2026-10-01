@@ -23,6 +23,7 @@ import {
   IntegrationToolApprovalUnavailableError,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
+  hasRejectedIntegrationToolInSession,
   listRecentIntegrationToolApprovalOutcomes,
   isIntegrationToolAutoSuspendedForSession,
   suspendIntegrationToolAutoForSession,
@@ -427,6 +428,119 @@ describe('expireIntegrationToolApproval', () => {
 });
 
 describe('auto-approved reservations', () => {
+  it('loses the claim to a rejection of the same tool in the session', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const reserve = (toolName: string) =>
+      insertAutoApprovedIntegrationToolApproval(context, {
+        integrationId: call.integrationId,
+        toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      });
+    const guarded = (approvalId: string, toolName: string) =>
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId,
+        requesterUserId: userId,
+        unlessToolRejected: {
+          sessionId,
+          integrationId: call.integrationId,
+          toolName,
+        },
+      });
+
+    // No rejection yet: the guarded claim succeeds.
+    const before = await reserve(call.toolName);
+    await expect(guarded(before.approvalId, call.toolName)).resolves.toBe(true);
+
+    // The owner rejects a call to the tool while another is reserved.
+    const reserved = await reserve(call.toolName);
+    const rejected = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: rejected.approvalId,
+      decision: 'rejected',
+    });
+    await expect(guarded(reserved.approvalId, call.toolName)).resolves.toBe(
+      false,
+    );
+    expect(
+      (await getIntegrationToolApproval(reserved.approvalId))?.status,
+    ).toBe('cancelled');
+
+    // Another tool is unaffected.
+    const other = await reserve('other_tool');
+    await expect(guarded(other.approvalId, 'other_tool')).resolves.toBe(true);
+  });
+
+  it('makes a rejection wait for an Auto claim of the same tool in progress', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const pending = await insertPending(context);
+    const order: string[] = [];
+    let rejection: Promise<unknown> | undefined;
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${sessionId}:${call.integrationId}:${call.toolName}`}, 0))`,
+      );
+      rejection = decideIntegrationToolApproval(context, {
+        approvalId: pending.approvalId,
+        decision: 'rejected',
+      }).then(() => order.push('rejected'));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      order.push('claim committed');
+    });
+    await rejection;
+    expect(order).toEqual(['claim committed', 'rejected']);
+  });
+
+  it('waits for a rejection in progress and then loses the claim to it', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const reserved = await insertAutoApprovedIntegrationToolApproval(context, {
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: call.args,
+    });
+    const pending = await insertPending(context);
+
+    let claim: Promise<boolean> | undefined;
+    // The owner's rejection is mid-transaction when Auto tries to claim.
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${sessionId}:${call.integrationId}:${call.toolName}`}, 0))`,
+      );
+      await tx
+        .update(integrationToolApprovalRequests)
+        .set({
+          status: 'rejected',
+          decidedByUserId: userId,
+          decidedAt: sql`clock_timestamp()`,
+        })
+        .where(eq(integrationToolApprovalRequests.id, pending.approvalId));
+      claim = claimAutoApprovedIntegrationToolApproval({
+        approvalId: reserved.approvalId,
+        requesterUserId: userId,
+        unlessToolRejected: {
+          sessionId,
+          integrationId: call.integrationId,
+          toolName: call.toolName,
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    });
+
+    await expect(claim).resolves.toBe(false);
+    expect(
+      (await getIntegrationToolApproval(reserved.approvalId))?.status,
+    ).toBe('cancelled');
+  });
+
   it('inserts an unrelayed approved decision and claims it exactly once', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
@@ -766,7 +880,7 @@ describe('listPendingIntegrationToolApprovals', () => {
 });
 
 describe('listRecentIntegrationToolApprovalOutcomes', () => {
-  it('returns only recent explicit decisions on calls in the same Session', async () => {
+  it('returns only recent explicit decisions on calls in the same session, with their arguments', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
     const context = { sessionId, userId };
@@ -841,14 +955,72 @@ describe('listRecentIntegrationToolApprovalOutcomes', () => {
           integrationId: call.integrationId,
           toolName: call.toolName,
           outcome: 'approved',
+          arguments: call.args,
         },
         {
           integrationId: call.integrationId,
           toolName: call.toolName,
           outcome: 'rejected',
+          arguments: { channel: 'C999', text: 'not this call' },
         },
       ]),
     );
+  });
+});
+
+describe('hasRejectedIntegrationToolInSession', () => {
+  it('finds a rejection of the tool however many decisions came after it', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const tool = {
+      sessionId,
+      userId,
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+    };
+    expect(await hasRejectedIntegrationToolInSession(tool)).toBe(false);
+
+    const rejected = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: rejected.approvalId,
+      decision: 'rejected',
+    });
+    for (let index = 0; index < 7; index += 1) {
+      const approved = await insertIntegrationToolApproval(context, {
+        ...call,
+        toolName: 'other_tool',
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      });
+      await decideIntegrationToolApproval(context, {
+        approvalId: approved.approvalId,
+        decision: 'approved',
+      });
+      await markIntegrationToolApprovalConsumed({
+        approvalId: approved.approvalId,
+        requesterUserId: userId,
+      });
+    }
+
+    const recent = await listRecentIntegrationToolApprovalOutcomes(context);
+    expect(recent.some((outcome) => outcome.outcome === 'rejected')).toBe(
+      false,
+    );
+    expect(await hasRejectedIntegrationToolInSession(tool)).toBe(true);
+    expect(
+      await hasRejectedIntegrationToolInSession({
+        ...tool,
+        toolName: 'other_tool',
+      }),
+    ).toBe(false);
+    expect(
+      await hasRejectedIntegrationToolInSession({
+        ...tool,
+        sessionId: await ownedSession(userId),
+      }),
+    ).toBe(false);
   });
 });
 

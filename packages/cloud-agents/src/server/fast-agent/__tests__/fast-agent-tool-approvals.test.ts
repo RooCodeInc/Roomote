@@ -64,6 +64,7 @@ vi.mock('@roomote/db/server', () => ({
   listRecentIntegrationToolApprovalOutcomes: vi.fn(
     async () => databaseMocks.recentApprovalOutcomes,
   ),
+  hasRejectedIntegrationToolInSession: vi.fn(async () => false),
   listIntegrationToolSessionOverrides: vi.fn(async () => []),
   listIntegrationToolUserPolicies: vi.fn(async () => []),
   markIntegrationToolApprovalConsumed: vi.fn(async () => true),
@@ -80,6 +81,7 @@ import {
   expireIntegrationToolApproval,
   getIntegrationToolApproval,
   getSessionForFastConversation,
+  hasRejectedIntegrationToolInSession,
   insertAutoApprovedIntegrationToolApproval,
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
@@ -1452,8 +1454,8 @@ describe('tool approval bridge', () => {
       requesterUserId: 'user-id',
     });
 
-    // A later call in the same Session is judged independently. The prior
-    // approval is visible as history, not as a reusable grant.
+    // A later call in the same session is still assessed. The prior
+    // approval is context for the model, never a skipped assessment.
     const nextCall = helpers();
     createFastAgentToolApprovalBridge({
       sessionId: 'session-id',
@@ -1488,6 +1490,55 @@ describe('tool approval bridge', () => {
         },
       }),
     );
+  });
+
+  it('gives the assessment what the agent proposed before the owner replied', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    const bridgeWith = (
+      resolveAgentMessageRepliedTo: () => Promise<string | undefined>,
+    ) =>
+      createFastAgentToolApprovalBridge({
+        sessionId: 'session-id',
+        userId: 'user-id',
+        surface: 'web',
+        integrations,
+        autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+        resolveUserRequest: () => 'yeah go ahead',
+        resolveSessionUserMessages: () => ['yeah go ahead'],
+        resolveAgentMessageRepliedTo,
+      });
+
+    const withPlan = helpers();
+    bridgeWith(
+      async () => 'Want me to post the release note in #eng?',
+    ).handleAsk({ ...ask, requestId: 'plan-1' }, withPlan);
+    await vi.waitFor(() =>
+      expect(withPlan.reply).toHaveBeenCalledWith('plan-1', 'once'),
+    );
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sessionContext: expect.objectContaining({
+          agentMessageRepliedTo: 'Want me to post the release note in #eng?',
+        }),
+      }),
+    );
+
+    // A failed lookup leaves the proposal out rather than failing the ask.
+    const failed = helpers();
+    bridgeWith(async () => {
+      throw new Error('db down');
+    }).handleAsk({ ...ask, requestId: 'plan-2' }, failed);
+    await vi.waitFor(() =>
+      expect(failed.reply).toHaveBeenCalledWith('plan-2', 'once'),
+    );
+    expect(
+      vi.mocked(resolveIntegrationToolAutoDecision).mock.lastCall![0]
+        .sessionContext,
+    ).not.toHaveProperty('agentMessageRepliedTo');
   });
 
   it('uses the shared neutral-masked argument view for the approval card and audit summary', async () => {
@@ -1990,6 +2041,109 @@ describe('tool approval bridge', () => {
       expect(insertAutoRejectedIntegrationToolApproval).not.toHaveBeenCalled();
     },
   );
+
+  it('tells Auto the owner rejected this tool when the session-wide lookup fails', async () => {
+    vi.mocked(hasRejectedIntegrationToolInSession).mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+    const helperMocks = helpers();
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+      resolveSessionUserMessages: () => ['Please post the release update.'],
+    }).handleAsk(ask, helperMocks);
+
+    await vi.waitFor(() =>
+      expect(resolveIntegrationToolAutoDecision).toHaveBeenCalled(),
+    );
+    expect(hasRejectedIntegrationToolInSession).toHaveBeenCalledWith({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      integrationId: 'mock-slack',
+      toolName: 'post_message',
+    });
+    expect(
+      vi.mocked(resolveIntegrationToolAutoDecision).mock.calls[0]![0]
+        .sessionContext,
+    ).toMatchObject({ toolRejectedInSession: true });
+  });
+
+  it('asks instead of auto-running when the owner rejects this tool during the assessment', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValueOnce({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    // No rejection when the context is read, one by the time Auto would run.
+    vi.mocked(hasRejectedIntegrationToolInSession)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
+    const helperMocks = helpers();
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+      resolveSessionUserMessages: () => ['Please post the release update.'],
+    }).handleAsk(ask, helperMocks);
+
+    await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalled());
+    expect(insertAutoApprovedIntegrationToolApproval).not.toHaveBeenCalled();
+    expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        autoEvaluation: expect.objectContaining({
+          recommendation: 'ask',
+          reason: 'the session owner rejected a call to this tool',
+        }),
+      }),
+    );
+  });
+
+  it('does not run an Auto approval that loses its claim to a rejection of the tool', async () => {
+    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValueOnce({
+      action: 'approve',
+      mode: 'on',
+      evaluation: { recommendation: 'approve', answers: {}, evaluatedAt: '' },
+    });
+    vi.mocked(claimAutoApprovedIntegrationToolApproval).mockResolvedValueOnce(
+      false,
+    );
+    const helperMocks = helpers();
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      surface: 'web',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+      resolveSessionUserMessages: () => ['Please post the release update.'],
+    }).handleAsk(ask, helperMocks);
+
+    await vi.waitFor(() =>
+      expect(helperMocks.reply).toHaveBeenCalledWith(
+        ask.requestId,
+        'reject',
+        expect.stringContaining('just rejected a call to this tool'),
+      ),
+    );
+    expect(claimAutoApprovedIntegrationToolApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unlessToolRejected: {
+          sessionId: 'session-id',
+          integrationId: 'mock-slack',
+          toolName: 'post_message',
+        },
+      }),
+    );
+    expect(helperMocks.reply).not.toHaveBeenCalledWith(ask.requestId, 'once');
+  });
 
   it('never consults Auto for a tool the requester asked to decide themselves', async () => {
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([

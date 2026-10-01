@@ -201,6 +201,7 @@ import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   findFastAgentActiveInferenceRetryNotice,
+  findFastAgentRepliesBeforeHumanPrompt,
   listRecentFastAgentHumanUserPromptTexts,
   claimFastAgentHumanFollowUpSteers,
   markFastAgentDurableTurnDelivered,
@@ -6759,6 +6760,14 @@ export async function answerFastAgentQuestion({
                           priorHumanMessages: await resolvePriorHumanMessages(),
                           steeredHumanRequests,
                         }),
+                      resolveAgentMessageRepliedTo: async () =>
+                        turnSource === 'human'
+                          ? findFastAgentRepliesBeforeHumanPrompt({
+                              conversationId: session.id,
+                              beforeTs: userPromptTs,
+                              currentEventId: userEvent.eventId,
+                            })
+                          : undefined,
                       signal: promptSignal,
                       // Auto stopped for this session: say so in the thread
                       // and end the turn. The notice closes the instruction,

@@ -15,6 +15,7 @@ import {
   insertIntegrationToolApproval,
   isIntegrationToolAutoSuspendedForSession,
   listIntegrationToolPolicies,
+  hasRejectedIntegrationToolInSession,
   listRecentIntegrationToolApprovalOutcomes,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
@@ -455,6 +456,11 @@ export function createFastAgentToolApprovalBridge(input: {
   resolveUserRequest?: () => string | undefined | Promise<string | undefined>;
   /** Human-authored request history from this Session, never a parent task. */
   resolveSessionUserMessages?: () => string[] | Promise<string[]>;
+  /**
+   * What the agent said before the owner's latest message, so Auto can tell
+   * what a reply such as "yes, go ahead" agreed to. Human turns only.
+   */
+  resolveAgentMessageRepliedTo?: () => Promise<string | undefined>;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   /**
@@ -744,7 +750,12 @@ export function createFastAgentToolApprovalBridge(input: {
         return;
       }
       const autoAssessed = autoCandidate && !autoSuspended;
-      const [recentUserMessages, explicitApprovalOutcomes] = autoAssessed
+      const [
+        recentUserMessages,
+        explicitApprovalOutcomes,
+        agentMessage,
+        toolRejectedInSession,
+      ] = autoAssessed
         ? await Promise.all([
             input.resolveSessionUserMessages?.() ?? [],
             // This query is keyed to this Session and owner, and excludes
@@ -754,11 +765,25 @@ export function createFastAgentToolApprovalBridge(input: {
               sessionId: input.sessionId,
               userId: input.userId,
             }).catch(() => []),
+            // Context only: a lookup failure means "go ahead" covers nothing.
+            input.resolveAgentMessageRepliedTo?.().catch(() => undefined),
+            // A lookup failure counts as a rejection, so Auto asks.
+            hasRejectedIntegrationToolInSession({
+              sessionId: input.sessionId,
+              userId: input.userId,
+              integrationId: tool.integrationId,
+              toolName: tool.toolName,
+            }).catch(() => true),
           ])
-        : [[], []];
+        : [[], [], undefined, false];
       const sessionContext: IntegrationToolAutoSessionContext | undefined =
         autoAssessed
-          ? { recentUserMessages, explicitApprovalOutcomes }
+          ? {
+              recentUserMessages,
+              explicitApprovalOutcomes,
+              ...(agentMessage ? { agentMessageRepliedTo: agentMessage } : {}),
+              ...(toolRejectedInSession ? { toolRejectedInSession } : {}),
+            }
           : undefined;
       const assess = async (callArgs: unknown) =>
         resolveIntegrationToolAutoDecision({
@@ -865,6 +890,30 @@ export function createFastAgentToolApprovalBridge(input: {
           });
         return;
       }
+      // The owner may have rejected a call to this tool while this one was
+      // being assessed (two calls in flight together). Check again right
+      // before running so that rejection still makes this call ask.
+      if (
+        auto?.mode === 'on' &&
+        auto.action === 'approve' &&
+        !toolRejectedInSession &&
+        (await hasRejectedIntegrationToolInSession({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          integrationId: tool.integrationId,
+          toolName: tool.toolName,
+        }).catch(() => true))
+      ) {
+        auto = {
+          ...auto,
+          action: 'ask',
+          evaluation: {
+            ...auto.evaluation,
+            recommendation: 'ask',
+            reason: 'the session owner rejected a call to this tool',
+          },
+        };
+      }
       if (auto?.action === 'ask' && !(await ownerIsPresent())) {
         // The audit row is born terminal `auto_rejected` with the assessment;
         // if it cannot be written the outer handler rejects the ask instead
@@ -913,16 +962,33 @@ export function createFastAgentToolApprovalBridge(input: {
               : {}),
           },
         );
+        // An Auto approval loses to a rejection of this tool that commits
+        // before the claim, even one made after the check above.
+        const guardRejection =
+          !allowedForSession &&
+          auto?.action === 'approve' &&
+          !toolRejectedInSession;
         const claimed = await claimAutoApprovedIntegrationToolApproval({
           approvalId: reservation.approvalId,
           requesterUserId: input.userId,
+          ...(guardRejection
+            ? {
+                unlessToolRejected: {
+                  sessionId: input.sessionId,
+                  integrationId: tool.integrationId,
+                  toolName: tool.toolName,
+                },
+              }
+            : {}),
         });
         if (!claimed) {
           await helpers
             .reply(
               ask.requestId,
               'reject',
-              'Tool approvals were disabled; the call was not run.',
+              guardRejection
+                ? 'The call was not run: tool approvals were disabled, or the session owner just rejected a call to this tool. Ask them before trying it again.'
+                : 'Tool approvals were disabled; the call was not run.',
             )
             .catch(() => undefined);
           return;
