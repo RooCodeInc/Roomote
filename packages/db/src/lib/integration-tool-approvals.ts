@@ -655,6 +655,39 @@ export async function listIntegrationToolSessionOverrides(
 }
 
 /**
+ * Stop Auto for one session: from now on its default tools ask a person.
+ * Returns true only for the call that stopped it, so the notice is posted
+ * once even when several calls fail at the same time.
+ */
+export async function suspendIntegrationToolAutoForSession(
+  sessionId: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(sessions)
+    .set({ autoToolApprovalsSuspendedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        isNull(sessions.autoToolApprovalsSuspendedAt),
+      ),
+    )
+    .returning({ id: sessions.id });
+  return rows.length > 0;
+}
+
+/** Whether Auto has stopped for this session; see `suspendIntegrationToolAutoForSession`. */
+export async function isIntegrationToolAutoSuspendedForSession(
+  sessionId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ suspendedAt: sessions.autoToolApprovalsSuspendedAt })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return row?.suspendedAt != null;
+}
+
+/**
  * Audit row for an ask the bridge relayed without a card because the
  * requester already chose "don't ask again this session" for the tool. It is
  * born terminal, so no later decision or relay can ever claim it.

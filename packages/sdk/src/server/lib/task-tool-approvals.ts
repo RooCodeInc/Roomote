@@ -10,9 +10,11 @@ import {
   insertAutoApprovedIntegrationToolApproval,
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
+  isIntegrationToolAutoSuspendedForSession,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
+  suspendIntegrationToolAutoForSession,
   taskRuns,
   trackedMessages,
 } from '@roomote/db/server';
@@ -258,6 +260,11 @@ type TaskToolApprovalRequestResult =
   | { outcome: 'approved' }
   /** Auto mode blocked the call; the reason goes back to the model. */
   | { outcome: 'denied'; reason: string }
+  /**
+   * The call could not be assessed, so Auto stopped for the session; the
+   * call did not run and later calls ask the owner.
+   */
+  | { outcome: 'paused' }
   | { outcome: 'pending'; approvalId: string };
 
 /** Record one native ask from a task's agent. */
@@ -312,34 +319,57 @@ export async function requestTaskToolApproval(input: {
   // Auto mode assesses a call to a default tool only; a tool someone made a
   // choice about is theirs to decide. A risky or unavailable assessment asks
   // the Session owner when present and is denied when they are away.
-  const auto = integrationToolModeIsAutoAssessed({
+  const autoCandidate = integrationToolModeIsAutoAssessed({
     policyMode,
     sessionOverrideMode: overrideForSession,
-  })
-    ? await resolveIntegrationToolAutoDecision({
-        integrationId: input.integrationId,
-        toolName: input.toolName,
-        args: input.args,
-        userRequest:
-          toIntegrationToolUserRequest(input.userRequest) ??
-          (await findLatestTaskUserRequest(session.taskId).catch(
-            () => undefined,
-          )),
-        userId: session.ownerUserId,
-        taskId: session.taskId,
-      }).catch(() => ({
-        action: 'ask' as const,
-        mode: 'on' as const,
-        evaluation: {
-          recommendation: 'ask' as const,
-          unavailable: 'error' as const,
-          evaluatedAt: new Date().toISOString(),
-        },
-      }))
-    : undefined;
+  });
+  // After Auto stopped for the session its default tools ask the owner,
+  // unless Auto has since been turned off, when they run as they always have.
+  const autoSuspended =
+    autoCandidate &&
+    (await isIntegrationToolAutoSuspendedForSession(session.sessionId));
+  if (
+    autoSuspended &&
+    (await resolveIntegrationToolAutoState()).mode !== 'on'
+  ) {
+    return { outcome: 'not_required' };
+  }
+  const auto =
+    autoCandidate && !autoSuspended
+      ? await resolveIntegrationToolAutoDecision({
+          integrationId: input.integrationId,
+          toolName: input.toolName,
+          args: input.args,
+          userRequest:
+            toIntegrationToolUserRequest(input.userRequest) ??
+            (await findLatestTaskUserRequest(session.taskId).catch(
+              () => undefined,
+            )),
+          userId: session.ownerUserId,
+          taskId: session.taskId,
+        }).catch(() => ({
+          action: 'ask' as const,
+          mode: 'on' as const,
+          evaluation: {
+            recommendation: 'ask' as const,
+            unavailable: 'error' as const,
+            evaluatedAt: new Date().toISOString(),
+          },
+        }))
+      : undefined;
   // A default tool asked while Auto is off (a stale native rule) runs as it
   // always has.
   if (auto?.mode === 'off') return { outcome: 'not_required' };
+  if (auto?.evaluation.unavailable) {
+    // The call could not be assessed: stop Auto for the session rather than
+    // ask about (or deny) every call while assessment is down.
+    await suspendIntegrationToolAutoForSession(session.sessionId);
+    await insertAutoRejectedIntegrationToolApproval(context, {
+      ...call,
+      autoEvaluation: auto.evaluation,
+    });
+    return { outcome: 'paused' };
+  }
   if (allowedForSession) {
     // Same reservation-and-claim audit path as a Session's own agent.
     const reservation = await insertAutoApprovedIntegrationToolApproval(

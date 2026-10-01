@@ -13,6 +13,7 @@ import {
   insertAutoApprovedIntegrationToolApproval,
   insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
+  isIntegrationToolAutoSuspendedForSession,
   listIntegrationToolPolicies,
   hasRejectedIntegrationToolInSession,
   listRecentIntegrationToolApprovalOutcomes,
@@ -20,9 +21,11 @@ import {
   listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
   sessionTasks,
+  suspendIntegrationToolAutoForSession,
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
 import {
+  INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
   describeIntegrationToolAutoAbsentDenial,
   integrationToolModeIsAutoAssessed,
   integrationToolPolicyKey,
@@ -460,6 +463,15 @@ export function createFastAgentToolApprovalBridge(input: {
   resolveAgentMessageRepliedTo?: () => Promise<string | undefined>;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
+  /**
+   * Auto stopped for this session because a call could not be assessed:
+   * tell the owner in the thread and end the turn. Called once per turn.
+   */
+  onAutoSuspended?: (tool: {
+    integrationId: string;
+    integrationName: string;
+    toolName: string;
+  }) => Promise<void>;
   signal?: AbortSignal;
 }) {
   type ToolIdentity = MountedIntegrationTool;
@@ -537,6 +549,9 @@ export function createFastAgentToolApprovalBridge(input: {
       );
     }
   };
+  // Once Auto stops in this turn the turn is ending: no other call runs or
+  // leaves a card waiting.
+  let autoSuspendedThisTurn = false;
 
   const ownerIsPresent = async (): Promise<boolean> => {
     if (isFastAgentApprovalChatSurface(input.surface)) return true;
@@ -682,6 +697,16 @@ export function createFastAgentToolApprovalBridge(input: {
         return;
       }
       const { tool, args, parallel, concurrent } = resolution;
+      if (autoSuspendedThisTurn) {
+        await helpers
+          .reply(
+            ask.requestId,
+            'reject',
+            INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
+          )
+          .catch(() => undefined);
+        return;
+      }
       const argsSummary = redactIntegrationToolArgs(args ?? null);
       const argsFingerprint = fingerprintIntegrationToolCall({
         integrationId: tool.integrationId,
@@ -706,11 +731,25 @@ export function createFastAgentToolApprovalBridge(input: {
       // stored mode or a session override) is theirs to decide, so it never
       // reaches the model. A risky or unavailable assessment asks the Session
       // owner when present and is denied when they are away.
-      const autoAssessed =
+      const autoCandidate =
         !overrideForSession &&
         input.autoToolKeys?.has(
           integrationToolPolicyKey(tool.integrationId, tool.toolName),
         ) === true;
+      // After Auto stopped for this session, its default tools ask a person.
+      const autoSuspended =
+        autoCandidate &&
+        (await isIntegrationToolAutoSuspendedForSession(input.sessionId));
+      // Auto turned off for the deployment since then: the tool runs as it
+      // always has, like any default tool asked under a stale rule.
+      if (
+        autoSuspended &&
+        (await resolveIntegrationToolAutoState()).mode !== 'on'
+      ) {
+        await helpers.reply(ask.requestId, 'once');
+        return;
+      }
+      const autoAssessed = autoCandidate && !autoSuspended;
       const [
         recentUserMessages,
         explicitApprovalOutcomes,
@@ -789,9 +828,13 @@ export function createFastAgentToolApprovalBridge(input: {
         // This ask is one of these calls; it runs only if every one of them
         // would run on its own.
         const results = await Promise.all(parallel.map(assessShared));
-        // Any call Auto would not run makes the batch ask the owner.
+        // Any call Auto could not check pauses Auto; any call it would not
+        // run makes the batch ask the owner.
         auto =
           results.find((result) => result.mode === 'off') ??
+          results.find(
+            (result) => result.mode === 'on' && result.evaluation.unavailable,
+          ) ??
           results.find((result) => result.action !== 'approve') ??
           results[0];
       } else if (autoAssessed) {
@@ -802,6 +845,49 @@ export function createFastAgentToolApprovalBridge(input: {
       // record.
       if (auto?.mode === 'off') {
         await helpers.reply(ask.requestId, 'once');
+        return;
+      }
+      if (auto?.evaluation.unavailable) {
+        // Calls in one turn run concurrently; only the first to get here
+        // posts the notice. No await between the check and the set.
+        const firstToPause = !autoSuspendedThisTurn;
+        // The call could not be assessed: stop Auto for this session rather
+        // than ask about (or deny) every call while assessment is down.
+        autoSuspendedThisTurn = true;
+        await suspendIntegrationToolAutoForSession(input.sessionId);
+        await insertAutoRejectedIntegrationToolApproval(
+          { sessionId: input.sessionId, userId: input.userId },
+          {
+            integrationId: tool.integrationId,
+            toolName: tool.toolName,
+            nativeRequestId: ask.requestId,
+            argsFingerprint,
+            argsSummary,
+            autoEvaluation: auto.evaluation,
+          },
+        );
+        await helpers
+          .reply(
+            ask.requestId,
+            'reject',
+            INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
+          )
+          .catch(() => undefined);
+        if (!firstToPause) return;
+        await input
+          .onAutoSuspended?.({
+            integrationId: tool.integrationId,
+            integrationName:
+              input.integrations.find(
+                (integration) => integration.id === tool.integrationId,
+              )?.name ?? tool.integrationId,
+            toolName: tool.toolName,
+          })
+          .catch((error: unknown) => {
+            console.warn(
+              `[Fast Agent] Could not post the Auto pause notice for session ${input.sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
         return;
       }
       // The owner may have rejected a call to this tool while this one was

@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import { sdk } from '@roomote/sdk/client';
 import {
+  INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
   describeIntegrationToolAutoAbsentDenial,
   toIntegrationToolUserRequest,
   type TaskIntegrationToolApprovals,
@@ -230,6 +231,10 @@ export function createTaskToolApprovalRelay(options: {
         'reject',
         describeIntegrationToolAutoAbsentDenial(result.reason),
       );
+      return;
+    }
+    if (result.outcome === 'paused') {
+      await reply(ask, 'reject', INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE);
       return;
     }
     if (result.outcome === 'unavailable') {
