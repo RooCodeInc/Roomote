@@ -3,23 +3,25 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { db } from '../db';
-import { fastAgentMessages, users } from '../schema';
+import { fastAgentMessages, taskMessages, users } from '../schema';
 
-/**
- * Who sent the human prompts of a session's conversation: nobody yet, one
- * person, or several. A prompt without a recorded sender counts as several,
- * so the answer is "one" only when every prompt is known to be that person's.
- * A chat sender with no account of their own acts under another user's id, so
- * the chat identity has to be the same throughout as well.
- */
-export type SessionPromptSenders =
+/** Who sent a set of prompts: nobody yet, one person, or several. */
+type PromptSenders =
   | { kind: 'none' }
   | { kind: 'one'; userId: string }
   | { kind: 'several' };
 
+/**
+ * Who sent the human prompts of a session's conversation, over all of them
+ * rather than the recent ones a caller shows. A prompt without a recorded
+ * sender counts as several, so the answer is "one" only when every prompt is
+ * known to be that person's. A chat sender with no account of their own acts
+ * under another user's id, so the chat identity has to be the same throughout
+ * as well.
+ */
 export async function findSessionPromptSenders(
   conversationId: string,
-): Promise<SessionPromptSenders> {
+): Promise<PromptSenders> {
   const rows = await db
     .selectDistinct({
       userId: sql<string | null>`${fastAgentMessages.metadata}->>'userId'`,
@@ -40,6 +42,35 @@ export async function findSessionPromptSenders(
   return another || !only.userId
     ? { kind: 'several' }
     : { kind: 'one', userId: only.userId };
+}
+
+/**
+ * Who sent the prompts people sent to a task itself, over all of them: an
+ * earlier prompt from somebody else still makes the task a shared one after
+ * it has left the recent history. Prompts the platform or the harness sends
+ * carry no sender and are not counted. These rows are recorded by the task's
+ * own worker.
+ */
+export async function findTaskPromptSenders(
+  taskId: string,
+): Promise<PromptSenders> {
+  const rows = await db
+    .selectDistinct({
+      userId: sql<string>`${taskMessages.metadata}->>'userId'`,
+      externalId: sql<string>`coalesce(${taskMessages.metadata}->>'senderExternalId', '')`,
+    })
+    .from(taskMessages)
+    .where(
+      and(
+        eq(taskMessages.taskId, taskId),
+        eq(taskMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        sql`${taskMessages.metadata}->>'userId' is not null`,
+      ),
+    )
+    .limit(2);
+  const [only, another] = rows;
+  if (!only) return { kind: 'none' };
+  return another ? { kind: 'several' } : { kind: 'one', userId: only.userId };
 }
 
 /**

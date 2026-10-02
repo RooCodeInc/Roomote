@@ -11,7 +11,10 @@ import {
 } from '@roomote/types';
 
 import { db } from '../db';
-import { findSessionPromptSenders } from './integration-tool-auto-owner';
+import {
+  findSessionPromptSenders,
+  findTaskPromptSenders,
+} from './integration-tool-auto-owner';
 import {
   fastAgentMessages,
   sessions,
@@ -62,7 +65,7 @@ type Request = {
   text: string;
   from: 'session' | 'task' | 'launch';
   eventId?: string;
-  /** Who sent it, where the row says. Session prompts are looked up apart. */
+  /** Who launched the task, for its launch prompt. */
   userId?: string;
 };
 
@@ -123,7 +126,6 @@ async function listTaskHumanPrompts(taskId: string): Promise<Request[]> {
       ts: taskMessages.ts,
       contentBlocks: taskMessages.contentBlocks,
       payload: taskMessages.payload,
-      userId: sql<string | null>`${taskMessages.metadata}->>'userId'`,
     })
     .from(taskMessages)
     .where(
@@ -140,16 +142,7 @@ async function listTaskHumanPrompts(taskId: string): Promise<Request[]> {
     const text = toIntegrationToolUserRequest(
       textOf(row.contentBlocks, row.payload),
     );
-    return text
-      ? [
-          {
-            ts: row.ts,
-            text,
-            from: 'task' as const,
-            ...(row.userId ? { userId: row.userId } : {}),
-          },
-        ]
-      : [];
+    return text ? [{ ts: row.ts, text, from: 'task' as const }] : [];
   });
 }
 
@@ -420,18 +413,21 @@ export async function resolveTaskIntegrationToolAutoContext(input: {
     });
   }
 
-  // One sender for the whole session conversation, checked over every
-  // prompt in it; the task's own prompts and its launch each name theirs.
-  const sessionSenders =
+  // Senders are checked over every prompt of the session and of the task,
+  // not only the recent ones shown: somebody else's earlier prompt still
+  // makes "me" ambiguous after it has left the history.
+  const [sessionSenders, taskSenders] = await Promise.all([
     conversationId && sessionPrompts.length > 0
-      ? await findSessionPromptSenders(conversationId)
-      : undefined;
+      ? findSessionPromptSenders(conversationId)
+      : undefined,
+    taskPrompts.length > 0 ? findTaskPromptSenders(input.taskId) : undefined,
+  ]);
   const authors = [
-    ...(sessionSenders
-      ? [sessionSenders.kind === 'one' ? sessionSenders.userId : undefined]
-      : []),
+    ...[sessionSenders, taskSenders].flatMap((senders) =>
+      senders ? [senders.kind === 'one' ? senders.userId : undefined] : [],
+    ),
     ...requests
-      .filter((request) => request.from !== 'session')
+      .filter((request) => request.from === 'launch')
       .map((request) => request.userId),
   ];
   const [author] = authors;

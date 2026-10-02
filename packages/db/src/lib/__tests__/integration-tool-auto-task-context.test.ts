@@ -343,6 +343,30 @@ describe('resolveTaskIntegrationToolAutoContext', () => {
     ).resolves.not.toHaveProperty('requestsWrittenBy');
   });
 
+  it('still counts somebody else’s prompt after it has left the recent history', async () => {
+    const { context, owner, taskMessage } = await seed({
+      origin: 'direct_launch',
+      prompt: 'File the bug.',
+      withConversation: false,
+    });
+    await taskMessage({
+      ts: 9_000,
+      text: 'Assign it to me.',
+      metadata: { userId: 'a-teammate', source: 'slack' },
+    });
+    // More prompts from the owner than the history keeps.
+    for (let index = 0; index < 25; index += 1) {
+      await taskMessage({
+        ts: 10_000 + index,
+        text: `Owner follow-up ${index}.`,
+        metadata: { userId: owner, source: 'web' },
+      });
+    }
+    const resolved = await resolveTaskIntegrationToolAutoContext(context);
+    expect(resolved.recentUserMessages).not.toContain('Assign it to me.');
+    expect(resolved).not.toHaveProperty('requestsWrittenBy');
+  });
+
   it('has nothing to judge against for a task outside the session', async () => {
     const { context } = await seed({
       origin: 'direct_launch',
