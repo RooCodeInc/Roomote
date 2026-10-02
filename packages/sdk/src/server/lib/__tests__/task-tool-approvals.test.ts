@@ -17,6 +17,15 @@ const mocks = vi.hoisted(() => ({
   suspended: vi.fn(async () => false),
   suspend: vi.fn(async () => true),
   latestUserRequest: vi.fn(async () => undefined as string | undefined),
+  taskContext: vi.fn(
+    async () => ({ recentUserMessages: [], recentToolResults: [] }) as unknown,
+  ),
+  outcomes: vi.fn(async () => [] as unknown[]),
+  toolRejected: vi.fn(async () => false),
+  delegated: vi.fn(async () => false),
+  listTools: vi.fn(
+    async () => [] as Array<{ name: string; description?: string }>,
+  ),
   postMessage: vi.fn(async () => ({ messageId: 'provider-message-1' })),
   claimTracked: vi.fn(async () => [{ id: 'tracked-1' }]),
   provider: vi.fn(),
@@ -39,6 +48,10 @@ vi.mock(
     resolveIntegrationToolAutoState: mocks.autoState,
   }),
 );
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  listMcpTools: mocks.listTools,
+}));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
@@ -67,6 +80,10 @@ vi.mock('@roomote/db/server', () => ({
   expireIntegrationToolApproval: mocks.expire,
   fingerprintIntegrationToolCall: (input: unknown) => JSON.stringify(input),
   findLatestTaskUserRequest: mocks.latestUserRequest,
+  resolveTaskIntegrationToolAutoContext: mocks.taskContext,
+  listRecentIntegrationToolApprovalOutcomes: mocks.outcomes,
+  hasRejectedIntegrationToolInSession: mocks.toolRejected,
+  isSessionDelegatedTask: mocks.delegated,
   isIntegrationToolAutoSuspendedForSession: mocks.suspended,
   suspendIntegrationToolAutoForSession: mocks.suspend,
 }));
@@ -116,6 +133,14 @@ beforeEach(() => {
   mocks.isPresent.mockResolvedValue(true);
   mocks.suspended.mockResolvedValue(false);
   mocks.latestUserRequest.mockResolvedValue(undefined);
+  mocks.taskContext.mockResolvedValue({
+    recentUserMessages: [],
+    recentToolResults: [],
+  });
+  mocks.outcomes.mockResolvedValue([]);
+  mocks.toolRejected.mockResolvedValue(false);
+  mocks.delegated.mockResolvedValue(false);
+  mocks.listTools.mockResolvedValue([]);
   mocks.claimTracked.mockResolvedValue([{ id: 'tracked-1' }]);
   mocks.provider.mockResolvedValue({ postMessage: mocks.postMessage });
 });
@@ -219,6 +244,168 @@ describe('requestTaskToolApproval', () => {
     );
     // A person's choice: the model is never consulted.
     expect(mocks.resolveAuto).not.toHaveBeenCalled();
+  });
+
+  it('assesses a call against what the server holds for the task and its session', async () => {
+    mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
+    mocks.taskContext.mockResolvedValue({
+      userRequest: 'yes, go ahead',
+      recentUserMessages: ['Clean up the stale tickets.', 'yes, go ahead'],
+      agentMessageRepliedTo: 'I will close ENG-1 and ENG-2.',
+      recentToolResults: [{ tool: 'linear.list_issues', output: 'ENG-1' }],
+      readContent: 'ENG-1 stale since June',
+    });
+    const approved = {
+      integrationId: 'linear',
+      toolName: 'save_issue',
+      outcome: 'approved',
+      arguments: { id: 'ENG-1', state: 'Canceled' },
+    };
+    mocks.outcomes.mockResolvedValue([approved]);
+    // The worker's own report of the request never overrides the server's.
+    await requestTaskToolApproval({
+      ...ask,
+      userRequest: 'Delete everything.',
+    });
+    expect(mocks.taskContext).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      taskId: 'task-1',
+    });
+    // The owner's decisions for the session and for this task both count.
+    const decided = {
+      sessionId: 'session-1',
+      userId: 'owner-1',
+      taskId: 'task-1',
+    };
+    expect(mocks.outcomes).toHaveBeenCalledWith(decided);
+    expect(mocks.toolRejected).toHaveBeenCalledWith({
+      ...decided,
+      integrationId: 'linear',
+      toolName: 'save_issue',
+    });
+    expect(mocks.resolveAuto).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userRequest: 'yes, go ahead',
+        readContent: 'ENG-1 stale since June',
+        sessionContext: {
+          recentUserMessages: ['Clean up the stale tickets.', 'yes, go ahead'],
+          explicitApprovalOutcomes: [approved],
+          agentMessageRepliedTo: 'I will close ENG-1 and ENG-2.',
+          recentToolResults: [{ tool: 'linear.list_issues', output: 'ENG-1' }],
+        },
+        sessionId: 'session-1',
+        taskId: 'task-1',
+      }),
+    );
+    expect(mocks.latestUserRequest).not.toHaveBeenCalled();
+    // A task reads its session's other tasks as the session's agent does.
+    const { isSessionLaunchedTask } = (
+      mocks.resolveAuto.mock.calls[0] as unknown as [
+        { isSessionLaunchedTask: (taskId: string) => Promise<boolean> },
+      ]
+    )[0];
+    mocks.delegated.mockResolvedValue(true);
+    await expect(isSessionLaunchedTask('task-2')).resolves.toBe(true);
+    expect(mocks.delegated).toHaveBeenCalledWith('session-1', 'task-2');
+  });
+
+  it("shows Auto what the server says the tool does, listing a run's server once", async () => {
+    mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
+    const assessed = () =>
+      (mocks.resolveAuto.mock.calls as unknown as [unknown][]).map(
+        ([call]) => call,
+      );
+    mocks.listTools.mockResolvedValue([
+      { name: 'save_issue', description: 'Create or update an issue.' },
+      { name: 'list_issues' },
+    ]);
+    const server = {
+      url: 'https://roomote.example/api/mcp/linear',
+      headers: { 'x-mcp-client': 'worker' },
+    };
+    const integrationProxy = {
+      origin: 'https://roomote.example',
+      authorization: 'Bearer run-token',
+    };
+    const described = {
+      ...ask,
+      runId: 71,
+      resolveServers: async () => ({ linear: server }),
+      integrationProxy,
+    };
+    await requestTaskToolApproval(described);
+    await requestTaskToolApproval({ ...described, toolName: 'list_issues' });
+    expect(mocks.listTools).toHaveBeenCalledTimes(1);
+    expect(mocks.listTools).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: server.url,
+        headers: {
+          'x-mcp-client': 'worker',
+          authorization: 'Bearer run-token',
+        },
+      }),
+    );
+    expect(mocks.resolveAuto).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        toolDescription: 'Create or update an issue.',
+      }),
+    );
+    expect(assessed()[1]).not.toHaveProperty('toolDescription');
+
+    // A listing that fails leaves the call judged without a description, and
+    // is tried again on the next call.
+    mocks.listTools.mockRejectedValueOnce(new Error('unreachable'));
+    const other = { ...described, runId: 72 };
+    await requestTaskToolApproval(other);
+    expect(assessed()[2]).not.toHaveProperty('toolDescription');
+    await requestTaskToolApproval(other);
+    expect(mocks.listTools).toHaveBeenCalledTimes(3);
+    expect(mocks.resolveAuto).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        toolDescription: 'Create or update an issue.',
+      }),
+    );
+
+    // The task's token goes only to this API's own proxy: a server on another
+    // origin, or outside the proxy path, is never listed.
+    for (const url of [
+      'https://mcp.elsewhere.example/api/mcp/linear',
+      'https://roomote.example/other/linear',
+    ]) {
+      await requestTaskToolApproval({
+        ...described,
+        runId: 73,
+        resolveServers: async () => ({ linear: { ...server, url } }),
+      });
+    }
+    await requestTaskToolApproval({
+      ...described,
+      runId: 74,
+      integrationProxy: undefined,
+    });
+    expect(mocks.listTools).toHaveBeenCalledTimes(3);
+  });
+
+  it('asks rather than trusts missing context when a lookup fails', async () => {
+    mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
+    mocks.taskContext.mockRejectedValue(new Error('db down'));
+    mocks.outcomes.mockRejectedValue(new Error('db down'));
+    mocks.toolRejected.mockRejectedValue(new Error('db down'));
+    await requestTaskToolApproval({ ...ask, userRequest: 'File the bug.' });
+    expect(mocks.resolveAuto).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // The worker's report stands in when the server has nothing.
+        userRequest: 'File the bug.',
+        readContent: undefined,
+        sessionContext: {
+          recentUserMessages: [],
+          explicitApprovalOutcomes: [],
+          // An unknown rejection counts as one.
+          toolRejectedInSession: true,
+        },
+      }),
+    );
   });
 
   it("assesses against the visible part of the worker's request", async () => {
