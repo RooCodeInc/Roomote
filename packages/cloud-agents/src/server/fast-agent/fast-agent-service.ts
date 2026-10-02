@@ -92,6 +92,7 @@ import {
   isXaiSubscriptionConnected,
   markSessionGoalForConversation,
   releaseSessionGoalContinuation,
+  clearManualStatusAfterNewerUserMessage,
   createSessionStatusJudgmentRequest,
   settleSessionStatusJudgmentTurn,
   sql,
@@ -3818,47 +3819,6 @@ export async function answerFastAgentQuestion({
         );
       });
     }
-    await setFastSessionResponding(
-      session.id,
-      true,
-      () => !signal?.aborted,
-    ).catch((error) => {
-      console.warn(
-        `[sessions] Failed to mark session active: ${formatErrorForLog(error)}`,
-      );
-    });
-    // Assistant-message persists extend the lease as a side effect, but a
-    // turn can spend longer than the lease inside tool calls or a streaming
-    // stretch without persisting one, and the expired-lease reconciler would
-    // then stamp its live retry notice as interrupted. Renew on wall clock
-    // for as long as this owner is executing; the tick stops renewing the
-    // moment ownership is aborted so a fenced-off owner cannot extend a
-    // successor's lease.
-    respondingLeaseRenewalTimer = setInterval(() => {
-      if (signal?.aborted) return;
-      respondingLeaseRenewal = respondingLeaseRenewal.then(async () => {
-        // The abort check is only a cheap short-circuit; correctness comes
-        // from the renewal statement itself, which extends the lease only
-        // where it is still live, so a stale write cannot resurrect a lease
-        // a settlement or successor already cleared.
-        if (signal?.aborted) return;
-        await renewFastSessionRespondingLease(session.id).catch((error) => {
-          console.warn(
-            `[sessions] Failed to renew session responding lease: ${formatErrorForLog(error)}`,
-          );
-        });
-        if (durableAdmission && durableTurnReplayable) {
-          await renewFastAgentDurableTurnClaim(durableAdmission.eventId).catch(
-            (error) => {
-              console.warn(
-                `[Fast Agent] Failed to renew durable turn claim: ${formatErrorForLog(error)}`,
-              );
-            },
-          );
-        }
-      });
-    }, FAST_RESPONDING_LEASE_RENEW_MS);
-    respondingLeaseRenewalTimer.unref();
     durableOpenCodeSessionId = session.openCodeSessionId;
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
@@ -3920,6 +3880,68 @@ export async function answerFastAgentQuestion({
     diagnostics.recordInitialHumanTurn(
       substantiveHumanInput ? userMessageResult?.initialHumanTurn : false,
     );
+    if (substantiveHumanInput) {
+      const unifiedSession = await getSessionForFastConversation(
+        db,
+        session.id,
+      ).catch((error) => {
+        console.warn(
+          `[sessions] Failed to resolve Session for manual status release: ${formatErrorForLog(error)}`,
+        );
+        return null;
+      });
+      if (unifiedSession) {
+        await clearManualStatusAfterNewerUserMessage(
+          db,
+          unifiedSession.id,
+        ).catch((error) => {
+          console.warn(
+            `[sessions] Failed to release manual status on new user message: ${formatErrorForLog(error)}`,
+          );
+        });
+      }
+    }
+    await setFastSessionResponding(
+      session.id,
+      true,
+      () => !signal?.aborted,
+    ).catch((error) => {
+      console.warn(
+        `[sessions] Failed to mark session active: ${formatErrorForLog(error)}`,
+      );
+    });
+    // Assistant-message persists extend the lease as a side effect, but a
+    // turn can spend longer than the lease inside tool calls or a streaming
+    // stretch without persisting one, and the expired-lease reconciler would
+    // then stamp its live retry notice as interrupted. Renew on wall clock
+    // for as long as this owner is executing; the tick stops renewing the
+    // moment ownership is aborted so a fenced-off owner cannot extend a
+    // successor's lease.
+    respondingLeaseRenewalTimer = setInterval(() => {
+      if (signal?.aborted) return;
+      respondingLeaseRenewal = respondingLeaseRenewal.then(async () => {
+        // The abort check is only a cheap short-circuit; correctness comes
+        // from the renewal statement itself, which extends the lease only
+        // where it is still live, so a stale write cannot resurrect a lease
+        // a settlement or successor already cleared.
+        if (signal?.aborted) return;
+        await renewFastSessionRespondingLease(session.id).catch((error) => {
+          console.warn(
+            `[sessions] Failed to renew session responding lease: ${formatErrorForLog(error)}`,
+          );
+        });
+        if (durableAdmission && durableTurnReplayable) {
+          await renewFastAgentDurableTurnClaim(durableAdmission.eventId).catch(
+            (error) => {
+              console.warn(
+                `[Fast Agent] Failed to renew durable turn claim: ${formatErrorForLog(error)}`,
+              );
+            },
+          );
+        }
+      });
+    }, FAST_RESPONDING_LEASE_RENEW_MS);
+    respondingLeaseRenewalTimer.unref();
     if (
       substantiveHumanInput ||
       (platformEvent && platformEventKind === 'automation')

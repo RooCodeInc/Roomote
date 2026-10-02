@@ -89,7 +89,7 @@ export function SessionCard({
     session.ownerKind === 'automation' && session.ownerAutomation
       ? formatAutomationLabel(session.ownerAutomation)
       : ownerDisplayName;
-  const status = session.cachedStatus ?? 'ready';
+  const status = session.manualStatus ?? session.cachedStatus ?? 'ready';
   const surfaceLabel = getSessionSurfaceLabel(session.sourceSurface);
   const hasOutputMetadata =
     session.pullRequests.length > 0 || session.artifactCount > 0;
