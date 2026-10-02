@@ -12,6 +12,10 @@ import {
 
 import { db } from '../db';
 import {
+  findSessionPromptSenders,
+  findTaskPromptSenders,
+} from './integration-tool-auto-owner';
+import {
   fastAgentMessages,
   sessions,
   sessionTasks,
@@ -49,6 +53,11 @@ export type TaskIntegrationToolAutoContext = {
   }>;
   /** What the task's agent read since a person last sent it a prompt. */
   readContent?: string;
+  /**
+   * The one person who wrote every request in `recentUserMessages`, when
+   * that is known: "me" in those requests is then this person.
+   */
+  requestsWrittenBy?: string;
 };
 
 type Request = {
@@ -56,6 +65,8 @@ type Request = {
   text: string;
   from: 'session' | 'task' | 'launch';
   eventId?: string;
+  /** Who launched the task, for its launch prompt. */
+  userId?: string;
 };
 
 function textOf(
@@ -339,6 +350,7 @@ export async function resolveTaskIntegrationToolAutoContext(input: {
       fastConversationId: sessions.fastConversationId,
       prompt: tasks.prompt,
       createdAt: tasks.createdAt,
+      initiatorUserId: tasks.initiatorUserId,
     })
     .from(sessionTasks)
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
@@ -374,6 +386,7 @@ export async function resolveTaskIntegrationToolAutoContext(input: {
             ts: link.createdAt.getTime(),
             text: launchPrompt,
             from: 'launch' as const,
+            ...(link.initiatorUserId ? { userId: link.initiatorUserId } : {}),
           },
         ]
       : []),
@@ -400,9 +413,31 @@ export async function resolveTaskIntegrationToolAutoContext(input: {
     });
   }
 
+  // Senders are checked over every prompt of the session and of the task,
+  // not only the recent ones shown: somebody else's earlier prompt still
+  // makes "me" ambiguous after it has left the history.
+  const [sessionSenders, taskSenders] = await Promise.all([
+    conversationId && sessionPrompts.length > 0
+      ? findSessionPromptSenders(conversationId)
+      : undefined,
+    taskPrompts.length > 0 ? findTaskPromptSenders(input.taskId) : undefined,
+  ]);
+  const authors = [
+    ...[sessionSenders, taskSenders].flatMap((senders) =>
+      senders ? [senders.kind === 'one' ? senders.userId : undefined] : [],
+    ),
+    ...requests
+      .filter((request) => request.from === 'launch')
+      .map((request) => request.userId),
+  ];
+  const [author] = authors;
+  const requestsWrittenBy =
+    author && authors.every((other) => other === author) ? author : undefined;
+
   return {
     ...(latest ? { userRequest: latest.text } : {}),
     recentUserMessages: requests.map((request) => request.text),
+    ...(requestsWrittenBy ? { requestsWrittenBy } : {}),
     ...(agentMessageRepliedTo ? { agentMessageRepliedTo } : {}),
     recentToolResults: [
       ...(delegated && launchPrompt

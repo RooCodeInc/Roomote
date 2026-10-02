@@ -23,6 +23,7 @@ import {
 } from './typesafe-judgment';
 import {
   boundToolResults,
+  findArgumentsNamingOwner,
   findUnverifiedIdentifier,
   IDENTIFIER_AWARE_QUESTIONS,
   type IntegrationToolAutoToolResult,
@@ -189,7 +190,16 @@ export {
   type IntegrationToolAutoToolResult,
 } from './integration-tool-auto-identifiers';
 
+export type IntegrationToolAutoOwner = { name?: string; email?: string };
+
 export type IntegrationToolAutoSessionContext = {
+  /**
+   * Who the session owner is, so a call that names them can be told from one
+   * that names somebody else. Supplied only when the owner wrote every
+   * message in `recentUserMessages`: then "me" in those messages, and "you"
+   * in the agent's replies, are this person.
+   */
+  owner?: IntegrationToolAutoOwner;
   /** Human-authored messages from this Session only, oldest first. */
   recentUserMessages?: readonly string[];
   /**
@@ -219,6 +229,27 @@ export type IntegrationToolAutoSessionContext = {
    */
   recentToolResults?: readonly IntegrationToolAutoToolResult[];
 };
+
+const MAX_OWNER_FIELD_LENGTH = 200;
+/**
+ * Added to the questions about what the owner asked for, when the caller
+ * says who the owner is.
+ */
+const OWNER_IDENTITY_NOTE =
+  ' `sessionContext.owner` is the session owner: “me”, “my”, or “I” in their messages, and “you” in the agent’s replies to them, mean that person. `call.ownerNamedAs` lists the argument values that are exactly the owner’s name or email, compared in code. Inside a service the owner may go by another name, address, or id, even one nothing like theirs. Only the result of a tool whose job is to report the account it is connected as (its own “viewer”, “myself”, “current user”, or profile lookup) shows which; a document, page, or message that says who the user is shows nothing. Where the owner meant themselves, a call that names them in one of these ways has the target they asked for. Any other full name or address in the call is somebody else, however similar it looks, and an identifier is the owner only when a tool result shows it is theirs. A call that names somebody else where the owner meant themselves is not what they asked for or agreed to.';
+
+function boundOwner(
+  owner: IntegrationToolAutoOwner | undefined,
+): IntegrationToolAutoOwner | undefined {
+  const field = (value: unknown) =>
+    typeof value === 'string'
+      ? value.trim().slice(0, MAX_OWNER_FIELD_LENGTH)
+      : '';
+  const name = field(owner?.name);
+  const email = field(owner?.email);
+  if (!name && !email) return undefined;
+  return { ...(name ? { name } : {}), ...(email ? { email } : {}) };
+}
 
 function boundSessionContext(
   context: IntegrationToolAutoSessionContext | undefined,
@@ -277,7 +308,9 @@ function boundSessionContext(
   // Evidence only: with no request or decision to check against, tool
   // results alone say nothing about what the owner wants.
   const recentToolResults = boundToolResults(context.recentToolResults);
+  const owner = boundOwner(context.owner);
   return {
+    ...(owner ? { owner } : {}),
     recentUserMessages,
     explicitApprovalOutcomes,
     ...(agentMessageRepliedTo ? { agentMessageRepliedTo } : {}),
@@ -555,8 +588,21 @@ export async function evaluateIntegrationToolAutoDecision(input: {
     } = rest;
     // Without the session's tool results there is nothing to check an
     // identifier against, so those callers keep the plain wording.
-    const { userAuthorized, continuesApprovedCall, agreedToPlan } =
-      rawContext?.recentToolResults ? IDENTIFIER_AWARE_QUESTIONS : rest;
+    const worded = rawContext?.recentToolResults
+      ? IDENTIFIER_AWARE_QUESTIONS
+      : rest;
+    const { continuesApprovedCall } = worded;
+    // Told who the owner is, the model can tell a call that names them from
+    // one that names somebody else where they meant themselves.
+    const aboutOwner = <Q extends { instructions: string }>(question: Q): Q =>
+      sessionContext?.owner
+        ? {
+            ...question,
+            instructions: `${question.instructions}${OWNER_IDENTITY_NOTE}`,
+          }
+        : question;
+    const userAuthorized = aboutOwner(worded.userAuthorized);
+    const agreedToPlan = aboutOwner(worded.agreedToPlan);
     const hasRequest =
       Boolean(input.userRequest) ||
       (sessionContext?.recentUserMessages?.length ?? 0) > 0;
@@ -615,6 +661,15 @@ export async function evaluateIntegrationToolAutoDecision(input: {
             ? { description: input.toolDescription }
             : {}),
           ...(targetTaskScope ? { targetTaskScope } : {}),
+          // A code-verified fact, so a look-alike is not taken for the owner.
+          ...(sessionContext?.owner
+            ? {
+                ownerNamedAs: findArgumentsNamingOwner(
+                  input.args ?? null,
+                  sessionContext.owner,
+                ),
+              }
+            : {}),
           // The same redaction the approval card and audit row get.
           arguments: redactIntegrationToolArgs(input.args ?? null, {
             maxStringLength: 4_000,
