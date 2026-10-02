@@ -208,8 +208,10 @@ describe('resolveTaskIntegrationToolAutoContext', () => {
       status: 'failed',
       output: 'not found',
     });
-    // Read after the latest prompt, by any kind of tool.
-    await toolResult(4_000, { toolName: 'bash', output: 'README: hello' });
+    // Read by any kind of tool. A harness reminder does not start a new
+    // window, so what was read before it is kept.
+    await toolResult(3_400, { toolName: 'bash', output: 'README: hello' });
+    await toolResult(4_000, { toolName: 'read', output: 'notes.txt: later' });
 
     await expect(
       resolveTaskIntegrationToolAutoContext(context),
@@ -229,7 +231,8 @@ describe('resolveTaskIntegrationToolAutoContext', () => {
           output: '[{"id":"ENG-1"},{"id":"ENG-2"}]',
         },
       ],
-      readContent: 'README: hello',
+      readContent:
+        '[{"id":"ENG-1"},{"id":"ENG-2"}]\n\n{"success":true}\n\nREADME: hello\n\nnotes.txt: later',
     });
 
     // A message a person then sends to the task itself is the latest request,
@@ -258,7 +261,8 @@ describe('resolveTaskIntegrationToolAutoContext', () => {
       'yes, that one too',
     ]);
     expect(later.agentMessageRepliedTo).toBe('I can also close ENG-4.');
-    // Nothing was read since that prompt.
+    // A prompt from a person does start a new window: nothing was read
+    // since it.
     expect(later.readContent).toBeUndefined();
   });
 

@@ -47,7 +47,7 @@ export type TaskIntegrationToolAutoContext = {
     arguments?: unknown;
     output: string;
   }>;
-  /** What the task's agent read since its latest prompt. */
+  /** What the task's agent read since a person last sent it a prompt. */
   readContent?: string;
 };
 
@@ -256,25 +256,18 @@ async function findRecentTaskToolResults(
 }
 
 /**
- * What the task's agent read since its latest prompt: the output of every
- * tool it finished, of any kind, oldest first. Auto reads it to tell whether
- * a call carries out an instruction planted in that content.
+ * What the task's agent read since a person last sent the task a prompt: the
+ * output of every tool it finished, of any kind, oldest first and bounded to
+ * the most recent ones. Auto reads it to tell whether a call carries out an
+ * instruction planted in that content. Prompts the platform or the harness
+ * sends (recovery, reminders) do not start a new window: what the agent read
+ * before one can still be what steers the call after it.
  */
 async function findTaskReadContent(
   taskId: string,
+  sinceTs: number,
 ): Promise<string | undefined> {
   const payload = taskMessages.payload;
-  const [latestPrompt] = await db
-    .select({ ts: taskMessages.ts })
-    .from(taskMessages)
-    .where(
-      and(
-        eq(taskMessages.taskId, taskId),
-        eq(taskMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
-      ),
-    )
-    .orderBy(desc(taskMessages.ts))
-    .limit(1);
   const rows = await db
     .select({
       output: sql<
@@ -285,7 +278,7 @@ async function findTaskReadContent(
     .where(
       and(
         eq(taskMessages.taskId, taskId),
-        gt(taskMessages.ts, latestPrompt?.ts ?? 0),
+        gt(taskMessages.ts, sinceTs),
         eq(taskMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.ToolResult),
         sql`${payload}->>'status' = 'completed'`,
       ),
@@ -361,13 +354,16 @@ export async function resolveTaskIntegrationToolAutoContext(input: {
   const delegated = link?.origin === 'fast_delegation';
   const launchPrompt = toIntegrationToolUserRequest(link?.prompt);
 
-  const [sessionPrompts, taskPrompts, taskToolResults, readContent] =
-    await Promise.all([
-      conversationId ? listSessionHumanPrompts(conversationId) : [],
-      listTaskHumanPrompts(input.taskId),
-      findRecentTaskToolResults(input.taskId),
-      findTaskReadContent(input.taskId),
-    ]);
+  const [sessionPrompts, taskPrompts, taskToolResults] = await Promise.all([
+    conversationId ? listSessionHumanPrompts(conversationId) : [],
+    listTaskHumanPrompts(input.taskId),
+    findRecentTaskToolResults(input.taskId),
+  ]);
+  // Newest first: everything the task read since a person last prompted it.
+  const readContent = await findTaskReadContent(
+    input.taskId,
+    taskPrompts[0]?.ts ?? 0,
+  );
 
   const requests: Request[] = [
     ...sessionPrompts,
