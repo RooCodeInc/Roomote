@@ -47,10 +47,10 @@
           "cloud",
           {
             "group": "Self-hosted",
+            "icon": "server",
             "root": "self-hosting",
             "expanded": false,
             "pages": [
-              "self-hosting",
               "homelab",
               "self-hosting/platforms",
               "self-hosting/operations"
@@ -92,10 +92,10 @@
         "pages": [
           {
             "group": "Models and inference",
+            "icon": "brain",
             "root": "models",
             "expanded": false,
             "pages": [
-              "models",
               "providers/inference/amazon-bedrock",
               "providers/inference/anthropic",
               "providers/inference/azure-foundry",
@@ -128,10 +128,10 @@
           },
           {
             "group": "Communications",
+            "icon": "messages-square",
             "root": "communications",
             "expanded": false,
             "pages": [
-              "communications",
               "providers/communications/agentmail",
               "providers/communications/discord",
               "providers/communications/microsoft-teams",
@@ -141,10 +141,10 @@
           },
           {
             "group": "Source control",
+            "icon": "git-merge",
             "root": "source-control",
             "expanded": false,
             "pages": [
-              "source-control",
               "providers/source-control/azure-devops",
               "providers/source-control/bitbucket",
               "providers/source-control/gitea",
@@ -154,10 +154,10 @@
           },
           {
             "group": "Sandboxes",
+            "icon": "cpu",
             "root": "compute",
             "expanded": false,
             "pages": [
-              "compute",
               "providers/compute/azure",
               "providers/compute/blaxel",
               "providers/compute/box",
