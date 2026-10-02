@@ -94,6 +94,8 @@ x-roomote-shared-env: &roomote-shared-env
   # triage decisions. See "Enabling the decision model" in README.md.
   R_JUDGMENT_UPSTREAM_URL: ${R_JUDGMENT_UPSTREAM_URL:-}
   R_JUDGMENT_UPSTREAM_API_KEY: ${SERVICE_PASSWORD_64_JUDGMENT}
+  CRITIQUE_BASE_URL: ${CRITIQUE_BASE_URL:-}
+  CRITIQUE_API_TOKEN: ${CRITIQUE_API_TOKEN:-}
 
 services:
   postgres:

@@ -358,6 +358,22 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     ],
   },
 
+  // Optional paid visual review for coding tasks. The task sends its local
+  // screenshot and sanitized DOM through this run-token endpoint so the
+  // deployment's Critique credential never enters the sandbox.
+  {
+    name: 'critique',
+    match: { type: 'prefix', path: '/api/critique' },
+    policy: 'task-token',
+    rateLimits: [
+      {
+        keySource: 'principal',
+        limit: 12,
+        windowSeconds: 60,
+      },
+    ],
+  },
+
   // Router-facing MCP endpoints share token parsing. The public member route
   // rejects run tokens in its handler; the legacy route remains run-capable.
   {

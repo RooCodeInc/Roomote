@@ -67,6 +67,9 @@ const config: KnipConfig = {
         'python',
         'fc-cache',
         'dpkg-query',
+        // Installed in the worker image and invoked by the built-in Critique
+        // MCP tool to reuse the task's active authenticated browser session.
+        'agent-browser',
       ],
     },
 

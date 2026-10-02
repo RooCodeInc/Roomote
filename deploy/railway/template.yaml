@@ -260,6 +260,10 @@ services:
       R_JUDGMENT_UPSTREAM_URL: ''
       # Bearer for the judgment service, shared with it by reference.
       R_JUDGMENT_UPSTREAM_API_KEY: ${{secret(48)}}
+      # Optional paid visual review. Configure both values on api; the token is
+      # never forwarded to task sandboxes.
+      CRITIQUE_BASE_URL: ''
+      CRITIQUE_API_TOKEN: ''
       R_PING_BASE_URL: https://ping.roomote.dev # anonymous-analytics / version-check pings
       R_INSTANCE_ID: '' # optional deterministic Ping instance identity
       DEFAULT_COMPUTE_PROVIDER: modal

@@ -47,6 +47,9 @@ export {
 // narration tts
 export { tts } from './tts';
 
+// paid visual review proxy for coding tasks
+export { critique } from './critique';
+
 // task runs
 export { taskRunsRouter } from './task-runs';
 

@@ -1039,6 +1039,9 @@ importers:
       '@types/http-proxy':
         specifier: ^1.17.17
         version: 1.17.17
+      '@types/jsdom':
+        specifier: 21.1.7
+        version: 21.1.7
       '@types/jsonwebtoken':
         specifier: ^9.0.10
         version: 9.0.10
@@ -1051,6 +1054,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      jsdom:
+        specifier: 26.1.0
+        version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.23)(tsx@4.20.4)(typescript@5.9.3)(yaml@2.9.0)

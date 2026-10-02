@@ -160,6 +160,31 @@ describe('roomote MCP tool descriptions', () => {
     expect(toolNames).not.toContain('complete_doctor_report');
   });
 
+  it('registers bounded opt-in Critique visual review actions', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, 'critique_visual_review');
+
+    expect(tool.config.description).toContain(
+      'current authenticated agent-browser page',
+    );
+    expect(tool.config.description).toContain(
+      'never retry a timeout automatically',
+    );
+    expect(tool.config.description).toContain('confidence >= 0.7');
+    expect(tool.config.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    });
+    expect(getInputSchemaField(tool, 'action').options).toEqual([
+      'capture',
+      'review',
+      'compare',
+      'inspect_nodes',
+    ]);
+  });
+
   it('registers the shared guarded public URL fetch descriptor', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const tool = getRegisteredTool(registeredTools, PUBLIC_URL_FETCH_TOOL.name);
