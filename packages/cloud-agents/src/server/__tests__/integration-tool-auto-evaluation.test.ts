@@ -219,9 +219,10 @@ describe('recommendFromAutoAnswers', () => {
       ),
     ).toBe('approve');
     for (const doubt of [
-      // Anything past "only reads", or unsure it is that.
-      { onlyReads: 0.6 },
-      { onlyReads: 0.1 },
+      // Anything past "only reads", or unsure it is that, when it could
+      // also do more than a harmless change.
+      { onlyReads: 0.6, risk: { score: 2, confidence: 0.9 } },
+      { onlyReads: 0.1, risk: { score: 2, confidence: 0.9 } },
       { steeredByUntrustedContent: 0.4 },
       { sendsPrivateDataOut: 0.4 },
       { guidanceFlagsRisk: 0.5 },
@@ -258,10 +259,12 @@ describe('recommendFromAutoAnswers', () => {
     expect(
       recommendFromAutoAnswers(routine, { readNeedsRequestMatch: true }),
     ).toBe('approve');
-    // An off-request write is not a read: it still asks.
+    // An off-request write that reaches other people is not a read: it
+    // still asks.
     expect(
       recommendFromAutoAnswers({
         ...routine,
+        risk: { score: 2, confidence: 0.95 },
         onlyReads: 0.05,
         matchesRequest: 0.05,
       }),
@@ -273,6 +276,72 @@ describe('recommendFromAutoAnswers', () => {
         onlyReads: undefined,
         matchesRequest: 0.6,
       }),
+    ).toBe('ask');
+  });
+
+  it('runs a harmless change nobody asked for; anything riskier or unsure asks', () => {
+    // A draft, a private note, a label: risk level 1, not a read, not asked.
+    const harmless: AutoRiskAnswers = {
+      ...routine,
+      risk: { score: 1.05, confidence: 0.95 },
+      onlyReads: 0.02,
+      matchesRequest: 0.05,
+      userAuthorized: 0.03,
+    };
+    expect(recommendFromAutoAnswers(harmless)).toBe('approve');
+    // With no request to judge against it is still harmless.
+    expect(
+      recommendFromAutoAnswers({
+        ...harmless,
+        matchesRequest: undefined,
+        userAuthorized: undefined,
+      }),
+    ).toBe('approve');
+    for (const riskier of [
+      // Reaches other people or changes shared work.
+      { score: 1.8, confidence: 0.95 },
+      { score: 2, confidence: 0.99 },
+      // Unsure of the level.
+      { score: 1.05, confidence: 0.6 },
+    ]) {
+      expect(recommendFromAutoAnswers({ ...harmless, risk: riskier })).toBe(
+        'ask',
+      );
+    }
+    // The same signals that stop a read stop a harmless change.
+    for (const unsafe of [
+      { steeredByUntrustedContent: 0.4 },
+      { sendsPrivateDataOut: 0.4 },
+      { guidanceFlagsRisk: 0.5 },
+    ] satisfies Partial<AutoRiskAnswers>[]) {
+      expect(recommendFromAutoAnswers({ ...harmless, ...unsafe })).toBe('ask');
+    }
+    // So does an earlier rejection of the tool.
+    expect(recommendFromAutoAnswers(harmless, { sameToolRejected: true })).toBe(
+      'ask',
+    );
+    // An item nothing in the session identifies does not: a harmless change
+    // to the wrong item is still harmless.
+    expect(recommendFromAutoAnswers(harmless, { unverifiedTarget: true })).toBe(
+      'approve',
+    );
+    // A read of another session's task, or an internal read, keeps its own
+    // gate: a low risk score does not stand in for it.
+    expect(
+      recommendFromAutoAnswers(
+        { ...routine, matchesRequest: 0.6 },
+        { readNeedsRequestMatch: true },
+      ),
+    ).toBe('ask');
+    expect(
+      recommendFromAutoAnswers(
+        { ...routine, matchesRequest: undefined, onlyReads: 0.85 },
+        { allowlistedInternalRead: true },
+      ),
+    ).toBe('ask');
+    // Answers recorded before `onlyReads` existed keep the rule they had.
+    expect(
+      recommendFromAutoAnswers({ ...harmless, onlyReads: undefined }),
     ).toBe('ask');
   });
 
@@ -707,8 +776,13 @@ describe('evaluateIntegrationToolAutoDecision', () => {
 
   it('uses bounded same-session human context and the redacted arguments of decided calls', async () => {
     mocks.evaluate.mockResolvedValue(
-      // A write the session does not ask for.
-      modelAnswers({ ...routine, onlyReads: 0.05, matchesRequest: 0.3 }),
+      // A write the session does not ask for, seen by other people.
+      modelAnswers({
+        ...routine,
+        risk: { score: 2, confidence: 0.95 },
+        onlyReads: 0.05,
+        matchesRequest: 0.3,
+      }),
     );
     const recentUserMessages = Array.from(
       { length: 10 },
