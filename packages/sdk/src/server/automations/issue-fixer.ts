@@ -1,6 +1,5 @@
 import {
   emptyJobResult,
-  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -11,7 +10,7 @@ import {
  * second prompt beside the webhook handlers.
  */
 export async function issueFixerJob(
-  _opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
+  _opts: AutomationRunOpts,
 ): Promise<AutomationJobResult> {
   const result = emptyJobResult();
   result.skippedReason =

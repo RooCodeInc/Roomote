@@ -46,7 +46,6 @@ import type { RepositoryRow } from '../lib/pull-requests/source-control-pull-req
 import {
   emptyJobResult,
   resolveAutomationRunContext,
-  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -191,7 +190,7 @@ const CONFLICT_RESOLVER_INTERVAL_MS: Record<string, number> = {
  * from missed webhooks or transient API failures.
  */
 export async function conflictScanJob(
-  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
+  opts: AutomationRunOpts,
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting scheduled conflict scan`);
 

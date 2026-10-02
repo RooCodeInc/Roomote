@@ -897,6 +897,27 @@
       "when": 1790675830722,
       "tag": "0127_harsh_silvermane",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1790789915082,
+      "tag": "0128_cooing_madripoor",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1790851193806,
+      "tag": "0129_chunky_metal_master",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1790867366761,
+      "tag": "0130_red_quasimodo",
+      "breakpoints": true
     }
   ]
 }

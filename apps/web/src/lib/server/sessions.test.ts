@@ -671,6 +671,12 @@ describe('unified Session queries', () => {
   });
 
   it('filters board statuses using the same derived lane semantics', async () => {
+    const manualActive = await sessionFactory.create({
+      title: 'Board status manual active',
+      activityAt: 400,
+      cachedStatus: 'ready',
+      manualStatus: 'active',
+    });
     const manualDone = await sessionFactory.create({
       title: 'Board status manual done',
       activityAt: 300,
@@ -696,8 +702,17 @@ describe('unified Session queries', () => {
       outcome: 'done',
       confidence: 0.97,
     });
-    const ids = [manualDone.id, judgedDone.id, ready.id];
+    const ids = [manualActive.id, manualDone.id, judgedDone.id, ready.id];
     const auth = { userId: crypto.randomUUID(), isAdmin: true };
+
+    const active = await getSessions(auth, {
+      ids,
+      status: 'active',
+      includeJudgedStatus: true,
+    });
+    expect(active.sessions.map((session) => session.id)).toEqual([
+      manualActive.id,
+    ]);
 
     const done = await getSessions(auth, {
       ids,

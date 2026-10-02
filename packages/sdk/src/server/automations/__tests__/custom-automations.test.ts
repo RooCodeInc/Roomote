@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const SCHEDULED_RUN_OPTS = {
+  context: { trigger: 'scheduled' },
+} as const;
+
 const fastMocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   deploymentExperimentEnabled: vi.fn(),
@@ -322,7 +326,7 @@ describe('customAutomationsJob', () => {
       { ...automation, scheduleMode: 'on_demand' } as never,
     ]);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.queued).toBe(false);
     expect(tryClaimCustomAutomationLaunch).not.toHaveBeenCalled();
@@ -341,7 +345,7 @@ describe('customAutomationsJob', () => {
       } as never,
     ]);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result).toMatchObject({ queued: true, completed: false });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
@@ -383,7 +387,7 @@ describe('customAutomationsJob', () => {
       teamId: 'T123',
     } as never);
 
-    await customAutomationsJob();
+    await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(db.query.slackInstallationChannels.findMany).toHaveBeenCalled();
     expect(fastMocks.slackPostMessage).not.toHaveBeenCalled();
@@ -417,7 +421,7 @@ describe('customAutomationsJob', () => {
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result).toMatchObject({ queued: true, errors: [] });
     expect(fastMocks.slackIsAppInChannel).toHaveBeenNthCalledWith(1, 'C123');
@@ -459,7 +463,7 @@ describe('customAutomationsJob', () => {
       },
     ] as never);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result).toMatchObject({
       queued: false,
@@ -486,7 +490,7 @@ describe('customAutomationsJob', () => {
       new Error('parent event admission failed'),
     );
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([
       'Flaky tests: parent event admission failed',
@@ -511,7 +515,7 @@ describe('customAutomationsJob', () => {
     const claimAt = new Date('2026-09-04T12:00:00.000Z');
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.queued).toBe(true);
     expect(result.launchedTaskId).toBeNull();
@@ -552,7 +556,7 @@ describe('customAutomationsJob', () => {
       { ...automation, environmentId: null, allRepositories: true } as never,
     ]);
 
-    await customAutomationsJob();
+    await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(db.query.environments.findFirst).not.toHaveBeenCalled();
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
@@ -574,7 +578,7 @@ describe('customAutomationsJob', () => {
       } as never,
     ]);
 
-    await customAutomationsJob();
+    await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(db.query.environments.findFirst).not.toHaveBeenCalled();
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
@@ -589,7 +593,7 @@ describe('customAutomationsJob', () => {
   it('drops the environment hint when the environment no longer exists', async () => {
     vi.mocked(db.query.environments.findFirst).mockResolvedValue(undefined);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.queued).toBe(true);
     expect(result.errors).toEqual([]);
@@ -608,7 +612,7 @@ describe('customAutomationsJob', () => {
       } as never,
     ]);
 
-    await customAutomationsJob();
+    await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(fastMocks.getSession).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -640,7 +644,7 @@ describe('customAutomationsJob', () => {
       new Error('database offline'),
     );
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([
       expect.stringContaining('Failed to settle custom automation'),
@@ -673,7 +677,7 @@ describe('customAutomationsJob', () => {
       'discord',
     ]);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result).toMatchObject({ queued: true, completed: false });
     expect(fastMocks.createDiscordThread).not.toHaveBeenCalled();
@@ -715,7 +719,7 @@ describe('customAutomationsJob', () => {
       'discord',
     ]);
 
-    await customAutomationsJob();
+    await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(fastMocks.createDiscordThread).not.toHaveBeenCalled();
     expect(fastMocks.discordPostMessage).not.toHaveBeenCalled();
@@ -759,7 +763,7 @@ describe('customAutomationsJob', () => {
       'discord',
     ]);
 
-    await customAutomationsJob();
+    await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(fastMocks.createDiscordThread).not.toHaveBeenCalled();
     const event = fastMocks.enqueueParentEvent.mock.calls[0]?.[0]?.event;
@@ -789,7 +793,7 @@ describe('customAutomationsJob', () => {
       undefined,
     );
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([
       'Flaky tests: Discord destination is no longer available.',
@@ -816,7 +820,7 @@ describe('customAutomationsJob', () => {
       teamId: 'T123',
     } as never);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result).toMatchObject({ queued: true, completed: false });
     expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
@@ -857,7 +861,7 @@ describe('customAutomationsJob', () => {
       } as never,
     ]);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result).toMatchObject({ queued: true, errors: [] });
     expect(fastMocks.canStartAgentMailConversation).toHaveBeenCalledWith(
@@ -910,8 +914,8 @@ describe('customAutomationsJob', () => {
       } as never,
     ]);
 
-    await customAutomationsJob();
-    await customAutomationsJob();
+    await customAutomationsJob(SCHEDULED_RUN_OPTS);
+    await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(fastMocks.prepareAgentMailConversation).toHaveBeenNthCalledWith(1, {
       userId: 'user-1',
@@ -957,7 +961,7 @@ describe('customAutomationsJob', () => {
     ]);
     fastMocks.canStartAgentMailConversation.mockResolvedValue(false);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([
       'Flaky tests: The automation owner no longer has an active Email destination.',
@@ -982,7 +986,7 @@ describe('customAutomationsJob', () => {
     ]);
     vi.mocked(findUserDirectMessageDestination).mockResolvedValue(null);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     const error =
       'The automation owner does not have a linked Slack account that can receive direct messages.';
@@ -1023,7 +1027,7 @@ describe('customAutomationsJob', () => {
       new Error('parent event admission failed'),
     );
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([
       'Flaky tests: parent event admission failed',
@@ -1061,7 +1065,7 @@ describe('customAutomationsJob', () => {
       new Error('parent event admission failed'),
     );
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([
       'Flaky tests: parent event admission failed',
@@ -1143,7 +1147,7 @@ describe('customAutomationsJob', () => {
         });
       }
 
-      const result = await customAutomationsJob();
+      const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
       expect(result).toMatchObject({ queued: true, completed: false });
       expect(fastMocks.getSession).toHaveBeenCalledWith({
@@ -1205,7 +1209,7 @@ describe('customAutomationsJob', () => {
       new Error('Threaded Mode is disabled'),
     );
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([]);
     expect(fastMocks.getSession).toHaveBeenCalledWith({
@@ -1239,7 +1243,7 @@ describe('customAutomationsJob', () => {
     vi.mocked(findTeamsConversationRoute).mockResolvedValue(null);
     vi.mocked(listConnectedCommunicationProviders).mockResolvedValue(['teams']);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([
       'Flaky tests: Teams report destination is missing a resolvable service URL.',
@@ -1276,7 +1280,7 @@ describe('customAutomationsJob', () => {
     );
     vi.mocked(findTeamsConversationRoute).mockResolvedValue(null);
 
-    await customAutomationsJob();
+    await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(findTeamsConversationRoute).toHaveBeenCalledWith(
       'teams-dm-1',
@@ -1334,7 +1338,7 @@ describe('customAutomationsJob', () => {
       ]);
       disable();
 
-      const result = await customAutomationsJob();
+      const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
       expect(result.errors).toEqual([
         expect.stringContaining(
@@ -1361,7 +1365,7 @@ describe('customAutomationsJob', () => {
       } as never,
     ]);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([
       'Flaky tests: The previous Fast automation run was interrupted.',
@@ -1383,7 +1387,7 @@ describe('customAutomationsJob', () => {
     );
     fastMocks.slackIsAppInChannel.mockResolvedValue(false);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.queued).toBe(false);
     expect(fastMocks.enqueueParentEvent).not.toHaveBeenCalled();
@@ -1409,7 +1413,7 @@ describe('customAutomationsJob', () => {
     ]);
     fastMocks.enqueueParentEvent.mockRejectedValueOnce(new Error('queue down'));
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual(['Flaky tests: queue down']);
     expect(fastMocks.telegramPostMessage).toHaveBeenCalledWith(
@@ -1439,7 +1443,7 @@ describe('customAutomationsJob', () => {
     ]);
     fastMocks.enqueueParentEvent.mockRejectedValueOnce(new Error('queue down'));
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual(['Flaky tests: queue down']);
     expect(fastMocks.telegramPostMessage).toHaveBeenCalledWith(
@@ -1464,7 +1468,7 @@ describe('customAutomationsJob', () => {
       } as never,
     ]);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.queued).toBe(true);
     expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
@@ -1496,7 +1500,7 @@ describe('customAutomationsJob', () => {
     ]);
     vi.mocked(findUserDirectMessageDestination).mockResolvedValue(null);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([
       'Flaky tests: The automation owner does not have a linked Slack account that can receive direct messages.',
@@ -1537,7 +1541,7 @@ describe('customAutomationsJob', () => {
         provider,
       ]);
 
-      const result = await customAutomationsJob();
+      const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
       expect(result.queued).toBe(true);
       expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
@@ -1564,7 +1568,7 @@ describe('customAutomationsJob', () => {
       { ...automation, target: {} } as never,
     ]);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.queued).toBe(true);
     expect(findUserDirectMessageDestination).not.toHaveBeenCalled();
@@ -1593,7 +1597,7 @@ describe('customAutomationsJob', () => {
       { ...automation, createdByUserId: null } as never,
     ]);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.queued).toBe(false);
     expect(result.errors).toEqual([
@@ -1613,7 +1617,7 @@ describe('customAutomationsJob', () => {
   it('uses hour-0 boundary for hourly schedules', async () => {
     vi.mocked(getCustomAutomationFrequency).mockReturnValue('every_hour');
 
-    await customAutomationsJob();
+    await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(isRunDue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1626,7 +1630,7 @@ describe('customAutomationsJob', () => {
   it('skips when another launcher already claimed the row', async () => {
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(null);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.launchedTaskId).toBeNull();
     expect(fastMocks.enqueueParentEvent).not.toHaveBeenCalled();
@@ -1635,7 +1639,7 @@ describe('customAutomationsJob', () => {
   it('skips when not due', async () => {
     vi.mocked(isRunDue).mockReturnValue(false);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.launchedTaskId).toBeNull();
     expect(tryClaimCustomAutomationLaunch).not.toHaveBeenCalled();
@@ -1660,7 +1664,7 @@ describe('customAutomationsJob', () => {
     });
     vi.mocked(listConnectedCommunicationProviders).mockResolvedValue(['teams']);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.queued).toBe(true);
     expect(findTeamsConversationRoute).toHaveBeenCalledWith(
@@ -1693,7 +1697,7 @@ describe('customAutomationsJob', () => {
     ]);
     vi.mocked(findTeamsConversationRoute).mockResolvedValue(null);
 
-    const result = await customAutomationsJob();
+    const result = await customAutomationsJob(SCHEDULED_RUN_OPTS);
 
     expect(result.queued).toBe(false);
     expect(fastMocks.enqueueParentEvent).not.toHaveBeenCalled();

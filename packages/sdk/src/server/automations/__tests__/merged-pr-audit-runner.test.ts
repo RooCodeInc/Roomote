@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const SCHEDULED_RUN_OPTS = {
+  context: { trigger: 'scheduled' },
+} as const;
+
 const {
   slackInstallationsTable,
   mockSlackInstallationRows,
@@ -151,7 +155,7 @@ describe('createMergedPullRequestAuditJob eligibility gate', () => {
   it('skips when no active repository exists on any provider', async () => {
     mockHasAnyActiveRepository.mockResolvedValue(false);
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     expect(result.skippedReason).toBe(
       'A repository and a communication provider must both be connected.',
@@ -163,7 +167,7 @@ describe('createMergedPullRequestAuditJob eligibility gate', () => {
   it('skips when a repository exists but no communication provider is connected', async () => {
     mockHasAnyActiveRepository.mockResolvedValue(true);
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     expect(result.skippedReason).toBe(
       'A repository and a communication provider must both be connected.',
@@ -174,7 +178,7 @@ describe('createMergedPullRequestAuditJob eligibility gate', () => {
     mockHasAnyActiveRepository.mockResolvedValue(true);
     mockListConnectedCommunicationProviders.mockResolvedValue(['teams']);
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     // The deployment is eligible; the run then stops at the disabled
     // automation runtime rather than the repository gate.
@@ -331,7 +335,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
       factRow({ index: 2, provider: 'github', repositoryFullName: 'acme/gh' }),
     ]);
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([]);
     expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
@@ -365,7 +369,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
       buildPrompt,
     });
 
-    await codeQualityJob();
+    await codeQualityJob(SCHEDULED_RUN_OPTS);
 
     expect(mockRecordBackgroundAutomationResult).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -382,7 +386,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
       factRow({ index: 1, provider: 'github', repositoryFullName: 'acme/b' }),
     ]);
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([]);
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
@@ -419,7 +423,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
       }),
     );
 
-    await job();
+    await job(SCHEDULED_RUN_OPTS);
 
     expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
     expect(
@@ -443,7 +447,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
       factRow({ index: 0, provider: 'github', repositoryFullName: 'acme/a' }),
     ]);
 
-    await silentJob();
+    await silentJob(SCHEDULED_RUN_OPTS);
 
     const [payload] = enqueuedPayloads();
     expect(payload).toMatchObject({
@@ -468,7 +472,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     // Distinct PR identity per row within each repository.
     mockSlackInstallationRows.mockResolvedValueOnce(rows);
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([]);
     expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
@@ -513,7 +517,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
       { sourceControlProvider: 'gitlab', fullName: 'acme/cloud' },
     ]);
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     expect(result.errors).toEqual([]);
     // Same provider, two hosts: two tasks, so neither manifest mixes hosts.
@@ -570,7 +574,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
         { sourceControlProvider: 'gitlab', fullName: 'acme/legacy' },
       ]);
 
-      const result = await job();
+      const result = await job(SCHEDULED_RUN_OPTS);
 
       expect(result.errors).toEqual([]);
       // The host-bearing entries launch one task per host: each payload
@@ -620,7 +624,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
         { sourceControlProvider: 'gitlab', fullName: 'acme/shared' },
       ]);
 
-      const result = await job();
+      const result = await job(SCHEDULED_RUN_OPTS);
 
       expect(result.errors).toEqual([]);
       expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
@@ -658,7 +662,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
       .mockResolvedValueOnce({ taskId: 'task-github' })
       .mockRejectedValueOnce(new Error('enqueue exploded'));
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     // The run fails without checkpointing, so the next run rescans the same
     // page instead of skipping the partition that never launched.

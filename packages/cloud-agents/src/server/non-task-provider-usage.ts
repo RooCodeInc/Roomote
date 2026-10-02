@@ -18,10 +18,17 @@ import {
   toBedrockMantleRuntimeModelId,
   type ReasoningEffort,
 } from '@roomote/types';
+import {
+  classifyModelFallbackTrigger,
+  getDisplayModelProviderId,
+  MODEL_FALLBACK_PROVIDER_ERROR_RETRIES,
+} from '@roomote/types';
+import { captureInstanceEvent } from '@roomote/telemetry/server';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
 import { decodeInferenceErrorEnvelope } from './inference-error-envelope';
+import { streamOpenCodeEventsAcrossDisposal } from './opencode-event-stream';
 import {
   DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
   leaseOpenCodeSdkServer,
@@ -32,6 +39,10 @@ import {
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 const NON_TASK_SESSION_ABORT_TIMEOUT_MS = 5_000;
 const NON_TASK_USAGE_EVENT_BARRIER_TIMEOUT_MS = 1_000;
+// After an instance refresh the pending permission asks are read again; the
+// new instance may still be settling, so a failed read is retried briefly.
+const PENDING_PERMISSION_LOOKUP_RETRIES = 3;
+const PENDING_PERMISSION_LOOKUP_RETRY_DELAY_MS = 200;
 const NON_TASK_USAGE_RECONCILE_TIMEOUT_MS = 5_000;
 type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
@@ -447,7 +458,11 @@ export interface NonTaskOpenCodePermissionAskHelpers {
   }) => Promise<
     | {
         input?: unknown;
-        toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        toolCalls?: Array<{
+          tool?: unknown;
+          input?: unknown;
+          status?: unknown;
+        }>;
         /** Completed tool results earlier in the paused call's turn. */
         readContent?: string;
       }
@@ -473,7 +488,7 @@ export function findPausedOpenCodeToolCall(
 ):
   | {
       input?: unknown;
-      toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+      toolCalls?: Array<{ tool?: unknown; input?: unknown; status?: unknown }>;
       readContent?: string;
     }
   | undefined {
@@ -502,7 +517,11 @@ export function findPausedOpenCodeToolCall(
             .filter(
               (entry): entry is Record<string, unknown> => entry !== undefined,
             )
-            .map((entry) => ({ tool: entry.tool, input: entry.input }))
+            .map((entry) => ({
+              tool: entry.tool,
+              input: entry.input,
+              ...(entry.status === undefined ? {} : { status: entry.status }),
+            }))
         : undefined;
       return {
         input: state?.input,
@@ -1514,6 +1533,34 @@ async function runNonTaskSdkPrompt(
         }
       },
     };
+    // One ask is relayed once, however it is learned of: its event, or the
+    // pending list read after the event stream had to be reopened.
+    const relayedPermissionAskIds = new Set<string>();
+    const relayPermissionAsk = (ask: {
+      id: string;
+      sessionID: string;
+      permission: string;
+      tool?: { messageID?: string; callID?: string };
+    }) => {
+      if (relayedPermissionAskIds.has(ask.id)) return;
+      relayedPermissionAskIds.add(ask.id);
+      try {
+        options.onPermissionAsked?.(
+          {
+            requestId: ask.id,
+            sessionId: ask.sessionID,
+            permission: ask.permission,
+            ...(ask.tool?.messageID ? { messageId: ask.tool.messageID } : {}),
+            ...(ask.tool?.callID ? { callId: ask.tool.callID } : {}),
+          },
+          permissionAskHelpers,
+        );
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+    };
     let sessionId = options.session?.id;
     if (sessionId && options.validateSession) {
       const validateStartedAtMs = Date.now();
@@ -1636,14 +1683,72 @@ async function runNonTaskSdkPrompt(
     // through OpenCode's whole backoff, or time out, instead of failing fast.
     try {
       const subscribeStartedAtMs = Date.now();
-      const subscription = await client.event.subscribe(
-        { directory: sessionDirectory },
-        { signal: eventAbortController.signal },
-      );
+      const subscribeToEvents = () =>
+        client.event.subscribe(
+          { directory: sessionDirectory },
+          { signal: eventAbortController.signal },
+        );
+      const subscription = await subscribeToEvents();
       setupTiming.eventSubscribeMs = Date.now() - subscribeStartedAtMs;
+      const events = streamOpenCodeEventsAcrossDisposal({
+        stream: subscription.stream,
+        resubscribe: async () => {
+          console.info(
+            '[NonTaskProviderUsage] OpenCode instance was disposed mid-prompt; reopening its event stream.',
+          );
+          return (await subscribeToEvents()).stream;
+        },
+        // Without a stream nothing can answer an ask, so the prompt stops
+        // rather than wait on one.
+        onResubscribeFailed: (error) => {
+          rejectSessionError(
+            new NonTaskOpenCodePromptError(error, promptErrorLabel),
+          );
+        },
+        // An ask raised while no stream was open was never relayed, and the
+        // reopened stream will not repeat it. The lookup can fail while the
+        // new instance is still settling, so it is retried; if the pending
+        // asks cannot be read at all, the prompt fails here rather than wait
+        // on an ask nobody will answer.
+        onResubscribed: async () => {
+          if (!options.onPermissionAsked) return;
+          for (let attempt = 0; ; attempt += 1) {
+            const pending = await client.permission
+              .list(
+                { directory: sessionDirectory },
+                { signal: eventAbortController.signal },
+              )
+              .catch((error: unknown) => ({ data: undefined, error }));
+            if (eventAbortController.signal.aborted) return;
+            if (!pending.error && pending.data) {
+              for (const ask of pending.data) relayPermissionAsk(ask);
+              return;
+            }
+            if (attempt >= PENDING_PERMISSION_LOOKUP_RETRIES) {
+              rejectSessionError(
+                new NonTaskOpenCodePromptError(
+                  pending.error ??
+                    new Error(
+                      'OpenCode pending permission asks could not be read.',
+                    ),
+                  promptErrorLabel,
+                ),
+              );
+              return;
+            }
+            await new Promise((resolve) =>
+              setTimeout(
+                resolve,
+                PENDING_PERMISSION_LOOKUP_RETRY_DELAY_MS * (attempt + 1),
+              ),
+            );
+          }
+        },
+        signal: eventAbortController.signal,
+      });
       eventMonitor = (async () => {
         try {
-          for await (const event of subscription.stream) {
+          for await (const event of events) {
             if (
               (event.type === 'session.created' ||
                 event.type === 'session.updated') &&
@@ -1821,27 +1926,7 @@ async function runNonTaskSdkPrompt(
               // and native reply), never by this monitor: a consumer
               // failure must not reject the prompt stream, and the pause
               // itself is the intended behavior.
-              try {
-                const properties = event.properties;
-                options.onPermissionAsked?.(
-                  {
-                    requestId: properties.id,
-                    sessionId: properties.sessionID,
-                    permission: properties.permission,
-                    ...(properties.tool?.messageID
-                      ? { messageId: properties.tool.messageID }
-                      : {}),
-                    ...(properties.tool?.callID
-                      ? { callId: properties.tool.callID }
-                      : {}),
-                  },
-                  permissionAskHelpers,
-                );
-              } catch (error) {
-                console.warn(
-                  `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
-                );
-              }
+              relayPermissionAsk(event.properties);
             } else if (
               event.type === 'session.error' &&
               event.properties.sessionID === sessionId
@@ -2112,35 +2197,32 @@ async function runNonTaskSdkPrompt(
 export async function generateTrackedNonTaskText(
   params: GenerateTrackedNonTaskTextParams,
 ): Promise<string> {
-  const runtime = await resolveNonTaskModelRuntime(
-    params.model,
-    params.modelRole,
-  );
-  const model = await resolveModelForInputModality(params, runtime);
-
-  const data = await runNonTaskSdkPrompt(
-    params,
-    { ...runtime, model },
-    {
-      system: params.system,
-      parts: [
-        {
-          type: 'text',
-          text: buildOpenCodePrompt({
-            prompt: params.prompt,
-            maxOutputTokens: params.maxOutputTokens,
-          }),
-        },
-        ...(params.files ?? []).map((file) => ({
-          type: 'file' as const,
-          mime: file.mime,
-          ...(file.filename ? { filename: file.filename } : {}),
-          url: file.url,
-        })),
-      ],
-    },
-    { promptErrorLabel: 'OpenCode text prompt failed' },
-  );
+  const data = await runControlPlaneWithFallback(params, async (runtime) => {
+    const model = await resolveModelForInputModality(params, runtime);
+    return runNonTaskSdkPrompt(
+      params,
+      { ...runtime, model },
+      {
+        system: params.system,
+        parts: [
+          {
+            type: 'text',
+            text: buildOpenCodePrompt({
+              prompt: params.prompt,
+              maxOutputTokens: params.maxOutputTokens,
+            }),
+          },
+          ...(params.files ?? []).map((file) => ({
+            type: 'file' as const,
+            mime: file.mime,
+            ...(file.filename ? { filename: file.filename } : {}),
+            url: file.url,
+          })),
+        ],
+      },
+      { promptErrorLabel: 'OpenCode text prompt failed' },
+    );
+  });
 
   const text = data.parts
     .filter(
@@ -2156,6 +2238,61 @@ export async function generateTrackedNonTaskText(
   }
 
   return text;
+}
+
+async function runControlPlaneWithFallback<T>(
+  params: GenerateTrackedNonTaskBaseParams,
+  execute: (
+    runtime: Awaited<ReturnType<typeof resolveNonTaskModelRuntime>>,
+  ) => Promise<T>,
+): Promise<T> {
+  const role = params.modelRole ?? 'small';
+  let runtime = await resolveNonTaskModelRuntime(params.model, role);
+  const fallbackEnvVar =
+    role === 'orchestration'
+      ? 'R_ORCHESTRATION_MODEL_FALLBACK'
+      : role === 'small'
+        ? 'R_SMALL_MODEL_FALLBACK'
+        : undefined;
+  const fallbackModel = fallbackEnvVar
+    ? runtime.resolvedModelRuntimeEnv[fallbackEnvVar]
+    : undefined;
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await execute(runtime);
+    } catch (error) {
+      const trigger = classifyModelFallbackTrigger(error, {
+        retriesUsed: attempt - 1,
+      });
+      if (
+        trigger &&
+        fallbackModel &&
+        fallbackModel !== runtime.catalogModelId
+      ) {
+        const fromModel = runtime.catalogModelId;
+        runtime = await resolveNonTaskModelRuntime(fallbackModel, 'primary');
+        const fromProvider = getDisplayModelProviderId(fromModel) ?? 'opencode';
+        const toProvider =
+          getDisplayModelProviderId(runtime.catalogModelId) ?? 'opencode';
+        void captureInstanceEvent('model_fallback_switched', {
+          fromProvider,
+          fromModel,
+          toProvider,
+          toModel: runtime.catalogModelId,
+        });
+        return execute(runtime);
+      }
+      const failure = classifyNonTaskInferenceError(error);
+      if (
+        !fallbackModel ||
+        !failure.retryable ||
+        attempt > MODEL_FALLBACK_PROVIDER_ERROR_RETRIES
+      ) {
+        throw error;
+      }
+    }
+  }
 }
 
 export async function generateTrackedNonTaskTextInOpenCodeSession(
@@ -2239,36 +2376,33 @@ async function generateTrackedNonTaskObjectWithSdk<
 >(
   params: GenerateTrackedNonTaskObjectParams<TSchema>,
 ): Promise<{ object: z.output<TSchema> }> {
-  const resolvedRuntime = await resolveNonTaskModelRuntime(
-    params.model,
-    params.modelRole,
-  );
-
-  const data = await runNonTaskSdkPrompt(
-    params,
-    resolvedRuntime,
-    {
-      system: params.system,
-      format: {
-        type: 'json_schema',
-        schema: buildNonTaskStructuredOutputJsonSchema(params.schema),
-        retryCount:
-          params.structuredOutputRetryCount ??
-          DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
-      },
-      parts: [
-        {
-          type: 'text',
-          text: buildOpenCodePrompt({
-            prompt: params.prompt,
-            maxOutputTokens: params.maxOutputTokens,
-          }),
+  const data = await runControlPlaneWithFallback(params, (resolvedRuntime) =>
+    runNonTaskSdkPrompt(
+      params,
+      resolvedRuntime,
+      {
+        system: params.system,
+        format: {
+          type: 'json_schema',
+          schema: buildNonTaskStructuredOutputJsonSchema(params.schema),
+          retryCount:
+            params.structuredOutputRetryCount ??
+            DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
         },
-      ],
-    },
-    {
-      promptErrorLabel: `OpenCode structured prompt failed (model ${resolvedRuntime.model})`,
-    },
+        parts: [
+          {
+            type: 'text',
+            text: buildOpenCodePrompt({
+              prompt: params.prompt,
+              maxOutputTokens: params.maxOutputTokens,
+            }),
+          },
+        ],
+      },
+      {
+        promptErrorLabel: `OpenCode structured prompt failed (model ${resolvedRuntime.model})`,
+      },
+    ),
   );
 
   const structured = (data.info as { structured?: unknown }).structured;

@@ -3,6 +3,7 @@ const {
   mockDeployment,
   mockUser,
   mockSessionForTask,
+  mockSessionForFastConversation,
   mockOverrides,
   mockClaim,
   mockAutoState,
@@ -10,13 +11,19 @@ const {
   mockLatestUserRequest,
   mockLatestFastUserRequest,
 } = vi.hoisted(() => ({
+  mockSessionForFastConversation: vi.fn(
+    async () => null as { id: string } | null,
+  ),
   mockExperiment: vi.fn(async () => true),
   mockDeployment: vi.fn(async () => [] as unknown[]),
   mockUser: vi.fn(async () => [] as unknown[]),
   mockSessionForTask: vi.fn(async () => null as { id: string } | null),
   mockOverrides: vi.fn(async () => [] as unknown[]),
   mockClaim: vi.fn(async () => true),
-  mockAutoState: vi.fn(async () => ({ mode: 'off' }) as unknown),
+  mockAutoState: vi.fn(
+    async (_scope?: { sessionId?: string | null }) =>
+      ({ mode: 'off' }) as unknown,
+  ),
   mockShadow: vi.fn(),
   mockLatestUserRequest: vi.fn(async () => 'Look up the open invoices.'),
   mockLatestFastUserRequest: vi.fn(async () => 'What is open for ENG?'),
@@ -28,6 +35,7 @@ vi.mock('@roomote/db/server', () => ({
   listIntegrationToolPolicies: mockDeployment,
   listIntegrationToolUserPolicies: mockUser,
   getSessionForTask: mockSessionForTask,
+  getSessionForFastConversation: mockSessionForFastConversation,
   listIntegrationToolSessionOverrides: mockOverrides,
   claimTaskIntegrationToolCall: mockClaim,
   fingerprintIntegrationToolCall: (input: unknown) => JSON.stringify(input),
@@ -70,7 +78,9 @@ describe('resolveProxyToolApprovalBlocks', () => {
     ]);
     mockUser.mockResolvedValue([]);
     mockSessionForTask.mockResolvedValue(null);
+    mockSessionForFastConversation.mockResolvedValue(null);
     mockOverrides.mockResolvedValue([]);
+    mockAutoState.mockReset();
     mockAutoState.mockResolvedValue({ mode: 'off' });
   });
 
@@ -201,6 +211,8 @@ describe('resolveProxyToolApprovalBlocks', () => {
       resolveTaskId: async () => 'task-1',
     });
     expect(task.defaultBlock).toBe('needs_approval');
+    // Auto is read for the task's own session, whose owner turned it on.
+    expect(mockAutoState).toHaveBeenCalledWith({ sessionId: 'session-1' });
     expect(blocksOf(task)).toEqual({
       get_issue: 'allow',
       delete_issue: 'reject',
@@ -218,6 +230,77 @@ describe('resolveProxyToolApprovalBlocks', () => {
       resolveActingUserId: async () => 'user-1',
     });
     expect(session.defaultBlock).toBeUndefined();
+  });
+
+  it('follows Auto for the session each call belongs to', async () => {
+    // Auto is on for one session only; everything else is shadowed.
+    mockAutoState.mockImplementation(async (scope) => ({
+      mode: scope?.sessionId === 'session-on' ? 'on' : 'shadow',
+    }));
+    mockDeployment.mockResolvedValue([]);
+    const conversationId = '11111111-1111-4111-8111-111111111111';
+    const requestHeaders = new Headers({
+      'x-roomote-fast-conversation-id': conversationId,
+    });
+
+    // A task in a session with Auto off runs its default tools ungated.
+    mockSessionForTask.mockResolvedValue({ id: 'session-off' });
+    const taskOff = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      tokenType: 'run',
+      resolveActingUserId: async () => 'user-1',
+      resolveTaskId: async () => 'task-1',
+    });
+    expect(taskOff.defaultBlock).toBeUndefined();
+    expect(taskOff.shadowDefaultTools).toBe(true);
+
+    // A task with no session has no owner to have turned Auto on.
+    mockSessionForTask.mockResolvedValue(null);
+    const orphan = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      tokenType: 'run',
+      resolveActingUserId: async () => 'user-1',
+      resolveTaskId: async () => 'task-2',
+    });
+    expect(orphan.defaultBlock).toBeUndefined();
+    expect(mockAutoState).toHaveBeenLastCalledWith({ sessionId: undefined });
+
+    // A session's own call names its conversation: with Auto on there it was
+    // already assessed natively, so the proxy does not shadow it again.
+    mockSessionForFastConversation.mockResolvedValue({ id: 'session-on' });
+    const sessionOn = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      tokenType: 'auth',
+      resolveActingUserId: async () => 'user-1',
+      requestHeaders,
+    });
+    expect(mockSessionForFastConversation).toHaveBeenCalledWith(
+      expect.anything(),
+      conversationId,
+    );
+    expect(sessionOn.shadowDefaultTools).toBe(false);
+    expect(sessionOn.defaultBlock).toBeUndefined();
+
+    // The shadow assessment is recorded against the same session.
+    mockSessionForFastConversation.mockResolvedValue({ id: 'session-off' });
+    const sessionOff = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      tokenType: 'auth',
+      resolveActingUserId: async () => 'user-1',
+      requestHeaders,
+    });
+    expect(sessionOff.shadowDefaultTools).toBe(true);
+    shadowProxyToolCall(sessionOff, {
+      integrationId: 'linear',
+      toolName: 'list_issues',
+      args: {},
+      userId: 'user-1',
+      taskId: null,
+      fastConversationId: conversationId,
+    });
+    expect(mockShadow).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-off' }),
+    );
   });
 
   it('shadow-assesses default tool calls only while shadowing', async () => {

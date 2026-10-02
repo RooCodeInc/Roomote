@@ -108,6 +108,10 @@ Task ownership follows the person who asked for the work. When identities are
 linked, Roomote can attribute a task to the right user, respect access rules,
 and continue the right thread when someone replies later.
 
+When a task or session switches to a configured model fallback, Roomote posts one
+notice to the originating Slack, Teams, Telegram, Discord, or email thread. The
+switch also remains visible in the dashboard transcript.
+
 If someone asks Roomote to do work from chat before their account is linked,
 Roomote prompts them to link the account. Slack resumes the original request
 through the session after linking; on other providers, they may need to send the

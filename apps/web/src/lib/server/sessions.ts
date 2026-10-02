@@ -482,9 +482,12 @@ function listConditions(
 
     switch (input.status) {
       case 'active':
-        return and(
-          isNull(sessions.manualStatus),
-          eq(sessions.cachedStatus, 'active'),
+        return or(
+          eq(sessions.manualStatus, 'active'),
+          and(
+            isNull(sessions.manualStatus),
+            eq(sessions.cachedStatus, 'active'),
+          ),
         );
       case 'needs_input':
       case 'blocked':
@@ -656,6 +659,8 @@ const baseSelection = {
   manualStatusSetAt: sessions.manualStatusSetAt,
   inactivityDueAt: sessions.inactivityDueAt,
   respondingUntil: sessions.respondingUntil,
+  autoToolApprovalsSuspendedAt: sessions.autoToolApprovalsSuspendedAt,
+  autoToolApprovalsEnabled: sessions.autoToolApprovalsEnabled,
   archivedAt: sessions.archivedAt,
   createdAt: sessions.createdAt,
   updatedAt: sessions.updatedAt,

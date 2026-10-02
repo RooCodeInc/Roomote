@@ -63,6 +63,8 @@ import {
   parseInferenceGatewayKeys,
   parseTaskModelContextWindows,
   parseTaskModelCosts,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
@@ -2212,14 +2214,10 @@ function removeDisabledProviderConfiguration(
   for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
     delete runtimeEnv[envVarName];
   }
-  for (const modelEnvVarName of [
-    'R_MODEL',
-    'R_SMALL_MODEL',
-    'R_VISION_MODEL',
-    'R_CODE_REVIEW_MODEL',
-    'R_EXPLORE_MODEL',
-    'R_PLANNING_MODEL',
-  ] as const) {
+  for (const modelEnvVarName of TASK_MODEL_ROLES.flatMap((role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    return [descriptor.modelEnvVar, descriptor.fallbackModelEnvVar];
+  })) {
     const modelId = runtimeEnv[modelEnvVarName];
 
     if (modelId && isTaskModelIdDisabled(modelId)) {

@@ -48,6 +48,24 @@ vi.mock('@/hooks/useSessionIntegrationToolApprovals', () => ({
   }),
 }));
 
+const autoToolApprovals = vi.hoisted(() => ({
+  state: undefined as
+    | { available: boolean; enabled: boolean; suspended: boolean }
+    | undefined,
+  setEnabled: vi.fn(),
+  sessionIds: [] as string[],
+}));
+vi.mock('@/hooks/useSessionAutoToolApprovals', () => ({
+  useSessionAutoToolApprovals: (sessionId: string) => {
+    autoToolApprovals.sessionIds.push(sessionId);
+    return {
+      state: autoToolApprovals.state,
+      isSaving: false,
+      setEnabled: autoToolApprovals.setEnabled,
+    };
+  },
+}));
+
 vi.mock('./CapabilityOfferCard', () => ({
   CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
     <div>Capability offer: {offer.capability}</div>
@@ -578,6 +596,45 @@ describe('FastSessionTranscript', () => {
     nativeSessionId: 'opencode-1',
     nativeMessageId: null,
     createdAt: new Date(ts),
+  });
+
+  it('offers the tool approvals mode in the composer to the session owner only', () => {
+    autoToolApprovals.state = {
+      available: true,
+      enabled: false,
+      suspended: false,
+    };
+    autoToolApprovals.sessionIds.length = 0;
+    autoToolApprovals.setEnabled.mockClear();
+    const { unmount } = render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const chip = screen.getByRole('button', { name: /^Tool approvals/ });
+    expect(chip).toHaveTextContent('Run');
+    // Approvals are keyed on the unified session, not the Fast conversation.
+    expect(autoToolApprovals.sessionIds).toContain('canonical-session');
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByRole('option', { name: /^Auto/ }));
+    expect(autoToolApprovals.setEnabled).toHaveBeenCalledWith(true);
+    unmount();
+
+    // Someone else's session: nothing to choose.
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(
+      screen.queryByRole('button', { name: /^Tool approvals/ }),
+    ).not.toBeInTheDocument();
+    autoToolApprovals.state = undefined;
   });
 
   it('shows a pending-key card for the owner and opens the key dialog from it', async () => {

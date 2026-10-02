@@ -29,6 +29,8 @@ import {
 import {
   claimFastAgentHumanFollowUpSteers,
   fastAgentConversationRepository,
+  findFastAgentRepliesBeforeHumanPrompt,
+  findRecentFastAgentToolResults,
   listRecentFastAgentHumanUserPromptTexts,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
@@ -1075,6 +1077,258 @@ describe('Fast conversation repository', () => {
     expect(history[1]).toContain(
       'Latest earlier request in the same millisecond.',
     );
+  });
+
+  it('finds what the agent said between the previous human prompt and the current one', async () => {
+    const user = await createUser();
+    const conversation = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const persist = (input: {
+      eventId: string;
+      ts: number;
+      eventType: FastAgentMessageWrite['eventType'];
+      role: NonNullable<FastAgentMessageWrite['role']>;
+      text: string;
+      metadata: Record<string, unknown>;
+    }) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: conversation.id,
+        message: {
+          eventId: input.eventId,
+          turnId: input.eventId,
+          turnSeq: 1,
+          ts: input.ts,
+          eventType: input.eventType,
+          role: input.role,
+          contentBlocks: [{ type: 'text', text: input.text }],
+          metadata: input.metadata,
+          payload: {},
+          source: 'slack',
+        },
+      });
+    const human = { visibleInTranscript: true, turnSource: 'human' };
+    const reply = { visibleInTranscript: true, purpose: 'closeout' };
+    await persist({
+      eventId: 'old-reply',
+      ts: 50,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'An older answer.',
+      metadata: reply,
+    });
+    await persist({
+      eventId: 'previous-prompt',
+      ts: 100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Can you clean up my Drafts folder?',
+      metadata: human,
+    });
+    await persist({
+      eventId: 'retry-notice',
+      ts: 150,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Retrying the model.',
+      metadata: { ...reply, inferenceRetryNotice: true },
+    });
+    await persist({
+      eventId: 'hidden-reply',
+      ts: 160,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Hidden draft.',
+      metadata: { ...reply, visibleInTranscript: false },
+    });
+    await persist({
+      eventId: 'progress',
+      ts: 170,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Looking at the folder.',
+      metadata: { visibleInTranscript: true, purpose: 'progress' },
+    });
+    await persist({
+      eventId: 'proposal',
+      ts: 200,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'I found 3 old drafts. Delete them?',
+      metadata: reply,
+    });
+    await persist({
+      eventId: 'current',
+      ts: 300,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'yeah go ahead',
+      metadata: human,
+    });
+    await persist({
+      eventId: 'later-reply',
+      ts: 400,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Done.',
+      metadata: reply,
+    });
+
+    await expect(
+      findFastAgentRepliesBeforeHumanPrompt({
+        conversationId: conversation.id,
+        beforeTs: 300,
+        currentEventId: 'current',
+      }),
+    ).resolves.toBe(
+      'Looking at the folder.\n\nI found 3 old drafts. Delete them?',
+    );
+
+    // The first prompt sees what the agent said before it.
+    await expect(
+      findFastAgentRepliesBeforeHumanPrompt({
+        conversationId: conversation.id,
+        beforeTs: 100,
+        currentEventId: 'previous-prompt',
+      }),
+    ).resolves.toBe('An older answer.');
+  });
+
+  it('returns the recent integration tool results of a conversation, oldest first', async () => {
+    const user = await createUser();
+    const conversation = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const persist = (input: {
+      eventId: string;
+      ts: number;
+      payload: Record<string, unknown>;
+    }) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: conversation.id,
+        message: {
+          eventId: input.eventId,
+          turnId: input.eventId,
+          turnSeq: 1,
+          ts: input.ts,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          role: 'assistant',
+          contentBlocks: [],
+          metadata: {},
+          payload: input.payload,
+          source: 'slack',
+        },
+      });
+    const mcp = {
+      kind: 'mcp',
+      isMcp: true,
+      isRoomoteNativeTool: false,
+      status: 'completed',
+    };
+    await persist({
+      eventId: 'list',
+      ts: 100,
+      payload: {
+        ...mcp,
+        serverName: 'hubspot',
+        toolName: 'search_deals',
+        rawInput: { arguments: { stage: 'contract' } },
+        output: '[{"id":"9921034","name":"Globex"}]',
+      },
+    });
+    await persist({
+      eventId: 'still-running',
+      ts: 150,
+      payload: {
+        ...mcp,
+        status: 'in_progress',
+        serverName: 'hubspot',
+        toolName: 'get_deal',
+        output: '',
+      },
+    });
+    await persist({
+      eventId: 'native',
+      ts: 160,
+      payload: {
+        kind: 'tool',
+        isMcp: false,
+        isRoomoteNativeTool: true,
+        status: 'completed',
+        toolName: 'send_chat_reply',
+        output: 'sent',
+      },
+    });
+    await persist({
+      eventId: 'get',
+      ts: 200,
+      payload: {
+        ...mcp,
+        mcpServerName: 'hubspot',
+        mcpToolName: 'get_deal',
+        rawInput: { arguments: { dealId: '9921034' } },
+        output: '{"id":"9921034","name":"Globex","stage":"contract"}',
+      },
+    });
+
+    await expect(
+      findRecentFastAgentToolResults({ conversationId: conversation.id }),
+    ).resolves.toEqual([
+      {
+        tool: 'hubspot.search_deals',
+        arguments: { stage: 'contract' },
+        output: '[{"id":"9921034","name":"Globex"}]',
+      },
+      {
+        tool: 'hubspot.get_deal',
+        arguments: { dealId: '9921034' },
+        output: '{"id":"9921034","name":"Globex","stage":"contract"}',
+      },
+    ]);
+
+    // A large result is cut to its head, and oversized arguments are left
+    // out, before anything is loaded.
+    await persist({
+      eventId: 'large',
+      ts: 250,
+      payload: {
+        ...mcp,
+        serverName: 'hubspot',
+        toolName: 'export_deals',
+        rawInput: { arguments: { filter: 'x'.repeat(3_000) } },
+        output: `first-row ${'y'.repeat(20_000)}`,
+      },
+    });
+    const withLarge = await findRecentFastAgentToolResults({
+      conversationId: conversation.id,
+    });
+    const large = withLarge.at(-1)!;
+    expect(large.tool).toBe('hubspot.export_deals');
+    expect(large.output).toHaveLength(8_000);
+    expect(large.output.startsWith('first-row')).toBe(true);
+    expect(large).not.toHaveProperty('arguments');
+
+    // Only the most recent results are kept.
+    for (let index = 0; index < 31; index += 1) {
+      await persist({
+        eventId: `later-${index}`,
+        ts: 300 + index,
+        payload: {
+          ...mcp,
+          serverName: 'hubspot',
+          toolName: 'get_deal',
+          output: `deal ${index}`,
+        },
+      });
+    }
+    const recent = await findRecentFastAgentToolResults({
+      conversationId: conversation.id,
+    });
+    expect(recent).toHaveLength(30);
+    expect(recent[0]!.output).toBe('deal 1');
+    expect(recent.at(-1)!.output).toBe('deal 30');
   });
 
   it('persists the canonical OpenCode session identity', async () => {

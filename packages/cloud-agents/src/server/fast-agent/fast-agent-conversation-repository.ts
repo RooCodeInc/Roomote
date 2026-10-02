@@ -486,6 +486,8 @@ export type FastAgentUnresolvedRequest = {
 
 const UNRESOLVED_REQUEST_CHAIN_LIMIT = 8;
 const FAST_AGENT_TOOL_APPROVAL_HISTORY_LIMIT = 80;
+// The agent's last few visible replies are enough to see what it proposed.
+const FAST_AGENT_REPLIED_TO_MESSAGE_LIMIT = 3;
 
 /**
  * Read the human-authored prompts that were already in the Session before its
@@ -546,6 +548,122 @@ export async function listRecentFastAgentHumanUserPromptTexts(input: {
     }
   }
   return groups.map((group) => group.texts.join('\n\n'));
+}
+
+/**
+ * What the agent said to the owner between their previous message and the
+ * current one: its visible replies, oldest first. Auto reads it to learn what
+ * a short answer such as "yes, go ahead" agreed to. Retry notices and hidden
+ * rows are skipped.
+ */
+export async function findFastAgentRepliesBeforeHumanPrompt(input: {
+  conversationId: string;
+  beforeTs: number;
+  currentEventId: string;
+}): Promise<string | undefined> {
+  const [previousPrompt] = await db
+    .select({ ts: fastAgentMessages.ts })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        lt(fastAgentMessages.ts, input.beforeTs),
+        ne(fastAgentMessages.eventId, input.currentEventId),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        eq(fastAgentMessages.role, 'user'),
+        sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts))
+    .limit(1);
+  const rows = await db
+    .select({ contentBlocks: fastAgentMessages.contentBlocks })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        gt(fastAgentMessages.ts, previousPrompt?.ts ?? 0),
+        lte(fastAgentMessages.ts, input.beforeTs),
+        eq(
+          fastAgentMessages.eventType,
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ),
+        eq(fastAgentMessages.role, 'assistant'),
+        sql`coalesce(${fastAgentMessages.metadata}->>'visibleInTranscript', 'true') <> 'false'`,
+        sql`coalesce(${fastAgentMessages.metadata}->>'inferenceRetryNotice', 'false') <> 'true'`,
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
+    .limit(FAST_AGENT_REPLIED_TO_MESSAGE_LIMIT);
+  const text = rows
+    .reverse()
+    .map((row) =>
+      row.contentBlocks
+        .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+        .join('\n')
+        .trim(),
+    )
+    .filter(Boolean)
+    .join('\n\n');
+  return text || undefined;
+}
+
+const FAST_AGENT_RECENT_TOOL_RESULT_LIMIT = 30;
+const FAST_AGENT_RECENT_TOOL_RESULT_OUTPUT_LENGTH = 8_000;
+const FAST_AGENT_RECENT_TOOL_RESULT_ARGUMENTS_LENGTH = 2_000;
+
+/**
+ * Results of the integration tools the agent ran most recently in this
+ * conversation, oldest first and across turns. Auto reads them to tell what
+ * an identifier in a paused call refers to (a listing that maps ids to
+ * names): it checks an identifier against all of them and shows the model
+ * the newest few. Unfinished calls and Roomote's own tools are skipped.
+ * Each output is cut to its head in the query, and oversized arguments are
+ * left out, so one call never loads more than a bounded amount of text.
+ */
+export async function findRecentFastAgentToolResults(input: {
+  conversationId: string;
+}): Promise<Array<{ tool: string; arguments?: unknown; output: string }>> {
+  const payload = fastAgentMessages.payload;
+  const rows = await db
+    .select({
+      toolName: sql<
+        string | null
+      >`coalesce(${payload}->>'mcpToolName', ${payload}->>'toolName')`,
+      serverName: sql<
+        string | null
+      >`coalesce(${payload}->>'mcpServerName', ${payload}->>'serverName')`,
+      arguments: sql<unknown>`case when length((${payload}->'rawInput'->'arguments')::text) <= ${FAST_AGENT_RECENT_TOOL_RESULT_ARGUMENTS_LENGTH} then ${payload}->'rawInput'->'arguments' end`,
+      output: sql<
+        string | null
+      >`left(${payload}->>'output', ${FAST_AGENT_RECENT_TOOL_RESULT_OUTPUT_LENGTH})`,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.ToolResult),
+        sql`${payload}->>'status' = 'completed'`,
+        sql`${payload}->>'isMcp' = 'true'`,
+        sql`coalesce(${payload}->>'isRoomoteNativeTool', 'false') <> 'true'`,
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
+    .limit(FAST_AGENT_RECENT_TOOL_RESULT_LIMIT);
+  return rows.reverse().flatMap((row) => {
+    if (!row.toolName || !row.output?.trim()) return [];
+    return [
+      {
+        tool: row.serverName
+          ? `${row.serverName}.${row.toolName}`
+          : row.toolName,
+        ...(row.arguments === null || row.arguments === undefined
+          ? {}
+          : { arguments: row.arguments }),
+        output: row.output,
+      },
+    ];
+  });
 }
 
 async function findFastAgentTurnPrompt(

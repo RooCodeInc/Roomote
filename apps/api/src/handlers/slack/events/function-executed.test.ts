@@ -142,6 +142,7 @@ describe('function-executed', () => {
         userId: 'user_author',
         teamId: 'T123',
         directedAtRoomote: true,
+        visibleInTranscript: false,
         event: expect.objectContaining({
           type: 'app_mention',
           channel: 'C123',
@@ -199,6 +200,7 @@ describe('function-executed', () => {
       expect.objectContaining({
         userId: 'user_installer',
         delegatedTaskInitiator: { kind: 'automation', key: 'slack_workflow' },
+        visibleInTranscript: false,
         event: expect.objectContaining({
           user: 'U_INSTALLER',
           ts: '222.000',

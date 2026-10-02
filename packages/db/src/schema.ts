@@ -39,6 +39,7 @@ import type {
   DeploymentAccessPolicy,
   DeploymentComputeConfig,
   DeploymentModelConfig,
+  ModelFallbackConfig,
   CodingHarness,
   RunEventDetails,
   RunEventSource,
@@ -277,6 +278,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   runtimeModelConfig: jsonb(
     'runtime_model_config',
   ).$type<DeploymentModelConfig>(),
+  modelFallbackConfig: jsonb(
+    'model_fallback_config',
+  ).$type<ModelFallbackConfig>(),
   runtimeComputeConfig: jsonb(
     'runtime_compute_config',
   ).$type<DeploymentComputeConfig>(),
@@ -4493,6 +4497,18 @@ export const sessions = pgTable(
     // status. 'done' is intentionally valid here but not in cached_status.
     manualStatus: text('manual_status').$type<SessionManualStatus>(),
     manualStatusSetAt: timestamp('manual_status_set_at'),
+    /**
+     * When Auto tool approvals stopped for this session because a call could
+     * not be assessed. From then on its default tools ask a person.
+     */
+    autoToolApprovalsSuspendedAt: timestamp('auto_tool_approvals_suspended_at'),
+    /**
+     * Whether the session owner turned Auto tool approvals on for this
+     * session. Off until they do: Auto is a per-session choice.
+     */
+    autoToolApprovalsEnabled: boolean('auto_tool_approvals_enabled')
+      .notNull()
+      .default(false),
     inactivityDueAt: timestamp('inactivity_due_at'),
     // Fast-conversation responding lease: while this is in the future, status
     // recomputation treats the conversation as actively responding. TTL-based

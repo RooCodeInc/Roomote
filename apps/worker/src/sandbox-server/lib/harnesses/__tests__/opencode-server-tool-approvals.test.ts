@@ -1,5 +1,7 @@
 vi.mock('@roomote/sdk/client', () => ({ sdk: {} }));
 
+import { INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE } from '@roomote/types';
+
 import {
   createTaskToolApprovalRelay,
   resolveTaskToolsForAsks,
@@ -155,6 +157,18 @@ describe('createTaskToolApprovalRelay', () => {
     expect(client.replyPermission).toHaveBeenCalledWith(
       expect.objectContaining({
         message: expect.not.stringContaining('transcript'),
+      }),
+    );
+  });
+
+  it('tells the agent to stop when Auto paused for the session', async () => {
+    const { client, relay } = setup([], { outcome: 'paused' });
+    relay.handleAsk(ask);
+    await replied(client);
+    expect(client.replyPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reply: 'reject',
+        message: INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
       }),
     );
   });

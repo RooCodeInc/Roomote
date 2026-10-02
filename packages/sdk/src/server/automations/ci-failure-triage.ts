@@ -65,7 +65,6 @@ import {
 import {
   emptyJobResult,
   resolveAutomationRunContext,
-  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -78,7 +77,7 @@ const LOG_PREFIX = '[ci-failure-triage]';
  * The task focuses on the latest default-branch failure only.
  */
 export async function ciFailureTriageJob(
-  opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
+  opts: AutomationRunOpts,
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting ci failure triage evaluator`);
 

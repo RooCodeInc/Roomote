@@ -23,7 +23,6 @@ import {
   appendAutomationWebhookInput,
   emptyJobResult,
   resolveAutomationRunContext,
-  SCHEDULED_AUTOMATION_RUN_CONTEXT,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -102,11 +101,11 @@ async function findEligibleDeploymentContexts(
 
 export function createScheduledTriageJob(
   config: ScheduledTriageAutomationConfig,
-): (opts?: AutomationRunOpts) => Promise<AutomationJobResult> {
+): (opts: AutomationRunOpts) => Promise<AutomationJobResult> {
   const logPrefix = `[${config.automationKey.replaceAll('_', '-')}]`;
 
   return async function scheduledTriageJob(
-    opts: AutomationRunOpts = { context: SCHEDULED_AUTOMATION_RUN_CONTEXT },
+    opts: AutomationRunOpts,
   ): Promise<AutomationJobResult> {
     console.log(
       `${logPrefix} Starting ${config.automationKey.replaceAll('_', ' ')} evaluator`,

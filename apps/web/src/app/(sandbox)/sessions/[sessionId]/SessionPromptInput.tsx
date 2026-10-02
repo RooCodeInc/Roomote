@@ -44,6 +44,7 @@ import {
   X,
 } from '@/components/system';
 import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
+import { SessionToolApprovalsPicker } from '@/components/sessions/SessionToolApprovalsPicker';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
@@ -245,6 +246,7 @@ export function SessionPromptInput({
   defaultReasoningEffort = null,
   voice,
   onModelSelectionChange,
+  toolApprovalsSessionId,
 }: {
   sessionId: string;
   isBusy: boolean;
@@ -278,6 +280,9 @@ export function SessionPromptInput({
   /** Keeps the parent's view of the picker current, so voice utterances
    * round-trip the same model selection a typed reply would. */
   onModelSelectionChange?: (selection: SessionModelSelection) => void;
+  /** The unified session, when the viewer owns it and may pick its tool
+   * approvals mode. */
+  toolApprovalsSessionId?: string;
 }) {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
@@ -557,6 +562,12 @@ export function SessionPromptInput({
                 defaultReasoningEffort={defaultReasoningEffort}
                 disabled={controlsDisabled}
               />
+              {toolApprovalsSessionId ? (
+                <SessionToolApprovalsPicker
+                  sessionId={toolApprovalsSessionId}
+                  disabled={isBusy}
+                />
+              ) : null}
             </PromptInputTools>
             <div className="flex items-center gap-2">
               {voice?.enabled ? (

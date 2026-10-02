@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+const SCHEDULED_RUN_OPTS = {
+  context: { trigger: 'scheduled' },
+} as const;
+
 import type {
   AutomationRuntime,
   ProviderUsageLimitSnapshot,
@@ -115,7 +119,7 @@ describe('provider usage limit automation', () => {
       .mockResolvedValueOnce('xoxb-a')
       .mockResolvedValueOnce('xoxb-b');
     const createNotifier = vi.fn(() => ({ postMessage: deps.postMessage }));
-    const result = await providerUsageLimitJob(undefined, {
+    const result = await providerUsageLimitJob(SCHEDULED_RUN_OPTS, {
       ...deps.overrides,
       createNotifier,
       resolveDestination: vi.fn().mockResolvedValue({
@@ -135,7 +139,7 @@ describe('provider usage limit automation', () => {
     deps.overrides.getSlackBotToken
       .mockResolvedValueOnce('xoxb-a')
       .mockResolvedValueOnce(null);
-    await providerUsageLimitJob(undefined, {
+    await providerUsageLimitJob(SCHEDULED_RUN_OPTS, {
       ...deps.overrides,
       resolveDestination: vi.fn().mockResolvedValue({
         provider: 'slack',
@@ -233,7 +237,10 @@ describe('provider usage limit automation', () => {
       automationRuntime: runtime({ enabled: false, scheduleMode: null }),
     });
 
-    const result = await providerUsageLimitJob(undefined, deps.overrides);
+    const result = await providerUsageLimitJob(
+      SCHEDULED_RUN_OPTS,
+      deps.overrides,
+    );
 
     expect(result).toMatchObject({
       launchedTaskId: null,
@@ -252,7 +259,10 @@ describe('provider usage limit automation', () => {
       }),
     });
 
-    const result = await providerUsageLimitJob(undefined, deps.overrides);
+    const result = await providerUsageLimitJob(
+      SCHEDULED_RUN_OPTS,
+      deps.overrides,
+    );
 
     expect(result).toMatchObject({ launchedTaskId: null, completed: true });
     expect(deps.overrides.getSnapshots).toHaveBeenCalledOnce();
@@ -265,8 +275,14 @@ describe('provider usage limit automation', () => {
   it('alerts at the configured threshold and deduplicates scheduled runs in a quota period', async () => {
     const deps = dependencies({});
 
-    const first = await providerUsageLimitJob(undefined, deps.overrides);
-    const second = await providerUsageLimitJob(undefined, deps.overrides);
+    const first = await providerUsageLimitJob(
+      SCHEDULED_RUN_OPTS,
+      deps.overrides,
+    );
+    const second = await providerUsageLimitJob(
+      SCHEDULED_RUN_OPTS,
+      deps.overrides,
+    );
 
     expect(first).toMatchObject({ launchedTaskId: null, completed: true });
     expect(second).toMatchObject({ launchedTaskId: null, completed: true });
@@ -280,10 +296,10 @@ describe('provider usage limit automation', () => {
     const snapshots = [snapshot({ usedPercent: 90, used: 90 })];
     const deps = dependencies({ snapshots });
 
-    await providerUsageLimitJob(undefined, deps.overrides);
+    await providerUsageLimitJob(SCHEDULED_RUN_OPTS, deps.overrides);
     snapshots[0] = snapshot({ usedPercent: 100, used: 100, remaining: 0 });
-    await providerUsageLimitJob(undefined, deps.overrides);
-    await providerUsageLimitJob(undefined, deps.overrides);
+    await providerUsageLimitJob(SCHEDULED_RUN_OPTS, deps.overrides);
+    await providerUsageLimitJob(SCHEDULED_RUN_OPTS, deps.overrides);
 
     expect(deps.postMessage).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(deps.postMessage.mock.calls[1]?.[0])).toContain(
@@ -296,11 +312,11 @@ describe('provider usage limit automation', () => {
     const snapshots = [snapshot()];
     const deps = dependencies({ redis, snapshots });
 
-    await providerUsageLimitJob(undefined, deps.overrides);
+    await providerUsageLimitJob(SCHEDULED_RUN_OPTS, deps.overrides);
     snapshots[0] = snapshot({ usedPercent: 80, used: 80 });
-    await providerUsageLimitJob(undefined, deps.overrides);
+    await providerUsageLimitJob(SCHEDULED_RUN_OPTS, deps.overrides);
     snapshots[0] = snapshot({ usedPercent: 90, used: 90 });
-    await providerUsageLimitJob(undefined, deps.overrides);
+    await providerUsageLimitJob(SCHEDULED_RUN_OPTS, deps.overrides);
 
     expect(deps.postMessage).toHaveBeenCalledTimes(2);
   });
@@ -356,7 +372,7 @@ describe('provider usage limit automation', () => {
       ],
     });
 
-    await providerUsageLimitJob(undefined, deps.overrides);
+    await providerUsageLimitJob(SCHEDULED_RUN_OPTS, deps.overrides);
 
     expect(deps.postMessage).toHaveBeenCalledTimes(1);
     expect(deps.postMessage.mock.calls[0]?.[0]?.text).toBe(
@@ -382,7 +398,7 @@ describe('provider usage limit automation', () => {
       communicationAdapter: { postMessage: adapterPostMessage },
     });
 
-    await providerUsageLimitJob(undefined, {
+    await providerUsageLimitJob(SCHEDULED_RUN_OPTS, {
       ...deps.overrides,
       resolveDestination: vi.fn().mockResolvedValue(destination),
     });
@@ -416,8 +432,14 @@ describe('provider usage limit automation', () => {
     const deps = dependencies({});
     deps.postMessage.mockResolvedValueOnce(null).mockResolvedValue('123.45');
 
-    const failed = await providerUsageLimitJob(undefined, deps.overrides);
-    const retried = await providerUsageLimitJob(undefined, deps.overrides);
+    const failed = await providerUsageLimitJob(
+      SCHEDULED_RUN_OPTS,
+      deps.overrides,
+    );
+    const retried = await providerUsageLimitJob(
+      SCHEDULED_RUN_OPTS,
+      deps.overrides,
+    );
 
     expect(failed.errors).toEqual([
       'Failed to post provider usage limit alert',

@@ -2381,6 +2381,7 @@ export function FastSessionTranscript({
               onModelSelectionChange={(selection) => {
                 modelSelectionRef.current = selection;
               }}
+              toolApprovalsSessionId={secretSessionId}
             />
             {replyError ? (
               <Alert

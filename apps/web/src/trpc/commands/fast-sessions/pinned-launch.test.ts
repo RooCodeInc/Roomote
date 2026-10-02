@@ -122,6 +122,7 @@ describe('startPinnedFastSessionLaunch', () => {
           description: expect.stringContaining('Fix the flaky test'),
           images: ['data:image/png;base64,AAAA'],
           blank: false,
+          visibleInTranscript: true,
           sourceControlProvider: 'gitlab',
           harnessModelOverrides: {
             'opencode-server': 'openrouter/z-ai/glm-5.2',
@@ -168,6 +169,7 @@ describe('startPinnedFastSessionLaunch', () => {
             branch: 'feature/x',
             sha: 'abc1234',
             blank: true,
+            visibleInTranscript: true,
             sourceControlProvider: 'github',
           }),
         }),

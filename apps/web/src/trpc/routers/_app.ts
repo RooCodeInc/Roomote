@@ -42,8 +42,10 @@ import {
   integrationToolPolicyUpsertSchema,
   integrationToolPoliciesUpsertSchema,
   taskModelMetadataSchema,
+  TASK_MODEL_ROLES,
   userTaskModelMappingPresetCreateSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
+  type TaskModelRole,
 } from '@roomote/types';
 
 import {
@@ -61,8 +63,14 @@ import {
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
+  getFastSessionAutoToolApprovalsCommand,
+  setFastSessionAutoToolApprovalsCommand,
+} from '../commands/fast-sessions/auto-tool-approvals';
+import {
   deleteFastSessionQueuedMessageInputSchema,
   replyToFastSessionInputSchema,
+  fastSessionAutoToolApprovalsInputSchema,
+  setFastSessionAutoToolApprovalsInputSchema,
   fastSessionPrReviewActionInputSchema,
   fastSessionCapabilityOfferResponseInputSchema,
   startFastSessionInputSchema,
@@ -507,6 +515,7 @@ import {
   saveTaskModelProviderCommand,
   suggestTaskModelsCommand,
   updateTaskModelSettingsCommand,
+  updateModelFallbackConfigCommand,
 } from '../commands/task-models';
 import {
   createUserTaskModelMappingPresetCommand,
@@ -2865,6 +2874,23 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         updateTaskModelSettingsCommand(auth, input),
       ),
+
+    updateFallbacks: protectedProcedure
+      .input(
+        z.object({
+          enabled: z.boolean(),
+          roles: z.record(
+            z.enum(TASK_MODEL_ROLES as [TaskModelRole, ...TaskModelRole[]]),
+            z.object({
+              modelId: z.string().trim().min(1),
+              reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable(),
+            }),
+          ),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateModelFallbackConfigCommand(auth, input),
+      ),
   }),
 
   chatgptSubscription: createRouter({
@@ -3394,6 +3420,16 @@ export const appRouter = createRouter({
       .input(updateFastSessionModelSelectionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         updateFastSessionModelSelectionCommand(auth, input),
+      ),
+    autoToolApprovals: protectedProcedure
+      .input(fastSessionAutoToolApprovalsInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionAutoToolApprovalsCommand(auth, input),
+      ),
+    setAutoToolApprovals: protectedProcedure
+      .input(setFastSessionAutoToolApprovalsInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setFastSessionAutoToolApprovalsCommand(auth, input),
       ),
     tasks: protectedProcedure
       .input(z.object({ sessionId: z.string().uuid() }))

@@ -393,6 +393,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         await processDiscordFastAgentMessage({
           ...fastEntry,
           senderUserId: launchOwnerUserId!,
+          visibleInTranscript: true,
         });
         return;
       }
@@ -417,6 +418,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         ...fastEntry,
         senderUserId: automationLaunchUserId,
         delegatedTaskInitiator: initiator,
+        visibleInTranscript: false,
       });
       if (fastStart.accepted) {
         apiLogger.info(

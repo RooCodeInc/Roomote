@@ -266,8 +266,25 @@ describe('McpToolManagementDialog tool approvals', () => {
         mode: 'reject',
       },
     ]);
-    // Only the group row offers Auto, returning every tool to the default.
-    fireEvent.click(group.getByRole('button', { name: 'Auto' }));
+    // The page has no Auto choice: Auto is a session's mode, not a tool's.
+    expect(group.queryByRole('button', { name: 'Auto' })).toBeNull();
+  });
+
+  it('returns a whole group to the default by pressing its selected choice again', () => {
+    state.autoEnabled = true;
+    state.policies = [
+      { integrationId: 'exa', toolName: 'web_search_exa', mode: 'reject' },
+      { integrationId: 'exa', toolName: 'web_fetch_exa', mode: 'reject' },
+    ];
+    renderDialog();
+    const group = within(
+      screen.getByRole('group', {
+        name: 'Approval mode for all tools',
+      }),
+    );
+    const disable = group.getByRole('button', { name: 'Disable' });
+    expect(disable).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(disable);
     expect(state.setModesCalls.at(-1)).toEqual({
       integrationId: 'exa',
       toolNames: ['web_search_exa', 'web_fetch_exa'],

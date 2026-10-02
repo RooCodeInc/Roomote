@@ -2,6 +2,8 @@ import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   parseModelProviderEnvKeys,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
 } from '@roomote/types';
 
 import { ALLOWED_ENV_VARS } from './constants';
@@ -28,18 +30,15 @@ const MODEL_RUNTIME_ENV_KEYS = [
   'R_INFERENCE_GATEWAY_GITHUB_COPILOT',
   'R_INFERENCE_GATEWAY_XAI',
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
-  'R_MODEL',
-  'R_SMALL_MODEL',
-  'R_VISION_MODEL',
-  'R_CODE_REVIEW_MODEL',
-  'R_EXPLORE_MODEL',
-  'R_PLANNING_MODEL',
-  'R_MODEL_REASONING_EFFORT',
-  'R_SMALL_MODEL_REASONING_EFFORT',
-  'R_VISION_MODEL_REASONING_EFFORT',
-  'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
-  'R_EXPLORE_MODEL_REASONING_EFFORT',
-  'R_PLANNING_MODEL_REASONING_EFFORT',
+  ...TASK_MODEL_ROLES.flatMap((role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    return [
+      descriptor.modelEnvVar,
+      descriptor.reasoningEnvVar,
+      descriptor.fallbackModelEnvVar,
+      descriptor.fallbackReasoningEnvVar,
+    ];
+  }),
   'R_MODEL_ENV_KEYS',
   'OPENCODE_CONFIG_CONTENT',
   'OPENCODE_COMMAND',

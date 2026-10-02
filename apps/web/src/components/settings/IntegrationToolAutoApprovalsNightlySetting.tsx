@@ -22,9 +22,10 @@ export function IntegrationToolAutoApprovalsNightlySetting() {
           onCheckedChange={setEnabled}
         />
         <p className="text-sm text-muted-foreground">
-          Expose the Auto-approval decisions card in Settings → Agent Guidance.
-          Jev is required for Auto to make decisions, and saved per-tool choices
-          continue to take priority.
+          Add the tool approvals mode to each session’s message box, where its
+          owner can choose Auto, and the Auto-approval decisions card to
+          Settings → Agent Guidance. Jev is required for Auto to make decisions,
+          and saved per-tool choices continue to take priority.
         </p>
       </div>
     </Section>

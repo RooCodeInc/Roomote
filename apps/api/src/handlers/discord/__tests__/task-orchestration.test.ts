@@ -66,6 +66,7 @@ describe('startNewDiscordTask', () => {
       applicationId: 'application-1',
       requesterDiscordUserId: 'discord-user-1',
       launchOwnerUserId: 'user-1',
+      visibleInTranscript: true,
       queuedMessage: {
         provider: 'discord',
         text: 'Fix checkout',
@@ -94,7 +95,10 @@ describe('startNewDiscordTask', () => {
 
     expect(result.status).toBe('started');
     expect(mocks.launchTask).toHaveBeenCalledWith(
-      expect.objectContaining({ beforeEnqueueKickoff }),
+      expect.objectContaining({
+        beforeEnqueueKickoff,
+        visibleInTranscript: true,
+      }),
     );
   });
 
