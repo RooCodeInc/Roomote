@@ -66,6 +66,36 @@ do not need direct network access to the endpoint or the API key.
 4. start a small Roomote task and confirm it completes through the endpoint
 5. check the upstream server logs for the request
 
+## Qualify a provider or gateway
+
+Provider maintainers and gateway operators can use the generic connection before
+requesting provider-specific support. A useful compatibility report covers the
+same path a Roomote task uses:
+
+1. Confirm `GET /v1/models` returns stable model IDs with the configured bearer
+   credential, and that a missing or invalid credential is rejected.
+2. Run a short non-streaming chat completion and a streaming completion that
+   terminates cleanly.
+3. Run a Roomote task that asks the model to call a harmless read-only tool,
+   accepts the matching tool result, and then produces a final text response.
+4. Repeat the tool task with enough prior messages to confirm the endpoint keeps
+   tool-call IDs and message roles intact across the round trip.
+5. Record the endpoint version, tested model IDs, supported reasoning values,
+   context and output limits, image support, error behavior for `401`, `429`,
+   and `5xx` responses, and any unsupported OpenAI fields.
+
+Do not include API keys, prompts from real repositories, or other private data in
+the report. Synthetic tasks are sufficient. A passing report establishes
+OpenAI-compatible behavior; it does not imply that Roomote endorses the provider
+or will add a dedicated catalog entry.
+
+To request a compatibility review or provider-specific setup guide, open a
+[well-scoped GitHub issue](https://github.com/RooCodeInc/Roomote/issues/new/choose)
+with the report and links to the provider-owned API and data-handling
+documentation. Follow Roomote's
+[contribution policy](https://github.com/RooCodeInc/Roomote/blob/develop/CONTRIBUTING.md)
+instead of opening an unsolicited pull request.
+
 ## Common issues
 
 - **No models appear.** Confirm the endpoint URL includes the OpenAI `/v1` API
