@@ -93,11 +93,12 @@ export async function decideUnaskedTaskToolCall(input: {
     case 'not_required':
       return { allowed: true };
     case 'approved':
-      // Decided for this call just now. Claiming it consumes the approval
-      // where one was left to consume; a tool its owner allowed for the
-      // session has none.
-      await claimProxyTaskToolCall(call).catch(() => false);
-      return { allowed: true };
+      // Decided for this call just now, and left for the proxy to consume.
+      // One approval runs one call: with nothing left to claim, or a claim
+      // that could not be made, the call does not run.
+      return (await claimProxyTaskToolCall(call).catch(() => false))
+        ? { allowed: true }
+        : refused;
     case 'denied':
       return {
         allowed: false,
@@ -127,8 +128,11 @@ export async function decideUnaskedTaskToolCall(input: {
       approvalId: result.approvalId,
     });
     if (status === 'approved') {
-      // One decision runs one call: the owner's approval is consumed here.
-      return (await claimProxyTaskToolCall(call)) ? { allowed: true } : refused;
+      // The owner's approval is consumed here, and not after the caller left.
+      if (input.signal?.aborted) return refused;
+      return (await claimProxyTaskToolCall(call).catch(() => false))
+        ? { allowed: true }
+        : refused;
     }
     if (status === 'expired') {
       return {

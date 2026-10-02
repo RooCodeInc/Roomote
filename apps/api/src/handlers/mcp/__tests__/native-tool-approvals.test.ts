@@ -124,9 +124,11 @@ describe('resolveNativeToolApprovalGuard', () => {
       ]),
       shadowDefaultTools: false,
     });
+    const caller = new AbortController();
     const guard = await resolveNativeToolApprovalGuard({
       auth: { userId: null, tokenType: 'run', runId: 42 },
       integrationId: 'notion',
+      requestSignal: caller.signal,
     });
 
     const disabled = await guard.checkCall({
@@ -152,6 +154,8 @@ describe('resolveNativeToolApprovalGuard', () => {
         integrationId: 'notion',
         toolName: 'ask_tool',
         args: {},
+        // A wait for approval ends when the caller goes away.
+        signal: caller.signal,
       }),
     );
     await expect(pending?.json()).resolves.toEqual(

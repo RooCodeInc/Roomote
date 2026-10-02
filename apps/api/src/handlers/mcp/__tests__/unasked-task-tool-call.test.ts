@@ -85,6 +85,13 @@ describe('decideUnaskedTaskToolCall', () => {
       toolName: 'save_issue',
       args: { title: 'Hi' },
     });
+
+    // One approval runs one call: when another call consumed it, or it could
+    // not be claimed, this one does not run.
+    mocks.claim.mockResolvedValueOnce(false);
+    await expect(decideUnaskedTaskToolCall(call)).resolves.toEqual(refused);
+    mocks.claim.mockRejectedValueOnce(new Error('db down'));
+    await expect(decideUnaskedTaskToolCall(call)).resolves.toEqual(refused);
   });
 
   it('refuses without asking when the call belongs to no task run', async () => {
@@ -180,5 +187,17 @@ describe('decideUnaskedTaskToolCall', () => {
       decideUnaskedTaskToolCall({ ...call, signal: gone.signal }),
     ).resolves.toEqual(refused);
     expect(mocks.status).not.toHaveBeenCalled();
+
+    // A caller that leaves while the owner is deciding never has the
+    // approval claimed for it afterwards.
+    const leaving = new AbortController();
+    mocks.status.mockImplementation(async () => {
+      leaving.abort();
+      return 'approved';
+    });
+    await expect(
+      decideUnaskedTaskToolCall({ ...call, signal: leaving.signal }),
+    ).resolves.toEqual(refused);
+    expect(mocks.claim).not.toHaveBeenCalled();
   });
 });

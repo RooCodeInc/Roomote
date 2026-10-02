@@ -76,6 +76,7 @@ vercelMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
       auth,
       integrationId: 'vercel',
       requestHeaders: c.req.raw.headers,
+      requestSignal: c.req.raw.signal,
     });
     const body = await readNativeMcpRequestBody(c.req.raw);
     const refusal = await guard.checkCall(body);

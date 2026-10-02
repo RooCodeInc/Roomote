@@ -55,6 +55,8 @@ export async function resolveNativeToolApprovalGuard(input: {
   integrationId: string;
   /** The request's headers, for the Fast conversation a call names. */
   requestHeaders?: Headers;
+  /** Aborts when the caller goes away, which ends a wait for approval. */
+  requestSignal?: AbortSignal;
 }): Promise<NativeToolApprovalGuard> {
   const approvals = await resolveProxyToolApprovalBlocks({
     integrationId: input.integrationId,
@@ -77,6 +79,7 @@ class NativeGuard implements NativeToolApprovalGuard {
       auth: McpAuthContext;
       integrationId: string;
       requestHeaders?: Headers;
+      requestSignal?: AbortSignal;
     },
     private readonly approvals: ProxyToolApprovals,
   ) {}
@@ -129,6 +132,7 @@ class NativeGuard implements NativeToolApprovalGuard {
           args,
           resolveActingUserId: () =>
             resolveTaskOrSessionUserIdOrNull(this.input.auth),
+          signal: this.input.requestSignal,
         });
         if (decision.allowed) return null;
         message = decision.message;
