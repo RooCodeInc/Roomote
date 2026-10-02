@@ -978,6 +978,7 @@ function isOpenCodeSessionInvalid(error: unknown): boolean {
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
+  reasoningEffort?: ReasoningEffort,
 ): Promise<{
   model: string;
   catalogModelId: string;
@@ -993,7 +994,15 @@ async function resolveNonTaskModelRuntime(
     // ProviderAuthError before a request is made.
     resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv(
       requestedModel
-        ? { runtimeEnv: { ...process.env, R_MODEL: requestedModel } }
+        ? {
+            runtimeEnv: {
+              ...process.env,
+              R_MODEL: requestedModel,
+              ...(reasoningEffort
+                ? { R_MODEL_REASONING_EFFORT: reasoningEffort }
+                : {}),
+            },
+          }
         : {},
     );
   } catch (error) {
@@ -1038,6 +1047,7 @@ async function resolveNonTaskModelRuntime(
     selectedRuntimeEnv = {
       ...resolvedModelRuntimeEnv,
       R_MODEL: resolvedModel,
+      ...(reasoningEffort ? { R_MODEL_REASONING_EFFORT: reasoningEffort } : {}),
     };
 
     if (modelRole === 'orchestration') {
@@ -2257,6 +2267,20 @@ async function runControlPlaneWithFallback<T>(
   const fallbackModel = fallbackEnvVar
     ? runtime.resolvedModelRuntimeEnv[fallbackEnvVar]
     : undefined;
+  const fallbackReasoningEnvVar =
+    role === 'orchestration'
+      ? 'R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT'
+      : role === 'small'
+        ? 'R_SMALL_MODEL_FALLBACK_REASONING_EFFORT'
+        : undefined;
+  const fallbackReasoningEffort = fallbackReasoningEnvVar
+    ? runtime.resolvedModelRuntimeEnv[fallbackReasoningEnvVar]
+    : undefined;
+  const validFallbackReasoningEffort = isReasoningEffort(
+    fallbackReasoningEffort,
+  )
+    ? fallbackReasoningEffort
+    : undefined;
 
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -2271,7 +2295,11 @@ async function runControlPlaneWithFallback<T>(
         fallbackModel !== runtime.catalogModelId
       ) {
         const fromModel = runtime.catalogModelId;
-        runtime = await resolveNonTaskModelRuntime(fallbackModel, 'primary');
+        runtime = await resolveNonTaskModelRuntime(
+          fallbackModel,
+          'primary',
+          validFallbackReasoningEffort,
+        );
         const fromProvider = getDisplayModelProviderId(fromModel) ?? 'opencode';
         const toProvider =
           getDisplayModelProviderId(runtime.catalogModelId) ?? 'opencode';
