@@ -81,6 +81,8 @@ describe('getOrphanedTaskRun', () => {
     expect(claimSql).toContain('FOR UPDATE SKIP LOCKED');
     expect(claimSql).toContain('task_phase IS DISTINCT FROM');
     expect(claimSql).toContain('waiting_for_sandbox_provider');
+    expect(claimSql).toContain('cancel_requested_at IS NULL');
+    expect(claimSql).toContain('canceled_at IS NULL');
   });
 
   it('returns null without touching Redis when no stale row is claimable', async () => {
