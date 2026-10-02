@@ -90,15 +90,15 @@ export async function decideUnaskedTaskToolCall(input: {
   });
 
   // A caller that left while this was being decided gets nothing run for
-  // it: no approval is claimed, and the call is not let through.
+  // it: the call is let through only if the caller is still there at every
+  // point a decision is returned, before and after the approval is claimed.
   const callerLeft = () => input.signal?.aborted === true;
   const claim = async (): Promise<UnaskedTaskToolCallDecision> => {
     if (callerLeft()) return refused;
     // One approval runs one call: with nothing left to claim, or a claim
     // that could not be made, the call does not run.
-    return (await claimProxyTaskToolCall(call).catch(() => false))
-      ? { allowed: true }
-      : refused;
+    const claimed = await claimProxyTaskToolCall(call).catch(() => false);
+    return claimed && !callerLeft() ? { allowed: true } : refused;
   };
 
   switch (result.outcome) {

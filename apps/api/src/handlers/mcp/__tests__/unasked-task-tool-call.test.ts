@@ -213,5 +213,16 @@ describe('decideUnaskedTaskToolCall', () => {
       ).resolves.toEqual(refused);
     }
     expect(mocks.claim).not.toHaveBeenCalled();
+
+    // Or while the approval is being claimed: the call is still not run.
+    const mid = new AbortController();
+    mocks.request.mockResolvedValueOnce({ outcome: 'approved' });
+    mocks.claim.mockImplementationOnce(async () => {
+      mid.abort();
+      return true;
+    });
+    await expect(
+      decideUnaskedTaskToolCall({ ...call, signal: mid.signal }),
+    ).resolves.toEqual(refused);
   });
 });
