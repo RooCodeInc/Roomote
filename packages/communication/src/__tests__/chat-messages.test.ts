@@ -273,6 +273,18 @@ describe('chat message copy builders', () => {
     expect(
       buildThreadReplyFooterText({
         taskUrl: 'https://roomote.dev/task/123',
+        linkedPrs: [7, 8, 9, 10, 11].map((prNumber) => ({
+          prNumber,
+          prUrl: `https://github.com/org/repo/pull/${prNumber}`,
+        })),
+      }),
+    ).toBe(
+      'Reply anytime · [PR #7](https://github.com/org/repo/pull/7), [PR #8](https://github.com/org/repo/pull/8), [PR #9](https://github.com/org/repo/pull/9), 2 more PRs · [Open in Roomote](https://roomote.dev/task/123)',
+    );
+
+    expect(
+      buildThreadReplyFooterText({
+        taskUrl: 'https://roomote.dev/task/123',
         livePreviewUrl: 'https://preview.roomote.dev',
         formatLink: (label, url) => `<${url}|${label}>`,
       }),

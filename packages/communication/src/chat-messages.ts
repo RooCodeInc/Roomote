@@ -294,6 +294,8 @@ export type ThreadReplyRunningTasks = {
   url: string;
 };
 
+const MAX_INLINE_THREAD_REPLY_PRS = 3;
+
 export function buildThreadReplyFooterText({
   taskUrl,
   linkedPrs,
@@ -318,10 +320,23 @@ export function buildThreadReplyFooterText({
         : `${runningTasks.count} tasks running`,
     );
   }
-  const prLinks = (linkedPrs ?? []).map((pr) =>
-    formatLink(`PR #${pr.prNumber}`, pr.prUrl),
-  );
-  if (prLinks.length > 0) items.push(prLinks.join(', '));
+  const prs = linkedPrs ?? [];
+  const prLinks = prs
+    .slice(0, MAX_INLINE_THREAD_REPLY_PRS)
+    .map((pr) => formatLink(`PR #${pr.prNumber}`, pr.prUrl));
+  if (prLinks.length > 0) {
+    const remainingPrCount = prs.length - prLinks.length;
+    items.push(
+      [
+        ...prLinks,
+        ...(remainingPrCount > 0
+          ? [
+              `${remainingPrCount} more ${remainingPrCount === 1 ? 'PR' : 'PRs'}`,
+            ]
+          : []),
+      ].join(', '),
+    );
+  }
 
   const taskNavigationUrl = new URL(taskUrl);
   let webUrl = taskNavigationUrl;
