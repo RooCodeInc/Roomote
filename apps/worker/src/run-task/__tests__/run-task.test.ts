@@ -1754,6 +1754,9 @@ describe('runTask', () => {
           HOME: '/tmp/home',
           PATH: '/usr/bin',
         })),
+        buildCritiqueMcpEnv: vi.fn(() => ({
+          ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY: 'rcq1.123.signature',
+        })),
       } as never,
     });
 
@@ -1766,8 +1769,12 @@ describe('runTask', () => {
         }),
         mcpTaskEnv: expect.objectContaining({
           AGENT_BROWSER_SESSION: 'task-101',
+          ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY: 'rcq1.123.signature',
         }),
       }),
+    );
+    expect(createHarnessMock.mock.calls[0]?.[0].runtimeEnv).not.toHaveProperty(
+      'ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY',
     );
   });
 

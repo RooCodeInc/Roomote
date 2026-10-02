@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { createCritiqueSubmissionCapability } from '@roomote/compute-providers';
 import type { RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
@@ -8,6 +9,8 @@ const { mockEnv, logHandlerErrorMock } = vi.hoisted(() => ({
   mockEnv: {
     CRITIQUE_BASE_URL: 'https://critique.example.test/',
     CRITIQUE_API_TOKEN: 'critique-secret-token',
+    ARTIFACT_SIGNING_KEY: 'artifact-signing-key',
+    ARTIFACT_SIGNING_KEY_PREVIOUS: undefined as string | undefined,
   },
   logHandlerErrorMock: vi.fn(),
 }));
@@ -33,12 +36,24 @@ function createApp(authContext: Variables['authContext'] = runAuth) {
   return app;
 }
 
-function request(body = 'multipart-body') {
+function request(body = 'multipart-body', includeCapability = true) {
+  const runToken = 'run-token';
   return new Request('http://localhost/critique', {
     method: 'POST',
     headers: {
       'content-type': 'multipart/form-data; boundary=test-boundary',
       'content-length': String(Buffer.byteLength(body)),
+      authorization: `Bearer ${runToken}`,
+      ...(includeCapability
+        ? {
+            'x-roomote-critique-submission-capability':
+              createCritiqueSubmissionCapability({
+                runToken,
+                expiresAtMs: Date.now() + 60_000,
+                signingKey: mockEnv.ARTIFACT_SIGNING_KEY,
+              }),
+          }
+        : {}),
     },
     body,
   });
@@ -159,6 +174,21 @@ describe('Critique proxy', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects arbitrary direct task-token multipart submissions', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createApp().request(
+      request('arbitrary-task-data', false),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Invalid Critique submission capability',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('rejects non-run auth and oversized payloads before upstream', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -175,6 +205,13 @@ describe('Critique proxy', () => {
         headers: {
           'content-type': 'multipart/form-data; boundary=test',
           'content-length': String(32 * 1024 * 1024 + 1),
+          authorization: 'Bearer run-token',
+          'x-roomote-critique-submission-capability':
+            createCritiqueSubmissionCapability({
+              runToken: 'run-token',
+              expiresAtMs: Date.now() + 60_000,
+              signingKey: mockEnv.ARTIFACT_SIGNING_KEY,
+            }),
         },
         body: 'small',
       }),

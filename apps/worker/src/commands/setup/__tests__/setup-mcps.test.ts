@@ -1230,6 +1230,7 @@ describe('resolveBuiltInMcpServers', () => {
       ROOMOTE_WORKSPACE_PATH: '/workspace',
       ROOMOTE_TASK_ID: 'task-123',
       AGENT_BROWSER_SESSION: 'task-123',
+      ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY: 'rcq1.123.signature',
       ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-bypass-roomote-auth',
       ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
       ROOMOTE_TASK_TYPE: 'standard',
@@ -1255,6 +1256,9 @@ describe('resolveBuiltInMcpServers', () => {
     expect(roomoteEnv.ROOMOTE_WORKSPACE_PATH).toBe('/workspace');
     expect(roomoteEnv.ROOMOTE_TASK_ID).toBe('task-123');
     expect(roomoteEnv.AGENT_BROWSER_SESSION).toBe('task-123');
+    expect(roomoteEnv.ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY).toBe(
+      'rcq1.123.signature',
+    );
     expect(roomoteEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME).toBe(
       'x-bypass-roomote-auth',
     );

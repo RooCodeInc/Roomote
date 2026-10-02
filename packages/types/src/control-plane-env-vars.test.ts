@@ -37,6 +37,7 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
       'R_JUDGMENT_UPSTREAM_API_KEY',
       'CRITIQUE_BASE_URL',
       'CRITIQUE_API_TOKEN',
+      'ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY',
     ]) {
       expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(true);
     }
@@ -46,6 +47,7 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
     expect([...CRITIQUE_ENV_VAR_NAMES]).toEqual([
       'CRITIQUE_BASE_URL',
       'CRITIQUE_API_TOKEN',
+      'ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY',
     ]);
   });
 

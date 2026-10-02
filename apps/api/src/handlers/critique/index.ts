@@ -1,6 +1,10 @@
 import { Hono } from 'hono';
 import { Env } from '@roomote/env';
-import type { RunTokenContext } from '@roomote/types';
+import { validateCritiqueSubmissionCapability } from '@roomote/compute-providers';
+import {
+  CRITIQUE_CAPABILITY_HEADER,
+  type RunTokenContext,
+} from '@roomote/types';
 
 import type { Variables } from '../../types';
 import { logHandlerError } from '../utils';
@@ -71,6 +75,23 @@ critique.post('/', async (c) => {
   const auth = c.get('authContext');
   if (!isRunTokenContext(auth)) {
     return c.json({ error: 'Critique requires a task run token' }, 403);
+  }
+
+  const runToken = c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
+  if (
+    !runToken ||
+    !validateCritiqueSubmissionCapability({
+      capability: c.req.header(CRITIQUE_CAPABILITY_HEADER),
+      runToken,
+      signingKeys: [
+        Env.ARTIFACT_SIGNING_KEY,
+        ...(Env.ARTIFACT_SIGNING_KEY_PREVIOUS
+          ? [Env.ARTIFACT_SIGNING_KEY_PREVIOUS]
+          : []),
+      ],
+    })
+  ) {
+    return c.json({ error: 'Invalid Critique submission capability' }, 403);
   }
 
   const contentType = c.req.header('content-type') ?? '';

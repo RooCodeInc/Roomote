@@ -1074,6 +1074,7 @@ export const runTask = async ({
       slackReplyContext,
       communicationReplyContext,
     });
+    Object.assign(mcpTaskEnv, workerEnv.buildCritiqueMcpEnv?.() ?? {});
     if (mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE) {
       runtimeEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE =
         mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE;

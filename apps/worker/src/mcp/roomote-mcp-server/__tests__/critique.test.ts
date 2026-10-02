@@ -149,6 +149,11 @@ describe('Critique capture and multipart', () => {
     },
   };
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
   function createBrowserRunner() {
     return vi.fn(async (args: string[]) => {
       if (args[0] === 'screenshot') {
@@ -261,6 +266,7 @@ describe('Critique capture and multipart', () => {
   });
 
   it('exercises capture, page review, and comparison through the task-facing handler', async () => {
+    vi.stubEnv('ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY', 'rcq1.123.signature');
     const browser = createBrowserRunner();
     const fetchMock = vi
       .fn()
@@ -335,6 +341,9 @@ describe('Critique capture and multipart', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const comparisonRequest = fetchMock.mock.calls[1]![1] as RequestInit;
+    expect(comparisonRequest.headers).toMatchObject({
+      'x-roomote-critique-submission-capability': 'rcq1.123.signature',
+    });
     const comparisonBody = Buffer.from(
       await (comparisonRequest.body as Blob).arrayBuffer(),
     ).toString();

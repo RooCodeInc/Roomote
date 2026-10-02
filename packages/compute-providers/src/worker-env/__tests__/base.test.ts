@@ -3,6 +3,9 @@ const { mockEnv } = vi.hoisted(() => ({
     R_APP_ENV: undefined as string | undefined,
     R_APP_URL: 'https://web.roomote.example.com',
     TRPC_URL: 'https://api.roomote.example.com',
+    ARTIFACT_SIGNING_KEY: 'artifact-signing-key',
+    CRITIQUE_BASE_URL: undefined as string | undefined,
+    CRITIQUE_API_TOKEN: undefined as string | undefined,
   },
 }));
 
@@ -16,6 +19,8 @@ describe('buildBaseWorkerEnv', () => {
   beforeEach(() => {
     process.env = { ...originalEnv };
     mockEnv.R_APP_ENV = undefined;
+    mockEnv.CRITIQUE_BASE_URL = undefined;
+    mockEnv.CRITIQUE_API_TOKEN = undefined;
     delete process.env.APP_ENV;
     delete process.env.PREVIEW_PROXY_BASE_URL;
     delete process.env.JOB_AUTH_PRIVATE_KEY;
@@ -236,5 +241,26 @@ describe('buildBaseWorkerEnv', () => {
     );
     expect(environmentEnv).not.toHaveProperty('OPENROUTER_API_KEY');
     expect(repositoryEnv).not.toHaveProperty('SANDBOX_OPENROUTER_API_KEY');
+  });
+
+  it('provisions a non-overridable Critique capability only when configured', () => {
+    mockEnv.CRITIQUE_BASE_URL = 'https://critique.example.test';
+    mockEnv.CRITIQUE_API_TOKEN = 'critique-token';
+    const env = buildBaseWorkerEnv({
+      authToken: 'run-token',
+      sandboxExpiresAtMs: Date.now() + 60_000,
+      extraEnv: {
+        ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY: 'caller-controlled',
+      },
+    });
+
+    expect(env.ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY).toMatch(/^rcq1\./);
+    expect(env.ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY).not.toBe(
+      'caller-controlled',
+    );
+    mockEnv.CRITIQUE_API_TOKEN = undefined;
+    expect(buildBaseWorkerEnv({ authToken: 'run-token' })).not.toHaveProperty(
+      'ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY',
+    );
   });
 });

@@ -15,6 +15,7 @@ export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
   'codeql-triage',
   'create-draft-pr',
   'create-pr',
+  'critique-visual-review',
   'debug-reported-bug',
   'dependabot-triage',
   'doctor',
