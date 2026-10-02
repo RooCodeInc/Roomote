@@ -60,7 +60,7 @@ describe('IntegrationToolAutoModeSetting', () => {
     const { rerender } = render(<IntegrationToolAutoModeSetting />);
     expect(
       screen.getByPlaceholderText(
-        'Include any specific guidance for how to decide auto-approval here',
+        'For example: Anything that moves money needs a person to approve it.',
       ),
     ).toBeInTheDocument();
     const guidance = screen.getByLabelText('Additional instructions');

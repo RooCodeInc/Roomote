@@ -18,7 +18,7 @@ const COPY = {
   guidanceHelp:
     'Describe what your deployment considers routine or risky. Optional.',
   guidancePlaceholder:
-    'Include any specific guidance for how to decide auto-approval here',
+    'For example: Anything that moves money needs a person to approve it.',
   save: 'Save changes',
   unavailable: 'Auto mode isn’t available yet.',
 };

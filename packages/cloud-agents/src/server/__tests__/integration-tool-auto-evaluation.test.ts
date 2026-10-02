@@ -34,6 +34,7 @@ vi.mock('@roomote/env', () => ({
 
 import {
   evaluateIntegrationToolAutoDecision,
+  INTEGRATION_TOOL_AUTO_QUESTIONS,
   isAllowlistedInternalRead,
   findUnverifiedIdentifier,
   recommendFromAutoAnswers,
@@ -60,9 +61,6 @@ const modelAnswers = (answers: AutoRiskAnswers) => ({
   ...(answers.userAuthorized === undefined
     ? {}
     : { userAuthorized: { type: 'noul', noul: answers.userAuthorized } }),
-  ...(answers.movesMoney === undefined
-    ? {}
-    : { movesMoney: { type: 'noul', noul: answers.movesMoney } }),
   ...(answers.continuesApprovedCall === undefined
     ? {}
     : {
@@ -284,7 +282,6 @@ describe('recommendFromAutoAnswers', () => {
       risk: { score: 3.9, confidence: 0.95 },
       onlyReads: 0.02,
       userAuthorized: 0.6,
-      movesMoney: 0.02,
     };
     expect(recommendFromAutoAnswers(next)).toBe('ask');
     expect(
@@ -317,7 +314,6 @@ describe('recommendFromAutoAnswers', () => {
       risk: { score: 3.9, confidence: 0.95 },
       onlyReads: 0.02,
       matchesRequest: 0.9,
-      movesMoney: 0.02,
     };
     // Each authorization signal counts at the lower bar with a matching call.
     for (const authorization of [
@@ -377,14 +373,7 @@ describe('recommendFromAutoAnswers', () => {
         matchesRequest: undefined,
       }),
     ).toBe('ask');
-    // Money, an unsafe signal, and a rejection of the tool still ask.
-    expect(
-      recommendFromAutoAnswers({
-        ...write,
-        userAuthorized: 0.78,
-        movesMoney: 0.5,
-      }),
-    ).toBe('ask');
+    // An unsafe signal and a rejection of the tool still ask.
     expect(
       recommendFromAutoAnswers({
         ...write,
@@ -406,7 +395,6 @@ describe('recommendFromAutoAnswers', () => {
       risk: { score: 3.9, confidence: 0.95 },
       onlyReads: 0.02,
       userAuthorized: 0.95,
-      movesMoney: 0.02,
     };
     expect(recommendFromAutoAnswers(write)).toBe('approve');
     expect(recommendFromAutoAnswers(write, { unverifiedTarget: true })).toBe(
@@ -417,22 +405,37 @@ describe('recommendFromAutoAnswers', () => {
     );
   });
 
-  it('runs a risky call the owner authorized, unless it moves money or is unsafe', () => {
+  it('singles out no kind of action: a payment the owner asked for runs, one they did not asks', () => {
+    const payment: AutoRiskAnswers = {
+      ...routine,
+      risk: { score: 3.2, confidence: 0.95 },
+      onlyReads: 0.02,
+      userAuthorized: 0.95,
+    };
+    expect(recommendFromAutoAnswers(payment)).toBe('approve');
+    expect(recommendFromAutoAnswers({ ...payment, userAuthorized: 0.1 })).toBe(
+      'ask',
+    );
+    // A deployment that wants payments to always ask says so in its guidance.
+    expect(
+      recommendFromAutoAnswers({ ...payment, guidanceFlagsRisk: 0.9 }),
+    ).toBe('ask');
+    // The built-in questions name no kind of action.
+    expect(INTEGRATION_TOOL_AUTO_QUESTIONS).not.toHaveProperty('movesMoney');
+  });
+
+  it('runs a risky call the owner authorized, whatever kind of action it is, unless it is unsafe', () => {
     const deletion: AutoRiskAnswers = {
       ...routine,
       risk: { score: 3.9, confidence: 0.95 },
       onlyReads: 0.02,
       userAuthorized: 0.95,
-      movesMoney: 0.02,
     };
     expect(recommendFromAutoAnswers(deletion)).toBe('approve');
     for (const doubt of [
       // Not clearly what the owner asked for or approved before.
       { userAuthorized: 0.7 },
       { userAuthorized: undefined },
-      // Auto cannot check amounts, so money always asks.
-      { movesMoney: 0.5 },
-      { movesMoney: undefined },
       // Authorization never outweighs these.
       { steeredByUntrustedContent: 0.4 },
       { sendsPrivateDataOut: 0.4 },
@@ -482,7 +485,6 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     );
     expect(Object.keys(questions).sort()).toEqual([
       'matchesRequest',
-      'movesMoney',
       'onlyReads',
       'risk',
       'sendsPrivateDataOut',
@@ -635,7 +637,6 @@ describe('evaluateIntegrationToolAutoDecision', () => {
         risk: { score: 3.95, confidence: 0.96 },
         onlyReads: 0.05,
         userAuthorized: 0.96,
-        movesMoney: 0.02,
       }),
     );
     const evaluation = await evaluateIntegrationToolAutoDecision({
@@ -657,7 +658,6 @@ describe('evaluateIntegrationToolAutoDecision', () => {
         ...routine,
         risk: { score: 3.95, confidence: 0.96 },
         userAuthorized: 0.96,
-        movesMoney: 0.02,
       }),
     );
     const evaluation = await evaluateIntegrationToolAutoDecision({
@@ -668,7 +668,7 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     });
     expect(evaluation).toMatchObject({
       recommendation: 'approve',
-      answers: { riskScore: 3.95, userAuthorized: 0.96, movesMoney: 0.02 },
+      answers: { riskScore: 3.95, userAuthorized: 0.96 },
     });
   });
 
@@ -679,7 +679,6 @@ describe('evaluateIntegrationToolAutoDecision', () => {
         matchesRequest: undefined,
         risk: { score: 3.9, confidence: 0.95 },
         userAuthorized: 0.9,
-        movesMoney: 0.02,
       }),
     );
     const evaluation = await evaluateIntegrationToolAutoDecision({
@@ -700,7 +699,7 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     });
     const { questions } = mocks.evaluate.mock.calls[0]![0];
     expect(Object.keys(questions)).toEqual(
-      expect.arrayContaining(['userAuthorized', 'movesMoney']),
+      expect.arrayContaining(['userAuthorized']),
     );
     expect(questions).not.toHaveProperty('matchesRequest');
     expect(evaluation.recommendation).toBe('approve');
@@ -1026,7 +1025,6 @@ describe('evaluateIntegrationToolAutoDecision', () => {
         onlyReads: 0.02,
         risk: { score: 3.9, confidence: 0.95 },
         userAuthorized: 0.95,
-        movesMoney: 0.02,
       }),
     );
     const evaluate = (
