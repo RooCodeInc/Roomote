@@ -3,14 +3,12 @@ import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
-  CRITIQUE_CAPABILITY_ENV_VAR,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   isTaskModelIdDisabled,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
 import type { BuildWorkerEnvOptions } from './types';
-import { createCritiqueSubmissionCapability } from '../critique-capability';
 
 const BLOCKED_WORKER_ENV_KEYS = new Set([
   'JOB_AUTH_PRIVATE_KEY',
@@ -25,7 +23,6 @@ const BLOCKED_WORKER_ENV_KEYS = new Set([
   // no env passthrough can ever ship it into a sandbox.
   'R_TRIAL_OPENROUTER_API_KEY',
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
-  CRITIQUE_CAPABILITY_ENV_VAR,
   ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
 ]);
 
@@ -189,15 +186,6 @@ export function buildBaseWorkerEnv({
     }),
     ...buildOperatorModelProviderEnv(),
     ...filterWorkerExtraEnv(extraEnv),
-    ...(Env.CRITIQUE_BASE_URL && Env.CRITIQUE_API_TOKEN
-      ? {
-          [CRITIQUE_CAPABILITY_ENV_VAR]: createCritiqueSubmissionCapability({
-            runToken: authToken,
-            expiresAtMs: sandboxExpiresAtMs ?? Date.now() + 5 * 60 * 60 * 1_000,
-            signingKey: Env.ARTIFACT_SIGNING_KEY,
-          }),
-        }
-      : {}),
     ...(environmentId &&
       process.env[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME] && {
         [SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME]:

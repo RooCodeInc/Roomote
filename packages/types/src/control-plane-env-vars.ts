@@ -130,7 +130,6 @@ const JUDGMENT_MODEL_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 export const CRITIQUE_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'CRITIQUE_BASE_URL',
   'CRITIQUE_API_TOKEN',
-  'ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY',
 ]);
 
 /**

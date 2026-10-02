@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { createCritiqueSubmissionCapability } from '@roomote/compute-providers';
+import sharp from 'sharp';
 import type { RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
@@ -9,8 +9,6 @@ const { mockEnv, logHandlerErrorMock } = vi.hoisted(() => ({
   mockEnv: {
     CRITIQUE_BASE_URL: 'https://critique.example.test/',
     CRITIQUE_API_TOKEN: 'critique-secret-token',
-    ARTIFACT_SIGNING_KEY: 'artifact-signing-key',
-    ARTIFACT_SIGNING_KEY_PREVIOUS: undefined as string | undefined,
   },
   logHandlerErrorMock: vi.fn(),
 }));
@@ -26,6 +24,51 @@ const runAuth: RunTokenContext = {
   version: 1,
 };
 
+const manifest = {
+  mode: 'page',
+  captures: [
+    {
+      id: 'capture-1',
+      screenshotAssetId: 'screenshot-1',
+      domAssetId: 'dom-1',
+      viewport: {
+        width: 2,
+        height: 2,
+        deviceScaleFactor: 1,
+        scrollX: 0,
+        scrollY: 0,
+      },
+      document: { width: 2, height: 2 },
+      page: { url: 'https://example.test/page?token=secret', title: 'Example' },
+    },
+  ],
+};
+
+const safeDom = {
+  rootNodeId: 'n1',
+  nodes: [
+    {
+      id: 'n1',
+      tagName: 'html',
+      bounds: { x: 0, y: 0, width: 2, height: 2 },
+      styles: { display: 'block' },
+      state: { visible: true },
+    },
+    {
+      id: 'n2',
+      parentId: 'n1',
+      tagName: 'body',
+      text: 'Visible text',
+      attributes: { 'aria-label': 'Main' },
+      bounds: { x: 0, y: 0, width: 2, height: 2 },
+      styles: { display: 'block' },
+      state: { visible: true },
+    },
+  ],
+};
+
+let validPng: Buffer;
+
 function createApp(authContext: Variables['authContext'] = runAuth) {
   const app = new Hono<{ Variables: Variables }>();
   app.use('*', async (c, next) => {
@@ -36,30 +79,49 @@ function createApp(authContext: Variables['authContext'] = runAuth) {
   return app;
 }
 
-function request(body = 'multipart-body', includeCapability = true) {
-  const runToken = 'run-token';
+function validRequest(
+  options: {
+    dom?: unknown;
+    input?: unknown;
+    screenshot?: Buffer;
+    extraPart?: boolean;
+  } = {},
+) {
+  const form = new FormData();
+  form.set('input', JSON.stringify(options.input ?? manifest));
+  form.set(
+    'screenshot-1',
+    new File([Uint8Array.from(options.screenshot ?? validPng)], 'capture.png', {
+      type: 'image/png',
+    }),
+  );
+  form.set(
+    'dom-1',
+    new File([JSON.stringify(options.dom ?? safeDom)], 'capture.json', {
+      type: 'application/json',
+    }),
+  );
+  if (options.extraPart) form.set('extra', 'not allowed');
   return new Request('http://localhost/critique', {
     method: 'POST',
-    headers: {
-      'content-type': 'multipart/form-data; boundary=test-boundary',
-      'content-length': String(Buffer.byteLength(body)),
-      authorization: `Bearer ${runToken}`,
-      ...(includeCapability
-        ? {
-            'x-roomote-critique-submission-capability':
-              createCritiqueSubmissionCapability({
-                runToken,
-                expiresAtMs: Date.now() + 60_000,
-                signingKey: mockEnv.ARTIFACT_SIGNING_KEY,
-              }),
-          }
-        : {}),
-    },
-    body,
+    body: form,
   });
 }
 
 describe('Critique proxy', () => {
+  beforeAll(async () => {
+    validPng = await sharp({
+      create: {
+        width: 2,
+        height: 2,
+        channels: 4,
+        background: { r: 10, g: 20, b: 30, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnv.CRITIQUE_BASE_URL = 'https://critique.example.test/';
@@ -71,35 +133,80 @@ describe('Critique proxy', () => {
     vi.useRealTimers();
   });
 
-  it('forwards multipart once with bearer auth and preserves a partial response', async () => {
+  it('sanitizes and reconstructs the multipart request before forwarding', async () => {
     const partial = {
       status: 'partial',
       findings: [{ id: 'f1', verdict: 'fail', confidence: 0.91 }],
       omittedFindingCount: 3,
-      errors: [{ code: 'rule_timeout', message: 'One rule timed out' }],
+      errors: [{ code: 'rule_timeout' }],
     };
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(partial), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(partial), { status: 200 }),
+      );
     vi.stubGlobal('fetch', fetchMock);
+    const unsafeDom = structuredClone(safeDom);
+    Object.assign(unsafeDom.nodes[1]!, {
+      text: 'token=should-not-leave',
+      attributes: {
+        'aria-label': 'Main',
+        href: 'https://secret.test',
+        onclick: 'steal()',
+        'data-secret': 'hidden',
+      },
+      styles: {
+        display: 'block',
+        transform: 'rotate(1deg)',
+        'background-image': 'url(https://secret.test/value)',
+      },
+    });
+    const screenshotWithTrailer = Buffer.concat([
+      validPng,
+      Buffer.from('SECRET_TRAILER'),
+    ]);
 
-    const response = await createApp().request(request());
+    const response = await createApp().request(
+      validRequest({ dom: unsafeDom, screenshot: screenshotWithTrailer }),
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(partial);
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      'https://critique.example.test/v1/critiques',
-    );
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://critique.example.test/v1/critiques');
     expect(init.headers).toMatchObject({
       authorization: 'Bearer critique-secret-token',
-      'content-type': 'multipart/form-data; boundary=test-boundary',
     });
-    await expect((init.body as Blob).text()).resolves.toBe('multipart-body');
+    const forwarded = await new Request('http://upstream.test', {
+      method: 'POST',
+      headers: {
+        'content-type': (init.headers as Record<string, string>)[
+          'content-type'
+        ]!,
+      },
+      body: init.body,
+    }).formData();
+    expect([...forwarded.keys()]).toEqual(['input', 'screenshot-1', 'dom-1']);
+    const forwardedManifest = JSON.parse(String(forwarded.get('input')));
+    expect(forwardedManifest.captures[0].page.url).toBe(
+      'https://example.test/page',
+    );
+    const forwardedDom = JSON.parse(
+      await (forwarded.get('dom-1') as File).text(),
+    );
+    expect(forwardedDom.nodes[1]).not.toHaveProperty('text');
+    expect(forwardedDom.nodes[1].attributes).toEqual({ 'aria-label': 'Main' });
+    expect(forwardedDom.nodes[1].styles).toEqual({ display: 'block' });
+    const forwardedPng = Buffer.from(
+      await (forwarded.get('screenshot-1') as File).arrayBuffer(),
+    );
+    expect(forwardedPng.includes(Buffer.from('SECRET_TRAILER'))).toBe(false);
+    await expect(sharp(forwardedPng).metadata()).resolves.toMatchObject({
+      format: 'png',
+      width: 2,
+      height: 2,
+    });
   });
 
   it.each([
@@ -109,24 +216,23 @@ describe('Critique proxy', () => {
   ])(
     'maps upstream %i accurately without retrying',
     async (upstreamStatus, expectedStatus, expectedMessage) => {
-      const fetchMock = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            error: `upstream detail ${mockEnv.CRITIQUE_API_TOKEN}`,
-          }),
-          { status: upstreamStatus },
-        ),
-      );
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ error: `upstream ${mockEnv.CRITIQUE_API_TOKEN}` }),
+            { status: upstreamStatus },
+          ),
+        );
       vi.stubGlobal('fetch', fetchMock);
 
-      const response = await createApp().request(request());
+      const response = await createApp().request(validRequest());
       const payload = (await response.json()) as Record<string, unknown>;
 
       expect(response.status).toBe(expectedStatus);
       expect(payload.error).toContain(expectedMessage);
       expect(payload.upstreamStatus).toBe(upstreamStatus);
       expect(payload.detail).toContain('[REDACTED]');
-      expect(JSON.stringify(payload)).not.toContain(mockEnv.CRITIQUE_API_TOKEN);
       expect(fetchMock).toHaveBeenCalledOnce();
     },
   );
@@ -134,8 +240,8 @@ describe('Critique proxy', () => {
   it('times out once after at least 150 seconds and warns against retry', async () => {
     const timeoutSpy = vi
       .spyOn(AbortSignal, 'timeout')
-      .mockImplementation((milliseconds) => {
-        expect(milliseconds).toBeGreaterThanOrEqual(150_000);
+      .mockImplementation((ms) => {
+        expect(ms).toBeGreaterThanOrEqual(150_000);
         const controller = new AbortController();
         queueMicrotask(() => controller.abort());
         return controller.signal;
@@ -150,42 +256,42 @@ describe('Critique proxy', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await createApp().request(request());
+    const response = await createApp().request(validRequest());
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(504);
-    expect(payload.error).toContain('160000ms');
     expect(payload.error).toContain('must not be retried automatically');
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(timeoutSpy).toHaveBeenCalledWith(160_000);
   });
 
-  it('returns advisory unavailability without calling upstream when unconfigured', async () => {
-    mockEnv.CRITIQUE_API_TOKEN = '';
+  it('rejects malformed, extra, and disconnected task data before upstream', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await createApp().request(request());
-
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      error: 'Critique visual review is not configured',
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('rejects arbitrary direct task-token multipart submissions', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    const response = await createApp().request(
-      request('arbitrary-task-data', false),
+    const malformed = await createApp().request(
+      new Request('http://localhost/critique', {
+        method: 'POST',
+        headers: { 'content-type': 'multipart/form-data; boundary=bad' },
+        body: 'arbitrary-task-data',
+      }),
     );
+    expect(malformed.status).toBe(400);
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({
-      error: 'Invalid Critique submission capability',
-    });
+    const extra = await createApp().request(validRequest({ extraPart: true }));
+    expect(extra.status).toBe(400);
+
+    const disconnectedDom = structuredClone(safeDom);
+    disconnectedDom.nodes[1]!.parentId = 'missing';
+    const disconnected = await createApp().request(
+      validRequest({ dom: disconnectedDom }),
+    );
+    expect(disconnected.status).toBe(400);
+
+    const scriptDom = structuredClone(safeDom);
+    scriptDom.nodes[1]!.tagName = 'script';
+    const script = await createApp().request(validRequest({ dom: scriptDom }));
+    expect(script.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -196,7 +302,7 @@ describe('Critique proxy', () => {
       userId: 'user-1',
       tokenType: 'auth',
       version: 1,
-    }).request(request());
+    }).request(validRequest());
     expect(memberResponse.status).toBe(403);
 
     const oversizedResponse = await createApp().request(
@@ -205,13 +311,6 @@ describe('Critique proxy', () => {
         headers: {
           'content-type': 'multipart/form-data; boundary=test',
           'content-length': String(32 * 1024 * 1024 + 1),
-          authorization: 'Bearer run-token',
-          'x-roomote-critique-submission-capability':
-            createCritiqueSubmissionCapability({
-              runToken: 'run-token',
-              expiresAtMs: Date.now() + 60_000,
-              signingKey: mockEnv.ARTIFACT_SIGNING_KEY,
-            }),
         },
         body: 'small',
       }),

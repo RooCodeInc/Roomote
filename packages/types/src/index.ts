@@ -96,7 +96,6 @@ export * from './request-observability';
 export * from './sandbox-server';
 export * from './sandbox-spawn';
 export * from './control-plane-env-vars';
-export * from './critique';
 export * from './setup-auth-config';
 export * from './setup-compute-config';
 export * from './setup-new';

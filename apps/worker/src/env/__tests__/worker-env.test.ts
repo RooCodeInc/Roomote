@@ -374,29 +374,6 @@ describe('WorkerEnv', () => {
       expect(env.appEnv).toBe('production');
     });
 
-    it('exposes the Critique capability only to the built-in MCP context', () => {
-      const processEnv = {
-        HOME: '/home/worker',
-        PATH: '/usr/bin',
-        AUTH_TOKEN: 'my-auth-token',
-        TRPC_URL: 'https://trpc.example.com',
-        R_APP_URL: 'https://api.example.com',
-        ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY: 'rcq1.123.signature',
-      } as NodeJS.ProcessEnv;
-
-      const env = WorkerEnv.fromProcessEnv(processEnv);
-
-      expect(env.buildCritiqueMcpEnv()).toEqual({
-        ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY: 'rcq1.123.signature',
-      });
-      expect(env.buildUserFacingEnv()).not.toHaveProperty(
-        'ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY',
-      );
-      expect(processEnv).not.toHaveProperty(
-        'ROOMOTE_CRITIQUE_SUBMISSION_CAPABILITY',
-      );
-    });
-
     it('should preserve the task-scoped Docker daemon endpoint', () => {
       const env = WorkerEnv.fromProcessEnv({
         HOME: '/home/worker',

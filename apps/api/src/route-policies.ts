@@ -368,8 +368,10 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     rateLimits: [
       {
         keySource: 'principal',
-        limit: 12,
-        windowSeconds: 60,
+        // One page review plus one post-fix comparison. Every request is a
+        // paid model call, so the API enforces the packaged skill's loop cap.
+        limit: 2,
+        windowSeconds: 18_000,
       },
     ],
   },

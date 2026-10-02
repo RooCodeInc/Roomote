@@ -8,7 +8,6 @@ import {
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   CREDENTIAL_EGRESS_SERVICE_TOKEN_ENV_PREFIX,
   CREDENTIAL_EGRESS_WORKLOAD_ENV,
-  CRITIQUE_CAPABILITY_ENV_VAR,
   type CredentialEgressWorkloadServiceManifestEntry,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
@@ -44,7 +43,6 @@ interface WorkerConfig {
   credentialEgress?: WorkerCredentialEgressConfig;
   credentialEgressBootstrapRequired?: boolean;
   credentialEgressBootstrapNonce?: string;
-  critiqueCapability?: string;
 }
 
 const PRESET_SYSTEM_ENV: Record<string, string> = {
@@ -84,7 +82,6 @@ const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'PREVIEW_PROXY_BASE_URL',
   'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
-  CRITIQUE_CAPABILITY_ENV_VAR,
 ]);
 const MODEL_RUNTIME_ENV_KEYS = [
   ...TASK_MODEL_ROLES.flatMap((role) => {
@@ -253,7 +250,6 @@ export class WorkerEnv {
       sandboxOpenRouterApiKey:
         processEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
       credentialEgress: captureCredentialEgressConfig(processEnv),
-      critiqueCapability: processEnv[CRITIQUE_CAPABILITY_ENV_VAR],
     };
 
     const env = new WorkerEnv({
@@ -279,7 +275,6 @@ export class WorkerEnv {
       'PREVIEW_PROXY_BASE_URL',
       'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
       SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
-      CRITIQUE_CAPABILITY_ENV_VAR,
     ];
 
     for (const key of workerSecretKeys) {
@@ -370,15 +365,6 @@ export class WorkerEnv {
 
   buildOpenCodeHarnessEnv(): Record<string, string> {
     return { ...this.launcherOpenCodeEnv };
-  }
-
-  /** Purpose-scoped credential available only to the built-in Roomote MCP. */
-  buildCritiqueMcpEnv(): Record<string, string> {
-    return this.workerConfig.critiqueCapability
-      ? {
-          [CRITIQUE_CAPABILITY_ENV_VAR]: this.workerConfig.critiqueCapability,
-        }
-      : {};
   }
 
   // --- Mutators (called during workspace preparation) ---

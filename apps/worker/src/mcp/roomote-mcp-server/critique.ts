@@ -3,10 +3,6 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { execa } from 'execa';
-import {
-  CRITIQUE_CAPABILITY_ENV_VAR,
-  CRITIQUE_CAPABILITY_HEADER,
-} from '@roomote/types';
 
 import {
   buildApiHeaders,
@@ -561,12 +557,6 @@ async function submitCritique(
   multipart: { body: Buffer; contentType: string },
   signal?: AbortSignal,
 ): Promise<unknown> {
-  const capability = process.env[CRITIQUE_CAPABILITY_ENV_VAR];
-  if (!capability) {
-    throw new Error(
-      'Critique visual review is unavailable because its submission capability was not provisioned for this task',
-    );
-  }
   const response = await fetchWithTimeout(
     `${config.platformApiUrl}/api/critique`,
     {
@@ -574,7 +564,6 @@ async function submitCritique(
       headers: buildApiHeaders(config, {
         'content-type': multipart.contentType,
         'content-length': String(multipart.body.byteLength),
-        [CRITIQUE_CAPABILITY_HEADER]: capability,
       }),
       body: new Blob([Uint8Array.from(multipart.body)]),
       signal,

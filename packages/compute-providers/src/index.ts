@@ -8,7 +8,6 @@ export * from './environment-machine';
 export * from './factory';
 export * from './sandbox';
 export * from './worker-env';
-export * from './critique-capability';
 export * from './modal';
 
 export * from './adapters/modal';
