@@ -347,6 +347,7 @@ function buildSettingsData(
       },
     ],
     codingModelRoutingRules: overrides.codingModelRoutingRules ?? [],
+    modelFallbacks: { enabled: false, roles: {} },
   };
 }
 
@@ -683,6 +684,24 @@ describe('ModelSettingsSection', () => {
     expect(within(modelMappingSection).getByText('X-High')).toBeInTheDocument();
     // Orchestration, helper, vision, and explore fall back to Low.
     expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
+  });
+
+  it('omits each role default from its fallback choices', () => {
+    settingsData.current = {
+      ...buildSettingsData(),
+      modelFallbacks: { enabled: true, roles: {} },
+    };
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Coding model fallback model and reasoning',
+      }),
+    );
+
+    expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'GLM 5.2' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'GPT 5.4' })).toBeNull();
   });
 
   it('adds, saves, edits, and removes coding-model routing rules', async () => {

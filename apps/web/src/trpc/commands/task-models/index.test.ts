@@ -778,7 +778,7 @@ describe('lookupTaskModelCommand', () => {
                             reasoningEffort: 'low',
                           },
                           vision: {
-                            modelId: 'openai/gpt-5.6',
+                            modelId: 'anthropic/claude-sonnet-5',
                             reasoningEffort: 'medium',
                           },
                         },
@@ -805,8 +805,13 @@ describe('lookupTaskModelCommand', () => {
           displayName: 'GLM 5.2',
           family: 'GLM',
         },
+        {
+          id: 'anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+          family: 'Claude',
+        },
       ],
-      allowedModelIds: ['openai/gpt-5.6'],
+      allowedModelIds: ['openai/gpt-5.6', 'anthropic/claude-sonnet-5'],
       defaultModelId: 'openai/gpt-5.6',
       helperModelId: null,
       visionModelId: null,
@@ -827,8 +832,86 @@ describe('lookupTaskModelCommand', () => {
             enabled: true,
             roles: {
               vision: {
-                modelId: 'openai/gpt-5.6',
+                modelId: 'anthropic/claude-sonnet-5',
                 reasoningEffort: 'medium',
+              },
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('prunes a fallback that becomes the role default', async () => {
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          select: vi.fn(() => ({
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                limit: vi.fn(() => ({
+                  for: vi.fn(async () => [
+                    {
+                      taskModelSettings: null,
+                      modelFallbackConfig: {
+                        enabled: true,
+                        roles: {
+                          coding: {
+                            modelId: 'openrouter/z-ai/glm-5.2',
+                            reasoningEffort: 'medium',
+                          },
+                          helper: {
+                            modelId: 'openai/gpt-5.4',
+                            reasoningEffort: 'low',
+                          },
+                        },
+                      },
+                    },
+                  ]),
+                })),
+              })),
+            })),
+          })),
+          insert: mockInsertDeploymentSettings,
+        }),
+    );
+
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: 'openai/gpt-5.4',
+          displayName: 'GPT 5.4',
+          family: 'GPT',
+        },
+        {
+          id: 'z-ai/glm-5.2',
+          displayName: 'GLM 5.2',
+          family: 'GLM',
+        },
+      ],
+      allowedModelIds: ['openai/gpt-5.4', 'z-ai/glm-5.2'],
+      defaultModelId: 'z-ai/glm-5.2',
+      helperModelId: 'z-ai/glm-5.2',
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          modelFallbackConfig: {
+            enabled: true,
+            roles: {
+              helper: {
+                modelId: 'openai/gpt-5.4',
+                reasoningEffort: 'low',
               },
             },
           },

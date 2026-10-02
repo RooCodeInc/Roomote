@@ -473,8 +473,9 @@ function UseRecommendedDefaultsAction({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm">
-          Use a mapping preset
+        <Button variant="ghost" size="sm" aria-label="Use a mapping preset">
+          <span className="hidden sm:inline">Use a mapping preset</span>
+          <span className="sm:hidden">Presets</span>
           <ChevronDown />
         </Button>
       </PopoverTrigger>
@@ -2392,8 +2393,11 @@ export function ModelSettingsSection({
                             displayName: 'None',
                             metadata: null,
                           },
-                          ...roleOptionGroups[config.role].flatMap(
-                            (group) => group.items,
+                          ...roleOptionGroups[config.role].flatMap((group) =>
+                            group.items.filter(
+                              (model) =>
+                                model.id !== resolvedModelIds[config.role],
+                            ),
                           ),
                         ]}
                         model={
