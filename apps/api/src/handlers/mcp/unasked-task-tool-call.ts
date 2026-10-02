@@ -89,16 +89,24 @@ export async function decideUnaskedTaskToolCall(input: {
     ...(proxy ? { integrationProxy: proxy } : {}),
   });
 
+  // A caller that left while this was being decided gets nothing run for
+  // it: no approval is claimed, and the call is not let through.
+  const callerLeft = () => input.signal?.aborted === true;
+  const claim = async (): Promise<UnaskedTaskToolCallDecision> => {
+    if (callerLeft()) return refused;
+    // One approval runs one call: with nothing left to claim, or a claim
+    // that could not be made, the call does not run.
+    return (await claimProxyTaskToolCall(call).catch(() => false))
+      ? { allowed: true }
+      : refused;
+  };
+
   switch (result.outcome) {
     case 'not_required':
-      return { allowed: true };
+      return callerLeft() ? refused : { allowed: true };
     case 'approved':
       // Decided for this call just now, and left for the proxy to consume.
-      // One approval runs one call: with nothing left to claim, or a claim
-      // that could not be made, the call does not run.
-      return (await claimProxyTaskToolCall(call).catch(() => false))
-        ? { allowed: true }
-        : refused;
+      return claim();
     case 'denied':
       return {
         allowed: false,
@@ -122,18 +130,13 @@ export async function decideUnaskedTaskToolCall(input: {
   const pollMs = input.pollMs ?? APPROVAL_POLL_MS;
   const deadline = Date.now() + APPROVAL_MAX_WAIT_MS;
   while (Date.now() < deadline) {
-    if (input.signal?.aborted) return refused;
+    if (callerLeft()) return refused;
     const status = await getTaskToolApprovalStatus({
       runId,
       approvalId: result.approvalId,
     });
-    if (status === 'approved') {
-      // The owner's approval is consumed here, and not after the caller left.
-      if (input.signal?.aborted) return refused;
-      return (await claimProxyTaskToolCall(call).catch(() => false))
-        ? { allowed: true }
-        : refused;
-    }
+    // The owner's approval is consumed here.
+    if (status === 'approved') return claim();
     if (status === 'expired') {
       return {
         allowed: false,

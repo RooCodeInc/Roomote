@@ -199,5 +199,19 @@ describe('decideUnaskedTaskToolCall', () => {
       decideUnaskedTaskToolCall({ ...call, signal: leaving.signal }),
     ).resolves.toEqual(refused);
     expect(mocks.claim).not.toHaveBeenCalled();
+
+    // The same holds when the caller leaves while the call is being
+    // assessed, whatever the assessment then says.
+    for (const outcome of ['approved', 'not_required']) {
+      const left = new AbortController();
+      mocks.request.mockImplementationOnce(async () => {
+        left.abort();
+        return { outcome };
+      });
+      await expect(
+        decideUnaskedTaskToolCall({ ...call, signal: left.signal }),
+      ).resolves.toEqual(refused);
+    }
+    expect(mocks.claim).not.toHaveBeenCalled();
   });
 });
