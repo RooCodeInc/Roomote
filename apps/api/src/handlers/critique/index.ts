@@ -14,6 +14,7 @@ import { logHandlerError } from '../utils';
 
 const MAX_CRITIQUE_REQUEST_BYTES = 32 * 1024 * 1024;
 const MAX_CRITIQUE_RESPONSE_BYTES = 4 * 1024 * 1024;
+const MAX_CRITIQUE_INTENT_BYTES = 64 * 1024;
 const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024;
 const MAX_SCREENSHOT_PIXELS = 40_000_000;
 const MAX_DOM_BYTES = 5 * 1024 * 1024;
@@ -550,7 +551,27 @@ critique.post('/', async (c) => {
   if (!isRunTokenContext(auth)) {
     return c.json({ error: 'Critique requires a task run token' }, 403);
   }
-  const request = requestSchema.safeParse(await c.req.json().catch(() => null));
+  const declaredIntentLength = Number(c.req.header('content-length'));
+  if (
+    Number.isFinite(declaredIntentLength) &&
+    declaredIntentLength > MAX_CRITIQUE_INTENT_BYTES
+  ) {
+    return c.json({ error: 'Critique request intent is too large' }, 413);
+  }
+  let rawRequest: unknown;
+  try {
+    const intentBytes = await readBoundedBytes(
+      c.req.raw.body,
+      MAX_CRITIQUE_INTENT_BYTES,
+    );
+    rawRequest = JSON.parse(new TextDecoder().decode(intentBytes));
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return c.json({ error: 'Critique request intent is too large' }, 413);
+    }
+    return c.json({ error: 'Invalid Critique request' }, 400);
+  }
+  const request = requestSchema.safeParse(rawRequest);
   if (!request.success)
     return c.json({ error: 'Invalid Critique request' }, 400);
   const run = await db.query.taskRuns.findFirst({

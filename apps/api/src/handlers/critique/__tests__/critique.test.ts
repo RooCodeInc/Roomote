@@ -214,6 +214,36 @@ describe('Critique proxy', () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
+  it('bounds declared and streamed JSON intent before parsing', async () => {
+    const declared = await createApp().request(
+      new Request('http://localhost/critique', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(64 * 1024 + 1),
+        },
+        body: '{}',
+      }),
+    );
+    expect(declared.status).toBe(413);
+
+    const streamed = await createApp().request(
+      new Request('http://localhost/critique', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(64 * 1024 + 1));
+            controller.close();
+          },
+        }),
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' }),
+    );
+    expect(streamed.status).toBe(413);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
   it('fails closed when the paid-call quota backend is unavailable', async () => {
     mocks.redisEval.mockRejectedValueOnce(new Error('redis unavailable'));
     const upstream = vi.fn();
