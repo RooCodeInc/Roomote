@@ -1,347 +1,146 @@
 ---
 title: Self-hosting
 icon: server
-description: Deploy the cloud coding agent you own on Roomote Cloud or your own infrastructure.
+description: Prepare your own host, install Roomote, and continue to your first task.
 ---
 
-Roomote is the cloud coding agent you actually own. It runs your development
-environment in isolated sandboxes, uses your repositories and tools, verifies
-its work, and returns reviewable pull requests with previews when they apply.
-Run the same single-tenant product on Roomote Cloud or infrastructure you
-control.
+Self-hosting means running Roomote on hardware or infrastructure you manage.
+That includes a computer at home, a homelab, a rented server, or a hosting
+platform such as Railway or Render.
 
-Choose the fastest path for your team. Every deployment needs model inference:
-use hosting-provisioned Roomote inference when it is offered, or connect a
-ChatGPT subscription or inference provider API key. Source control is optional.
-Connect it when Roomote should work on repositories, and configure a sandbox
-provider only when you are ready to run coding work. Connect communications
-providers and other tools when your team needs them.
+Install Roomote once, then open its dashboard in a browser from your Windows,
+macOS, or Linux computers. The host runs Roomote and, by default, the Docker
+sandboxes where agents work on your repositories.
+
+This guide covers installation on a public Linux server. If your host is on
+your home network, use [Home network and homelab](/homelab), which walks through
+preparing a computer and giving Roomote a reachable URL. Both paths continue
+to [Run your first task](/first-task).
+
+## Before you start
+
+For a deployment that runs tasks on the same host, prepare:
+
+| What you need | Starting point |
+| --- | --- |
+| Linux host | A dedicated Ubuntu 24.04 LTS or Debian 12+ server or full VM, with x86_64 or arm64 architecture and administrator (`sudo`) access. |
+| Capacity | Start with 4 CPUs, 8 GB RAM, and 60 GB free disk. Allow more for concurrent tasks or projects that run Docker services. The application alone needs less; 4 GB leaves little room for local tasks. |
+| Task execution | Choose Docker with [quota-capable storage](/providers/compute/docker#resource-and-network-isolation), or prepare credentials for a [hosted sandbox](/compute). A new Linux VM can need storage configuration before local tasks work. |
+| Networking | A public HTTPS URL that browsers and provider callbacks can reach. Prepare the domain or tunnel before connecting providers. |
+| Model access | A supported subscription, such as ChatGPT, or an inference provider API key with available credit or quota. |
+| Repository access | One repository and permission to authorize Roomote's access, for the first task. |
+
+The installer sets up Docker and Compose when needed, the Roomote services,
+databases, generated secrets, HTTPS through Caddy, and the `roomote` host CLI.
+Choose a dedicated host with ports 80 and 443 available.
 
 <Tip>
-  Asking a coding agent to install Roomote? Send it this page. Agents should
-  follow the [agent installation guide](/self-hosting/agent-installation). It
-  uses the standard installer on Linux and creates a Linux VM plus temporary
-  HTTPS ingress when the current machine is macOS or Windows.
+  You can create the first administrator with email and password. Slack and
+  other communications providers are optional; your first task can run
+  entirely through the web dashboard.
 </Tip>
 
-<div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
-  <a href="https://cloud.roomote.dev/sign-up"><img src="https://roomote.dev/images/deploy-button.png" alt="Deploy on Roomote Cloud" style={{ height: "40px", width: "auto" }} /></a>
-  <a href="https://railway.com/deploy/Rj2cFo?referralCode=roomote"><img src="https://railway.com/button.svg" alt="Deploy on Railway" style={{ height: "40px", width: "auto" }} /></a>
-  <a href="https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote"><img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" style={{ height: "40px", width: "auto" }} /></a>
-</div>
+## 1. Choose the matching installation path
 
-## Choose your deployment
+| Where Roomote will run | Follow this path |
+| --- | --- |
+| Public Ubuntu or Debian server | Continue below. |
+| Computer or server on your home network | [Home network and homelab](/homelab), including Windows/macOS VM setup and a named tunnel. |
+| Railway, Render, or another hosting platform | [Hosting platforms](/self-hosting/platforms), including provider accounts and template setup. |
 
-- **Roomote Cloud** is the fastest way to get started. Your deployment remains
-  isolated while Roomote manages hosting, networking, sandboxes, and upgrades.
-- **Railway** and **Render** provision the application, PostgreSQL, and Redis
-  from a template so you can run Roomote on managed infrastructure you control.
-- **Your own server** gives you the most infrastructure control with the
-  one-command installer below.
+If you are asking a coding agent to install Roomote, give it the
+[agent installation guide](/self-hosting/agent-installation).
 
-Running Roomote on Proxmox or another server at home? Follow the
-[Homelab deployment guide](/homelab) for VM sizing, Tailscale administration,
-public ingress, and a prompt that a local agent can follow.
+## 2. Prepare the server's URL
 
-By the end of setup, you should have a reachable Roomote URL, sign-in, and
-managed Roomote inference or a connected inference provider. Repository access,
-an environment, and a first reviewable task are optional until you choose coding
-work.
+Choose a domain such as `roomote.example.com`. In your DNS provider, create
+these records, replacing the example address with your server's public IPv4
+address:
 
-The canonical, always up-to-date guide for operating your own server lives in
-[`SELF_HOSTING.md`](https://github.com/RooCodeInc/Roomote/blob/main/SELF_HOSTING.md)
-in the repository.
-
-## One-command install
-
-SSH into a fresh Ubuntu or Debian server (x86_64 or arm64, 4 GB+ RAM) and run:
-
-```sh
-curl -fsSL https://get.roomote.dev | sudo bash
+```text
+roomote.example.com    A    203.0.113.10
+*.roomote.example.com  A    203.0.113.10
 ```
 
-The installer brings up the full stack from published images and prints a setup
-link. Open it in a browser to create the first administrator and configure
-inference. Roomote then opens a persistent setup conversation. You can connect
-or skip source control, choose useful integrations, and continue talking without
-a repository. With synchronized repositories, Roomote offers starter work and
-then repository-aware automations. A sandbox is requested only when selected
-coding work needs to launch.
+The first record is for the dashboard and provider callbacks. The wildcard
+record lets Roomote serve live task previews. Allow inbound TCP ports 80 and
+443 in the server and hosting-provider firewalls so Caddy can obtain HTTPS
+certificates and serve requests. The records should point directly to your
+server; if you use Cloudflare DNS, select **DNS only** for these records.
 
-No DNS setup is needed to try it out; pass `--domain roomote.example.com` for a
-production install on your own domain.
+**Check:** Both records resolve to the server's public address, and the
+firewalls allow ports 80 and 443. If your server is behind a home router or
+cannot accept inbound connections, follow the [home-network guide](/homelab)
+before installing.
 
-Prefer to read what you are about to run as root? Download, inspect, then run
-the same script:
+<Accordion title="Try a public server without buying a domain">
+  If the server has a directly reachable public IPv4 address and ports 80
+  and 443 are open, you can omit `--domain` from the install command below.
+  The installer uses an automatic `sslip.io` hostname with HTTPS. This is a
+  short evaluation option: the hostname depends on your IP address and shares
+  certificate rate limits with other `sslip.io` users.
+
+  A computer behind a home router still needs port forwarding or a tunnel.
+  Follow [Connect your home network](/homelab#2-connect-your-home-network)
+  to prepare a stable URL for that case.
+</Accordion>
+
+## 3. Install Roomote
+
+Open a terminal on the Linux host, or SSH into it. Install the small tools
+used by the installer:
+
+```sh
+sudo apt update
+sudo apt install -y curl openssl less ca-certificates
+```
+
+Download and inspect the installer, then run it with your domain:
 
 ```sh
 curl -fsSL https://get.roomote.dev -o install.sh
 less install.sh
-sudo bash install.sh
+sudo bash install.sh --domain roomote.example.com
 ```
 
-## Setup checklist
+Press `q` to leave `less`. Replace `roomote.example.com` with the domain you
+prepared. The installer downloads the published Roomote images and starts
+the services. When it finishes, it prints a setup link for the first
+administrator. Keep this link private.
 
-Have these ready before setup asks for them:
+Run:
 
-- a public HTTPS URL for the deployment, especially when source-control or chat
-  callbacks need to reach it
-- a sign-in provider for the people who will use the deployment
-- a source-control provider account with permission to install or configure the
-  app, if Roomote should work on repositories
-- a ChatGPT subscription or inference provider API key, such as OpenRouter,
-  Anthropic, or OpenAI, unless your host already provisioned Roomote inference
-- a communications provider workspace, such as Slack, Microsoft Teams,
-  Telegram, or Discord, if your team wants to start work from chat
-- at least one repository that can become the first Roomote environment, if you
-  want to launch coding work during setup
+```sh
+sudo roomote status
+```
+
+**Check:** The services are healthy. Open the printed setup link in your
+browser and confirm that the page loads over HTTPS. To retrieve the link
+again, run `sudo roomote setup-url` in your terminal.
+
+If the page does not load, check the DNS records and ports from step 2, then
+inspect `sudo roomote logs`. More troubleshooting is in
+[Operate a self-hosted deployment](/self-hosting/operations#common-issues).
+
+## 4. Complete setup and run your first task
+
+Continue to **[Run your first task](/first-task)** with the setup page open.
+That guide takes you through creating the administrator account, connecting
+inference and a repository, checking the sandbox provider, and running a
+small task with a result you can inspect.
+
+The Linux installer selects Docker for task execution. Follow the Docker
+checks in the first-task guide, including the storage requirements above.
+You can choose a hosted sandbox provider if you want task workloads to run
+elsewhere.
+
+Your getting-started path is complete when you can sign in, access your
+repository, run commands in a task sandbox, and inspect the result in the
+dashboard.
 
 ## Day-2 operations
 
-The installer also sets up the `roomote` host CLI for common operations:
-
-```sh
-roomote upgrade   # pull and roll out newer images
-roomote rollback  # return to the release before the last upgrade
-roomote backup    # create an encrypted deployment recovery bundle
-roomote logs      # tail service logs
-```
-
-`roomote backup` prompts for a passphrase and writes a versioned `.roomote`
-bundle under `/opt/roomote/backups`. The bundle contains PostgreSQL, the
-deployment configuration and encryption/signing keys, local MinIO artifacts,
-schema metadata, the exact deployed image identities, and both the Memory volume
-and isolated Memory database when the `brain` profile is enabled. Store the
-passphrase separately in your secret manager; the backup cannot be restored
-without it.
-
-Webhook and delivery lifecycle entries in `roomote logs` use single-line JSON
-with an `event` field plus safe correlation fields such as provider, delivery,
-Session, task, run, and job IDs. Search these entries to follow Telegram
-messages and GitHub pull-request review activity from receipt through
-persistence, dispatch, and final delivery. Message bodies, raw payloads,
-credentials, signatures, and token-bearing URLs are excluded.
-
-Use `roomote backup --include-redis` when queued work, BullMQ schedules,
-sessions, and other transient Redis state must survive. Backups briefly stop
-application writers (and active Docker task workers) so the included stores
-share a documented consistency point. If object storage is external, the
-bundle records its endpoint and bucket but does not copy its objects; keep a
-provider-level backup of that bucket.
-
-Roomote exposes `/health/bullmq` for queue-processing health. It returns healthy
-only when the background worker has recently processed its heartbeat job and no
-Session event has remained queued for more than five minutes. Any overdue event
-makes the check fail; authenticated error responses report the overdue count,
-while unauthenticated responses omit diagnostics. Use it alongside container
-liveness and `roomote logs`: a stale heartbeat or growing backlog can reveal a
-worker process that is still running but no longer draining jobs.
-
-Restore only after installing Roomote on the replacement host:
-
-```sh
-roomote restore /path/to/backup.roomote --yes
-```
-
-Restore verifies the encrypted bundle and checksums before replacing any
-state, restores the original `.env` (including `ENCRYPTION_KEY`), repopulates
-empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
-
-## Decision model on CPU (optional)
-
-Roomote asks a decision model small typed questions: whether a turn is worth
-remembering, who a thread reply is for, when a running task has news for the
-user, which model a delegated task should use. With a TypeSafe key, Jev
-answers them. Without one, the `judgment` profile runs a CPU decision model
-beside the stack, so these features work with no external decision API and no
-GPU.
-
-Add these to `.env`:
-
-```sh
-COMPOSE_PROFILES=judgment                          # or append to an existing list
-R_JUDGMENT_UPSTREAM_URL=http://judgment:8080
-R_JUDGMENT_MODEL=roomote                           # or choose it in Settings > Models
-```
-
-The sidecar serves
-[`roomote/roomote-judgment-gliner`](https://huggingface.co/roomote/roomote-judgment-gliner),
-a GLiNER 2.5 model fine-tuned on Roomote's decisions and trained only on
-synthetic data. It downloads the model on first start and keeps it in the
-`roomote_judgment_models` volume. Its model card lists the decisions it covers
-and its accuracy; on real decisions it trails Jev by a few points, and Roomote
-acts on a decision only when the model is confident and the decision is in its
-evaluated policy. Unsupported decisions keep their existing safe fallback. To
-serve a different checkpoint, set `JUDGMENT_MODEL` to a Hugging Face id or path
-(and `JUDGMENT_HF_TOKEN` if it is private).
-
-The sidecar is reachable only on the stack's internal network; set
-`R_JUDGMENT_UPSTREAM_API_KEY` as well to require a bearer token.
-
-Sizing: the container is capped at `JUDGMENT_MEMORY_LIMIT` (default `4g`) and
-`JUDGMENT_CPUS` (default `4`). It uses about 1.5 GB, and on 4 cores a decision
-takes about 0.3 to 1 second (p90 about 2 seconds). Decisions run one at a
-time, so a burst of them queues and more cores make each one faster.
-
-The production install (`install.sh`) and the Railway, Render, and Coolify
-templates carry the same service, opt-in like Memory: in the production
-install it is the `judgment` profile, and in the templates it idles without
-loading its model until `R_JUDGMENT_UPSTREAM_URL` points at it and the
-Roomote judgment model is selected. Each template's README has the steps.
-
-## Upgrades and rollback
-
-`roomote upgrade` is designed so a bad release cannot strand your deployment:
-
-- **A backup comes first.** Every upgrade creates an encrypted pre-upgrade
-  bundle under `/opt/roomote/backups` before anything changes. Pass a
-  passphrase with `--backup-passphrase-file` (or `ROOMOTE_BACKUP_PASSPHRASE`);
-  otherwise one is generated and stored next to the bundle. Use
-  `--skip-backup` to opt out.
-- **Migrations run before services are replaced.** Database migrations apply
-  in a single transaction while the previous release keeps serving. The bundled
-  migration runner makes up to three total attempts after a transient Postgres
-  connection failure: the initial run plus at most two retries. If migration
-  still fails, the schema rolls back, the previous configuration is restored,
-  and the previous release stays up.
-- **Rollback is one command.** Every release's schema keeps the previous
-  release working, so `roomote rollback` re-deploys the prior release without
-  touching the database. `roomote upgrade <tag>` does the same for any
-  retained tag, and restoring the pre-upgrade bundle is the last-resort path
-  that also rewinds data.
-
-Use `roomote upgrade` instead of updating application image references alone.
-The command refreshes the release's Compose and Caddy configuration together;
-mixing newer application images with an older Caddyfile can leave routes used
-by the new controller unavailable until the deployment configuration is also
-updated.
-
-The supported rollback target is the release immediately before the current
-one. Check the running application version and applied schema migration at any
-time under **Settings → Deployment → Diagnostics**; both are also recorded in
-every backup bundle's manifest.
-
-Roomote surfaces release history and available updates in the web app:
-
-- **Admins** on self-hosted deployments see an update notice in the sidenav when
-  a newer GitHub release is available. The update dialog keeps that target and
-  its GitHub link visible even when the running image does not yet contain the
-  newer release's notes. Use `roomote upgrade` (or your image roll-forward
-  process) to install it.
-- **Everyone** can open **About Roomote** and select **See all Roomote releases**
-  to browse the current and previous release notes bundled in the running
-  image, with the latest release expanded. After an upgrade, Roomote also shows
-  the latest "what's new" notice once.
-
-## Deployment modes
-
-- **One-command install** — `deploy/install.sh` on an existing server, using
-  published GHCR images.
-- **Railway** — deploy the managed Railway template with hosted sandboxes. New
-  Railway signups get $20 in credit through [our referral link](https://railway.com?referralCode=roomote).
-- **Local development** — `pnpm dev` runs the services from your checkout with
-  PM2 for fast source edits.
-- **Production Compose with Caddy** — `docker-compose.production.yml` adds a
-  Caddy container as the HTTPS entrypoint for your app and preview domains, and
-  runs the containerized stack in production mode with per-install secrets
-  (locally or on a server).
-
-## Requirements
-
-- Managed Roomote inference from an eligible host, or a ChatGPT subscription or
-  inference provider API key (OpenRouter, Anthropic, OpenAI, and others).
-- An account with a supported source-control provider. For GitHub, the setup
-  conversation creates the GitHub App; other providers use their documented
-  OAuth or credential flow.
-- For Slack, Microsoft Teams, Telegram, and Discord: a workspace or server where
-  you can install an app or bot; the setup assistant prefills the Slack app
-  manifest and creates Discord's installation link for you.
-
-## Verify the deployment
-
-After sign-in and inference are ready, setup continues entirely in a persistent
-conversation with Roomote. Roomote suggests the next useful capability in a
-recommended order and presents its trusted action card in the conversation.
-Cards are non-blocking: the message composer remains available, and you can
-continue talking without completing a card. Source control, integrations,
-starter work, sandbox configuration, and automation recommendations can also be
-offered later when a new request would benefit from them. Choosing **Not now**
-advances the initial setup conversation; it does not permanently disable that
-capability or prevent Roomote from suggesting it for a later goal.
-
-Detailed provider instructions and credential entry open in trusted dialogs;
-Roomote never asks for credentials in chat. Only deployment administrators can
-use configuration cards. Other members need an administrator to configure a
-missing capability.
-
-After the source-control decision, Roomote normally offers integrations next.
-The optional integrations card lists supported, disconnected tools and opens
-their secure configuration without leaving the conversation. If you already
-named a tool, Roomote can narrow the card to matching supported integrations.
-If there are no eligible matches, setup moves on without showing suggestions.
-Tools without a built-in connector are not presented as supported. Use
-**Keep going** to move on without connecting; you can connect tools later in
-Settings. Integration choices do not change the starter tasks offered.
-Services that are also source-control, communications, inference, or sandbox
-providers are excluded from this optional step; their separate setup is unchanged.
-The Vercel deployments integration remains available separately from Vercel AI
-Gateway inference.
-
-Without source control, setup completes after you connect or skip integrations;
-no sandbox is required. Roomote continues with useful integration-based ideas
-instead of repository starter tasks or automations. With synchronized
-repositories, Roomote offers starter work after integrations. Choosing **Not
-now** completes that initial decision without a sandbox. Selected starter work
-waits for a sandbox, then Roomote
-attempts every launch and completes setup even if one fails; ask Roomote to
-retry a failed item. Automation analysis can begin after repository sync, but
-recommendations appear only after integrations and the starter-task decision.
-They never gate completion.
-
-After setup, run a small task that uses the first environment if you did not
-start one from the starter list. A healthy deployment should let you:
-
-- sign in from the public Roomote URL
-- connect source control and see the expected repositories
-- create or select an environment
-- start a task from the dashboard or chat
-- inspect the task transcript, logs, and any generated diff or artifact
-- open a preview when the task starts a web app
-
-## Common issues
-
-- **Callbacks fail.** For providers that use callbacks or webhooks, confirm the
-  deployment has a public HTTPS URL and that the provider is using that exact
-  URL. Discord uses its Gateway service instead of a public callback.
-- **The first task cannot clone a repository.** Workers authenticate git with a
-  short-lived GitHub App installation token created when the run starts — they
-  do not read a `GH_TOKEN`/`GITHUB_TOKEN` from the container environment. If a
-  task fails with "No GitHub credentials are available", verify the GitHub App
-  is installed for the repository owner, the installation covers the
-  repository, and the repository appears in the source-control settings after a
-  sync.
-- **The agent cannot run useful commands.** Add missing services, environment
-  variables, setup commands, or tool versions to the environment.
-- **Chat messages do not reach Roomote.** Confirm the app is installed, invited
-  to the channel, and using the current callback URL.
-- **Roomote reports that local working storage is full.** Clean up container
-  storage, then recreate the affected application containers. Installer-managed
-  Compose deployments can raise `ROOMOTE_APP_TMPFS_SIZE` above its `512m`
-  default before recreating them; keep the limit within the host's available
-  memory.
-- **Memory climbs for hours, or a service is OOM-killed under a container
-  memory limit.** Node sizes its heap from the memory it can see (the host's,
-  not the container's), so it defers garbage collection and lets memory drift
-  well above what the service needs; a container memory cap then kills the
-  process before Node ever feels pressure. Current app images cap each Node
-  service's heap by default (768 MB for web and api, 512 MB for controller and
-  bullmq, reduced to ~75% of the container's memory when a cgroup limit is
-  set). Set `NODE_OPTIONS=--max-old-space-size=<MB>` on a service to override
-  the default, or on older images to add the cap manually.
-
-## Agent-guided installation
-
-The [agent installation guide](/self-hosting/agent-installation) keeps the
-one-command Linux installer as the single deployment path. On macOS or Windows,
-an agent runs it inside a Linux VM and adds temporary HTTPS ingress for OAuth
-callbacks and webhooks.
+After the first task works, use [Operate a self-hosted deployment](/self-hosting/operations)
+for backups, restore, upgrades, rollback, and troubleshooting. The
+[operator reference](https://github.com/RooCodeInc/Roomote/blob/main/SELF_HOSTING.md)
+covers advanced Compose configuration and deployment settings.
