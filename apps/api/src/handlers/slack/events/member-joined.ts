@@ -118,7 +118,7 @@ export async function maybePostSlackChannelWelcome(params: {
           `Thanks for adding me to #${MANAGER_CHANNEL_CANDIDATE_NAME}.`,
           "I've set it as your Manager Channel for manager-facing questions, self-improvement suggestions and more.",
         ].join('\n')
-      : `Hi humans, <@${slackInstallation.botUserId}> here. If you have questions about your code or want me to get anything done, just @-mention me or DM me directly. Can't wait to help!`;
+      : `Hi humans, Roomote here. If you have questions about your code or want me to get anything done, just @-mention me or DM me directly. Can't wait to help!`;
 
   try {
     await slack.postMessage({
