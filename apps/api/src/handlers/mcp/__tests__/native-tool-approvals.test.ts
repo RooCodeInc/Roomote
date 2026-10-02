@@ -4,15 +4,28 @@ type Approvals = {
   shadowDefaultTools: boolean;
 };
 
-const { mockResolveBlocks, mockClaim, mockShadow } = vi.hoisted(() => ({
-  mockResolveBlocks: vi.fn(
-    async (): Promise<Approvals> => ({
-      blocks: new Map<string, string>(),
-      shadowDefaultTools: false,
-    }),
-  ),
-  mockClaim: vi.fn(async () => false),
-  mockShadow: vi.fn(),
+const { mockResolveBlocks, mockClaim, mockShadow, mockDecideUnasked } =
+  vi.hoisted(() => ({
+    mockDecideUnasked: vi.fn(
+      async (
+        _input: unknown,
+      ): Promise<{ allowed: true } | { allowed: false; message: string }> => ({
+        allowed: false,
+        message: 'not approved',
+      }),
+    ),
+    mockResolveBlocks: vi.fn(
+      async (): Promise<Approvals> => ({
+        blocks: new Map<string, string>(),
+        shadowDefaultTools: false,
+      }),
+    ),
+    mockClaim: vi.fn(async () => false),
+    mockShadow: vi.fn(),
+  }));
+
+vi.mock('../unasked-task-tool-call', () => ({
+  decideUnaskedTaskToolCall: mockDecideUnasked,
 }));
 
 vi.mock('../tool-approval-enforcement', () => ({
@@ -61,6 +74,10 @@ describe('resolveNativeToolApprovalGuard', () => {
       shadowDefaultTools: false,
     });
     mockClaim.mockResolvedValue(false);
+    mockDecideUnasked.mockResolvedValue({
+      allowed: false,
+      message: 'not approved',
+    });
   });
 
   it('hides disabled tools from native tools/list responses', async () => {
@@ -126,7 +143,33 @@ describe('resolveNativeToolApprovalGuard', () => {
       params: { name: 'ask_tool', arguments: {} },
     });
     expect(pending?.status).toBe(403);
+    // With no approval to claim, the guard asked on the task's behalf and
+    // passes on why the call was not run.
+    expect(mockDecideUnasked).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 42,
+        taskId: 'task-1',
+        integrationId: 'notion',
+        toolName: 'ask_tool',
+        args: {},
+      }),
+    );
+    await expect(pending?.json()).resolves.toEqual(
+      expect.objectContaining({
+        error: expect.objectContaining({ message: 'not approved' }),
+      }),
+    );
+    // A call decided that way runs without an earlier approval.
+    mockDecideUnasked.mockResolvedValueOnce({ allowed: true });
+    await expect(
+      guard.checkCall({
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'ask_tool', arguments: {} },
+      }),
+    ).resolves.toBeNull();
 
+    mockDecideUnasked.mockClear();
     mockClaim.mockResolvedValue(true);
     await expect(
       guard.checkCall({
@@ -135,6 +178,8 @@ describe('resolveNativeToolApprovalGuard', () => {
         params: { name: 'ask_tool', arguments: {} },
       }),
     ).resolves.toBeNull();
+    // An approval that was there to claim needs no second ask.
+    expect(mockDecideUnasked).not.toHaveBeenCalled();
   });
 
   it('holds default tools for a claim while Auto mode is on and offers every call for shadow assessment', async () => {

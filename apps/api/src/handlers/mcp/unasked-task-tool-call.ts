@@ -1,9 +1,5 @@
 import { fingerprintIntegrationToolCall } from '@roomote/db/server';
 import {
-  getTaskToolApprovalStatus,
-  requestTaskToolApproval,
-} from '@roomote/sdk/server';
-import {
   INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
   describeIntegrationToolAutoAbsentDenial,
 } from '@roomote/types';
@@ -65,6 +61,10 @@ export async function decideUnaskedTaskToolCall(input: {
     toolName: input.toolName,
     args: input.args,
   };
+  // Loaded on first use: asking pulls in the task approval code, which a
+  // proxy request that has its approval never needs.
+  const { getTaskToolApprovalStatus, requestTaskToolApproval } =
+    await import('@roomote/sdk/server/task-tool-approvals');
   const proxy = resolveEndpointAccess(input.endpoint);
   const result = await requestTaskToolApproval({
     runId,
