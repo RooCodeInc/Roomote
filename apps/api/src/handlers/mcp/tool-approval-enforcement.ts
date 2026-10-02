@@ -48,8 +48,11 @@ export type ProxyToolApprovals = {
  * - `reject` blocks the tool for every caller, and hides it.
  * - `ask` holds a task run's call until the Session owner has approved that
  *   exact call (`claimProxyTaskToolCall`). The task's agent asks natively, but
- *   the approval is only real because it is claimed here. Session calls pass:
- *   their native ask was already decided by the Session owner.
+ *   the approval is only real because it is claimed here. A call that arrives
+ *   with nothing to claim is asked about here instead of refused
+ *   (`decideUnaskedTaskToolCall`): the agent only asks about what was gated
+ *   when its run started. Session calls pass: their native ask was already
+ *   decided by the Session owner.
  *
  * A task belongs to one Session, whose overrides apply to it as they do to
  * the Session's own agent: "don't ask again this session" lifts an `ask`, and

@@ -16,6 +16,7 @@ import {
   resolveTaskOrSessionUserIdOrNull,
   type McpAuthContext,
 } from './proxy-utils';
+import { decideUnaskedTaskToolCall } from './unasked-task-tool-call';
 
 interface NativeToolApprovalGuard {
   /** Refuse a call blocked by the same policy used by the proxy boundary. */
@@ -54,6 +55,8 @@ export async function resolveNativeToolApprovalGuard(input: {
   integrationId: string;
   /** The request's headers, for the Fast conversation a call names. */
   requestHeaders?: Headers;
+  /** Aborts when the caller goes away, which ends a wait for approval. */
+  requestSignal?: AbortSignal;
 }): Promise<NativeToolApprovalGuard> {
   const approvals = await resolveProxyToolApprovalBlocks({
     integrationId: input.integrationId,
@@ -76,6 +79,7 @@ class NativeGuard implements NativeToolApprovalGuard {
       auth: McpAuthContext;
       integrationId: string;
       requestHeaders?: Headers;
+      requestSignal?: AbortSignal;
     },
     private readonly approvals: ProxyToolApprovals,
   ) {}
@@ -109,6 +113,7 @@ class NativeGuard implements NativeToolApprovalGuard {
     const block = resolveProxyToolApprovalBlock(this.approvals, toolName);
     if (!block || block === 'allow') return null;
 
+    let message = describeProxyToolApprovalBlock(toolName, block);
     if (block === 'needs_approval') {
       try {
         const approved = await claimProxyTaskToolCall({
@@ -118,15 +123,28 @@ class NativeGuard implements NativeToolApprovalGuard {
           args,
         });
         if (approved) return null;
+        // Nothing to claim: the task's agent did not ask first. Ask for it.
+        const decision = await decideUnaskedTaskToolCall({
+          runId: this.input.auth.runId,
+          taskId,
+          integrationId: this.input.integrationId,
+          toolName,
+          args,
+          resolveActingUserId: () =>
+            resolveTaskOrSessionUserIdOrNull(this.input.auth),
+          signal: this.input.requestSignal,
+        });
+        if (decision.allowed) return null;
+        message = decision.message;
       } catch {
-        // Fail closed when the approval cannot be read or consumed.
+        // Fail closed when the approval cannot be read, asked for, or consumed.
       }
     }
 
     return jsonRpcErrorResponse(
       403,
       -32000,
-      describeProxyToolApprovalBlock(toolName, block),
+      message,
       getJsonRpcRequestId(body),
     );
   }
