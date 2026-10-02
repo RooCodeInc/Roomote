@@ -2771,12 +2771,7 @@ describe('task model provider commands', () => {
     }
     expect(updateSet.modelFallbackConfig).toEqual({
       enabled: true,
-      roles: {
-        vision: {
-          modelId: 'openrouter/openai/gpt-5.6-terra',
-          reasoningEffort: 'medium',
-        },
-      },
+      roles: {},
     });
     expect(updateSet.setupNewState.modelProvider).toBeNull();
   });

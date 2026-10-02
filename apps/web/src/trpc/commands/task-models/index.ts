@@ -1104,13 +1104,26 @@ function removeTaskModelsForProvider({
       }),
     ),
   } as DeploymentModelConfig;
+  const nextRuntimeModels = resolveRuntimeModelStatus({
+    settingsDefaultModelId: taskModelSettings.defaultModelId,
+    persisted: nextRuntimeModelConfig,
+  });
 
   return {
     taskModelSettings,
     runtimeModelConfig: nextRuntimeModelConfig,
     modelFallbackConfig: pruneModelFallbackConfig(
       modelFallbackConfig,
-      (_role, modelId) => !isModelIdForProvider(modelId, providerId),
+      (role, modelId) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        const activeModel =
+          nextRuntimeModels[descriptor.runtimeStatusKey].effectiveModelId ??
+          nextRuntimeModels.codingModel.effectiveModelId;
+        return (
+          taskModelSettings.allowedModelIds.includes(modelId) &&
+          modelId !== activeModel
+        );
+      },
     ),
   };
 }
