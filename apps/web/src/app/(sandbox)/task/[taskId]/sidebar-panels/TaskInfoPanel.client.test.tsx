@@ -328,6 +328,8 @@ describe('TaskInfoPanel', () => {
             inferenceUsage: {
               eventCount: 2,
               costMicroUsd: 15_000,
+              totalTokens: 12_345,
+              peakContextTokens: 6_789,
             },
           } as never
         }
@@ -339,6 +341,10 @@ describe('TaskInfoPanel', () => {
 
     expect(screen.getByText('Inference Cost')).toBeInTheDocument();
     expect(screen.getByText('0.02')).toBeInTheDocument();
+    expect(screen.getByText('Token Usage')).toBeInTheDocument();
+    expect(
+      screen.getByText('12.35K total · 6.79K peak context'),
+    ).toBeInTheDocument();
   });
 
   it('refreshes a fresh cached zero on opening and catches up with later usage writes', async () => {

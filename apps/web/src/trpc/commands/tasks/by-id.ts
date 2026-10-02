@@ -5,7 +5,7 @@ import {
   isNull,
   and,
   sql,
-  taskInferenceUsageEvents,
+  llmUsageEvents,
   taskRuns,
   tasks,
   users,
@@ -39,6 +39,8 @@ export type TaskByIdAccessResult =
 const EMPTY_INFERENCE_USAGE: TaskInferenceUsageSummary = {
   eventCount: 0,
   costMicroUsd: 0,
+  totalTokens: 0,
+  peakContextTokens: 0,
 };
 
 function normalizeInferenceUsageSummary(
@@ -47,6 +49,8 @@ function normalizeInferenceUsageSummary(
   return {
     eventCount: Number(usage?.eventCount ?? 0),
     costMicroUsd: Number(usage?.costMicroUsd ?? 0),
+    totalTokens: Number(usage?.totalTokens ?? 0),
+    peakContextTokens: Number(usage?.peakContextTokens ?? 0),
   };
 }
 
@@ -56,10 +60,12 @@ async function getTaskInferenceUsageByTaskId(
   const [usage] = await db
     .select({
       eventCount: sql<number>`count(*)::int`,
-      costMicroUsd: sql<number>`coalesce(sum(${taskInferenceUsageEvents.costMicroUsd}), 0)::bigint`,
+      costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+      totalTokens: sql<number>`coalesce(sum(${llmUsageEvents.totalTokens}), 0)::bigint`,
+      peakContextTokens: sql<number>`coalesce(max(${llmUsageEvents.contextTokens}), 0)::bigint`,
     })
-    .from(taskInferenceUsageEvents)
-    .where(eq(taskInferenceUsageEvents.taskId, taskId));
+    .from(llmUsageEvents)
+    .where(eq(llmUsageEvents.taskId, taskId));
 
   return normalizeInferenceUsageSummary(usage ?? EMPTY_INFERENCE_USAGE);
 }

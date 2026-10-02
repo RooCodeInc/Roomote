@@ -13,7 +13,7 @@ import {
   taskMessages,
   taskRuns,
   taskPullRequests,
-  taskInferenceUsageEvents,
+  llmUsageEvents,
   users,
   eq,
   exists,
@@ -336,20 +336,26 @@ async function getTaskInferenceUsageByTaskIds(
 
   const results = await db
     .select({
-      taskId: taskInferenceUsageEvents.taskId,
+      taskId: llmUsageEvents.taskId,
       eventCount: sql<number>`count(*)::int`,
-      costMicroUsd: sql<number>`coalesce(sum(${taskInferenceUsageEvents.costMicroUsd}), 0)::bigint`,
+      costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+      totalTokens: sql<number>`coalesce(sum(${llmUsageEvents.totalTokens}), 0)::bigint`,
+      peakContextTokens: sql<number>`coalesce(max(${llmUsageEvents.contextTokens}), 0)::bigint`,
     })
-    .from(taskInferenceUsageEvents)
-    .where(inArray(taskInferenceUsageEvents.taskId, taskIds))
-    .groupBy(taskInferenceUsageEvents.taskId);
+    .from(llmUsageEvents)
+    .where(inArray(llmUsageEvents.taskId, taskIds))
+    .groupBy(llmUsageEvents.taskId);
 
   const usageByTaskId: Record<string, TaskInferenceUsageSummary> = {};
 
   for (const row of results) {
+    if (!row.taskId) continue;
+
     usageByTaskId[row.taskId] = {
       eventCount: Number(row.eventCount ?? 0),
       costMicroUsd: Number(row.costMicroUsd ?? 0),
+      totalTokens: Number(row.totalTokens ?? 0),
+      peakContextTokens: Number(row.peakContextTokens ?? 0),
     };
   }
 

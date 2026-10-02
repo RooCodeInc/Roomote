@@ -689,6 +689,8 @@ type HydratedLinkedTask = {
   model: string | null;
   activityAt: number;
   inferenceCostMicroUsd?: number;
+  inferenceTotalTokens?: number;
+  peakContextTokens?: number;
 };
 
 type SessionListArtifact = {
@@ -780,6 +782,8 @@ async function hydrateSessionRows(
       .select({
         sessionId: llmUsageEvents.sessionId,
         costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+        totalTokens: sql<number>`coalesce(sum(${llmUsageEvents.totalTokens}), 0)::bigint`,
+        peakContextTokens: sql<number>`coalesce(max(${llmUsageEvents.contextTokens}), 0)::bigint`,
       })
       .from(llmUsageEvents)
       .where(
@@ -794,6 +798,8 @@ async function hydrateSessionRows(
         sessionId: sessionTasks.sessionId,
         taskId: sessionTasks.taskId,
         costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+        totalTokens: sql<number>`coalesce(sum(${llmUsageEvents.totalTokens}), 0)::bigint`,
+        peakContextTokens: sql<number>`coalesce(max(${llmUsageEvents.contextTokens}), 0)::bigint`,
       })
       .from(sessionTasks)
       .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
@@ -805,6 +811,40 @@ async function hydrateSessionRows(
         sessionId: sessions.id,
         costMicroUsd: sql<number>`(
           select coalesce(sum(legacy_usage.cost_micro_usd), 0)::bigint
+          from task_inference_usage_events legacy_usage
+          where legacy_usage.session_id is null
+            and legacy_usage.task_id is null
+            and legacy_usage.harness_session_id in (
+              select distinct ${fastAgentMessages.nativeSessionId}
+              from ${fastAgentMessages}
+              where ${fastAgentMessages.conversationId} = ${sessions.fastConversationId}
+                and ${fastAgentMessages.nativeSessionId} is not null
+              union
+              select ${fastAgentConversations.openCodeSessionId}
+              from ${fastAgentConversations}
+              where ${fastAgentConversations.id} = ${sessions.fastConversationId}
+                and ${fastAgentConversations.openCodeSessionId} is not null
+            )
+        )`,
+        totalTokens: sql<number>`(
+          select coalesce(sum(legacy_usage.total_tokens), 0)::bigint
+          from task_inference_usage_events legacy_usage
+          where legacy_usage.session_id is null
+            and legacy_usage.task_id is null
+            and legacy_usage.harness_session_id in (
+              select distinct ${fastAgentMessages.nativeSessionId}
+              from ${fastAgentMessages}
+              where ${fastAgentMessages.conversationId} = ${sessions.fastConversationId}
+                and ${fastAgentMessages.nativeSessionId} is not null
+              union
+              select ${fastAgentConversations.openCodeSessionId}
+              from ${fastAgentConversations}
+              where ${fastAgentConversations.id} = ${sessions.fastConversationId}
+                and ${fastAgentConversations.openCodeSessionId} is not null
+            )
+        )`,
+        peakContextTokens: sql<number>`(
+          select coalesce(max(legacy_usage.context_tokens), 0)::bigint
           from task_inference_usage_events legacy_usage
           where legacy_usage.session_id is null
             and legacy_usage.task_id is null
@@ -944,16 +984,51 @@ async function hydrateSessionRows(
         legacyFastDirectUsage.find((event) => event.sessionId === row.id)
           ?.costMicroUsd ?? 0,
       );
+    const directInferenceTotalTokens =
+      Number(
+        directSessionUsage.find((event) => event.sessionId === row.id)
+          ?.totalTokens ?? 0,
+      ) +
+      Number(
+        legacyFastDirectUsage.find((event) => event.sessionId === row.id)
+          ?.totalTokens ?? 0,
+      );
+    const directPeakContextTokens = Math.max(
+      Number(
+        directSessionUsage.find((event) => event.sessionId === row.id)
+          ?.peakContextTokens ?? 0,
+      ),
+      Number(
+        legacyFastDirectUsage.find((event) => event.sessionId === row.id)
+          ?.peakContextTokens ?? 0,
+      ),
+    );
     const tasksWithUsage = tasksForSession.map((task) => ({
       ...task,
       inferenceCostMicroUsd: Number(
         attachedTaskUsage.find((event) => event.taskId === task.taskId)
           ?.costMicroUsd ?? 0,
       ),
+      inferenceTotalTokens: Number(
+        attachedTaskUsage.find((event) => event.taskId === task.taskId)
+          ?.totalTokens ?? 0,
+      ),
+      peakContextTokens: Number(
+        attachedTaskUsage.find((event) => event.taskId === task.taskId)
+          ?.peakContextTokens ?? 0,
+      ),
     }));
     const taskInferenceCostMicroUsd = tasksWithUsage.reduce(
       (total, task) => total + task.inferenceCostMicroUsd,
       0,
+    );
+    const taskInferenceTotalTokens = tasksWithUsage.reduce(
+      (total, task) => total + task.inferenceTotalTokens,
+      0,
+    );
+    const peakContextTokens = tasksWithUsage.reduce(
+      (peak, task) => Math.max(peak, task.peakContextTokens),
+      directPeakContextTokens,
     );
     const sessionArtifacts = artifactsBySession.get(row.id) ?? [];
     return {
@@ -978,6 +1053,10 @@ async function hydrateSessionRows(
       executionCount: tasksForSession.length,
       participants: sessionParticipantsRows,
       directInferenceCostMicroUsd,
+      directInferenceTotalTokens,
+      inferenceTotalTokens:
+        directInferenceTotalTokens + taskInferenceTotalTokens,
+      peakContextTokens,
       inferenceCostMicroUsd:
         directInferenceCostMicroUsd + taskInferenceCostMicroUsd,
       artifactCount: sessionArtifacts.length,
@@ -1197,6 +1276,8 @@ async function getSessionTasks(sessionId: string) {
         .select({
           taskId: llmUsageEvents.taskId,
           costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+          totalTokens: sql<number>`coalesce(sum(${llmUsageEvents.totalTokens}), 0)::bigint`,
+          peakContextTokens: sql<number>`coalesce(max(${llmUsageEvents.contextTokens}), 0)::bigint`,
         })
         .from(llmUsageEvents)
         .where(inArray(llmUsageEvents.taskId, taskIds))
@@ -1208,7 +1289,14 @@ async function getSessionTasks(sessionId: string) {
   const retryableFailedStartRunIds =
     await getRetryableFailedStartRunIds(latestRuns);
   const usageByTask = new Map(
-    usageRows.map((row) => [row.taskId, Number(row.costMicroUsd)]),
+    usageRows.map((row) => [
+      row.taskId,
+      {
+        costMicroUsd: Number(row.costMicroUsd),
+        totalTokens: Number(row.totalTokens),
+        peakContextTokens: Number(row.peakContextTokens),
+      },
+    ]),
   );
 
   return linked.map((task) => {
@@ -1238,7 +1326,9 @@ async function getSessionTasks(sessionId: string) {
       ...task,
       latestRun,
       latestOutput,
-      inferenceCostMicroUsd: usageByTask.get(task.taskId) ?? 0,
+      inferenceCostMicroUsd: usageByTask.get(task.taskId)?.costMicroUsd ?? 0,
+      inferenceTotalTokens: usageByTask.get(task.taskId)?.totalTokens ?? 0,
+      peakContextTokens: usageByTask.get(task.taskId)?.peakContextTokens ?? 0,
       previews: buildSessionTaskPreviews(
         task.taskId,
         latestRunRow,
