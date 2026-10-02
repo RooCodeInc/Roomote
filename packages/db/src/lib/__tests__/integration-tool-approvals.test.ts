@@ -968,6 +968,75 @@ describe('listRecentIntegrationToolApprovalOutcomes', () => {
         },
       ]),
     );
+
+    // A task also sees what its owner decided on its own calls, and never
+    // what they decided for another task of the session.
+    const otherTask = await taskFactory.create();
+    const otherTaskApproval = await insertIntegrationToolApproval(context, {
+      ...call,
+      taskId: otherTask.id,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: { channel: 'C777', text: 'another task' },
+    });
+    await decideIntegrationToolApproval(context, {
+      approvalId: otherTaskApproval.approvalId,
+      decision: 'rejected',
+    });
+    const forTask = await listRecentIntegrationToolApprovalOutcomes({
+      ...context,
+      taskId: task.id,
+    });
+    expect(forTask).toHaveLength(3);
+    expect(forTask.filter((row) => row.outcome === 'approved')).toHaveLength(2);
+    expect(JSON.stringify(forTask)).not.toContain('another task');
+    const rejectedHere = {
+      ...context,
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+    };
+    await expect(
+      hasRejectedIntegrationToolInSession({
+        ...rejectedHere,
+        taskId: otherTask.id,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      listRecentIntegrationToolApprovalOutcomes(context),
+    ).resolves.toHaveLength(2);
+  });
+
+  it("counts a rejection of a task's call for that task only", async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const task = await taskFactory.create();
+    const otherTask = await taskFactory.create();
+    const rejected = await insertIntegrationToolApproval(context, {
+      ...call,
+      taskId: task.id,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: call.args,
+    });
+    await decideIntegrationToolApproval(context, {
+      approvalId: rejected.approvalId,
+      decision: 'rejected',
+    });
+    const tool = {
+      ...context,
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+    };
+    await expect(
+      hasRejectedIntegrationToolInSession({ ...tool, taskId: task.id }),
+    ).resolves.toBe(true);
+    await expect(
+      hasRejectedIntegrationToolInSession({ ...tool, taskId: otherTask.id }),
+    ).resolves.toBe(false);
+    await expect(hasRejectedIntegrationToolInSession(tool)).resolves.toBe(
+      false,
+    );
   });
 });
 
