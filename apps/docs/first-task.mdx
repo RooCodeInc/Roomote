@@ -1,0 +1,200 @@
+---
+title: Run your first task
+icon: play
+description: Connect a model and repository, run a small task, and review the result in your browser.
+---
+
+Follow this guide after you can open your Roomote deployment. The steps are
+the same for Roomote Cloud and self-hosted deployments, with hosting
+differences called out below. By the end, you will have a Roomote task that
+reads a repository, runs commands in a sandbox, and reports what it found.
+
+## Before you start
+
+Have these ready:
+
+- the deployment's initial setup link, or an administrator account if setup
+  has already started
+- an inference provider account with usable credentials and available credit
+  or quota, unless you choose the Roomote inference offered during Cloud setup
+- permission to connect one repository for the first task
+
+An inference provider supplies the model. A sandbox provider supplies the
+isolated workspace where the agent edits files and runs commands. Both are
+needed for the task in this guide. Cloud provisions a sandbox provider;
+for a self-hosted deployment, the installer can configure Docker on your host.
+
+<Note>
+You can start a conversation after connecting inference alone. Repository
+access and a sandbox are needed for this repository task. Slack, other
+communications providers, integrations, and automations are optional: you
+can complete the whole guide in your browser.
+</Note>
+
+## 1. Open your deployment and create your account
+
+Open the deployment link from the Cloud portal or your self-hosted installer.
+Follow the account setup prompts. If you have already created the account,
+sign in and continue from your current setup step.
+
+For a self-hosted deployment, **Use email/password** is the simplest account
+option. You can choose Slack or Teams sign-in if you already intend to use
+one of them. Use the setup token from the installer if Roomote requests it.
+
+**Check:** You can sign in to the Roomote dashboard and reach inference setup.
+
+## 2. Connect inference
+
+If you see **Configure inference**, choose **Use the Roomote provider** when
+offered, or **Configure my own provider**. Otherwise, setup opens directly
+at **Choose your LLM provider**. Select the service you use and follow its
+connection instructions. For example, [OpenRouter](/providers/inference/openrouter) and
+[Anthropic](/providers/inference/anthropic) use API keys; other providers may
+use an account sign-in or a model endpoint.
+
+Enter credentials in the configuration form. Keep API keys and other secrets
+out of the conversation.
+
+Roomote adds recommended models for supported providers. Start with those
+defaults; you can change models later in **Settings > Models**. If Roomote
+reports that the account has no credit or quota, resolve that with the
+provider before starting work.
+
+**Check:** Roomote opens a setup conversation and sends an introductory
+message. This conversation is saved, so you can return to it to continue
+setup.
+
+## 3. Connect one repository
+
+In the setup conversation, choose your source-control provider and open its
+configuration dialog. Follow the provider's authorization steps and grant
+access to your chosen repository. Start with one small, existing repository
+so you can easily inspect the first result.
+
+For [GitHub](/providers/source-control/github), **Create GitHub App** prepares
+the app configuration for you. Complete the GitHub flow and install the app
+on the account or organization that owns the repository. Other providers
+have their own guides, including [GitLab](/providers/source-control/gitlab)
+and [Gitea](/providers/source-control/gitea).
+
+**Check:** Return to the setup conversation and wait for Roomote to confirm
+that your repositories are available. If the repository is missing, check
+the provider connection and the app's repository permissions before
+continuing.
+
+## 4. Choose a small first task
+
+Roomote next offers integrations with other tools. Select **Keep going** to
+continue without connecting any for this guide.
+
+When Roomote offers starter tasks, leave them unselected and choose
+**I'll type it myself**. Those suggested tasks can make changes and open pull
+requests; the example below gives you a smaller first result to inspect.
+Automation recommendations are optional and can wait until your first task
+works.
+
+Send this request in the setup conversation, replacing `owner/repository`
+with the repository you connected:
+
+```text
+Run a task in a sandbox for owner/repository. Inspect the repository and
+summarize its top-level folders and the dependency-install and test commands
+already documented or defined in the project. Cite the files you used. If a
+command is missing, say so instead of inventing one.
+
+Run git rev-parse --show-toplevel and git status --short in the repository
+and include the results so I can confirm the workspace is working. Keep
+this task read-only: do not edit files, commit, push, or open a pull request.
+```
+
+You do not need to create an environment for this first task. Roomote can
+resolve the connected repository from your request. An
+[environment](/environments) is useful when you want to save repeatable setup
+commands, services, tool versions, or preview ports for later work.
+
+## 5. Confirm where the task will run
+
+If a sandbox provider is already configured, Roomote can start the task
+without another setup step. Keep the provider provisioned for your Cloud
+deployment or configured by your self-hosted installer.
+
+If Roomote asks for a sandbox, use its configuration controls to select and
+configure a provider:
+
+- for a single-host self-hosted deployment, [Docker](/providers/compute/docker)
+  runs tasks on your server and needs no separate provider API key
+- for a hosted sandbox, follow the chosen provider's credential and setup
+  instructions; see [Sandboxes](/compute) for the options
+
+You can also inspect or configure the default provider in **Settings >
+Sandboxes**. Return to the conversation after saving and continue your
+request if it has not started.
+
+For Docker, use **Validate environment** under **Settings > Sandboxes >
+Local Docker** to check the daemon, worker image, and release archive.
+Docker must also support writable-layer disk limits; the first task checks
+that when its container starts. If it reports an unsupported disk limit,
+follow the [Docker storage guidance](/providers/compute/docker#resource-and-network-isolation)
+or choose a hosted sandbox provider.
+
+**Check:** A task appears in the conversation and begins preparing its
+workspace. Open the task to follow progress. The first run may take longer
+while images and repository dependencies are prepared.
+
+## 6. Review the result
+
+When the task finishes, open its workspace and check:
+
+1. The overview matches the repository, and the commands point back to real
+   project files.
+2. The command output identifies the repository's sandbox checkout. An empty
+   `git status --short` result means the working tree is clean.
+3. The task left the repository unchanged, as requested.
+
+Expand command entries in the task transcript to inspect their output. If
+environment setup failed, open **Logs** and select the relevant
+`Setup: <command>` entry. See [Review a task](/tasks) for the other review
+tools.
+
+You now have a working path from your browser through inference, repository
+access, and sandbox execution to a result you can inspect. Continue in the
+same conversation with a small code change, ask Roomote to run the relevant
+checks, and review its diff before requesting a pull request. Future work can
+start from **New Session**; select a repository or environment when you
+already know where it should run.
+
+## If your first task gets stuck
+
+| What you see | What to check |
+| --- | --- |
+| The conversation fails before answering | Check the saved provider in **Settings > Models**, its credentials, and available credit or quota. |
+| Roomote cannot find or clone the repository | Check source-control authorization and repository permissions. On a self-hosted deployment, also check that the configured application URL is reachable for provider callbacks. |
+| The task cannot start its sandbox | Check **Settings > Sandboxes**. For Docker, inspect host capacity and the error in the task logs. For a hosted provider, check its credentials and connectivity to your deployment. |
+| A setup command or project check fails | Open the task logs. Add missing tools, services, or setup guidance through an [environment](/environments), then retry with that environment. |
+
+If a task failed to start, **Try in a new task** opens an editable request
+with its original prompt and context. Correct the problem before launching
+it again.
+
+## Continue setup later
+
+The setup conversation stays available when you leave the page. Its
+configuration cards also leave the message composer available, so you can
+keep talking while deciding what to connect. **Not now** skips an initial
+offer; Roomote can offer that capability again when later work needs it.
+
+Only deployment administrators can configure providers through these
+controls. Other members should ask an administrator to connect anything
+their task needs. If you chose a suggested starter task and its launch
+failed, ask Roomote to retry that item after fixing the problem; you do not
+need to repeat setup.
+
+## Add more when you need it
+
+- [Create an environment](/environments) to make your project's setup reusable.
+- [Connect Slack](/providers/communications/slack) or another communications
+  provider if you want to start and follow work outside the dashboard.
+- [Connect integrations](/integrations/index) when a task needs context from
+  your other tools.
+- [Set up automations](/automations) after you have verified the work you want
+  Roomote to repeat.

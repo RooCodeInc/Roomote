@@ -1,0 +1,71 @@
+---
+title: Roomote Cloud
+icon: cloud
+description: Create a hosted Roomote deployment, connect your tools, and complete your first task.
+---
+
+Roomote Cloud runs an isolated Roomote deployment for you. Roomote manages
+hosting, networking, task sandboxes, and upgrades. You use the web dashboard to
+choose models, connect your repositories, and start work.
+
+By the end of this guide and [Run your first task](/first-task), you will
+have a working deployment and a completed task whose result you can review.
+
+## Before you start
+
+For your first repository task, have:
+
+- a repository and an account with permission to authorize Roomote's access
+- an inference option: managed Roomote inference when offered during setup,
+  or a supported subscription or inference provider API key
+- any credentials or setup instructions your repository needs to build and
+  run, if they are not already documented in the repository
+
+You can use a browser on Windows, macOS, or Linux. Cloud provides the server
+and sandbox infrastructure, so there is no local installation or domain setup
+to complete.
+
+<Tip>
+  Start in the web dashboard. Slack and other communications providers are
+  optional and can be connected after your first task.
+</Tip>
+
+## 1. Create your Cloud deployment
+
+[Sign up for Roomote Cloud](https://cloud.roomote.dev/sign-up), or
+[sign in to the Cloud portal](https://cloud.roomote.dev/) if you already have
+an account. Follow the portal's deployment setup, then open your Roomote
+deployment when it is ready.
+
+The Cloud portal manages hosting. Your Roomote deployment is where you
+complete product setup, configure providers, and run tasks. Keep its URL so
+you can return directly to the dashboard.
+
+## 2. Complete setup and run a task
+
+Continue with [Run your first task](/first-task). Start at the account setup
+step, or continue from your current step if it is already complete.
+
+The guide helps you create the administrator account, choose inference,
+connect a repository, and run a small task. For Cloud:
+
+- **Inference:** choose the Roomote provider when offered, or connect your own
+  provider. Managed inference has a credit limit; see
+  [Managed Roomote inference](/models#managed-roomote-inference) for how it
+  works and how to add your own provider.
+- **Sandboxes:** keep the sandbox provider provisioned for your Cloud
+  deployment. You do not need to create a separate sandbox provider account
+  to run your first task.
+- **Repository access:** authorize the repositories you want Roomote to work
+  on. Cloud hosting does not grant Roomote access to them automatically.
+
+You have completed the getting-started path when Roomote can access your
+repository, run work in a sandbox, and return a result you can inspect in the
+dashboard. The first-task guide includes those checks and help for each step.
+
+## After your first task
+
+Connect [Slack or another communications provider](/communications) to start
+and follow work from chat, or [invite your team](/users#create-invites) to use
+the dashboard. Add an [environment](/environments) when you want reusable
+repository setup, secrets, and instructions for future tasks.
