@@ -365,15 +365,6 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     name: 'critique',
     match: { type: 'prefix', path: '/api/critique' },
     policy: 'task-token',
-    rateLimits: [
-      {
-        keySource: 'principal',
-        // One page review plus one post-fix comparison. Every request is a
-        // paid model call, so the API enforces the packaged skill's loop cap.
-        limit: 2,
-        windowSeconds: 18_000,
-      },
-    ],
   },
 
   // Router-facing MCP endpoints share token parsing. The public member route

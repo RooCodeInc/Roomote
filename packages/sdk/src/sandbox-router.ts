@@ -324,6 +324,18 @@ export interface SandboxServerRpcClient {
       SandboxPrepareRepositoryInput,
       SandboxPrepareRepositoryResult
     >;
+    critiqueCapture: SandboxMutation<
+      { action: 'capture' } | { action: 'read'; captureIds: string[] },
+      | { action: 'capture'; capture: Record<string, unknown> }
+      | {
+          action: 'read';
+          captures: Array<{
+            record: Record<string, unknown>;
+            screenshotBase64: string;
+            domJson: string;
+          }>;
+        }
+    >;
   };
 }
 

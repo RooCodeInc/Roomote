@@ -4,6 +4,9 @@ import { Hono } from 'hono';
 import sharp from 'sharp';
 import { z } from 'zod';
 import { Env } from '@roomote/env';
+import { db, eq, taskRuns } from '@roomote/db/server';
+import { getRedis } from '@roomote/redis';
+import { withSandboxServerRpcClient } from '@roomote/sdk/server';
 import type { RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../types';
@@ -130,6 +133,28 @@ const contextSchema = z
     designIntent: z.string().max(4_000).optional(),
   })
   .strict();
+const requestSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('capture') }).strict(),
+  z
+    .object({
+      action: z.literal('review'),
+      captureIds: z.array(z.string().regex(ID_PATTERN)).min(1).max(4),
+      rules: rulesSchema.optional(),
+      options: optionsSchema.optional(),
+      context: contextSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('compare'),
+      baselineCaptureId: z.string().regex(ID_PATTERN),
+      candidateCaptureId: z.string().regex(ID_PATTERN),
+      rules: rulesSchema.optional(),
+      options: optionsSchema.optional(),
+      context: contextSchema.optional(),
+    })
+    .strict(),
+]);
 const manifestSchema = z
   .object({
     mode: z.enum(['page', 'comparison']),
@@ -180,6 +205,18 @@ type DomNode = z.infer<typeof domNodeSchema>;
 
 class RequestBodyTooLargeError extends Error {}
 class InvalidCritiqueInputError extends Error {}
+class CritiqueQuotaUnavailableError extends Error {}
+
+function parseCaptureRecord(value: Record<string, unknown>): CritiqueCapture {
+  return captureSchema.parse({
+    id: value.id,
+    screenshotAssetId: value.screenshotAssetId,
+    domAssetId: value.domAssetId,
+    viewport: value.viewport,
+    document: value.document,
+    ...(value.page ? { page: value.page } : {}),
+  });
+}
 
 function isRunTokenContext(
   auth: Variables['authContext'],
@@ -477,91 +514,6 @@ function buildMultipart(
   return { body, contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
-async function parseAndSanitizeRequest(contentType: string, body: Uint8Array) {
-  let formData: FormData;
-  try {
-    formData = await new Request('http://roomote.local/critique', {
-      method: 'POST',
-      headers: { 'content-type': contentType },
-      body: new Blob([Uint8Array.from(body)]),
-    }).formData();
-  } catch {
-    throw new InvalidCritiqueInputError('Critique multipart body is invalid');
-  }
-  const inputEntries = formData.getAll('input');
-  if (inputEntries.length !== 1 || typeof inputEntries[0] !== 'string') {
-    throw new InvalidCritiqueInputError(
-      'Critique request requires exactly one JSON input part',
-    );
-  }
-  let rawManifest: unknown;
-  try {
-    rawManifest = JSON.parse(inputEntries[0]);
-  } catch {
-    throw new InvalidCritiqueInputError(
-      'Critique input part must contain valid JSON',
-    );
-  }
-  const parsedManifest = manifestSchema.safeParse(rawManifest);
-  if (!parsedManifest.success) {
-    throw new InvalidCritiqueInputError('Critique input manifest is invalid');
-  }
-  const manifest = sanitizeManifest(parsedManifest.data);
-  const expectedAssetIds = manifest.captures.flatMap((capture) => [
-    capture.screenshotAssetId,
-    capture.domAssetId,
-  ]);
-  const actualNames = [...formData.keys()];
-  if (
-    actualNames.length !== expectedAssetIds.length + 1 ||
-    actualNames.some(
-      (name) => name !== 'input' && !expectedAssetIds.includes(name),
-    )
-  ) {
-    throw new InvalidCritiqueInputError(
-      'Critique assets must match the manifest exactly',
-    );
-  }
-  const assets: Array<{
-    id: string;
-    contentType: string;
-    extension: string;
-    bytes: Buffer;
-  }> = [];
-  for (const capture of manifest.captures) {
-    const screenshotEntries = formData.getAll(capture.screenshotAssetId);
-    const domEntries = formData.getAll(capture.domAssetId);
-    if (
-      screenshotEntries.length !== 1 ||
-      domEntries.length !== 1 ||
-      !(screenshotEntries[0] instanceof File) ||
-      !(domEntries[0] instanceof File)
-    ) {
-      throw new InvalidCritiqueInputError(
-        'Each manifest asset must appear exactly once as a file',
-      );
-    }
-    assets.push(
-      {
-        id: capture.screenshotAssetId,
-        contentType: 'image/png',
-        extension: 'png',
-        bytes: await sanitizeScreenshot(
-          Buffer.from(await screenshotEntries[0].arrayBuffer()),
-          capture,
-        ),
-      },
-      {
-        id: capture.domAssetId,
-        contentType: 'application/json',
-        extension: 'json',
-        bytes: sanitizeDom(Buffer.from(await domEntries[0].arrayBuffer())),
-      },
-    );
-  }
-  return buildMultipart(manifest, assets);
-}
-
 function safeUpstreamDetail(
   payload: unknown,
   secret: string,
@@ -578,51 +530,144 @@ function safeUpstreamDetail(
   return candidate?.split(secret).join('[REDACTED]').slice(0, 1_000);
 }
 
+async function consumeCritiqueQuota(runId: number): Promise<boolean> {
+  const quota = getRedis().eval(
+    `local current = redis.call('INCR', KEYS[1]); if current == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return current`,
+    1,
+    `critique:paid-calls:run:${runId}`,
+    '18000',
+  );
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const count = await Promise.race([
+      quota,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new CritiqueQuotaUnavailableError()),
+          2_000,
+        );
+      }),
+    ]);
+    return Number(count) <= 2;
+  } catch (error) {
+    if (error instanceof CritiqueQuotaUnavailableError) throw error;
+    throw new CritiqueQuotaUnavailableError();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export const critique = new Hono<{ Variables: Variables }>();
 
 critique.post('/', async (c) => {
   if (!Env.CRITIQUE_BASE_URL || !Env.CRITIQUE_API_TOKEN) {
     return c.json({ error: 'Critique visual review is not configured' }, 404);
   }
-  if (!isRunTokenContext(c.get('authContext'))) {
+  const auth = c.get('authContext');
+  if (!isRunTokenContext(auth)) {
     return c.json({ error: 'Critique requires a task run token' }, 403);
   }
-  const contentType = c.req.header('content-type') ?? '';
-  if (!contentType.toLowerCase().startsWith('multipart/form-data;')) {
-    return c.json({ error: 'Critique requires multipart/form-data' }, 400);
-  }
-  const declaredLength = Number(c.req.header('content-length'));
-  if (
-    Number.isFinite(declaredLength) &&
-    declaredLength > MAX_CRITIQUE_REQUEST_BYTES
-  ) {
+  const request = requestSchema.safeParse(await c.req.json().catch(() => null));
+  if (!request.success)
+    return c.json({ error: 'Invalid Critique request' }, 400);
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, auth.runId),
+    columns: { id: true, actingUserId: true, sandboxServerUrl: true },
+  });
+  if (!run?.sandboxServerUrl) {
     return c.json(
-      { error: `Critique request exceeds ${MAX_CRITIQUE_REQUEST_BYTES} bytes` },
-      413,
+      { error: 'Active Critique capture runtime is unavailable' },
+      409,
     );
+  }
+  const callWorker = <T>(
+    call: Parameters<typeof withSandboxServerRpcClient<T>>[0]['call'],
+  ) =>
+    withSandboxServerRpcClient({
+      runId: run.id,
+      userId: run.actingUserId,
+      sandboxServerUrl: run.sandboxServerUrl!,
+      authMode: 'sandbox-control',
+      timeoutMs: 30_000,
+      call,
+    });
+  if (request.data.action === 'capture') {
+    const result = await callWorker((client) =>
+      client.commands.critiqueCapture.mutate({ action: 'capture' }),
+    );
+    return c.json(result);
   }
 
+  const captureIds =
+    request.data.action === 'review'
+      ? request.data.captureIds
+      : [request.data.baselineCaptureId, request.data.candidateCaptureId];
+  const stored = await callWorker((client) =>
+    client.commands.critiqueCapture.mutate({ action: 'read', captureIds }),
+  );
+  if (stored.action !== 'read') {
+    return c.json(
+      { error: 'Critique capture runtime returned invalid data' },
+      502,
+    );
+  }
   let outbound: { body: Buffer; contentType: string };
   try {
-    const body = await readBoundedBytes(
-      c.req.raw.body,
-      MAX_CRITIQUE_REQUEST_BYTES,
+    const captures = stored.captures.map((capture) =>
+      parseCaptureRecord(capture.record),
     );
-    outbound = await parseAndSanitizeRequest(contentType, body);
+    const manifest = sanitizeManifest({
+      mode: request.data.action === 'review' ? 'page' : 'comparison',
+      captures,
+      ...(request.data.action === 'compare'
+        ? {
+            comparison: {
+              baselineCaptureId: request.data.baselineCaptureId,
+              candidateCaptureId: request.data.candidateCaptureId,
+            },
+          }
+        : {}),
+      ...(request.data.rules ? { rules: request.data.rules } : {}),
+      ...(request.data.options ? { options: request.data.options } : {}),
+      ...(request.data.context ? { context: request.data.context } : {}),
+    });
+    const assets = await Promise.all(
+      stored.captures.flatMap((capture, index) => [
+        sanitizeScreenshot(
+          Buffer.from(capture.screenshotBase64, 'base64'),
+          captures[index]!,
+        ).then((bytes) => ({
+          id: captures[index]!.screenshotAssetId,
+          contentType: 'image/png',
+          extension: 'png',
+          bytes,
+        })),
+        Promise.resolve({
+          id: captures[index]!.domAssetId,
+          contentType: 'application/json',
+          extension: 'json',
+          bytes: sanitizeDom(Buffer.from(capture.domJson)),
+        }),
+      ]),
+    );
+    outbound = buildMultipart(manifest, assets);
   } catch (error) {
-    if (error instanceof RequestBodyTooLargeError) {
-      return c.json(
-        {
-          error: `Critique request exceeds ${MAX_CRITIQUE_REQUEST_BYTES} bytes`,
-        },
-        413,
-      );
-    }
     if (error instanceof InvalidCritiqueInputError) {
       return c.json({ error: error.message }, 400);
     }
     logHandlerError('critiqueSanitize', error);
     return c.json({ error: 'Failed to sanitize Critique capture' }, 400);
+  }
+
+  try {
+    if (!(await consumeCritiqueQuota(auth.runId))) {
+      return c.json(
+        { error: 'Critique paid-call limit reached for this task run' },
+        429,
+      );
+    }
+  } catch {
+    return c.json({ error: 'Critique quota is temporarily unavailable' }, 503);
   }
 
   const timeoutSignal = AbortSignal.timeout(CRITIQUE_TIMEOUT_MS);

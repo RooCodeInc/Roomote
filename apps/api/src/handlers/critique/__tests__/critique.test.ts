@@ -5,16 +5,30 @@ import type { RunTokenContext } from '@roomote/types';
 import type { Variables } from '../../../types';
 import { critique } from '..';
 
-const { mockEnv, logHandlerErrorMock } = vi.hoisted(() => ({
-  mockEnv: {
+const mocks = vi.hoisted(() => ({
+  env: {
     CRITIQUE_BASE_URL: 'https://critique.example.test/',
     CRITIQUE_API_TOKEN: 'critique-secret-token',
   },
-  logHandlerErrorMock: vi.fn(),
+  findRun: vi.fn(),
+  redisEval: vi.fn(),
+  rpc: vi.fn(),
+  log: vi.fn(),
 }));
 
-vi.mock('@roomote/env', () => ({ Env: mockEnv }));
-vi.mock('../../utils', () => ({ logHandlerError: logHandlerErrorMock }));
+vi.mock('@roomote/env', () => ({ Env: mocks.env }));
+vi.mock('@roomote/db/server', () => ({
+  db: { query: { taskRuns: { findFirst: mocks.findRun } } },
+  eq: vi.fn(),
+  taskRuns: { id: 'id' },
+}));
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({ eval: mocks.redisEval }),
+}));
+vi.mock('@roomote/sdk/server', () => ({
+  withSandboxServerRpcClient: mocks.rpc,
+}));
+vi.mock('../../utils', () => ({ logHandlerError: mocks.log }));
 
 const runAuth: RunTokenContext = {
   runId: 42,
@@ -24,27 +38,24 @@ const runAuth: RunTokenContext = {
   version: 1,
 };
 
-const manifest = {
-  mode: 'page',
-  captures: [
-    {
-      id: 'capture-1',
-      screenshotAssetId: 'screenshot-1',
-      domAssetId: 'dom-1',
-      viewport: {
-        width: 2,
-        height: 2,
-        deviceScaleFactor: 1,
-        scrollX: 0,
-        scrollY: 0,
-      },
-      document: { width: 2, height: 2 },
-      page: { url: 'https://example.test/page?token=secret', title: 'Example' },
-    },
-  ],
+const record = {
+  id: 'capture-1',
+  screenshotAssetId: 'screenshot-1',
+  domAssetId: 'dom-1',
+  screenshotPath: '/tmp/removed.png',
+  domPath: '/tmp/removed.json',
+  viewport: {
+    width: 2,
+    height: 2,
+    deviceScaleFactor: 1,
+    scrollX: 0,
+    scrollY: 0,
+  },
+  document: { width: 2, height: 2 },
+  page: { url: 'https://example.test/page?token=secret', title: 'Example' },
+  nodeCount: 2,
 };
-
-const safeDom = {
+const dom = {
   rootNodeId: 'n1',
   nodes: [
     {
@@ -59,7 +70,6 @@ const safeDom = {
       parentId: 'n1',
       tagName: 'body',
       text: 'Visible text',
-      attributes: { 'aria-label': 'Main' },
       bounds: { x: 0, y: 0, width: 2, height: 2 },
       styles: { display: 'block' },
       state: { visible: true },
@@ -67,7 +77,7 @@ const safeDom = {
   ],
 };
 
-let validPng: Buffer;
+let screenshotBase64: string;
 
 function createApp(authContext: Variables['authContext'] = runAuth) {
   const app = new Hono<{ Variables: Variables }>();
@@ -79,105 +89,91 @@ function createApp(authContext: Variables['authContext'] = runAuth) {
   return app;
 }
 
-function validRequest(
-  options: {
-    dom?: unknown;
-    input?: unknown;
-    screenshot?: Buffer;
-    extraPart?: boolean;
-  } = {},
-) {
-  const form = new FormData();
-  form.set('input', JSON.stringify(options.input ?? manifest));
-  form.set(
-    'screenshot-1',
-    new File([Uint8Array.from(options.screenshot ?? validPng)], 'capture.png', {
-      type: 'image/png',
-    }),
-  );
-  form.set(
-    'dom-1',
-    new File([JSON.stringify(options.dom ?? safeDom)], 'capture.json', {
-      type: 'application/json',
-    }),
-  );
-  if (options.extraPart) form.set('extra', 'not allowed');
+function request(body: unknown) {
   return new Request('http://localhost/critique', {
     method: 'POST',
-    body: form,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
   });
 }
 
 describe('Critique proxy', () => {
   beforeAll(async () => {
-    validPng = await sharp({
-      create: {
-        width: 2,
-        height: 2,
-        channels: 4,
-        background: { r: 10, g: 20, b: 30, alpha: 1 },
-      },
-    })
-      .png()
-      .toBuffer();
+    screenshotBase64 = (
+      await sharp({
+        create: {
+          width: 2,
+          height: 2,
+          channels: 4,
+          background: { r: 10, g: 20, b: 30, alpha: 1 },
+        },
+      })
+        .png()
+        .toBuffer()
+    ).toString('base64');
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnv.CRITIQUE_BASE_URL = 'https://critique.example.test/';
-    mockEnv.CRITIQUE_API_TOKEN = 'critique-secret-token';
+    mocks.findRun.mockResolvedValue({
+      id: 42,
+      actingUserId: 'user-1',
+      sandboxServerUrl: 'http://sandbox.test',
+    });
+    mocks.redisEval.mockResolvedValue(1);
+    mocks.rpc.mockImplementation(async ({ call }) =>
+      call({
+        commands: {
+          critiqueCapture: {
+            mutate: vi.fn(async (input) =>
+              input.action === 'capture'
+                ? { action: 'capture', capture: record }
+                : {
+                    action: 'read',
+                    captures: [
+                      {
+                        record,
+                        screenshotBase64,
+                        domJson: JSON.stringify(dom),
+                      },
+                    ],
+                  },
+            ),
+          },
+        },
+      }),
+    );
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('captures through the control-plane-only sandbox RPC', async () => {
+    const response = await createApp().request(request({ action: 'capture' }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      action: 'capture',
+      capture: { id: 'capture-1' },
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      expect.objectContaining({ authMode: 'sandbox-control', runId: 42 }),
+    );
   });
 
-  it('sanitizes and reconstructs the multipart request before forwarding', async () => {
-    const partial = {
-      status: 'partial',
-      findings: [{ id: 'f1', verdict: 'fail', confidence: 0.91 }],
-      omittedFindingCount: 3,
-      errors: [{ code: 'rule_timeout' }],
-    };
-    const fetchMock = vi
+  it('accepts only capture IDs and builds the paid multipart from worker bytes', async () => {
+    const upstream = vi
       .fn()
       .mockResolvedValue(
-        new Response(JSON.stringify(partial), { status: 200 }),
+        new Response(JSON.stringify({ status: 'completed', findings: [] })),
       );
-    vi.stubGlobal('fetch', fetchMock);
-    const unsafeDom = structuredClone(safeDom);
-    Object.assign(unsafeDom.nodes[1]!, {
-      text: 'token=should-not-leave',
-      attributes: {
-        'aria-label': 'Main',
-        href: 'https://secret.test',
-        onclick: 'steal()',
-        'data-secret': 'hidden',
-      },
-      styles: {
-        display: 'block',
-        transform: 'rotate(1deg)',
-        'background-image': 'url(https://secret.test/value)',
-      },
-    });
-    const screenshotWithTrailer = Buffer.concat([
-      validPng,
-      Buffer.from('SECRET_TRAILER'),
-    ]);
+    vi.stubGlobal('fetch', upstream);
 
     const response = await createApp().request(
-      validRequest({ dom: unsafeDom, screenshot: screenshotWithTrailer }),
+      request({ action: 'review', captureIds: ['capture-1'] }),
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(partial);
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://critique.example.test/v1/critiques');
-    expect(init.headers).toMatchObject({
-      authorization: 'Bearer critique-secret-token',
-    });
+    expect(upstream).toHaveBeenCalledOnce();
+    const init = upstream.mock.calls[0]?.[1] as RequestInit;
     const forwarded = await new Request('http://upstream.test', {
       method: 'POST',
       headers: {
@@ -188,134 +184,44 @@ describe('Critique proxy', () => {
       body: init.body,
     }).formData();
     expect([...forwarded.keys()]).toEqual(['input', 'screenshot-1', 'dom-1']);
-    const forwardedManifest = JSON.parse(String(forwarded.get('input')));
-    expect(forwardedManifest.captures[0].page.url).toBe(
-      'https://example.test/page',
-    );
-    const forwardedDom = JSON.parse(
-      await (forwarded.get('dom-1') as File).text(),
-    );
-    expect(forwardedDom.nodes[1]).not.toHaveProperty('text');
-    expect(forwardedDom.nodes[1].attributes).toEqual({ 'aria-label': 'Main' });
-    expect(forwardedDom.nodes[1].styles).toEqual({ display: 'block' });
-    const forwardedPng = Buffer.from(
-      await (forwarded.get('screenshot-1') as File).arrayBuffer(),
-    );
-    expect(forwardedPng.includes(Buffer.from('SECRET_TRAILER'))).toBe(false);
-    await expect(sharp(forwardedPng).metadata()).resolves.toMatchObject({
-      format: 'png',
-      width: 2,
-      height: 2,
-    });
+    expect(
+      JSON.parse(String(forwarded.get('input'))).captures[0].page.url,
+    ).toBe('https://example.test/page');
   });
 
-  it.each([
-    [422, 400, 'rejected the capture or input'],
-    [502, 502, 'service is unavailable'],
-    [503, 503, 'service is unavailable'],
-  ])(
-    'maps upstream %i accurately without retrying',
-    async (upstreamStatus, expectedStatus, expectedMessage) => {
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({ error: `upstream ${mockEnv.CRITIQUE_API_TOKEN}` }),
-            { status: upstreamStatus },
-          ),
-        );
-      vi.stubGlobal('fetch', fetchMock);
-
-      const response = await createApp().request(validRequest());
-      const payload = (await response.json()) as Record<string, unknown>;
-
-      expect(response.status).toBe(expectedStatus);
-      expect(payload.error).toContain(expectedMessage);
-      expect(payload.upstreamStatus).toBe(upstreamStatus);
-      expect(payload.detail).toContain('[REDACTED]');
-      expect(fetchMock).toHaveBeenCalledOnce();
-    },
-  );
-
-  it('times out once after at least 150 seconds and warns against retry', async () => {
-    const timeoutSpy = vi
-      .spyOn(AbortSignal, 'timeout')
-      .mockImplementation((ms) => {
-        expect(ms).toBeGreaterThanOrEqual(150_000);
-        const controller = new AbortController();
-        queueMicrotask(() => controller.abort());
-        return controller.signal;
-      });
-    const fetchMock = vi.fn(
-      (_url: string, init: RequestInit) =>
-        new Promise<Response>((_resolve, reject) => {
-          init.signal?.addEventListener('abort', () =>
-            reject(new DOMException('aborted', 'AbortError')),
-          );
-        }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    const response = await createApp().request(validRequest());
-    const payload = (await response.json()) as { error: string };
-
-    expect(response.status).toBe(504);
-    expect(payload.error).toContain('must not be retried automatically');
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(timeoutSpy).toHaveBeenCalledWith(160_000);
-  });
-
-  it('rejects malformed, extra, and disconnected task data before upstream', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    const malformed = await createApp().request(
-      new Request('http://localhost/critique', {
-        method: 'POST',
-        headers: { 'content-type': 'multipart/form-data; boundary=bad' },
-        body: 'arbitrary-task-data',
+  it('rejects task-supplied image and DOM fields before capture RPC', async () => {
+    const response = await createApp().request(
+      request({
+        action: 'review',
+        captureIds: ['capture-1'],
+        screenshot: screenshotBase64,
+        dom,
       }),
     );
-    expect(malformed.status).toBe(400);
-
-    const extra = await createApp().request(validRequest({ extraPart: true }));
-    expect(extra.status).toBe(400);
-
-    const disconnectedDom = structuredClone(safeDom);
-    disconnectedDom.nodes[1]!.parentId = 'missing';
-    const disconnected = await createApp().request(
-      validRequest({ dom: disconnectedDom }),
-    );
-    expect(disconnected.status).toBe(400);
-
-    const scriptDom = structuredClone(safeDom);
-    scriptDom.nodes[1]!.tagName = 'script';
-    const script = await createApp().request(validRequest({ dom: scriptDom }));
-    expect(script.status).toBe(400);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(400);
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it('rejects non-run auth and oversized payloads before upstream', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    const memberResponse = await createApp({
-      userId: 'user-1',
-      tokenType: 'auth',
-      version: 1,
-    }).request(validRequest());
-    expect(memberResponse.status).toBe(403);
+  it('fails closed when the paid-call quota backend is unavailable', async () => {
+    mocks.redisEval.mockRejectedValueOnce(new Error('redis unavailable'));
+    const upstream = vi.fn();
+    vi.stubGlobal('fetch', upstream);
 
-    const oversizedResponse = await createApp().request(
-      new Request('http://localhost/critique', {
-        method: 'POST',
-        headers: {
-          'content-type': 'multipart/form-data; boundary=test',
-          'content-length': String(32 * 1024 * 1024 + 1),
-        },
-        body: 'small',
-      }),
+    const response = await createApp().request(
+      request({ action: 'review', captureIds: ['capture-1'] }),
     );
-    expect(oversizedResponse.status).toBe(413);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it('returns 429 after two paid calls for the run', async () => {
+    mocks.redisEval.mockResolvedValueOnce(3);
+    const upstream = vi.fn();
+    vi.stubGlobal('fetch', upstream);
+    const response = await createApp().request(
+      request({ action: 'review', captureIds: ['capture-1'] }),
+    );
+    expect(response.status).toBe(429);
+    expect(upstream).not.toHaveBeenCalled();
   });
 });

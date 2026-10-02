@@ -50,7 +50,7 @@ type CritiqueToolInput = {
   context?: CritiqueContext;
 };
 
-type CaptureRecord = {
+export type CaptureRecord = {
   id: string;
   screenshotAssetId: string;
   domAssetId: string;
@@ -487,25 +487,6 @@ export async function captureCritiquePage(
   return record;
 }
 
-async function readCapture(captureId: string): Promise<CaptureRecord> {
-  const parsed = JSON.parse(
-    await readFile(captureMetadataPath(captureId), 'utf8'),
-  ) as CaptureRecord;
-  if (parsed.id !== captureId) throw new Error('Capture metadata is invalid');
-  return parsed;
-}
-
-function manifestCapture(capture: CaptureRecord) {
-  return {
-    id: capture.id,
-    screenshotAssetId: capture.screenshotAssetId,
-    domAssetId: capture.domAssetId,
-    viewport: capture.viewport,
-    document: capture.document,
-    ...(capture.page ? { page: capture.page } : {}),
-  };
-}
-
 export function buildCritiqueMultipart(
   manifest: Record<string, unknown>,
   assets: {
@@ -554,7 +535,7 @@ export function buildCritiqueMultipart(
 
 async function submitCritique(
   config: RoomoteConfig,
-  multipart: { body: Buffer; contentType: string },
+  input: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<unknown> {
   const response = await fetchWithTimeout(
@@ -562,10 +543,9 @@ async function submitCritique(
     {
       method: 'POST',
       headers: buildApiHeaders(config, {
-        'content-type': multipart.contentType,
-        'content-length': String(multipart.body.byteLength),
+        'content-type': 'application/json',
       }),
-      body: new Blob([Uint8Array.from(multipart.body)]),
+      body: JSON.stringify(input),
       signal,
     },
     {
@@ -582,35 +562,6 @@ async function submitCritique(
   return response.json();
 }
 
-async function buildSubmission(
-  captures: CaptureRecord[],
-  manifest: Record<string, unknown>,
-): Promise<{ body: Buffer; contentType: string }> {
-  const assets: {
-    id: string;
-    fileName: string;
-    contentType: string;
-    bytes: Buffer;
-  }[] = [];
-  for (const capture of captures) {
-    assets.push(
-      {
-        id: capture.screenshotAssetId,
-        fileName: `${capture.screenshotAssetId}.png`,
-        contentType: 'image/png',
-        bytes: await readFile(capture.screenshotPath),
-      },
-      {
-        id: capture.domAssetId,
-        fileName: `${capture.domAssetId}.json`,
-        contentType: 'application/json',
-        bytes: await readFile(capture.domPath),
-      },
-    );
-  }
-  return buildCritiqueMultipart(manifest, assets);
-}
-
 export async function handleCritiqueVisualReview(
   input: CritiqueToolInput,
   config: RoomoteConfig,
@@ -619,8 +570,13 @@ export async function handleCritiqueVisualReview(
 ): Promise<ToolResult> {
   try {
     if (input.action === 'capture') {
-      const capture = await captureCritiquePage(signal, runBrowser);
-      return textResult(JSON.stringify(capture, null, 2));
+      return textResult(
+        JSON.stringify(
+          await submitCritique(config, { action: 'capture' }, signal),
+          null,
+          2,
+        ),
+      );
     }
 
     if (input.action === 'inspect_nodes') {
@@ -639,8 +595,7 @@ export async function handleCritiqueVisualReview(
       );
     }
 
-    let captures: CaptureRecord[];
-    let manifest: Record<string, unknown>;
+    let request: Record<string, unknown>;
     if (input.action === 'review') {
       if (!input.captureIds?.length || input.captureIds.length > 4) {
         return errorResult('review requires 1-4 captureIds');
@@ -648,10 +603,9 @@ export async function handleCritiqueVisualReview(
       if (new Set(input.captureIds).size !== input.captureIds.length) {
         return errorResult('captureIds must not contain duplicates');
       }
-      captures = await Promise.all(input.captureIds.map(readCapture));
-      manifest = {
-        mode: 'page',
-        captures: captures.map(manifestCapture),
+      request = {
+        action: 'review',
+        captureIds: input.captureIds,
       };
     } else {
       if (!input.baselineCaptureId || !input.candidateCaptureId) {
@@ -662,28 +616,17 @@ export async function handleCritiqueVisualReview(
       if (input.baselineCaptureId === input.candidateCaptureId) {
         return errorResult('baseline and candidate captures must differ');
       }
-      captures = await Promise.all([
-        readCapture(input.baselineCaptureId),
-        readCapture(input.candidateCaptureId),
-      ]);
-      manifest = {
-        mode: 'comparison',
-        captures: captures.map(manifestCapture),
-        comparison: {
-          baselineCaptureId: input.baselineCaptureId,
-          candidateCaptureId: input.candidateCaptureId,
-        },
+      request = {
+        action: 'compare',
+        baselineCaptureId: input.baselineCaptureId,
+        candidateCaptureId: input.candidateCaptureId,
       };
     }
-    if (input.rules) manifest.rules = input.rules;
-    if (input.options) manifest.options = input.options;
-    if (input.context) manifest.context = input.context;
+    if (input.rules) request.rules = input.rules;
+    if (input.options) request.options = input.options;
+    if (input.context) request.context = input.context;
 
-    const response = await submitCritique(
-      config,
-      await buildSubmission(captures, manifest),
-      signal,
-    );
+    const response = await submitCritique(config, request, signal);
     return textResult(
       JSON.stringify(
         {

@@ -1,5 +1,7 @@
 import { initTRPC } from '@trpc/server';
+import { TRPCError } from '@trpc/server';
 import superjson from 'superjson';
+import type { SandboxControlTokenContext } from '@roomote/auth/client';
 import type {
   AuthTokenContext,
   RunTokenContext,
@@ -26,7 +28,7 @@ export interface Context {
   harnessLogger?: HarnessLogger;
   harness: Harness;
   harnessManager?: HarnessManager;
-  auth: AuthTokenContext | RunTokenContext | null;
+  auth: AuthTokenContext | RunTokenContext | SandboxControlTokenContext | null;
 
   /** Task run ID for the current worker session. */
   runId?: number;
@@ -90,4 +92,19 @@ const t = initTRPC.context<Context>().create({ transformer: superjson });
 
 export const router = t.router;
 
-export const publicProcedure = t.procedure;
+export const publicProcedure = t.procedure.use(({ ctx, next }) => {
+  if (ctx.auth?.tokenType === 'sandbox-control') {
+    throw new TRPCError({ code: 'FORBIDDEN' });
+  }
+  return next();
+});
+
+export const critiqueControlProcedure = t.procedure.use(({ ctx, next }) => {
+  if (
+    ctx.auth?.tokenType !== 'sandbox-control' ||
+    ctx.auth.purpose !== 'critique-capture'
+  ) {
+    throw new TRPCError({ code: 'FORBIDDEN' });
+  }
+  return next();
+});

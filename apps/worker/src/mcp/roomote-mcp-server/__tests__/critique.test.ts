@@ -266,29 +266,36 @@ describe('Critique capture and multipart', () => {
 
   it('exercises capture, page review, and comparison through the task-facing handler', async () => {
     const browser = createBrowserRunner();
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
+    let captureNumber = 0;
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { action: string };
+      if (body.action === 'capture') {
+        captureNumber += 1;
+        return new Response(
+          JSON.stringify({
+            action: 'capture',
+            capture: { id: `capture-${captureNumber}` },
+          }),
+        );
+      }
+      if (body.action === 'review') {
+        return new Response(
           JSON.stringify({
             status: 'partial',
             findings: [{ id: 'f1', verdict: 'fail', confidence: 0.9 }],
             omittedFindingCount: 2,
             errors: [{ code: 'rule_timeout' }],
           }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            status: 'completed',
-            findings: [{ id: 'f2', change: 'persisting' }],
-            summary: { resolvedRuleIds: ['rule-1'] },
-          }),
-          { status: 200 },
-        ),
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          status: 'completed',
+          findings: [{ id: 'f2', change: 'persisting' }],
+          summary: { resolvedRuleIds: ['rule-1'] },
+        }),
       );
+    });
     vi.stubGlobal('fetch', fetchMock);
     const config = {
       platformApiUrl: 'https://roomote.test',
@@ -315,7 +322,7 @@ describe('Critique capture and multipart', () => {
     );
 
     const review = await handleCritiqueVisualReview(
-      { action: 'review', captureIds: [baseline.id] },
+      { action: 'review', captureIds: [baseline.capture.id] },
       config,
       undefined,
       browser,
@@ -326,8 +333,8 @@ describe('Critique capture and multipart', () => {
     const comparison = await handleCritiqueVisualReview(
       {
         action: 'compare',
-        baselineCaptureId: baseline.id,
-        candidateCaptureId: candidate.id,
+        baselineCaptureId: baseline.capture.id,
+        candidateCaptureId: candidate.capture.id,
       },
       config,
       undefined,
@@ -337,14 +344,13 @@ describe('Critique capture and multipart', () => {
       'resolvedRuleIds',
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const comparisonRequest = fetchMock.mock.calls[1]![1] as RequestInit;
-    const comparisonBody = Buffer.from(
-      await (comparisonRequest.body as Blob).arrayBuffer(),
-    ).toString();
-    expect(comparisonBody).toContain('name="input"');
-    expect(comparisonBody).toContain('"mode":"comparison"');
-    expect(comparisonBody).toContain(`"baselineCaptureId":"${baseline.id}"`);
-    expect(comparisonBody).toContain(`"candidateCaptureId":"${candidate.id}"`);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const comparisonRequest = fetchMock.mock.calls[3]![1] as RequestInit;
+    const comparisonBody = JSON.parse(String(comparisonRequest.body));
+    expect(comparisonBody).toEqual({
+      action: 'compare',
+      baselineCaptureId: baseline.capture.id,
+      candidateCaptureId: candidate.capture.id,
+    });
   });
 });
