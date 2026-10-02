@@ -210,6 +210,7 @@ function makeTaskRun(overrides: Partial<TaskRun> = {}): TaskRun {
     prRepo: null,
     prNumber: null,
     prSha: null,
+    cancelRequestedAt: null,
     canceledAt: null,
     completedAt: null,
     ...overrides,
@@ -603,6 +604,41 @@ describe('BaseController.dequeueTaskRun', () => {
     mockTaskRunsFindFirst.mockResolvedValueOnce({
       status: RunStatus.Canceled,
       canceledAt: new Date(),
+    });
+
+    const result = await controller.testDequeueTaskRun(job);
+
+    expect(result).toBeNull();
+    expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not dequeue a job whose cancellation was already requested', async () => {
+    const job = makeTaskRun({
+      id: 83,
+      status: RunStatus.Pending,
+      cancelRequestedAt: new Date(),
+    });
+
+    const result = await controller.testDequeueTaskRun(job);
+
+    expect(result).toBeNull();
+    expect(mockDbTransaction).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not revive a job with a cancellation request during the dequeue window', async () => {
+    const job = makeTaskRun({
+      id: 82,
+      status: RunStatus.Pending,
+    });
+
+    mockUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([]),
+    });
+    mockTaskRunsFindFirst.mockResolvedValueOnce({
+      status: RunStatus.Pending,
+      cancelRequestedAt: new Date(),
+      canceledAt: null,
     });
 
     const result = await controller.testDequeueTaskRun(job);
