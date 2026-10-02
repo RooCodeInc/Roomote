@@ -213,6 +213,8 @@ type ResolveTaskServers = () => Promise<
 
 const TOOL_DESCRIPTION_TTL_MS = 10 * 60_000;
 const TOOL_DESCRIPTION_LOOKUP_TIMEOUT_MS = 5_000;
+/** How long a failed listing stands before it is tried again. */
+const TOOL_DESCRIPTION_RETRY_MS = 60_000;
 const TOOL_DESCRIPTION_CACHE_LIMIT = 500;
 const toolDescriptionsByRunServer = new Map<
   string,
@@ -249,7 +251,7 @@ function isOwnIntegrationProxyUrl(url: string, origin: string): boolean {
  * What a server says one of a task's tools does, as Auto is shown it for a
  * call by the session's own agent. A run's server is listed once and kept
  * for a while. A listing that fails or is slow leaves the call judged on its
- * name and arguments alone.
+ * name and arguments alone, and is not tried again for a minute.
  */
 async function resolveTaskToolDescription(input: {
   runId: number;
@@ -290,10 +292,17 @@ async function resolveTaskToolDescription(input: {
           ),
         ),
     );
-    cached = { expiresAt: now + TOOL_DESCRIPTION_TTL_MS, descriptions };
-    toolDescriptionsByRunServer.set(key, cached);
-    // A failed listing is tried again on the next call.
-    descriptions.catch(() => toolDescriptionsByRunServer.delete(key));
+    const entry = { expiresAt: now + TOOL_DESCRIPTION_TTL_MS, descriptions };
+    cached = entry;
+    toolDescriptionsByRunServer.set(key, entry);
+    // A failed listing is tried again, but not on every call: a server that
+    // cannot be listed would otherwise hold up each of the task's asks.
+    descriptions.catch(() => {
+      entry.expiresAt = Math.min(
+        entry.expiresAt,
+        Date.now() + TOOL_DESCRIPTION_RETRY_MS,
+      );
+    });
   }
   return cached.descriptions
     .then((descriptions) => descriptions.get(input.toolName))

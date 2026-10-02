@@ -353,13 +353,19 @@ describe('requestTaskToolApproval', () => {
     );
     expect(assessed()[1]).not.toHaveProperty('toolDescription');
 
-    // A listing that fails leaves the call judged without a description, and
-    // is tried again on the next call.
+    // A listing that fails leaves the call judged without a description. It
+    // is not tried again on the very next call, only after a minute.
     mocks.listTools.mockRejectedValueOnce(new Error('unreachable'));
     const other = { ...described, runId: 72 };
     await requestTaskToolApproval(other);
     expect(assessed()[2]).not.toHaveProperty('toolDescription');
     await requestTaskToolApproval(other);
+    expect(assessed()[3]).not.toHaveProperty('toolDescription');
+    expect(mocks.listTools).toHaveBeenCalledTimes(2);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 61_000);
+    await requestTaskToolApproval(other);
+    clock.mockRestore();
     expect(mocks.listTools).toHaveBeenCalledTimes(3);
     expect(mocks.resolveAuto).toHaveBeenLastCalledWith(
       expect.objectContaining({
