@@ -2,6 +2,7 @@ import {
   getVisiblePrimaryNavItems,
   getVisibleSideNavSections,
   isVisiblePrimaryNavPath,
+  matchesPrimaryNavPath,
 } from './navigation-items';
 
 describe('getVisiblePrimaryNavItems', () => {
@@ -88,8 +89,28 @@ describe('isVisiblePrimaryNavPath', () => {
   });
 
   it('does not expose admin-only navigation paths to members', () => {
-    expect(isVisiblePrimaryNavPath('/analytics', { isAdmin: false })).toBe(
-      false,
+    expect(
+      isVisiblePrimaryNavPath('/analytics/costs', { isAdmin: false }),
+    ).toBe(false);
+  });
+});
+
+describe('matchesPrimaryNavPath', () => {
+  const items = getVisiblePrimaryNavItems({ isAdmin: true });
+  const homeItem = items.find((item) => item.href === '/')!;
+  const sessionsItem = items.find((item) => item.href === '/sessions')!;
+
+  it('matches the home route exactly', () => {
+    expect(matchesPrimaryNavPath('/', homeItem)).toBe(true);
+    expect(matchesPrimaryNavPath('/home', homeItem)).toBe(false);
+    expect(matchesPrimaryNavPath('//', homeItem)).toBe(false);
+  });
+
+  it('matches nested routes for prefix-based navigation items', () => {
+    expect(matchesPrimaryNavPath('/sessions/session-123', sessionsItem)).toBe(
+      true,
     );
+    expect(matchesPrimaryNavPath('/sessions/', sessionsItem)).toBe(true);
+    expect(matchesPrimaryNavPath('/session-123', sessionsItem)).toBe(false);
   });
 });

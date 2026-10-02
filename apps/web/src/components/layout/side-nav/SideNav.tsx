@@ -36,6 +36,7 @@ import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
 
 import {
   getVisibleSideNavSections,
+  matchesPrimaryNavPath,
   type PrimaryNavItem,
 } from '../navigation-items';
 import { SideNavItem } from './SideNavItem';
@@ -157,11 +158,7 @@ export const SideNav = () => {
       tooltip={label}
       description={description}
       expanded={isSideNavExpanded}
-      active={
-        matchExact
-          ? matchPaths.includes(pathname)
-          : matchPaths.some((path) => pathname.startsWith(path))
-      }
+      active={matchesPrimaryNavPath(pathname, { matchExact, matchPaths })}
       badgeCount={href === '/results' ? unreadResultCount : 0}
     />
   );
