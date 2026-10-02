@@ -157,11 +157,20 @@ export async function createHarness({
     )
       ? fallbackReasoningEffortValue
       : undefined;
+    // Subagent roles left at "Same as coding" have no role model env var; the
+    // generated OpenCode agents then run on the effective coding model.
+    const effectiveCodingModel =
+      modelOverride ??
+      spawnRuntimeEnv[TASK_MODEL_ROLE_DESCRIPTORS.coding.modelEnvVar];
     const agentFallbacks = Object.fromEntries(
       Object.entries(MODEL_FALLBACK_AGENT_ROLES).flatMap(
         ([agentType, role]) => {
           const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
-          const activeModelId = spawnRuntimeEnv[descriptor.modelEnvVar];
+          const activeModelId =
+            spawnRuntimeEnv[descriptor.modelEnvVar] ??
+            (descriptor.modelFallback === 'coding'
+              ? effectiveCodingModel
+              : undefined);
           const agentFallbackModel =
             spawnRuntimeEnv[descriptor.fallbackModelEnvVar];
           const effort = spawnRuntimeEnv[descriptor.fallbackReasoningEnvVar];
