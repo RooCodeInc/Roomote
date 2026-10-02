@@ -202,6 +202,18 @@ describe('Critique proxy', () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
+  it('rejects task-supplied review context', async () => {
+    const response = await createApp().request(
+      request({
+        action: 'review',
+        captureIds: ['capture-1'],
+        context: { task: 'arbitrary task data' },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
   it('fails closed when the paid-call quota backend is unavailable', async () => {
     mocks.redisEval.mockRejectedValueOnce(new Error('redis unavailable'));
     const upstream = vi.fn();

@@ -127,12 +127,6 @@ const optionsSchema = z
     maximumFindings: z.number().int().positive().max(1_000).optional(),
   })
   .strict();
-const contextSchema = z
-  .object({
-    task: z.string().max(4_000).optional(),
-    designIntent: z.string().max(4_000).optional(),
-  })
-  .strict();
 const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('capture') }).strict(),
   z
@@ -141,7 +135,6 @@ const requestSchema = z.discriminatedUnion('action', [
       captureIds: z.array(z.string().regex(ID_PATTERN)).min(1).max(4),
       rules: rulesSchema.optional(),
       options: optionsSchema.optional(),
-      context: contextSchema.optional(),
     })
     .strict(),
   z
@@ -151,7 +144,6 @@ const requestSchema = z.discriminatedUnion('action', [
       candidateCaptureId: z.string().regex(ID_PATTERN),
       rules: rulesSchema.optional(),
       options: optionsSchema.optional(),
-      context: contextSchema.optional(),
     })
     .strict(),
 ]);
@@ -168,7 +160,6 @@ const manifestSchema = z
       .optional(),
     rules: rulesSchema.optional(),
     options: optionsSchema.optional(),
-    context: contextSchema.optional(),
   })
   .strict();
 
@@ -332,14 +323,6 @@ function sanitizeManifest(manifest: CritiqueManifest): CritiqueManifest {
       }
       return { ...capture, ...(page ? { page } : { page: undefined }) };
     }),
-    ...(manifest.context
-      ? {
-          context: {
-            task: sanitizeText(manifest.context.task, 4_000),
-            designIntent: sanitizeText(manifest.context.designIntent, 4_000),
-          },
-        }
-      : {}),
   };
 }
 
@@ -629,7 +612,6 @@ critique.post('/', async (c) => {
         : {}),
       ...(request.data.rules ? { rules: request.data.rules } : {}),
       ...(request.data.options ? { options: request.data.options } : {}),
-      ...(request.data.context ? { context: request.data.context } : {}),
     });
     const assets = await Promise.all(
       stored.captures.flatMap((capture, index) => [

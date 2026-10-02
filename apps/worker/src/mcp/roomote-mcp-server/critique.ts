@@ -33,11 +33,6 @@ type CritiqueOptions = {
   maximumFindings?: number;
 };
 
-type CritiqueContext = {
-  task?: string;
-  designIntent?: string;
-};
-
 type CritiqueToolInput = {
   action: 'capture' | 'review' | 'compare' | 'inspect_nodes';
   captureIds?: string[];
@@ -47,7 +42,6 @@ type CritiqueToolInput = {
   nodeIds?: string[];
   rules?: CritiqueRules;
   options?: CritiqueOptions;
-  context?: CritiqueContext;
 };
 
 export type CaptureRecord = {
@@ -624,7 +618,6 @@ export async function handleCritiqueVisualReview(
     }
     if (input.rules) request.rules = input.rules;
     if (input.options) request.options = input.options;
-    if (input.context) request.context = input.context;
 
     const response = await submitCritique(config, request, signal);
     return textResult(

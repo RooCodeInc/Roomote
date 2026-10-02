@@ -423,13 +423,6 @@ roomoteMcpServer.registerTool(
         })
         .strict()
         .optional(),
-      context: z
-        .object({
-          task: z.string().max(4_000).optional(),
-          designIntent: z.string().max(4_000).optional(),
-        })
-        .strict()
-        .optional(),
     },
     annotations: {
       readOnlyHint: false,
