@@ -4,11 +4,12 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.15.1 (2026-10-02)
 
-Roomote 1.15.1 adds resilient model fallbacks and fixes approval, sessions board, and task-detail edge cases.
+Roomote 1.15.1 adds resilient model fallbacks, reduces Auto approval prompts, and fixes approval, sessions board, and task-detail edge cases.
 
 ### Highlights
 
 - Configure per-role model fallbacks that keep work moving through eligible provider failures and make each switch visible to users.
+- Fewer unnecessary Auto approval prompts.
 - Review the correct arguments when an agent calls the same integration tool several times at once.
 - Keep manually active sessions and human command-style prompts visible in the views where users expect them.
 
@@ -18,6 +19,8 @@ Roomote 1.15.1 adds resilient model fallbacks and fixes approval, sessions board
 - Add configurable per-role model fallbacks with sticky runtime switching, provider-error retry classification, user-visible notices, notifications, and anonymous telemetry.
 - Keep manually active sessions visible in the sessions board's Active lane.
 - Keep human prompts that begin with commands visible in task details while continuing to hide generated setup and automation prompts.
+- Reduce unnecessary Auto approval prompts for harmless actions and for steps a session's owner already approved.
+- Apply model fallbacks to subagents that use the "Same as coding" model.
 
 ## 1.15.0 (2026-09-30)
 
