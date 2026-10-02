@@ -17,6 +17,11 @@ export {
 } from './trpc';
 
 export {
+  getTaskToolApprovalStatus,
+  requestTaskToolApproval,
+} from './lib/task-tool-approvals';
+
+export {
   finishRun,
   maybeEnqueueBrainMemoryForCompletedRun,
 } from './lib/task-runs/finish-run';

@@ -32,6 +32,7 @@ import {
   shadowProxyToolCall,
   type ProxyToolApprovals,
 } from './tool-approval-enforcement';
+import { decideUnaskedTaskToolCall } from './unasked-task-tool-call';
 
 type JsonRpcRequestId = string | number | null;
 
@@ -1164,12 +1165,48 @@ export function createMcpProxy(config: McpProxyConfig) {
           );
         }
         if (!approved) {
-          return jsonRpcErrorResponse(
-            403,
-            -32000,
-            describeProxyToolApprovalBlock(gatedToolName, 'needs_approval'),
-            getJsonRpcRequestId(parsedBody),
-          );
+          // Nothing to claim: the task's agent did not ask first. Ask for it.
+          let decision: Awaited<ReturnType<typeof decideUnaskedTaskToolCall>>;
+          try {
+            decision = await decideUnaskedTaskToolCall({
+              runId: auth.runId,
+              taskId: await resolveRunTokenTaskId(auth),
+              integrationId: credentials.toolApprovalIntegrationId,
+              policyScope: credentials.toolApprovalPolicyScope,
+              toolName: gatedToolName,
+              args: callArguments,
+              resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(auth),
+              endpoint: {
+                url: c.req.url,
+                authorization: c.req.raw.headers.get('authorization'),
+              },
+              signal: c.req.raw.signal,
+            });
+          } catch (error) {
+            // Fail closed: a decision that could not be made is not one.
+            console.error(
+              formatSingleLineLog(`${logPrefix} Failed to ask for approval`, {
+                requestId,
+                toolName: gatedToolName,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+            decision = {
+              allowed: false,
+              message: describeProxyToolApprovalBlock(
+                gatedToolName,
+                'needs_approval',
+              ),
+            };
+          }
+          if (!decision.allowed) {
+            return jsonRpcErrorResponse(
+              403,
+              -32000,
+              decision.message,
+              getJsonRpcRequestId(parsedBody),
+            );
+          }
         }
       }
 
