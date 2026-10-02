@@ -1,21 +1,14 @@
 ---
 title: Self-hosting
 icon: server
-description: Deploy the cloud coding agent you own on Roomote Cloud or your own infrastructure.
+description: Install and finish setting up Roomote on infrastructure you control.
 ---
 
 Roomote is the cloud coding agent you actually own. It runs your development
 environment in isolated sandboxes, uses your repositories and tools, verifies
 its work, and returns reviewable pull requests with previews when they apply.
-Run the same single-tenant product on Roomote Cloud or infrastructure you
+This guide covers running the single-tenant product on infrastructure you
 control.
-
-Choose the fastest path for your team. Every deployment needs model inference:
-use hosting-provisioned Roomote inference when it is offered, or connect a
-ChatGPT subscription or inference provider API key. Source control is optional.
-Connect it when Roomote should work on repositories, and configure a sandbox
-provider only when you are ready to run coding work. Connect communications
-providers and other tools when your team needs them.
 
 <Tip>
   Asking a coding agent to install Roomote? Send it this page. Agents should
@@ -25,28 +18,59 @@ providers and other tools when your team needs them.
 </Tip>
 
 <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
-  <a href="https://cloud.roomote.dev/sign-up"><img src="https://roomote.dev/images/deploy-button.png" alt="Deploy on Roomote Cloud" style={{ height: "40px", width: "auto" }} /></a>
   <a href="https://railway.com/deploy/Rj2cFo?referralCode=roomote"><img src="https://railway.com/button.svg" alt="Deploy on Railway" style={{ height: "40px", width: "auto" }} /></a>
   <a href="https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote"><img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" style={{ height: "40px", width: "auto" }} /></a>
 </div>
 
-## Choose your deployment
+## Start here
 
-- **Roomote Cloud** is the fastest way to get started. Your deployment remains
-  isolated while Roomote manages hosting, networking, sandboxes, and upgrades.
-- **Railway** and **Render** provision the application, PostgreSQL, and Redis
-  from a template so you can run Roomote on managed infrastructure you control.
-- **Your own server** gives you the most infrastructure control with the
-  one-command installer below.
+A **homelab deployment is a self-hosted deployment**. Choose the row that
+matches where Roomote will run:
 
-Running Roomote on Proxmox or another server at home? Follow the
-[Homelab deployment guide](/homelab) for VM sizing, Tailscale administration,
-public ingress, and a prompt that a local agent can follow.
+| Where you want to run Roomote | Start with |
+| --- | --- |
+| A Proxmox VM, home server, or other Linux host on your local network | [Homelab deployment](/homelab) for sizing, private administration, and public ingress |
+| A fresh Ubuntu or Debian VPS or server | [One-command install](#one-command-install) on that host |
+| Railway or Render in your own account | The deployment buttons above |
+| A Mac or Windows computer for evaluation | [Agent-guided installation](/self-hosting/agent-installation), which creates or reuses a full Linux VM |
+| A source checkout because you plan to modify Roomote itself | [Local development](/local-development), not this deployment guide |
 
-By the end of setup, you should have a reachable Roomote URL, sign-in, and
-managed Roomote inference or a connected inference provider. Repository access,
-an environment, and a first reviewable task are optional until you choose coding
-work.
+If you do not want to operate infrastructure, use
+[Roomote Cloud](https://cloud.roomote.dev/sign-up) instead. That is the hosted
+product, not a self-hosted or homelab deployment.
+
+## Before you install
+
+Have the required items ready before running an installer:
+
+- a dedicated x86_64 or arm64 Ubuntu or Debian host with at least 4 GB of RAM;
+  use more memory when the same host will run coding sandboxes
+- a public HTTPS origin that browsers and provider callbacks can reach; the
+  installer can create a temporary hostname for a short evaluation on a server
+  with a directly reachable public IPv4 address
+- a sign-in provider for the people who will use the deployment
+- a ChatGPT subscription or inference provider API key, such as OpenRouter,
+  Anthropic, or OpenAI
+
+These are optional until you want the corresponding workflow:
+
+- a source-control provider account and repository access for repository work
+- a configured sandbox provider and environment for coding tasks
+- a communications-provider workspace for starting and following work from chat
+
+## What a completed setup includes
+
+Installing the containers is only the first step. A usable deployment has:
+
+1. healthy services and a reachable public Roomote URL
+2. a first administrator who can sign in
+3. working model inference
+4. source control and a sandbox provider when Roomote will perform coding work
+5. one small successful Roomote task that verifies the intended workflow
+
+The browser setup conversation walks through these choices after installation.
+You can skip source control, sandboxes, and communications when you only need
+integration-based or conversational work, then add them later in Settings.
 
 The canonical, always up-to-date guide for operating your own server lives in
 [`SELF_HOSTING.md`](https://github.com/RooCodeInc/Roomote/blob/main/SELF_HOSTING.md)
@@ -79,22 +103,6 @@ curl -fsSL https://get.roomote.dev -o install.sh
 less install.sh
 sudo bash install.sh
 ```
-
-## Setup checklist
-
-Have these ready before setup asks for them:
-
-- a public HTTPS URL for the deployment, especially when source-control or chat
-  callbacks need to reach it
-- a sign-in provider for the people who will use the deployment
-- a source-control provider account with permission to install or configure the
-  app, if Roomote should work on repositories
-- a ChatGPT subscription or inference provider API key, such as OpenRouter,
-  Anthropic, or OpenAI, unless your host already provisioned Roomote inference
-- a communications provider workspace, such as Slack, Microsoft Teams,
-  Telegram, or Discord, if your team wants to start work from chat
-- at least one repository that can become the first Roomote environment, if you
-  want to launch coding work during setup
 
 ## Day-2 operations
 
@@ -245,17 +253,6 @@ Roomote surfaces release history and available updates in the web app:
   Caddy container as the HTTPS entrypoint for your app and preview domains, and
   runs the containerized stack in production mode with per-install secrets
   (locally or on a server).
-
-## Requirements
-
-- Managed Roomote inference from an eligible host, or a ChatGPT subscription or
-  inference provider API key (OpenRouter, Anthropic, OpenAI, and others).
-- An account with a supported source-control provider. For GitHub, the setup
-  conversation creates the GitHub App; other providers use their documented
-  OAuth or credential flow.
-- For Slack, Microsoft Teams, Telegram, and Discord: a workspace or server where
-  you can install an app or bot; the setup assistant prefills the Slack app
-  manifest and creates Discord's installation link for you.
 
 ## Verify the deployment
 
