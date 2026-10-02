@@ -65,6 +65,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
     await expect(
       launchTask({
         prompt: 'Investigate the issue',
+        initialPromptSource: 'human',
         environmentId: null,
         parentSessionId: 'missing-parent',
         postKickoff,
@@ -86,7 +87,6 @@ describe('createFastAgentSlackTaskLauncher', () => {
       channelId: 'C123',
       threadTs: '100.001',
       messageId: '100.002',
-      visibleInTranscript: true,
     });
     const order: string[] = [];
     const postKickoff = vi.fn(async () => {
@@ -108,6 +108,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
     await expect(
       launchTask({
         prompt: '$review-code Add a regression test',
+        initialPromptSource: 'human',
         environmentId: 'env-1',
         branch: 'feature/source-branch',
         launchIdempotencyKey: 'artifact-build:launch-1',
@@ -128,7 +129,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
           payload: {
             repo: ALL_REPOSITORIES,
             description: '$review-code Add a regression test',
-            visibleInTranscript: true,
+            initialPromptSource: 'human',
             communicationProvider: 'slack',
             communicationTeamId: 'T123',
             communicationTeamDomain: 'acme',
@@ -193,6 +194,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
       threadTs: '100.001',
     })({
       prompt: 'Investigate the report',
+      initialPromptSource: 'human',
       environmentId: null,
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff: vi.fn(),
@@ -212,17 +214,17 @@ describe('createFastAgentSlackTaskLauncher', () => {
     ).not.toHaveProperty('visibleInTranscript');
   });
 
-  it('preserves an explicit hidden prompt-origin choice', async () => {
+  it('preserves generated initial-prompt authorship', async () => {
     const launchTask = createFastAgentSlackTaskLauncher({
       userId: 'user-1',
       teamId: 'T123',
       channelId: 'C123',
       threadTs: '100.001',
-      visibleInTranscript: false,
     });
 
     await launchTask({
       prompt: '$sentry-triage generated suggestion context',
+      initialPromptSource: 'generated',
       environmentId: null,
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff: vi.fn(),
@@ -230,9 +232,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
 
     expect(
       mocks.enqueueTask.mock.calls.at(-1)?.[0]?.task.payload,
-    ).toMatchObject({
-      visibleInTranscript: false,
-    });
+    ).toMatchObject({ initialPromptSource: 'generated' });
   });
 
   it('supports platform-event launches without a human message ID', async () => {
@@ -245,6 +245,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
 
     await launchTask({
       prompt: 'Investigate separately',
+      initialPromptSource: 'human',
       environmentId: null,
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff: vi.fn(),
@@ -269,6 +270,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
 
     await launchTask({
       prompt: 'Update every repository',
+      initialPromptSource: 'human',
       environmentId: ALL_REPOSITORIES,
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff: vi.fn(),
@@ -290,6 +292,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
 
     await launchTask({
       prompt: 'Create an artifact without source code',
+      initialPromptSource: 'human',
       environmentId: NO_REPOSITORIES,
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff: vi.fn(),
@@ -315,6 +318,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
 
     await launchTask({
       prompt: 'Implement the UI shown in these screenshots',
+      initialPromptSource: 'human',
       images,
       environmentId: null,
       parentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -357,6 +361,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
 
     await launchTask({
       prompt: 'Add a regression test',
+      initialPromptSource: 'human',
       environmentId: null,
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff: vi.fn(async () => {
@@ -411,6 +416,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
     await expect(
       launchTask({
         prompt: 'Add a regression test',
+        initialPromptSource: 'human',
         environmentId: null,
         parentSessionId: '11111111-1111-4111-8111-111111111111',
         postKickoff: vi.fn(),
@@ -433,6 +439,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
       rendersTaskLink: true,
     })({
       prompt: 'Add a regression test',
+      initialPromptSource: 'human',
       environmentId: null,
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff,
@@ -470,6 +477,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
     await expect(
       launchTask({
         prompt: 'Add a regression test',
+        initialPromptSource: 'human',
         environmentId: null,
         parentSessionId: '11111111-1111-4111-8111-111111111111',
         postKickoff: vi.fn(),
@@ -503,6 +511,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
     await expect(
       launchTask({
         prompt: 'Add a regression test',
+        initialPromptSource: 'human',
         environmentId: null,
         parentSessionId: '11111111-1111-4111-8111-111111111111',
         postKickoff,
@@ -542,6 +551,7 @@ describe('createFastAgentWebTaskLauncher', () => {
       userId: 'user-1',
     })({
       prompt: 'Fix checkout',
+      initialPromptSource: 'human',
       environmentId: null,
       branch: 'feature/source-branch',
       launchIdempotencyKey: 'artifact-build:launch-1',
@@ -593,6 +603,7 @@ describe('createFastAgentWebTaskLauncher', () => {
 
     await createFastAgentWebTaskLauncher({ userId: 'user-1' })({
       prompt: 'Handle private context',
+      initialPromptSource: 'human',
       environmentId: null,
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff: vi.fn(),

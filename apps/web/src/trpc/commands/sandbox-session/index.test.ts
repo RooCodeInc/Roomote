@@ -440,6 +440,17 @@ describe('restoreSnapshotResumeVisiblePromptFields', () => {
     expect(payload.visibleInTranscript).toBe(false);
   });
 
+  it('restores initial prompt authorship when missing from snapshot resumes', () => {
+    const payload: Record<string, unknown> = { text: 'Existing prompt' };
+
+    restoreSnapshotResumeVisiblePromptFields(payload, {
+      text: 'Source prompt',
+      initialPromptSource: 'generated',
+    });
+
+    expect(payload.initialPromptSource).toBe('generated');
+  });
+
   it('restores reasoningEffort when missing from snapshot resumes', () => {
     const payload: Record<string, unknown> = {
       text: 'Existing prompt',

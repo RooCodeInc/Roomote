@@ -711,7 +711,7 @@ async function processDeployment(
             suggestionSource: config.suggestionSource ?? config.automationKey,
             historicalThreadFeedbackDebugSnippet:
               recentThreadFeedback.debugSnippet,
-            visibleInTranscript: false,
+            initialPromptSource: 'generated',
           },
         },
         initiator: { kind: 'automation', key: config.automationKey },

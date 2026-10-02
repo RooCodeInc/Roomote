@@ -319,7 +319,7 @@ export async function launchActWorkItems(params: {
                     discordTaskThread: Boolean(workItemChatTarget.threadId),
                   }
                 : {}),
-              visibleInTranscript: false,
+              initialPromptSource: 'generated',
             },
           },
           initiator: { kind: 'automation', key: params.automationKey },

@@ -42,9 +42,17 @@ vi.mock('../webhook-gate.js', () => ({
 
 import {
   buildTelegramTaskTopicName,
-  launchTelegramTask,
+  launchTelegramTask as launchTelegramTaskImpl,
   shouldCreateTelegramTaskTopic,
 } from '../task-launch';
+
+type LaunchTelegramTaskInput = Parameters<typeof launchTelegramTaskImpl>[0];
+function launchTelegramTask(
+  input: Omit<LaunchTelegramTaskInput, 'initialPromptSource'> &
+    Partial<Pick<LaunchTelegramTaskInput, 'initialPromptSource'>>,
+) {
+  return launchTelegramTaskImpl({ initialPromptSource: 'human', ...input });
+}
 
 describe('Telegram task topic launch', () => {
   beforeEach(() => {
@@ -99,7 +107,7 @@ describe('Telegram task topic launch', () => {
           replyTarget: { channelId: '555' },
         },
       },
-      visibleInTranscript: false,
+      initialPromptSource: 'generated',
       beforeEnqueue,
     });
 
@@ -110,7 +118,7 @@ describe('Telegram task topic launch', () => {
           payload: expect.objectContaining({
             reportConsumer: 'orchestrator',
             fastAgentSessionId: '66666666-6666-4666-8666-666666666666',
-            visibleInTranscript: false,
+            initialPromptSource: 'generated',
             fastAgentParent: expect.objectContaining({
               sessionId: '66666666-6666-4666-8666-666666666666',
             }),

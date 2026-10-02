@@ -129,6 +129,7 @@ describe('automated Slack message mentions', () => {
         userId: 'USER_INSTALLER',
         teamId: 'T123',
         directedAtRoomote: true,
+        turnSource: 'platform_event',
         event: expect.objectContaining({
           channel: 'C123',
           user: 'U_INSTALLER',
@@ -142,7 +143,6 @@ describe('automated Slack message mentions', () => {
           key: 'slack_channel_auto_start',
           actor: { externalId: 'U_WORKFLOW' },
         },
-        visibleInTranscript: false,
       }),
     );
     expect(mocks.startTask).not.toHaveBeenCalled();

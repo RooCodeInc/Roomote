@@ -142,8 +142,7 @@ export async function processDiscordFastAgentMessage(
      * turns pass their automation initiator so delegated work keeps automation
      * provenance instead of appearing installer-initiated. */
     delegatedTaskInitiator?: TaskInitiator;
-    /** Visibility comes from the entry surface, not the delegated task initiator. */
-    visibleInTranscript?: boolean;
+    turnSource?: 'human' | 'platform_event';
     onAccepted?: (abort: () => Promise<void>) => void;
     onRejected?: () => void;
   } & DiscordFastAgentSource,
@@ -423,6 +422,7 @@ export async function processDiscordFastAgentMessage(
       apiBaseUrl,
       conversation,
       currentMessageId: anchorMessageId ?? input.interaction?.interaction.id,
+      ...(input.turnSource ? { turnSource: input.turnSource } : {}),
       signal: activeTurnLock.signal,
       ...(durableTurnForResume
         ? { durableAdmission: { eventId: durableTurnForResume.id } }
@@ -471,6 +471,7 @@ export async function processDiscordFastAgentMessage(
           }),
         launchTask: async ({
           prompt,
+          initialPromptSource,
           environmentId,
           model,
           parentSessionId,
@@ -507,9 +508,7 @@ export async function processDiscordFastAgentMessage(
             applicationId: input.applicationId,
             requesterDiscordUserId: input.sender.id,
             launchOwnerUserId: input.senderUserId,
-            ...(input.visibleInTranscript !== undefined
-              ? { visibleInTranscript: input.visibleInTranscript }
-              : {}),
+            initialPromptSource,
             ...(input.delegatedTaskInitiator
               ? { initiator: input.delegatedTaskInitiator }
               : {}),

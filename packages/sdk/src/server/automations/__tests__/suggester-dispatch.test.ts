@@ -107,7 +107,7 @@ describe('dispatchSuggestionScan', () => {
           requiresTerminalCloseoutWithoutTurn: true,
           slackChannel: 'C123SUGGEST',
           suggestionSource: 'suggest_ideas',
-          visibleInTranscript: false,
+          initialPromptSource: 'generated',
         },
       },
       initiator: { kind: 'automation', key: 'suggester' },

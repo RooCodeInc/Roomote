@@ -410,7 +410,7 @@ async function handleSuggestionLaunchCallback(params: {
             const launched = await launchTelegramTask({
               launchOwnerUserId: senderUserId,
               queuedMessage,
-              visibleInTranscript: false,
+              initialPromptSource: 'generated',
               metadata: {
                 communicationProvider: 'telegram',
                 communicationChannelId: chatId,

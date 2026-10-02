@@ -88,6 +88,13 @@ function getTaskRunPromptVisibility(
 
   if (
     !explicitSnapshotResumePrompt &&
+    taskRun.payload.initialPromptSource !== undefined
+  ) {
+    return taskRun.payload.initialPromptSource === 'human';
+  }
+
+  if (
+    !explicitSnapshotResumePrompt &&
     typeof taskRun.payload.visibleInTranscript === 'boolean'
   ) {
     return taskRun.payload.visibleInTranscript;

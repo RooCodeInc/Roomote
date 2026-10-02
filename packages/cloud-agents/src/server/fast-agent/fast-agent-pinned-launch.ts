@@ -392,6 +392,7 @@ async function launchInSession(
     });
     launch = await launchTask({
       prompt,
+      initialPromptSource: task.payload.initialPromptSource ?? 'human',
       environmentId: task.payload.environmentId ?? null,
       model: null,
       parentSessionId: target.id,

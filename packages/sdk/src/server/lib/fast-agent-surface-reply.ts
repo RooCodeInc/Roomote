@@ -316,7 +316,6 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             : {}),
           channelId: conversation.replyTarget.channelId,
           threadTs: threadId,
-          visibleInTranscript: true,
         }),
         postReply: async ({
           message,

@@ -270,12 +270,14 @@ export async function launchTask(
       return c.json({ error: 'prompt is required' }, 400);
     }
 
-    const visibleInTranscript =
+    const initialPromptSource =
       typeof body.visibleInTranscript === 'boolean'
         ? body.visibleInTranscript
+          ? ('human' as const)
+          : ('generated' as const)
         : body.hidden === true
-          ? false
-          : (taskTypePayload.visibleInTranscript ?? true);
+          ? ('generated' as const)
+          : taskTypePayload.initialPromptSource;
 
     const workspacePayload =
       body.repo === NO_REPOSITORIES
@@ -316,7 +318,7 @@ export async function launchTask(
       branch: body.branch,
       sha: body.sha,
       description: taskTypePayload.taskPrompt,
-      visibleInTranscript,
+      initialPromptSource,
       reasoningEffort: body.reasoningEffort,
       ...(harnessSelection.harnessModelOverrides
         ? { harnessModelOverrides: harnessSelection.harnessModelOverrides }

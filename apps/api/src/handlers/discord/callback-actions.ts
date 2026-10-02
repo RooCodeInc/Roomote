@@ -377,7 +377,7 @@ async function launchClaimedDiscordSuggestion(input: {
               input.triggerId,
             ),
             createAnchoredThread: false,
-            visibleInTranscript: false,
+            turnSource: 'platform_event',
           });
           return fastStart.accepted
             ? {
@@ -469,7 +469,7 @@ async function launchClaimedDiscordSuggestion(input: {
               applicationId: input.applicationId,
               requesterDiscordUserId: input.sender.id,
               launchOwnerUserId: input.senderUserId,
-              visibleInTranscript: false,
+              initialPromptSource: 'generated',
               queuedMessage,
               metadata,
               channel: launchChannel,
