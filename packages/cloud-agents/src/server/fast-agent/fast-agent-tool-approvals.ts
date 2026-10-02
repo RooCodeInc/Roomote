@@ -43,6 +43,7 @@ import {
   describeIntegrationToolAutoDeny,
   resolveIntegrationToolAutoDecision,
   resolveIntegrationToolAutoState,
+  type IntegrationToolAutoOwner,
   type IntegrationToolAutoSessionContext,
   type IntegrationToolAutoToolResult,
 } from '../integration-tool-auto-evaluation';
@@ -467,6 +468,11 @@ export function createFastAgentToolApprovalBridge(input: {
    * oldest first, so Auto can tell what an identifier in a call refers to.
    */
   resolveRecentToolResults?: () => Promise<IntegrationToolAutoToolResult[]>;
+  /**
+   * Who the session owner is, when they wrote every message in the session,
+   * so Auto can tell a call that names them from one that names somebody else.
+   */
+  resolveSessionOwner?: () => Promise<IntegrationToolAutoOwner | undefined>;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   /**
@@ -763,6 +769,7 @@ export function createFastAgentToolApprovalBridge(input: {
         agentMessage,
         toolRejectedInSession,
         recentToolResults,
+        owner,
       ] = autoAssessed
         ? await Promise.all([
             input.resolveSessionUserMessages?.() ?? [],
@@ -786,11 +793,14 @@ export function createFastAgentToolApprovalBridge(input: {
             // names an identifier nothing else shows asks. Undefined when
             // this bridge was not given a way to read results at all.
             input.resolveRecentToolResults?.().catch(() => []),
+            // Context only: a failed lookup leaves the owner unnamed.
+            input.resolveSessionOwner?.().catch(() => undefined),
           ])
-        : [[], [], undefined, false, undefined];
+        : [[], [], undefined, false, undefined, undefined];
       const sessionContext: IntegrationToolAutoSessionContext | undefined =
         autoAssessed
           ? {
+              ...(owner ? { owner } : {}),
               recentUserMessages,
               explicitApprovalOutcomes,
               ...(agentMessage ? { agentMessageRepliedTo: agentMessage } : {}),

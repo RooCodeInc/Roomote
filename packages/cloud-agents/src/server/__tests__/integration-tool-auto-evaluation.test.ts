@@ -44,6 +44,7 @@ import {
   RISK_LEVELS,
   type AutoRiskAnswers,
 } from '../integration-tool-auto-evaluation';
+import { findArgumentsNamingOwner } from '../integration-tool-auto-identifiers';
 
 const routine: AutoRiskAnswers = {
   risk: { score: 0.1, confidence: 0.9 },
@@ -185,6 +186,51 @@ describe('findUnverifiedIdentifier', () => {
         evidence,
       ),
     ).toBeUndefined();
+  });
+});
+
+describe('findArgumentsNamingOwner', () => {
+  const owner = { name: 'Priya Raman', email: 'priya.raman@ourco.com' };
+
+  it('finds the values that are exactly the owner’s name or email', () => {
+    expect(
+      findArgumentsNamingOwner(
+        { id: 'ENG-7', assignee: 'priya  raman' },
+        owner,
+      ),
+    ).toEqual(['priya  raman']);
+    expect(
+      findArgumentsNamingOwner(
+        {
+          to: ['Priya.Raman@ourco.com', 'all-hands@ourco.com'],
+          cc: ['Priya Raman <priya.raman@ourco.com>'],
+          message: { channel: '@Priya Raman' },
+        },
+        owner,
+      ),
+    ).toEqual([
+      'Priya.Raman@ourco.com',
+      'Priya Raman <priya.raman@ourco.com>',
+      '@Priya Raman',
+    ]);
+  });
+
+  it('does not take a look-alike, a part of the name, or a mention for the owner', () => {
+    expect(
+      findArgumentsNamingOwner(
+        {
+          assignee: 'Priya Ramanathan',
+          reviewer: 'Priya',
+          to: ['priya.raman@ourco.co', 'Sam <priya.raman@ourco.com.example>'],
+          body: 'Ask Priya Raman about it.',
+        },
+        owner,
+      ),
+    ).toEqual([]);
+    expect(findArgumentsNamingOwner({ assignee: 'Priya Raman' }, {})).toEqual(
+      [],
+    );
+    expect(findArgumentsNamingOwner(null, owner)).toEqual([]);
   });
 });
 
@@ -1217,6 +1263,77 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(questions.guidanceFlagsRisk.criteria.false).toContain(
       'outside the place or kind of thing the guidance limits itself to',
     );
+  });
+
+  it('says who the owner is, and which arguments name them, only when the caller knows', async () => {
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    const assign = {
+      ...call,
+      toolName: 'update_issue',
+      args: { id: 'ENG-7', assignee: 'Priya Raman' },
+      userRequest: 'yes, go ahead',
+    };
+    const said = {
+      recentUserMessages: ['Which issues are stale?', 'yes, go ahead'],
+      agentMessageRepliedTo: 'ENG-7 is stale. I can reassign it to you.',
+    };
+    await evaluateIntegrationToolAutoDecision({
+      ...assign,
+      sessionContext: {
+        ...said,
+        owner: { name: ' Priya Raman ', email: 'priya.raman@ourco.com' },
+      },
+    });
+    const told = mocks.evaluate.mock.calls[0]![0];
+    expect(told.state.sessionContext.owner).toEqual({
+      name: 'Priya Raman',
+      email: 'priya.raman@ourco.com',
+    });
+    // Compared in code, so the model need not judge a look-alike.
+    expect(told.state.call.ownerNamedAs).toEqual(['Priya Raman']);
+    for (const question of [
+      told.questions.userAuthorized,
+      told.questions.agreedToPlan,
+    ]) {
+      expect(question.instructions).toContain(
+        '`sessionContext.owner` is the session owner',
+      );
+      expect(question.instructions).toContain(
+        'A call that names somebody else where the owner meant themselves',
+      );
+    }
+    expect(told.questions.matchesRequest.instructions).not.toContain(
+      'sessionContext.owner',
+    );
+
+    // A call that names somebody else: the fact says nobody matched.
+    await evaluateIntegrationToolAutoDecision({
+      ...assign,
+      args: { id: 'ENG-7', assignee: 'Priya Ramanathan' },
+      sessionContext: { ...said, owner: { name: 'Priya Raman' } },
+    });
+    expect(mocks.evaluate.mock.calls[1]![0].state.call.ownerNamedAs).toEqual(
+      [],
+    );
+
+    // Nobody said who the owner is (other people wrote in the session, or
+    // the lookup failed): the questions and the state are as before.
+    for (const owner of [undefined, { name: '  ', email: '' }]) {
+      mocks.evaluate.mockClear();
+      await evaluateIntegrationToolAutoDecision({
+        ...assign,
+        sessionContext: { ...said, ...(owner ? { owner } : {}) },
+      });
+      const plain = mocks.evaluate.mock.calls[0]![0];
+      expect(plain.state.sessionContext).not.toHaveProperty('owner');
+      expect(plain.state.call).not.toHaveProperty('ownerNamedAs');
+      expect(plain.questions.userAuthorized).toEqual(
+        INTEGRATION_TOOL_AUTO_QUESTIONS.userAuthorized,
+      );
+      expect(plain.questions.agreedToPlan).toEqual(
+        INTEGRATION_TOOL_AUTO_QUESTIONS.agreedToPlan,
+      );
+    }
   });
 
   it('asks when no model or a failed evaluation leaves Auto unable to check', async () => {

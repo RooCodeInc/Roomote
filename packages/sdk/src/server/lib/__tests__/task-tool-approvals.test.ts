@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   suspended: vi.fn(async () => false),
   suspend: vi.fn(async () => true),
   latestUserRequest: vi.fn(async () => undefined as string | undefined),
+  autoOwner: vi.fn(async () => undefined as unknown),
   taskContext: vi.fn(
     async () => ({ recentUserMessages: [], recentToolResults: [] }) as unknown,
   ),
@@ -80,6 +81,7 @@ vi.mock('@roomote/db/server', () => ({
   expireIntegrationToolApproval: mocks.expire,
   fingerprintIntegrationToolCall: (input: unknown) => JSON.stringify(input),
   findLatestTaskUserRequest: mocks.latestUserRequest,
+  getIntegrationToolAutoOwner: mocks.autoOwner,
   resolveTaskIntegrationToolAutoContext: mocks.taskContext,
   listRecentIntegrationToolApprovalOutcomes: mocks.outcomes,
   hasRejectedIntegrationToolInSession: mocks.toolRejected,
@@ -133,6 +135,7 @@ beforeEach(() => {
   mocks.isPresent.mockResolvedValue(true);
   mocks.suspended.mockResolvedValue(false);
   mocks.latestUserRequest.mockResolvedValue(undefined);
+  mocks.autoOwner.mockResolvedValue(undefined);
   mocks.taskContext.mockResolvedValue({
     recentUserMessages: [],
     recentToolResults: [],
@@ -307,6 +310,52 @@ describe('requestTaskToolApproval', () => {
     mocks.delegated.mockResolvedValue(true);
     await expect(isSessionLaunchedTask('task-2')).resolves.toBe(true);
     expect(mocks.delegated).toHaveBeenCalledWith('session-1', 'task-2');
+  });
+
+  it('names the owner to Auto only when they wrote every request shown', async () => {
+    mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
+    const owner = { name: 'Priya Raman', email: 'priya.raman@ourco.example' };
+    mocks.autoOwner.mockResolvedValue(owner);
+    const sessionContexts = () =>
+      (
+        mocks.resolveAuto.mock.calls as unknown as [
+          { sessionContext: Record<string, unknown> },
+        ][]
+      ).map(([call]) => call.sessionContext);
+    const context = {
+      userRequest: 'Assign ENG-1 to me.',
+      recentUserMessages: ['Assign ENG-1 to me.'],
+      recentToolResults: [],
+    };
+
+    mocks.taskContext.mockResolvedValue({
+      ...context,
+      requestsWrittenBy: 'owner-1',
+    });
+    await requestTaskToolApproval(ask);
+    expect(mocks.autoOwner).toHaveBeenCalledWith('owner-1');
+    expect(sessionContexts()[0]).toMatchObject({ owner });
+
+    // Somebody else wrote a request, or nobody knows who did: "me" in the
+    // requests is not known to be the owner, so the owner is not named.
+    for (const requestsWrittenBy of ['a-teammate', undefined]) {
+      mocks.autoOwner.mockClear();
+      mocks.resolveAuto.mockClear();
+      mocks.taskContext.mockResolvedValue({ ...context, requestsWrittenBy });
+      await requestTaskToolApproval(ask);
+      expect(mocks.autoOwner).not.toHaveBeenCalled();
+      expect(sessionContexts()[0]).not.toHaveProperty('owner');
+    }
+
+    // A failed lookup leaves the owner unnamed; the call is still assessed.
+    mocks.resolveAuto.mockClear();
+    mocks.taskContext.mockResolvedValue({
+      ...context,
+      requestsWrittenBy: 'owner-1',
+    });
+    mocks.autoOwner.mockRejectedValue(new Error('db down'));
+    await requestTaskToolApproval(ask);
+    expect(sessionContexts()[0]).not.toHaveProperty('owner');
   });
 
   it("shows Auto what the server says the tool does, listing a run's server once", async () => {

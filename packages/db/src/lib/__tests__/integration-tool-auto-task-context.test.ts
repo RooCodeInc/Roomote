@@ -278,6 +278,8 @@ describe('resolveTaskIntegrationToolAutoContext', () => {
     ).resolves.toEqual({
       userRequest: 'File the bug.',
       recentUserMessages: ['File the bug.'],
+      // The person who launched it wrote the only request.
+      requestsWrittenBy: owner,
       recentToolResults: [],
     });
 
@@ -292,6 +294,53 @@ describe('resolveTaskIntegrationToolAutoContext', () => {
       'File the bug.',
       'Also assign it to me.',
     ]);
+    expect(later.requestsWrittenBy).toBe(owner);
+
+    // Somebody else then writes to the task: "me" is no longer one person.
+    await taskMessage({
+      ts: 9_500,
+      text: 'And cc me on it.',
+      metadata: { userId: 'a-teammate', source: 'slack' },
+    });
+    await expect(
+      resolveTaskIntegrationToolAutoContext(context),
+    ).resolves.not.toHaveProperty('requestsWrittenBy');
+  });
+
+  it('names the one person who wrote every request to the session and the task', async () => {
+    const { context, owner, sessionMessage, taskMessage } = await seed({
+      origin: 'fast_delegation',
+      prompt: 'Assign ENG-1 to the requester.',
+      withConversation: true,
+    });
+    const fromOwner = { turnSource: 'human', userId: owner };
+    await sessionMessage({
+      ts: 1_000,
+      text: 'Assign ENG-1 to me.',
+      metadata: fromOwner,
+    });
+    // The agent wrote the launch prompt, so it has no author to count.
+    await expect(
+      resolveTaskIntegrationToolAutoContext(context),
+    ).resolves.toMatchObject({
+      userRequest: 'Assign ENG-1 to me.',
+      requestsWrittenBy: owner,
+    });
+
+    await taskMessage({
+      ts: 4_000,
+      text: 'ENG-2 as well.',
+      metadata: { userId: owner, source: 'web' },
+    });
+    await expect(
+      resolveTaskIntegrationToolAutoContext(context),
+    ).resolves.toMatchObject({ requestsWrittenBy: owner });
+
+    // A session prompt whose sender is not recorded could be anybody's.
+    await sessionMessage({ ts: 5_000, text: 'And ENG-3 to me.' });
+    await expect(
+      resolveTaskIntegrationToolAutoContext(context),
+    ).resolves.not.toHaveProperty('requestsWrittenBy');
   });
 
   it('has nothing to judge against for a task outside the session', async () => {

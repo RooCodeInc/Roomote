@@ -125,6 +125,49 @@ export function findUnverifiedIdentifier(
   return visit('', args, 0);
 }
 
+const MAX_OWNER_VALUES = 10;
+
+/**
+ * The argument values that are exactly the owner's name or email, compared
+ * in code so a look-alike (a longer name, another domain) is never taken for
+ * the owner. A leading "@" and a "Name <email>" form are read as the name or
+ * the address they carry.
+ */
+export function findArgumentsNamingOwner(
+  args: unknown,
+  owner: { name?: string; email?: string },
+): string[] {
+  const normalize = (text: string) =>
+    text.trim().replace(/^@/, '').replace(/\s+/g, ' ').toLowerCase();
+  const names = [owner.name, owner.email]
+    .filter((value): value is string => typeof value === 'string')
+    .map(normalize)
+    .filter((value) => value.length >= 2);
+  if (names.length === 0) return [];
+  const found = new Set<string>();
+  const visited = new WeakSet<object>();
+  const visit = (value: unknown, depth: number): void => {
+    if (depth > 5 || found.size >= MAX_OWNER_VALUES) return;
+    if (typeof value === 'string') {
+      if (value.length > 400) return;
+      const address = /<([^<>\s]+@[^<>\s]+)>\s*$/.exec(value)?.[1];
+      if (
+        names.includes(normalize(value)) ||
+        (address !== undefined && names.includes(normalize(address)))
+      ) {
+        found.add(value);
+      }
+      return;
+    }
+    if (!value || typeof value !== 'object' || visited.has(value)) return;
+    visited.add(value);
+    const entries = Array.isArray(value) ? value : Object.values(value);
+    for (const entry of entries.slice(0, 50)) visit(entry, depth + 1);
+  };
+  visit(args, 0);
+  return [...found];
+}
+
 /**
  * The same three questions, worded for a caller that supplies what the agent
  * read in the session (`sessionContext.recentToolResults`): an identifier in

@@ -5,6 +5,7 @@ import {
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
   getIntegrationToolApproval,
+  getIntegrationToolAutoOwner,
   findLatestTaskUserRequest,
   getSessionForTask,
   hasRejectedIntegrationToolInSession,
@@ -402,9 +403,18 @@ async function resolveTaskAutoContext(input: {
     context?.userRequest ??
     toIntegrationToolUserRequest(input.reportedUserRequest) ??
     (await findLatestTaskUserRequest(input.taskId).catch(() => undefined));
+  // Named only when the owner wrote every request shown, so "me" in them is
+  // the owner. A failed lookup leaves the owner unnamed, as before.
+  const owner =
+    context?.requestsWrittenBy === input.ownerUserId
+      ? await getIntegrationToolAutoOwner(input.ownerUserId).catch(
+          () => undefined,
+        )
+      : undefined;
   return {
     userRequest,
     sessionContext: {
+      ...(owner ? { owner } : {}),
       recentUserMessages: context?.recentUserMessages ?? [],
       explicitApprovalOutcomes,
       ...(context?.agentMessageRepliedTo

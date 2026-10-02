@@ -98,6 +98,7 @@ import {
   touchSessionActivity,
   withEnvironmentVerificationRetryLock,
   resolveEffectiveModelRuntimeEnv,
+  resolveSessionIntegrationToolAutoOwner,
   fastAgentConversations,
 } from '@roomote/db/server';
 import { captureInstanceEvent } from '@roomote/telemetry/server';
@@ -6806,6 +6807,13 @@ export async function answerFastAgentQuestion({
                         findRecentFastAgentToolResults({
                           conversationId: session.id,
                         }),
+                      resolveSessionOwner: async () =>
+                        toolApprovalOwnerUserId
+                          ? resolveSessionIntegrationToolAutoOwner({
+                              conversationId: session.id,
+                              ownerUserId: toolApprovalOwnerUserId,
+                            })
+                          : undefined,
                       signal: promptSignal,
                       // Auto stopped for this session: say so in the thread
                       // and end the turn. The notice closes the instruction,

@@ -11,6 +11,7 @@ import {
 } from '@roomote/types';
 
 import { db } from '../db';
+import { findSessionPromptSenders } from './integration-tool-auto-owner';
 import {
   fastAgentMessages,
   sessions,
@@ -49,6 +50,11 @@ export type TaskIntegrationToolAutoContext = {
   }>;
   /** What the task's agent read since a person last sent it a prompt. */
   readContent?: string;
+  /**
+   * The one person who wrote every request in `recentUserMessages`, when
+   * that is known: "me" in those requests is then this person.
+   */
+  requestsWrittenBy?: string;
 };
 
 type Request = {
@@ -56,6 +62,8 @@ type Request = {
   text: string;
   from: 'session' | 'task' | 'launch';
   eventId?: string;
+  /** Who sent it, where the row says. Session prompts are looked up apart. */
+  userId?: string;
 };
 
 function textOf(
@@ -115,6 +123,7 @@ async function listTaskHumanPrompts(taskId: string): Promise<Request[]> {
       ts: taskMessages.ts,
       contentBlocks: taskMessages.contentBlocks,
       payload: taskMessages.payload,
+      userId: sql<string | null>`${taskMessages.metadata}->>'userId'`,
     })
     .from(taskMessages)
     .where(
@@ -131,7 +140,16 @@ async function listTaskHumanPrompts(taskId: string): Promise<Request[]> {
     const text = toIntegrationToolUserRequest(
       textOf(row.contentBlocks, row.payload),
     );
-    return text ? [{ ts: row.ts, text, from: 'task' as const }] : [];
+    return text
+      ? [
+          {
+            ts: row.ts,
+            text,
+            from: 'task' as const,
+            ...(row.userId ? { userId: row.userId } : {}),
+          },
+        ]
+      : [];
   });
 }
 
@@ -339,6 +357,7 @@ export async function resolveTaskIntegrationToolAutoContext(input: {
       fastConversationId: sessions.fastConversationId,
       prompt: tasks.prompt,
       createdAt: tasks.createdAt,
+      initiatorUserId: tasks.initiatorUserId,
     })
     .from(sessionTasks)
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
@@ -374,6 +393,7 @@ export async function resolveTaskIntegrationToolAutoContext(input: {
             ts: link.createdAt.getTime(),
             text: launchPrompt,
             from: 'launch' as const,
+            ...(link.initiatorUserId ? { userId: link.initiatorUserId } : {}),
           },
         ]
       : []),
@@ -400,9 +420,28 @@ export async function resolveTaskIntegrationToolAutoContext(input: {
     });
   }
 
+  // One sender for the whole session conversation, checked over every
+  // prompt in it; the task's own prompts and its launch each name theirs.
+  const sessionSenders =
+    conversationId && sessionPrompts.length > 0
+      ? await findSessionPromptSenders(conversationId)
+      : undefined;
+  const authors = [
+    ...(sessionSenders
+      ? [sessionSenders.kind === 'one' ? sessionSenders.userId : undefined]
+      : []),
+    ...requests
+      .filter((request) => request.from !== 'session')
+      .map((request) => request.userId),
+  ];
+  const [author] = authors;
+  const requestsWrittenBy =
+    author && authors.every((other) => other === author) ? author : undefined;
+
   return {
     ...(latest ? { userRequest: latest.text } : {}),
     recentUserMessages: requests.map((request) => request.text),
+    ...(requestsWrittenBy ? { requestsWrittenBy } : {}),
     ...(agentMessageRepliedTo ? { agentMessageRepliedTo } : {}),
     recentToolResults: [
       ...(delegated && launchPrompt
