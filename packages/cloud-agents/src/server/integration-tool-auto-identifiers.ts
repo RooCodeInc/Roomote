@@ -3,9 +3,15 @@ import {
   redactIntegrationToolArgs,
 } from '@roomote/types';
 
-const MAX_SESSION_TOOL_RESULTS = 8;
-const MAX_SESSION_TOOL_RESULT_LENGTH = 1_500;
-const MAX_SESSION_TOOL_RESULTS_LENGTH = 6_000;
+/**
+ * Enough results, and enough of each, that a lookup is still in view when
+ * the agent uses what it found: it often looks a person or an item up in a
+ * long listing, makes a few more calls, and then uses the id from that
+ * listing. The total below bounds what is shown, newest first.
+ */
+const MAX_SESSION_TOOL_RESULTS = 20;
+const MAX_SESSION_TOOL_RESULT_LENGTH = 6_000;
+const MAX_SESSION_TOOL_RESULTS_LENGTH = 16_000;
 
 export type IntegrationToolAutoToolResult = {
   /** `integration.tool` */

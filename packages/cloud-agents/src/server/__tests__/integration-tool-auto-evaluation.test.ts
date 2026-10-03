@@ -1103,14 +1103,14 @@ describe('evaluateIntegrationToolAutoDecision', () => {
 
   it('passes recent tool results to the model, bounded and with credentials masked', async () => {
     mocks.evaluate.mockResolvedValue(modelAnswers(routine));
-    const long = `first-item ${'x'.repeat(3_000)}`;
+    const long = `first-item ${'x'.repeat(9_000)}`;
     await evaluateIntegrationToolAutoDecision({
       ...call,
       userRequest: 'close the Globex deal',
       sessionContext: {
         recentUserMessages: ['close the Globex deal'],
         recentToolResults: [
-          ...Array.from({ length: 9 }, (_, index) => ({
+          ...Array.from({ length: 21 }, (_, index) => ({
             tool: 'hubspot.get_deal',
             output: `deal ${index}`,
           })),
@@ -1125,8 +1125,8 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     });
     const results =
       mocks.evaluate.mock.calls[0]![0].state.sessionContext.recentToolResults;
-    // The newest eight, oldest first; the oldest three were dropped.
-    expect(results).toHaveLength(8);
+    // The newest twenty, oldest first; the oldest three were dropped.
+    expect(results).toHaveLength(20);
     expect(results[0].output).toBe('deal 3');
     expect(results.at(-2)).toEqual({
       tool: 'hubspot.search_deals',
@@ -1134,7 +1134,7 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       output: '[{"id":"9921034","name":"Globex","key":"[value omitted]"}]',
     });
     // A long listing keeps its head, where the items are named.
-    expect(results.at(-1).output).toHaveLength(1_500);
+    expect(results.at(-1).output).toHaveLength(6_000);
     expect(results.at(-1).output.startsWith('first-item')).toBe(true);
   });
 
