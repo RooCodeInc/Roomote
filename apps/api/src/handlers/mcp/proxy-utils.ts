@@ -5,6 +5,7 @@ import {
   formatSingleLineLog,
   getEffectiveAllowedMcpToolNames,
   type RunTokenContext,
+  isExitedRunStatus,
   isMcpToolAllowed,
   isUserToken,
   parseMcpJsonRpcPayload,
@@ -233,9 +234,9 @@ export async function resolveRunTokenTaskId(
 }
 
 /**
- * Validates that the run token's run still exists. No principal equality
- * check: the run-scoped token IS the authorization (only that run's sandbox
- * holds it). The token's userId is mint-time attribution while
+ * Validates that the run token's run still exists and remains active. No
+ * principal equality check: the run-scoped token IS the authorization (only
+ * that run's sandbox holds it). The token's userId is mint-time attribution while
  * `task_runs.actingUserId` is current-steering attribution — web steer and
  * follow-up delivery mutate the acting user mid-run, so the two legitimately
  * diverge and must not be compared for authorization.
@@ -244,7 +245,7 @@ async function verifyTaskRunTokenTargetExists(
   auth: RunTokenContext,
 ): Promise<Response | null> {
   const taskRun = await db.query.taskRuns.findFirst({
-    columns: { id: true },
+    columns: { id: true, status: true },
     where: eq(taskRuns.id, auth.runId),
   });
 
@@ -253,6 +254,14 @@ async function verifyTaskRunTokenTargetExists(
       404,
       -32000,
       'Task run not found for this MCP token',
+    );
+  }
+
+  if (isExitedRunStatus(taskRun.status)) {
+    return jsonRpcErrorResponse(
+      403,
+      -32000,
+      'Task run is no longer active for this MCP token',
     );
   }
 
