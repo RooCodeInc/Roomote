@@ -97,6 +97,25 @@ describe('resolveModelsDevSlug', () => {
     );
   });
 
+  it('strips the cloudflare-ai-gateway/ prefix for AI Gateway routed models', () => {
+    expect(
+      resolveModelsDevSlug('cloudflare-ai-gateway/openai/gpt-5.6-terra'),
+    ).toBe('openai/gpt-5.6-terra');
+    expect(
+      resolveModelsDevSlug(
+        'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2',
+      ),
+    ).toBe('workers-ai/@cf/zai-org/glm-5.2');
+  });
+
+  it('strips the cloudflare-workers-ai/ prefix for hosted Workers AI models', () => {
+    expect(
+      resolveModelsDevSlug(
+        'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      ),
+    ).toBe('@cf/moonshotai/kimi-k2.7-code');
+  });
+
   it('strips the requesty/ prefix for Requesty routed models', () => {
     expect(resolveModelsDevSlug('requesty/gpt-5.6-terra@eu')).toBe(
       'gpt-5.6-terra@eu',

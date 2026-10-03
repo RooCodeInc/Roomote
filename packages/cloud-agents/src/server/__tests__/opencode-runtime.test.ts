@@ -109,6 +109,59 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it('materializes Cloudflare AI Gateway with Roomote env names for helper inference', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2',
+      CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'token',
+      CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      CLOUDFLARE_AI_GATEWAY_ID: 'my_gateway',
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toMatchObject({
+      model: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      small_model: 'cloudflare-ai-gateway/@cf/zai-org/glm-5.2',
+      provider: {
+        'cloudflare-ai-gateway': {
+          npm: '@ai-sdk/openai-compatible',
+          options: {
+            baseURL:
+              'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1',
+            apiKey: '{env:CLOUDFLARE_AI_GATEWAY_API_TOKEN}',
+            headers: { 'cf-aig-gateway-id': 'my_gateway' },
+          },
+        },
+      },
+    });
+  });
+
+  it('materializes Cloudflare Workers AI without a gateway header', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      CLOUDFLARE_WORKERS_AI_API_TOKEN: 'token',
+      CLOUDFLARE_WORKERS_AI_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toMatchObject({
+      model: 'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      provider: {
+        'cloudflare-workers-ai': {
+          npm: '@ai-sdk/openai-compatible',
+          options: {
+            baseURL:
+              'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1',
+            apiKey: '{env:CLOUDFLARE_WORKERS_AI_API_TOKEN}',
+          },
+        },
+      },
+    });
+    expect(
+      JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}').provider[
+        'cloudflare-workers-ai'
+      ].options.headers,
+    ).toBeUndefined();
+  });
+
   it('materializes LiteLLM provider config for restricted helper inference', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'litellm/qwen3.6:35b-unsloth',
@@ -518,6 +571,91 @@ describe('buildOpenCodeCliEnv', () => {
       npm: '@ai-sdk/anthropic',
       api: 'https://api.kimi.com/coding/v1',
     });
+  });
+
+  it('adds the Cloudflare AI Gateway registration to operator-supplied config content', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'token',
+      CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      CLOUDFLARE_AI_GATEWAY_ID: 'my_gateway',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        model: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      }),
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider?: Record<string, Record<string, unknown>>;
+    };
+
+    expect(config.provider?.['cloudflare-ai-gateway']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL:
+          'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1',
+        apiKey: '{env:CLOUDFLARE_AI_GATEWAY_API_TOKEN}',
+        headers: { 'cf-aig-gateway-id': 'my_gateway' },
+      },
+    });
+  });
+
+  it('merges configured reasoning for Cloudflare AI Gateway models into operator-supplied config content', () => {
+    const env = buildOpenCodeCliEnv(
+      {
+        R_MODEL: 'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2',
+        R_MODEL_REASONING_EFFORT: 'high',
+        CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'token',
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+        CLOUDFLARE_AI_GATEWAY_ID: 'my_gateway',
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          model: 'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2',
+        }),
+      },
+      { preserveReasoning: true },
+    );
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider?: Record<
+        string,
+        { models?: Record<string, { options?: Record<string, unknown> }> }
+      >;
+    };
+
+    const models = config.provider?.['cloudflare-ai-gateway']?.models ?? {};
+    // The reasoning options must land under the same rewritten model id the
+    // provider registration uses, or OpenCode never applies them.
+    expect(models['@cf/zai-org/glm-5.2']?.options).toMatchObject({
+      // Cloudflare /ai/v1 is OpenAI-compatible, so the option key is
+      // `reasoningEffort`, not OpenRouter's `reasoning.effort`.
+      reasoningEffort: 'high',
+    });
+  });
+
+  it('adds the Cloudflare Workers AI registration to operator-supplied config content', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      CLOUDFLARE_WORKERS_AI_API_TOKEN: 'token',
+      CLOUDFLARE_WORKERS_AI_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        model: 'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      }),
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider?: Record<
+        string,
+        { options?: Record<string, unknown> } & Record<string, unknown>
+      >;
+    };
+
+    expect(config.provider?.['cloudflare-workers-ai']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL:
+          'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1',
+        apiKey: '{env:CLOUDFLARE_WORKERS_AI_API_TOKEN}',
+      },
+    });
+    expect(
+      config.provider?.['cloudflare-workers-ai']?.options?.headers,
+    ).toBeUndefined();
   });
 
   it('registers bearer-token credentials on the native Bedrock provider', () => {
