@@ -1,4 +1,5 @@
 import { fingerprintIntegrationToolCall } from '@roomote/db/server';
+import { waitForIntegrationToolApproval } from '@roomote/sdk/tool-approval-wait';
 import {
   INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
   describeIntegrationToolAutoAbsentDenial,
@@ -9,7 +10,6 @@ import {
   describeProxyToolApprovalBlock,
 } from './tool-approval-enforcement';
 
-const APPROVAL_POLL_MS = 1_500;
 /**
  * Longer than an approval stays open, so a wait ends on the owner's decision
  * or on the approval expiring, never on this limit in normal operation.
@@ -127,30 +127,28 @@ export async function decideUnaskedTaskToolCall(input: {
       break;
   }
 
-  const pollMs = input.pollMs ?? APPROVAL_POLL_MS;
-  const deadline = Date.now() + APPROVAL_MAX_WAIT_MS;
-  while (Date.now() < deadline) {
-    if (callerLeft()) return refused;
-    const status = await getTaskToolApprovalStatus({
-      runId,
-      approvalId: result.approvalId,
-    });
+  const decision = await waitForIntegrationToolApproval({
+    readStatus: () =>
+      getTaskToolApprovalStatus({ runId, approvalId: result.approvalId }),
     // The owner's approval is consumed here.
-    if (status === 'approved') return claim();
-    if (status === 'expired') {
-      return {
-        allowed: false,
-        message:
-          'The requester did not answer in time; the tool call was not run.',
-      };
-    }
-    if (status !== 'pending') {
-      return {
-        allowed: false,
-        message: 'The requester rejected this tool call.',
-      };
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    claimApproved: async () => (await claim()).allowed,
+    signal: input.signal,
+    pollMs: input.pollMs,
+    deadline: Date.now() + APPROVAL_MAX_WAIT_MS,
+  });
+  if (decision === 'approved') return { allowed: true };
+  if (decision === 'expired') {
+    return {
+      allowed: false,
+      message:
+        'The requester did not answer in time; the tool call was not run.',
+    };
+  }
+  if (decision === 'rejected') {
+    return {
+      allowed: false,
+      message: 'The requester rejected this tool call.',
+    };
   }
   return refused;
 }

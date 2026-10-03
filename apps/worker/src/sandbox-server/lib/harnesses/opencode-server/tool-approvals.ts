@@ -2,6 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import { sdk } from '@roomote/sdk/client';
+import { waitForIntegrationToolApproval } from '@roomote/sdk/tool-approval-wait';
 import {
   INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
   describeIntegrationToolAutoAbsentDenial,
@@ -14,7 +15,6 @@ import { parseDirectMcpConfig } from './mcp-config';
 import type { OpenCodeServerClient } from './client';
 import type { OpenCodeToolPart } from './types';
 
-const TOOL_APPROVAL_POLL_MS = 1_500;
 const AUTO_SERVER_TOOL_LIST_TIMEOUT_MS = 15_000;
 
 type TaskToolApprovalApi = Pick<typeof sdk.toolApprovals, 'request' | 'status'>;
@@ -171,7 +171,6 @@ export function createTaskToolApprovalRelay(options: {
   onPendingCountChange?: (pending: number) => void;
 }) {
   const api = options.api ?? sdk.toolApprovals;
-  const pollMs = options.pollMs ?? TOOL_APPROVAL_POLL_MS;
   const handled = new Set<string>();
   let pending = 0;
 
@@ -245,27 +244,25 @@ export function createTaskToolApprovalRelay(options: {
       );
       return;
     }
-    for (;;) {
-      if (options.signal.aborted) return;
-      const { status } = await api.status(result.approvalId);
-      if (status === 'approved') {
-        await reply(ask, 'once');
-        return;
-      }
-      if (status === 'expired') {
-        await reply(
-          ask,
-          'reject',
-          'The requester did not answer in time; the tool call was not run.',
-        );
-        return;
-      }
-      if (status !== 'pending') {
-        await reply(ask, 'reject', 'The requester rejected this tool call.');
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    const decision = await waitForIntegrationToolApproval({
+      readStatus: async () => (await api.status(result.approvalId)).status,
+      signal: options.signal,
+      pollMs: options.pollMs,
+    });
+    if (decision === 'aborted') return;
+    if (decision === 'approved') {
+      await reply(ask, 'once');
+      return;
     }
+    if (decision === 'expired') {
+      await reply(
+        ask,
+        'reject',
+        'The requester did not answer in time; the tool call was not run.',
+      );
+      return;
+    }
+    await reply(ask, 'reject', 'The requester rejected this tool call.');
   };
 
   /** Fire-and-forget from the event loop; the pause is the intended state. */

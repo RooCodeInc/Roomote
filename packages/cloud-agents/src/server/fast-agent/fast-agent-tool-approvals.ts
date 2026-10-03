@@ -25,6 +25,10 @@ import {
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
 import {
+  waitForIntegrationToolApproval,
+  type IntegrationToolApprovalWaitResult,
+} from '@roomote/sdk/tool-approval-wait';
+import {
   INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
   describeIntegrationToolAutoAbsentDenial,
   integrationToolModeIsAutoAssessed,
@@ -70,9 +74,7 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
  *   per ask, which binds the approval to the exact paused call; a repeated
  *   call with changed arguments is a new ask by construction.
  */
-const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
-
-type CardDecision = 'approved' | 'rejected' | 'expired' | 'invalid' | 'aborted';
+type CardDecision = IntegrationToolApprovalWaitResult;
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
 /**
  * An open session page renews its presence every 10 seconds, and a page that
@@ -534,32 +536,21 @@ export function createFastAgentToolApprovalBridge(input: {
       notifiedApprovalIds.add(approval.approvalId);
       await input.notify(approval);
     }
-    const deadline = Date.parse(approval.expiresAt);
-    for (;;) {
-      if (input.signal?.aborted) return 'aborted';
-      const row = await getIntegrationToolApproval(approval.approvalId);
-      if (!row || row.status === 'rejected' || row.status === 'cancelled') {
-        return 'rejected';
-      }
-      if (row.status === 'expired') return 'expired';
-      if (row.status === 'approved') {
-        // Consume before relaying: only the first relay of an approved,
-        // unclaimed decision reaches OpenCode; a cancelled or
-        // double-claimed row fails closed instead of executing twice.
-        const consumed = await markIntegrationToolApprovalConsumed({
+    return waitForIntegrationToolApproval({
+      readStatus: async () =>
+        (await getIntegrationToolApproval(approval.approvalId))?.status ?? null,
+      // Consume before relaying: only the first relay of an approved,
+      // unclaimed decision reaches OpenCode; a cancelled or double-claimed
+      // row fails closed instead of executing twice.
+      claimApproved: () =>
+        markIntegrationToolApprovalConsumed({
           approvalId: approval.approvalId,
           requesterUserId: input.userId,
-        });
-        return consumed ? 'approved' : 'invalid';
-      }
-      if (Date.now() >= deadline) {
-        await expireIntegrationToolApproval(approval.approvalId);
-        return 'expired';
-      }
-      await new Promise((resolve) =>
-        setTimeout(resolve, INTEGRATION_TOOL_APPROVAL_POLL_MS),
-      );
-    }
+        }),
+      signal: input.signal,
+      deadline: Date.parse(approval.expiresAt),
+      expire: () => expireIntegrationToolApproval(approval.approvalId),
+    });
   };
   // Once Auto stops in this turn the turn is ending: no other call runs or
   // leaves a card waiting.
