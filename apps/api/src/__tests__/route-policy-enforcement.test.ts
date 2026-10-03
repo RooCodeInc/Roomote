@@ -207,6 +207,29 @@ describe('route policy enforcement', () => {
   });
 
   describe('authenticated routes', () => {
+    it('does not expose run-token issuance through tRPC', async () => {
+      const response = await createApiApp().request(
+        'http://localhost/trpc/auth.createRunToken',
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer test-user-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ json: { runId: 123 } }),
+        },
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          json: {
+            data: { code: 'NOT_FOUND' },
+          },
+        },
+      });
+    });
+
     it('rejects unauthenticated task run log requests centrally', async () => {
       const response = await createApiApp().request(
         'http://localhost/api/task-runs/123/logs',
