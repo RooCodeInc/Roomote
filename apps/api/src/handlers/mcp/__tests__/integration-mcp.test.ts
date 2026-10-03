@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { RunTokenContext } from '@roomote/types';
-import { getMcpIntegration } from '@roomote/types';
+import { getMcpIntegration, RunStatus } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -173,6 +173,23 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     mockGetValidAccessToken.mockResolvedValue('valid-access-token');
     mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
   });
+
+  it.each([RunStatus.Completed, RunStatus.Failed, RunStatus.Canceled])(
+    'rejects a run token when its task run is %s',
+    async (status) => {
+      mockFindTaskRun.mockResolvedValue({ id: 42, status });
+      const fetchMock = stubUpstreamFetch();
+
+      const response = await postMcp(
+        createApp('supermemory', createRunToken()),
+        createInitializeRequest(1),
+      );
+
+      expect(response.status).toBe(403);
+      expect(mockFindConnection).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('serves a deployment-scoped integration on a run with no human actor', async () => {
     // Slack automation launches (channel auto-start) run as the deployment
