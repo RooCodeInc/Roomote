@@ -1138,6 +1138,43 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(results.at(-1).output.startsWith('first-item')).toBe(true);
   });
 
+  it('counts the arguments of tool results against the same budget as their outputs', async () => {
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    const bigArgs = Object.fromEntries(
+      Array.from({ length: 12 }, (_, index) => [
+        `field${index}`,
+        'v'.repeat(150),
+      ]),
+    );
+    await evaluateIntegrationToolAutoDecision({
+      ...call,
+      userRequest: 'close the Globex deal',
+      sessionContext: {
+        recentUserMessages: ['close the Globex deal'],
+        recentToolResults: Array.from({ length: 20 }, (_, index) => ({
+          tool: 'hubspot.get_deal',
+          arguments: bigArgs,
+          output: `deal ${index} ${'x'.repeat(900)}`,
+        })),
+      },
+    });
+    const results: Array<{ arguments?: unknown; output: string }> =
+      mocks.evaluate.mock.calls[0]![0].state.sessionContext.recentToolResults;
+    const shown = results.reduce(
+      (total, result) =>
+        total +
+        result.output.length +
+        (result.arguments === undefined
+          ? 0
+          : JSON.stringify(result.arguments).length),
+      0,
+    );
+    expect(shown).toBeLessThanOrEqual(16_000);
+    // The newest results keep their arguments; older ones lose them or drop.
+    expect(results.at(-1)).toHaveProperty('arguments');
+    expect(results.length).toBeLessThan(20);
+  });
+
   it('asks, with a reason, when an authorized call names an item nothing in the session identifies', async () => {
     mocks.evaluate.mockResolvedValue(
       modelAnswers({
