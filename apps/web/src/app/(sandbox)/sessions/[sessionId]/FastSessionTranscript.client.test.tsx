@@ -514,7 +514,7 @@ afterEach(() => {
       originalScrollIntoView,
     );
   } else {
-    delete HTMLElement.prototype.scrollIntoView;
+    Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
   }
 });
 
