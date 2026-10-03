@@ -31,6 +31,49 @@ describe('integration tool argument secret handling', () => {
     ).toBe(true);
   });
 
+  it('detects each published credential prefix on its own, and masks it in text', () => {
+    // Built from parts so no credential-shaped literal sits in the source.
+    const shapes = {
+      stripeLive: `sk_${'live'}_${'A1b2'.repeat(6)}`,
+      stripeTest: `sk_${'test'}_${'C3d4'.repeat(6)}`,
+      stripeRestricted: `rk_${'live'}_${'E5f6'.repeat(6)}`,
+      stripeWebhook: `whsec_${'G7h8'.repeat(8)}`,
+      githubServer: `ghs_${'i'.repeat(36)}`,
+      githubUser: `ghu_${'j'.repeat(36)}`,
+      githubRefresh: `ghr_${'k'.repeat(36)}`,
+      gitlab: `glpat-${'L9m0'.repeat(5)}`,
+      slackApp: `xapp-${'1'.repeat(10)}-${'2'.repeat(10)}`,
+      slackRefresh: `xoxe-${'3'.repeat(10)}-${'4'.repeat(10)}`,
+      google: `AIza${'N1o2P'.repeat(7)}`,
+      npm: `npm_${'q'.repeat(36)}`,
+      sendgrid: `SG.${'R3s4'.repeat(5)}.${'T5u6'.repeat(8)}`,
+      linear: `lin_api_${'V7w8'.repeat(10)}`,
+      huggingFace: `hf_${'X9y0'.repeat(8)}`,
+    };
+    for (const [name, value] of Object.entries(shapes)) {
+      expect([name, hasIntegrationToolSecret({ value })]).toEqual([name, true]);
+      expect([
+        name,
+        boundIntegrationToolReadContent(`KEY=${value} is set`),
+      ]).toEqual([name, 'KEY=[value omitted] is set']);
+    }
+  });
+
+  it('does not take ordinary words that share a prefix for credentials', () => {
+    expect(
+      hasIntegrationToolSecret({
+        note: 'use sk_live_ keys in production and sk_test_ keys locally',
+        command: 'npm_config_registry=https://registry.example npm install',
+        module: 'hf_hub_download',
+        branch: 'glpat-notes',
+        ref: 'AIzaShort',
+        file: 'SG.report.final.pdf',
+        handle: 'ghs_team',
+        channel: 'xapp-news',
+      }),
+    ).toBe(false);
+  });
+
   it('decodes URL-encoded values and scans past the preview limit', () => {
     expect(
       hasIntegrationToolSecret({
