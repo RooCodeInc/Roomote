@@ -28,7 +28,7 @@ import { granolaMcp } from './granola';
 import { grafanaMcp } from './grafana';
 import { getIntegrationMcpProxyOptions } from './integration-mcp-policy';
 import { createLinearMcp } from './linear';
-import { mcpAuthMiddleware } from './middleware';
+import { activeRunMcpAuthMiddleware, mcpAuthMiddleware } from './middleware';
 import { notionMcp } from './notion';
 import { slackMcp } from './slack';
 import { snowflakeMcp } from './snowflake';
@@ -74,7 +74,29 @@ const requireCustomMcp: MiddlewareHandler<{
 mcp.use('/custom/*', requireCustomMcp);
 mcp.route('/custom/:serverId', createCustomMcpProxy());
 mcp.route('/development-fixtures', developmentFixturesMcp);
-mcp.use('/public-url-fetch', mcpAuthMiddleware);
+
+for (const path of [
+  '/public-url-fetch',
+  '/slack/*',
+  '/slack',
+  '/communication/*',
+  '/communication',
+  '/tasks/*',
+  '/tasks',
+  '/sessions/*',
+  '/sessions',
+  '/environments/*',
+  '/environments',
+  '/custom-automations/*',
+  '/custom-automations',
+  '/custom-skills/*',
+  '/custom-skills',
+  '/artifacts/*',
+  '/artifacts',
+]) {
+  mcp.use(path, mcpAuthMiddleware, activeRunMcpAuthMiddleware);
+}
+
 mcp.route('/public-url-fetch', publicUrlFetchRoute);
 
 // Brain (deployment-hosted gbrain): a native-mode catalog
@@ -118,24 +140,6 @@ for (const integration of MCP_INTEGRATIONS.filter(
     }),
   );
 }
-
-// Task and agent routes share the mcpAuth middleware
-mcp.use('/slack/*', mcpAuthMiddleware);
-mcp.use('/slack', mcpAuthMiddleware);
-mcp.use('/communication/*', mcpAuthMiddleware);
-mcp.use('/communication', mcpAuthMiddleware);
-mcp.use('/tasks/*', mcpAuthMiddleware);
-mcp.use('/tasks', mcpAuthMiddleware);
-mcp.use('/sessions/*', mcpAuthMiddleware);
-mcp.use('/sessions', mcpAuthMiddleware);
-mcp.use('/environments/*', mcpAuthMiddleware);
-mcp.use('/environments', mcpAuthMiddleware);
-mcp.use('/custom-automations/*', mcpAuthMiddleware);
-mcp.use('/custom-automations', mcpAuthMiddleware);
-mcp.use('/custom-skills/*', mcpAuthMiddleware);
-mcp.use('/custom-skills', mcpAuthMiddleware);
-mcp.use('/artifacts/*', mcpAuthMiddleware);
-mcp.use('/artifacts', mcpAuthMiddleware);
 
 mcp.route('/slack', slackMcp);
 mcp.route('/communication', communicationMcp);

@@ -3,7 +3,11 @@ import { createMiddleware } from 'hono/factory';
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../types';
-import { resolveTaskOrSessionUserIdOrNull } from './proxy-utils';
+import {
+  assertTaskRunTokenTargetExists,
+  McpProxyError,
+  resolveTaskOrSessionUserIdOrNull,
+} from './proxy-utils';
 
 export interface McpAuth {
   userId: string | undefined;
@@ -45,6 +49,29 @@ export const mcpAuthMiddleware = createMiddleware<{
     'userId' in authContext ? (authContext.userId ?? undefined) : undefined;
 
   c.set('mcpAuth', { userId, authContext });
+
+  await next();
+});
+
+/** Rejects inactive run tokens before they reach a native MCP handler. */
+export const activeRunMcpAuthMiddleware = createMiddleware<{
+  Variables: McpVariables;
+}>(async (c, next) => {
+  const { authContext } = c.get('mcpAuth');
+
+  if (authContext.tokenType === 'run') {
+    try {
+      await assertTaskRunTokenTargetExists(authContext);
+    } catch (error) {
+      if (error instanceof McpProxyError) {
+        return Response.json(
+          { error: error.message },
+          { status: error.httpStatus },
+        );
+      }
+      throw error;
+    }
+  }
 
   await next();
 });
