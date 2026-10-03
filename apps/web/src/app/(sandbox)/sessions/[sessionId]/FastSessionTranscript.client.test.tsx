@@ -443,6 +443,11 @@ class FakeEventSource {
   }
 }
 
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  'scrollIntoView',
+);
+
 beforeEach(() => {
   vi.spyOn(window, 'matchMedia').mockReturnValue({
     matches: true,
@@ -502,6 +507,15 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  if (originalScrollIntoView) {
+    Object.defineProperty(
+      HTMLElement.prototype,
+      'scrollIntoView',
+      originalScrollIntoView,
+    );
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+  }
 });
 
 describe('FastSessionTranscript', () => {
@@ -963,6 +977,32 @@ describe('FastSessionTranscript', () => {
     userEmail,
     userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  const pendingInputMessage = (requestId: string, ts: number) => ({
+    ...textMessage({
+      id: `input-${requestId}`,
+      role: 'assistant' as const,
+      text: 'Choose a path',
+      ts,
+    }),
+    eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+    payload: {
+      requestId,
+      status: 'pending' as const,
+      sessionId: 'session-1',
+      turnId: `turn-${requestId}`,
+      callId: `call-${requestId}`,
+      questions: [
+        {
+          id: 'path',
+          header: 'Path',
+          question: 'Choose a path',
+          isOther: true,
+          isSecret: false,
+        },
+      ],
+    },
   });
 
   it('records synthetic long-transcript render and event-loop timing', async () => {
@@ -1934,6 +1974,113 @@ describe('FastSessionTranscript', () => {
     expect(interaction.compareDocumentPosition(after)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+  });
+
+  it('jumps to an unanswered question only while its card is outside the viewport', () => {
+    let observerCallback: IntersectionObserverCallback | null = null;
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          observerCallback = callback;
+        }
+
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[pendingInputMessage('rui:jump', 1)]}
+      />,
+    );
+
+    const jump = screen.getByRole('button', {
+      name: 'Jump to unanswered question',
+    });
+    const target = screen.getByLabelText('Unanswered question');
+
+    fireEvent.click(jump);
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'auto',
+      block: 'center',
+    });
+    expect(target).toHaveFocus();
+
+    act(() => {
+      observerCallback?.(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      );
+    });
+    expect(
+      screen.queryByRole('button', {
+        name: 'Jump to unanswered question',
+      }),
+    ).toBeNull();
+
+    act(() => {
+      observerCallback?.(
+        [{ isIntersecting: false } as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      );
+    });
+    expect(
+      screen.getByRole('button', {
+        name: 'Jump to unanswered question',
+      }),
+    ).toBeVisible();
+  });
+
+  it('removes the question jump after the pending request is answered', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[pendingInputMessage('rui:resolved', 1)]}
+      />,
+    );
+    expect(
+      screen.getByRole('button', {
+        name: 'Jump to unanswered question',
+      }),
+    ).toBeVisible();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'input-response',
+              role: 'user',
+              text: 'Path: Continue',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+            payload: {
+              requestId: 'rui:resolved',
+              sessionId: 'session-1',
+              turnId: 'turn-rui:resolved',
+              callId: 'call-rui:resolved',
+              answers: { path: { answers: ['Continue'] } },
+              resolution: 'submitted',
+            },
+          },
+        ],
+      });
+    });
+
+    expect(
+      screen.queryByRole('button', {
+        name: 'Jump to unanswered question',
+      }),
+    ).toBeNull();
   });
 
   it('keeps the composer available for non-preset input requests', () => {
