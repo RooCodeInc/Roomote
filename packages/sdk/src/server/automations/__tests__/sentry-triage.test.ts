@@ -1,14 +1,14 @@
 const {
   mockDbSelect,
   mockGetAutomationTargetRefs,
-  mockGetActiveRepositoryFullNames,
+  mockGetActiveRepositoriesForProviders,
   mockPartitionActiveRepositoriesByProvider,
   mockBuildRepositoryCoverage,
   mockLoadAutomationThreadFeedbackReport,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
   mockGetAutomationTargetRefs: vi.fn(),
-  mockGetActiveRepositoryFullNames: vi.fn(),
+  mockGetActiveRepositoriesForProviders: vi.fn(),
   mockPartitionActiveRepositoriesByProvider: vi.fn(),
   mockBuildRepositoryCoverage: vi.fn(),
   mockLoadAutomationThreadFeedbackReport: vi.fn(),
@@ -35,7 +35,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../github-deployment-scope', () => ({
-  getActiveRepositoryFullNames: mockGetActiveRepositoryFullNames,
+  getActiveRepositoriesForProviders: mockGetActiveRepositoriesForProviders,
   partitionActiveRepositoriesByProvider:
     mockPartitionActiveRepositoriesByProvider,
 }));
@@ -105,16 +105,18 @@ describe('sentryTriageJob buildScanTask', () => {
   });
 
   it('launches one stamped scan per provider partition when the scope spans providers', async () => {
-    mockGetActiveRepositoryFullNames.mockResolvedValue([
-      'roomote/stoodio-bitbucket',
-      'roomote/Test ADO/Test ADO',
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      { id: 'repo-bitbucket', fullName: 'roomote/stoodio-bitbucket' },
+      { id: 'repo-ado', fullName: 'roomote/Test ADO/Test ADO' },
     ]);
     mockBuildRepositoryCoverage.mockResolvedValue([
       {
+        repositoryId: 'repo-bitbucket',
         repositoryFullName: 'roomote/stoodio-bitbucket',
         targetEnvironmentId: 'env-bitbucket',
       },
       {
+        repositoryId: 'repo-ado',
         repositoryFullName: 'roomote/Test ADO/Test ADO',
         targetEnvironmentId: 'env-ado',
       },
@@ -123,11 +125,13 @@ describe('sentryTriageJob buildScanTask', () => {
       {
         provider: 'ado',
         host: 'dev.azure.com',
+        repositoryIds: ['repo-ado'],
         repositoryFullNames: ['roomote/Test ADO/Test ADO'],
       },
       {
         provider: 'bitbucket',
         host: 'bitbucket.org',
+        repositoryIds: ['repo-bitbucket'],
         repositoryFullNames: ['roomote/stoodio-bitbucket'],
       },
     ]);
@@ -142,8 +146,8 @@ describe('sentryTriageJob buildScanTask', () => {
 
     expect(result.payloads).toHaveLength(2);
     expect(mockPartitionActiveRepositoriesByProvider).toHaveBeenCalledWith([
-      'roomote/stoodio-bitbucket',
-      'roomote/Test ADO/Test ADO',
+      'repo-bitbucket',
+      'repo-ado',
     ]);
 
     const [adoPayload, bitbucketPayload] = result.payloads;
@@ -174,10 +178,65 @@ describe('sentryTriageJob buildScanTask', () => {
     );
   });
 
-  it('keeps a single unstamped scan when no repository is environment-backed', async () => {
-    mockGetActiveRepositoryFullNames.mockResolvedValue(['acme/api']);
+  it('keeps same-name environment coverage scoped to its repository partition', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      { id: 'repo-github', fullName: 'acme/api' },
+      { id: 'repo-gitlab', fullName: 'acme/api' },
+    ]);
     mockBuildRepositoryCoverage.mockResolvedValue([
-      { repositoryFullName: 'acme/api' },
+      {
+        repositoryId: 'repo-github',
+        repositoryFullName: 'acme/api',
+        targetEnvironmentId: 'env-github',
+      },
+      {
+        repositoryId: 'repo-gitlab',
+        repositoryFullName: 'acme/api',
+        targetEnvironmentId: 'env-gitlab',
+      },
+    ]);
+    mockPartitionActiveRepositoriesByProvider.mockResolvedValue([
+      {
+        provider: 'github',
+        host: 'github.com',
+        repositoryIds: ['repo-github'],
+        repositoryFullNames: ['acme/api'],
+      },
+      {
+        provider: 'gitlab',
+        host: 'gitlab.example.com',
+        repositoryIds: ['repo-gitlab'],
+        repositoryFullNames: ['acme/api'],
+      },
+    ]);
+
+    const result = await config.buildScanTask(buildScanTaskParams());
+
+    expect(result.kind).toBe('scan');
+    if (result.kind !== 'scan') {
+      throw new Error('expected a scan build');
+    }
+
+    expect(mockPartitionActiveRepositoriesByProvider).toHaveBeenCalledWith([
+      'repo-github',
+      'repo-gitlab',
+    ]);
+    expect(String(result.payloads[0]!.description)).toContain(
+      'acme/api -> environment env-github',
+    );
+    expect(String(result.payloads[0]!.description)).not.toContain('env-gitlab');
+    expect(String(result.payloads[1]!.description)).toContain(
+      'acme/api -> environment env-gitlab',
+    );
+    expect(String(result.payloads[1]!.description)).not.toContain('env-github');
+  });
+
+  it('keeps a single unstamped scan when no repository is environment-backed', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      { id: 'repo-api', fullName: 'acme/api' },
+    ]);
+    mockBuildRepositoryCoverage.mockResolvedValue([
+      { repositoryId: 'repo-api', repositoryFullName: 'acme/api' },
     ]);
     mockPartitionActiveRepositoriesByProvider.mockResolvedValue([]);
 
@@ -206,9 +265,15 @@ describe('sentryTriageJob buildScanTask', () => {
   });
 
   it('uses the daily scan window for an explicit on-demand run', async () => {
-    mockGetActiveRepositoryFullNames.mockResolvedValue(['acme/api']);
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      { id: 'repo-api', fullName: 'acme/api' },
+    ]);
     mockBuildRepositoryCoverage.mockResolvedValue([
-      { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
+      {
+        repositoryId: 'repo-api',
+        repositoryFullName: 'acme/api',
+        targetEnvironmentId: 'env-api',
+      },
     ]);
     mockPartitionActiveRepositoriesByProvider.mockResolvedValue([]);
 
@@ -231,9 +296,15 @@ describe('sentryTriageJob buildScanTask', () => {
   });
 
   it('preserves webhook attribution in the scan prompt', async () => {
-    mockGetActiveRepositoryFullNames.mockResolvedValue(['acme/api']);
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      { id: 'repo-api', fullName: 'acme/api' },
+    ]);
     mockBuildRepositoryCoverage.mockResolvedValue([
-      { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
+      {
+        repositoryId: 'repo-api',
+        repositoryFullName: 'acme/api',
+        targetEnvironmentId: 'env-api',
+      },
     ]);
     mockPartitionActiveRepositoriesByProvider.mockResolvedValue([]);
 

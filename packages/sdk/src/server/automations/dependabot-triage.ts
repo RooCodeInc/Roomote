@@ -12,7 +12,7 @@ import {
   type ResolvedAutomationDestination,
 } from './destination';
 import {
-  getActiveGitHubRepositoryFullNames,
+  getActiveRepositoriesForProviders,
   hasActiveGitHubInstallation,
 } from './github-deployment-scope';
 import { createScheduledTriageJob } from './scheduled-triage-runner';
@@ -90,7 +90,12 @@ export const dependabotTriageJob = createScheduledTriageJob({
     // include repositories from other providers: a mixed-provider scope
     // leaves the run's source-control provider ambiguous and GitHub token
     // minting then fails on the non-GitHub repository names.
-    const selectedRepositories = await getActiveGitHubRepositoryFullNames();
+    const activeRepositories = await getActiveRepositoriesForProviders([
+      'github',
+    ]);
+    const selectedRepositories = [
+      ...new Set(activeRepositories.map((repository) => repository.fullName)),
+    ];
     if (selectedRepositories.length === 0) {
       return {
         kind: 'skip',
@@ -98,8 +103,12 @@ export const dependabotTriageJob = createScheduledTriageJob({
       };
     }
 
-    const repositoryCoverage =
-      await buildRepositoryCoverage(selectedRepositories);
+    const repositoryCoverage = await buildRepositoryCoverage(
+      activeRepositories.map((repository) => ({
+        repositoryId: repository.id,
+        repositoryFullName: repository.fullName,
+      })),
+    );
     const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
       automationKey: 'dependabot_triage',
       slackChannelId: channelId,
