@@ -75,29 +75,16 @@ mcp.use('/custom/*', requireCustomMcp);
 mcp.route('/custom/:serverId', createCustomMcpProxy());
 mcp.route('/development-fixtures', developmentFixturesMcp);
 
-for (const path of [
-  '/public-url-fetch',
-  '/slack/*',
-  '/slack',
-  '/communication/*',
-  '/communication',
-  '/tasks/*',
-  '/tasks',
-  '/sessions/*',
-  '/sessions',
-  '/environments/*',
-  '/environments',
-  '/custom-automations/*',
-  '/custom-automations',
-  '/custom-skills/*',
-  '/custom-skills',
-  '/artifacts/*',
-  '/artifacts',
-]) {
+function registerNativeMcpRoute<E extends { Variables: Variables }>(
+  path: string,
+  router: Hono<E>,
+) {
   mcp.use(path, mcpAuthMiddleware, activeRunMcpAuthMiddleware);
+  mcp.use(`${path}/*`, mcpAuthMiddleware, activeRunMcpAuthMiddleware);
+  mcp.route(path, router);
 }
 
-mcp.route('/public-url-fetch', publicUrlFetchRoute);
+registerNativeMcpRoute('/public-url-fetch', publicUrlFetchRoute);
 
 // Brain (deployment-hosted gbrain): a native-mode catalog
 // integration with a custom handler, like snowflake/grafana below. The
@@ -141,11 +128,11 @@ for (const integration of MCP_INTEGRATIONS.filter(
   );
 }
 
-mcp.route('/slack', slackMcp);
-mcp.route('/communication', communicationMcp);
-mcp.route('/tasks', tasksRouter);
-mcp.route('/sessions', sessionsRouter);
-mcp.route('/environments', environmentsRouter);
-mcp.route('/custom-automations', customAutomationsRouter);
-mcp.route('/custom-skills', customSkillsRouter);
-mcp.route('/artifacts', artifactMcpRouter);
+registerNativeMcpRoute('/slack', slackMcp);
+registerNativeMcpRoute('/communication', communicationMcp);
+registerNativeMcpRoute('/tasks', tasksRouter);
+registerNativeMcpRoute('/sessions', sessionsRouter);
+registerNativeMcpRoute('/environments', environmentsRouter);
+registerNativeMcpRoute('/custom-automations', customAutomationsRouter);
+registerNativeMcpRoute('/custom-skills', customSkillsRouter);
+registerNativeMcpRoute('/artifacts', artifactMcpRouter);
