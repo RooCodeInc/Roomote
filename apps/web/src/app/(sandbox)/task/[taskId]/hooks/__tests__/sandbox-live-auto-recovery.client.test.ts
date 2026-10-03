@@ -108,6 +108,31 @@ describe('startSandboxLiveAutoRecovery', () => {
     cleanup();
   });
 
+  it('uses the current connection phase to schedule background retries', () => {
+    const triggerReconnect = vi.fn();
+    let hasConnectedOnce = false;
+    const cleanup = startSandboxLiveAutoRecovery({
+      isEligible: () => true,
+      triggerReconnect,
+      backgroundRetryIntervalMs: () => (hasConnectedOnce ? 60_000 : 10_000),
+    });
+
+    vi.advanceTimersByTime(9_999);
+    expect(triggerReconnect).not.toHaveBeenCalled();
+
+    hasConnectedOnce = true;
+
+    vi.advanceTimersByTime(1);
+    expect(triggerReconnect).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(59_999);
+    expect(triggerReconnect).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(1);
+    expect(triggerReconnect).toHaveBeenCalledTimes(2);
+    cleanup();
+  });
+
   it('stops listening after cleanup', () => {
     const triggerReconnect = vi.fn();
     const cleanup = startSandboxLiveAutoRecovery({
