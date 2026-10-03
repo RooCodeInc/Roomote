@@ -32,7 +32,10 @@ import { dirname, join } from 'node:path';
 
 import packageJson from '../../../../package.json';
 
-import { validateToken } from '@roomote/auth/client';
+import {
+  validateSandboxControlToken,
+  validateToken,
+} from '@roomote/auth/client';
 import {
   buildRoomoteSystemPrompt,
   FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
@@ -2334,6 +2337,7 @@ export const runTask = async ({
       prepareActorScopedTurn,
       applyTaskModelSettingsUpdate,
       validateToken,
+      validateSandboxControlToken,
     });
 
     logger.log(

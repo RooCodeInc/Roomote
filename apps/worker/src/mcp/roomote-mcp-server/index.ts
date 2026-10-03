@@ -125,6 +125,7 @@ import { handleGetRelayUpdates } from './relay-updates.js';
 import { handleCloneRepository } from './clone-repository.js';
 import { handleListRepositories } from './list-repositories.js';
 import { handlePublicUrlFetch } from './public-url-fetch.js';
+import { handleCritiqueVisualReview } from './critique.js';
 import {
   CLONE_REPOSITORY_TOOL_NAME,
   ON_DEMAND_REPOSITORIES_MANIFEST_FILE,
@@ -367,6 +368,75 @@ roomoteMcpServer.registerTool(
       },
       taskId,
     );
+  },
+);
+
+roomoteMcpServer.registerTool(
+  'critique_visual_review',
+  {
+    title: 'Critique Visual Review',
+    description:
+      'Opt-in visual-quality review for frontend coding tasks using the current authenticated agent-browser page. ' +
+      'Use capture to snapshot the viewport and sanitized rendered DOM without navigation, review with 1-4 captureIds for independent page findings, compare with baselineCaptureId and candidateCaptureId after one bounded repair pass, and inspect_nodes while the same browser session remains active. ' +
+      'Critique is advisory and paid: never retry a timeout automatically, never create an unbounded repair loop, and prefer action only on fail findings with confidence >= 0.7. Unavailability must not block unrelated task completion.',
+    inputSchema: {
+      action: z
+        .enum(['capture', 'review', 'compare', 'inspect_nodes'])
+        .describe('The Critique workflow action.'),
+      captureIds: z
+        .array(z.string())
+        .min(1)
+        .max(4)
+        .optional()
+        .describe('For review, 1-4 capture IDs returned by capture.'),
+      baselineCaptureId: z
+        .string()
+        .optional()
+        .describe('For compare, the pre-repair capture ID.'),
+      candidateCaptureId: z
+        .string()
+        .optional()
+        .describe('For compare, the post-repair capture ID.'),
+      captureId: z
+        .string()
+        .optional()
+        .describe('For inspect_nodes, the capture whose node map to inspect.'),
+      nodeIds: z
+        .array(z.string())
+        .max(50)
+        .optional()
+        .describe(
+          'For inspect_nodes, Critique node IDs to map in the live page.',
+        ),
+      rules: z
+        .object({
+          rulePackIds: z.array(z.string()).optional(),
+          include: z.array(z.string()).optional(),
+          exclude: z.array(z.string()).optional(),
+        })
+        .strict()
+        .optional(),
+      options: z
+        .object({
+          minimumConfidence: z.number().min(0).max(1).optional(),
+          maximumFindings: z.number().int().positive().optional(),
+        })
+        .strict()
+        .optional(),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (params, extra): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+    return handleCritiqueVisualReview(params, config, extra.signal);
   },
 );
 

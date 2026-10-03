@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CRITIQUE_ENV_VAR_NAMES,
   CONTROL_PLANE_ENV_VAR_NAMES,
   SOURCE_CONTROL_SECRET_ENV_VAR_NAMES,
 } from './control-plane-env-vars';
@@ -34,9 +35,18 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
       'R_TYPESAFE_API_KEY',
       'R_JUDGMENT_UPSTREAM_URL',
       'R_JUDGMENT_UPSTREAM_API_KEY',
+      'CRITIQUE_BASE_URL',
+      'CRITIQUE_API_TOKEN',
     ]) {
       expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(true);
     }
+  });
+
+  it('keeps Critique configuration out of task environment variables', () => {
+    expect([...CRITIQUE_ENV_VAR_NAMES]).toEqual([
+      'CRITIQUE_BASE_URL',
+      'CRITIQUE_API_TOKEN',
+    ]);
   });
 
   it('includes non-secret provider identifiers for defense-in-depth', () => {

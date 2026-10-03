@@ -126,6 +126,12 @@ const JUDGMENT_MODEL_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'R_JUDGMENT_CAPTURE',
 ]);
 
+/** Paid visual-review connection; task sandboxes use the API proxy only. */
+export const CRITIQUE_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  'CRITIQUE_BASE_URL',
+  'CRITIQUE_API_TOKEN',
+]);
+
 /**
  * Declarative environment provisioning inputs, managed through the deployment
  * environment. Not secrets per se, but they are control-plane configuration
@@ -163,6 +169,7 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...INSTANCE_SECRET_ENV_VAR_NAMES,
     ...MEDIA_PROVIDER_ENV_VAR_NAMES,
     ...JUDGMENT_MODEL_ENV_VAR_NAMES,
+    ...CRITIQUE_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
     ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
     // Hosting-managed Roomote inference is served only through the inference

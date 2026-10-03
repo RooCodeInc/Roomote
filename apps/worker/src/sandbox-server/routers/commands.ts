@@ -22,6 +22,7 @@ import {
   restoreScrubbedCredentials,
   prepareRepository,
   listRepositories,
+  critiqueCapture,
 } from '../procedures';
 
 export const commandsRouter = router({
@@ -46,4 +47,5 @@ export const commandsRouter = router({
   restoreScrubbedCredentials,
   prepareRepository,
   listRepositories,
+  critiqueCapture,
 });

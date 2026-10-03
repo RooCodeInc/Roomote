@@ -438,6 +438,12 @@ envVarGroups:
       # decisions.
       - key: R_JUDGMENT_UPSTREAM_URL
         value: ''
+      # Optional paid visual review. Both values are operator-supplied and the
+      # API keeps the bearer credential out of task sandboxes.
+      - key: CRITIQUE_BASE_URL
+        value: ''
+      - key: CRITIQUE_API_TOKEN
+        value: ''
       - key: S3_BUCKET_ARTIFACTS
         value: roomote-artifacts
       - key: S3_AUTO_CREATE_BUCKET

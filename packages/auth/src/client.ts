@@ -12,3 +12,7 @@ export {
 
 export { configureAuthClientEnv } from './client-runtime';
 export { validateToken } from './validate-token';
+export {
+  validateSandboxControlToken,
+  type SandboxControlTokenContext,
+} from './sandbox-control-token';
