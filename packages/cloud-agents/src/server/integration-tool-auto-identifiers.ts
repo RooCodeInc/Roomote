@@ -3,9 +3,16 @@ import {
   redactIntegrationToolArgs,
 } from '@roomote/types';
 
-const MAX_SESSION_TOOL_RESULTS = 8;
-const MAX_SESSION_TOOL_RESULT_LENGTH = 1_500;
-const MAX_SESSION_TOOL_RESULTS_LENGTH = 6_000;
+/**
+ * Enough results, and enough of each, that a lookup is still in view when
+ * the agent uses what it found: it often looks a person or an item up in a
+ * long listing, makes a few more calls, and then uses the id from that
+ * listing. The total below bounds what is shown, tool names, outputs and
+ * arguments together, newest first.
+ */
+const MAX_SESSION_TOOL_RESULTS = 20;
+const MAX_SESSION_TOOL_RESULT_LENGTH = 6_000;
+const MAX_SESSION_TOOL_RESULTS_LENGTH = 16_000;
 
 export type IntegrationToolAutoToolResult = {
   /** `integration.tool` */
@@ -27,23 +34,35 @@ export function boundToolResults(
     if (typeof result?.tool !== 'string' || typeof result.output !== 'string') {
       continue;
     }
+    // The tool's name is shown too, so it counts against the budget.
+    const tool = result.tool.slice(0, 200);
     // A listing names its items from the start, so keep the head.
     const output = maskIntegrationToolText(result.output)
       .trim()
-      .slice(0, Math.min(MAX_SESSION_TOOL_RESULT_LENGTH, remaining));
+      .slice(
+        0,
+        Math.max(
+          0,
+          Math.min(MAX_SESSION_TOOL_RESULT_LENGTH, remaining - tool.length),
+        ),
+      );
     if (!output) continue;
+    remaining -= tool.length + output.length;
+    // The arguments count against the same budget, and are left out when
+    // they no longer fit: the output is what identifies an item.
+    const args =
+      result.arguments === undefined
+        ? undefined
+        : redactIntegrationToolArgs(result.arguments, { maxStringLength: 200 });
+    const argsLength =
+      args === undefined ? 0 : (JSON.stringify(args)?.length ?? 0);
+    const keepArgs = args !== undefined && argsLength <= remaining;
+    if (keepArgs) remaining -= argsLength;
     bounded.push({
-      tool: result.tool.slice(0, 200),
-      ...(result.arguments === undefined
-        ? {}
-        : {
-            arguments: redactIntegrationToolArgs(result.arguments, {
-              maxStringLength: 200,
-            }),
-          }),
+      tool,
+      ...(keepArgs ? { arguments: args } : {}),
       output,
     });
-    remaining -= output.length;
   }
   return bounded.reverse();
 }

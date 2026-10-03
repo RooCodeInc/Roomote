@@ -1103,14 +1103,14 @@ describe('evaluateIntegrationToolAutoDecision', () => {
 
   it('passes recent tool results to the model, bounded and with credentials masked', async () => {
     mocks.evaluate.mockResolvedValue(modelAnswers(routine));
-    const long = `first-item ${'x'.repeat(3_000)}`;
+    const long = `first-item ${'x'.repeat(9_000)}`;
     await evaluateIntegrationToolAutoDecision({
       ...call,
       userRequest: 'close the Globex deal',
       sessionContext: {
         recentUserMessages: ['close the Globex deal'],
         recentToolResults: [
-          ...Array.from({ length: 9 }, (_, index) => ({
+          ...Array.from({ length: 21 }, (_, index) => ({
             tool: 'hubspot.get_deal',
             output: `deal ${index}`,
           })),
@@ -1125,8 +1125,8 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     });
     const results =
       mocks.evaluate.mock.calls[0]![0].state.sessionContext.recentToolResults;
-    // The newest eight, oldest first; the oldest three were dropped.
-    expect(results).toHaveLength(8);
+    // The newest twenty, oldest first; the oldest three were dropped.
+    expect(results).toHaveLength(20);
     expect(results[0].output).toBe('deal 3');
     expect(results.at(-2)).toEqual({
       tool: 'hubspot.search_deals',
@@ -1134,8 +1134,50 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       output: '[{"id":"9921034","name":"Globex","key":"[value omitted]"}]',
     });
     // A long listing keeps its head, where the items are named.
-    expect(results.at(-1).output).toHaveLength(1_500);
+    expect(results.at(-1).output).toHaveLength(6_000);
     expect(results.at(-1).output.startsWith('first-item')).toBe(true);
+  });
+
+  it('counts the arguments of tool results against the same budget as their outputs', async () => {
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    const bigArgs = Object.fromEntries(
+      Array.from({ length: 12 }, (_, index) => [
+        `field${index}`,
+        'v'.repeat(150),
+      ]),
+    );
+    await evaluateIntegrationToolAutoDecision({
+      ...call,
+      userRequest: 'close the Globex deal',
+      sessionContext: {
+        recentUserMessages: ['close the Globex deal'],
+        recentToolResults: Array.from({ length: 20 }, (_, index) => ({
+          tool: `hubspot.${'get_deal_'.repeat(30)}`,
+          arguments: bigArgs,
+          output: `deal ${index} ${'x'.repeat(900)}`,
+        })),
+      },
+    });
+    const results: Array<{
+      tool: string;
+      arguments?: unknown;
+      output: string;
+    }> =
+      mocks.evaluate.mock.calls[0]![0].state.sessionContext.recentToolResults;
+    const shown = results.reduce(
+      (total, result) =>
+        total +
+        result.tool.length +
+        result.output.length +
+        (result.arguments === undefined
+          ? 0
+          : JSON.stringify(result.arguments).length),
+      0,
+    );
+    expect(shown).toBeLessThanOrEqual(16_000);
+    // The newest results keep their arguments; older ones lose them or drop.
+    expect(results.at(-1)).toHaveProperty('arguments');
+    expect(results.length).toBeLessThan(20);
   });
 
   it('asks, with a reason, when an authorized call names an item nothing in the session identifies', async () => {
