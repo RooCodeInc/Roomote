@@ -856,7 +856,7 @@ describe('resolveTaskMemoryRequest', () => {
     ).toBeNull();
     expect(
       resolveTaskMemoryRequest(
-        { description: 'Set up.', visibleInTranscript: false },
+        { description: 'Set up.', initialPromptSource: 'generated' },
         'standard',
       ),
     ).toBeNull();

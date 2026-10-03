@@ -5,6 +5,7 @@ import {
   buildTelegramMessagePermalink,
   TaskPayloadKind,
   type FastAgentParent,
+  type InitialTaskPromptSource,
   type TaskSpec,
 } from '@roomote/types';
 import { db, environments, eq } from '@roomote/db/server';
@@ -91,7 +92,7 @@ export async function launchTelegramTask(input: {
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
   workspace: TelegramWorkspaceSelection;
-  visibleInTranscript?: boolean;
+  initialPromptSource: InitialTaskPromptSource;
   createTopicForTask?: boolean;
   /** The session that owns this task; its transcript gets the kickoff. */
   fastAgentParent?: FastAgentParent;
@@ -141,9 +142,7 @@ export async function launchTelegramTask(input: {
         ...(input.fastAgentParent
           ? buildFastAgentChildTaskMetadata(input.fastAgentParent)
           : {}),
-        ...(input.visibleInTranscript !== undefined
-          ? { visibleInTranscript: input.visibleInTranscript }
-          : {}),
+        initialPromptSource: input.initialPromptSource,
       },
     };
   const launchResult = await enqueueTask(

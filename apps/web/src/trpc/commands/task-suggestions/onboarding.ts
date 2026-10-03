@@ -172,7 +172,7 @@ async function launchSuggestedTasksTask(input: {
           }),
           trigger: input.trigger,
           notifySlack: input.notifySlack,
-          visibleInTranscript: false,
+          initialPromptSource: 'generated',
         },
       },
       initiator: { kind: 'user', userId: input.userId },

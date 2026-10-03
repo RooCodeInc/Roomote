@@ -104,7 +104,7 @@ export async function dispatchSuggestionScan(params: {
             notifySlack: true,
             requiresTerminalCloseoutWithoutTurn: true,
             suggestionSource: 'suggest_ideas',
-            visibleInTranscript: false,
+            initialPromptSource: 'generated',
             ...(isSlackDestination ? { slackChannel: params.channelId } : {}),
             ...destinationFields,
           },

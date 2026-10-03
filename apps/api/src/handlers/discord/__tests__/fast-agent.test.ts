@@ -216,6 +216,7 @@ describe('processDiscordFastAgentMessage', () => {
       await adapter.replaceReply(reply, { message: 'Updated' });
       await adapter.launchTask({
         prompt: 'Fix errors',
+        initialPromptSource: 'generated',
         environmentId: ALL_REPOSITORIES,
         parentSessionId: 'fast-session-1',
         postKickoff: async () => {},
@@ -246,7 +247,7 @@ describe('processDiscordFastAgentMessage', () => {
           interaction: { id: 'new-interaction', token: 'token' } as never,
           interactionDeferred: true,
         },
-        visibleInTranscript: false,
+        turnSource: 'platform_event',
         onAccepted,
       }),
     ).resolves.toBe(true);
@@ -306,7 +307,7 @@ describe('processDiscordFastAgentMessage', () => {
           threadTs: 'report-thread',
           userId: 'acting-user',
         }),
-        visibleInTranscript: false,
+        initialPromptSource: 'generated',
         fastAgentParent: { sessionId: 'fast-session-1', conversation },
       }),
     );

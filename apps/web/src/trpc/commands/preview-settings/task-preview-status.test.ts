@@ -421,7 +421,7 @@ describe('startPreviewSetupTaskCommand', () => {
         payload: {
           description: string;
           environmentId?: string;
-          visibleInTranscript?: boolean;
+          initialPromptSource?: string;
         };
       };
     };
@@ -438,7 +438,7 @@ describe('startPreviewSetupTaskCommand', () => {
     expect(enqueueInput.task.payload.description).toContain(
       'manage_environments',
     );
-    expect(enqueueInput.task.payload.visibleInTranscript).toBe(false);
+    expect(enqueueInput.task.payload.initialPromptSource).toBe('generated');
   });
 
   it('launches with the setup change request by default', async () => {
@@ -463,7 +463,7 @@ describe('startPreviewSetupTaskCommand', () => {
         payload: {
           description: string;
           environmentId?: string;
-          visibleInTranscript?: boolean;
+          initialPromptSource?: string;
         };
       };
     };
@@ -472,6 +472,6 @@ describe('startPreviewSetupTaskCommand', () => {
     expect(enqueueInput.task.payload.description).toContain(
       ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
     );
-    expect(enqueueInput.task.payload.visibleInTranscript).toBe(false);
+    expect(enqueueInput.task.payload.initialPromptSource).toBe('generated');
   });
 });

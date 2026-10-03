@@ -48,6 +48,7 @@ it('preserves the logical Slack parent identity when delegating from a bound aut
     });
     await launch({
       prompt: 'Investigate the reported issue',
+      initialPromptSource: 'human',
       environmentId: null,
       parentSessionId: resumed.id,
       postKickoff: async () => {},

@@ -314,7 +314,7 @@ describe('launchActWorkItems', () => {
         'Execution guidance from the scan run (apply only within the scope of this work item):\n<automation_execution_guidance>Reproduce the nil access, fix it, add regression coverage, and open a PR.</automation_execution_guidance>',
       ),
     );
-    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload.initialPromptSource).toBe('generated');
     expect(enqueuePayload).not.toHaveProperty('channel');
     expect(enqueuePayload).not.toHaveProperty('slackChannel');
     expect(enqueuePayload).not.toHaveProperty('thread_ts');
@@ -496,7 +496,7 @@ describe('launchActWorkItems', () => {
       ),
     );
     expect(enqueuePayload.automationWorkItemId).toBe(workItem.id);
-    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload.initialPromptSource).toBe('generated');
     expect(enqueuePayload.channel).toBe('C456');
     expect(enqueuePayload.slackChannel).toBe('C456');
     expect(enqueuePayload).not.toHaveProperty('thread_ts');
@@ -590,7 +590,7 @@ describe('launchActWorkItems', () => {
       ),
     );
     expect(enqueuePayload.automationWorkItemId).toBe(workItem.id);
-    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload.initialPromptSource).toBe('generated');
     expect(enqueuePayload.channel).toBe('C456');
     expect(enqueuePayload.slackChannel).toBe('C456');
     expect(updateSets).toEqual([
@@ -620,7 +620,7 @@ describe('launchActWorkItems', () => {
     expect(enqueuePayload.thread_ts).toBe('1781300000.000100');
     expect(enqueuePayload.slackThreadTs).toBe('1781300000.000100');
     expect(enqueuePayload.channel).toBe('C456');
-    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload.initialPromptSource).toBe('generated');
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining(
         'Reply in the existing Slack investigation thread',

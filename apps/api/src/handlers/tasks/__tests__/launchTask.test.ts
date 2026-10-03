@@ -162,9 +162,34 @@ describe('launchTask', () => {
     expect(json.id).toBeUndefined();
     expect(json.error).toBeUndefined();
     const launchedTask = mockLaunchPinned.mock.calls[0]?.[0] as {
-      task: { payload: { visibleInTranscript?: boolean } };
+      task: { payload: { initialPromptSource?: string } };
     };
-    expect(launchedTask.task.payload.visibleInTranscript).toBe(true);
+    expect(launchedTask.task.payload.initialPromptSource).toBe('human');
+  });
+
+  it('maps the legacy hidden input to generated prompt authorship', async () => {
+    mockLaunchPinned.mockResolvedValue({
+      sessionId: 'session-1',
+      fastConversationId: 'fast-1',
+      runId: 99,
+      taskId: 'task-new',
+    });
+
+    const response = await createApp(authContext).request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Generated setup', hidden: true }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockLaunchPinned.mock.calls[0]?.[0]?.task.payload).toMatchObject({
+      initialPromptSource: 'generated',
+    });
+    expect(
+      mockLaunchPinned.mock.calls[0]?.[0]?.task.payload,
+    ).not.toHaveProperty('visibleInTranscript');
   });
 
   it('maps read-only launch rejection to a stable 409 error', async () => {

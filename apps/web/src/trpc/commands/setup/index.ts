@@ -394,7 +394,7 @@ async function sendSetupCompletionMcpRecommendations(
           slackChannel: mcpRecommendationContext.slackChannel,
           installerUserId: userId,
           currentConfig: mcpRecommendationContext.currentConfig,
-          visibleInTranscript: false,
+          initialPromptSource: 'generated',
         },
       },
       initiator: { kind: 'automation', key: 'mcp_recommendations' },

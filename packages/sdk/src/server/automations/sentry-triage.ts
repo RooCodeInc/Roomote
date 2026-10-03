@@ -215,7 +215,7 @@ export const sentryTriageJob = createScheduledTriageJob({
         : {}),
       suggestionSource: 'sentry_triage',
       historicalThreadFeedbackDebugSnippet: recentThreadFeedback.debugSnippet,
-      visibleInTranscript: false,
+      initialPromptSource: 'generated',
     });
 
     // Sentry issues can map to repositories on any provider, but a run's

@@ -483,7 +483,7 @@ export async function launchCiFailureTriageForFailedRun(
                   : reportDestination.provider,
             }),
             ...announcementPayloadFields,
-            visibleInTranscript: false,
+            initialPromptSource: 'generated',
           },
         },
         initiator: { kind: 'automation', key: 'ci_failure_triage' },

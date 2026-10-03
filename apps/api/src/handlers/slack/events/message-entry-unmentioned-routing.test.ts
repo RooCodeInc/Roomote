@@ -308,9 +308,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         event: expect.objectContaining({ text: '<@UBOT> please continue' }),
       }),
     );
-    expect(createFastAgentSlackLiveTaskLauncherMock).toHaveBeenCalledWith(
-      expect.objectContaining({ visibleInTranscript: true }),
-    );
+    expect(createFastAgentSlackLiveTaskLauncherMock).toHaveBeenCalledOnce();
     expect(evaluateTypeSafeJudgmentsMock).not.toHaveBeenCalled();
   });
 

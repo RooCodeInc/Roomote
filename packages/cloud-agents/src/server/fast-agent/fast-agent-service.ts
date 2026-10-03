@@ -5310,6 +5310,7 @@ export async function answerFastAgentQuestion({
                 launch: () =>
                   adapter.launchTask({
                     prompt,
+                    initialPromptSource: 'generated',
                     environmentId: candidate.environmentId,
                     verifiesEnvironmentId: candidate.environmentId,
                     model: null,
@@ -5580,6 +5581,8 @@ export async function answerFastAgentQuestion({
             try {
               result = await adapter.launchTask({
                 prompt,
+                initialPromptSource:
+                  turnSource === 'human' ? 'human' : 'generated',
                 ...(args.includeAttachments && images.length > 0
                   ? { images }
                   : {}),

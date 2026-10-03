@@ -572,7 +572,7 @@ describe('Discord component callbacks', () => {
     expect(mocks.startNewTask).toHaveBeenCalledWith(
       expect.objectContaining({
         workspace: target.expectedWorkspace,
-        visibleInTranscript: false,
+        initialPromptSource: 'generated',
         fastAgentParent: expect.objectContaining({ sessionId: 'fast-1' }),
       }),
     );

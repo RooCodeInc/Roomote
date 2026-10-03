@@ -75,6 +75,7 @@ import {
   buildFastAgentChildTaskMetadata,
   type FastAgentConversation,
   type FastAgentParent,
+  type InitialTaskPromptSource,
 } from '@roomote/types';
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
@@ -1504,7 +1505,7 @@ async function launchTeamsTask(input: {
   queuedMessage: QueuedTeamsCommunicationMessage;
   metadata: TeamsActivityCommunicationMetadata;
   workspace: TeamsWorkspaceSelection;
-  visibleInTranscript?: boolean;
+  initialPromptSource: InitialTaskPromptSource;
   /** The session that owns this task; its transcript gets the kickoff. */
   fastAgentParent?: FastAgentParent;
   /** Runs inside the launch gate before the child becomes runnable. */
@@ -1528,9 +1529,7 @@ async function launchTeamsTask(input: {
         ...(input.fastAgentParent
           ? buildFastAgentChildTaskMetadata(input.fastAgentParent)
           : {}),
-        ...(input.visibleInTranscript !== undefined
-          ? { visibleInTranscript: input.visibleInTranscript }
-          : {}),
+        initialPromptSource: input.initialPromptSource,
       },
     };
   const launchResult = await enqueueTask(
@@ -1613,7 +1612,7 @@ async function launchPinnedTeamsSuggestionTask(input: {
         queuedMessage: input.queuedMessage,
         metadata: input.metadata,
         workspace: input.workspace,
-        visibleInTranscript: false,
+        initialPromptSource: 'generated',
         fastAgentParent: parent,
         beforeEnqueue: async () => {
           await postKickoff();
