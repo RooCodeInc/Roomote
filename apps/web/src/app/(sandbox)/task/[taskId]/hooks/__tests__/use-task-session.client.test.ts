@@ -120,16 +120,19 @@ describe('getTaskRunVisiblePrompt', () => {
     ).toMatchObject({ visibleInTranscript: false });
   });
 
-  it('keeps unflagged legacy command envelopes hidden', () => {
-    expect(
-      getTaskRunVisiblePrompt(
-        buildTaskRun({
-          repo: 'Roomote/example-app',
-          description: '$environment-setup Generated setup instructions',
-        } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
-      ),
-    ).toMatchObject({ visibleInTranscript: false });
-  });
+  it.each(['$review-code Check this change', '/new Start a fresh task'])(
+    'keeps an unflagged command-style human prompt visible: %s',
+    (description) => {
+      expect(
+        getTaskRunVisiblePrompt(
+          buildTaskRun({
+            repo: 'Roomote/example-app',
+            description,
+          } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
+        ),
+      ).toEqual({ text: description, visibleInTranscript: true });
+    },
+  );
 
   it('strips Slack thread context and reply targets from the visible prompt text', () => {
     expect(

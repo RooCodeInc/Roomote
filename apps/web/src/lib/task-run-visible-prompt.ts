@@ -103,13 +103,7 @@ function getTaskRunPromptVisibility(
     return false;
   }
 
-  const usesCommandStylePromptField =
-    !explicitSnapshotResumePrompt &&
-    ('description' in taskRun.payload || 'text' in taskRun.payload);
-
-  return !(
-    usesCommandStylePromptField && /^(?:\/|\$)[a-z0-9-]+(?:\s|$)/i.test(trimmed)
-  );
+  return true;
 }
 
 function getTaskRunPromptImages(
