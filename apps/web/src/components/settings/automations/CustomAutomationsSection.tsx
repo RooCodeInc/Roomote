@@ -7,6 +7,7 @@ import {
   isValidElement,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from 'react';
@@ -117,6 +118,46 @@ type CustomAutomationEditorField =
   | 'webhook'
   | null;
 
+type EditorStateUpdate<T> = T | ((current: T) => T);
+
+type CustomAutomationEditorState = {
+  editingId: string | null;
+  isCreating: boolean;
+  form: CustomAutomationFormState;
+  editingField: CustomAutomationEditorField;
+  modelPickerOpen: boolean;
+  webhookEnabled: boolean;
+  webhookUrl: string | null;
+  fieldErrors: CustomAutomationFieldErrors;
+  resolvedCron: string | null;
+  scheduleSummary: string | null;
+};
+
+type CustomAutomationEditorAction =
+  | { type: 'open-create'; form: CustomAutomationFormState }
+  | {
+      type: 'open-edit';
+      editingId: string;
+      form: CustomAutomationFormState;
+      resolvedCron: string | null;
+    }
+  | { type: 'close' }
+  | { type: 'create-succeeded' }
+  | { type: 'update-succeeded' }
+  | {
+      type: 'update-form';
+      update: EditorStateUpdate<CustomAutomationFormState>;
+    }
+  | { type: 'set-editing-field'; field: CustomAutomationEditorField }
+  | { type: 'set-model-picker-open'; open: boolean }
+  | { type: 'set-webhook-state'; enabled: boolean; url: string | null }
+  | {
+      type: 'set-field-errors';
+      update: EditorStateUpdate<CustomAutomationFieldErrors>;
+    }
+  | { type: 'set-resolved-cron'; value: string | null }
+  | { type: 'set-schedule-summary'; value: string | null };
+
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
   prompt: '',
@@ -132,6 +173,103 @@ const EMPTY_FORM: CustomAutomationFormState = {
   targetMode: 'channel',
   targetChannelId: '',
 };
+
+export function createInitialCustomAutomationEditorState(): CustomAutomationEditorState {
+  return {
+    editingId: null,
+    isCreating: false,
+    form: EMPTY_FORM,
+    editingField: null,
+    modelPickerOpen: false,
+    webhookEnabled: false,
+    webhookUrl: null,
+    fieldErrors: {},
+    resolvedCron: null,
+    scheduleSummary: null,
+  };
+}
+
+function applyEditorStateUpdate<T>(
+  current: T,
+  update: EditorStateUpdate<T>,
+): T {
+  return typeof update === 'function'
+    ? (update as (current: T) => T)(current)
+    : update;
+}
+
+export function customAutomationEditorReducer(
+  state: CustomAutomationEditorState,
+  action: CustomAutomationEditorAction,
+): CustomAutomationEditorState {
+  switch (action.type) {
+    // These transitions intentionally stay distinct even though they close the
+    // editor to the same state: their callers own different URL/query effects.
+    case 'close':
+    case 'create-succeeded':
+    case 'update-succeeded':
+      return createInitialCustomAutomationEditorState();
+    case 'open-create':
+      return {
+        ...createInitialCustomAutomationEditorState(),
+        isCreating: true,
+        form: action.form,
+      };
+    case 'open-edit':
+      return {
+        ...createInitialCustomAutomationEditorState(),
+        editingId: action.editingId,
+        form: action.form,
+        resolvedCron: action.resolvedCron,
+      };
+    case 'update-form': {
+      const form = applyEditorStateUpdate(state.form, action.update);
+      if (form === state.form) return state;
+      return {
+        ...state,
+        form,
+      };
+    }
+    case 'set-editing-field':
+      if (state.editingField === action.field) return state;
+      return { ...state, editingField: action.field };
+    case 'set-model-picker-open':
+      if (state.modelPickerOpen === action.open) return state;
+      return { ...state, modelPickerOpen: action.open };
+    case 'set-webhook-state':
+      if (
+        state.webhookEnabled === action.enabled &&
+        state.webhookUrl === action.url
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        webhookEnabled: action.enabled,
+        webhookUrl: action.url,
+      };
+    case 'set-field-errors': {
+      const fieldErrors = applyEditorStateUpdate(
+        state.fieldErrors,
+        action.update,
+      );
+      if (fieldErrors === state.fieldErrors) return state;
+      return {
+        ...state,
+        fieldErrors,
+      };
+    }
+    case 'set-resolved-cron':
+      if (state.resolvedCron === action.value) return state;
+      return { ...state, resolvedCron: action.value };
+    case 'set-schedule-summary':
+      if (state.scheduleSummary === action.value) return state;
+      return {
+        ...state,
+        scheduleSummary: action.value,
+      };
+  }
+}
 
 const SCHEDULE_OPTIONS: Array<{
   value: CustomAutomationScheduleMode;
@@ -536,7 +674,23 @@ export function CustomAutomationsSection({
     optionsQuery.data?.launchCriteriaEnabled === true;
   const taskModelsQuery = useLaunchTaskModels();
 
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editor, dispatchEditor] = useReducer(
+    customAutomationEditorReducer,
+    undefined,
+    createInitialCustomAutomationEditorState,
+  );
+  const {
+    editingId,
+    isCreating,
+    form,
+    editingField,
+    modelPickerOpen,
+    webhookEnabled,
+    webhookUrl,
+    fieldErrors,
+    resolvedCron,
+    scheduleSummary,
+  } = editor;
   const cronExpressionRef = useRef<HTMLInputElement>(null);
   const environmentRef = useRef<HTMLButtonElement>(null);
   // Email identities belong to the automation owner (runs execute as the
@@ -554,20 +708,8 @@ export function CustomAutomationsSection({
       { enabled: Boolean(editingId), staleTime: 0, gcTime: 0 },
     ),
   );
-  const [isCreating, setIsCreating] = useState(false);
-  const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
-  const [editingField, setEditingField] =
-    useState<CustomAutomationEditorField>(null);
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [webhookEnabled, setWebhookEnabled] = useState(false);
-  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<CustomAutomationFieldErrors>(
-    {},
-  );
   const nameRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
-  const [resolvedCron, setResolvedCron] = useState<string | null>(null);
-  const [scheduleSummary, setScheduleSummary] = useState<string | null>(null);
   const [localFilter, setLocalFilter] = useState<AutomationListFilter>('all');
   const [localSearch, setLocalSearch] = useState('');
   const filter = controlledFilter ?? localFilter;
@@ -680,15 +822,7 @@ export function CustomAutomationsSection({
     trpc.automations.createCustomAutomation.mutationOptions({
       onSuccess: async () => {
         toast.success('Custom automation created');
-        setIsCreating(false);
-        setForm(EMPTY_FORM);
-        setEditingField(null);
-        setModelPickerOpen(false);
-        setWebhookEnabled(false);
-        setWebhookUrl(null);
-        setFieldErrors({});
-        setResolvedCron(null);
-        setScheduleSummary(null);
+        dispatchEditor({ type: 'create-succeeded' });
         await invalidate();
       },
       onError: (error) => {
@@ -701,15 +835,7 @@ export function CustomAutomationsSection({
     trpc.automations.updateCustomAutomation.mutationOptions({
       onSuccess: async () => {
         toast.success('Custom automation saved');
-        setEditingId(null);
-        setForm(EMPTY_FORM);
-        setEditingField(null);
-        setModelPickerOpen(false);
-        setWebhookEnabled(false);
-        setWebhookUrl(null);
-        setFieldErrors({});
-        setResolvedCron(null);
-        setScheduleSummary(null);
+        dispatchEditor({ type: 'update-succeeded' });
         window.history.replaceState(
           null,
           '',
@@ -737,8 +863,11 @@ export function CustomAutomationsSection({
   const webhookMutation = useMutation(
     trpc.automations.setCustomAutomationWebhookEnabled.mutationOptions({
       onSuccess: (result) => {
-        setWebhookEnabled(result.enabled);
-        setWebhookUrl(result.url);
+        dispatchEditor({
+          type: 'set-webhook-state',
+          enabled: result.enabled,
+          url: result.url,
+        });
         toast.success(
           result.enabled
             ? 'Webhook trigger enabled'
@@ -752,8 +881,11 @@ export function CustomAutomationsSection({
   const rotateWebhookMutation = useMutation(
     trpc.automations.rotateCustomAutomationWebhook.mutationOptions({
       onSuccess: (result) => {
-        setWebhookEnabled(true);
-        setWebhookUrl(result.url);
+        dispatchEditor({
+          type: 'set-webhook-state',
+          enabled: true,
+          url: result.url,
+        });
         toast.success('Webhook URL rotated; the previous URL no longer works');
       },
       onError: (error) => toast.error(error.message),
@@ -782,36 +914,52 @@ export function CustomAutomationsSection({
           return;
         }
         if (result.status === 'ambiguous') {
-          setResolvedCron(null);
-          setScheduleSummary(null);
-          setFieldErrors((current) => ({
-            ...current,
-            schedule: result.clarification ?? 'Clarify the schedule.',
-          }));
+          dispatchEditor({ type: 'set-resolved-cron', value: null });
+          dispatchEditor({ type: 'set-schedule-summary', value: null });
+          dispatchEditor({
+            type: 'set-field-errors',
+            update: (current) => ({
+              ...current,
+              schedule: result.clarification ?? 'Clarify the schedule.',
+            }),
+          });
           return;
         }
-        setFieldErrors((current) => ({ ...current, schedule: undefined }));
-        setResolvedCron(result.cronExpression);
-        setScheduleSummary(
-          scheduleSummaryLine(result.summary, result.timeZone),
-        );
+        dispatchEditor({
+          type: 'set-field-errors',
+          update: (current) => ({ ...current, schedule: undefined }),
+        });
+        dispatchEditor({
+          type: 'set-resolved-cron',
+          value: result.cronExpression,
+        });
+        dispatchEditor({
+          type: 'set-schedule-summary',
+          value: scheduleSummaryLine(result.summary, result.timeZone),
+        });
       },
       onError: (error, variables) => {
         if (variables.schedule !== form.cronExpression) {
           return;
         }
-        setFieldErrors((current) => ({
-          ...current,
-          schedule: error.message,
-        }));
+        dispatchEditor({
+          type: 'set-field-errors',
+          update: (current) => ({
+            ...current,
+            schedule: error.message,
+          }),
+        });
       },
     }),
   );
 
   useEffect(() => {
     if (webhookQuery.data) {
-      setWebhookEnabled(webhookQuery.data.enabled);
-      setWebhookUrl(webhookQuery.data.url);
+      dispatchEditor({
+        type: 'set-webhook-state',
+        enabled: webhookQuery.data.enabled,
+        url: webhookQuery.data.url,
+      });
     }
   }, [webhookQuery.data]);
 
@@ -916,16 +1064,7 @@ export function CustomAutomationsSection({
     : null;
 
   const closeEditor = () => {
-    setIsCreating(false);
-    setEditingId(null);
-    setForm(EMPTY_FORM);
-    setEditingField(null);
-    setModelPickerOpen(false);
-    setWebhookEnabled(false);
-    setWebhookUrl(null);
-    setFieldErrors({});
-    setResolvedCron(null);
-    setScheduleSummary(null);
+    dispatchEditor({ type: 'close' });
     if (window.location.hash.startsWith('#custom-automation-')) {
       window.history.replaceState(
         null,
@@ -942,22 +1081,18 @@ export function CustomAutomationsSection({
     row: CustomAutomationListItem,
     enabled = row.enabled,
   ) => {
-    setEditingId(row.id);
-    setIsCreating(false);
-    setEditingField(null);
-    setModelPickerOpen(false);
-    setWebhookEnabled(false);
-    setWebhookUrl(null);
-    setFieldErrors({});
-    setForm({
-      ...formFromRow(
-        row,
-        capabilitiesLoaded ? connectedDestinationProviders : null,
-      ),
-      enabled,
+    dispatchEditor({
+      type: 'open-edit',
+      editingId: row.id,
+      form: {
+        ...formFromRow(
+          row,
+          capabilitiesLoaded ? connectedDestinationProviders : null,
+        ),
+        enabled,
+      },
+      resolvedCron: row.cronExpression ?? null,
     });
-    setResolvedCron(row.cronExpression ?? null);
-    setScheduleSummary(null);
     window.history.replaceState(
       null,
       '',
@@ -977,22 +1112,17 @@ export function CustomAutomationsSection({
           candidate.id === window.location.hash.slice(prefix.length),
       );
       if (row) {
-        setEditingId(row.id);
-        setIsCreating(false);
-        setEditingField(null);
-        setModelPickerOpen(false);
-        setWebhookEnabled(false);
-        setWebhookUrl(null);
-        setForm(
-          formFromRow(
+        dispatchEditor({
+          type: 'open-edit',
+          editingId: row.id,
+          form: formFromRow(
             row,
             capabilitiesLoadedRef.current
               ? connectedDestinationProvidersRef.current
               : null,
           ),
-        );
-        setResolvedCron(row.cronExpression ?? null);
-        setScheduleSummary(null);
+          resolvedCron: row.cronExpression ?? null,
+        });
       }
     };
 
@@ -1004,18 +1134,20 @@ export function CustomAutomationsSection({
   useEffect(() => {
     if (!capabilitiesLoaded) return;
 
-    setForm((current) =>
-      current.targetProvider === 'none' ||
-      current.targetProvider === 'email' ||
-      connectedDestinationProviders.includes(current.targetProvider)
-        ? current
-        : {
-            ...current,
-            targetProvider: 'none',
-            targetMode: 'channel',
-            targetChannelId: '',
-          },
-    );
+    dispatchEditor({
+      type: 'update-form',
+      update: (current) =>
+        current.targetProvider === 'none' ||
+        current.targetProvider === 'email' ||
+        connectedDestinationProviders.includes(current.targetProvider)
+          ? current
+          : {
+              ...current,
+              targetProvider: 'none',
+              targetMode: 'channel',
+              targetChannelId: '',
+            },
+    });
   }, [capabilitiesLoaded, connectedDestinationProviders]);
 
   const saveForm = () => {
@@ -1027,38 +1159,50 @@ export function CustomAutomationsSection({
       requiredFieldErrors.prompt = 'Enter a prompt.';
     }
     if (requiredFieldErrors.name || requiredFieldErrors.prompt) {
-      setFieldErrors(requiredFieldErrors);
+      dispatchEditor({
+        type: 'set-field-errors',
+        update: requiredFieldErrors,
+      });
       (requiredFieldErrors.name ? nameRef : promptRef).current?.focus();
       return;
     }
-    setFieldErrors((current) => ({ schedule: current.schedule }));
+    dispatchEditor({
+      type: 'set-field-errors',
+      update: (current) => ({ schedule: current.schedule }),
+    });
 
     if (!form.environmentId) {
       const environmentError = 'Choose an environment.';
-      setEditingField('environment');
-      setFieldErrors((current) => ({
-        ...current,
-        environment: environmentError,
-      }));
+      dispatchEditor({ type: 'set-editing-field', field: 'environment' });
+      dispatchEditor({
+        type: 'set-field-errors',
+        update: (current) => ({
+          ...current,
+          environment: environmentError,
+        }),
+      });
       const environmentTrigger = environmentRef.current;
       environmentTrigger?.focus();
       environmentTrigger?.scrollIntoView?.({ block: 'center' });
       return;
     }
     if (form.scheduleMode === 'cron' && !effectiveResolvedCron) {
-      setEditingField('schedule');
-      setFieldErrors((current) => ({
-        ...current,
-        schedule:
-          current.schedule ??
-          (resolveScheduleMutation.isPending
-            ? 'Still interpreting the schedule, try again in a moment.'
-            : 'Enter a valid schedule first.'),
-      }));
+      dispatchEditor({ type: 'set-editing-field', field: 'schedule' });
+      dispatchEditor({
+        type: 'set-field-errors',
+        update: (current) => ({
+          ...current,
+          schedule:
+            current.schedule ??
+            (resolveScheduleMutation.isPending
+              ? 'Still interpreting the schedule, try again in a moment.'
+              : 'Enter a valid schedule first.'),
+        }),
+      });
       cronExpressionRef.current?.focus();
       return;
     }
-    setFieldErrors({});
+    dispatchEditor({ type: 'set-field-errors', update: {} });
     if (
       form.targetProvider !== 'none' &&
       (form.targetMode === 'channel' || form.targetProvider === 'email') &&
@@ -1127,9 +1271,15 @@ export function CustomAutomationsSection({
             }
             onChange={(event) => {
               const name = event.target.value;
-              setForm((current) => ({ ...current, name }));
+              dispatchEditor({
+                type: 'update-form',
+                update: (current) => ({ ...current, name }),
+              });
               if (name.trim() && fieldErrors.name) {
-                setFieldErrors((current) => ({ ...current, name: undefined }));
+                dispatchEditor({
+                  type: 'set-field-errors',
+                  update: (current) => ({ ...current, name: undefined }),
+                });
               }
             }}
             placeholder="Weekly flaky-test scan"
@@ -1160,15 +1310,21 @@ export function CustomAutomationsSection({
             }
             onChange={(event) => {
               const prompt = event.target.value;
-              setForm((current) => ({
-                ...current,
-                prompt,
-              }));
-              if (prompt.trim() && fieldErrors.prompt) {
-                setFieldErrors((current) => ({
+              dispatchEditor({
+                type: 'update-form',
+                update: (current) => ({
                   ...current,
-                  prompt: undefined,
-                }));
+                  prompt,
+                }),
+              });
+              if (prompt.trim() && fieldErrors.prompt) {
+                dispatchEditor({
+                  type: 'set-field-errors',
+                  update: (current) => ({
+                    ...current,
+                    prompt: undefined,
+                  }),
+                });
               }
             }}
             placeholder="What should Roomote do on each run?"
@@ -1197,7 +1353,10 @@ export function CustomAutomationsSection({
               rows={3}
               onChange={(event) => {
                 const launchCriteria = event.target.value;
-                setForm((current) => ({ ...current, launchCriteria }));
+                dispatchEditor({
+                  type: 'update-form',
+                  update: (current) => ({ ...current, launchCriteria }),
+                });
               }}
               placeholder="Only investigate newly regressed issues affecting active users."
             />
@@ -1219,14 +1378,26 @@ export function CustomAutomationsSection({
                 handoffTargetOnSelect={cronExpressionRef}
                 onValueChange={(value) => {
                   const scheduleMode = value as CustomAutomationScheduleMode;
-                  setResolvedCron(null);
-                  setScheduleSummary(null);
-                  setFieldErrors((current) => ({
-                    ...current,
-                    schedule: undefined,
-                  }));
-                  setForm((current) => ({ ...current, scheduleMode }));
-                  setEditingField(scheduleMode === 'cron' ? 'schedule' : null);
+                  dispatchEditor({ type: 'set-resolved-cron', value: null });
+                  dispatchEditor({
+                    type: 'set-schedule-summary',
+                    value: null,
+                  });
+                  dispatchEditor({
+                    type: 'set-field-errors',
+                    update: (current) => ({
+                      ...current,
+                      schedule: undefined,
+                    }),
+                  });
+                  dispatchEditor({
+                    type: 'update-form',
+                    update: (current) => ({ ...current, scheduleMode }),
+                  });
+                  dispatchEditor({
+                    type: 'set-editing-field',
+                    field: scheduleMode === 'cron' ? 'schedule' : null,
+                  });
                 }}
               >
                 <SelectTrigger
@@ -1261,18 +1432,27 @@ export function CustomAutomationsSection({
                       : undefined
                   }
                   onChange={(event) => {
-                    setResolvedCron(null);
-                    setScheduleSummary(null);
+                    dispatchEditor({ type: 'set-resolved-cron', value: null });
+                    dispatchEditor({
+                      type: 'set-schedule-summary',
+                      value: null,
+                    });
                     if (fieldErrors.schedule) {
-                      setFieldErrors((current) => ({
-                        ...current,
-                        schedule: undefined,
-                      }));
+                      dispatchEditor({
+                        type: 'set-field-errors',
+                        update: (current) => ({
+                          ...current,
+                          schedule: undefined,
+                        }),
+                      });
                     }
-                    setForm((current) => ({
-                      ...current,
-                      cronExpression: event.target.value,
-                    }));
+                    dispatchEditor({
+                      type: 'update-form',
+                      update: (current) => ({
+                        ...current,
+                        cronExpression: event.target.value,
+                      }),
+                    });
                   }}
                   onBlur={() => {
                     const alreadyResolvingThisInput =
@@ -1318,17 +1498,23 @@ export function CustomAutomationsSection({
                 className="h-auto p-0"
                 onClick={() => {
                   if (fieldErrors.schedule || !effectiveResolvedCron) {
-                    setFieldErrors((current) => ({
-                      ...current,
-                      schedule:
-                        current.schedule ??
-                        (resolveScheduleMutation.isPending
-                          ? 'Still interpreting the schedule, try again in a moment.'
-                          : 'Enter a valid schedule first.'),
-                    }));
+                    dispatchEditor({
+                      type: 'set-field-errors',
+                      update: (current) => ({
+                        ...current,
+                        schedule:
+                          current.schedule ??
+                          (resolveScheduleMutation.isPending
+                            ? 'Still interpreting the schedule, try again in a moment.'
+                            : 'Enter a valid schedule first.'),
+                      }),
+                    });
                     return;
                   }
-                  setEditingField(null);
+                  dispatchEditor({
+                    type: 'set-editing-field',
+                    field: null,
+                  });
                 }}
               >
                 Done
@@ -1344,7 +1530,9 @@ export function CustomAutomationsSection({
                 ? (effectiveScheduleSummary ?? 'Custom schedule')
                 : scheduleLabel(form.scheduleMode)
             }
-            onEdit={() => setEditingField('schedule')}
+            onEdit={() =>
+              dispatchEditor({ type: 'set-editing-field', field: 'schedule' })
+            }
           />
         )}
 
@@ -1353,11 +1541,14 @@ export function CustomAutomationsSection({
             value={form.resultPriority}
             disabled={busy}
             onValueChange={(value) => {
-              setForm((current) => ({
-                ...current,
-                resultPriority: value as AutomationResultPriority,
-              }));
-              setEditingField(null);
+              dispatchEditor({
+                type: 'update-form',
+                update: (current) => ({
+                  ...current,
+                  resultPriority: value as AutomationResultPriority,
+                }),
+              });
+              dispatchEditor({ type: 'set-editing-field', field: null });
             }}
           >
             <SelectTrigger
@@ -1380,7 +1571,9 @@ export function CustomAutomationsSection({
             icon={CircleAlert}
             label="Priority"
             value={AUTOMATION_RESULT_PRIORITY_LABELS[form.resultPriority]}
-            onEdit={() => setEditingField('priority')}
+            onEdit={() =>
+              dispatchEditor({ type: 'set-editing-field', field: 'priority' })
+            }
           />
         )}
 
@@ -1390,16 +1583,22 @@ export function CustomAutomationsSection({
               value={form.environmentId || undefined}
               disabled={busy || environmentOptions.length === 0}
               onValueChange={(value) => {
-                setForm((current) => ({
-                  ...current,
-                  environmentId: value,
-                }));
-                setEditingField(null);
-                if (fieldErrors.environment) {
-                  setFieldErrors((current) => ({
+                dispatchEditor({
+                  type: 'update-form',
+                  update: (current) => ({
                     ...current,
-                    environment: undefined,
-                  }));
+                    environmentId: value,
+                  }),
+                });
+                dispatchEditor({ type: 'set-editing-field', field: null });
+                if (fieldErrors.environment) {
+                  dispatchEditor({
+                    type: 'set-field-errors',
+                    update: (current) => ({
+                      ...current,
+                      environment: undefined,
+                    }),
+                  });
                 }
               }}
             >
@@ -1444,7 +1643,12 @@ export function CustomAutomationsSection({
                 (environment) => environment.id === form.environmentId,
               )?.name ?? 'Select environment'
             }
-            onEdit={() => setEditingField('environment')}
+            onEdit={() =>
+              dispatchEditor({
+                type: 'set-editing-field',
+                field: 'environment',
+              })
+            }
           />
         )}
 
@@ -1464,7 +1668,9 @@ export function CustomAutomationsSection({
           action={
             <ModelReasoningPicker
               open={modelPickerOpen}
-              onOpenChange={setModelPickerOpen}
+              onOpenChange={(open) =>
+                dispatchEditor({ type: 'set-model-picker-open', open })
+              }
               trigger={
                 <Button
                   type="button"
@@ -1485,19 +1691,28 @@ export function CustomAutomationsSection({
                   : 'Deployment default'
               }
               onModelChange={(model) =>
-                setForm((current) => ({ ...current, model }))
+                dispatchEditor({
+                  type: 'update-form',
+                  update: (current) => ({ ...current, model }),
+                })
               }
               reasoningEffort={form.reasoningEffort}
               defaultReasoningEffort={defaultReasoningEffort}
               onReasoningEffortChange={(reasoningEffort) =>
-                setForm((current) => ({ ...current, reasoningEffort }))
+                dispatchEditor({
+                  type: 'update-form',
+                  update: (current) => ({ ...current, reasoningEffort }),
+                })
               }
               onModelSelectionChange={(selection) =>
-                setForm((current) => ({
-                  ...current,
-                  model: selection.model,
-                  reasoningEffort: selection.reasoningEffort,
-                }))
+                dispatchEditor({
+                  type: 'update-form',
+                  update: (current) => ({
+                    ...current,
+                    model: selection.model,
+                    reasoningEffort: selection.reasoningEffort,
+                  }),
+                })
               }
               providerGrouping={{
                 chatgptConnected: taskModelsQuery.data?.chatgptConnected,
@@ -1529,12 +1744,15 @@ export function CustomAutomationsSection({
             defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
             disabled={busy}
             onChange={(destination) =>
-              setForm((current) => ({
-                ...current,
-                targetProvider: destination.provider,
-                targetMode: destination.mode,
-                targetChannelId: destination.channelId,
-              }))
+              dispatchEditor({
+                type: 'update-form',
+                update: (current) => ({
+                  ...current,
+                  targetProvider: destination.provider,
+                  targetMode: destination.mode,
+                  targetChannelId: destination.channelId,
+                }),
+              })
             }
           />
         ) : (
@@ -1547,7 +1765,12 @@ export function CustomAutomationsSection({
               discordOptions,
               visibleEmailOptions,
             )}
-            onEdit={() => setEditingField('destination')}
+            onEdit={() =>
+              dispatchEditor({
+                type: 'set-editing-field',
+                field: 'destination',
+              })
+            }
           />
         )}
 
@@ -1638,7 +1861,9 @@ export function CustomAutomationsSection({
                   ? 'Enabled'
                   : 'Disabled'
             }
-            onEdit={() => setEditingField('webhook')}
+            onEdit={() =>
+              dispatchEditor({ type: 'set-editing-field', field: 'webhook' })
+            }
           />
         ) : null}
 
@@ -1673,21 +1898,15 @@ export function CustomAutomationsSection({
           const target = destinationValueFromAutomationTarget(
             optionsQuery.data?.defaultTarget ?? {},
           );
-          setIsCreating(true);
-          setEditingId(null);
-          setEditingField(null);
-          setModelPickerOpen(false);
-          setWebhookEnabled(false);
-          setWebhookUrl(null);
-          setFieldErrors({});
-          setForm({
-            ...EMPTY_FORM,
-            targetProvider: target.provider,
-            targetMode: target.mode,
-            targetChannelId: target.channelId,
+          dispatchEditor({
+            type: 'open-create',
+            form: {
+              ...EMPTY_FORM,
+              targetProvider: target.provider,
+              targetMode: target.mode,
+              targetChannelId: target.channelId,
+            },
           });
-          setResolvedCron(null);
-          setScheduleSummary(null);
         }}
       >
         <Plus />
