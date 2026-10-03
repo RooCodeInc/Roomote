@@ -1152,17 +1152,22 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       sessionContext: {
         recentUserMessages: ['close the Globex deal'],
         recentToolResults: Array.from({ length: 20 }, (_, index) => ({
-          tool: 'hubspot.get_deal',
+          tool: `hubspot.${'get_deal_'.repeat(30)}`,
           arguments: bigArgs,
           output: `deal ${index} ${'x'.repeat(900)}`,
         })),
       },
     });
-    const results: Array<{ arguments?: unknown; output: string }> =
+    const results: Array<{
+      tool: string;
+      arguments?: unknown;
+      output: string;
+    }> =
       mocks.evaluate.mock.calls[0]![0].state.sessionContext.recentToolResults;
     const shown = results.reduce(
       (total, result) =>
         total +
+        result.tool.length +
         result.output.length +
         (result.arguments === undefined
           ? 0
