@@ -1860,6 +1860,79 @@ describe('resolveOpenCodeSmallModel', () => {
     });
   });
 
+  it.each([
+    {
+      role: 'small' as const,
+      roleEnv: {
+        R_SMALL_MODEL: 'openrouter/openai/gpt-5.6-luna',
+        R_SMALL_MODEL_REASONING_EFFORT: 'medium',
+        R_SMALL_MODEL_FALLBACK: 'openrouter/z-ai/glm-5.2',
+        R_SMALL_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+      },
+    },
+    {
+      role: 'orchestration' as const,
+      roleEnv: {
+        R_ORCHESTRATION_MODEL: 'openrouter/openai/gpt-5.6-sol',
+        R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
+        R_ORCHESTRATION_MODEL_FALLBACK: 'openrouter/z-ai/glm-5.2',
+        R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+      },
+    },
+  ])(
+    'uses the configured $role fallback reasoning effort',
+    async ({ role, roleEnv }) => {
+      process.env = { ...originalEnv };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_MODEL_REASONING_EFFORT: 'xhigh',
+        OPENROUTER_API_KEY: 'test-key',
+        ...roleEnv,
+      });
+      sessionPromptMock
+        .mockResolvedValueOnce({
+          data: {
+            info: {
+              error: {
+                name: 'APIError',
+                data: { statusCode: 401, message: 'Invalid API key' },
+              },
+            },
+            parts: [],
+          },
+          error: undefined,
+        })
+        .mockResolvedValueOnce({
+          data: {
+            info: { error: null },
+            parts: [{ type: 'text', text: 'fallback response' }],
+          },
+          error: undefined,
+        });
+
+      const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+        await import('../non-task-provider-usage.js');
+
+      await expect(
+        generateTrackedNonTaskText({
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          modelRole: role,
+          prompt: 'Answer.',
+        }),
+      ).resolves.toBe('fallback response');
+      expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenLastCalledWith({
+        runtimeEnv: expect.objectContaining({
+          R_MODEL: 'openrouter/z-ai/glm-5.2',
+          R_MODEL_REASONING_EFFORT: 'low',
+        }),
+      });
+      expect(spawnMock.mock.calls.at(-1)?.[2]?.env).toMatchObject({
+        R_MODEL: 'openrouter/z-ai/glm-5.2',
+        R_MODEL_REASONING_EFFORT: 'low',
+      });
+    },
+  );
+
   it('uses the deployment coding model for Fast inference when no orchestration override is configured', async () => {
     process.env = {
       ...originalEnv,
