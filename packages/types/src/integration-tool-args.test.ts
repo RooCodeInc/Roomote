@@ -37,6 +37,8 @@ describe('integration tool argument secret handling', () => {
       stripeLive: `sk_${'live'}_${'A1b2'.repeat(6)}`,
       stripeTest: `sk_${'test'}_${'C3d4'.repeat(6)}`,
       stripeRestricted: `rk_${'live'}_${'E5f6'.repeat(6)}`,
+      stripeOrganization: `sk_${'org'}_${'H7j8'.repeat(6)}`,
+      stripeOrganizationLive: `sk_${'org'}_${'live'}_${'K9m1'.repeat(6)}`,
       stripeWebhook: `whsec_${'G7h8'.repeat(8)}`,
       githubServer: `ghs_${'i'.repeat(36)}`,
       githubUser: `ghu_${'j'.repeat(36)}`,
@@ -62,7 +64,7 @@ describe('integration tool argument secret handling', () => {
   it('does not take ordinary words that share a prefix for credentials', () => {
     expect(
       hasIntegrationToolSecret({
-        note: 'use sk_live_ keys in production and sk_test_ keys locally',
+        note: 'use sk_live_ keys in production, sk_test_ keys locally, sk_org_ keys per organization',
         command: 'npm_config_registry=https://registry.example npm install',
         module: 'hf_hub_download',
         branch: 'glpat-notes',

@@ -12,8 +12,9 @@ const MASKED_VALUE = '[value omitted]';
 const SECRET_VALUE_PATTERNS = [
   // OpenAI, OpenRouter, Anthropic
   /\bsk-(?:or-)?[A-Za-z0-9_-]{12,}\b/,
-  // Stripe secret and restricted keys, and webhook signing secrets
-  /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}\b/,
+  // Stripe secret, restricted and organization keys, and webhook signing
+  // secrets
+  /\b[sr]k_(?:live|test|org)_(?:(?:live|test)_)?[A-Za-z0-9]{16,}\b/,
   /\bwhsec_[A-Za-z0-9]{24,}\b/,
   // GitHub
   /\bgh[pousr]_[A-Za-z0-9]{16,}\b/,
