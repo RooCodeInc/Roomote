@@ -5,7 +5,9 @@ const mocks = vi.hoisted(() => ({
   },
   queueConstructor: vi.fn(),
   workerConstructor: vi.fn(),
+  workerClose: vi.fn(),
   queueEventsConstructor: vi.fn(),
+  queueEventsClose: vi.fn(),
   drainSessionDoneWebhookDeliveries: vi.fn(),
 }));
 
@@ -18,6 +20,7 @@ vi.mock('bullmq', () => ({
   },
   Worker: class {
     on = vi.fn();
+    close = mocks.workerClose;
 
     constructor(...args: unknown[]) {
       mocks.workerConstructor(...args);
@@ -25,6 +28,7 @@ vi.mock('bullmq', () => ({
   },
   QueueEvents: class {
     on = vi.fn();
+    close = mocks.queueEventsClose;
 
     constructor(...args: unknown[]) {
       mocks.queueEventsConstructor(...args);
@@ -48,12 +52,24 @@ describe('startSessionDoneWebhookDeliveryQueue', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.queue.close.mockResolvedValue(undefined);
+    mocks.workerClose.mockResolvedValue(undefined);
+    mocks.queueEventsClose.mockResolvedValue(undefined);
     mocks.queue.upsertJobScheduler.mockResolvedValue(undefined);
     mocks.drainSessionDoneWebhookDeliveries.mockResolvedValue({
       delivered: 0,
       failed: 0,
       skipped: 0,
     });
+  });
+
+  it('force-closes an active delivery during shutdown', async () => {
+    const resources = await startSessionDoneWebhookDeliveryQueue();
+
+    await resources.close();
+
+    expect(mocks.workerClose).toHaveBeenCalledWith(true);
+    expect(mocks.queueEventsClose).toHaveBeenCalledTimes(1);
+    expect(mocks.queue.close).toHaveBeenCalledTimes(1);
   });
 
   it('isolates completion delivery in a dedicated single-concurrency worker', async () => {

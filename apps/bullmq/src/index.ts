@@ -132,8 +132,7 @@ const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
   await startScheduler();
 const {
   queue: sessionDoneWebhookDeliveryQueue,
-  worker: sessionDoneWebhookDeliveryWorker,
-  queueEvents: sessionDoneWebhookDeliveryQueueEvents,
+  close: closeSessionDoneWebhookDeliveryQueue,
 } = await startSessionDoneWebhookDeliveryQueue();
 const {
   sandboxOidcRefreshQueue,
@@ -494,9 +493,7 @@ installBullMqGracefulShutdown({
     await schedulerWorker.close();
     await schedulerQueueEvents.close();
     await schedulerQueue.close();
-    await sessionDoneWebhookDeliveryWorker.close();
-    await sessionDoneWebhookDeliveryQueueEvents.close();
-    await sessionDoneWebhookDeliveryQueue.close();
+    await closeSessionDoneWebhookDeliveryQueue();
     await sandboxOidcRefreshWorker.close();
     await sandboxOidcRefreshQueueEvents.close();
     await sandboxOidcRefreshQueue.close();

@@ -63,5 +63,16 @@ export async function startSessionDoneWebhookDeliveryQueue() {
     ),
   );
 
-  return { queue, worker, queueEvents };
+  return {
+    queue,
+    worker,
+    queueEvents,
+    close: async () => {
+      // Delivery leases recover abandoned work; never hold deployment shutdown
+      // open for a slow external endpoint.
+      await worker.close(true);
+      await queueEvents.close();
+      await queue.close();
+    },
+  };
 }
