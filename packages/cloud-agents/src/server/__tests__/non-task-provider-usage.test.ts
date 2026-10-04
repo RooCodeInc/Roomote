@@ -1860,6 +1860,215 @@ describe('resolveOpenCodeSmallModel', () => {
     });
   });
 
+  it.each(
+    [
+      {
+        role: 'small' as const,
+        roleEnv: {
+          R_SMALL_MODEL: 'openrouter/openai/gpt-5.6-luna',
+          R_SMALL_MODEL_REASONING_EFFORT: 'medium',
+          R_SMALL_MODEL_FALLBACK: 'openrouter/z-ai/glm-5.2',
+          R_SMALL_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+        },
+      },
+      {
+        role: 'orchestration' as const,
+        roleEnv: {
+          R_ORCHESTRATION_MODEL: 'openrouter/openai/gpt-5.6-sol',
+          R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
+          R_ORCHESTRATION_MODEL_FALLBACK: 'openrouter/z-ai/glm-5.2',
+          R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+        },
+      },
+    ].flatMap((testCase) =>
+      (['text', 'object'] as const).map((output) => ({ ...testCase, output })),
+    ),
+  )(
+    'uses the configured $role fallback reasoning in $output provider config',
+    async ({ role, roleEnv, output }) => {
+      process.env = { ...originalEnv };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_MODEL_REASONING_EFFORT: 'xhigh',
+        OPENROUTER_API_KEY: 'test-key',
+        ...roleEnv,
+      });
+      sessionPromptMock
+        .mockResolvedValueOnce({
+          data: {
+            info: {
+              error: {
+                name: 'APIError',
+                data: { statusCode: 401, message: 'Invalid API key' },
+              },
+            },
+            parts: [],
+          },
+          error: undefined,
+        })
+        .mockResolvedValueOnce({
+          data: {
+            info: { error: null, structured: { answer: 'fallback response' } },
+            parts: [{ type: 'text', text: 'fallback response' }],
+          },
+          error: undefined,
+        });
+
+      const {
+        generateTrackedNonTaskText,
+        generateTrackedNonTaskObject,
+        NON_TASK_INFERENCE_SURFACES,
+      } = await import('../non-task-provider-usage.js');
+      const params = {
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: role,
+        prompt: 'Answer.',
+      };
+
+      if (output === 'text') {
+        await expect(generateTrackedNonTaskText(params)).resolves.toBe(
+          'fallback response',
+        );
+      } else {
+        await expect(
+          generateTrackedNonTaskObject({
+            ...params,
+            reasoningEffort: 'high',
+            schema: z.object({ answer: z.string() }),
+          }),
+        ).resolves.toEqual({ object: { answer: 'fallback response' } });
+      }
+      expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenLastCalledWith({
+        runtimeEnv: expect.objectContaining({
+          R_MODEL: 'openrouter/z-ai/glm-5.2',
+          R_MODEL_REASONING_EFFORT: 'low',
+        }),
+      });
+      expect(spawnMock.mock.calls.at(-1)?.[2]?.env).toMatchObject({
+        R_MODEL: 'openrouter/z-ai/glm-5.2',
+        R_MODEL_REASONING_EFFORT: 'low',
+      });
+      expect(
+        JSON.parse(
+          spawnMock.mock.calls.at(-1)?.[2]?.env?.OPENCODE_CONFIG_CONTENT ??
+            '{}',
+        ),
+      ).toMatchObject({
+        provider: {
+          openrouter: {
+            models: {
+              'z-ai/glm-5.2': {
+                options: { reasoning: { effort: 'low' } },
+              },
+            },
+          },
+        },
+      });
+    },
+  );
+
+  it("keeps modality reroutes from inheriting another model's fallback reasoning", async () => {
+    process.env = { ...originalEnv };
+    const fallbackModel = 'openrouter/openai/gpt-5.4';
+    const visionModel = 'openrouter/google/gemini-3.6-pro';
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_SMALL_MODEL_FALLBACK: fallbackModel,
+      R_SMALL_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+      R_VISION_MODEL: visionModel,
+      R_VISION_MODEL_REASONING_EFFORT: 'high',
+      OPENROUTER_API_KEY: 'test-key',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'google/gemini-3.6-pro': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+              'openai/gpt-5.4': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+              'z-ai/glm-5.2': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+    sessionPromptMock
+      .mockResolvedValueOnce({
+        data: {
+          info: {
+            error: {
+              name: 'APIError',
+              data: { statusCode: 401, message: 'Invalid API key' },
+            },
+          },
+          parts: [],
+        },
+        error: undefined,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          info: { error: null },
+          parts: [{ type: 'text', text: 'Image described.' }],
+        },
+        error: undefined,
+      });
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'small',
+        prompt: 'Describe the image.',
+        requiredInputModality: 'image',
+        reasoningEffort: 'high',
+      }),
+    ).resolves.toBe('Image described.');
+    expect(sessionPromptMock).toHaveBeenCalledTimes(2);
+    for (const [request] of sessionPromptMock.mock.calls) {
+      expect(request.model).toEqual({
+        providerID: 'openrouter',
+        modelID: 'google/gemini-3.6-pro',
+      });
+    }
+    const fallbackServer = spawnMock.mock.calls
+      .filter((call) => call[2]?.env?.R_MODEL === fallbackModel)
+      .at(-1);
+    expect(fallbackServer).toBeDefined();
+    expect(
+      JSON.parse(fallbackServer?.[2]?.env?.OPENCODE_CONFIG_CONTENT ?? '{}'),
+    ).toMatchObject({
+      provider: {
+        openrouter: {
+          models: {
+            'google/gemini-3.6-pro': {
+              options: { reasoning: { effort: 'high' } },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it('uses the deployment coding model for Fast inference when no orchestration override is configured', async () => {
     process.env = {
       ...originalEnv,
