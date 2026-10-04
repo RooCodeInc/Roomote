@@ -290,6 +290,11 @@ metadata for every session, including private sessions; the payload does not
 include titles, prompts, replies, repository names, or artifacts, and the
 session URL still requires normal Roomote access.
 
+Roomote queues the first delivery as soon as the durable **Done** judgment is
+applied. A separate one-minute scheduled drain remains as a recovery path for
+retries or a missed immediate queue signal; it does not delay the first
+attempt.
+
 Session rows show who or which automation started the work, its source and
 cost, and links to accumulated active pull requests. In the session workspace,
 those pull requests remain available across delegated tasks. Selecting the live
