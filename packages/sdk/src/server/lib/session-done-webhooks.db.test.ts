@@ -44,14 +44,14 @@ describe('Session done webhook delivery', () => {
       .values({
         id: 'default',
         sessionDoneWebhookEnabled: true,
-        sessionDoneWebhookUrl: 'https://orchestrator.example/roomote',
+        sessionDoneWebhookUrl: 'http://127.0.0.1:4317/roomote',
         sessionDoneWebhookSecret: secret,
       })
       .onConflictDoUpdate({
         target: deploymentSettings.id,
         set: {
           sessionDoneWebhookEnabled: true,
-          sessionDoneWebhookUrl: 'https://orchestrator.example/roomote',
+          sessionDoneWebhookUrl: 'http://127.0.0.1:4317/roomote',
           sessionDoneWebhookSecret: secret,
         },
       });
@@ -86,12 +86,17 @@ describe('Session done webhook delivery', () => {
     );
 
     await expect(
-      drainSessionDoneWebhookDeliveries({ fetch, now: () => now }),
+      drainSessionDoneWebhookDeliveries({
+        fetch,
+        now: () => now,
+        allowedPrivateCidrs: '127.0.0.1/32',
+      }),
     ).resolves.toEqual({ delivered: 1, failed: 0, skipped: 0 });
 
     expect(fetch).toHaveBeenCalledOnce();
     const [url, options] = fetch.mock.calls[0]!;
-    expect(url).toBe('https://orchestrator.example/roomote');
+    expect(url).toBe('http://127.0.0.1:4317/roomote');
+    expect(options?.allowedPrivateCidrs).toBe('127.0.0.1/32');
     const body = options?.body as string;
     expect(JSON.parse(body)).toMatchObject({
       id: delivery!.id,

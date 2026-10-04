@@ -239,6 +239,18 @@ redirect. Roomote blocks private and special-use network destinations by
 default. Add a signing secret of at least 16 characters; Roomote encrypts the
 saved value and never displays it again.
 
+Self-hosted deployments can allow only the private receiver ranges they need:
+
+```bash
+R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS=127.0.0.1/32
+```
+
+Set the variable on the BullMQ service and restart it. This example permits a
+receiver on the same host when BullMQ runs directly on that host. In a
+container, `127.0.0.1` points to the BullMQ container itself; use a receiver
+hostname reachable from that container and allow its exact resolved CIDR
+instead. Multiple ranges are comma-separated.
+
 Each request is a JSON `POST` with a metadata-only payload:
 
 ```json

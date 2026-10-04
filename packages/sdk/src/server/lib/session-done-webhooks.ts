@@ -92,6 +92,7 @@ export async function drainSessionDoneWebhookDeliveries(
   options: {
     fetch?: typeof safeFetch;
     now?: () => Date;
+    allowedPrivateCidrs?: string;
   } = {},
 ): Promise<{ delivered: number; failed: number; skipped: number }> {
   const fetch = options.fetch ?? safeFetch;
@@ -194,6 +195,9 @@ export async function drainSessionDoneWebhookDeliveries(
         .update(`${timestamp}.${body}`)
         .digest('hex');
       const response = await fetch(settings.sessionDoneWebhookUrl, {
+        allowedPrivateCidrs:
+          options.allowedPrivateCidrs ??
+          Env.R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS,
         method: 'POST',
         headers: {
           'content-type': 'application/json',
