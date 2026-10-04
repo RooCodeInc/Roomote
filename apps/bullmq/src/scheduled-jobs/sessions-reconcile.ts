@@ -203,7 +203,12 @@ async function backfillParticipants(): Promise<void> {
   console.info(`${LOG_PREFIX} backfill participants complete`);
 }
 
-async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
+async function reconcileRecentSessions(
+  watermark: Date | null,
+  options: {
+    onDoneApplied?: (event: { sessionId: string; judgmentId: string }) => void;
+  },
+): Promise<void> {
   // Bound the steady-state orphan scans to rows created since the last
   // fully-successful pass (with slack) so they stop scanning entire tables
   // every run. A null watermark (first run, or no clean pass yet) scans
@@ -217,7 +222,10 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     await reconcileExpiredFastAgentInferenceRetryNotices(BATCH_SIZE);
   const enqueuedInactiveStatusJudgments =
     await enqueueInactiveSessionStatusJudgmentRequests(db, BATCH_SIZE);
-  const processedStatusJudgments = await processSessionStatusJudgmentBatch();
+  const processedStatusJudgments = await processSessionStatusJudgmentBatch(
+    undefined,
+    { onDoneApplied: options.onDoneApplied },
+  );
   const prunedStatusJudgments = await pruneSessionStatusJudgmentHistory(db);
 
   // Fast conversations without a session row (e.g. created before this
@@ -378,7 +386,11 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
   });
 }
 
-export async function sessionsReconcileJob(): Promise<void> {
+export async function sessionsReconcileJob(
+  options: {
+    onDoneApplied?: (event: { sessionId: string; judgmentId: string }) => void;
+  } = {},
+): Promise<void> {
   const state = await db.query.sessionBackfillState.findFirst({
     where: eq(sessionBackfillState.key, BACKFILL_KEY),
   });
@@ -386,7 +398,10 @@ export async function sessionsReconcileJob(): Promise<void> {
     const reconcileState = await db.query.sessionBackfillState.findFirst({
       where: eq(sessionBackfillState.key, RECONCILE_KEY),
     });
-    await reconcileRecentSessions(reconcileState?.cursorCreatedAt ?? null);
+    await reconcileRecentSessions(
+      reconcileState?.cursorCreatedAt ?? null,
+      options,
+    );
     return;
   }
 
