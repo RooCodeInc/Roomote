@@ -207,6 +207,13 @@ function SessionDoneWebhookSetting({
   const [url, setUrl] = useState(configured.url ?? '');
   const [secret, setSecret] = useState('');
 
+  const generateSecret = () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    setSecret(
+      Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(''),
+    );
+  };
+
   return (
     <Section icon={Webhook} title="Completion webhook">
       <form
@@ -230,9 +237,8 @@ function SessionDoneWebhookSetting({
             onCheckedChange={(checked) => setEnabled(checked === true)}
           />
           <p className="text-sm text-muted-foreground">
-            Notify an external orchestrator whenever Roomote judges a session
-            turn done. Delivery is at least once; deduplicate requests using the
-            delivery ID.
+            Send a webhook when Roomote marks a session done. Delivery is at
+            least once; use the delivery ID to ignore duplicates.
           </p>
         </div>
         <div className="space-y-2">
@@ -241,29 +247,39 @@ function SessionDoneWebhookSetting({
             id="session-done-webhook-url"
             type="url"
             value={url}
-            placeholder="https://orchestrator.example/webhooks/roomote"
+            placeholder="https://example.com/webhooks/roomote"
             disabled={isPending}
             onChange={(event) => setUrl(event.target.value)}
           />
         </div>
         <div className="space-y-2">
           <Label htmlFor="session-done-webhook-secret">Signing secret</Label>
-          <Input
-            id="session-done-webhook-secret"
-            type="password"
-            value={secret}
-            minLength={16}
-            placeholder={
-              configured.secretConfigured
-                ? 'Configured; enter a new secret to replace it'
-                : 'At least 16 characters'
-            }
-            disabled={isPending}
-            onChange={(event) => setSecret(event.target.value)}
-          />
+          <div className="flex gap-2">
+            <Input
+              id="session-done-webhook-secret"
+              type="password"
+              value={secret}
+              minLength={16}
+              placeholder={
+                configured.secretConfigured
+                  ? 'Configured; enter or generate a new secret to replace it'
+                  : 'Enter at least 16 characters or generate one'
+              }
+              disabled={isPending}
+              onChange={(event) => setSecret(event.target.value)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isPending}
+              onClick={generateSecret}
+            >
+              Generate
+            </Button>
+          </div>
           <p className="text-xs text-muted-foreground">
-            Roomote signs the exact request body with HMAC-SHA256. The saved
-            secret is encrypted and is never shown again.
+            Roomote signs each request with HMAC-SHA256. Saved secrets are
+            encrypted and never shown again.
           </p>
         </div>
         <Button type="submit" size="sm" disabled={isPending}>

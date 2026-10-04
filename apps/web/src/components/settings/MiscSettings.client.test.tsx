@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   setQueryData: vi.fn(),
@@ -71,5 +71,22 @@ describe('MiscSettings', () => {
     ).toBeVisible();
     expect(screen.getByLabelText('Endpoint URL')).toBeVisible();
     expect(screen.getByLabelText('Signing secret')).toBeVisible();
+    expect(
+      screen.getByText(
+        'Send a webhook when Roomote marks a session done. Delivery is at least once; use the delivery ID to ignore duplicates.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByPlaceholderText('https://example.com/webhooks/roomote'),
+    ).toBeVisible();
+  });
+
+  it('generates a strong signing secret', () => {
+    render(<MiscSettings />);
+
+    const input = screen.getByLabelText('Signing secret');
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+
+    expect((input as HTMLInputElement).value).toMatch(/^[0-9a-f]{64}$/);
   });
 });

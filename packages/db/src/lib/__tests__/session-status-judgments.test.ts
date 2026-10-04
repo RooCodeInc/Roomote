@@ -316,15 +316,14 @@ describe('Session status judgment requests', () => {
       .values({
         id: 'default',
         sessionDoneWebhookEnabled: true,
-        sessionDoneWebhookUrl: 'https://orchestrator.example/webhooks/roomote',
+        sessionDoneWebhookUrl: 'https://example.com/webhooks/roomote',
         sessionDoneWebhookSecret: 'test-secret',
       })
       .onConflictDoUpdate({
         target: deploymentSettings.id,
         set: {
           sessionDoneWebhookEnabled: true,
-          sessionDoneWebhookUrl:
-            'https://orchestrator.example/webhooks/roomote',
+          sessionDoneWebhookUrl: 'https://example.com/webhooks/roomote',
           sessionDoneWebhookSecret: 'test-secret',
         },
       });
