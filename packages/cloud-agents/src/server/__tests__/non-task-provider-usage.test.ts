@@ -1860,28 +1860,32 @@ describe('resolveOpenCodeSmallModel', () => {
     });
   });
 
-  it.each([
-    {
-      role: 'small' as const,
-      roleEnv: {
-        R_SMALL_MODEL: 'openrouter/openai/gpt-5.6-luna',
-        R_SMALL_MODEL_REASONING_EFFORT: 'medium',
-        R_SMALL_MODEL_FALLBACK: 'openrouter/z-ai/glm-5.2',
-        R_SMALL_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+  it.each(
+    [
+      {
+        role: 'small' as const,
+        roleEnv: {
+          R_SMALL_MODEL: 'openrouter/openai/gpt-5.6-luna',
+          R_SMALL_MODEL_REASONING_EFFORT: 'medium',
+          R_SMALL_MODEL_FALLBACK: 'openrouter/z-ai/glm-5.2',
+          R_SMALL_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+        },
       },
-    },
-    {
-      role: 'orchestration' as const,
-      roleEnv: {
-        R_ORCHESTRATION_MODEL: 'openrouter/openai/gpt-5.6-sol',
-        R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
-        R_ORCHESTRATION_MODEL_FALLBACK: 'openrouter/z-ai/glm-5.2',
-        R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+      {
+        role: 'orchestration' as const,
+        roleEnv: {
+          R_ORCHESTRATION_MODEL: 'openrouter/openai/gpt-5.6-sol',
+          R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
+          R_ORCHESTRATION_MODEL_FALLBACK: 'openrouter/z-ai/glm-5.2',
+          R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+        },
       },
-    },
-  ])(
-    'uses the configured $role fallback reasoning effort',
-    async ({ role, roleEnv }) => {
+    ].flatMap((testCase) =>
+      (['text', 'object'] as const).map((output) => ({ ...testCase, output })),
+    ),
+  )(
+    'uses the configured $role fallback reasoning in $output provider config',
+    async ({ role, roleEnv, output }) => {
       process.env = { ...originalEnv };
       mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
         R_MODEL: 'openrouter/openai/gpt-5.6-terra',
@@ -1904,22 +1908,36 @@ describe('resolveOpenCodeSmallModel', () => {
         })
         .mockResolvedValueOnce({
           data: {
-            info: { error: null },
+            info: { error: null, structured: { answer: 'fallback response' } },
             parts: [{ type: 'text', text: 'fallback response' }],
           },
           error: undefined,
         });
 
-      const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
-        await import('../non-task-provider-usage.js');
+      const {
+        generateTrackedNonTaskText,
+        generateTrackedNonTaskObject,
+        NON_TASK_INFERENCE_SURFACES,
+      } = await import('../non-task-provider-usage.js');
+      const params = {
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: role,
+        prompt: 'Answer.',
+      };
 
-      await expect(
-        generateTrackedNonTaskText({
-          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
-          modelRole: role,
-          prompt: 'Answer.',
-        }),
-      ).resolves.toBe('fallback response');
+      if (output === 'text') {
+        await expect(generateTrackedNonTaskText(params)).resolves.toBe(
+          'fallback response',
+        );
+      } else {
+        await expect(
+          generateTrackedNonTaskObject({
+            ...params,
+            reasoningEffort: 'high',
+            schema: z.object({ answer: z.string() }),
+          }),
+        ).resolves.toEqual({ object: { answer: 'fallback response' } });
+      }
       expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenLastCalledWith({
         runtimeEnv: expect.objectContaining({
           R_MODEL: 'openrouter/z-ai/glm-5.2',
@@ -1929,6 +1947,22 @@ describe('resolveOpenCodeSmallModel', () => {
       expect(spawnMock.mock.calls.at(-1)?.[2]?.env).toMatchObject({
         R_MODEL: 'openrouter/z-ai/glm-5.2',
         R_MODEL_REASONING_EFFORT: 'low',
+      });
+      expect(
+        JSON.parse(
+          spawnMock.mock.calls.at(-1)?.[2]?.env?.OPENCODE_CONFIG_CONTENT ??
+            '{}',
+        ),
+      ).toMatchObject({
+        provider: {
+          openrouter: {
+            models: {
+              'z-ai/glm-5.2': {
+                options: { reasoning: { effort: 'low' } },
+              },
+            },
+          },
+        },
       });
     },
   );

@@ -983,6 +983,7 @@ async function resolveNonTaskModelRuntime(
   model: string;
   catalogModelId: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
+  reasoningEffort?: ReasoningEffort;
 }> {
   const requestedModel = model?.trim();
   let resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv = {};
@@ -1076,6 +1077,7 @@ async function resolveNonTaskModelRuntime(
     // request is made. The lease cache keys on env, so distinct explicit
     // models get their own servers instead of colliding.
     resolvedModelRuntimeEnv: selectedRuntimeEnv,
+    reasoningEffort,
   };
 }
 
@@ -1375,6 +1377,7 @@ async function runNonTaskSdkPrompt(
   runtime: {
     model: string;
     resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
+    reasoningEffort?: ReasoningEffort;
   },
   promptOptions: NonTaskSdkPromptOptions,
   options: {
@@ -1429,6 +1432,7 @@ async function runNonTaskSdkPrompt(
   parts: Array<{ type?: unknown; text?: unknown }>;
 }> {
   const { model, resolvedModelRuntimeEnv } = runtime;
+  const reasoningEffort = runtime.reasoningEffort ?? params.reasoningEffort;
   const timeoutMs = params.timeoutMs === undefined ? 120_000 : params.timeoutMs;
   const promptErrorLabel =
     options.promptErrorLabel ??
@@ -1443,11 +1447,10 @@ async function runNonTaskSdkPrompt(
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
-    preserveReasoning:
-      options.preserveReasoning ?? Boolean(params.reasoningEffort),
+    preserveReasoning: options.preserveReasoning ?? Boolean(reasoningEffort),
     promptOnlySubagents: options.promptOnlySubagents,
-    reasoningOverride: params.reasoningEffort
-      ? { model, effort: params.reasoningEffort }
+    reasoningOverride: reasoningEffort
+      ? { model, effort: reasoningEffort }
       : undefined,
     startTimeoutMs:
       timeoutMs === null
