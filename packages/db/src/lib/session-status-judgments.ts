@@ -7,6 +7,8 @@ import {
 
 import type { DatabaseOrTransaction } from '../db';
 import {
+  deploymentSettings,
+  sessionDoneWebhookDeliveries,
   sessionStatusJudgments,
   sessions,
   type SessionStatusJudgmentSourceKind,
@@ -353,6 +355,32 @@ export async function completeSessionStatusJudgment(
         ),
       )
       .returning({ id: sessionStatusJudgments.id });
+
+    if (updated && input.state === 'applied' && input.outcome === 'done') {
+      const webhook = await tx.query.deploymentSettings.findFirst({
+        where: eq(deploymentSettings.id, 'default'),
+        columns: {
+          sessionDoneWebhookEnabled: true,
+          sessionDoneWebhookUrl: true,
+          sessionDoneWebhookSecret: true,
+        },
+      });
+      if (
+        webhook?.sessionDoneWebhookEnabled &&
+        webhook.sessionDoneWebhookUrl &&
+        webhook.sessionDoneWebhookSecret
+      ) {
+        await tx
+          .insert(sessionDoneWebhookDeliveries)
+          .values({
+            sessionId: input.sessionId,
+            judgmentId: updated.id,
+          })
+          .onConflictDoNothing({
+            target: sessionDoneWebhookDeliveries.judgmentId,
+          });
+      }
+    }
 
     return updated ? input.state : 'missing';
   });

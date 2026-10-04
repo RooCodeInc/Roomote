@@ -153,6 +153,8 @@ export {
   sessionGoals,
   sessionStatusJudgments,
   sessionStatusJudgmentsRelations,
+  sessionDoneWebhookDeliveries,
+  sessionDoneWebhookDeliveriesRelations,
   sessionsRelations,
   sessionTasks,
   sessionTasksRelations,

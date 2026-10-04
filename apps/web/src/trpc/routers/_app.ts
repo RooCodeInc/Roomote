@@ -576,6 +576,7 @@ import {
 } from '../commands/analytics';
 import {
   getMiscSettingsCommand,
+  setSessionDoneWebhookCommand,
   setDeploymentTimeZoneCommand,
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
@@ -3911,6 +3912,17 @@ export const appRouter = createRouter({
       .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))
       .mutation(({ ctx: { auth }, input }) =>
         setDeploymentTimeZoneCommand(auth, input),
+      ),
+    setSessionDoneWebhook: protectedProcedure
+      .input(
+        z.object({
+          enabled: z.boolean(),
+          url: z.string().trim().max(2_048).nullable(),
+          secret: z.string().trim().min(16).max(512).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setSessionDoneWebhookCommand(auth, input),
       ),
   }),
 

@@ -27,6 +27,7 @@ import {
   touchSessionActivity,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
+import { drainSessionDoneWebhookDeliveries } from '@roomote/sdk/server';
 const LOG_PREFIX = '[sessions]';
 const BACKFILL_KEY = 'unified-sessions-v1';
 /**
@@ -218,6 +219,7 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
   const enqueuedInactiveStatusJudgments =
     await enqueueInactiveSessionStatusJudgmentRequests(db, BATCH_SIZE);
   const processedStatusJudgments = await processSessionStatusJudgmentBatch();
+  const doneWebhookDeliveries = await drainSessionDoneWebhookDeliveries();
   const prunedStatusJudgments = await pruneSessionStatusJudgmentHistory(db);
 
   // Fast conversations without a session row (e.g. created before this
@@ -374,6 +376,7 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     reconciledRetryNotices,
     enqueuedInactiveStatusJudgments,
     processedStatusJudgments,
+    doneWebhookDeliveries,
     prunedStatusJudgments,
   });
 }
