@@ -109,17 +109,17 @@ describe('DiscordCommunicationProvider', () => {
     });
   });
 
-  it('posts long fenced tables as independent bounded code blocks', async () => {
+  it('keeps LF table rows whole when they fit in a fresh fenced message', async () => {
     let nonce = 123456789012345678n;
     const { server, provider } = createHarness({
       nonceFactory: () => String(nonce++),
     });
     const channelId = '400000000000000001';
-    const rows = Array.from(
-      { length: 130 },
-      (_, index) => `| row ${index} | ${'value '.repeat(4)} |`,
-    );
-    const text = `Summary\n\n\`\`\`text\n| Item | Detail |\n| --- | --- |\n${rows.join('\n')}\n\`\`\`\nDone`;
+    const rows = Array.from({ length: 104 }, (_, index) => {
+      const label = String(index).padStart(3, '0');
+      return `| row ${label} | ${'x'.repeat(974)} value |`;
+    });
+    const text = `\`\`\`text\n${rows.join('\n')}\n\`\`\``;
 
     await provider.postMessage({ channelId, text });
 
@@ -129,24 +129,24 @@ describe('DiscordCommunicationProvider', () => {
       expect(message.content.length).toBeLessThanOrEqual(2_000);
       expect(message.content.match(/^```/gm)?.length ?? 0).toBe(2);
     }
-    expect(messages[0]?.content).toContain('Summary\n\n```text\n');
-    expect(messages.at(-1)?.content).toContain('```\nDone');
-    expect(messages.map((message) => message.content).join('\n')).toContain(
-      rows[95],
-    );
+    expect(
+      rows.every((row) =>
+        messages.some((message) => message.content.includes(row)),
+      ),
+    ).toBe(true);
   });
 
-  it('posts CRLF fenced tables with the closing fence before following text', async () => {
+  it('keeps CRLF table rows whole when they fit in a fresh fenced message', async () => {
     let nonce = 123456789012345678n;
     const { server, provider } = createHarness({
       nonceFactory: () => String(nonce++),
     });
     const channelId = '400000000000000001';
-    const rows = Array.from(
-      { length: 130 },
-      (_, index) => `| row ${index} | ${'value '.repeat(4)} |`,
-    );
-    const text = `Summary\r\n\r\n\`\`\`text\r\n${rows.join('\r\n')}\r\n\`\`\`\r\nDone`;
+    const rows = Array.from({ length: 101 }, (_, index) => {
+      const label = String(index).padStart(3, '0');
+      return `| row ${label} | ${'x'.repeat(973)} value |`;
+    });
+    const text = `\`\`\`text\r\n${rows.join('\r\n')}\r\n\`\`\``;
 
     await provider.postMessage({ channelId, text });
 
@@ -156,7 +156,35 @@ describe('DiscordCommunicationProvider', () => {
       expect(message.content.length).toBeLessThanOrEqual(2_000);
       expect(message.content.match(/^```/gm)?.length ?? 0).toBe(2);
     }
-    expect(messages.at(-1)?.content).toMatch(/```\r?\nDone$/u);
+    expect(
+      rows.every((row) =>
+        messages.some((message) => message.content.includes(row)),
+      ),
+    ).toBe(true);
+  });
+
+  it('splits a fenced line when it is too long for a fresh message', async () => {
+    let nonce = 123456789012345678n;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(nonce++),
+    });
+    const channelId = '400000000000000001';
+    const row = `| row | ${'x'.repeat(2_100)} value |`;
+
+    await provider.postMessage({
+      channelId,
+      text: `\`\`\`text\n${row}\n\`\`\``,
+    });
+
+    const messages = server.state.messages[channelId] ?? [];
+    expect(messages.length).toBeGreaterThan(1);
+    expect(messages.some((message) => message.content.includes(row))).toBe(
+      false,
+    );
+    for (const message of messages) {
+      expect(message.content.length).toBeLessThanOrEqual(2_000);
+      expect(message.content.match(/^```/gm)?.length ?? 0).toBe(2);
+    }
   });
 
   it('suppresses link unfurls on messages that carry no embeds of their own', async () => {
