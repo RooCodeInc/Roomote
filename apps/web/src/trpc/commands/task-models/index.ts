@@ -1034,7 +1034,7 @@ function clearRuntimeModelForProvider(
 
 function pruneModelFallbackConfig(
   rawConfig: unknown,
-  keepModelId: (modelId: string) => boolean,
+  keepFallback: (role: TaskModelRole, modelId: string) => boolean,
 ): ModelFallbackConfig | null {
   if (rawConfig == null) return null;
 
@@ -1044,7 +1044,7 @@ function pruneModelFallbackConfig(
     roles: Object.fromEntries(
       TASK_MODEL_ROLES.flatMap((role) => {
         const fallback = config.roles[role];
-        return fallback && keepModelId(fallback.modelId)
+        return fallback && keepFallback(role, fallback.modelId)
           ? [[role, fallback]]
           : [];
       }),
@@ -1104,13 +1104,26 @@ function removeTaskModelsForProvider({
       }),
     ),
   } as DeploymentModelConfig;
+  const nextRuntimeModels = resolveRuntimeModelStatus({
+    settingsDefaultModelId: taskModelSettings.defaultModelId,
+    persisted: nextRuntimeModelConfig,
+  });
 
   return {
     taskModelSettings,
     runtimeModelConfig: nextRuntimeModelConfig,
     modelFallbackConfig: pruneModelFallbackConfig(
       modelFallbackConfig,
-      (modelId) => !isModelIdForProvider(modelId, providerId),
+      (role, modelId) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        const activeModel =
+          nextRuntimeModels[descriptor.runtimeStatusKey].effectiveModelId ??
+          nextRuntimeModels.codingModel.effectiveModelId;
+        return (
+          taskModelSettings.allowedModelIds.includes(modelId) &&
+          modelId !== activeModel
+        );
+      },
     ),
   };
 }
@@ -1586,9 +1599,22 @@ export async function updateTaskModelSettingsCommand(
         persisted?.taskModelSettings ?? null,
       ).catalogSyncedModelIds,
     });
+    const nextRuntimeModels = resolveRuntimeModelStatus({
+      settingsDefaultModelId: taskModelSettings.defaultModelId,
+      persisted: nextRuntimeModelConfig,
+    });
     const nextModelFallbackConfig = pruneModelFallbackConfig(
       persisted?.modelFallbackConfig,
-      (modelId) => allowedModelIds.includes(modelId),
+      (role, modelId) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        const activeModel =
+          nextRuntimeModels[descriptor.runtimeStatusKey].effectiveModelId ??
+          nextRuntimeModels.codingModel.effectiveModelId;
+        return (
+          taskModelSettings.allowedModelIds.includes(modelId) &&
+          modelId !== activeModel
+        );
+      },
     );
 
     await tx
