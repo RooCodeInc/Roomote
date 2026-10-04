@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { replaceMock, refreshMock, signInOauth2Mock } = vi.hoisted(() => ({
-  replaceMock: vi.fn(),
-  refreshMock: vi.fn(),
-  signInOauth2Mock: vi.fn(),
-}));
+const { replaceMock, refreshMock, signInEmailMock, signInOauth2Mock } =
+  vi.hoisted(() => ({
+    replaceMock: vi.fn(),
+    refreshMock: vi.fn(),
+    signInEmailMock: vi.fn(),
+    signInOauth2Mock: vi.fn(),
+  }));
 
 let searchParams = new URLSearchParams();
 
@@ -19,6 +21,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/auth-client', () => ({
   authClient: {
     signIn: {
+      email: signInEmailMock,
       oauth2: signInOauth2Mock,
     },
   },
@@ -38,6 +41,7 @@ describe('AuthForm', () => {
       data: { url: 'https://oauth.example.com' },
       error: null,
     });
+    signInEmailMock.mockResolvedValue({ data: {}, error: null });
   });
 
   it('starts Slack sign-in with the requested redirect path', async () => {
@@ -194,6 +198,30 @@ describe('AuthForm', () => {
     expect(
       screen.queryByRole('button', { name: 'Continue with Microsoft Teams' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('falls back safely when an email sign-in error has a non-string message', async () => {
+    signInEmailMock.mockResolvedValue({
+      data: null,
+      error: { message: { error: 'Unauthorized' }, status: 401 },
+    });
+
+    render(<AuthForm enabledProviders={[]} />);
+
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'ada@example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Password'), {
+      target: { value: 'password' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(
+      await screen.findByText(
+        'Unable to sign in with that email and password.',
+      ),
+    ).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 
   it('omits provider buttons when no provider is configured', () => {
