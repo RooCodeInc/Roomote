@@ -57,7 +57,6 @@ export function createGbrainMcpProxy(options?: { allowAuthTokens?: boolean }) {
     name: 'Brain',
     allowAuthTokens: options?.allowAuthTokens,
     allowedToolNames: GBRAIN_READ_TOOL_NAMES,
-    validateTaskRunToken: async () => null,
     resolveCredentials: async () => {
       // No enablement row and no connection dialog: a deployment with a Brain
       // service has a Brain, and the read-only agent client is provisioned

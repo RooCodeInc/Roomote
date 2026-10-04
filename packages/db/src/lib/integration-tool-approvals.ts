@@ -8,6 +8,7 @@ import {
   inArray,
   isNull,
   notExists,
+  or,
   sql,
   type SQL,
 } from 'drizzle-orm';
@@ -407,16 +408,34 @@ export async function listPendingIntegrationToolApprovals(context: {
 }
 
 /**
+ * Whose calls a decision lookup covers: the session's own agent, or with
+ * `taskId` that agent and the one task. A task sees what its owner decided
+ * for the session and for the task itself, never for the session's other
+ * tasks.
+ */
+function decidedCallScope(taskId: string | undefined): SQL | undefined {
+  return taskId
+    ? or(
+        isNull(integrationToolApprovalRequests.taskId),
+        eq(integrationToolApprovalRequests.taskId, taskId),
+      )
+    : isNull(integrationToolApprovalRequests.taskId);
+}
+
+/**
  * Recent decisions made by the session owner on that session's own calls,
  * with the redacted arguments the owner saw. Auto reads an approval as
  * covering a later call that plainly continues the same work (the next file
- * of the same cleanup), and a rejection as a reason to ask again. Task calls
- * and model-generated Auto outcomes are deliberately excluded: only a
- * person's own decisions count.
+ * of the same cleanup), and a rejection as a reason to ask again. Calls by
+ * the session's tasks are excluded unless `taskId` names one, and
+ * model-generated Auto outcomes always are: only a person's own decisions
+ * count.
  */
 export async function listRecentIntegrationToolApprovalOutcomes(context: {
   sessionId: string;
   userId: string;
+  /** Also include the owner's decisions on this task's calls. */
+  taskId?: string;
 }): Promise<
   Array<{
     integrationId: string;
@@ -439,7 +458,7 @@ export async function listRecentIntegrationToolApprovalOutcomes(context: {
         eq(integrationToolApprovalRequests.sessionId, context.sessionId),
         eq(integrationToolApprovalRequests.requesterUserId, context.userId),
         eq(integrationToolApprovalRequests.decidedByUserId, context.userId),
-        isNull(integrationToolApprovalRequests.taskId),
+        decidedCallScope(context.taskId),
         inArray(integrationToolApprovalRequests.status, [
           'consumed',
           'rejected',
@@ -467,6 +486,8 @@ export async function hasRejectedIntegrationToolInSession(context: {
   userId: string;
   integrationId: string;
   toolName: string;
+  /** Also count the owner's rejections of this task's calls. */
+  taskId?: string;
 }): Promise<boolean> {
   const [row] = await db
     .select({ id: integrationToolApprovalRequests.id })
@@ -476,7 +497,7 @@ export async function hasRejectedIntegrationToolInSession(context: {
         eq(integrationToolApprovalRequests.sessionId, context.sessionId),
         eq(integrationToolApprovalRequests.requesterUserId, context.userId),
         eq(integrationToolApprovalRequests.decidedByUserId, context.userId),
-        isNull(integrationToolApprovalRequests.taskId),
+        decidedCallScope(context.taskId),
         eq(
           integrationToolApprovalRequests.integrationId,
           context.integrationId,

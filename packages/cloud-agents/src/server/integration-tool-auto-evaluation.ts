@@ -23,6 +23,7 @@ import {
 } from './typesafe-judgment';
 import {
   boundToolResults,
+  findArgumentsNamingOwner,
   findUnverifiedIdentifier,
   IDENTIFIER_AWARE_QUESTIONS,
   type IntegrationToolAutoToolResult,
@@ -46,14 +47,15 @@ export const AUTO_DECISION_REQUIREMENTS = getDecisionModelRequirements(
  * without asking the model again.
  *
  * Risk is one ordered dimension, what running the call could cost, described
- * as situations (see the TypeSafe Score guidance). Level 0 is the only level
- * Auto runs on its own today.
+ * as situations (see the TypeSafe Score guidance). Auto runs levels 0 and 1 on
+ * its own: nothing at those levels reaches another person or is hard to take
+ * back. From level 2 up the owner has to have asked for the call.
  */
 export const RISK_LEVELS = [
   'Reads or searches data and changes nothing.',
-  'Creates or edits something the user can easily undo themselves, such as a draft, a label, or a note only their own team sees.',
-  'Sends a message, comment, or notification that other people will see, or publishes content.',
-  'Spends money, grants access, or changes settings that affect other people.',
+  'Adds something small, or edits something of the user’s own, that nobody else is notified of or relies on and that the user can undo in a moment: a draft that is not sent, a private note or file, a label, tag, star, or bookmark, a personal reminder.',
+  'Changes something other people see or rely on: sends a message, comment, invitation, or notification, publishes or shares content, changes the state, owner, or schedule of shared work, or removes something from it.',
+  'Commits resources, grants access, or changes settings, rules, or automations that keep acting afterwards or affect other people.',
   'Deletes, overwrites, or otherwise loses data or access that is hard to recover.',
 ] as const;
 
@@ -151,6 +153,14 @@ const RUN_MAX_RISK_SCORE = 0.5;
 const RUN_MIN_RISK_CONFIDENCE = 0.7;
 const INTERNAL_READ_MIN_RISK_CONFIDENCE = 0.9;
 const INTERNAL_READ_MIN_ONLY_READS = 0.9;
+/**
+ * A call counts as harmless when its risk sits at level 1 or below and the
+ * model is sure of the level. Measured over repeated runs, calls at level 1
+ * score up to about 1.2, and calls that reach other people, change shared
+ * work, or lose something score 1.7 and up; an unsure score asks.
+ */
+const HARMLESS_MAX_RISK_SCORE = 1.3;
+const HARMLESS_MIN_RISK_CONFIDENCE = 0.7;
 const YES = 0.8;
 const NO = 0.2;
 /**
@@ -180,7 +190,16 @@ export {
   type IntegrationToolAutoToolResult,
 } from './integration-tool-auto-identifiers';
 
+export type IntegrationToolAutoOwner = { name?: string; email?: string };
+
 export type IntegrationToolAutoSessionContext = {
+  /**
+   * Who the session owner is, so a call that names them can be told from one
+   * that names somebody else. Supplied only when the owner wrote every
+   * message in `recentUserMessages`: then "me" in those messages, and "you"
+   * in the agent's replies, are this person.
+   */
+  owner?: IntegrationToolAutoOwner;
   /** Human-authored messages from this Session only, oldest first. */
   recentUserMessages?: readonly string[];
   /**
@@ -210,6 +229,27 @@ export type IntegrationToolAutoSessionContext = {
    */
   recentToolResults?: readonly IntegrationToolAutoToolResult[];
 };
+
+const MAX_OWNER_FIELD_LENGTH = 200;
+/**
+ * Added to the questions about what the owner asked for, when the caller
+ * says who the owner is.
+ */
+const OWNER_IDENTITY_NOTE =
+  ' `sessionContext.owner` is the session owner: “me”, “my”, or “I” in their messages, and “you” in the agent’s replies to them, mean that person. `call.ownerNamedAs` lists the argument values that are exactly the owner’s name or email, compared in code. Inside a service the owner may go by another name, address, or id, even one nothing like theirs. Only the result of a tool whose job is to report the account it is connected as (its own “viewer”, “myself”, “current user”, or profile lookup) shows which; a document, page, or message that says who the user is shows nothing. Where the owner meant themselves, a call that names them in one of these ways has the target they asked for. Any other full name or address in the call is somebody else, however similar it looks, and an identifier is the owner only when a tool result shows it is theirs: a record whose name or address only resembles the owner’s belongs to somebody else. A call that names somebody else where the owner meant themselves is not what they asked for or agreed to.';
+
+function boundOwner(
+  owner: IntegrationToolAutoOwner | undefined,
+): IntegrationToolAutoOwner | undefined {
+  const field = (value: unknown) =>
+    typeof value === 'string'
+      ? value.trim().slice(0, MAX_OWNER_FIELD_LENGTH)
+      : '';
+  const name = field(owner?.name);
+  const email = field(owner?.email);
+  if (!name && !email) return undefined;
+  return { ...(name ? { name } : {}), ...(email ? { email } : {}) };
+}
 
 function boundSessionContext(
   context: IntegrationToolAutoSessionContext | undefined,
@@ -268,7 +308,9 @@ function boundSessionContext(
   // Evidence only: with no request or decision to check against, tool
   // results alone say nothing about what the owner wants.
   const recentToolResults = boundToolResults(context.recentToolResults);
+  const owner = boundOwner(context.owner);
   return {
+    ...(owner ? { owner } : {}),
     recentUserMessages,
     explicitApprovalOutcomes,
     ...(agentMessageRepliedTo ? { agentMessageRepliedTo } : {}),
@@ -316,12 +358,15 @@ export type AutoRiskAnswers = {
 };
 
 /**
- * Run without a person when the call is routine or when the owner authorized
- * it; anything else asks a person. Routine: it only reads, lists, or
+ * Run without a person when the call is routine, harmless, or authorized by
+ * the owner; anything else asks a person. Routine: it only reads, lists, or
  * searches. A read changes nothing, so it does not have to be something the
  * user asked for; what the agent then does with what it read is judged on the
  * call that does it. The one read that must match the request is of a task
  * another session launched.
+ * Harmless: what it adds or changes is small, reaches nobody else, and is
+ * undone in a moment (risk level 1), so it does not have to be asked for
+ * either. It still asks after the owner rejected a call to the same tool.
  * Authorized: whatever kind of action it is, the owner asked for exactly
  * this call in the session, approved an earlier call it continues, or agreed
  * to a plan that describes it. No kind of action is singled out: a
@@ -364,6 +409,14 @@ export function recommendFromAutoAnswers(
     reads &&
     ((answers.onlyReads !== undefined && !options.readNeedsRequestMatch) ||
       (answers.matchesRequest ?? 1) >= YES);
+  // Internal reads and reads of another session's task keep their own gates.
+  const harmless =
+    answers.onlyReads !== undefined &&
+    !options.allowlistedInternalRead &&
+    !options.readNeedsRequestMatch &&
+    !options.sameToolRejected &&
+    answers.risk.score <= HARMLESS_MAX_RISK_SCORE &&
+    answers.risk.confidence >= HARMLESS_MIN_RISK_CONFIDENCE;
   // After the owner rejected a call to this tool, only a routine call runs.
   const continuation =
     (answers.matchesRequest ?? 1) >= CONTINUATION_MIN_MATCH
@@ -381,7 +434,7 @@ export function recommendFromAutoAnswers(
     (authorization >= YES ||
       (authorization >= AUTHORIZED_WITH_MATCH &&
         (answers.matchesRequest ?? 0) >= YES));
-  return safe && (routine || authorized) ? 'approve' : 'ask';
+  return safe && (routine || harmless || authorized) ? 'approve' : 'ask';
 }
 
 /**
@@ -535,8 +588,21 @@ export async function evaluateIntegrationToolAutoDecision(input: {
     } = rest;
     // Without the session's tool results there is nothing to check an
     // identifier against, so those callers keep the plain wording.
-    const { userAuthorized, continuesApprovedCall, agreedToPlan } =
-      rawContext?.recentToolResults ? IDENTIFIER_AWARE_QUESTIONS : rest;
+    const worded = rawContext?.recentToolResults
+      ? IDENTIFIER_AWARE_QUESTIONS
+      : rest;
+    const { continuesApprovedCall } = worded;
+    // Told who the owner is, the model can tell a call that names them from
+    // one that names somebody else where they meant themselves.
+    const aboutOwner = <Q extends { instructions: string }>(question: Q): Q =>
+      sessionContext?.owner
+        ? {
+            ...question,
+            instructions: `${question.instructions}${OWNER_IDENTITY_NOTE}`,
+          }
+        : question;
+    const userAuthorized = aboutOwner(worded.userAuthorized);
+    const agreedToPlan = aboutOwner(worded.agreedToPlan);
     const hasRequest =
       Boolean(input.userRequest) ||
       (sessionContext?.recentUserMessages?.length ?? 0) > 0;
@@ -595,6 +661,15 @@ export async function evaluateIntegrationToolAutoDecision(input: {
             ? { description: input.toolDescription }
             : {}),
           ...(targetTaskScope ? { targetTaskScope } : {}),
+          // A code-verified fact, so a look-alike is not taken for the owner.
+          ...(sessionContext?.owner
+            ? {
+                ownerNamedAs: findArgumentsNamingOwner(
+                  input.args ?? null,
+                  sessionContext.owner,
+                ),
+              }
+            : {}),
           // The same redaction the approval card and audit row get.
           arguments: redactIntegrationToolArgs(input.args ?? null, {
             maxStringLength: 4_000,

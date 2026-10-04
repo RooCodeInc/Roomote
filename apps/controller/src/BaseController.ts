@@ -561,6 +561,14 @@ export abstract class BaseController {
     const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
     if (
+      taskRun.cancelRequestedAt ||
+      taskRun.canceledAt ||
+      taskRun.status === RunStatus.Canceled
+    ) {
+      return null;
+    }
+
+    if (
       taskRun.status === RunStatus.Pending ||
       taskRun.status === RunStatus.Dequeued
     ) {
@@ -602,6 +610,7 @@ export abstract class BaseController {
           and(
             eq(taskRuns.id, taskRun.id),
             eq(taskRuns.status, taskRun.status),
+            isNull(taskRuns.cancelRequestedAt),
             isNull(taskRuns.canceledAt),
           ),
         )
@@ -636,11 +645,16 @@ export abstract class BaseController {
         where: eq(taskRuns.id, taskRun.id),
         columns: {
           status: true,
+          cancelRequestedAt: true,
           canceledAt: true,
         },
       });
 
-      if (latestRun?.canceledAt || latestRun?.status === RunStatus.Canceled) {
+      if (
+        latestRun?.cancelRequestedAt ||
+        latestRun?.canceledAt ||
+        latestRun?.status === RunStatus.Canceled
+      ) {
         return null;
       }
 

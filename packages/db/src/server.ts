@@ -56,6 +56,8 @@ export * from './lib/tasks';
 export * from './lib/sessions';
 export * from './lib/service-credentials';
 export * from './lib/integration-tool-approvals';
+export * from './lib/integration-tool-auto-owner';
+export * from './lib/integration-tool-auto-task-context';
 export * from './lib/integration-tool-auto-settings';
 export * from './lib/credential-egress';
 export * from './lib/session-goals';
@@ -151,6 +153,8 @@ export {
   sessionGoals,
   sessionStatusJudgments,
   sessionStatusJudgmentsRelations,
+  sessionDoneWebhookDeliveries,
+  sessionDoneWebhookDeliveriesRelations,
   sessionsRelations,
   sessionTasks,
   sessionTasksRelations,

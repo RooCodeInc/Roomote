@@ -3,9 +3,16 @@ import {
   redactIntegrationToolArgs,
 } from '@roomote/types';
 
-const MAX_SESSION_TOOL_RESULTS = 8;
-const MAX_SESSION_TOOL_RESULT_LENGTH = 1_500;
-const MAX_SESSION_TOOL_RESULTS_LENGTH = 6_000;
+/**
+ * Enough results, and enough of each, that a lookup is still in view when
+ * the agent uses what it found: it often looks a person or an item up in a
+ * long listing, makes a few more calls, and then uses the id from that
+ * listing. The total below bounds what is shown, tool names, outputs and
+ * arguments together, newest first.
+ */
+const MAX_SESSION_TOOL_RESULTS = 20;
+const MAX_SESSION_TOOL_RESULT_LENGTH = 6_000;
+const MAX_SESSION_TOOL_RESULTS_LENGTH = 16_000;
 
 export type IntegrationToolAutoToolResult = {
   /** `integration.tool` */
@@ -27,23 +34,35 @@ export function boundToolResults(
     if (typeof result?.tool !== 'string' || typeof result.output !== 'string') {
       continue;
     }
+    // The tool's name is shown too, so it counts against the budget.
+    const tool = result.tool.slice(0, 200);
     // A listing names its items from the start, so keep the head.
     const output = maskIntegrationToolText(result.output)
       .trim()
-      .slice(0, Math.min(MAX_SESSION_TOOL_RESULT_LENGTH, remaining));
+      .slice(
+        0,
+        Math.max(
+          0,
+          Math.min(MAX_SESSION_TOOL_RESULT_LENGTH, remaining - tool.length),
+        ),
+      );
     if (!output) continue;
+    remaining -= tool.length + output.length;
+    // The arguments count against the same budget, and are left out when
+    // they no longer fit: the output is what identifies an item.
+    const args =
+      result.arguments === undefined
+        ? undefined
+        : redactIntegrationToolArgs(result.arguments, { maxStringLength: 200 });
+    const argsLength =
+      args === undefined ? 0 : (JSON.stringify(args)?.length ?? 0);
+    const keepArgs = args !== undefined && argsLength <= remaining;
+    if (keepArgs) remaining -= argsLength;
     bounded.push({
-      tool: result.tool.slice(0, 200),
-      ...(result.arguments === undefined
-        ? {}
-        : {
-            arguments: redactIntegrationToolArgs(result.arguments, {
-              maxStringLength: 200,
-            }),
-          }),
+      tool,
+      ...(keepArgs ? { arguments: args } : {}),
       output,
     });
-    remaining -= output.length;
   }
   return bounded.reverse();
 }
@@ -123,6 +142,49 @@ export function findUnverifiedIdentifier(
     return check(key, value);
   };
   return visit('', args, 0);
+}
+
+const MAX_OWNER_VALUES = 10;
+
+/**
+ * The argument values that are exactly the owner's name or email, compared
+ * in code so a look-alike (a longer name, another domain) is never taken for
+ * the owner. A leading "@" and a "Name <email>" form are read as the name or
+ * the address they carry.
+ */
+export function findArgumentsNamingOwner(
+  args: unknown,
+  owner: { name?: string; email?: string },
+): string[] {
+  const normalize = (text: string) =>
+    text.trim().replace(/^@/, '').replace(/\s+/g, ' ').toLowerCase();
+  const names = [owner.name, owner.email]
+    .filter((value): value is string => typeof value === 'string')
+    .map(normalize)
+    .filter((value) => value.length >= 2);
+  if (names.length === 0) return [];
+  const found = new Set<string>();
+  const visited = new WeakSet<object>();
+  const visit = (value: unknown, depth: number): void => {
+    if (depth > 5 || found.size >= MAX_OWNER_VALUES) return;
+    if (typeof value === 'string') {
+      if (value.length > 400) return;
+      const address = /<([^<>\s]+@[^<>\s]+)>\s*$/.exec(value)?.[1];
+      if (
+        names.includes(normalize(value)) ||
+        (address !== undefined && names.includes(normalize(address)))
+      ) {
+        found.add(value);
+      }
+      return;
+    }
+    if (!value || typeof value !== 'object' || visited.has(value)) return;
+    visited.add(value);
+    const entries = Array.isArray(value) ? value : Object.values(value);
+    for (const entry of entries.slice(0, 50)) visit(entry, depth + 1);
+  };
+  visit(args, 0);
+  return [...found];
 }
 
 /**

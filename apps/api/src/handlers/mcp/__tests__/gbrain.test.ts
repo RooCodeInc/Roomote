@@ -4,17 +4,31 @@ import type { AddressInfo } from 'node:net';
 import { Hono } from 'hono';
 import {
   BRAIN_MCP_READ_INSTRUCTIONS,
+  RunStatus,
   type RunTokenContext,
 } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
-const { mockResolveConnection, mockIsBrainEmbeddingAvailable } = vi.hoisted(
-  () => ({
-    mockResolveConnection: vi.fn(),
-    mockIsBrainEmbeddingAvailable: vi.fn(),
-  }),
-);
+const {
+  mockFindTaskRun,
+  mockResolveConnection,
+  mockIsBrainEmbeddingAvailable,
+} = vi.hoisted(() => ({
+  mockFindTaskRun: vi.fn(),
+  mockResolveConnection: vi.fn(),
+  mockIsBrainEmbeddingAvailable: vi.fn(),
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  db: {
+    query: {
+      taskRuns: { findFirst: mockFindTaskRun },
+    },
+  },
+  taskRuns: { id: 'taskRuns.id' },
+  eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
+}));
 
 vi.mock('@roomote/sdk/server', () => ({
   resolveBrainConnection: mockResolveConnection,
@@ -71,12 +85,26 @@ describe('createGbrainMcpProxy', () => {
 
   beforeEach(() => {
     upstreamRequests = [];
+    mockFindTaskRun.mockReset();
+    mockFindTaskRun.mockResolvedValue({ id: 42, status: RunStatus.Running });
     mockResolveConnection.mockReset();
     // A Brain is only offered to agents when it can actually embed, so the
     // default for these cases is "an embedder is available".
     mockIsBrainEmbeddingAvailable.mockReset();
     mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
   });
+
+  it.each([RunStatus.Completed, RunStatus.Failed, RunStatus.Canceled])(
+    'rejects a run token when its task run is %s',
+    async (status) => {
+      mockFindTaskRun.mockResolvedValue({ id: 42, status });
+
+      const response = await postMcp(createApp(), toolCall('query'));
+
+      expect(response.status).toBe(403);
+      expect(mockResolveConnection).not.toHaveBeenCalled();
+    },
+  );
 
   afterEach(async () => {
     if (upstream) {

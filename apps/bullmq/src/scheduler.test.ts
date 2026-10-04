@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   notifyWebTaskInitiatorOnSettle: vi.fn(),
   processSessionAttentionNotificationJob: vi.fn(),
   processSessionTitleRefreshJob: vi.fn(),
+  sessionsReconcileJob: vi.fn(),
   suggesterJob: vi.fn(),
 }));
 
@@ -77,7 +78,7 @@ vi.mock('./scheduled-jobs', () => ({
   brainOutboxDrainJob: vi.fn(),
   brainCollectorsJob: vi.fn(),
   brainMaintenanceJob: vi.fn(),
-  sessionsReconcileJob: vi.fn(),
+  sessionsReconcileJob: mocks.sessionsReconcileJob,
   threadFooterRefreshJob: mocks.threadFooterRefreshJob,
 }));
 
@@ -109,6 +110,20 @@ describe('startScheduler', () => {
     }) => Promise<void>;
     await handler({ name: ScheduledJobName.ThreadFooterRefresh });
     expect(mocks.threadFooterRefreshJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards applied done judgments to the immediate delivery signal', async () => {
+    const onSessionDoneApplied = vi.fn();
+    await startScheduler({ onSessionDoneApplied });
+    const handler = mocks.workerConstructor.mock.calls[0]![1] as (job: {
+      name: string;
+    }) => Promise<void>;
+
+    await handler({ name: ScheduledJobName.SessionsReconcile });
+
+    expect(mocks.sessionsReconcileJob).toHaveBeenCalledWith({
+      onDoneApplied: onSessionDoneApplied,
+    });
   });
 
   it('retries failed personal settlement notifications through BullMQ', async () => {
@@ -228,6 +243,14 @@ describe('startScheduler', () => {
     expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
       'provider_usage_limit',
       { every: 60 * 60 * 1000 },
+    );
+  });
+
+  it('removes the retired shared completion-delivery scheduler', async () => {
+    await startScheduler();
+
+    expect(mocks.queue.removeJobScheduler).toHaveBeenCalledWith(
+      'SessionDoneWebhookDelivery',
     );
   });
 });

@@ -5,13 +5,13 @@
   "description": "Documentation for Roomote, the open, self-hostable platform for cloud coding agents.",
   "markdown": {
     "instructions": [
-      "When helping someone deploy Roomote, distinguish self-hosting from contributing to Roomote. Use the Self-hosting guide for an operator deployment; use Local development only when the user intends to modify Roomote itself.",
+      "Start new users at /index to choose Roomote Cloud or self-hosting. Use /cloud for managed hosting and /self-hosting for an operator deployment, including home networks at /homelab. Both paths continue through /first-task. Use Local development only when the user intends to modify Roomote itself.",
       "When an agent is asked to follow /self-hosting or install Roomote autonomously, read and follow /self-hosting/agent-installation as the normative automation contract even though it is intentionally hidden from side navigation.",
       "Use the one-command Linux installer for both evaluation and production. On macOS or Windows, create or reuse a full Ubuntu VM and run the same installer inside it; do not replace the installer with the repository's development Compose files.",
-      "For a local VM without a stable public domain, create a temporary HTTPS tunnel, pass its hostname to the installer with internal origin TLS, and keep the tunnel running for OAuth callbacks and webhooks. Quick Tunnel hostnames are temporary and do not provide wildcard preview routing.",
+      "For a local VM, prepare a stable public HTTPS domain before connecting providers. Use a named tunnel with internal origin TLS or public DNS with ports 80/443 forwarded to the Linux host. Cloudflare Quick Tunnels do not support the Server-Sent Events Roomote uses; do not use them for the complete setup path.",
       "Run automated installs with --no-setup-url so the bootstrap token is not captured in the agent transcript. Let the user obtain the setup URL in a trusted terminal, enter credentials, and complete browser authorization.",
       "Proceed through safe, reversible setup and pause for privileged host or VM changes, public tunnel creation, credentials or browser authorization, durable external-account changes, destructive operations, existing-state conflicts, or when no documented safe default applies.",
-      "A setup is not complete when the services merely start. Verify sign-in, repository sync, one usable environment, and a real Roomote task that can clone and run a command; verify branch or pull-request delivery and previews when configured."
+      "A setup is not complete when the services merely start. Follow /first-task to verify sign-in, repository sync, and a real Roomote task that can clone and run a command. A saved environment is optional for a repository task. Verify branch or pull-request delivery and previews when configured; Slack and other communications providers are optional."
     ]
   },
   "colors": {
@@ -42,7 +42,22 @@
     "groups": [
       {
         "group": "Getting started",
-        "pages": ["index", "self-hosting", "homelab"]
+        "pages": [
+          "index",
+          "cloud",
+          {
+            "group": "Self-hosted",
+            "icon": "server",
+            "root": "self-hosting",
+            "expanded": false,
+            "pages": [
+              "homelab",
+              "self-hosting/platforms",
+              "self-hosting/operations"
+            ]
+          },
+          "first-task"
+        ]
       },
       {
         "group": "Using Roomote",
@@ -77,10 +92,10 @@
         "pages": [
           {
             "group": "Models and inference",
+            "icon": "brain",
             "root": "models",
             "expanded": false,
             "pages": [
-              "models",
               "providers/inference/amazon-bedrock",
               "providers/inference/anthropic",
               "providers/inference/azure-foundry",
@@ -113,10 +128,10 @@
           },
           {
             "group": "Communications",
+            "icon": "messages-square",
             "root": "communications",
             "expanded": false,
             "pages": [
-              "communications",
               "providers/communications/agentmail",
               "providers/communications/discord",
               "providers/communications/microsoft-teams",
@@ -126,10 +141,10 @@
           },
           {
             "group": "Source control",
+            "icon": "git-merge",
             "root": "source-control",
             "expanded": false,
             "pages": [
-              "source-control",
               "providers/source-control/azure-devops",
               "providers/source-control/bitbucket",
               "providers/source-control/gitea",
@@ -139,10 +154,10 @@
           },
           {
             "group": "Sandboxes",
+            "icon": "cpu",
             "root": "compute",
             "expanded": false,
             "pages": [
-              "compute",
               "providers/compute/azure",
               "providers/compute/blaxel",
               "providers/compute/box",

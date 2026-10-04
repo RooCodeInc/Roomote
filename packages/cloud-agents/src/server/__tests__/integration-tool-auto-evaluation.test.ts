@@ -44,6 +44,7 @@ import {
   RISK_LEVELS,
   type AutoRiskAnswers,
 } from '../integration-tool-auto-evaluation';
+import { findArgumentsNamingOwner } from '../integration-tool-auto-identifiers';
 
 const routine: AutoRiskAnswers = {
   risk: { score: 0.1, confidence: 0.9 },
@@ -188,6 +189,51 @@ describe('findUnverifiedIdentifier', () => {
   });
 });
 
+describe('findArgumentsNamingOwner', () => {
+  const owner = { name: 'Priya Raman', email: 'priya.raman@ourco.com' };
+
+  it('finds the values that are exactly the owner’s name or email', () => {
+    expect(
+      findArgumentsNamingOwner(
+        { id: 'ENG-7', assignee: 'priya  raman' },
+        owner,
+      ),
+    ).toEqual(['priya  raman']);
+    expect(
+      findArgumentsNamingOwner(
+        {
+          to: ['Priya.Raman@ourco.com', 'all-hands@ourco.com'],
+          cc: ['Priya Raman <priya.raman@ourco.com>'],
+          message: { channel: '@Priya Raman' },
+        },
+        owner,
+      ),
+    ).toEqual([
+      'Priya.Raman@ourco.com',
+      'Priya Raman <priya.raman@ourco.com>',
+      '@Priya Raman',
+    ]);
+  });
+
+  it('does not take a look-alike, a part of the name, or a mention for the owner', () => {
+    expect(
+      findArgumentsNamingOwner(
+        {
+          assignee: 'Priya Ramanathan',
+          reviewer: 'Priya',
+          to: ['priya.raman@ourco.co', 'Sam <priya.raman@ourco.com.example>'],
+          body: 'Ask Priya Raman about it.',
+        },
+        owner,
+      ),
+    ).toEqual([]);
+    expect(findArgumentsNamingOwner({ assignee: 'Priya Raman' }, {})).toEqual(
+      [],
+    );
+    expect(findArgumentsNamingOwner(null, owner)).toEqual([]);
+  });
+});
+
 describe('recommendFromAutoAnswers', () => {
   it('runs a call that only reads; any doubt that it is safe asks', () => {
     expect(recommendFromAutoAnswers(routine)).toBe('approve');
@@ -219,9 +265,10 @@ describe('recommendFromAutoAnswers', () => {
       ),
     ).toBe('approve');
     for (const doubt of [
-      // Anything past "only reads", or unsure it is that.
-      { onlyReads: 0.6 },
-      { onlyReads: 0.1 },
+      // Anything past "only reads", or unsure it is that, when it could
+      // also do more than a harmless change.
+      { onlyReads: 0.6, risk: { score: 2, confidence: 0.9 } },
+      { onlyReads: 0.1, risk: { score: 2, confidence: 0.9 } },
       { steeredByUntrustedContent: 0.4 },
       { sendsPrivateDataOut: 0.4 },
       { guidanceFlagsRisk: 0.5 },
@@ -258,10 +305,12 @@ describe('recommendFromAutoAnswers', () => {
     expect(
       recommendFromAutoAnswers(routine, { readNeedsRequestMatch: true }),
     ).toBe('approve');
-    // An off-request write is not a read: it still asks.
+    // An off-request write that reaches other people is not a read: it
+    // still asks.
     expect(
       recommendFromAutoAnswers({
         ...routine,
+        risk: { score: 2, confidence: 0.95 },
         onlyReads: 0.05,
         matchesRequest: 0.05,
       }),
@@ -273,6 +322,72 @@ describe('recommendFromAutoAnswers', () => {
         onlyReads: undefined,
         matchesRequest: 0.6,
       }),
+    ).toBe('ask');
+  });
+
+  it('runs a harmless change nobody asked for; anything riskier or unsure asks', () => {
+    // A draft, a private note, a label: risk level 1, not a read, not asked.
+    const harmless: AutoRiskAnswers = {
+      ...routine,
+      risk: { score: 1.05, confidence: 0.95 },
+      onlyReads: 0.02,
+      matchesRequest: 0.05,
+      userAuthorized: 0.03,
+    };
+    expect(recommendFromAutoAnswers(harmless)).toBe('approve');
+    // With no request to judge against it is still harmless.
+    expect(
+      recommendFromAutoAnswers({
+        ...harmless,
+        matchesRequest: undefined,
+        userAuthorized: undefined,
+      }),
+    ).toBe('approve');
+    for (const riskier of [
+      // Reaches other people or changes shared work.
+      { score: 1.8, confidence: 0.95 },
+      { score: 2, confidence: 0.99 },
+      // Unsure of the level.
+      { score: 1.05, confidence: 0.6 },
+    ]) {
+      expect(recommendFromAutoAnswers({ ...harmless, risk: riskier })).toBe(
+        'ask',
+      );
+    }
+    // The same signals that stop a read stop a harmless change.
+    for (const unsafe of [
+      { steeredByUntrustedContent: 0.4 },
+      { sendsPrivateDataOut: 0.4 },
+      { guidanceFlagsRisk: 0.5 },
+    ] satisfies Partial<AutoRiskAnswers>[]) {
+      expect(recommendFromAutoAnswers({ ...harmless, ...unsafe })).toBe('ask');
+    }
+    // So does an earlier rejection of the tool.
+    expect(recommendFromAutoAnswers(harmless, { sameToolRejected: true })).toBe(
+      'ask',
+    );
+    // An item nothing in the session identifies does not: a harmless change
+    // to the wrong item is still harmless.
+    expect(recommendFromAutoAnswers(harmless, { unverifiedTarget: true })).toBe(
+      'approve',
+    );
+    // A read of another session's task, or an internal read, keeps its own
+    // gate: a low risk score does not stand in for it.
+    expect(
+      recommendFromAutoAnswers(
+        { ...routine, matchesRequest: 0.6 },
+        { readNeedsRequestMatch: true },
+      ),
+    ).toBe('ask');
+    expect(
+      recommendFromAutoAnswers(
+        { ...routine, matchesRequest: undefined, onlyReads: 0.85 },
+        { allowlistedInternalRead: true },
+      ),
+    ).toBe('ask');
+    // Answers recorded before `onlyReads` existed keep the rule they had.
+    expect(
+      recommendFromAutoAnswers({ ...harmless, onlyReads: undefined }),
     ).toBe('ask');
   });
 
@@ -707,8 +822,13 @@ describe('evaluateIntegrationToolAutoDecision', () => {
 
   it('uses bounded same-session human context and the redacted arguments of decided calls', async () => {
     mocks.evaluate.mockResolvedValue(
-      // A write the session does not ask for.
-      modelAnswers({ ...routine, onlyReads: 0.05, matchesRequest: 0.3 }),
+      // A write the session does not ask for, seen by other people.
+      modelAnswers({
+        ...routine,
+        risk: { score: 2, confidence: 0.95 },
+        onlyReads: 0.05,
+        matchesRequest: 0.3,
+      }),
     );
     const recentUserMessages = Array.from(
       { length: 10 },
@@ -983,14 +1103,14 @@ describe('evaluateIntegrationToolAutoDecision', () => {
 
   it('passes recent tool results to the model, bounded and with credentials masked', async () => {
     mocks.evaluate.mockResolvedValue(modelAnswers(routine));
-    const long = `first-item ${'x'.repeat(3_000)}`;
+    const long = `first-item ${'x'.repeat(9_000)}`;
     await evaluateIntegrationToolAutoDecision({
       ...call,
       userRequest: 'close the Globex deal',
       sessionContext: {
         recentUserMessages: ['close the Globex deal'],
         recentToolResults: [
-          ...Array.from({ length: 9 }, (_, index) => ({
+          ...Array.from({ length: 21 }, (_, index) => ({
             tool: 'hubspot.get_deal',
             output: `deal ${index}`,
           })),
@@ -1005,8 +1125,8 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     });
     const results =
       mocks.evaluate.mock.calls[0]![0].state.sessionContext.recentToolResults;
-    // The newest eight, oldest first; the oldest three were dropped.
-    expect(results).toHaveLength(8);
+    // The newest twenty, oldest first; the oldest three were dropped.
+    expect(results).toHaveLength(20);
     expect(results[0].output).toBe('deal 3');
     expect(results.at(-2)).toEqual({
       tool: 'hubspot.search_deals',
@@ -1014,8 +1134,50 @@ describe('evaluateIntegrationToolAutoDecision', () => {
       output: '[{"id":"9921034","name":"Globex","key":"[value omitted]"}]',
     });
     // A long listing keeps its head, where the items are named.
-    expect(results.at(-1).output).toHaveLength(1_500);
+    expect(results.at(-1).output).toHaveLength(6_000);
     expect(results.at(-1).output.startsWith('first-item')).toBe(true);
+  });
+
+  it('counts the arguments of tool results against the same budget as their outputs', async () => {
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    const bigArgs = Object.fromEntries(
+      Array.from({ length: 12 }, (_, index) => [
+        `field${index}`,
+        'v'.repeat(150),
+      ]),
+    );
+    await evaluateIntegrationToolAutoDecision({
+      ...call,
+      userRequest: 'close the Globex deal',
+      sessionContext: {
+        recentUserMessages: ['close the Globex deal'],
+        recentToolResults: Array.from({ length: 20 }, (_, index) => ({
+          tool: `hubspot.${'get_deal_'.repeat(30)}`,
+          arguments: bigArgs,
+          output: `deal ${index} ${'x'.repeat(900)}`,
+        })),
+      },
+    });
+    const results: Array<{
+      tool: string;
+      arguments?: unknown;
+      output: string;
+    }> =
+      mocks.evaluate.mock.calls[0]![0].state.sessionContext.recentToolResults;
+    const shown = results.reduce(
+      (total, result) =>
+        total +
+        result.tool.length +
+        result.output.length +
+        (result.arguments === undefined
+          ? 0
+          : JSON.stringify(result.arguments).length),
+      0,
+    );
+    expect(shown).toBeLessThanOrEqual(16_000);
+    // The newest results keep their arguments; older ones lose them or drop.
+    expect(results.at(-1)).toHaveProperty('arguments');
+    expect(results.length).toBeLessThan(20);
   });
 
   it('asks, with a reason, when an authorized call names an item nothing in the session identifies', async () => {
@@ -1143,6 +1305,77 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(questions.guidanceFlagsRisk.criteria.false).toContain(
       'outside the place or kind of thing the guidance limits itself to',
     );
+  });
+
+  it('says who the owner is, and which arguments name them, only when the caller knows', async () => {
+    mocks.evaluate.mockResolvedValue(modelAnswers(routine));
+    const assign = {
+      ...call,
+      toolName: 'update_issue',
+      args: { id: 'ENG-7', assignee: 'Priya Raman' },
+      userRequest: 'yes, go ahead',
+    };
+    const said = {
+      recentUserMessages: ['Which issues are stale?', 'yes, go ahead'],
+      agentMessageRepliedTo: 'ENG-7 is stale. I can reassign it to you.',
+    };
+    await evaluateIntegrationToolAutoDecision({
+      ...assign,
+      sessionContext: {
+        ...said,
+        owner: { name: ' Priya Raman ', email: 'priya.raman@ourco.com' },
+      },
+    });
+    const told = mocks.evaluate.mock.calls[0]![0];
+    expect(told.state.sessionContext.owner).toEqual({
+      name: 'Priya Raman',
+      email: 'priya.raman@ourco.com',
+    });
+    // Compared in code, so the model need not judge a look-alike.
+    expect(told.state.call.ownerNamedAs).toEqual(['Priya Raman']);
+    for (const question of [
+      told.questions.userAuthorized,
+      told.questions.agreedToPlan,
+    ]) {
+      expect(question.instructions).toContain(
+        '`sessionContext.owner` is the session owner',
+      );
+      expect(question.instructions).toContain(
+        'A call that names somebody else where the owner meant themselves',
+      );
+    }
+    expect(told.questions.matchesRequest.instructions).not.toContain(
+      'sessionContext.owner',
+    );
+
+    // A call that names somebody else: the fact says nobody matched.
+    await evaluateIntegrationToolAutoDecision({
+      ...assign,
+      args: { id: 'ENG-7', assignee: 'Priya Ramanathan' },
+      sessionContext: { ...said, owner: { name: 'Priya Raman' } },
+    });
+    expect(mocks.evaluate.mock.calls[1]![0].state.call.ownerNamedAs).toEqual(
+      [],
+    );
+
+    // Nobody said who the owner is (other people wrote in the session, or
+    // the lookup failed): the questions and the state are as before.
+    for (const owner of [undefined, { name: '  ', email: '' }]) {
+      mocks.evaluate.mockClear();
+      await evaluateIntegrationToolAutoDecision({
+        ...assign,
+        sessionContext: { ...said, ...(owner ? { owner } : {}) },
+      });
+      const plain = mocks.evaluate.mock.calls[0]![0];
+      expect(plain.state.sessionContext).not.toHaveProperty('owner');
+      expect(plain.state.call).not.toHaveProperty('ownerNamedAs');
+      expect(plain.questions.userAuthorized).toEqual(
+        INTEGRATION_TOOL_AUTO_QUESTIONS.userAuthorized,
+      );
+      expect(plain.questions.agreedToPlan).toEqual(
+        INTEGRATION_TOOL_AUTO_QUESTIONS.agreedToPlan,
+      );
+    }
   });
 
   it('asks when no model or a failed evaluation leaves Auto unable to check', async () => {

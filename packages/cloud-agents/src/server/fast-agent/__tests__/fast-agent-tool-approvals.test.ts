@@ -2197,6 +2197,47 @@ describe('tool approval bridge', () => {
     ).toMatchObject({ recentToolResults: [] });
   });
 
+  it('names the owner to Auto when the session says who they are, and not when the lookup fails', async () => {
+    const owner = { name: 'Priya Raman', email: 'priya.raman@ourco.example' };
+    const assessWith = async (
+      requestId: string,
+      resolveSessionOwner?: () => Promise<typeof owner | undefined>,
+    ) => {
+      vi.mocked(resolveIntegrationToolAutoDecision).mockClear();
+      createFastAgentToolApprovalBridge({
+        sessionId: 'session-id',
+        userId: 'user-id',
+        surface: 'web',
+        integrations,
+        autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+        resolveSessionUserMessages: () => ['Please post the release update.'],
+        ...(resolveSessionOwner ? { resolveSessionOwner } : {}),
+      }).handleAsk({ ...ask, requestId }, helpers());
+      await vi.waitFor(() =>
+        expect(resolveIntegrationToolAutoDecision).toHaveBeenCalled(),
+      );
+      return vi.mocked(resolveIntegrationToolAutoDecision).mock.calls[0]![0]
+        .sessionContext;
+    };
+
+    await expect(
+      assessWith('owner-known', async () => owner),
+    ).resolves.toMatchObject({ owner });
+    // Other people wrote in the session, the lookup failed, or the caller
+    // has no way to look: the owner is not named.
+    await expect(
+      assessWith('owner-not-sole', async () => undefined),
+    ).resolves.not.toHaveProperty('owner');
+    await expect(
+      assessWith('owner-lookup-failed', async () => {
+        throw new Error('database unavailable');
+      }),
+    ).resolves.not.toHaveProperty('owner');
+    await expect(assessWith('owner-no-lookup')).resolves.not.toHaveProperty(
+      'owner',
+    );
+  });
+
   it('never consults Auto for a tool the requester asked to decide themselves', async () => {
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
       { integrationId: 'mock-slack', toolName: 'post_message', mode: 'ask' },

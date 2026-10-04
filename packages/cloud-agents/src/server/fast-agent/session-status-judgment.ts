@@ -397,15 +397,38 @@ export function chooseApplicableSessionStatusJudgment(answer: {
 
 export async function processSessionStatusJudgmentBatch(
   limit = MAX_JUDGMENTS_PER_TICK,
-  options: { sessionIds?: string[] } = {},
+  options: {
+    sessionIds?: string[];
+    onDoneApplied?: (event: { sessionId: string; judgmentId: string }) => void;
+  } = {},
 ): Promise<number> {
+  const complete = async (
+    input: Parameters<typeof completeSessionStatusJudgment>[1],
+  ) => {
+    const result = await completeSessionStatusJudgment(db, input);
+    if (
+      result === 'applied' &&
+      input.state === 'applied' &&
+      input.outcome === 'done'
+    ) {
+      try {
+        options.onDoneApplied?.({
+          sessionId: input.sessionId,
+          judgmentId: input.id,
+        });
+      } catch {
+        console.warn('[sessions] Session done delivery signal failed.');
+      }
+    }
+    return result;
+  };
   const requests = await claimSessionStatusJudgmentRequests(db, limit, options);
   for (const request of requests) {
     try {
       await clearManualStatusAfterNewerUserMessage(db, request.sessionId);
       const snapshot = await loadJudgmentState(request.sessionId);
       if (!snapshot) {
-        await completeSessionStatusJudgment(db, {
+        await complete({
           id: request.id,
           sessionId: request.sessionId,
           generation: request.generation,
@@ -421,7 +444,7 @@ export async function processSessionStatusJudgmentBatch(
         manualStatusChangedAt: snapshot.state.manualStatusChangedAt,
       });
       if (precedence === 'manual') {
-        await completeSessionStatusJudgment(db, {
+        await complete({
           id: request.id,
           sessionId: request.sessionId,
           generation: request.generation,
@@ -437,7 +460,7 @@ export async function processSessionStatusJudgmentBatch(
       const goalStillActive = snapshot.state.goalStatus === 'active';
       if (precedence === 'inactivity') {
         const liveWork = liveTurn || snapshot.hasActiveTask || goalStillActive;
-        await completeSessionStatusJudgment(db, {
+        await complete({
           id: request.id,
           sessionId: request.sessionId,
           generation: request.generation,
@@ -454,7 +477,7 @@ export async function processSessionStatusJudgmentBatch(
         snapshot.state,
       );
       if (authoritativeOutcome) {
-        await completeSessionStatusJudgment(db, {
+        await complete({
           id: request.id,
           sessionId: request.sessionId,
           generation: request.generation,
@@ -472,7 +495,7 @@ export async function processSessionStatusJudgmentBatch(
         questions: SESSION_STATUS_JUDGMENT_QUESTIONS,
       });
       if (!answers) {
-        await completeSessionStatusJudgment(db, {
+        await complete({
           id: request.id,
           sessionId: request.sessionId,
           generation: request.generation,
@@ -484,7 +507,7 @@ export async function processSessionStatusJudgmentBatch(
 
       const decision = chooseApplicableSessionStatusJudgment(answers.outcome);
       if (!decision) {
-        await completeSessionStatusJudgment(db, {
+        await complete({
           id: request.id,
           sessionId: request.sessionId,
           generation: request.generation,
@@ -504,7 +527,7 @@ export async function processSessionStatusJudgmentBatch(
           goalStillActive ||
           snapshot.pendingUserInput)
       ) {
-        await completeSessionStatusJudgment(db, {
+        await complete({
           id: request.id,
           sessionId: request.sessionId,
           generation: request.generation,
@@ -517,7 +540,7 @@ export async function processSessionStatusJudgmentBatch(
         continue;
       }
 
-      await completeSessionStatusJudgment(db, {
+      await complete({
         id: request.id,
         sessionId: request.sessionId,
         generation: request.generation,

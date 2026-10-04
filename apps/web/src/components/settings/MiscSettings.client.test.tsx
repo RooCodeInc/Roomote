@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   setQueryData: vi.fn(),
@@ -15,6 +15,11 @@ vi.mock('@tanstack/react-query', () => ({
       timeZone: null,
       effectiveTimeZone: 'UTC',
       timeZoneSource: 'utc_fallback',
+      sessionDoneWebhook: {
+        enabled: false,
+        url: null,
+        secretConfigured: false,
+      },
     },
     isPending: false,
     isError: false,
@@ -35,6 +40,9 @@ vi.mock('@/trpc/client', () => ({
       setAnonymousAnalytics: {
         mutationOptions: () => ({ kind: 'analytics' }),
       },
+      setSessionDoneWebhook: {
+        mutationOptions: () => ({ kind: 'webhook' }),
+      },
     },
   }),
 }));
@@ -52,5 +60,33 @@ describe('MiscSettings', () => {
     expect(
       screen.queryByRole('switch', { name: 'Toggle Private Sessions' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('places completion webhook configuration on Deployment settings', () => {
+    render(<MiscSettings />);
+
+    expect(screen.getByText('Completion webhook')).toBeVisible();
+    expect(
+      screen.getByRole('switch', { name: 'Toggle completion webhook' }),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Endpoint URL')).toBeVisible();
+    expect(screen.getByLabelText('Signing secret')).toBeVisible();
+    expect(
+      screen.getByText(
+        'Send a webhook when Roomote marks a session done. Delivery is at least once; use the delivery ID to ignore duplicates.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByPlaceholderText('https://example.com/webhooks/roomote'),
+    ).toBeVisible();
+  });
+
+  it('generates a strong signing secret', () => {
+    render(<MiscSettings />);
+
+    const input = screen.getByLabelText('Signing secret');
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+
+    expect((input as HTMLInputElement).value).toMatch(/^[0-9a-f]{64}$/);
   });
 });
