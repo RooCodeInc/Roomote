@@ -61,6 +61,7 @@ import { startHomeComposerRecommendationsQueue } from './home-composer-recommend
 import { startAutomationResultPreparationQueue } from './automation-result-preparation-queue';
 import { startTaskActivityDigestQueue } from './task-activity-digest-queue';
 import { startBuiltInAutomationWebhooksQueue } from './built-in-automation-webhooks-queue';
+import { startSessionDoneWebhookDeliveryQueue } from './session-done-webhook-delivery-queue';
 import { installBullMqGracefulShutdown } from './graceful-shutdown';
 
 // Deployments roll every service at once while migrations run only ahead
@@ -129,6 +130,11 @@ const { queue: discordGatewayEventsQueue, worker: discordGatewayEventsWorker } =
 
 const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
   await startScheduler();
+const {
+  queue: sessionDoneWebhookDeliveryQueue,
+  worker: sessionDoneWebhookDeliveryWorker,
+  queueEvents: sessionDoneWebhookDeliveryQueueEvents,
+} = await startSessionDoneWebhookDeliveryQueue();
 const {
   sandboxOidcRefreshQueue,
   sandboxOidcRefreshWorker,
@@ -256,6 +262,9 @@ const serverAdapter = new HonoAdapter(serveStatic);
 createBullBoard({
   queues: [
     new BullMQAdapter(schedulerQueue, { readOnlyMode: false }),
+    new BullMQAdapter(sessionDoneWebhookDeliveryQueue, {
+      readOnlyMode: false,
+    }),
     new BullMQAdapter(sandboxOidcRefreshQueue, { readOnlyMode: false }),
     new BullMQAdapter(snapshotQueue, { readOnlyMode: false }),
     new BullMQAdapter(dockerValidationQueue, { readOnlyMode: false }),
@@ -338,6 +347,8 @@ app.get('/admin/health', async (c) => {
     const health = await readBullMqQueueHealth(redisStatus, async () => ({
       scheduler: await schedulerQueue.getJobCounts(),
       sandboxOidcRefresh: await sandboxOidcRefreshQueue.getJobCounts(),
+      sessionDoneWebhookDelivery:
+        await sessionDoneWebhookDeliveryQueue.getJobCounts(),
     }));
 
     if (health.queueCounts === null) {
@@ -374,6 +385,15 @@ app.get('/admin/health', async (c) => {
               delayed: health.queueCounts.sandboxOidcRefresh.delayed,
               repeat: health.queueCounts.sandboxOidcRefresh.repeat,
             },
+            sessionDoneWebhookDelivery: {
+              waiting: health.queueCounts.sessionDoneWebhookDelivery.waiting,
+              active: health.queueCounts.sessionDoneWebhookDelivery.active,
+              completed:
+                health.queueCounts.sessionDoneWebhookDelivery.completed,
+              failed: health.queueCounts.sessionDoneWebhookDelivery.failed,
+              delayed: health.queueCounts.sessionDoneWebhookDelivery.delayed,
+              repeat: health.queueCounts.sessionDoneWebhookDelivery.repeat,
+            },
           },
         },
       },
@@ -399,6 +419,10 @@ app.get('/admin/stats', async (c) => {
       await sandboxOidcRefreshQueue.getJobCounts();
     const sandboxOidcRefreshJobSchedulers =
       await sandboxOidcRefreshQueue.getJobSchedulers();
+    const sessionDoneWebhookDeliveryJobCounts =
+      await sessionDoneWebhookDeliveryQueue.getJobCounts();
+    const sessionDoneWebhookDeliveryJobSchedulers =
+      await sessionDoneWebhookDeliveryQueue.getJobSchedulers();
 
     return c.json({
       timestamp: new Date().toISOString(),
@@ -418,6 +442,16 @@ app.get('/admin/stats', async (c) => {
             pattern: job.pattern,
             next: job.next ? new Date(job.next).toISOString() : null,
           })),
+        },
+        sessionDoneWebhookDelivery: {
+          ...sessionDoneWebhookDeliveryJobCounts,
+          repeatableJobs: sessionDoneWebhookDeliveryJobSchedulers.map(
+            (job) => ({
+              key: job.key,
+              pattern: job.pattern,
+              next: job.next ? new Date(job.next).toISOString() : null,
+            }),
+          ),
         },
       },
     });
@@ -460,6 +494,9 @@ installBullMqGracefulShutdown({
     await schedulerWorker.close();
     await schedulerQueueEvents.close();
     await schedulerQueue.close();
+    await sessionDoneWebhookDeliveryWorker.close();
+    await sessionDoneWebhookDeliveryQueueEvents.close();
+    await sessionDoneWebhookDeliveryQueue.close();
     await sandboxOidcRefreshWorker.close();
     await sandboxOidcRefreshQueueEvents.close();
     await sandboxOidcRefreshQueue.close();

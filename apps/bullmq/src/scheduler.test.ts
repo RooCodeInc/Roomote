@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   notifyWebTaskInitiatorOnSettle: vi.fn(),
   processSessionAttentionNotificationJob: vi.fn(),
   processSessionTitleRefreshJob: vi.fn(),
-  drainSessionDoneWebhookDeliveries: vi.fn(),
   sessionsReconcileJob: vi.fn(),
   suggesterJob: vi.fn(),
 }));
@@ -49,7 +48,6 @@ vi.mock('@roomote/sdk/server', () => ({
   conflictScanJob: vi.fn(),
   customAutomationsJob: vi.fn(),
   dependabotTriageJob: vi.fn(),
-  drainSessionDoneWebhookDeliveries: mocks.drainSessionDoneWebhookDeliveries,
   managerStatsJob: vi.fn(),
   providerUsageLimitJob: vi.fn(),
   securityAuditorJob: vi.fn(),
@@ -112,38 +110,6 @@ describe('startScheduler', () => {
     }) => Promise<void>;
     await handler({ name: ScheduledJobName.ThreadFooterRefresh });
     expect(mocks.threadFooterRefreshJob).toHaveBeenCalledTimes(1);
-  });
-
-  it('drains completion webhooks independently from session reconciliation', async () => {
-    let releaseDelivery!: () => void;
-    mocks.drainSessionDoneWebhookDeliveries.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          releaseDelivery = resolve;
-        }),
-    );
-    await startScheduler();
-    expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
-      ScheduledJobName.SessionDoneWebhookDelivery,
-      { every: 60_000 },
-    );
-    const handler = mocks.workerConstructor.mock.calls[0]![1] as (job: {
-      name: string;
-    }) => Promise<void>;
-
-    const slowDelivery = handler({
-      name: ScheduledJobName.SessionDoneWebhookDelivery,
-    });
-    await Promise.resolve();
-    await handler({ name: ScheduledJobName.SessionsReconcile });
-
-    expect(mocks.drainSessionDoneWebhookDeliveries).toHaveBeenCalledTimes(1);
-    expect(mocks.sessionsReconcileJob).toHaveBeenCalledTimes(1);
-    expect(mocks.workerConstructor.mock.calls[0]![2]).toMatchObject({
-      concurrency: 5,
-    });
-    releaseDelivery();
-    await slowDelivery;
   });
 
   it('retries failed personal settlement notifications through BullMQ', async () => {
@@ -263,6 +229,14 @@ describe('startScheduler', () => {
     expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
       'provider_usage_limit',
       { every: 60 * 60 * 1000 },
+    );
+  });
+
+  it('removes the retired shared completion-delivery scheduler', async () => {
+    await startScheduler();
+
+    expect(mocks.queue.removeJobScheduler).toHaveBeenCalledWith(
+      'SessionDoneWebhookDelivery',
     );
   });
 });
