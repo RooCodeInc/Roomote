@@ -142,9 +142,11 @@ describe('processSessionStatusJudgmentBatch', () => {
       state: 'pending',
     });
     highConfidenceDone();
+    const onDoneApplied = vi.fn();
 
     await processSessionStatusJudgmentBatch(undefined, {
       sessionIds: [session.id],
+      onDoneApplied,
     });
 
     const evaluation = evaluateMock.mock.calls.find(([input]) => {
@@ -187,6 +189,11 @@ describe('processSessionStatusJudgmentBatch', () => {
       .from(sessionStatusJudgments)
       .where(eq(sessionStatusJudgments.sessionId, session.id));
     expect(judgment).toMatchObject({ state: 'applied', outcome: 'done' });
+    expect(evaluateMock).toHaveBeenCalledTimes(1);
+    expect(onDoneApplied).toHaveBeenCalledWith({
+      sessionId: session.id,
+      judgmentId: judgment!.id,
+    });
     const [persistedSession] = await db
       .select({ cachedStatus: sessions.cachedStatus })
       .from(sessions)

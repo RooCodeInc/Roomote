@@ -67,6 +67,18 @@ export async function startSessionDoneWebhookDeliveryQueue() {
     queue,
     worker,
     queueEvents,
+    enqueueNow: (judgmentId: string) => {
+      void queue
+        .add(SESSION_DONE_WEBHOOK_DELIVERY_JOB_NAME, undefined, {
+          jobId: `session-done-${judgmentId}`,
+        })
+        .catch((error) =>
+          console.error(
+            '[SessionDoneWebhookDeliveryQueue] immediate enqueue failed:',
+            error,
+          ),
+        );
+    },
     close: async () => {
       // Delivery leases recover abandoned work; never hold deployment shutdown
       // open for a slow external endpoint.

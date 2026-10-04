@@ -128,12 +128,16 @@ const discordGatewaySupervisor = startDiscordGatewaySupervisor(
 const { queue: discordGatewayEventsQueue, worker: discordGatewayEventsWorker } =
   startDiscordGatewayEventsQueue();
 
-const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
-  await startScheduler();
 const {
   queue: sessionDoneWebhookDeliveryQueue,
+  enqueueNow: enqueueSessionDoneWebhookDelivery,
   close: closeSessionDoneWebhookDeliveryQueue,
 } = await startSessionDoneWebhookDeliveryQueue();
+const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
+  await startScheduler({
+    onSessionDoneApplied: ({ judgmentId }) =>
+      enqueueSessionDoneWebhookDelivery(judgmentId),
+  });
 const {
   sandboxOidcRefreshQueue,
   sandboxOidcRefreshWorker,

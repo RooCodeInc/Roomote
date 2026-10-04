@@ -112,6 +112,20 @@ describe('startScheduler', () => {
     expect(mocks.threadFooterRefreshJob).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards applied done judgments to the immediate delivery signal', async () => {
+    const onSessionDoneApplied = vi.fn();
+    await startScheduler({ onSessionDoneApplied });
+    const handler = mocks.workerConstructor.mock.calls[0]![1] as (job: {
+      name: string;
+    }) => Promise<void>;
+
+    await handler({ name: ScheduledJobName.SessionsReconcile });
+
+    expect(mocks.sessionsReconcileJob).toHaveBeenCalledWith({
+      onDoneApplied: onSessionDoneApplied,
+    });
+  });
+
   it('retries failed personal settlement notifications through BullMQ', async () => {
     mocks.notifyWebTaskInitiatorOnSettle.mockResolvedValue('failed');
     await startScheduler();

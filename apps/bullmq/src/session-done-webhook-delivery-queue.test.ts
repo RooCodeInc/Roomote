@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   queue: {
+    add: vi.fn(),
     close: vi.fn(),
     upsertJobScheduler: vi.fn(),
   },
@@ -52,6 +53,7 @@ describe('startSessionDoneWebhookDeliveryQueue', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.queue.close.mockResolvedValue(undefined);
+    mocks.queue.add.mockResolvedValue(undefined);
     mocks.workerClose.mockResolvedValue(undefined);
     mocks.queueEventsClose.mockResolvedValue(undefined);
     mocks.queue.upsertJobScheduler.mockResolvedValue(undefined);
@@ -70,6 +72,19 @@ describe('startSessionDoneWebhookDeliveryQueue', () => {
     expect(mocks.workerClose).toHaveBeenCalledWith(true);
     expect(mocks.queueEventsClose).toHaveBeenCalledTimes(1);
     expect(mocks.queue.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('enqueues immediate delivery without waiting for the worker', async () => {
+    const resources = await startSessionDoneWebhookDeliveryQueue();
+
+    expect(resources.enqueueNow('judgment-1')).toBeUndefined();
+    await vi.waitFor(() =>
+      expect(mocks.queue.add).toHaveBeenCalledWith(
+        SESSION_DONE_WEBHOOK_DELIVERY_JOB_NAME,
+        undefined,
+        { jobId: 'session-done-judgment-1' },
+      ),
+    );
   });
 
   it('isolates completion delivery in a dedicated single-concurrency worker', async () => {
