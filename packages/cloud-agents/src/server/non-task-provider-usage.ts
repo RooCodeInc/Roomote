@@ -2214,7 +2214,12 @@ export async function generateTrackedNonTaskText(
     const model = await resolveModelForInputModality(params, runtime);
     return runNonTaskSdkPrompt(
       params,
-      { ...runtime, model },
+      {
+        ...runtime,
+        model,
+        reasoningEffort:
+          model === runtime.model ? runtime.reasoningEffort : undefined,
+      },
       {
         system: params.system,
         parts: [
