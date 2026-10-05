@@ -109,6 +109,10 @@ export async function transcribeAudioAttachment(input: {
   mimeType: string;
   filename?: string;
   userId?: string | null;
+  /**
+   * Task-owned callers may supply context for a per-task media override.
+   * Automatic chat attachments omit it and use the deployment setting.
+   */
   taskId?: string | null;
   userTextContext?: string;
 }): Promise<AudioTranscriptionResult> {

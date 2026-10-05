@@ -596,6 +596,11 @@ describe('ModelSettingsSection', () => {
     renderModelSettingsSection();
 
     expect(
+      screen.getByText(
+        'Used to transcribe audio and describe videos. Automatic chat-attachment transcription uses this deployment setting, not per-task overrides.',
+      ),
+    ).toBeInTheDocument();
+    expect(
       screen.queryByText(/doesn't support audio or video/u),
     ).not.toBeInTheDocument();
     fireEvent.click(

@@ -1330,6 +1330,11 @@ async function resolveModelForInputModality(
   return model;
 }
 
+/**
+ * Resolves an override only for callers that explicitly supply task context.
+ * Automatic communication attachment transcription omits task context and
+ * therefore uses deployment audio/video configuration.
+ */
 async function resolveTaskAudioVideoModelOverride(
   taskId?: string | null,
   taskRunId?: number,

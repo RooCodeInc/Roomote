@@ -311,14 +311,16 @@ a stronger review model, after they can see real usage.
 
 The **Vision model** handles image attachments when the active model cannot
 inspect them. The separate **Audio and video model** handles audio transcription
-and video descriptions. Both roles default to **Same as coding model**, and
-either can be configured independently in **Settings > Models**. Roomote warns
-when catalog metadata shows that the selected media model does not support
-audio or video. When the Audio and video model remains unset, Roomote preserves
-the existing helper and Vision model routing for those inputs.
+and video descriptions. Each can be configured independently in **Settings >
+Models**. Roomote warns when catalog metadata shows that the selected media model
+does not support audio or video. When the audio and video model remains unset,
+Roomote uses the helper model for audio and the vision model for video.
 
-The task model switcher also includes an Audio and video role override. Changes
-to a task's role selections apply from its next message.
+The task model switcher also includes an Audio and video role override for
+media processing owned by that task. Changes apply from the task's next message.
+Automatic chat-attachment transcription from Slack, Discord, Telegram, and
+Microsoft Teams uses the deployment audio and video model instead of a per-task
+override.
 
 ## Fallback models
 

@@ -92,6 +92,10 @@ directly to their session model when it supports audio. When the audio and video
 model is explicitly set, it is authoritative for both inputs instead of
 silently switching to the vision, helper, or coding model.
 
+Automatic audio transcription for Slack, Discord, Telegram, and Microsoft Teams
+uses the deployment audio and video model. A per-task Audio and video override
+does not change which model transcribes those incoming chat attachments.
+
 That means you can ask things like:
 
 - "Compare this export to the expected format and tell me what is broken."

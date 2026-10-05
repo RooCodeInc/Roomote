@@ -215,7 +215,8 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   {
     role: 'audioVideo',
     label: 'Audio and video model',
-    description: 'Used to transcribe audio and describe videos.',
+    description:
+      'Used to transcribe audio and describe videos. Automatic chat-attachment transcription uses this deployment setting, not per-task overrides.',
     icon: AudioLines,
     placeholder: 'Select an audio and video model',
     reasoningAriaLabel: 'Audio and video model reasoning level',
