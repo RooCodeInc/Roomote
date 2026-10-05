@@ -531,6 +531,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
                       url: null,
                     },
                   ],
+                  pageInfo: { hasNextPage: false, endCursor: null },
                 },
               },
               {
@@ -550,9 +551,11 @@ describe('readSourceControlPullRequestForTaskRun', () => {
                       url: null,
                     },
                   ],
+                  pageInfo: { hasNextPage: false, endCursor: null },
                 },
               },
             ],
+            pageInfo: { hasNextPage: false, endCursor: null },
           },
         },
       },
@@ -623,6 +626,178 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         submittedAt: '2026-08-01T00:00:00Z',
         url: 'https://github.com/acme/backend/pull/55#pullrequestreview-900',
       },
+    ]);
+  });
+
+  it('includes paginated top-level comments and REST review comments absent from GraphQL', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const listReviewComments = vi.fn();
+    const listComments = vi.fn();
+    const listReviews = vi.fn();
+    const paginate = vi.fn().mockImplementation(async (endpoint, params) => {
+      expect(params).toMatchObject({ per_page: 100 });
+      if (endpoint === listReviewComments) {
+        return [
+          { id: 100, body: 'Old finding', path: 'src/old.ts', line: 4 },
+          { id: 101, in_reply_to_id: 100, body: 'New reply' },
+          {
+            id: 4084648868,
+            body: 'New inline finding',
+            path: 'src/new.ts',
+            line: 8,
+          },
+        ];
+      }
+      if (endpoint === listComments) {
+        // Octokit paginate has collected both issue-comment pages.
+        return [
+          { id: 12, body: 'Old discussion' },
+          { id: 5798381888, body: 'New top-level discussion' },
+        ];
+      }
+      if (endpoint === listReviews) return [];
+      throw new Error('Unexpected endpoint');
+    });
+    mockGetOctokit.mockReturnValue({
+      paginate,
+      graphql: vi.fn().mockResolvedValue({
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              nodes: [
+                {
+                  id: 'PRRT_old',
+                  isResolved: true,
+                  path: 'src/old.ts',
+                  line: 4,
+                  comments: {
+                    nodes: [{ databaseId: 100, body: 'Old finding' }],
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                  },
+                },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      }),
+      rest: {
+        pulls: { listReviewComments, listReviews },
+        issues: { listComments },
+      },
+    });
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'list_pull_request_comments',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+      },
+    });
+    if (!('threads' in result)) throw new Error('Expected comments');
+    expect(paginate).toHaveBeenCalledWith(listComments, {
+      owner: 'acme',
+      repo: 'backend',
+      issue_number: 55,
+      per_page: 100,
+    });
+    expect(paginate).toHaveBeenCalledWith(listReviewComments, {
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      per_page: 100,
+    });
+    expect(result.issueComments.map((comment) => comment.id)).toEqual([
+      '12',
+      '5798381888',
+    ]);
+    expect(result.threads).toEqual([
+      expect.objectContaining({
+        id: 'PRRT_old',
+        resolved: true,
+        comments: [
+          expect.objectContaining({ id: '100' }),
+          expect.objectContaining({ id: '101', body: 'New reply' }),
+        ],
+      }),
+      expect.objectContaining({
+        id: '4084648868',
+        resolved: null,
+        path: 'src/new.ts',
+        line: 8,
+        comments: [
+          expect.objectContaining({
+            id: '4084648868',
+            body: 'New inline finding',
+          }),
+        ],
+      }),
+    ]);
+    expect(result.warnings).toEqual([
+      expect.stringContaining('2 GitHub review comment(s) were absent'),
+    ]);
+  });
+
+  it('falls back to complete REST review comments when GraphQL omits pagination metadata', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    mockGetOctokit.mockReturnValue({
+      paginate: vi
+        .fn()
+        .mockResolvedValueOnce([
+          {
+            id: 4084648868,
+            body: 'Latest finding',
+            path: 'src/new.ts',
+            line: 8,
+          },
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]),
+      graphql: vi.fn().mockResolvedValue({
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              nodes: [], // Without pageInfo this might be only the first page.
+            },
+          },
+        },
+      }),
+      rest: {
+        pulls: { listReviewComments: vi.fn(), listReviews: vi.fn() },
+        issues: { listComments: vi.fn() },
+      },
+    });
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'list_pull_request_comments',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+      },
+    });
+    if (!('threads' in result)) throw new Error('Expected comments');
+    expect(result.threads).toEqual([
+      expect.objectContaining({ id: '4084648868', resolved: null }),
+    ]);
+    expect(result.warnings).toEqual([
+      expect.stringContaining('without resolution state'),
     ]);
   });
 

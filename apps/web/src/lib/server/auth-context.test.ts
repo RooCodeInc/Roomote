@@ -10,6 +10,7 @@ const {
   mockGetSession,
   mockAccessDecision,
   mockTxState,
+  mockNightlyExperimentsEnabled,
 } = vi.hoisted(() => ({
   mockDeploymentFindFirst: vi.fn(),
   mockUsersFindFirst: vi.fn(),
@@ -28,6 +29,7 @@ const {
     anyUser: null as { id: string } | null,
     insertedValues: [] as Array<Record<string, unknown>>,
   },
+  mockNightlyExperimentsEnabled: { value: false as string | boolean },
 }));
 
 vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
@@ -106,8 +108,15 @@ vi.mock('./bootstrap-runtime-env', () => ({
 vi.mock('./env', () => ({
   Env: {
     R_ALLOWED_EMAILS: '',
+    get R_NIGHTLY_EXPERIMENTS_ENABLED() {
+      return mockNightlyExperimentsEnabled.value;
+    },
   },
   isBrainConfigured: () => false,
+  isEnvFlagEnabled: (value: string | boolean | undefined) =>
+    value === true ||
+    (typeof value === 'string' &&
+      ['true', '1'].includes(value.trim().toLowerCase())),
   isRoomoteCloudEnabled: () => false,
 }));
 
@@ -144,6 +153,7 @@ describe('authorize', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAccessDecision.current = { allowed: true, via: 'existing_user' };
+    mockNightlyExperimentsEnabled.value = false;
     mockTxState.anyUser = null;
     mockTxState.insertedValues = [];
     mockGetSession.mockResolvedValue({
@@ -172,6 +182,15 @@ describe('authorize', () => {
       deletedAt: null,
     });
     mockUpdateWhere.mockResolvedValue([]);
+  });
+
+  it('returns the normalized nightly experiment environment flag', async () => {
+    const disabled = await authorize();
+    expect(disabled).toMatchObject({ nightlyExperimentsEnabled: false });
+
+    mockNightlyExperimentsEnabled.value = '1';
+    const enabled = await authorize();
+    expect(enabled).toMatchObject({ nightlyExperimentsEnabled: true });
   });
 
   it('does not consume rolling renewal during server rendering', async () => {

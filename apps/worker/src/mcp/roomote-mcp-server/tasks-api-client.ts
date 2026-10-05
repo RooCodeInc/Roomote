@@ -743,27 +743,6 @@ export async function saveTaskMemory(
   );
 }
 
-type DiffRiskHintsResponse =
-  | { available: true; text: string }
-  | { available: false; reason: string };
-
-export async function getDiffRiskHints(
-  config: RoomoteConfig,
-  runId: number,
-  diff: string,
-): Promise<DiffRiskHintsResponse> {
-  return apiFetch(
-    config,
-    `/api/mcp/tasks/runs/${runId}/diff_risk_hints`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ diff }),
-    },
-    'Failed to get diff risk hints',
-  );
-}
-
 export async function updatePersonalization(
   config: RoomoteConfig,
   runId: number,

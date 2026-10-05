@@ -1417,6 +1417,67 @@ describe('PromptInput', () => {
   });
 });
 
+describe('PromptInput history navigation', () => {
+  it('recalls only visible persisted user prompts', () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({
+      data: [
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          text: 'First user prompt',
+        },
+        {
+          eventType: 'roomote_runtime.assistant_message',
+          role: 'assistant',
+          text: 'Assistant reply',
+        },
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          text: '  Latest user prompt\n',
+        },
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          text: ' \n ',
+        },
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          visibleInTranscript: false,
+          text: 'Hidden prompt',
+        },
+      ],
+    });
+
+    render(
+      <PromptInput
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+        taskRun={createTaskRun(1)}
+      />,
+    );
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+    expect(textarea).toHaveValue('  Latest user prompt\n');
+
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+    expect(textarea).toHaveValue('First user prompt');
+  });
+});
+
 describe('PromptInput ghost suggestion', () => {
   function renderConnectedComposer(
     suggestion = 'Add a regression test for that',

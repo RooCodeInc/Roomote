@@ -3,7 +3,10 @@
 import { pathToFileURL } from 'node:url';
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
+import {
+  NullableOptionalsMcpServer,
+  withNullableOptionals,
+} from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { z } from 'zod';
 import {
   CALL_INTEGRATION_TOOL_TOOL,
@@ -14,7 +17,7 @@ import {
   CHAT_MESSAGE_CONTEXT_TOOL,
   chatDestinationLookupFieldSchemas,
   chatDestinationLookupInputSchema,
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  getManageCustomAutomationsTool,
   CREATE_CUSTOM_SKILL_TOOL,
   OPEN_ARTIFACT_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
@@ -22,6 +25,7 @@ import {
   createTaskEnvVarRequestBaseSchema,
   dataVisualizationInputsSchema,
   type DataVisualizationInput,
+  type ManageCustomAutomationsInput,
   PRODUCT_NAME,
   PUBLIC_URL_FETCH_TOOL,
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
@@ -95,7 +99,6 @@ import { handleReportPlatformIssue } from './report-platform-issue.js';
 import { handleManageSourceControl } from './source-control.js';
 import { getArtifactConfig, getRoomoteConfig } from './config.js';
 import { handleSaveTaskMemory } from './task-memory.js';
-import { handleGetDiffRiskHints } from './diff-risk-hints.js';
 import { handleUpdatePersonalization } from './user-personalization.js';
 import { ABOUT_ME_CONTENT } from './about-me.js';
 import { INTEGRATION_SETUP_CONTENT } from './integration-setup.js';
@@ -103,7 +106,10 @@ import type { ToolResult } from './types.js';
 import { errorResult } from './tool-result.js';
 import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
-import { handleManageCustomAutomations } from './custom-automations.js';
+import {
+  handleManageCustomAutomations,
+  resolveCustomAutomationLaunchCriteriaEnabled,
+} from './custom-automations.js';
 import {
   handleCreateCustomSkill,
   handleUpdateCustomSkill,
@@ -134,6 +140,10 @@ export const roomoteMcpServer = new NullableOptionalsMcpServer({
   name: 'roomote-mcp-server',
   version: '1.0.0',
 });
+
+let automationLaunchCriteriaEnabled = false;
+const initialManageCustomAutomationsTool =
+  getManageCustomAutomationsTool(false);
 
 roomoteMcpServer.registerTool(
   PUBLIC_URL_FETCH_TOOL.name,
@@ -170,20 +180,24 @@ const uuidStringSchema = z
     message: 'Value must be a UUID.',
   });
 
-roomoteMcpServer.registerTool(
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+const manageCustomAutomationsToolRegistration = roomoteMcpServer.registerTool(
+  initialManageCustomAutomationsTool.name,
   {
-    title: MANAGE_CUSTOM_AUTOMATIONS_TOOL.title,
-    description: MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
-    inputSchema: MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
-    annotations: MANAGE_CUSTOM_AUTOMATIONS_TOOL.annotations,
+    title: initialManageCustomAutomationsTool.title,
+    description: initialManageCustomAutomationsTool.description,
+    inputSchema: initialManageCustomAutomationsTool.inputSchema,
+    annotations: initialManageCustomAutomationsTool.annotations,
   },
   async (params): Promise<ToolResult> => {
     const config = getRoomoteConfig();
     if (!config) {
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
-    return handleManageCustomAutomations(params, config);
+    return handleManageCustomAutomations(
+      params as ManageCustomAutomationsInput,
+      config,
+      automationLaunchCriteriaEnabled,
+    );
   },
 );
 
@@ -552,20 +566,6 @@ function shouldRegisterEnvVarRequestTool(): boolean {
  * and setup-mcps mirrors that into this flag — so agents without a Brain
  * never see a memory tool that cannot work.
  */
-/**
- * Every coding task run can screen its own diff. Pull request reviews are
- * excluded: their reviewer already receives the same hints.
- */
-function shouldRegisterDiffRiskHintsTool(): boolean {
-  const taskType = process.env.ROOMOTE_TASK_TYPE?.trim();
-
-  return (
-    Boolean(process.env.ROOMOTE_TASK_RUN_ID?.trim()) &&
-    taskType !== TaskPayloadKind.GithubPrReview &&
-    taskType !== TaskPayloadKind.GithubPrReviewSync
-  );
-}
-
 function shouldRegisterTaskMemoryTool(): boolean {
   return process.env.ROOMOTE_BRAIN_AVAILABLE === 'true';
 }
@@ -1330,28 +1330,6 @@ if (shouldRegisterOnDemandIntegrationTools()) {
         );
       }
     },
-  );
-}
-
-if (shouldRegisterDiffRiskHintsTool()) {
-  roomoteMcpServer.registerTool(
-    'get_diff_risk_hints',
-    {
-      title: 'Get Diff Risk Hints',
-      description:
-        "Before you push or open a pull request, call this once during your self-review. It runs the same fast pre-screen Roomote's pull request review uses on your branch's diff (committed, uncommitted, and new files against the default branch) and returns up to three changed hunks most likely to contain a defect, each with the kind of issue suspected. Re-read those hunks and fix what the code confirms. The hints are questions, not findings, and they miss about half of real defects, so they never clear the rest of the change. Returns a result with `available: false` when the deployment has no hosted judgment model.",
-      inputSchema: {
-        repositoryPath: z
-          .string()
-          .trim()
-          .optional()
-          .describe(
-            'Absolute path of the git checkout you changed. Defaults to the workspace root; pass it when the workspace holds several repositories.',
-          ),
-      },
-      annotations: { readOnlyHint: true },
-    },
-    async (input) => handleGetDiffRiskHints(input),
   );
 }
 
@@ -2200,6 +2178,20 @@ async function main() {
   installWorkerFatalProcessHandlers({
     uncaughtExceptionStage: 'roomote-mcp-server.uncaughtException',
     unhandledRejectionStage: 'roomote-mcp-server.unhandledRejection',
+  });
+
+  const config = getRoomoteConfig();
+  automationLaunchCriteriaEnabled = config
+    ? await resolveCustomAutomationLaunchCriteriaEnabled(config)
+    : false;
+  const manageCustomAutomationsTool = getManageCustomAutomationsTool(
+    automationLaunchCriteriaEnabled,
+  );
+  manageCustomAutomationsToolRegistration.update({
+    description: manageCustomAutomationsTool.description,
+    paramsSchema: withNullableOptionals(
+      manageCustomAutomationsTool.inputSchema,
+    ),
   });
 
   const transport = new StdioServerTransport();

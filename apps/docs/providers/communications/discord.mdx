@@ -108,7 +108,7 @@ unmoderated tag, or a moderated tag when the bot has Manage Threads.
 
 Individual automations can also report to their own Discord channel instead of
 the default: pick a Discord channel in that automation's destination selector
-under **Settings > Automations**, the same way you would pick a Slack channel.
+on the **Automations** page, the same way you would pick a Slack channel.
 
 ## Start and continue tasks
 
@@ -138,7 +138,7 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 Roomote can read bounded context from the current Discord thread or channel, use
 MCP servers and user-scoped integrations that you are allowed to access, and
 delegate repository work to Roomote tasks. Members can create and manage their
-own [custom automations](/automations#custom-automations) through a session; deployment
+own [custom automations](/custom-automations) through a session; deployment
 admins can manage all custom automations, including those without a creator.
 Built-in automations and deployment settings remain admin-only.
 Roomote does not read other channels implicitly
@@ -153,11 +153,12 @@ Linked participants' messages in established Roomote Discord threads keep
 reaching Roomote after a peer is mentioned. When a
 [judgment model](/models#judgment-model) is configured, every unmentioned
 reply in such a thread with more than one person is judged before it can start
-a turn and routes when
-it is addressed to Roomote and is more than a closing acknowledgement;
-otherwise Roomote may ignore ambient discussion. Explicit bot mentions, commands, DMs, and replies to
-Roomote always receive a response. This applies only inside the established
-thread; it does not make Roomote monitor the surrounding channel.
+a turn and routes when it is addressed to Roomote. Messages meant for another
+participant stay silent; acknowledgements addressed to Roomote reach the
+session, which then decides whether a response is warranted. Explicit bot
+mentions, commands, DMs, and replies to Roomote always receive a response. This
+applies only inside the established thread; it does not make Roomote monitor the
+surrounding channel.
 
 Every Roomote reply ends with a compact footer: **Reply anytime**, a plain
 running-task count when at least one task is running, links to pull requests the

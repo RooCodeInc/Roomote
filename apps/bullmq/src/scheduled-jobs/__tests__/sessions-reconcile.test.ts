@@ -7,12 +7,15 @@ import {
   inArray,
   sessionBackfillState,
   sessionFactory,
+  sessionStatusJudgments,
   sessionTasks,
   sessions,
+  refreshSessionInactivityDueAt,
   taskFactory,
   userFactory,
   users,
 } from '@roomote/db/server';
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 import { sessionsReconcileJob } from '../sessions-reconcile';
 
 const BACKFILL_KEY = 'unified-sessions-v1';
@@ -305,5 +308,54 @@ describe('sessionsReconcileJob', () => {
       purpose: 'closeout',
       inferenceRetryActive: false,
     });
+  });
+
+  it('requeues an idle Session after it crosses the inactivity boundary', async () => {
+    await sessionsReconcileJob();
+    await sessionsReconcileJob();
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      fastConversationId: conversation!.id,
+    });
+    const latestVisibleUserTs = Date.now() - 4 * 24 * 60 * 60 * 1_000;
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'reconcile-inactive-user',
+      turnId: 'reconcile-inactive-turn',
+      turnSeq: 1,
+      ts: latestVisibleUserTs,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'Please investigate this.' }],
+      metadata: { visibleInTranscript: true, userId: user.id },
+    });
+    await refreshSessionInactivityDueAt(db, session.id);
+
+    try {
+      await sessionsReconcileJob();
+
+      const [judgment] = await db
+        .select()
+        .from(sessionStatusJudgments)
+        .where(eq(sessionStatusJudgments.sessionId, session.id));
+      expect(judgment).toMatchObject({
+        sourceEventId: `inactivity-due:${latestVisibleUserTs + 4 * 24 * 60 * 60 * 1_000}`,
+      });
+    } finally {
+      await db.delete(sessions).where(eq(sessions.id, session.id));
+      await db
+        .delete(fastAgentConversations)
+        .where(eq(fastAgentConversations.id, conversation!.id));
+      await db.delete(users).where(eq(users.id, user.id));
+    }
   });
 });

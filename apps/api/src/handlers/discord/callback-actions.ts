@@ -5,6 +5,7 @@ import {
   activeRunStatuses,
   isDeploymentReadOnlyError,
   type QueuedCommunicationMessage,
+  parseIntegrationToolApprovalCallback,
 } from '@roomote/types';
 import {
   and,
@@ -376,6 +377,7 @@ async function launchClaimedDiscordSuggestion(input: {
               input.triggerId,
             ),
             createAnchoredThread: false,
+            visibleInTranscript: false,
           });
           return fastStart.accepted
             ? {
@@ -467,6 +469,7 @@ async function launchClaimedDiscordSuggestion(input: {
               applicationId: input.applicationId,
               requesterDiscordUserId: input.sender.id,
               launchOwnerUserId: input.senderUserId,
+              visibleInTranscript: false,
               queuedMessage,
               metadata,
               channel: launchChannel,
@@ -638,6 +641,13 @@ export async function handleDiscordComponentInteraction(input: {
   channel: DiscordChannelContext;
 }): Promise<'handled' | 'unsupported'> {
   const customId = input.interaction.data?.custom_id;
+  const toolApproval = parseIntegrationToolApprovalCallback(customId);
+  if (toolApproval) {
+    const { handleDiscordToolApprovalAction } =
+      await import('./tool-approval-action.js');
+    await handleDiscordToolApprovalAction({ ...input, decision: toolApproval });
+    return 'handled';
+  }
   if (hasPendingDiscordRequestUserInputCallback(customId)) {
     const sender = input.interaction.member?.user ?? input.interaction.user;
     const mappedUserId = sender?.id

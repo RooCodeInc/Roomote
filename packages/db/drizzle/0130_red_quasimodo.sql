@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "auto_tool_approvals_enabled" boolean DEFAULT false NOT NULL;

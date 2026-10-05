@@ -9,6 +9,8 @@ import {
   inArray,
   ne,
   or,
+  createSessionStatusJudgmentRequest,
+  getSessionForTask,
   reconcileAutomationResultAcceptance,
   requeueBrainMemoryEventsForTasks,
   syncTaskStateFromRuns,
@@ -205,14 +207,41 @@ export async function updateTaskPrStatus(
         null;
     }
 
+    const statusUpdatedAt = new Date();
     const updatedRows = await tx
       .update(taskPullRequests)
-      .set({ status, ...(mergedAt ? { mergedAt } : {}), updatedAt: new Date() })
+      .set({
+        status,
+        ...(mergedAt ? { mergedAt } : {}),
+        updatedAt: statusUpdatedAt,
+      })
       .where(matchingStatus)
       .returning({
         taskId: taskPullRequests.taskId,
         createdByRoomote: taskPullRequests.createdByRoomote,
       });
+
+    if (status === 'merged' || status === 'closed') {
+      const sessionIds = new Set<string>();
+      for (const taskId of [
+        ...new Set(
+          updatedRows
+            .filter(({ createdByRoomote }) => createdByRoomote)
+            .map((row) => row.taskId),
+        ),
+      ].sort()) {
+        const session = await getSessionForTask(tx, taskId);
+        if (session) sessionIds.add(session.id);
+      }
+      for (const sessionId of [...sessionIds].sort()) {
+        await createSessionStatusJudgmentRequest(tx, {
+          sessionId,
+          sourceEventId: `pull-request:${provider}:${repository}:${prNumber}:${status}:${statusUpdatedAt.getTime()}`,
+          sourceKind: 'task_terminal',
+          state: 'pending',
+        });
+      }
+    }
 
     if (status === 'merged' && mergedAt) {
       for (const taskId of [

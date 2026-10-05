@@ -5,6 +5,7 @@ import {
   formatSingleLineLog,
   getEffectiveAllowedMcpToolNames,
   type RunTokenContext,
+  isExitedRunStatus,
   isMcpToolAllowed,
   isUserToken,
   parseMcpJsonRpcPayload,
@@ -28,9 +29,11 @@ import {
   describeProxyToolApprovalBlock,
   resolveProxyToolApprovalBlock,
   resolveProxyToolApprovalBlocks,
+  readFastConversationIdHeader,
   shadowProxyToolCall,
   type ProxyToolApprovals,
 } from './tool-approval-enforcement';
+import { decideUnaskedTaskToolCall } from './unasked-task-tool-call';
 
 type JsonRpcRequestId = string | number | null;
 
@@ -231,9 +234,9 @@ export async function resolveRunTokenTaskId(
 }
 
 /**
- * Validates that the run token's run still exists. No principal equality
- * check: the run-scoped token IS the authorization (only that run's sandbox
- * holds it). The token's userId is mint-time attribution while
+ * Validates that the run token's run still exists and remains active. No
+ * principal equality check: the run-scoped token IS the authorization (only
+ * that run's sandbox holds it). The token's userId is mint-time attribution while
  * `task_runs.actingUserId` is current-steering attribution — web steer and
  * follow-up delivery mutate the acting user mid-run, so the two legitimately
  * diverge and must not be compared for authorization.
@@ -242,7 +245,7 @@ async function verifyTaskRunTokenTargetExists(
   auth: RunTokenContext,
 ): Promise<Response | null> {
   const taskRun = await db.query.taskRuns.findFirst({
-    columns: { id: true },
+    columns: { id: true, status: true },
     where: eq(taskRuns.id, auth.runId),
   });
 
@@ -251,6 +254,14 @@ async function verifyTaskRunTokenTargetExists(
       404,
       -32000,
       'Task run not found for this MCP token',
+    );
+  }
+
+  if (isExitedRunStatus(taskRun.status)) {
+    return jsonRpcErrorResponse(
+      403,
+      -32000,
+      'Task run is no longer active for this MCP token',
     );
   }
 
@@ -428,50 +439,6 @@ interface McpProxyConfig {
   guardUpstreamEgress?: { allowedPrivateCidrs?: string };
   /** Reject request bodies larger than this many bytes (413). */
   maxRequestBodyBytes?: number;
-  /**
-   * Rewrite a successful `tools/call` result before the client sees it;
-   * resolve `undefined` to pass it through. Applied only where the proxy
-   * already holds the whole JSON-RPC response (JSON bodies and single-response
-   * SSE replies). A throw is treated as `undefined`.
-   */
-  transformToolCallResult?: ToolCallResultTransform;
-}
-
-type ToolCallResultTransform = (call: {
-  toolName: string;
-  arguments: unknown;
-  result: unknown;
-}) => Promise<unknown>;
-
-async function applyToolCallResultTransform(
-  transform: ToolCallResultTransform | undefined,
-  request: unknown,
-  response: unknown,
-): Promise<unknown> {
-  const toolName = getToolCallName(request);
-
-  if (
-    !transform ||
-    !toolName ||
-    !response ||
-    typeof response !== 'object' ||
-    !('result' in response)
-  ) {
-    return undefined;
-  }
-
-  try {
-    const result = await transform({
-      toolName,
-      arguments: (request as { params?: { arguments?: unknown } }).params
-        ?.arguments,
-      result: response.result,
-    });
-
-    return result === undefined ? undefined : { ...response, result };
-  } catch {
-    return undefined;
-  }
 }
 
 export class McpProxyError extends Error {
@@ -846,7 +813,6 @@ export function createMcpProxy(config: McpProxyConfig) {
     stripToolSchemaPatterns: shouldStripToolSchemaPatterns = false,
     guardUpstreamEgress,
     maxRequestBodyBytes,
-    transformToolCallResult,
   } = config;
 
   const buildResponseHeaders = (upstreamHeaders: Headers): Headers => {
@@ -1046,6 +1012,7 @@ export function createMcpProxy(config: McpProxyConfig) {
           tokenType: auth.tokenType,
           resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(auth),
           resolveTaskId: () => resolveRunTokenTaskId(auth),
+          requestHeaders: c.req.raw.headers,
         });
       } catch (error) {
         // Fail closed: an unreadable policy must not let a gated tool run.
@@ -1179,6 +1146,7 @@ export function createMcpProxy(config: McpProxyConfig) {
           args: callArguments,
           userId: auth.userId ?? null,
           taskId: await resolveRunTokenTaskId(auth),
+          fastConversationId: readFastConversationIdHeader(c.req.raw.headers),
         });
       }
       if (
@@ -1206,12 +1174,48 @@ export function createMcpProxy(config: McpProxyConfig) {
           );
         }
         if (!approved) {
-          return jsonRpcErrorResponse(
-            403,
-            -32000,
-            describeProxyToolApprovalBlock(gatedToolName, 'needs_approval'),
-            getJsonRpcRequestId(parsedBody),
-          );
+          // Nothing to claim: the task's agent did not ask first. Ask for it.
+          let decision: Awaited<ReturnType<typeof decideUnaskedTaskToolCall>>;
+          try {
+            decision = await decideUnaskedTaskToolCall({
+              runId: auth.runId,
+              taskId: await resolveRunTokenTaskId(auth),
+              integrationId: credentials.toolApprovalIntegrationId,
+              policyScope: credentials.toolApprovalPolicyScope,
+              toolName: gatedToolName,
+              args: callArguments,
+              resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(auth),
+              endpoint: {
+                url: c.req.url,
+                authorization: c.req.raw.headers.get('authorization'),
+              },
+              signal: c.req.raw.signal,
+            });
+          } catch (error) {
+            // Fail closed: a decision that could not be made is not one.
+            console.error(
+              formatSingleLineLog(`${logPrefix} Failed to ask for approval`, {
+                requestId,
+                toolName: gatedToolName,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+            decision = {
+              allowed: false,
+              message: describeProxyToolApprovalBlock(
+                gatedToolName,
+                'needs_approval',
+              ),
+            };
+          }
+          if (!decision.allowed) {
+            return jsonRpcErrorResponse(
+              403,
+              -32000,
+              decision.message,
+              getJsonRpcRequestId(parsedBody),
+            );
+          }
         }
       }
 
@@ -1433,28 +1437,10 @@ export function createMcpProxy(config: McpProxyConfig) {
       }
 
       if (method === 'POST' && isJsonResponse(contentType)) {
-        const text = await upstreamResponse.text();
-        let transformed: unknown;
-
-        if (transformToolCallResult && upstreamResponse.ok) {
-          try {
-            transformed = await applyToolCallResultTransform(
-              transformToolCallResult,
-              parsedBody,
-              JSON.parse(text),
-            );
-          } catch {
-            // Not a JSON-RPC body we can rewrite; forward it untouched.
-          }
-        }
-
-        return new Response(
-          transformed === undefined ? text : JSON.stringify(transformed),
-          {
-            status: upstreamResponse.status,
-            headers: buildResponseHeaders(upstreamResponse.headers),
-          },
-        );
+        return new Response(await upstreamResponse.text(), {
+          status: upstreamResponse.status,
+          headers: buildResponseHeaders(upstreamResponse.headers),
+        });
       }
 
       // Some Streamable HTTP MCP servers (e.g. X) answer a POST request with an
@@ -1491,15 +1477,10 @@ export function createMcpProxy(config: McpProxyConfig) {
             // the upstream connection instead of leaving it open.
             upstreamResponse.body?.cancel().catch(() => {});
 
-            const transformed = await applyToolCallResultTransform(
-              transformToolCallResult,
-              parsedBody,
-              response,
-            );
             const headers = buildResponseHeaders(upstreamResponse.headers);
             headers.set('content-type', 'application/json');
 
-            return new Response(JSON.stringify(transformed ?? response), {
+            return new Response(JSON.stringify(response), {
               status: upstreamResponse.status,
               headers,
             });

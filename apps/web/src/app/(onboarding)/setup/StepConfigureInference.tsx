@@ -19,6 +19,7 @@ export function StepConfigureInference({
   onConfigureProvider,
   onBack,
 }: {
+  cloudEnabled: boolean;
   onUseTrial: () => void;
   onConfigureProvider: () => void;
   onBack?: () => void;
@@ -46,12 +47,15 @@ export function StepConfigureInference({
       <StepTitle text={INFERENCE_STEP.title} />
       <div className="space-y-4 max-w-xl">
         <p>
-          Roomote needs a model provider for, you know, AI stuff.
-          <br />
-          Your Roomote Cloud trial includes $5 of inference, enough to complete
-          several tasks and get a practical sense of what Roomote can do. You
-          can also configure your own provider directly.
+          Your Roomote Cloud trial includes $5 of inference to try things out,
+          or you can configure your own provider directly.
         </p>
+        <p>
+          Some Roomote functionality uses fast judgement models, not just LLMs.
+          You can use the Roomote provider model for free, or configure your own
+          (TypeSafe Jev, OpenRouter, Vercel).
+        </p>
+        <p>The Roomote provider never retains your data.</p>
 
         <div className="space-y-0.5 max-w-sm">
           <Button
@@ -67,7 +71,7 @@ export function StepConfigureInference({
               <Gift className="size-4 shrink-0" />
             )}
             <span className="font-medium grow text-left">
-              Use free Roomote trial inference
+              Use the Roomote provider
             </span>
             <ArrowRight />
           </Button>
@@ -80,7 +84,7 @@ export function StepConfigureInference({
           >
             <Plug className="size-4 shrink-0" />
             <span className="font-medium grow text-left">
-              Configure your provider
+              Configure my own provider
             </span>
             <ArrowRight />
           </Button>

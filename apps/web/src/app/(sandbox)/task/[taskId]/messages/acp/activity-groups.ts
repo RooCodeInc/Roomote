@@ -1,4 +1,7 @@
-import { getProviderRetryNoticeFromMessageData } from '@roomote/types';
+import {
+  getModelFallbackNoticeFromMessageData,
+  getProviderRetryNoticeFromMessageData,
+} from '@roomote/types';
 
 import type { TaskArtifact } from '@/types';
 
@@ -65,6 +68,9 @@ function isProviderRetryNoticeMessage(msg: AcpUiMessage): boolean {
 
   return (
     getProviderRetryNoticeFromMessageData(
+      msg.data as Record<string, unknown>,
+    ) !== null ||
+    getModelFallbackNoticeFromMessageData(
       msg.data as Record<string, unknown>,
     ) !== null
   );

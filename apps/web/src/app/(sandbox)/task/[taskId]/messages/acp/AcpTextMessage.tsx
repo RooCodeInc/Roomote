@@ -4,6 +4,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   type AcpRequestUserInputPayload,
   getProviderRetryNoticeFromMessageData,
+  getModelFallbackNoticeFromMessageData,
   getTerminalProviderErrorFromMessageData,
   parseLinkedReviewResults,
   parsePrReviewActionOffer,
@@ -34,7 +35,6 @@ import {
   MessagePlainText,
   MessageCopyButton,
   MessageNewTaskButton,
-  MessageResponse,
   MessageTimestamp,
 } from '@/components/ai-elements';
 
@@ -44,10 +44,12 @@ import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
+import { ModelFallbackNoticeMessage } from './ModelFallbackNoticeMessage';
 import { AcpDataVisualizations } from './AcpDataVisualizations';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 import { SlackMessageText } from '@/components/ai-elements/slack-message-text';
+import { SlackMessageResponse } from '@/components/ai-elements/slack-message-response';
 import { useOpenSessionArtifactViewer } from '@/app/(sandbox)/sessions/[sessionId]/session-task-panel-context';
 import { useArtifactLink } from '../../hooks/ArtifactLinkProvider';
 
@@ -222,6 +224,12 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
           msg.data as Record<string, unknown>,
         )
       : null;
+  const modelFallbackNotice =
+    !isUser && msg.kind === 'text'
+      ? getModelFallbackNoticeFromMessageData(
+          msg.data as Record<string, unknown>,
+        )
+      : null;
   const requestUserInputResponse =
     isUser &&
     msg.updateType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
@@ -243,6 +251,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
     : msg.partial !== true &&
       msg.isTurnCompletion === true &&
       !providerRetryNotice &&
+      !modelFallbackNotice &&
       !terminalProviderError;
   const messageContentClassName = cn(
     'min-w-0 flex-1',
@@ -388,6 +397,10 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
               data={msg.data as Record<string, unknown>}
               text={content}
             />
+          ) : modelFallbackNotice ? (
+            <ModelFallbackNoticeMessage
+              data={msg.data as Record<string, unknown>}
+            />
           ) : terminalProviderError ? (
             <TerminalProviderErrorMessage
               data={msg.data as Record<string, unknown>}
@@ -428,7 +441,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
               </MessagePlainText>
             </CollapsibleContent>
           ) : (
-            <MessageResponse>{content}</MessageResponse>
+            <SlackMessageResponse text={content} />
           )}
           {!isUser && msg.charts?.length ? (
             <AcpDataVisualizations charts={msg.charts} />

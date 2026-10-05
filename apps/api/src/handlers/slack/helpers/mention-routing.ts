@@ -1,5 +1,7 @@
 import type { SlackEvent, SlackThreadMessage } from '@roomote/slack';
 
+import type { UnmentionedThreadMention } from '../../shared/unmentioned-thread-reply.js';
+
 type SlackMentionTextSource =
   | Pick<SlackEvent, 'text' | 'authoredText'>
   | Pick<SlackThreadMessage, 'text' | 'authoredText'>;
@@ -104,5 +106,23 @@ export function mentionsSlackUserOtherThanBotWithoutMentioningBot(
   return (
     mentionedUserIds.length > 0 &&
     !mentionedUserIds.some((userId) => userId === botUserId)
+  );
+}
+
+/**
+ * Every user mention in `text`, as the judgment state's mention list. Unlike
+ * the routing checks above this covers the whole text, quotes and code
+ * included, since all of it is shown to the judgment model.
+ */
+export function getSlackMentionsForJudgment(
+  text: string | undefined,
+  botUserId: string | null | undefined,
+): UnmentionedThreadMention[] {
+  return Array.from((text ?? '').matchAll(/<@([^>|]+)(?:\|[^>]+)?>/gu)).map(
+    (match) => ({
+      token: match[0],
+      userId: match[1] ?? null,
+      isBot: Boolean(botUserId) && match[1] === botUserId,
+    }),
   );
 }

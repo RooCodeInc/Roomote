@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Brain (deployment-hosted gbrain) shared contract.
  *
  * Not a catalog integration: the Brain is infrastructure, not something a
- * user connects in Settings. A deployment that supplies
+ * user connects on the Integrations page. A deployment that supplies
  * R_BRAIN_OPENROUTER_API_KEY or R_BRAIN_OPENAI_API_KEY has a Brain;
  * everything else (client
  * provisioning, MCP delivery, ingestion) follows from that one signal. Only

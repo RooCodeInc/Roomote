@@ -18,6 +18,7 @@ import {
   SUGGESTION_MIN_HISTORY_MESSAGES,
   useGhostSuggestion,
 } from '@/hooks/useGhostSuggestion';
+import { usePromptHistoryNavigation } from '@/hooks/usePromptHistoryNavigation';
 import {
   LiveVoiceButton,
   PromptInput as PromptInputRoot,
@@ -43,9 +44,15 @@ import {
   X,
 } from '@/components/system';
 import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
+import { SessionToolApprovalsPicker } from '@/components/sessions/SessionToolApprovalsPicker';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
+import {
+  SessionQueuedMessageList,
+  type SessionQueuedMessage,
+  type SessionQueuedMessageDeleteOutcome,
+} from './SessionQueuedMessageList';
 import { SessionWakeups } from './SessionWakeups';
 
 export type SessionPromptSubmission = PromptInputMessage & {
@@ -227,14 +234,19 @@ export function SessionPromptInput({
   onSend,
   historyMessageCount = 0,
   assistantMessageCount = 0,
+  promptHistory = [],
   taskStateRevision = '',
   agentWorking = false,
+  queuedMessages = [],
+  currentUserId = null,
+  onDeleteQueuedMessage,
   initialModel = null,
   initialReasoningEffort = null,
   defaultModelId = null,
   defaultReasoningEffort = null,
   voice,
   onModelSelectionChange,
+  toolApprovalsSessionId,
 }: {
   sessionId: string;
   isBusy: boolean;
@@ -244,12 +256,22 @@ export function SessionPromptInput({
   /** Persisted assistant messages with text; each completed agent turn
    * advances the suggestion query key. */
   assistantMessageCount?: number;
+  /** Visible persisted messages sent by users, oldest first. */
+  promptHistory?: readonly string[];
   /** Fingerprint of the delegated tasks' state; a task finishing while the
    * session is idle refreshes the suggestion through this key. */
   taskStateRevision?: string;
   /** True while the agent is still responding; suggestions only exist while
    * the agent is waiting for the human. */
   agentWorking?: boolean;
+  /** Follow-ups waiting for delivery, shown inside the composer card until
+   * the agent picks them up. */
+  queuedMessages?: SessionQueuedMessage[];
+  /** The viewer, who may delete their own queued follow-ups. */
+  currentUserId?: string | null;
+  onDeleteQueuedMessage?: (
+    message: SessionQueuedMessage,
+  ) => Promise<SessionQueuedMessageDeleteOutcome>;
   initialModel?: string | null;
   initialReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
@@ -258,6 +280,9 @@ export function SessionPromptInput({
   /** Keeps the parent's view of the picker current, so voice utterances
    * round-trip the same model selection a typed reply would. */
   onModelSelectionChange?: (selection: SessionModelSelection) => void;
+  /** The unified session, when the viewer owns it and may pick its tool
+   * approvals mode. */
+  toolApprovalsSessionId?: string;
 }) {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
@@ -317,6 +342,11 @@ export function SessionPromptInput({
     active: !prompt && !isBusy && !isUpdatingModelSelection && !agentWorking,
     surface: 'session',
     onAccept: (text) => setPrompt(text),
+  });
+  const handlePromptHistoryKeyDown = usePromptHistoryNavigation({
+    history: promptHistory,
+    value: prompt,
+    onNavigate: setPrompt,
   });
 
   const handleSubmit = async (message: PromptInputMessage) => {
@@ -449,6 +479,11 @@ export function SessionPromptInput({
   return (
     <div className="mx-auto w-full max-w-4xl">
       <SessionWakeups key={sessionId} sessionId={sessionId} />
+      <SessionQueuedMessageList
+        queuedMessages={queuedMessages}
+        currentUserId={currentUserId}
+        onDelete={onDeleteQueuedMessage}
+      />
       <PromptInputRoot
         onSubmit={handleSubmit}
         accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
@@ -471,7 +506,8 @@ export function SessionPromptInput({
                 onFocus={() => setIsTextareaFocused(true)}
                 onBlur={() => setIsTextareaFocused(false)}
                 onKeyDown={(event) => {
-                  handleSuggestionKeyDown(event);
+                  if (handleSuggestionKeyDown(event)) return;
+                  handlePromptHistoryKeyDown(event);
                 }}
                 placeholder={ghostSuggestion ?? 'Message agent'}
                 aria-describedby={
@@ -526,6 +562,12 @@ export function SessionPromptInput({
                 defaultReasoningEffort={defaultReasoningEffort}
                 disabled={controlsDisabled}
               />
+              {toolApprovalsSessionId ? (
+                <SessionToolApprovalsPicker
+                  sessionId={toolApprovalsSessionId}
+                  disabled={isBusy}
+                />
+              ) : null}
             </PromptInputTools>
             <div className="flex items-center gap-2">
               {voice?.enabled ? (

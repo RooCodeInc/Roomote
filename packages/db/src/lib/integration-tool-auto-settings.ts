@@ -9,12 +9,16 @@ import { type DatabaseOrTransaction, db } from '../db';
 import { deploymentSettings } from '../schema';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
-const METADATA_KEY = 'integration_tool_auto';
+const METADATA_KEY = 'integration_tool_auto_nightly';
+const LEGACY_METADATA_KEY = 'integration_tool_auto';
 
 /**
- * Deployment-wide Auto mode for tool approvals, kept with the other
- * deployment settings. Off by default: default tools run as they always
- * have until an admin turns Auto on.
+ * Deployment-wide Auto settings for tool approvals, kept with the other
+ * deployment settings: the guidance every assessment reads. Auto itself is
+ * turned on per session by its owner (`setIntegrationToolAutoForSession`), so
+ * the stored mode decides nothing; it stays as saved for N-1 rollback
+ * compatibility. The nightly key intentionally does not inherit the
+ * customer-preview key's mode.
  */
 const DEFAULTS: IntegrationToolAutoSettings = { mode: 'off', policy: '' };
 
@@ -25,10 +29,18 @@ export async function getIntegrationToolAutoSettings(
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
     columns: { metadata: true },
   });
-  const parsed = integrationToolAutoSettingsSchema.safeParse(
-    (deployment?.metadata as Record<string, unknown> | null)?.[METADATA_KEY],
+  const metadata = deployment?.metadata as Record<string, unknown> | null;
+  const current = integrationToolAutoSettingsSchema.safeParse(
+    metadata?.[METADATA_KEY],
   );
-  return parsed.success ? parsed.data : DEFAULTS;
+  if (current.success) return current.data;
+
+  const legacy = integrationToolAutoSettingsSchema.safeParse(
+    metadata?.[LEGACY_METADATA_KEY],
+  );
+  return legacy.success
+    ? { mode: 'off', policy: legacy.data.policy }
+    : DEFAULTS;
 }
 
 export async function setIntegrationToolAutoSettings(

@@ -2336,12 +2336,15 @@ function reconstructFreshTaskFromFailedRun(sourceRun: TaskRun): FreshTask {
     ...(sourceRun.payload as Record<string, unknown>),
   };
 
-  // Discord launch idempotency keys the original gateway event on the first
-  // run via task_runs_discord_source_event_unique (uncanceled rows only). A
-  // failed-start relaunch creates another uncanceled run on the same task and
-  // must not re-claim that source event, or Postgres rejects the insert with
-  // 23505 and the UI surfaces a raw Failed query / stuck Booting state.
+  // Launch-dedupe keys belong to the original run: Discord source events via
+  // task_runs_discord_source_event_unique and launch idempotency keys (every
+  // Fast-launched task) via task_runs_launch_idempotency_key_unique, both
+  // scoped to uncanceled rows. A failed-start relaunch creates another
+  // uncanceled run on the same task and must not re-claim either, or Postgres
+  // rejects the insert with 23505 and the UI surfaces a raw Failed query /
+  // stuck Booting state.
   delete payload.communicationSourceEventId;
+  delete payload.launchIdempotencyKey;
 
   return {
     type: sourceRun.payloadKind,

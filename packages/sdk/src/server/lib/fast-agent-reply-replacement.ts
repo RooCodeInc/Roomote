@@ -1,5 +1,6 @@
 import type {
   FastAgentConversation,
+  FastAgentReply,
   FastAgentReplyHandle,
   FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
@@ -12,6 +13,7 @@ import {
   type FastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
+  DISCORD_MAX_EMBEDS_PER_MESSAGE,
   DISCORD_MAX_MESSAGE_LENGTH,
   type DiscordCommunicationProvider,
 } from '@roomote/communication/discord-provider';
@@ -27,6 +29,7 @@ import {
 
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
 import { buildFastAgentSlackReplyBodyBlocks } from './fast-agent-slack-reply-blocks';
+import type { FastAgentReplyImage } from './fast-agent-session-images';
 
 /**
  * Edit-in-place reply replacement per surface. A Fast turn edits its own
@@ -116,10 +119,18 @@ export function createDiscordFastReplyReplacer(params: {
   threadId: string | undefined;
   sessionId: string;
   footerContext: FastSessionReplyFooterContext;
+  resolveImages: (artifactIds: string[]) => Promise<FastAgentReplyImage[]>;
   /** Posts the replacement as a new message when it does not fit an edit. */
-  postReplacement: (text: string) => Promise<FastAgentReplyHandle | void>;
+  postReplacement: (
+    text: string,
+    artifactIds?: string[],
+  ) => Promise<FastAgentReplyHandle | void>;
 }): FastAgentReplyReplacer {
-  return async ({ messageId }, { message: text }) => {
+  return async ({ messageId }, reply: FastAgentReply) => {
+    const { message: text, imageArtifactIds } = reply;
+    const images = imageArtifactIds?.length
+      ? await params.resolveImages(imageArtifactIds)
+      : undefined;
     const footerText = buildFastSessionReplyFooterText({
       provider: 'discord',
       sessionId: params.sessionId,
@@ -145,7 +156,10 @@ export function createDiscordFastReplyReplacer(params: {
           : text;
         await assertLock();
 
-        if (replacementText.length > DISCORD_MAX_MESSAGE_LENGTH) {
+        if (
+          replacementText.length > DISCORD_MAX_MESSAGE_LENGTH ||
+          (images?.length ?? 0) > DISCORD_MAX_EMBEDS_PER_MESSAGE
+        ) {
           const placeholder = 'Reconnected to the inference provider.';
           await params.provider.editMessage({
             channelId: editChannelId,
@@ -186,6 +200,7 @@ export function createDiscordFastReplyReplacer(params: {
           channelId: editChannelId,
           messageId,
           text: replacementText,
+          ...(images?.length ? { images } : {}),
         });
         if (isFooterCarrier) {
           await rememberThreadReplyFooterAfterEdit({
@@ -216,7 +231,7 @@ export function createDiscordFastReplyReplacer(params: {
     if (!replaced) {
       // The oversized replacement posts as a new message; the sticky post
       // takes the footer lock itself, so it runs outside ours.
-      const posted = await params.postReplacement(text);
+      const posted = await params.postReplacement(text, imageArtifactIds);
       return posted ?? { messageId };
     }
     await recordFastAgentConversationMessageBestEffort({

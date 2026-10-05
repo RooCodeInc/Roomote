@@ -28,6 +28,7 @@ export type SettingsPageId =
   | 'memory'
   | 'skills'
   | 'experimental'
+  | 'nightly-experiments'
   | 'misc';
 
 type SettingsNavigationItem = {
@@ -207,6 +208,9 @@ export function getSettingsNavigationItem(pageId: SettingsPageId) {
 export function getSettingsTitleForPath(pathname: string) {
   if (pathname === SETTINGS_PATHS.root) {
     return 'Settings';
+  }
+  if (pathname === SETTINGS_PATHS.nightlyExperiments) {
+    return 'Nightly Experiments';
   }
 
   return SETTINGS_NAVIGATION_ITEMS.find((item) => item.matches(pathname))

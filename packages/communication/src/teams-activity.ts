@@ -340,6 +340,26 @@ export function isTeamsTaskEntryActivity(activity: TeamsActivity): boolean {
 }
 
 /**
+ * Mention entities on the activity: the tag as it appears in `activity.text`
+ * (`<at>Name</at>`), the mentioned account id, and whether it is the bot.
+ */
+export function getTeamsActivityMentions(
+  activity: TeamsActivity,
+): Array<{ text: string; mentionedId?: string; isRecipient: boolean }> {
+  return (
+    activity.entities?.filter(
+      (entity) => entity.type?.toLowerCase() === 'mention',
+    ) ?? []
+  )
+    .filter((entity) => Boolean(entity.text))
+    .map((entity) => ({
+      text: entity.text!,
+      ...(entity.mentioned?.id ? { mentionedId: entity.mentioned.id } : {}),
+      isRecipient: isMentionForRecipient(entity, activity),
+    }));
+}
+
+/**
  * True when the activity carries a mention entity that does not target the
  * bot (the activity recipient). When the recipient identity is missing every
  * mention counts as "somebody else" on purpose, so ambiguous mentions keep

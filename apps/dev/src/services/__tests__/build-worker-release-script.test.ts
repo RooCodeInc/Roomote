@@ -28,6 +28,13 @@ describe('build-worker-release.sh', () => {
 
     fs.mkdirSync(path.dirname(tempScriptPath), { recursive: true });
     fs.mkdirSync(path.join(tempRepoRoot, 'apps/worker'), { recursive: true });
+    fs.mkdirSync(
+      path.join(
+        tempRepoRoot,
+        'packages/cloud-agents/src/server/workflows/skills/standard',
+      ),
+      { recursive: true },
+    );
     fs.mkdirSync(outputDir, { recursive: true });
     fs.mkdirSync(fakeBinDir, { recursive: true });
 
@@ -49,8 +56,10 @@ set -euo pipefail
 printf '%s\\n' "$*" >> "$PNPM_LOG"
 
 if [[ "$1" == "--filter" && "$2" == "@roomote/worker" && "$3" == "build" ]]; then
-  mkdir -p apps/worker/dist
+  mkdir -p apps/worker/dist/skills/judgement/references
   printf 'worker bundle' > apps/worker/dist/worker.js
+  printf 'judgement skill' > apps/worker/dist/skills/judgement/SKILL.md
+  printf 'judgement guide' > apps/worker/dist/skills/judgement/references/agent-guide.md
   exit 0
 fi
 
@@ -94,5 +103,16 @@ exit 44
     expect(fs.readFileSync(pnpmLogPath, 'utf8')).toBe(
       '--filter @roomote/worker build\n',
     );
+    for (const [file, content] of [
+      ['SKILL.md', 'judgement skill'],
+      ['references/agent-guide.md', 'judgement guide'],
+    ]) {
+      const { stdout } = await execa('tar', [
+        '-xOzf',
+        path.join(outputDir, 'worker-vlocal-dev.tar.gz'),
+        `worker-vlocal-dev/.packaged-skills/standard/judgement/${file}`,
+      ]);
+      expect(stdout).toBe(content);
+    }
   });
 });

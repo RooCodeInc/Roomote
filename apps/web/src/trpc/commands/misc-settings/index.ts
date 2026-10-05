@@ -25,6 +25,7 @@ import {
   normalizeTimeZone,
   resolveDeploymentTimeZone,
 } from '@roomote/sdk/server';
+import { validateEgressUrl } from '@roomote/sdk/server/safe-fetch';
 
 import type { UserAuthSuccess } from '@/types';
 import {
@@ -68,6 +69,11 @@ export type MiscSettings = {
   timeZone: string | null;
   effectiveTimeZone: string;
   timeZoneSource: 'explicit' | 'slack' | 'utc_fallback';
+  sessionDoneWebhook: {
+    enabled: boolean;
+    url: string | null;
+    secretConfigured: boolean;
+  };
 };
 
 function normalizeMetadata(value: unknown): Record<string, unknown> {
@@ -569,7 +575,12 @@ export async function getMiscSettingsCommand(
       collectDeploymentDiagnostics(),
       db.query.deploymentSettings.findFirst({
         where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-        columns: { timeZone: true },
+        columns: {
+          timeZone: true,
+          sessionDoneWebhookEnabled: true,
+          sessionDoneWebhookUrl: true,
+          sessionDoneWebhookSecret: true,
+        },
       }),
       resolveDeploymentTimeZone(),
     ]);
@@ -585,7 +596,56 @@ export async function getMiscSettingsCommand(
     timeZone: configured?.timeZone ?? null,
     effectiveTimeZone: resolvedTimeZone.timeZone,
     timeZoneSource: resolvedTimeZone.source,
+    sessionDoneWebhook: {
+      enabled: configured?.sessionDoneWebhookEnabled ?? false,
+      url: configured?.sessionDoneWebhookUrl ?? null,
+      secretConfigured: Boolean(configured?.sessionDoneWebhookSecret),
+    },
   };
+}
+
+export async function setSessionDoneWebhookCommand(
+  auth: UserAuthSuccess,
+  input: { enabled: boolean; url: string | null; secret?: string },
+): Promise<MiscSettings> {
+  assertAdmin(auth);
+  const url = input.url?.trim()
+    ? validateEgressUrl(input.url.trim()).toString()
+    : null;
+  const existing = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+    columns: { id: true, sessionDoneWebhookSecret: true },
+  });
+  const secret = input.secret?.trim();
+
+  if (input.enabled && !url) {
+    throw new Error('A completion webhook URL is required when enabled.');
+  }
+  if (input.enabled && !secret && !existing?.sessionDoneWebhookSecret) {
+    throw new Error(
+      'A signing secret is required when the webhook is enabled.',
+    );
+  }
+
+  const values = {
+    sessionDoneWebhookEnabled: input.enabled,
+    sessionDoneWebhookUrl: url,
+    ...(secret ? { sessionDoneWebhookSecret: secret } : {}),
+    updatedAt: new Date(),
+  };
+  if (existing) {
+    await db
+      .update(deploymentSettings)
+      .set(values)
+      .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
+  } else {
+    await db.insert(deploymentSettings).values({
+      id: DEFAULT_DEPLOYMENT_ID,
+      ...values,
+    });
+  }
+
+  return getMiscSettingsCommand(auth);
 }
 
 export async function setDeploymentTimeZoneCommand(

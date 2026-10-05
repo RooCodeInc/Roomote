@@ -1,17 +1,13 @@
 'use client';
 
 import { SettingsShell } from '@/components/settings/SettingsShell';
-import { ResultsExperimentalSetting } from '@/components/settings/ResultsExperimentalSetting';
-import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
-import { BrowserNotificationsExperimentalSetting } from '@/components/settings/BrowserNotificationsExperimentalSetting';
-import { IntegrationToolApprovalsExperimentalSetting } from '@/components/settings/IntegrationToolApprovalsExperimentalSetting';
-import { FastSessionCommunicationJevExperimentalSetting } from '@/components/settings/FastSessionCommunicationJevExperimentalSetting';
+import { ExperimentSettingsControls } from '@/components/settings/experiment-settings-controls';
 import { RetryableLoadError } from '@/components/system';
 import { useDeploymentExperiments } from '@/hooks/useDeploymentExperiments';
 
 export function ExperimentalSettingsPage() {
   const { error, hasLoadedExperiments, isFetching, refetch } =
-    useDeploymentExperiments();
+    useDeploymentExperiments(undefined, 'customer-preview');
 
   return (
     <SettingsShell pageId="experimental" adminOnly={true}>
@@ -24,11 +20,7 @@ export function ExperimentalSettingsPage() {
         />
       ) : (
         <>
-          <PrivateSessionsExperimentalSetting />
-          <IntegrationToolApprovalsExperimentalSetting />
-          <BrowserNotificationsExperimentalSetting />
-          <ResultsExperimentalSetting />
-          <FastSessionCommunicationJevExperimentalSetting />
+          <ExperimentSettingsControls audience="customer-preview" />
         </>
       )}
     </SettingsShell>

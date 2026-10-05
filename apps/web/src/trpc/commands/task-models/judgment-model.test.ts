@@ -99,7 +99,7 @@ describe('judgment model settings commands', () => {
     });
   });
 
-  it('uses a configured Roomote judgment upstream by default and never exposes it', async () => {
+  it('uses a configured Roomote judgment upstream only when selected and never exposes it', async () => {
     vi.stubEnv('R_JUDGMENT_UPSTREAM_URL', 'https://judgment.example.test');
     vi.stubEnv('R_JUDGMENT_UPSTREAM_API_KEY', 'upstream-secret');
 
@@ -107,13 +107,21 @@ describe('judgment model settings commands', () => {
     expect(settings).toMatchObject({
       roomoteConnected: true,
       storedSelection: null,
-      effectiveSelection: 'roomote',
+      effectiveSelection: 'off',
       effectiveSelectionUsable: true,
     });
     expect(JSON.stringify(settings)).not.toContain('upstream-secret');
     expect(JSON.stringify(settings)).not.toContain('judgment.example.test');
 
-    // An explicit third-party choice still wins over the hosted default.
+    await expect(
+      setJudgmentModelSelectionCommand(adminAuth, { selection: 'roomote' }),
+    ).resolves.toMatchObject({
+      roomoteConnected: true,
+      storedSelection: 'roomote',
+      effectiveSelection: 'roomote',
+      effectiveSelectionUsable: true,
+    });
+
     vi.stubEnv('OPENROUTER_API_KEY', 'openrouter-key');
     await expect(
       setJudgmentModelSelectionCommand(adminAuth, { selection: 'openrouter' }),

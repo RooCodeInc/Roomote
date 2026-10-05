@@ -328,7 +328,6 @@ export const mcpConnectionsRouter = router({
   /**
    * The native approval rules for what a task run mounts, compiled here
    * because the policy scopes are control-plane metadata a worker never sees.
-   * Absent while the `integrationToolApprovals` experiment is off.
    */
   getTaskToolApprovals: authenticatedProcedure.query(async ({ ctx }) => {
     if (!isRunToken(ctx.auth)) {

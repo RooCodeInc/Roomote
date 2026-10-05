@@ -683,6 +683,7 @@ export async function startPreviewSetupTaskCommand(
           environmentId: environment.id,
           environmentDefinitionId: environment.id,
           description: prompt,
+          visibleInTranscript: false,
         },
       },
       initiator: { kind: 'user', userId: auth.userId },

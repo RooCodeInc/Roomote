@@ -1,0 +1,96 @@
+{
+  "ruleId": "criterion_8",
+  "examples": [
+    {
+      "name": "Historical aside in an ordinary instruction",
+      "path": "docs/setup.md",
+      "before": "Save your filter in preferences.json.\n",
+      "after": "Save your filter in preferences.json, replacing the earlier filters.yaml convention.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Unnecessary sole-location aside",
+      "path": "docs/setup.md",
+      "before": "Put templates under templates/.\n",
+      "after": "Put templates under templates/, the only directory for templates.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "An actionable security restriction",
+      "path": "docs/setup.md",
+      "before": "Configure the integration.\n",
+      "after": "Only signed webhook requests are accepted.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "An explicit migration guide",
+      "path": "docs/setup.md",
+      "before": "## Migration to version 4\nUpdate configuration.\n",
+      "after": "## Migration to version 4\nMove filters from filters.yaml to preferences.json before upgrading.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Clearly quoted writing examples",
+      "path": "docs/setup.md",
+      "before": "## Writing guidance\nKeep instructions direct.\n",
+      "after": "## Writing guidance\nAvoid: \"templates/ is the only directory for templates.\"\nPrefer: \"Put templates under templates/.\"\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Unnecessary old cache path",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "Store cache entries in cache/, unlike the retired tmp-cache/ path.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Unnecessary prior format",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "Define settings in settings.json, replacing the former config.ini convention.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Unnecessary exclusivity",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "Save snippets under snippets/, the sole snippet directory.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Migration without heading",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "When upgrading from version 2, move config.ini values into settings.json before starting version 3.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Two supported version requirements",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "Version 2 reads config.ini; version 3 reads settings.json. Choose the format for the version you run.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Security restriction",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "Only administrators may rotate signing keys.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Release notes",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "## Release notes\nCache entries now live in cache/ instead of tmp-cache/.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Quoted bad writing",
+      "path": "docs/guide.md",
+      "before": "Read the guidance below.\n",
+      "after": "## Writing examples\nAvoid: \"snippets/ is the sole snippet directory.\"\nPrefer: \"Save snippets under snippets/.\"\n",
+      "expected": "pass"
+    }
+  ]
+}

@@ -19,13 +19,7 @@ type NavbarHeaderProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children'>;
 
 const MOBILE_HEADER_LOGO_SRC = '/logos/r.svg';
 
-export const NavbarHeader = ({
-  className,
-  setupIncomplete = false,
-  ...props
-}: NavbarHeaderProps & {
-  setupIncomplete?: boolean;
-}) => {
+export const NavbarHeader = ({ className, ...props }: NavbarHeaderProps) => {
   const { setOpen: openCommandPalette } = useCommandPalette();
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   useAuthorizedUser();
@@ -39,31 +33,17 @@ export const NavbarHeader = ({
         )}
         {...props}
       >
-        <NavbarDrawer
-          setupIncomplete={setupIncomplete}
-          onNewSession={() => setIsNewTaskDialogOpen(true)}
-        />
-        {setupIncomplete ? (
+        <NavbarDrawer onNewSession={() => setIsNewTaskDialogOpen(true)} />
+        <Link href="/" className="shrink-0">
           <Image
             src={MOBILE_HEADER_LOGO_SRC}
             alt="Roomote"
             width={28}
             height={28}
             priority
-            className="h-7 w-7 shrink-0 opacity-50 dark:invert"
+            className="h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert"
           />
-        ) : (
-          <Link href="/" className="shrink-0">
-            <Image
-              src={MOBILE_HEADER_LOGO_SRC}
-              alt="Roomote"
-              width={28}
-              height={28}
-              priority
-              className="h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert"
-            />
-          </Link>
-        )}
+        </Link>
         <Button
           variant="ghost"
           size="icon"

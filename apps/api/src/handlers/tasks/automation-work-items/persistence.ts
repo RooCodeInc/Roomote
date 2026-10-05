@@ -90,9 +90,18 @@ export async function persistAutomationWorkItems(params: {
       };
     }
 
-    const fingerprints = [
-      ...new Set(params.preparedWorkItems.map((item) => item.fingerprint)),
-    ];
+    const seenFingerprints = new Set<string>();
+    const uniquePreparedWorkItems = params.preparedWorkItems.filter((item) => {
+      if (seenFingerprints.has(item.fingerprint)) {
+        return false;
+      }
+
+      seenFingerprints.add(item.fingerprint);
+      return true;
+    });
+    const fingerprints = uniquePreparedWorkItems.map(
+      (item) => item.fingerprint,
+    );
     const unorderedDuplicateWorkItemRefs =
       fingerprints.length === 0
         ? ([] as PersistedDuplicateWorkItemRef[])
@@ -141,7 +150,7 @@ export async function persistAutomationWorkItems(params: {
       duplicateWorkItemRefs.map((row) => row.fingerprint),
     );
 
-    const workItemsToInsert = params.preparedWorkItems.filter(
+    const workItemsToInsert = uniquePreparedWorkItems.filter(
       (item) => !existingFingerprints.has(item.fingerprint),
     );
 

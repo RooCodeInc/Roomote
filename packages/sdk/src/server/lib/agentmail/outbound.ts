@@ -11,6 +11,7 @@ import {
   agentmailSuppressions,
   and,
   authUsers,
+  canSendAgentMailWithRuntimeCredentials,
   db,
   eq,
   isNull,
@@ -181,8 +182,7 @@ export async function listAvailableAgentMailOutboundIdentities(
   if (!isEmailChannelEnabled()) {
     return [];
   }
-  const credentials = await resolveAgentMailRuntimeCredentials();
-  if (!credentials.apiKey || !credentials.inboxId) {
+  if (!(await canSendAgentMailWithRuntimeCredentials())) {
     return [];
   }
   return listAgentMailOutboundIdentities(userId);
@@ -235,8 +235,7 @@ export async function canStartAgentMailConversationWithUser(
   if (!isEmailChannelEnabled()) {
     return false;
   }
-  const credentials = await resolveAgentMailRuntimeCredentials();
-  if (!credentials.apiKey || !credentials.inboxId) {
+  if (!(await canSendAgentMailWithRuntimeCredentials())) {
     return false;
   }
   const resolution = await resolveAgentMailOutboundRecipient(
@@ -282,7 +281,9 @@ export async function prepareAgentMailConversation(input: {
   messageId: null;
 } | null> {
   if (!isEmailChannelEnabled()) return null;
-  const credentials = await resolveAgentMailRuntimeCredentials();
+  const credentials = await resolveAgentMailRuntimeCredentials({
+    allocate: true,
+  });
   if (!credentials.apiKey || !credentials.inboxId) return null;
   const resolution = await resolveAgentMailOutboundIdentity(
     input.userId,
@@ -340,7 +341,9 @@ export async function startAgentMailConversationWithResult(input: {
   if (!isEmailChannelEnabled()) {
     return { sent: false };
   }
-  const credentials = await resolveAgentMailRuntimeCredentials();
+  const credentials = await resolveAgentMailRuntimeCredentials({
+    allocate: true,
+  });
   if (!credentials.apiKey || !credentials.inboxId) {
     return { sent: false };
   }
@@ -562,7 +565,9 @@ export async function sendAgentMailSystemEmail(input: {
   if (!isEmailChannelEnabled()) {
     return { sent: false, reason: 'channel_disabled' };
   }
-  const credentials = await resolveAgentMailRuntimeCredentials();
+  const credentials = await resolveAgentMailRuntimeCredentials({
+    allocate: true,
+  });
   if (!credentials.apiKey || !credentials.inboxId) {
     return { sent: false, reason: 'not_configured' };
   }

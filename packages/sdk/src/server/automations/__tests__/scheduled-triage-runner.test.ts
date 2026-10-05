@@ -1,3 +1,7 @@
+const SCHEDULED_RUN_OPTS = {
+  context: { trigger: 'scheduled' },
+} as const;
+
 const {
   mockDbSelect,
   mockGetAutomationRuntime,
@@ -112,7 +116,7 @@ describe('createScheduledTriageJob', () => {
       }),
     });
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
     expect(mockEnqueueTask.mock.calls[0]![0]).toMatchObject({
@@ -135,13 +139,57 @@ describe('createScheduledTriageJob', () => {
     );
   });
 
+  it('allows an explicit webhook run when the automation is on-demand', async () => {
+    mockGetAutomationRuntime.mockResolvedValue({
+      enabled: true,
+      scheduleMode: 'on_demand',
+      lastRunAt: null,
+      destination: { provider: 'slack', channelId: 'C123MANAGER' },
+      instructions: null,
+      settings: {},
+    });
+    mockEnqueueTask.mockResolvedValue({ taskId: 'webhook-task' });
+
+    const buildScanTask = vi.fn(async () => ({
+      kind: 'scan' as const,
+      payloads: [{ repo: '__all_repositories__', description: 'scan' }],
+    }));
+    const job = createScheduledTriageJob({
+      automationKey: 'sentry_triage',
+      buildScanTask,
+    });
+
+    const result = await job({
+      context: {
+        trigger: 'webhook',
+        webhookInputJson: '{"issue":"test"}',
+      },
+    });
+
+    expect(buildScanTask).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: 'webhook' }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: 'webhook',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            agentPromptText: expect.stringContaining('scan'),
+          }),
+        }),
+      }),
+    );
+    expect(result.launchedTaskId).toBe('webhook-task');
+    expect(result.errors).toEqual([]);
+  });
+
   it('skips the deployment when the builder returns no payloads', async () => {
     const job = createScheduledTriageJob({
       automationKey: 'sentry_triage',
       buildScanTask: async () => ({ kind: 'scan', payloads: [] }),
     });
 
-    const result = await job();
+    const result = await job(SCHEDULED_RUN_OPTS);
 
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(result.launchedTaskId).toBeNull();
@@ -185,7 +233,7 @@ describe('createScheduledTriageJob', () => {
     const result = await createScheduledTriageJob({
       automationKey: 'sentry_triage',
       buildScanTask,
-    })();
+    })(SCHEDULED_RUN_OPTS);
     expect(mockIsRunDue).toHaveBeenCalledTimes(1);
     expect(buildScanTask).toHaveBeenCalledTimes(1);
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);

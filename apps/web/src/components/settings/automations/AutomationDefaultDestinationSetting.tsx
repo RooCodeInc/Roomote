@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { AutomationDestinationProvider as DestinationProvider } from '@roomote/types';
 
+import { SettingSummaryRow } from '@/components/settings';
 import {
   Button,
   Dialog,
@@ -11,7 +12,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  SendHorizontal,
+  Rss,
 } from '@/components/system';
 
 import {
@@ -64,11 +65,11 @@ export function AutomationDefaultDestinationSetting({
 
   return (
     <>
-      <div className="flex items-center gap-1 text-sm text-muted-foreground">
-        <SendHorizontal className="size-4" />
-        <p>
-          Default destination:{' '}
-          <span className="font-medium text-foreground">{summary}</span>{' '}
+      <SettingSummaryRow
+        icon={Rss}
+        label="Default destination"
+        value={summary}
+        action={
           <Button
             type="button"
             variant="link"
@@ -78,8 +79,8 @@ export function AutomationDefaultDestinationSetting({
           >
             {savedValue.provider === 'none' ? 'Select' : 'Edit'}
           </Button>
-        </p>
-      </div>
+        }
+      />
 
       <Dialog
         open={open}

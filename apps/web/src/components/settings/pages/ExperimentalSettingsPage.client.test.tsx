@@ -47,27 +47,34 @@ vi.mock(
 );
 
 vi.mock(
-  '@/components/settings/IntegrationToolApprovalsExperimentalSetting',
+  '@/components/settings/SessionTaskCommunicationTriageExperimentalSetting',
   () => ({
-    IntegrationToolApprovalsExperimentalSetting: () => (
-      <div>Integration tool approvals setting</div>
+    SessionTaskCommunicationTriageExperimentalSetting: () => (
+      <div>Task communication triage setting</div>
     ),
   }),
 );
-
-vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
-  ResultsExperimentalSetting: () => <div>Results setting</div>,
-}));
 
 vi.mock(
-  '@/components/settings/FastSessionCommunicationJevExperimentalSetting',
+  '@/components/settings/AutomationLaunchCriteriaExperimentalSetting',
   () => ({
-    FastSessionCommunicationJevExperimentalSetting: () => (
-      <div>Jev Session communication setting</div>
+    AutomationLaunchCriteriaExperimentalSetting: () => (
+      <div>Custom automation launch criteria setting</div>
     ),
   }),
 );
+
+vi.mock('@/components/settings/JevgrepExperimentalSetting', () => ({
+  JevgrepExperimentalSetting: () => <div>Jevgrep code search setting</div>,
+}));
+
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
+
+vi.mock('@/components/settings/JudgementExperimentalSetting', () => ({
+  JudgementExperimentalSetting: () => (
+    <div>Judgement repository rules setting</div>
+  ),
+}));
 
 describe('ExperimentalSettingsPage', () => {
   beforeEach(() => {
@@ -77,23 +84,37 @@ describe('ExperimentalSettingsPage', () => {
     state.isFetching = false;
   });
 
-  it('marks every experimental setting as admin-only', () => {
+  it('keeps customer-preview settings admin-only and omits internal experiments', () => {
     render(<ExperimentalSettingsPage />);
 
     expect(screen.getByTestId('experimental-settings')).toHaveAttribute(
       'data-admin-only',
       'true',
     );
+    expect(screen.getByText('Jevgrep code search setting')).toBeInTheDocument();
+    expect(
+      screen.getByText('Judgement repository rules setting'),
+    ).toBeInTheDocument();
     expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(
       screen.getByText('Browser notifications setting'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('Integration tool approvals setting'),
+      screen.queryByRole('switch', { name: 'Toggle Auto tool approvals' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Task communication triage setting'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('Jev Session communication setting'),
-    ).toBeInTheDocument();
+      screen.queryByText('Session status judgment setting'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Sessions board setting'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Custom automation launch criteria setting'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
   });
 
   it('shows one retryable error instead of default-valued settings after an initial load failure', () => {
@@ -121,7 +142,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Results setting')).toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();
@@ -150,7 +171,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Results setting')).toBeInTheDocument();
+    expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();

@@ -11,6 +11,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   cancelTask: 'cancel_task',
   createArtifact: 'create_artifact',
   findIntegrationTools: 'find_integration_tools',
+  evaluateAutomationLaunchCriteria: 'evaluate_automation_launch_criteria',
   ignoreEvent: 'ignore_event',
   inspectImages: 'inspect_images',
   launchTask: 'launch_task',
@@ -66,6 +67,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
     kind: ACP_TOOL_KINDS.search,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.evaluateAutomationLaunchCriteria,
+    kind: ACP_TOOL_KINDS.tool,
   },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,

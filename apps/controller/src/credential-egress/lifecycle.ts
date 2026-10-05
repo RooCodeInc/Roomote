@@ -218,7 +218,20 @@ export class CredentialEgressLifecycle {
     resume: boolean;
   }): Promise<CredentialEgressRegistrationOutcome> {
     const { taskRun, provider } = input;
-    const candidate = await this.safeFindCandidate(taskRun.id);
+    let candidate: Awaited<
+      ReturnType<CredentialEgressLifecycleDependencies['findCandidate']>
+    >;
+    try {
+      candidate = await this.deps.findCandidate(taskRun.id);
+    } catch {
+      // Unlike planning, a lookup failure here is an outage, not a changed
+      // run: report it as a failure so the start error does not blame the
+      // Session.
+      this.logger.warn(
+        `[credentialEgress] Candidate lookup failed for task run #${taskRun.id}`,
+      );
+      return { status: 'failed', error: 'Eligibility lookup failed' };
+    }
     if (!candidate) return { status: 'skipped', reason: 'run_not_eligible' };
 
     const record = (

@@ -10,6 +10,7 @@ import { HTTP_INTEGRATIONS_BROKER } from '../mcp-provenance';
 
 import {
   createRoomoteAdvisorAgentPrompt,
+  createRoomoteExploreAgentPrompt,
   createRoomoteJudgeAgentPrompt,
   OPENCODE_IDENTITY_PLUGIN_SCRIPT,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
@@ -62,6 +63,8 @@ import {
   parseInferenceGatewayKeys,
   parseTaskModelContextWindows,
   parseTaskModelCosts,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
@@ -1446,9 +1449,13 @@ function createAdvisorModelInstructions(): string {
 function createExploreAgentConfig(options: {
   model: string;
   reasoningOptions?: Record<string, unknown> | null;
+  jevgrepSkillPath?: string;
 }): Record<string, unknown> {
   return {
     model: options.model,
+    ...(options.jevgrepSkillPath
+      ? { prompt: createRoomoteExploreAgentPrompt(options.jevgrepSkillPath) }
+      : {}),
     ...(options.reasoningOptions ? { options: options.reasoningOptions } : {}),
     // Redundant with the built-in explore agent's wildcard-deny permission
     // set, but kept explicit so every generated subagent override carries the
@@ -1667,10 +1674,16 @@ function resolveModelBackedOpenCodeConfig(
   };
   const exploreEffectiveModel = exploreModel ?? effectiveCodingModel;
   const exploreAgent =
-    exploreModel || exploreModelReasoningEffort
+    exploreModel ||
+    exploreModelReasoningEffort ||
+    runtimeEnv.R_JEVGREP_GATEWAY_URL
       ? {
           [ROOMOTE_OPENCODE_EXPLORE_AGENT_NAME]: createExploreAgentConfig({
             model: exploreEffectiveModel,
+            jevgrepSkillPath:
+              runtimeEnv.R_JEVGREP_GATEWAY_URL && runtimeEnv.HOME
+                ? path.join(runtimeEnv.HOME, '.agents/skills/jevgrep/SKILL.md')
+                : undefined,
             reasoningOptions: exploreModelReasoningEffort
               ? buildOpenCodeModelReasoningOptions(
                   exploreEffectiveModel,
@@ -2201,14 +2214,10 @@ function removeDisabledProviderConfiguration(
   for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
     delete runtimeEnv[envVarName];
   }
-  for (const modelEnvVarName of [
-    'R_MODEL',
-    'R_SMALL_MODEL',
-    'R_VISION_MODEL',
-    'R_CODE_REVIEW_MODEL',
-    'R_EXPLORE_MODEL',
-    'R_PLANNING_MODEL',
-  ] as const) {
+  for (const modelEnvVarName of TASK_MODEL_ROLES.flatMap((role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    return [descriptor.modelEnvVar, descriptor.fallbackModelEnvVar];
+  })) {
     const modelId = runtimeEnv[modelEnvVarName];
 
     if (modelId && isTaskModelIdDisabled(modelId)) {

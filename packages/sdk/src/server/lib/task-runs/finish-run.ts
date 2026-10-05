@@ -40,6 +40,7 @@ import {
   maybeEnqueueBrainMemoryEvent,
   markEnvironmentVerificationFailedIfCurrent,
   recordTaskRunLifecycleEvent,
+  recordSilentAutomationResultForRun,
   resolveDefaultComputeProvider,
   slackInstallations,
   slackUserMappings,
@@ -409,6 +410,16 @@ export const finishRun = async ({
   if (automaticallyRetried) {
     void captureTaskSettled(run.id, RunStatus.Failed, errorCode);
     return;
+  }
+
+  if (status === RunStatus.Completed && task.initiatorAutomation) {
+    try {
+      await recordSilentAutomationResultForRun(id);
+    } catch (resultError) {
+      console.error(
+        `[finishRun] Failed to record silent automation outcome for run ${id}: ${resultError instanceof Error ? resultError.message : String(resultError)}`,
+      );
+    }
   }
 
   if (status !== RunStatus.Idle) {

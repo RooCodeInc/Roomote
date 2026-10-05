@@ -17,8 +17,10 @@ import {
   userFactory,
 } from '@roomote/db/server';
 import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
+import { claimFastAgentHumanFollowUpSteers } from '@roomote/cloud-agents/server';
 import type { UserAuthSuccess } from '@/types';
 import {
+  deleteFastSessionQueuedMessageCommand,
   getFastSessionMessagesCommand,
   updateFastSessionModelSelectionCommand,
   replyToFastSessionCommand,
@@ -36,11 +38,14 @@ import {
   findReadableFastSession,
   getFastSessionPrReviewOfferStatus,
   getFastSessionById,
+  getFastSessionTranscriptPage,
   getFastSessionTasks,
+  FAST_SESSION_TRANSCRIPT_PAGE_SIZE,
   getFastSessionMessagesSince,
   getFastSessionDisplayTitle,
   getFastSessionSuggestableMessages,
   updateFastSessionPrReviewOfferStatus,
+  withdrawFastSessionQueuedMessage,
 } from './fast-sessions';
 
 async function createFastSession({
@@ -276,6 +281,11 @@ describe('Session queries', () => {
             sessionId: unified!.id,
             requestId: crypto.randomUUID(),
             answers: {},
+          }),
+        () =>
+          deleteFastSessionQueuedMessageCommand(memberAuth, {
+            sessionId: unified!.id,
+            clientMessageId: crypto.randomUUID(),
           }),
       ]) {
         await expect(action()).rejects.toThrow('Session not found');
@@ -913,6 +923,78 @@ describe('Session queries', () => {
       expect(JSON.stringify(result?.messages)).not.toContain('platform_event');
     },
   );
+
+  it('pages older Fast transcript messages without gaps or duplicates at a tied cursor', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'fast-transcript-paged-history',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const messageCount = FAST_SESSION_TRANSCRIPT_PAGE_SIZE * 2 + 31;
+    await db.insert(fastAgentMessages).values(
+      Array.from({ length: messageCount }, (_, index) => ({
+        conversationId: session.id,
+        id: `00000000-0000-4000-8000-${index.toString().padStart(12, '0')}`,
+        eventId: `paged-message-${index}`,
+        turnId: `turn-${index}`,
+        turnSeq: 0,
+        ts: 1,
+        createdAt: sql`'2026-01-01 00:00:00.123456+00'::timestamptz`,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant' as const,
+        contentBlocks: [{ type: 'text' as const, text: `message-${index}` }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+        source: 'web',
+      })),
+    );
+    await db
+      .update(fastAgentConversations)
+      .set({ updatedAt: sql`now()` })
+      .where(eq(fastAgentConversations.id, session.id));
+
+    const auth = { userId: owner.id, isAdmin: false };
+    const initial = await getFastSessionById(auth, session.id, {
+      transcriptLimit: FAST_SESSION_TRANSCRIPT_PAGE_SIZE,
+    });
+    expect(initial?.initialStreamCursor).toEqual(expect.any(Number));
+    expect(initial?.messages).toHaveLength(FAST_SESSION_TRANSCRIPT_PAGE_SIZE);
+    expect(initial?.messagesCursor).toMatchObject({
+      ts: 1,
+      turnSeq: 0,
+      id: `00000000-0000-4000-8000-${(
+        messageCount - FAST_SESSION_TRANSCRIPT_PAGE_SIZE
+      )
+        .toString()
+        .padStart(12, '0')}`,
+    });
+    await expect(
+      getFastSessionMessagesSince(
+        session.id,
+        initial?.initialStreamCursor ?? 0,
+      ),
+    ).resolves.toMatchObject({ messages: [] });
+
+    let cursor = initial?.messagesCursor ?? null;
+    let combined = initial?.messages ?? [];
+    while (cursor) {
+      const page = await getFastSessionTranscriptPage(auth, session.id, cursor);
+      expect(page).not.toBeNull();
+      combined = [...(page?.messages ?? []), ...combined];
+      cursor = page?.nextCursor ?? null;
+    }
+
+    expect(combined.map((message) => message.eventId)).toEqual(
+      Array.from(
+        { length: messageCount },
+        (_, index) => `paged-message-${index}`,
+      ),
+    );
+    expect(new Set(combined.map((message) => message.eventId)).size).toBe(
+      messageCount,
+    );
+  });
 
   it('returns only the newest 60 visible conversational suggestion messages', async () => {
     const owner = await userFactory.create();
@@ -2066,6 +2148,213 @@ describe('Session queries', () => {
       session.id,
     );
     expect(reloaded?.queuedMessages).toEqual(polled.queuedMessages);
+  });
+
+  it('withdraws only the sender’s queued follow-up, and only before a delivery path takes it', async () => {
+    const owner = await userFactory.create();
+    const collaborator = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'withdraw-queued-web-follow-ups',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      surface: 'web',
+    });
+    const parent = {
+      sessionId: session.id,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: owner.id,
+        conversationId: session.conversationId,
+      },
+    };
+    const queue = async (
+      question: string,
+      values: Partial<typeof fastAgentParentEvents.$inferInsert> = {},
+    ) => {
+      const clientMessageId = crypto.randomUUID();
+      const [row] = await db
+        .insert(fastAgentParentEvents)
+        .values({
+          conversationId: session.id,
+          eventKey: `withdraw-${clientMessageId}`,
+          parent,
+          event: {
+            type: 'human_follow_up',
+            eventId: clientMessageId,
+            currentMessageId: clientMessageId,
+            userId: owner.id,
+            question,
+            webFollowUp: true,
+          },
+          ...values,
+        })
+        .returning({ id: fastAgentParentEvents.id });
+      return { id: row!.id, clientMessageId };
+    };
+    const withdraw = (clientMessageId: string, userId = owner.id) =>
+      withdrawFastSessionQueuedMessage({
+        sessionId: session.id,
+        clientMessageId,
+        userId,
+      });
+    const readRow = async (id: string) => {
+      const [row] = await db
+        .select({
+          discardedAt: fastAgentParentEvents.discardedAt,
+          lastError: fastAgentParentEvents.lastError,
+        })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, id));
+      return row!;
+    };
+
+    // An idle queued message is withdrawn by its sender and nobody else,
+    // admins included.
+    const idle = await queue('Idle');
+    await expect(withdraw(idle.clientMessageId, collaborator.id)).resolves.toBe(
+      'forbidden',
+    );
+    expect((await readRow(idle.id)).discardedAt).toBeNull();
+    await expect(withdraw(idle.clientMessageId)).resolves.toBe('withdrawn');
+    expect(await readRow(idle.id)).toMatchObject({
+      discardedAt: expect.any(Date),
+      lastError: 'Withdrawn by its sender before delivery.',
+    });
+    await expect(withdraw(idle.clientMessageId)).resolves.toBe('not_queued');
+
+    // A failed attempt parked for a later retry is idle again.
+    const parked = await queue('Parked', {
+      attempts: 1,
+      retryAt: new Date(Date.now() + 60_000),
+    });
+    await expect(withdraw(parked.clientMessageId)).resolves.toBe('withdrawn');
+
+    // Anything a delivery path has taken stays with it, even a lapsed steer
+    // claim whose owner may still be delivering.
+    const attempting = await queue('Attempting', { attempts: 1 });
+    const claimed = await queue('Steer claimed', {
+      claimedUntil: new Date(Date.now() + 60_000),
+    });
+    const lapsedClaim = await queue('Lapsed claim', {
+      claimedUntil: new Date(Date.now() - 60_000),
+    });
+    const persisted = await queue('Prompt persisted');
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: `${persisted.clientMessageId}:user`,
+      turnSeq: 0,
+      role: 'user',
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      metadata: {
+        visibleInTranscript: true,
+        clientMessageId: persisted.clientMessageId,
+      },
+    });
+    const delivered = await queue('Delivered', { deliveredAt: new Date() });
+    const inline = await queue('Inline turn', { admission: 'inline' });
+    for (const taken of [
+      attempting,
+      claimed,
+      lapsedClaim,
+      persisted,
+      delivered,
+      inline,
+    ]) {
+      await expect(withdraw(taken.clientMessageId)).resolves.toBe('not_queued');
+      expect((await readRow(taken.id)).discardedAt).toBeNull();
+    }
+
+    const { queuedMessages } = await getFastSessionMessagesSince(session.id, 0);
+    expect(
+      queuedMessages.map((message) => message.clientMessageId).sort(),
+    ).toEqual(
+      [attempting, claimed, lapsedClaim, persisted]
+        .map((row) => row.clientMessageId)
+        .sort(),
+    );
+    expect(queuedMessages[0]).toMatchObject({ userId: owner.id });
+
+    // The mutation keeps the same rule for callers.
+    const viaCommand = await queue('Via command');
+    await expect(
+      deleteFastSessionQueuedMessageCommand(
+        { userId: collaborator.id, isAdmin: true } as UserAuthSuccess,
+        { sessionId: session.id, clientMessageId: viaCommand.clientMessageId },
+      ),
+    ).rejects.toThrow('Only the sender can delete a queued message');
+    await expect(
+      deleteFastSessionQueuedMessageCommand(
+        { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+        { sessionId: session.id, clientMessageId: viaCommand.clientMessageId },
+      ),
+    ).resolves.toEqual({ outcome: 'withdrawn' });
+  });
+
+  it('lets exactly one of a withdrawal and a racing native steer claim win', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'withdraw-steer-race',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      surface: 'web',
+    });
+    const parent = {
+      sessionId: session.id,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: owner.id,
+        conversationId: session.conversationId,
+      },
+    };
+
+    for (let round = 0; round < 20; round += 1) {
+      const clientMessageId = crypto.randomUUID();
+      const [row] = await db
+        .insert(fastAgentParentEvents)
+        .values({
+          conversationId: session.id,
+          eventKey: `race-${clientMessageId}`,
+          parent,
+          event: {
+            type: 'human_follow_up',
+            eventId: clientMessageId,
+            currentMessageId: clientMessageId,
+            userId: owner.id,
+            question: `Race ${round}`,
+            webFollowUp: true,
+          },
+        })
+        .returning({ id: fastAgentParentEvents.id });
+
+      const [withdrawal, steerClaim] = await Promise.all([
+        withdrawFastSessionQueuedMessage({
+          sessionId: session.id,
+          clientMessageId,
+          userId: owner.id,
+        }),
+        claimFastAgentHumanFollowUpSteers([row!.id]),
+      ]);
+      const [state] = await db
+        .select({
+          claimedUntil: fastAgentParentEvents.claimedUntil,
+          discardedAt: fastAgentParentEvents.discardedAt,
+        })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, row!.id));
+      const steerWon = steerClaim.has(row!.id);
+
+      // Never both: a steer that delivers the message was never reported as
+      // withdrawn, and a withdrawn message never reached the steer.
+      expect({
+        withdrawal,
+        claimed: state!.claimedUntil !== null,
+        discarded: state!.discardedAt !== null,
+      }).toEqual(
+        steerWon
+          ? { withdrawal: 'not_queued', claimed: true, discarded: false }
+          : { withdrawal: 'withdrawn', claimed: false, discarded: true },
+      );
+    }
   });
 
   it('finds sessions for every deployment user', async () => {

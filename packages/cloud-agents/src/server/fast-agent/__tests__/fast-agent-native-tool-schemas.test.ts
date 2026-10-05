@@ -427,6 +427,10 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(tool.description).toContain(
       'registers this deployment with the provider before returning an authorization link',
     );
+    expect(tool.description).toContain(
+      'a settingsUrl for static headers/manual OAuth client setup: the Integrations page for a shared server, or Personal settings for a private one',
+    );
+    expect(tool.description).not.toContain('Settings link');
 
     expect(tool.description).toContain('Any member may call this.');
     expect(tool.description).toContain(
@@ -470,6 +474,9 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     );
     expect(tool.description).toContain(
       'Pass only the exact canonical provider id',
+    );
+    expect(tool.description).toContain(
+      'or the existing secure form on the Integrations page',
     );
     expect(Object.keys(tool.args!)).toEqual(['integrationId']);
     expect(schema).toMatchObject({

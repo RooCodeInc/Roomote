@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   buildSourceControlDelivery: vi.fn(),
   sourceControlPostComment: vi.fn(),
   createConversationArtifact: vi.fn(),
+  resolveSessionImages: vi.fn(),
 }));
 
 vi.mock('./artifacts/create-session-artifact', () => ({
@@ -40,6 +41,9 @@ vi.mock('./artifacts/create-session-artifact', () => ({
 }));
 vi.mock('./fast-agent-session-videos', () => ({
   deliverFastAgentSessionVideos: mocks.deliverVideos,
+}));
+vi.mock('./fast-agent-session-images', () => ({
+  resolveFastAgentSessionImages: mocks.resolveSessionImages,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -216,6 +220,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     mocks.discordPostMessage.mockResolvedValue({
       messageId: 'discord-message-1',
     });
+    mocks.resolveSessionImages.mockResolvedValue([]);
     mocks.findTeamsConversationRoute.mockResolvedValue({
       serviceUrl: 'https://smba.example.com/amer/',
       workspaceId: 'tenant-1',
@@ -227,6 +232,57 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       abort: vi.fn(),
     });
   });
+
+  it.each(['discord', 'telegram'] as const)(
+    'posts a %s approval as a native actionable message without consuming the reply quote',
+    async (surface) => {
+      const user = await userFactory.create();
+      const conversation = await createConversation({
+        userId: user.id,
+        surface,
+        replyTarget: { channelId: '123', threadId: '456' },
+      });
+      const delivery = await buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Dana',
+        question: 'Run the tool',
+      });
+      const approval = {
+        approvalId: '3f0c8f0e-1111-4222-8333-444455556666',
+        integrationId: 'example',
+        toolName: 'write',
+        argsSummary: { token: '[REDACTED]' },
+        status: 'pending' as const,
+        taskId: null,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        createdAt: new Date().toISOString(),
+      };
+      await delivery!.adapter.postReply({
+        purpose: 'progress',
+        message: 'fallback link',
+        toolApproval: approval,
+      });
+      const post =
+        surface === 'discord'
+          ? mocks.discordPostMessage
+          : mocks.telegramPostMessage;
+      expect(post).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId: '123',
+          threadId: '456',
+          text: expect.stringContaining('[REDACTED]'),
+          buttons: [
+            [
+              expect.objectContaining({ text: 'Allow once' }),
+              expect.objectContaining({ text: 'Allow for session' }),
+              expect.objectContaining({ text: 'Deny' }),
+            ],
+          ],
+        }),
+      );
+    },
+  );
 
   it.each(['discord', 'telegram'] as const)(
     'wires %s typing to the reply target for only the active turn',
@@ -1005,6 +1061,41 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       );
     },
   );
+
+  it('resolves and delivers selected image artifacts in Discord replies', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'discord',
+      replyTarget: { channelId: 'discord-channel', threadId: 'discord-thread' },
+    });
+    const resolvedImage = {
+      url: 'https://roomote.example.com/artifacts/image-1.png',
+      altText: 'proof.png',
+      contentType: 'image/png',
+    };
+    mocks.resolveSessionImages.mockResolvedValueOnce([resolvedImage]);
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Dana',
+      question: 'Show the screenshot',
+    });
+
+    await delivery!.adapter.postReply({
+      purpose: 'closeout',
+      message: 'The screenshot is attached.',
+      imageArtifactIds: ['image-1'],
+    });
+
+    expect(mocks.resolveSessionImages).toHaveBeenCalledWith({
+      artifactIds: ['image-1'],
+      sessionId: conversation.id,
+    });
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ images: [resolvedImage] }),
+    );
+  });
 
   it('quotes web follow-ups in Discord replies with provider Markdown', async () => {
     const user = await userFactory.create();

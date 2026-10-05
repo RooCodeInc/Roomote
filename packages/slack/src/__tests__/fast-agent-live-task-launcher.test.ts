@@ -86,7 +86,7 @@ import { RunStatus } from '@roomote/types';
 
 import { createFastAgentSlackLiveTaskLauncher } from '../fast-agent-live-task-launcher';
 
-function createLauncher() {
+function createLauncher(visibleInTranscript?: boolean) {
   return createFastAgentSlackLiveTaskLauncher({
     slack: {
       postMessage: mocks.postMessage,
@@ -100,6 +100,7 @@ function createLauncher() {
     channelId: 'C123',
     threadTs: '100.001',
     messageId: '100.002',
+    ...(visibleInTranscript !== undefined ? { visibleInTranscript } : {}),
   });
 }
 
@@ -133,6 +134,21 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     unfurl_links: false,
     unfurl_media: false,
   };
+
+  it('forwards explicit prompt visibility from the launch origin', async () => {
+    const launchTask = createLauncher(true);
+
+    await launchTask({
+      prompt: '$review-code Check this change',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({ visibleInTranscript: true }),
+    );
+  });
 
   it('posts a starting placeholder card in the parent thread and records the task title', async () => {
     const launchTask = createLauncher();

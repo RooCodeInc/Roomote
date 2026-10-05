@@ -1,3 +1,7 @@
+const SCHEDULED_RUN_OPTS = {
+  context: { trigger: 'scheduled' },
+} as const;
+
 const {
   slackInstallationsTable,
   taskPullRequestsTable,
@@ -7,6 +11,7 @@ const {
   mockActiveRepositoryRows,
   mockGetAutomationRuntime,
   mockRecordAutomationRunOutcome,
+  mockRecordBackgroundAutomationResult,
   mockUpsertBackgroundAutomationSlackThread,
   mockResolveAutomationRuntimeDestination,
   mockResolveAutomationRepositoryDestination,
@@ -47,6 +52,7 @@ const {
   mockActiveRepositoryRows: vi.fn(),
   mockGetAutomationRuntime: vi.fn(),
   mockRecordAutomationRunOutcome: vi.fn(),
+  mockRecordBackgroundAutomationResult: vi.fn(),
   mockUpsertBackgroundAutomationSlackThread: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
   mockResolveAutomationRepositoryDestination: vi.fn(),
@@ -84,6 +90,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   getAutomationRuntime: mockGetAutomationRuntime,
   recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
+  recordBackgroundAutomationResult: mockRecordBackgroundAutomationResult,
   upsertBackgroundAutomationSlackThread:
     mockUpsertBackgroundAutomationSlackThread,
   slackInstallations: slackInstallationsTable,
@@ -222,7 +229,7 @@ describe('announcerJob non-Slack posting', () => {
     mockGetAutomationRuntime.mockResolvedValue({
       key: 'announcer',
       enabled: true,
-      scheduleMode: 'daily',
+      scheduleMode: 'on_demand',
       lastRunAt: null,
       instructions: null,
       destination: null,
@@ -263,7 +270,7 @@ describe('announcerJob non-Slack posting', () => {
       channelId: '-100555',
     });
 
-    const result = await announcerJob({ manualTrigger: true });
+    const result = await announcerJob({ context: { trigger: 'manual' } });
 
     expect(result.completed).toBe(true);
     expect(result.errors).toEqual([]);
@@ -289,6 +296,24 @@ describe('announcerJob non-Slack posting', () => {
     );
   });
 
+  it('persists a cleared outcome when the scan window has no merged PRs', async () => {
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '-100555',
+    });
+    mockMergedPullRequestRows.mockResolvedValue([]);
+
+    await announcerJob({ context: { trigger: 'manual' } });
+
+    expect(mockRecordBackgroundAutomationResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationKey: 'announcer',
+        content: 'No merged PRs to summarize.',
+      }),
+    );
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
   it('ignores installation A before any outcome and launches the manager report for owner B', async () => {
     mockSlackInstallationRows.mockResolvedValue([
       { slackBotToken: 'xoxb-a', slackTeamId: 'T-A' },
@@ -308,7 +333,7 @@ describe('announcerJob non-Slack posting', () => {
       instructions: null,
       destination: null,
     }));
-    const result = await announcerJob();
+    const result = await announcerJob(SCHEDULED_RUN_OPTS);
     expect(result.completed).toBe(true);
     expect(result.errors).toEqual([]);
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
@@ -341,7 +366,7 @@ describe('announcerJob non-Slack posting', () => {
       postMessage: mockAdapterPostMessage,
     });
 
-    const result = await announcerJob({ manualTrigger: true });
+    const result = await announcerJob({ context: { trigger: 'manual' } });
 
     expect(result.completed).toBe(true);
     expect(mockEnqueueTask).toHaveBeenCalledWith(
@@ -363,7 +388,7 @@ describe('announcerJob non-Slack posting', () => {
       channelId: '-100555',
     });
 
-    await announcerJob({ manualTrigger: true });
+    await announcerJob({ context: { trigger: 'manual' } });
 
     expect(mockLoadAutomationThreadFeedbackContext).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -411,7 +436,7 @@ describe('announcerJob non-Slack posting', () => {
       }),
     );
 
-    await announcerJob({ manualTrigger: true });
+    await announcerJob({ context: { trigger: 'manual' } });
 
     expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
     expect(
@@ -428,7 +453,7 @@ describe('announcerJob non-Slack posting', () => {
     });
     mockEnqueueTask.mockRejectedValue(new Error('queue unavailable'));
 
-    const result = await announcerJob({ manualTrigger: true });
+    const result = await announcerJob({ context: { trigger: 'manual' } });
 
     expect(result.completed).toBe(false);
     expect(result.errors).toEqual(['queue unavailable']);
@@ -441,7 +466,7 @@ describe('announcerJob non-Slack posting', () => {
   it('skips the deployment when no destination resolves', async () => {
     mockResolveAutomationRuntimeDestination.mockResolvedValue(null);
 
-    const result = await announcerJob({ manualTrigger: true });
+    const result = await announcerJob({ context: { trigger: 'manual' } });
 
     expect(result.completed).toBe(false);
     expect(result.skippedReason).toBe('Announcer channel is not configured.');

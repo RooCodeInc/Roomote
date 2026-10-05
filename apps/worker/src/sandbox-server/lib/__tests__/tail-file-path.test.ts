@@ -1,10 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import {
-  assertSafeTailFilePath,
-  resolveSafeTailFilePath,
-} from '../tail-file-path';
+import { resolveSafeTailFilePath } from '../tail-file-path';
 
 describe('resolveSafeTailFilePath', () => {
   it('allows workspace-relative paths unchanged', () => {
@@ -112,15 +109,6 @@ describe('resolveSafeTailFilePath', () => {
 
     expect(resolveSafeTailFilePath(missing)).toBe(
       path.posix.normalize(missing),
-    );
-  });
-});
-
-describe('assertSafeTailFilePath', () => {
-  it('delegates validation', () => {
-    expect(() => assertSafeTailFilePath('logs/app.log')).not.toThrow();
-    expect(() => assertSafeTailFilePath('/etc/passwd')).toThrow(
-      'Absolute paths outside /tmp are not allowed',
     );
   });
 });

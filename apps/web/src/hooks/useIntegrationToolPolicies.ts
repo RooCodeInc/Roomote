@@ -135,12 +135,11 @@ function reconcileSavedPolicies(
 }
 
 /**
- * Per-tool approval policies (`integrationToolApprovals`
- * experiment). The list endpoint is admin-only server side, so callers gate
- * this query behind admin-only, open surfaces — for example the integration
- * tool management dialog only enables it while open for an admin with the
- * experiment on. Changes save immediately and take effect from the next
- * session turn.
+ * Per-tool approval policies. The list endpoint is admin-only server side, so
+ * callers gate this query behind admin-only, open surfaces — for example the
+ * integration tool management dialog only enables it while open for an
+ * admin. Changes save immediately and take effect from the next session
+ * turn.
  *
  * `scope: 'personal'` reads and writes the caller's own policies instead,
  * which any user can manage and which only tighten the deployment ones.

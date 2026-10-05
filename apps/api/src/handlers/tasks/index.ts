@@ -19,7 +19,6 @@ import { manageSourceControl } from './manageSourceControl';
 import { updateTaskModelSelection } from './updateModelSelection';
 import { listTaskModels } from './listModels';
 import { saveTaskMemory } from './saveTaskMemory';
-import { getDiffRiskHints } from './getDiffRiskHints';
 import { recordAutomationResult } from './recordAutomationResult';
 import { updatePersonalization } from './updatePersonalization';
 
@@ -44,5 +43,4 @@ tasksRouter.post('/:taskId/task_suggestions', submitTaskSuggestions);
 tasksRouter.post('/:taskId/automation_result', recordAutomationResult);
 tasksRouter.post('/:taskId/mcp_recommendations', submitMcpRecommendations);
 tasksRouter.post('/runs/:runId/memory', saveTaskMemory);
-tasksRouter.post('/runs/:runId/diff_risk_hints', getDiffRiskHints);
 tasksRouter.post('/runs/:runId/personalization', updatePersonalization);

@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 
 import {
   ALL_REPOSITORIES,
@@ -10,16 +10,20 @@ import {
   type ScheduleOnlyBackgroundAutomationFrequency,
   CUSTOM_AUTOMATION_NAME_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+  CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH,
   CUSTOM_AUTOMATION_CRON_MAX_LENGTH,
   CUSTOM_AUTOMATION_MODEL_MAX_LENGTH,
   FAST_EXECUTION,
   NO_REPOSITORIES,
   type ReasoningEffort,
   type AutomationResultPriority,
+  customAutomationRunWhenSchema,
+  type CustomAutomationRunWhen,
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { customAutomations, environments, tasks } from '../schema';
+import { decryptText } from './encryption';
 import type { CustomAutomation } from '../types';
 import type { AutomationRunOutcomeStatus } from './automations';
 
@@ -45,6 +49,10 @@ export type CustomAutomationWriteInput = {
   environmentId: string;
   /** Full destination target, or {} when the automation has no report destination. */
   target: OptionalAutomationTarget;
+  /** Optional typed criteria evaluated before automation work starts. */
+  runWhen?: CustomAutomationRunWhen | null;
+  /** Optional natural-language gate evaluated before automation work starts. */
+  launchCriteria?: string | null;
   createdByUserId?: string | null;
 };
 
@@ -76,9 +84,15 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
   cronExpression: string | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
+  launchCriteria?: string | null;
+  runWhen?: CustomAutomationRunWhen | null;
 } {
   const name = normalizeName(input.name);
   const prompt = input.prompt.trim();
+  const launchCriteria =
+    input.launchCriteria === undefined
+      ? undefined
+      : input.launchCriteria?.trim() || null;
 
   if (!name) {
     throw new Error('Name is required.');
@@ -101,7 +115,17 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
   }
 
   if (
+    launchCriteria &&
+    launchCriteria.length > CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH
+  ) {
+    throw new Error(
+      `Launch criteria must be at most ${CUSTOM_AUTOMATION_LAUNCH_CRITERIA_MAX_LENGTH} characters.`,
+    );
+  }
+
+  if (
     input.scheduleMode !== 'cron' &&
+    input.scheduleMode !== 'on_demand' &&
     !isScheduleOnlyBackgroundAutomationFrequency(input.scheduleMode)
   ) {
     throw new Error(`Invalid schedule mode: ${input.scheduleMode}`);
@@ -140,6 +164,11 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     throw new Error('Reasoning effort requires a model override.');
   }
 
+  const runWhen =
+    input.runWhen == null
+      ? input.runWhen
+      : customAutomationRunWhenSchema.parse(input.runWhen);
+
   if (!input.environmentId) {
     throw new Error('Environment is required.');
   }
@@ -155,7 +184,15 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     );
   }
 
-  return { name, prompt, cronExpression, model, reasoningEffort };
+  return {
+    name,
+    prompt,
+    cronExpression,
+    model,
+    reasoningEffort,
+    launchCriteria,
+    runWhen,
+  };
 }
 
 export type CustomAutomationWithCreator = CustomAutomation & {
@@ -193,12 +230,121 @@ export async function getCustomAutomationById(
   return row ?? null;
 }
 
+/** Returns the decrypted webhook bearer token for trusted server callers. */
+export async function getCustomAutomationWebhookToken(
+  id: string,
+  client: DatabaseOrTransaction = db,
+): Promise<string | null> {
+  const row = await client.query.customAutomations.findFirst({
+    where: eq(customAutomations.id, id),
+    columns: { webhookSecret: true },
+  });
+  return row?.webhookSecret ? decryptText(row.webhookSecret) : null;
+}
+
+export async function getCustomAutomationWebhookState(
+  id: string,
+  client: DatabaseOrTransaction = db,
+): Promise<{
+  enabled: boolean;
+  createdByUserId: string | null;
+  token: string | null;
+} | null> {
+  const row = await client.query.customAutomations.findFirst({
+    where: eq(customAutomations.id, id),
+    columns: {
+      enabled: true,
+      createdByUserId: true,
+      webhookSecret: true,
+    },
+  });
+  return row
+    ? {
+        enabled: row.enabled,
+        createdByUserId: row.createdByUserId,
+        token: row.webhookSecret ? decryptText(row.webhookSecret) : null,
+      }
+    : null;
+}
+
+/** Stores a new encrypted webhook token or revokes the current one. */
+export async function setCustomAutomationWebhookToken(
+  id: string,
+  token: string | null,
+  client: DatabaseOrTransaction = db,
+): Promise<boolean> {
+  const updated = await client
+    .update(customAutomations)
+    .set({ webhookSecret: token, updatedAt: new Date() })
+    .where(eq(customAutomations.id, id))
+    .returning({ id: customAutomations.id });
+  return updated.length > 0;
+}
+
+/**
+ * Ensures one encrypted webhook token exists despite concurrent enable calls.
+ * Returns the persisted token (including another request's winning token).
+ */
+export async function ensureCustomAutomationWebhookToken(
+  id: string,
+  token: string,
+  client: DatabaseOrTransaction = db,
+): Promise<string | null> {
+  const inserted = await client
+    .update(customAutomations)
+    .set({ webhookSecret: token, updatedAt: new Date() })
+    .where(
+      and(
+        eq(customAutomations.id, id),
+        eq(customAutomations.enabled, true),
+        isNull(customAutomations.webhookSecret),
+      ),
+    )
+    .returning({ webhookSecret: customAutomations.webhookSecret });
+  if (inserted[0]?.webhookSecret) {
+    return decryptText(inserted[0].webhookSecret);
+  }
+  const current = await getCustomAutomationWebhookState(id, client);
+  return current?.enabled ? current.token : null;
+}
+
+/**
+ * Atomically replaces an enabled automation's active webhook token. Returning
+ * null means the webhook was disabled, the automation was disabled, or it was
+ * deleted before the rotation acquired its row lock.
+ */
+export async function rotateCustomAutomationWebhookToken(
+  id: string,
+  token: string,
+  client: DatabaseOrTransaction = db,
+): Promise<string | null> {
+  const [rotated] = await client
+    .update(customAutomations)
+    .set({ webhookSecret: token, updatedAt: new Date() })
+    .where(
+      and(
+        eq(customAutomations.id, id),
+        eq(customAutomations.enabled, true),
+        isNotNull(customAutomations.webhookSecret),
+      ),
+    )
+    .returning({ webhookSecret: customAutomations.webhookSecret });
+  return rotated?.webhookSecret ? decryptText(rotated.webhookSecret) : null;
+}
+
 export async function createCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression, model, reasoningEffort } =
-    assertValidWriteInput(input);
+  const {
+    name,
+    prompt,
+    cronExpression,
+    model,
+    reasoningEffort,
+    launchCriteria,
+    runWhen,
+  } = assertValidWriteInput(input);
 
   const { executionMode, allRepositories, noRepositories } = getExecutionTarget(
     input.environmentId,
@@ -225,6 +371,8 @@ export async function createCustomAutomation(
     .values({
       name,
       prompt,
+      launchCriteria: launchCriteria ?? null,
+      runWhen: runWhen ?? null,
       enabled: input.enabled,
       resultPriority: input.resultPriority ?? 'normal',
       scheduleMode: input.scheduleMode,
@@ -255,8 +403,15 @@ export async function updateCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression, model, reasoningEffort } =
-    assertValidWriteInput(input);
+  const {
+    name,
+    prompt,
+    cronExpression,
+    model,
+    reasoningEffort,
+    launchCriteria,
+    runWhen,
+  } = assertValidWriteInput(input);
 
   const existing = await getCustomAutomationById(id, client);
   if (!existing) {
@@ -288,6 +443,9 @@ export async function updateCustomAutomation(
     .set({
       name,
       prompt,
+      launchCriteria:
+        launchCriteria === undefined ? existing.launchCriteria : launchCriteria,
+      runWhen: runWhen === undefined ? existing.runWhen : runWhen,
       enabled: input.enabled,
       resultPriority: input.resultPriority ?? existing.resultPriority,
       scheduleMode: input.scheduleMode,
@@ -302,6 +460,8 @@ export async function updateCustomAutomation(
       noRepositories,
       executionMode,
       target: input.target,
+      // Disabling the automation also revokes its external trigger URL.
+      ...(!input.enabled ? { webhookSecret: null } : {}),
       updatedAt: new Date(),
     })
     .where(eq(customAutomations.id, id))
@@ -343,13 +503,17 @@ export async function recordCustomAutomationRunOutcome(
   const update: Partial<typeof customAutomations.$inferInsert> = {
     updatedAt: at,
   };
+  const requestedLastRunAt =
+    params.lastRunAt === 'skip' ? null : (params.lastRunAt ?? at);
+  const lastRunAtUpdate = requestedLastRunAt
+    ? sql`GREATEST(${customAutomations.lastRunAt}, ${sql.param(
+        requestedLastRunAt,
+        customAutomations.lastRunAt,
+      )})`
+    : undefined;
 
   if (params.launchClaimedAt) {
     update.launchClaimedAt = null;
-  }
-
-  if (params.lastRunAt !== 'skip') {
-    update.lastRunAt = params.lastRunAt ?? at;
   }
 
   if (params.launchClaimedAt && params.lastLaunchedTaskId !== undefined) {
@@ -376,7 +540,10 @@ export async function recordCustomAutomationRunOutcome(
 
   const updated = await client
     .update(customAutomations)
-    .set(update)
+    .set({
+      ...update,
+      ...(lastRunAtUpdate ? { lastRunAt: lastRunAtUpdate } : {}),
+    })
     .where(where)
     .returning({ id: customAutomations.id });
 

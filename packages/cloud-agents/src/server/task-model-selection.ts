@@ -67,7 +67,8 @@ export async function applyTaskModelSelectionToRun(options: {
   role: TaskModelSelectionRole;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
-}): Promise<{ stampedTaskModel: string | null }> {
+  expectedModel?: string;
+}): Promise<{ stampedTaskModel: string | null; applied: boolean }> {
   const deployment = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
     columns: {
@@ -134,6 +135,17 @@ export async function applyTaskModelSelectionToRun(options: {
     }
 
     const payload = { ...run.payload };
+    const persistedActiveModel =
+      options.role === 'coding'
+        ? payload.harnessModelOverrides?.['opencode-server']
+        : payload.modelRoleOverrides?.[options.role]?.model;
+    if (
+      options.expectedModel &&
+      persistedActiveModel &&
+      persistedActiveModel !== options.expectedModel
+    ) {
+      return { stampedTaskModel: null, applied: false };
+    }
     let stampedTaskModel: string | null = null;
 
     if (options.role === 'coding') {
@@ -211,6 +223,6 @@ export async function applyTaskModelSelectionToRun(options: {
         .where(eq(tasks.id, run.taskId));
     }
 
-    return { stampedTaskModel };
+    return { stampedTaskModel, applied: true };
   });
 }

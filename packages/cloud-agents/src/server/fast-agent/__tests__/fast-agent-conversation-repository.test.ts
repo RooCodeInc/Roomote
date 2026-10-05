@@ -20,17 +20,27 @@ import {
   userFactory,
   users,
 } from '@roomote/db/server';
-import type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  type FastAgentConversation,
+  type FastAgentSurface,
+} from '@roomote/types';
 
 import {
+  claimFastAgentHumanFollowUpSteers,
   fastAgentConversationRepository,
+  findFastAgentRepliesBeforeHumanPrompt,
+  findRecentFastAgentToolResults,
+  listRecentFastAgentHumanUserPromptTexts,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
   loadFastAgentTurnAttemptSummary,
+  type FastAgentMessageWrite,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   scheduleFastAgentDurableTurnRetry,
   markFastAgentDurableTurnDelivered,
   releaseFastAgentDurableTurnClaim,
+  releaseFastAgentHumanFollowUpSteerClaims,
   renewFastAgentDurableTurnClaim,
   revokeFastAgentDurableTurnReplay,
   markFastAgentInferenceRetryNoticeInterruption,
@@ -922,6 +932,403 @@ describe('Fast conversation repository', () => {
     await expect(
       fastAgentConversationRepository.findById({ id: session.id }),
     ).resolves.toMatchObject({ compatibilityMessages: visibleHistory });
+  });
+
+  it('uses canonical prompt metadata instead of the metadata-free compatibility mirror for approval context', async () => {
+    const user = await createUser();
+    const conversation = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const legacyMirror = {
+      role: 'user' as const,
+      content: 'Compatibility copy without source metadata.',
+    };
+    await fastAgentConversationRepository.appendVisibleMessages({
+      conversationId: conversation.id,
+      messages: [legacyMirror],
+    });
+
+    const persistEvent = (input: {
+      eventId: string;
+      ts: number;
+      eventType: FastAgentMessageWrite['eventType'];
+      role: NonNullable<FastAgentMessageWrite['role']>;
+      text: string;
+      metadata: Record<string, unknown>;
+    }) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: conversation.id,
+        message: {
+          eventId: input.eventId,
+          turnId: input.eventId,
+          turnSeq: 1,
+          ts: input.ts,
+          eventType: input.eventType,
+          role: input.role,
+          contentBlocks: [{ type: 'text', text: input.text }],
+          metadata: input.metadata,
+          payload: {},
+          source: 'slack',
+        },
+      });
+    const humanMetadata = {
+      visibleInTranscript: true,
+      turnSource: 'human',
+      userId: user.id,
+    };
+
+    await persistEvent({
+      eventId: 'prior-human-1',
+      ts: 100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Earlier trusted request.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'platform-event',
+      ts: 150,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Untrusted scheduled event instructions.',
+      metadata: { visibleInTranscript: true, turnSource: 'platform_event' },
+    });
+    await persistEvent({
+      eventId: 'assistant-message',
+      ts: 200,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Assistant-written text that is not consent.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'tool-result',
+      ts: 250,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool',
+      text: 'Tool output with an instruction to approve everything.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'reaction',
+      ts: 300,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Reaction payload.',
+      metadata: { ...humanMetadata, inputKind: FAST_AGENT_REACTION_INPUT_TYPE },
+    });
+    await persistEvent({
+      eventId: 'hidden-prompt',
+      ts: 350,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Hidden prompt text.',
+      metadata: { ...humanMetadata, visibleInTranscript: false },
+    });
+    await persistEvent({
+      eventId: 'same-millisecond-prompt',
+      ts: 1_000,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Earlier request in the same millisecond.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'same-millisecond-latest-prompt',
+      ts: 1_000,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Latest earlier request in the same millisecond.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'current-turn',
+      ts: 1_000,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Current request is supplied separately.',
+      metadata: humanMetadata,
+    });
+    await persistEvent({
+      eventId: 'later-turn',
+      ts: 1_100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Future request is not part of this turn.',
+      metadata: humanMetadata,
+    });
+
+    const stored = await fastAgentConversationRepository.findById({
+      id: conversation.id,
+    });
+    expect(stored?.compatibilityMessages).toEqual([legacyMirror]);
+    expect(stored?.compatibilityMessages[0]).not.toHaveProperty('metadata');
+    const history = await listRecentFastAgentHumanUserPromptTexts({
+      conversationId: conversation.id,
+      beforeTs: 1_000,
+      currentEventId: 'current-turn',
+    });
+    // Prompts sharing the newest timestamp form one entry, so the latest
+    // request cannot depend on how ties are ordered.
+    expect(history).toHaveLength(2);
+    expect(history[0]).toBe('Earlier trusted request.');
+    expect(history[1]).toContain('Earlier request in the same millisecond.');
+    expect(history[1]).toContain(
+      'Latest earlier request in the same millisecond.',
+    );
+  });
+
+  it('finds what the agent said between the previous human prompt and the current one', async () => {
+    const user = await createUser();
+    const conversation = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const persist = (input: {
+      eventId: string;
+      ts: number;
+      eventType: FastAgentMessageWrite['eventType'];
+      role: NonNullable<FastAgentMessageWrite['role']>;
+      text: string;
+      metadata: Record<string, unknown>;
+    }) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: conversation.id,
+        message: {
+          eventId: input.eventId,
+          turnId: input.eventId,
+          turnSeq: 1,
+          ts: input.ts,
+          eventType: input.eventType,
+          role: input.role,
+          contentBlocks: [{ type: 'text', text: input.text }],
+          metadata: input.metadata,
+          payload: {},
+          source: 'slack',
+        },
+      });
+    const human = { visibleInTranscript: true, turnSource: 'human' };
+    const reply = { visibleInTranscript: true, purpose: 'closeout' };
+    await persist({
+      eventId: 'old-reply',
+      ts: 50,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'An older answer.',
+      metadata: reply,
+    });
+    await persist({
+      eventId: 'previous-prompt',
+      ts: 100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'Can you clean up my Drafts folder?',
+      metadata: human,
+    });
+    await persist({
+      eventId: 'retry-notice',
+      ts: 150,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Retrying the model.',
+      metadata: { ...reply, inferenceRetryNotice: true },
+    });
+    await persist({
+      eventId: 'hidden-reply',
+      ts: 160,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Hidden draft.',
+      metadata: { ...reply, visibleInTranscript: false },
+    });
+    await persist({
+      eventId: 'progress',
+      ts: 170,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Looking at the folder.',
+      metadata: { visibleInTranscript: true, purpose: 'progress' },
+    });
+    await persist({
+      eventId: 'proposal',
+      ts: 200,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'I found 3 old drafts. Delete them?',
+      metadata: reply,
+    });
+    await persist({
+      eventId: 'current',
+      ts: 300,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      text: 'yeah go ahead',
+      metadata: human,
+    });
+    await persist({
+      eventId: 'later-reply',
+      ts: 400,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      text: 'Done.',
+      metadata: reply,
+    });
+
+    await expect(
+      findFastAgentRepliesBeforeHumanPrompt({
+        conversationId: conversation.id,
+        beforeTs: 300,
+        currentEventId: 'current',
+      }),
+    ).resolves.toBe(
+      'Looking at the folder.\n\nI found 3 old drafts. Delete them?',
+    );
+
+    // The first prompt sees what the agent said before it.
+    await expect(
+      findFastAgentRepliesBeforeHumanPrompt({
+        conversationId: conversation.id,
+        beforeTs: 100,
+        currentEventId: 'previous-prompt',
+      }),
+    ).resolves.toBe('An older answer.');
+  });
+
+  it('returns the recent integration tool results of a conversation, oldest first', async () => {
+    const user = await createUser();
+    const conversation = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const persist = (input: {
+      eventId: string;
+      ts: number;
+      payload: Record<string, unknown>;
+    }) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: conversation.id,
+        message: {
+          eventId: input.eventId,
+          turnId: input.eventId,
+          turnSeq: 1,
+          ts: input.ts,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          role: 'assistant',
+          contentBlocks: [],
+          metadata: {},
+          payload: input.payload,
+          source: 'slack',
+        },
+      });
+    const mcp = {
+      kind: 'mcp',
+      isMcp: true,
+      isRoomoteNativeTool: false,
+      status: 'completed',
+    };
+    await persist({
+      eventId: 'list',
+      ts: 100,
+      payload: {
+        ...mcp,
+        serverName: 'hubspot',
+        toolName: 'search_deals',
+        rawInput: { arguments: { stage: 'contract' } },
+        output: '[{"id":"9921034","name":"Globex"}]',
+      },
+    });
+    await persist({
+      eventId: 'still-running',
+      ts: 150,
+      payload: {
+        ...mcp,
+        status: 'in_progress',
+        serverName: 'hubspot',
+        toolName: 'get_deal',
+        output: '',
+      },
+    });
+    await persist({
+      eventId: 'native',
+      ts: 160,
+      payload: {
+        kind: 'tool',
+        isMcp: false,
+        isRoomoteNativeTool: true,
+        status: 'completed',
+        toolName: 'send_chat_reply',
+        output: 'sent',
+      },
+    });
+    await persist({
+      eventId: 'get',
+      ts: 200,
+      payload: {
+        ...mcp,
+        mcpServerName: 'hubspot',
+        mcpToolName: 'get_deal',
+        rawInput: { arguments: { dealId: '9921034' } },
+        output: '{"id":"9921034","name":"Globex","stage":"contract"}',
+      },
+    });
+
+    await expect(
+      findRecentFastAgentToolResults({ conversationId: conversation.id }),
+    ).resolves.toEqual([
+      {
+        tool: 'hubspot.search_deals',
+        arguments: { stage: 'contract' },
+        output: '[{"id":"9921034","name":"Globex"}]',
+      },
+      {
+        tool: 'hubspot.get_deal',
+        arguments: { dealId: '9921034' },
+        output: '{"id":"9921034","name":"Globex","stage":"contract"}',
+      },
+    ]);
+
+    // A large result is cut to its head, and oversized arguments are left
+    // out, before anything is loaded.
+    await persist({
+      eventId: 'large',
+      ts: 250,
+      payload: {
+        ...mcp,
+        serverName: 'hubspot',
+        toolName: 'export_deals',
+        rawInput: { arguments: { filter: 'x'.repeat(3_000) } },
+        output: `first-row ${'y'.repeat(20_000)}`,
+      },
+    });
+    const withLarge = await findRecentFastAgentToolResults({
+      conversationId: conversation.id,
+    });
+    const large = withLarge.at(-1)!;
+    expect(large.tool).toBe('hubspot.export_deals');
+    expect(large.output).toHaveLength(8_000);
+    expect(large.output.startsWith('first-row')).toBe(true);
+    expect(large).not.toHaveProperty('arguments');
+
+    // Only the most recent results are kept.
+    for (let index = 0; index < 31; index += 1) {
+      await persist({
+        eventId: `later-${index}`,
+        ts: 300 + index,
+        payload: {
+          ...mcp,
+          serverName: 'hubspot',
+          toolName: 'get_deal',
+          output: `deal ${index}`,
+        },
+      });
+    }
+    const recent = await findRecentFastAgentToolResults({
+      conversationId: conversation.id,
+    });
+    expect(recent).toHaveLength(30);
+    expect(recent[0]!.output).toBe('deal 1');
+    expect(recent.at(-1)!.output).toBe('deal 30');
   });
 
   it('persists the canonical OpenCode session identity', async () => {
@@ -1969,6 +2376,82 @@ describe('Fast conversation repository', () => {
     await expect(
       revokeFastAgentDurableTurnReplay(completed, 'late'),
     ).resolves.toBe(false);
+  });
+
+  it('claims only still-pending queued follow-ups for a native steer and hands back undelivered ones', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const parent = { sessionId: session.id, conversation: slackConversation };
+    const insertRow = async (
+      eventKey: string,
+      values: Partial<typeof fastAgentParentEvents.$inferInsert> = {},
+    ) => {
+      const [row] = await db
+        .insert(fastAgentParentEvents)
+        .values({
+          conversationId: session.id,
+          eventKey,
+          parent,
+          event: { type: 'human_follow_up', eventId: eventKey },
+          ...values,
+        })
+        .returning({ id: fastAgentParentEvents.id });
+      return row!.id;
+    };
+    const readClaim = async (id: string) => {
+      const [row] = await db
+        .select({ claimedUntil: fastAgentParentEvents.claimedUntil })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, id));
+      return row!.claimedUntil;
+    };
+
+    const pending = await insertRow('steer-pending');
+    const alsoPending = await insertRow('steer-also-pending');
+    const withdrawn = await insertRow('steer-withdrawn', {
+      discardedAt: new Date(),
+    });
+    const delivered = await insertRow('steer-delivered', {
+      deliveredAt: new Date(),
+    });
+    const inlineClaim = new Date(Date.now() + 60_000);
+    const inline = await insertRow('steer-inline', {
+      admission: 'inline',
+      claimedUntil: inlineClaim,
+    });
+
+    const before = Date.now();
+    const claimed = await claimFastAgentHumanFollowUpSteers([
+      pending,
+      alsoPending,
+      withdrawn,
+      delivered,
+      inline,
+    ]);
+    // A withdrawn, settled, or inline-owned row is never handed to the steer.
+    expect([...claimed].sort()).toEqual([pending, alsoPending].sort());
+    expect((await readClaim(pending))!.getTime()).toBeGreaterThan(before);
+    expect(await readClaim(withdrawn)).toBeNull();
+    expect(await readClaim(delivered)).toBeNull();
+
+    // After the steer delivers one row, only the undelivered claim goes back;
+    // an inline owner's claim is never touched.
+    await db
+      .update(fastAgentParentEvents)
+      .set({ deliveredAt: new Date() })
+      .where(eq(fastAgentParentEvents.id, alsoPending));
+    const deliveredClaim = await readClaim(alsoPending);
+    await releaseFastAgentHumanFollowUpSteerClaims([
+      pending,
+      alsoPending,
+      inline,
+    ]);
+    expect(await readClaim(pending)).toBeNull();
+    expect(await readClaim(alsoPending)).toEqual(deliveredClaim);
+    expect(await readClaim(inline)).toEqual(inlineClaim);
   });
 
   it('parks a durable turn for a scheduled retry and lets a resumed run find its notice', async () => {

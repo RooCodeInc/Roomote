@@ -8,6 +8,8 @@ import {
 import { useState } from 'react';
 import type { ReasoningEffort } from '@roomote/types';
 
+import { Dialog, DialogContent, DialogTitle } from '@/components/system';
+
 const mobileState = vi.hoisted(() => ({ current: false }));
 const userState = vi.hoisted(() => ({ isAdmin: false }));
 const pathnameState = vi.hoisted(() => ({ current: '/tasks' }));
@@ -73,6 +75,11 @@ const models: ModelReasoningPickerModel[] = [
     },
   },
 ];
+
+const longModelList = Array.from({ length: 12 }, (_, index) => ({
+  id: `provider/model-${index}`,
+  displayName: `Model ${index}`,
+}));
 
 function Harness({
   initialModel = 'provider/alpha',
@@ -184,6 +191,75 @@ describe('ModelReasoningPicker', () => {
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
       expect(scrollIntoView.mock.instances).toContain(selectedOption);
       expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    },
+  );
+
+  it.each([
+    ['standalone popover', false],
+    ['nested New Session dialog', true],
+  ])(
+    'keeps mouse-wheel and trackpad list scrolling available on the %s',
+    (_surface, nestedInDialog) => {
+      render(
+        nestedInDialog ? (
+          <Dialog open>
+            <DialogContent aria-describedby={undefined}>
+              <DialogTitle>Choose a model</DialogTitle>
+              <Harness
+                initialModel="provider/model-0"
+                availableModels={longModelList}
+              />
+            </DialogContent>
+          </Dialog>
+        ) : (
+          <Harness
+            initialModel="provider/model-0"
+            availableModels={longModelList}
+          />
+        ),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+      const list = screen.getByRole('listbox', { name: 'Models' });
+      Object.defineProperties(list, {
+        clientHeight: { configurable: true, value: 240 },
+        scrollHeight: { configurable: true, value: 480 },
+      });
+      const firstOption = screen.getByRole('option', { name: 'Model 0' });
+
+      const mouseWheel = new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        deltaMode: WheelEvent.DOM_DELTA_LINE,
+        deltaY: 3,
+      });
+      expect(firstOption.dispatchEvent(mouseWheel)).toBe(true);
+      expect(mouseWheel.defaultPrevented).toBe(false);
+
+      for (const deltaY of [1, 2, 1]) {
+        const trackpadStep = new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+          deltaY,
+        });
+        expect(firstOption.dispatchEvent(trackpadStep)).toBe(true);
+        expect(trackpadStep.defaultPrevented).toBe(false);
+      }
+
+      if (nestedInDialog) {
+        const outerDialog = document.querySelector(
+          '[data-slot="dialog-content"]',
+        );
+        expect(outerDialog).not.toBeNull();
+        const outsideList = new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 100,
+        });
+        expect(outerDialog?.dispatchEvent(outsideList)).toBe(false);
+        expect(outsideList.defaultPrevented).toBe(true);
+      }
     },
   );
 

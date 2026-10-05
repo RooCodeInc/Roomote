@@ -1,6 +1,18 @@
 import { createHash } from 'node:crypto';
 
-import { and, eq, gt, inArray, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  notExists,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 import type {
   IntegrationToolApprovalMetadata,
@@ -10,9 +22,9 @@ import type {
   IntegrationToolSessionOverrideMetadata,
   IntegrationToolSessionOverrideMode,
 } from '@roomote/types';
+import { redactIntegrationToolArgs } from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
-import { isDeploymentExperimentEnabledWithShareLock } from './deployment-experiments';
 import {
   integrationToolApprovalRequests,
   integrationToolAutoEvaluations,
@@ -61,42 +73,7 @@ export function fingerprintIntegrationToolCall(input: {
     .digest('hex');
 }
 
-const SECRET_KEY_PATTERN =
-  /secret|token|password|api[-_]?key|authorization|credential|private[-_]?key/i;
-const MAX_STRING_LENGTH = 200;
-const MAX_DEPTH = 6;
-
-/**
- * Display/audit preview of tool-call arguments. Secret-looking values and
- * oversized strings never reach the database or the UI; the approver still
- * sees the call's shape and ordinary arguments.
- */
-export function redactIntegrationToolArgs(value: unknown, depth = 0): unknown {
-  if (depth > MAX_DEPTH) return '[truncated]';
-  if (typeof value === 'string') {
-    return value.length > MAX_STRING_LENGTH
-      ? `${value.slice(0, MAX_STRING_LENGTH)}…[truncated]`
-      : value;
-  }
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 50)
-      .map((item) => redactIntegrationToolArgs(item, depth + 1));
-  }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .slice(0, 50)
-        .map(([key, item]) => [
-          key,
-          SECRET_KEY_PATTERN.test(key)
-            ? '[redacted]'
-            : redactIntegrationToolArgs(item, depth + 1),
-        ]),
-    );
-  }
-  return value;
-}
+export { redactIntegrationToolArgs } from '@roomote/types';
 
 type IntegrationToolPolicyRow = typeof integrationToolPolicies.$inferSelect;
 type IntegrationToolApprovalRow =
@@ -384,7 +361,7 @@ export async function insertIntegrationToolApproval(
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
-        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
         expiresAt: sql`clock_timestamp() + ${INTEGRATION_TOOL_APPROVAL_WINDOW_MINUTES} * interval '1 minute'`,
       })
       .onConflictDoNothing({
@@ -430,6 +407,109 @@ export async function listPendingIntegrationToolApprovals(context: {
   return rows.map(approvalMetadata);
 }
 
+/**
+ * Whose calls a decision lookup covers: the session's own agent, or with
+ * `taskId` that agent and the one task. A task sees what its owner decided
+ * for the session and for the task itself, never for the session's other
+ * tasks.
+ */
+function decidedCallScope(taskId: string | undefined): SQL | undefined {
+  return taskId
+    ? or(
+        isNull(integrationToolApprovalRequests.taskId),
+        eq(integrationToolApprovalRequests.taskId, taskId),
+      )
+    : isNull(integrationToolApprovalRequests.taskId);
+}
+
+/**
+ * Recent decisions made by the session owner on that session's own calls,
+ * with the redacted arguments the owner saw. Auto reads an approval as
+ * covering a later call that plainly continues the same work (the next file
+ * of the same cleanup), and a rejection as a reason to ask again. Calls by
+ * the session's tasks are excluded unless `taskId` names one, and
+ * model-generated Auto outcomes always are: only a person's own decisions
+ * count.
+ */
+export async function listRecentIntegrationToolApprovalOutcomes(context: {
+  sessionId: string;
+  userId: string;
+  /** Also include the owner's decisions on this task's calls. */
+  taskId?: string;
+}): Promise<
+  Array<{
+    integrationId: string;
+    toolName: string;
+    outcome: 'approved' | 'rejected';
+    /** The redacted arguments the owner saw on the card. */
+    arguments: unknown;
+  }>
+> {
+  const rows = await db
+    .select({
+      integrationId: integrationToolApprovalRequests.integrationId,
+      toolName: integrationToolApprovalRequests.toolName,
+      status: integrationToolApprovalRequests.status,
+      argsSummary: integrationToolApprovalRequests.argsSummary,
+    })
+    .from(integrationToolApprovalRequests)
+    .where(
+      and(
+        eq(integrationToolApprovalRequests.sessionId, context.sessionId),
+        eq(integrationToolApprovalRequests.requesterUserId, context.userId),
+        eq(integrationToolApprovalRequests.decidedByUserId, context.userId),
+        decidedCallScope(context.taskId),
+        inArray(integrationToolApprovalRequests.status, [
+          'consumed',
+          'rejected',
+        ]),
+      ),
+    )
+    .orderBy(desc(integrationToolApprovalRequests.decidedAt))
+    .limit(6);
+
+  return rows.map((row) => ({
+    integrationId: row.integrationId,
+    toolName: row.toolName,
+    outcome: row.status === 'rejected' ? 'rejected' : 'approved',
+    arguments: row.argsSummary,
+  }));
+}
+
+/**
+ * Whether the session owner rejected any call to this tool in the session.
+ * The recent outcomes above are bounded, so Auto checks this separately to
+ * keep a rejection in force for the rest of the session.
+ */
+export async function hasRejectedIntegrationToolInSession(context: {
+  sessionId: string;
+  userId: string;
+  integrationId: string;
+  toolName: string;
+  /** Also count the owner's rejections of this task's calls. */
+  taskId?: string;
+}): Promise<boolean> {
+  const [row] = await db
+    .select({ id: integrationToolApprovalRequests.id })
+    .from(integrationToolApprovalRequests)
+    .where(
+      and(
+        eq(integrationToolApprovalRequests.sessionId, context.sessionId),
+        eq(integrationToolApprovalRequests.requesterUserId, context.userId),
+        eq(integrationToolApprovalRequests.decidedByUserId, context.userId),
+        decidedCallScope(context.taskId),
+        eq(
+          integrationToolApprovalRequests.integrationId,
+          context.integrationId,
+        ),
+        eq(integrationToolApprovalRequests.toolName, context.toolName),
+        eq(integrationToolApprovalRequests.status, 'rejected'),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
 /** Executor-side read while waiting for the requester's decision. */
 export async function getIntegrationToolApproval(
   approvalId: string,
@@ -438,6 +518,19 @@ export async function getIntegrationToolApproval(
   return database.query.integrationToolApprovalRequests.findFirst({
     where: eq(integrationToolApprovalRequests.id, approvalId),
   });
+}
+
+/**
+ * Serializes a rejection of a session's tool with Auto's claim of a call to
+ * the same tool: whichever commits first is the one the other sees.
+ */
+async function lockToolRejections(
+  tx: DatabaseOrTransaction,
+  tool: { sessionId: string; integrationId: string; toolName: string },
+): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${tool.sessionId}:${tool.integrationId}:${tool.toolName}`}, 0))`,
+  );
 }
 
 /**
@@ -453,6 +546,28 @@ export async function decideIntegrationToolApproval(
   },
 ): Promise<IntegrationToolApprovalMetadata> {
   return db.transaction(async (tx) => {
+    if (input.decision === 'rejected') {
+      // Taken before the rejection is written and held until it commits, so
+      // an Auto claim of the same tool either finishes first or sees it.
+      const [target] = await tx
+        .select({
+          integrationId: integrationToolApprovalRequests.integrationId,
+          toolName: integrationToolApprovalRequests.toolName,
+        })
+        .from(integrationToolApprovalRequests)
+        .where(
+          and(
+            eq(integrationToolApprovalRequests.id, input.approvalId),
+            eq(integrationToolApprovalRequests.sessionId, context.sessionId),
+          ),
+        );
+      if (target) {
+        await lockToolRejections(tx, {
+          sessionId: context.sessionId,
+          ...target,
+        });
+      }
+    }
     const [row] = await tx
       .update(integrationToolApprovalRequests)
       .set({
@@ -490,29 +605,22 @@ export async function decideIntegrationToolApproval(
 }
 
 /**
- * Claim an unrelayed `approved` row for relay, serialized against the
- * experiment toggle. Disabling commits `enabled=false` first and sweeps open
- * rows second, so a bare conditional update could still claim a row in
- * between and relay under a disabled experiment. Reading the setting with a
- * share lock in the same transaction closes that: either the disable already
- * committed and the claim fails, or the claim holds the lock and the disable
- * waits until the claim has committed — so the call was genuinely authorized
- * before the experiment went off. It also covers a row inserted after the
- * sweep already ran, which the sweep alone can never cancel.
+ * Claim an unrelayed `approved` row for relay: only an `approved`, unclaimed
+ * row moves to its terminal claimed status, so a double click, a second
+ * replica, or a restarted process can never relay the same decision twice.
  */
 async function claimApprovedIntegrationToolApproval(
   input: { approvalId: string; requesterUserId: string },
   claimedStatus: 'consumed' | 'auto_approved',
+  guard?: {
+    lock: (tx: DatabaseOrTransaction) => Promise<void>;
+    condition: SQL;
+  },
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
-    if (
-      !(await isDeploymentExperimentEnabledWithShareLock(
-        'integrationToolApprovals',
-        tx,
-      ))
-    ) {
-      return false;
-    }
+    // Taken before the claim, so the claim's check reads after any
+    // conflicting decision that already holds the lock has committed.
+    await guard?.lock(tx);
     const [row] = await tx
       .update(integrationToolApprovalRequests)
       .set({ status: claimedStatus })
@@ -524,6 +632,7 @@ async function claimApprovedIntegrationToolApproval(
             input.requesterUserId,
           ),
           eq(integrationToolApprovalRequests.status, 'approved'),
+          guard?.condition,
         ),
       )
       .returning({ id: integrationToolApprovalRequests.id });
@@ -568,25 +677,6 @@ export async function expireIntegrationToolApproval(
         eq(integrationToolApprovalRequests.status, 'pending'),
       ),
     );
-}
-
-/**
- * Cancel every still-open approval (pending or approved-but-unclaimed) with a
- * recorded reason. Used when the experiment is disabled: in-flight asks fail
- * closed, approved-but-unrelayed decisions never execute, and a later
- * re-enable cannot resurrect these rows because cancelled is terminal.
- */
-export async function cancelOpenIntegrationToolApprovals(
-  reason: string,
-): Promise<number> {
-  const rows = await db
-    .update(integrationToolApprovalRequests)
-    .set({ status: 'cancelled', cancelReason: reason })
-    .where(
-      inArray(integrationToolApprovalRequests.status, ['pending', 'approved']),
-    )
-    .returning({ id: integrationToolApprovalRequests.id });
-  return rows.length;
 }
 
 async function upsertSessionOverride(
@@ -640,6 +730,107 @@ export async function listIntegrationToolSessionOverrides(
 }
 
 /**
+ * Stop Auto for one session: from now on its default tools ask a person.
+ * Returns true only for the call that stopped it, so the notice is posted
+ * once even when several calls fail at the same time.
+ */
+export async function suspendIntegrationToolAutoForSession(
+  sessionId: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(sessions)
+    .set({ autoToolApprovalsSuspendedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        isNull(sessions.autoToolApprovalsSuspendedAt),
+      ),
+    )
+    .returning({ id: sessions.id });
+  return rows.length > 0;
+}
+
+/**
+ * Turn Auto on or off for one session, as its owner. Turning it on also
+ * lifts an earlier stop (see `suspendIntegrationToolAutoForSession`), so the
+ * owner can start Auto again once calls can be assessed. Returns false when
+ * the session is not this user's.
+ */
+export async function setIntegrationToolAutoForSession(input: {
+  sessionId: string;
+  userId: string;
+  enabled: boolean;
+}): Promise<boolean> {
+  const rows = await db
+    .update(sessions)
+    .set({
+      autoToolApprovalsEnabled: input.enabled,
+      ...(input.enabled ? { autoToolApprovalsSuspendedAt: null } : {}),
+    })
+    .where(
+      and(
+        eq(sessions.id, input.sessionId),
+        eq(sessions.ownerUserId, input.userId),
+      ),
+    )
+    .returning({ id: sessions.id });
+  return rows.length > 0;
+}
+
+/**
+ * Auto's state for one session, as its owner sees it. Null when the session
+ * is not this user's.
+ */
+export async function getIntegrationToolAutoForSession(input: {
+  sessionId: string;
+  userId: string;
+}): Promise<{ enabled: boolean; suspended: boolean } | null> {
+  const [row] = await db
+    .select({
+      enabled: sessions.autoToolApprovalsEnabled,
+      suspendedAt: sessions.autoToolApprovalsSuspendedAt,
+    })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.id, input.sessionId),
+        eq(sessions.ownerUserId, input.userId),
+      ),
+    )
+    .limit(1);
+  return row
+    ? { enabled: row.enabled, suspended: row.suspendedAt != null }
+    : null;
+}
+
+/**
+ * Whether the session owner has Auto on for this session. Off for a session
+ * that does not exist: Auto never runs without an owner's choice.
+ */
+export async function isIntegrationToolAutoEnabledForSession(
+  sessionId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ enabled: sessions.autoToolApprovalsEnabled })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return row?.enabled === true;
+}
+
+/** Whether Auto has stopped for this session; see `suspendIntegrationToolAutoForSession`. */
+export async function isIntegrationToolAutoSuspendedForSession(
+  sessionId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ suspendedAt: sessions.autoToolApprovalsSuspendedAt })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return row?.suspendedAt != null;
+}
+
+/**
  * Audit row for an ask the bridge relayed without a card because the
  * requester already chose "don't ask again this session" for the tool. It is
  * born terminal, so no later decision or relay can ever claim it.
@@ -680,7 +871,7 @@ export async function insertAutoApprovedIntegrationToolApproval(
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
-        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
         status: 'approved',
         decidedByUserId: input.decidedBy === 'model' ? null : owner.id,
         decidedAt: sql`clock_timestamp()`,
@@ -725,7 +916,7 @@ export async function insertAutoRejectedIntegrationToolApproval(
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
-        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
         status: 'auto_rejected',
         decidedByUserId: null,
         decidedAt: sql`clock_timestamp()`,
@@ -739,17 +930,65 @@ export async function insertAutoRejectedIntegrationToolApproval(
 
 /**
  * Atomically claim an unrelayed auto-approval for relay: only an `approved`,
- * unclaimed row transitions to terminal `auto_approved`. The experiment
- * disable sweep cancels `approved` rows, so a sweep that lands first makes
- * this return false and the caller rejects the native ask instead of
- * executing — no auto_approved record ever exists for a call that did not
- * run, and no disable can slip between the claim and the relay decision.
+ * unclaimed row transitions to terminal `auto_approved`. A row that is no
+ * longer claimable makes this return false and the caller rejects the native
+ * ask instead of executing, so no auto_approved record ever exists for a call
+ * that did not run.
  */
 export async function claimAutoApprovedIntegrationToolApproval(input: {
   approvalId: string;
   requesterUserId: string;
+  /**
+   * Fail the claim if the requester has rejected a call to this tool in the
+   * session. The claim and rejections of the tool share a lock, so a
+   * rejection that commits before the claim is never missed.
+   */
+  unlessToolRejected?: {
+    sessionId: string;
+    integrationId: string;
+    toolName: string;
+  };
 }): Promise<boolean> {
-  return claimApprovedIntegrationToolApproval(input, 'auto_approved');
+  const rejection = alias(integrationToolApprovalRequests, 'rejection');
+  const tool = input.unlessToolRejected;
+  const claimed = await claimApprovedIntegrationToolApproval(
+    input,
+    'auto_approved',
+    tool
+      ? {
+          lock: (tx) => lockToolRejections(tx, tool),
+          condition: notExists(
+            db
+              .select({ id: rejection.id })
+              .from(rejection)
+              .where(
+                and(
+                  eq(rejection.sessionId, tool.sessionId),
+                  eq(rejection.requesterUserId, input.requesterUserId),
+                  eq(rejection.decidedByUserId, input.requesterUserId),
+                  isNull(rejection.taskId),
+                  eq(rejection.integrationId, tool.integrationId),
+                  eq(rejection.toolName, tool.toolName),
+                  eq(rejection.status, 'rejected'),
+                ),
+              ),
+          ),
+        }
+      : undefined,
+  );
+  if (!claimed && tool) {
+    // A reservation that lost to a rejection never runs; close it.
+    await db
+      .update(integrationToolApprovalRequests)
+      .set({ status: 'cancelled' })
+      .where(
+        and(
+          eq(integrationToolApprovalRequests.id, input.approvalId),
+          eq(integrationToolApprovalRequests.status, 'approved'),
+        ),
+      );
+  }
+  return claimed;
 }
 
 /**
@@ -757,21 +996,13 @@ export async function claimAutoApprovedIntegrationToolApproval(input: {
  * approval of this exact call. The agent's native ask is advisory inside a
  * sandbox, so the proxy is what makes Ask first real for a task: a call runs
  * only by consuming an approved row for the same task, tool, and arguments,
- * once. Serialized against the experiment toggle like every other claim.
+ * once.
  */
 export async function claimTaskIntegrationToolCall(input: {
   taskId: string;
   argsFingerprint: string;
 }): Promise<boolean> {
   return db.transaction(async (tx) => {
-    if (
-      !(await isDeploymentExperimentEnabledWithShareLock(
-        'integrationToolApprovals',
-        tx,
-      ))
-    ) {
-      return false;
-    }
     const [approved] = await tx
       .select({
         id: integrationToolApprovalRequests.id,
@@ -825,7 +1056,7 @@ export async function recordIntegrationToolShadowEvaluation(input: {
     taskId: input.taskId,
     integrationId: input.integrationId,
     toolName: input.toolName,
-    argsSummary: redactIntegrationToolArgs(input.argsSummary),
+    argsSummary: redactIntegrationToolArgs(input.argsSummary ?? {}),
     evaluation: input.evaluation,
   });
 }

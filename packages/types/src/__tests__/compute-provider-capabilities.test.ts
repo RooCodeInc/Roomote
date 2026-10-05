@@ -11,34 +11,35 @@ import { getWorkerComputeProviderLabel } from '../compute-providers/worker-conte
 import { resolveConfiguredComputeProviderResources } from '../compute-provider-usage';
 
 describe('compute provider capabilities', () => {
-  it.each([
-    ['roomote', 'central'],
-    ['modal', 'none'],
-    ['docker', 'none'],
-    ['daytona', 'provider'],
-    ['e2b', 'provider'],
-    ['blaxel', 'provider'],
-    ['box', 'provider'],
-    ['azure', 'provider'],
-  ] as const)(
-    'resolves %s command output from %s storage',
-    (provider, source) => {
+  it('resolves command output storage for every compute provider', () => {
+    for (const [provider, source] of [
+      ['roomote', 'central'],
+      ['modal', 'none'],
+      ['docker', 'none'],
+      ['daytona', 'provider'],
+      ['e2b', 'provider'],
+      ['blaxel', 'provider'],
+      ['box', 'provider'],
+      ['azure', 'provider'],
+    ] as const) {
       expect(getComputeProviderCommandOutputSource(provider)).toBe(source);
-    },
-  );
+    }
+  });
 
-  it.each([
-    'docker',
-    'modal',
-    'daytona',
-    'e2b',
-    'blaxel',
-    'box',
-    'roomote',
-  ] as const)('marks %s as supporting Docker projects', (provider) => {
-    expect(
-      getComputeProviderCapabilities(provider).supportsDockerProjects,
-    ).toBe(true);
+  it('marks all sandbox providers as supporting Docker projects', () => {
+    for (const provider of [
+      'docker',
+      'modal',
+      'daytona',
+      'e2b',
+      'blaxel',
+      'box',
+      'roomote',
+    ] as const) {
+      expect(
+        getComputeProviderCapabilities(provider).supportsDockerProjects,
+      ).toBe(true);
+    }
   });
 
   it('classifies Box as standby-resumable with template snapshots', () => {

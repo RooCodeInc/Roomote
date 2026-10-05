@@ -3,6 +3,7 @@ import { RunStatus, type TaskState } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
 import { taskRuns, tasks } from '../schema';
+import { createSessionStatusJudgmentRequest } from './session-status-judgments';
 import { touchSessionForTask } from './sessions';
 
 /**
@@ -139,10 +140,27 @@ export async function syncTaskStateFromRuns(
     return;
   }
 
-  await tx
+  const [updatedTask] = await tx
     .update(tasks)
     .set({ state: nextState, updatedAt: new Date() })
-    .where(and(eq(tasks.id, taskId), ne(tasks.state, nextState)));
+    .where(and(eq(tasks.id, taskId), ne(tasks.state, nextState)))
+    .returning({ id: tasks.id });
 
-  await touchSessionForTask(tx, taskId, Math.floor(Date.now() / 1000));
+  const session = await touchSessionForTask(
+    tx,
+    taskId,
+    Math.floor(Date.now() / 1000),
+  );
+
+  if (updatedTask && nextState !== 'active' && session) {
+    const terminalRun = selectTaskStateRun(runs);
+    if (terminalRun) {
+      await createSessionStatusJudgmentRequest(tx, {
+        sessionId: session.id,
+        sourceEventId: `task-run:${terminalRun.id}:${nextState}`,
+        sourceKind: 'task_terminal',
+        state: 'pending',
+      });
+    }
+  }
 }

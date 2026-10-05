@@ -129,13 +129,11 @@ describe('personal integration tool policy commands', () => {
     });
   });
 
-  it('is inert while the experiment is off', async () => {
-    vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(false);
-    expect(await listPersonalIntegrationToolPoliciesCommand(auth)).toEqual([]);
-    await expect(
-      setPersonalIntegrationToolPolicyCommand(auth, input),
-    ).rejects.toThrow('not enabled');
-    expect(listIntegrationToolUserPolicies).not.toHaveBeenCalled();
-    expect(upsertIntegrationToolUserPolicy).not.toHaveBeenCalled();
+  it('needs no experiment: personal policies are always available', async () => {
+    await listPersonalIntegrationToolPoliciesCommand(auth);
+    await setPersonalIntegrationToolPolicyCommand(auth, input);
+    expect(listIntegrationToolUserPolicies).toHaveBeenCalled();
+    expect(upsertIntegrationToolUserPolicy).toHaveBeenCalled();
+    expect(isDeploymentExperimentEnabled).not.toHaveBeenCalled();
   });
 });

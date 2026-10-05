@@ -9,6 +9,8 @@ import {
   CREDENTIAL_EGRESS_SERVICE_TOKEN_ENV_PREFIX,
   CREDENTIAL_EGRESS_WORKLOAD_ENV,
   type CredentialEgressWorkloadServiceManifestEntry,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
 } from '@roomote/types';
 
 /**
@@ -82,18 +84,15 @@ const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
 ]);
 const MODEL_RUNTIME_ENV_KEYS = [
-  'R_MODEL',
-  'R_SMALL_MODEL',
-  'R_VISION_MODEL',
-  'R_CODE_REVIEW_MODEL',
-  'R_EXPLORE_MODEL',
-  'R_PLANNING_MODEL',
-  'R_MODEL_REASONING_EFFORT',
-  'R_SMALL_MODEL_REASONING_EFFORT',
-  'R_VISION_MODEL_REASONING_EFFORT',
-  'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
-  'R_EXPLORE_MODEL_REASONING_EFFORT',
-  'R_PLANNING_MODEL_REASONING_EFFORT',
+  ...TASK_MODEL_ROLES.flatMap((role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    return [
+      descriptor.modelEnvVar,
+      descriptor.reasoningEnvVar,
+      descriptor.fallbackModelEnvVar,
+      descriptor.fallbackReasoningEnvVar,
+    ];
+  }),
   'R_MODEL_ENV_KEYS',
   'OPENCODE_CONFIG_CONTENT',
   'OPENCODE_COMMAND',

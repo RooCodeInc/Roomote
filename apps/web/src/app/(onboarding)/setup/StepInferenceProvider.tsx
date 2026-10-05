@@ -140,7 +140,10 @@ export function StepInferenceProvider({
   const xaiStatus = xaiStatusQuery.data ?? null;
   const saveModelConfig = useMutation(
     trpc.setupNew.saveModelConfig.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (result) => {
+        if (result.validationWarning) {
+          toast.warning(result.validationWarning);
+        }
         await queryClient.invalidateQueries({
           queryKey: trpc.setupNew.status.queryKey(),
         });

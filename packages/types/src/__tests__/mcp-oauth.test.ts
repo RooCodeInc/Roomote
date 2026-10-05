@@ -37,7 +37,7 @@ describe('integration data policy', () => {
 });
 
 describe('Linear OAuth scopes', () => {
-  it('keeps issue comments separate from issue field updates', () => {
+  it('keeps Linear actions, scopes, and actors aligned', () => {
     expect(getMcpIntegration('linear')?.instructions).toContain(
       'dedicated comment-creation tool',
     );
@@ -47,21 +47,12 @@ describe('Linear OAuth scopes', () => {
     expect(getMcpIntegration('linear')?.instructions).toContain(
       'report the returned tool error verbatim',
     );
-  });
-
-  it('makes deployment app actors assignable and mentionable', () => {
     expect(
       getMcpIntegrationOauthScopes('linear', 'linear_org_install'),
     ).toEqual(LINEAR_APP_OAUTH_SCOPES);
-  });
-
-  it('keeps personal account links read-only', () => {
     expect(getMcpIntegrationOauthScopes('linear', 'linear_user_link')).toEqual([
       'read',
     ]);
-  });
-
-  it('uses the OAuth user actor for personal account links', () => {
     expect(
       getMcpIntegrationAuthorizationParameters('linear', 'linear_user_link'),
     ).toEqual([{ name: 'actor', value: 'user' }]);
@@ -120,7 +111,7 @@ describe('Cloudflare OAuth', () => {
 });
 
 describe('Notion internal integration', () => {
-  it('uses a deployment-scoped native MCP with admin-managed credentials', () => {
+  it('uses and recognizes the deployment-scoped native MCP configuration', () => {
     expect(getMcpIntegration('notion')).toMatchObject({
       name: 'Notion',
       connectionScope: 'deployment',
@@ -137,9 +128,6 @@ describe('Notion internal integration', () => {
       oauthPkce: false,
     });
     expect(getMcpIntegrationConnectionScope('notion')).toBe('deployment');
-  });
-
-  it('recognizes only stored Notion internal integration configs', () => {
     expect(
       isMcpConnectionNotionConfig({
         type: 'notion',
@@ -157,7 +145,7 @@ describe('Notion internal integration', () => {
 });
 
 describe('Rippling HRIS connection', () => {
-  it('keeps the deployment credential on the control plane', () => {
+  it('keeps and recognizes the deployment credential on the control plane', () => {
     expect(getMcpIntegration('rippling')).toMatchObject({
       name: 'Rippling',
       connectionScope: 'deployment',
@@ -165,9 +153,6 @@ describe('Rippling HRIS connection', () => {
       serverMode: 'credential_only',
     });
     expect(getMcpIntegration('rippling')?.url).toBeUndefined();
-  });
-
-  it('recognizes only encrypted Rippling token configs', () => {
     expect(
       isMcpConnectionRipplingConfig({
         type: 'rippling',
@@ -229,7 +214,7 @@ describe('Exa optional API key connection', () => {
 });
 
 describe('ElevenLabs credential-only integration', () => {
-  it('is a deployment-scoped credential_only entry with no MCP url', () => {
+  it('is credential-only and recognizes only complete stored configs', () => {
     expect(getMcpIntegration('elevenlabs')).toMatchObject({
       name: 'ElevenLabs',
       connectionScope: 'deployment',
@@ -238,9 +223,6 @@ describe('ElevenLabs credential-only integration', () => {
     });
     expect(getMcpIntegration('elevenlabs')?.url).toBeUndefined();
     expect(getMcpIntegrationDefaultDisabledTools('elevenlabs')).toEqual([]);
-  });
-
-  it('recognizes a valid stored ElevenLabs config and rejects others', () => {
     expect(
       isMcpConnectionElevenLabsConfig({
         type: 'elevenlabs',
@@ -343,7 +325,7 @@ describe('Resend OAuth', () => {
 });
 
 describe('Voice credential-only integration', () => {
-  it('is a deployment-scoped credential_only entry with no MCP url', () => {
+  it('is credential-only and recognizes valid stored configs', () => {
     expect(getMcpIntegration('voice')).toMatchObject({
       name: 'Voice',
       connectionScope: 'deployment',
@@ -352,9 +334,6 @@ describe('Voice credential-only integration', () => {
     });
     expect(getMcpIntegration('voice')?.url).toBeUndefined();
     expect(getMcpIntegrationDefaultDisabledTools('voice')).toEqual([]);
-  });
-
-  it('recognizes a valid stored Voice config and rejects others', () => {
     expect(
       isMcpConnectionVoiceConfig({ type: 'voice', encryptedApiKey: 'enc' }),
     ).toBe(true);

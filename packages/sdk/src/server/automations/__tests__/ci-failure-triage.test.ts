@@ -230,7 +230,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       source: 'manager_channel',
     });
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.skippedReason).toBeNull();
     expect(result.launchedTaskId).toBe('task-1');
@@ -266,6 +266,31 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
         trigger: 'manual',
         visibility: 'hidden',
       },
+      { launchClass: 'automation' },
+    );
+  });
+
+  it('preserves webhook provenance through the launched task', async () => {
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'teams',
+      channelId: '19:teams-channel@thread.tacv2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({
+      context: { trigger: 'webhook' },
+    });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockTryClaimCiFailureTriageInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({ marker: 'webhook:acme/api' }),
+    );
+    expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: 'webhook' }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: 'webhook' }),
       { launchClass: 'automation' },
     );
   });
@@ -318,7 +343,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
         source: 'automation_target' as const,
       };
       const result = await ciFailureTriageJob({
-        manualTrigger: true,
+        context: { trigger: 'manual' },
         ...(override ? { destination } : {}),
       });
       expect(result.launchedTaskId).toBe('task-1');
@@ -341,7 +366,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       settings: { additionalRules: 'Only backend' },
     });
     await ciFailureTriageJob({
-      manualTrigger: true,
+      context: { trigger: 'manual' },
       destination: {
         provider: 'slack',
         channelId: 'C123',
@@ -400,7 +425,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
         source: 'automation_target' as const,
       };
       const result = await ciFailureTriageJob({
-        manualTrigger: true,
+        context: { trigger: 'manual' },
         ...(override ? { destination } : {}),
       });
       expect(result.launchedTaskId).toBe('task-1');
@@ -436,7 +461,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     });
     mockBuildDestinationTaskPayloadFields.mockReturnValue({});
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBe('task-1');
     expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenCalledWith(
@@ -497,7 +522,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     });
     mockBuildDestinationTaskPayloadFields.mockReturnValue({});
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBe('task-1');
     expect(mockGetLatestGitLabPipeline).toHaveBeenCalledTimes(1);
@@ -538,7 +563,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       source: 'manager_channel',
     });
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBeNull();
     expect(mockGetLatestGitLabPipeline).not.toHaveBeenCalled();
@@ -571,7 +596,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       source: 'manager_channel',
     });
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBeNull();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
@@ -603,7 +628,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       source: 'manager_channel',
     });
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBeNull();
     expect(mockGetGitLabPipelineFailureEvidence).not.toHaveBeenCalled();
@@ -619,7 +644,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     });
     mockBuildDestinationTaskPayloadFields.mockReturnValue({});
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBe('task-1');
     expect(mockEnqueueTask).toHaveBeenCalledWith(
@@ -640,7 +665,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     });
     mockBuildDestinationTaskPayloadFields.mockReturnValue({});
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBe('task-1');
     expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenCalledWith(
@@ -683,7 +708,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       source: 'manager_channel',
     });
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBeNull();
     expect(result.skippedReason).toContain('no repositories are covered');
@@ -710,7 +735,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     });
     mockBuildDestinationTaskPayloadFields.mockReturnValue({});
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBe('task-1');
     expect(mockGetLatestAdoBuild).toHaveBeenCalledWith({
@@ -768,7 +793,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       source: 'manager_channel',
     });
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBeNull();
     expect(mockGetAdoBuildFailureEvidence).not.toHaveBeenCalled();
@@ -808,7 +833,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       source: 'manager_channel',
     });
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBeNull();
     expect(mockGetLatestAdoBuild).not.toHaveBeenCalled();
@@ -833,7 +858,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     });
     mockBuildDestinationTaskPayloadFields.mockReturnValue({});
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBe('task-1');
     expect(mockGetLatestGiteaActionRun).toHaveBeenCalledWith({
@@ -890,7 +915,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       source: 'manager_channel',
     });
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBeNull();
     expect(mockGetGiteaActionRunFailureEvidence).not.toHaveBeenCalled();
@@ -924,7 +949,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     });
     mockBuildDestinationTaskPayloadFields.mockReturnValue({});
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBe('task-1');
     expect(mockEnqueueTask).toHaveBeenCalled();
@@ -960,7 +985,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     });
     mockBuildDestinationTaskPayloadFields.mockReturnValue({});
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBe('task-1');
     expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
@@ -1006,7 +1031,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       source: 'manager_channel',
     });
 
-    const result = await ciFailureTriageJob({ manualTrigger: true });
+    const result = await ciFailureTriageJob({ context: { trigger: 'manual' } });
 
     expect(result.launchedTaskId).toBeNull();
     expect(mockGetLatestGiteaActionRun).not.toHaveBeenCalled();

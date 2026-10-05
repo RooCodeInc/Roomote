@@ -35,11 +35,13 @@ const fetchRequestHandlerMock = vi.mocked(fetchRequestHandler);
 describe('POST /api/trpc/[trpc]', () => {
   let clock = 0;
   let responseMetaResult: unknown;
+  let responseProcedurePaths = ['tasks.get'];
 
   beforeEach(() => {
     vi.clearAllMocks();
     clock = 0;
     responseMetaResult = undefined;
+    responseProcedurePaths = ['tasks.get'];
     vi.spyOn(performance, 'now').mockImplementation(() => clock);
 
     createContextMock.mockImplementation(async () => {
@@ -58,7 +60,7 @@ describe('POST /api/trpc/[trpc]', () => {
       responseMetaResult = opts.responseMeta?.({
         data: [],
         ctx: undefined,
-        paths: ['tasks.get'],
+        paths: responseProcedurePaths,
         info: undefined,
         type: 'query',
         errors: [],
@@ -119,6 +121,20 @@ describe('POST /api/trpc/[trpc]', () => {
     });
     expect(response.headers.get('server-timing')).toBe('handler;dur=50');
 
+    await response.text();
+  });
+
+  it('marks the webhook URL settings response as uncacheable and non-referring', async () => {
+    responseProcedurePaths = ['automations.getCustomAutomationWebhook'];
+
+    const response = await call();
+
+    expect(responseMetaResult).toMatchObject({
+      headers: {
+        'cache-control': 'no-store, private',
+        'referrer-policy': 'no-referrer',
+      },
+    });
     await response.text();
   });
 

@@ -22,12 +22,21 @@ export class InferenceProviderValidationError extends Error {
 // save. Model access, rate limits, and unreachable endpoints also arise from
 // catalog defaults the account legitimately lacks (Azure models are
 // customer-named deployments) or from Roomote's own validation helper, and
-// must not lock an operator out of connecting a working provider.
+// must not lock an operator out of connecting a working provider. An account
+// out of credits or quota is not a credential problem either: operators add
+// the key and top the account up in parallel, so that save goes through with
+// a warning instead.
 const BLOCKING_FAILURE_REASONS =
-  new Set<NonTaskInferenceValidationFailureReason>([
-    'insufficient_credits',
-    'invalid_credentials',
-  ]);
+  new Set<NonTaskInferenceValidationFailureReason>(['invalid_credentials']);
+
+/** A validation result that does not block the save but is worth showing. */
+type InferenceProviderValidationWarning = {
+  code: Extract<
+    NonTaskInferenceValidationFailureReason,
+    'insufficient_credits'
+  >;
+  message: string;
+};
 
 type CollectCredentialParams = Parameters<
   typeof collectSetupModelProviderCredentialValues
@@ -75,6 +84,9 @@ export async function collectCandidateProviderCredentials(
  * Persisted values the runtime env does not override fill in surrounding
  * context (regions, base URLs); submitted values are always the values
  * exercised, because they are exactly what the save will persist.
+ *
+ * Throws when the provider rejects the credentials. Returns a warning when
+ * the save can proceed but the account cannot serve requests yet.
  */
 export async function assertInferenceProviderConnection(params: {
   clearedEnvVarNames?: string[];
@@ -83,7 +95,7 @@ export async function assertInferenceProviderConnection(params: {
   persistedEnv?: Record<string, string>;
   providerEnvVarNames: string[];
   providerLabel: string;
-}): Promise<void> {
+}): Promise<InferenceProviderValidationWarning | null> {
   const persistedEnv =
     params.persistedEnv ?? (await resolveEffectiveDeploymentEnvVars());
   const clearedEnvVarNames = new Set(params.clearedEnvVarNames ?? []);
@@ -123,19 +135,28 @@ export async function assertInferenceProviderConnection(params: {
       result.retryable,
     );
   }
+
+  if (!result.success && result.reason === 'insufficient_credits') {
+    return {
+      code: result.reason,
+      message: `The ${params.providerLabel} account seems to be out of credits or quota. Add credits before using it.`,
+    };
+  }
+
+  return null;
 }
 
 /**
  * Pre-save credential validation shared by the setup wizard and the Models
  * settings page: collect the candidate credentials once, skip the live check
  * when the save changes nothing, and qualify the rest through the non-task
- * inference canary.
+ * inference canary. Resolves with a non-blocking warning, if any.
  */
 export async function validateSetupModelProviderCredentials(
   params: Omit<CollectCredentialParams, 'isEnvVarSatisfied'> & {
     modelId: string;
   },
-): Promise<void> {
+): Promise<InferenceProviderValidationWarning | null> {
   const { modelId, ...collectParams } = params;
   const {
     values,
@@ -149,10 +170,10 @@ export async function validateSetupModelProviderCredentials(
   // now; only a value that differs from what is persisted, or a clear that
   // removes a persisted value, needs qualification.
   if (changedValues.length === 0 && clearedPersistedEnvVarNames.length === 0) {
-    return;
+    return null;
   }
 
-  await assertInferenceProviderConnection({
+  return assertInferenceProviderConnection({
     providerLabel: params.provider.label,
     providerEnvVarNames: getSetupModelProviderEnvVarNames(params.provider),
     modelId,

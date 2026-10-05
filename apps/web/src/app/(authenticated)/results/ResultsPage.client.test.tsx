@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   get: vi.fn(),
   replace: vi.fn(),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+  searchParams: new URLSearchParams(),
   isDesktop: true,
 }));
 
@@ -56,7 +59,7 @@ const results: ResultInboxItem[] = [
     automationName: 'Code Quality Auditor',
     headline: 'Simplify the worker',
     decisionContext: 'Extract the repeated boundary.',
-    content: 'Extract the repeated boundary.',
+    content: '',
     priority: 'high',
     preparationStatus: 'not_required',
     createdAt: new Date('2026-09-11T09:00:00Z'),
@@ -73,7 +76,7 @@ const results: ResultInboxItem[] = [
 let currentResults = results;
 
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => mocks.searchParams,
   useRouter: () => ({ replace: mocks.replace }),
 }));
 
@@ -82,11 +85,7 @@ vi.mock('usehooks-ts', () => ({
 }));
 
 vi.mock('sonner', () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
-}));
-
-vi.mock('@/hooks/useResultsPage', () => ({
-  useResultsPage: () => ({ enabled: true, isLoading: false }),
+  toast: { error: mocks.toastError, success: mocks.toastSuccess },
 }));
 
 vi.mock('@/hooks/useTelemetry', () => ({
@@ -169,6 +168,7 @@ describe('ResultsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isDesktop = true;
+    mocks.searchParams = new URLSearchParams();
     currentResults = results;
     mocks.list.mockImplementation(async () => currentResults);
     mocks.get.mockImplementation(
@@ -199,13 +199,24 @@ describe('ResultsPage', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
-  it('renders concise rows and the complete selected report on desktop', async () => {
+  it('starts collapsed and opens the selected report on desktop', async () => {
     renderPage();
+    const first = await screen.findByRole('option', {
+      name: /Three dependency risks need review/,
+    });
+    expect(first).toHaveAttribute('aria-selected', 'false');
     expect(
-      await screen.findByRole('option', {
-        name: /Three dependency risks need review/,
+      screen.queryByRole('heading', {
+        name: 'Three dependency risks need review',
       }),
-    ).toHaveAttribute('aria-selected', 'true');
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(first);
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Three dependency risks need review',
+      }),
+    ).toBeInTheDocument();
     expect(
       screen.getAllByText('The report is limited to the API workspace.'),
     ).toHaveLength(2);
@@ -232,6 +243,48 @@ describe('ResultsPage', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('opens an explicitly selected result from the URL', async () => {
+    mocks.searchParams = new URLSearchParams({
+      result: `report:${results[0]!.id}`,
+    });
+    renderPage();
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Three dependency risks need review',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    ).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('closes the selected detail panel without selecting another result', async () => {
+    renderPage();
+    const first = await screen.findByRole('option', {
+      name: /Three dependency risks need review/,
+    });
+    fireEvent.click(first);
+    await screen.findByRole('heading', {
+      name: 'Three dependency risks need review',
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Close result details' }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('heading', {
+          name: 'Three dependency risks need review',
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(first).toHaveAttribute('aria-selected', 'false');
+  });
+
   it('opens mobile detail explicitly and returns to the mounted list', async () => {
     mocks.isDesktop = false;
     renderPage();
@@ -249,12 +302,19 @@ describe('ResultsPage', () => {
         name: 'Three dependency risks need review',
       }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Back to results' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Close result details' }),
+    );
     expect(row).toBeInTheDocument();
   });
 
   it('clears the selected result without treating selection as disposition', async () => {
     renderPage();
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    );
     await screen.findByText('Full report');
     expect(mocks.clearOne).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
@@ -263,6 +323,19 @@ describe('ResultsPage', () => {
         { id: results[0]!.id, kind: 'report' },
         expect.anything(),
       ),
+    );
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('Result cleared');
+  });
+
+  it('does not duplicate suggestion context when the result has no body', async () => {
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole('option', { name: /Simplify the worker/ }),
+    );
+
+    await screen.findByRole('heading', { name: 'Simplify the worker' });
+    expect(screen.getAllByText('Extract the repeated boundary.')).toHaveLength(
+      2,
     );
   });
 
@@ -291,10 +364,16 @@ describe('ResultsPage', () => {
     );
   });
 
-  it('uses pending language for an empty queue', async () => {
+  it('explains where new results will appear when the queue is empty', async () => {
     mocks.list.mockResolvedValue([]);
     renderPage();
-    expect(await screen.findByText('No pending results')).toBeInTheDocument();
+    expect(await screen.findByText("You're all caught up")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'New automation reports and suggested follow-ups will appear here when they are ready.',
+      ),
+    ).toBeInTheDocument();
+    expect(mocks.replace).not.toHaveBeenCalled();
   });
 
   it('retains prior detail for 500ms, hides stale actions, then swaps when ready', async () => {
@@ -308,6 +387,11 @@ describe('ResultsPage', () => {
         : Promise.resolve(results[0]),
     );
     renderPage();
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    );
     await screen.findByText('Full report');
 
     fireEvent.click(
@@ -344,6 +428,11 @@ describe('ResultsPage', () => {
         : Promise.resolve(results[0]),
     );
     renderPage();
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    );
     await screen.findByText('Full report');
     fireEvent.click(
       screen.getByRole('option', { name: /Simplify the worker/ }),
@@ -374,6 +463,11 @@ describe('ResultsPage', () => {
         : Promise.resolve(results[0]),
     );
     renderPage();
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    );
     await screen.findByText('Full report');
     fireEvent.click(
       screen.getByRole('option', { name: /Simplify the worker/ }),
@@ -392,10 +486,11 @@ describe('ResultsPage', () => {
 
   it('navigates rows with arrows and activates the current main action with Enter', async () => {
     renderPage();
-    await screen.findByText('Full report');
-    const first = screen.getByRole('option', {
+    const first = await screen.findByRole('option', {
       name: /Three dependency risks need review/,
     });
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+    await screen.findByText('Full report');
     first.focus();
     fireEvent.keyDown(first, { key: 'ArrowDown' });
 
@@ -415,6 +510,11 @@ describe('ResultsPage', () => {
 
   it('clears the current result with Delete without double activation', async () => {
     renderPage();
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    );
     await screen.findByText('Full report');
     fireEvent.keyDown(document.body, { key: 'Delete', repeat: false });
     fireEvent.keyDown(document.body, { key: 'Delete', repeat: true });
@@ -423,5 +523,6 @@ describe('ResultsPage', () => {
       { id: results[0]!.id, kind: 'report' },
       expect.anything(),
     );
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('Result cleared');
   });
 });

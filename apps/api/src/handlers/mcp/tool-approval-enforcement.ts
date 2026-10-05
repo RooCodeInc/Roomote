@@ -1,14 +1,17 @@
 import {
   claimTaskIntegrationToolCall,
   db,
+  findLatestFastConversationUserRequest,
+  findLatestTaskUserRequest,
   fingerprintIntegrationToolCall,
+  getSessionForFastConversation,
   getSessionForTask,
-  isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
   listIntegrationToolUserPolicies,
 } from '@roomote/db/server';
 import {
+  INTEGRATION_TOOL_FAST_CONVERSATION_HEADER,
   integrationToolModeIsAutoAssessed,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
@@ -32,11 +35,12 @@ export type ProxyToolApprovals = {
   defaultBlock?: 'needs_approval';
   /** Whether a call to a default tool should be shadow-assessed. */
   shadowDefaultTools: boolean;
+  /** The session the call belongs to, whose owner turns Auto on. */
+  sessionId?: string;
 };
 
 /**
- * Experiment-gated (`integrationToolApprovals`) enforcement of per-tool
- * approval policies at the integration proxy, the one boundary every caller
+ * Enforcement of per-tool approval policies at the integration proxy, the one boundary every caller
  * crosses. A Session enforces `ask` natively before the call ever gets here,
  * but a task's agent has a shell next to its MCP configuration, so nothing
  * inside the sandbox can be the boundary for a task.
@@ -44,15 +48,18 @@ export type ProxyToolApprovals = {
  * - `reject` blocks the tool for every caller, and hides it.
  * - `ask` holds a task run's call until the Session owner has approved that
  *   exact call (`claimProxyTaskToolCall`). The task's agent asks natively, but
- *   the approval is only real because it is claimed here. Session calls pass:
- *   their native ask was already decided by the Session owner.
+ *   the approval is only real because it is claimed here. A call that arrives
+ *   with nothing to claim is asked about here instead of refused
+ *   (`decideUnaskedTaskToolCall`): the agent only asks about what was gated
+ *   when its run started. Session calls pass: their native ask was already
+ *   decided by the Session owner.
  *
  * A task belongs to one Session, whose overrides apply to it as they do to
  * the Session's own agent: "don't ask again this session" lifts an `ask`, and
  * a session `ask` gates a tool the policies leave alone.
  *
  * The stricter of the deployment policy and the acting user's personal
- * policy applies, within the layers that govern the integration. Returns no blocks while the experiment is off.
+ * policy applies, within the layers that govern the integration.
  */
 export async function resolveProxyToolApprovalBlocks(input: {
   integrationId: string;
@@ -63,17 +70,31 @@ export async function resolveProxyToolApprovalBlocks(input: {
    */
   policyScope?: 'deployment' | 'personal';
   tokenType: 'run' | 'auth';
-  /** Looked up only while the experiment is on. */
   resolveActingUserId: () => Promise<string | null>;
   /** The run token's task, for its Session's overrides. */
   resolveTaskId?: () => Promise<string | null>;
+  /** The request's headers, for the Fast conversation a session's call names. */
+  requestHeaders?: Headers;
 }): Promise<ProxyToolApprovals> {
   const blocks = new Map<string, ProxyToolApprovalBlock>();
   const result: ProxyToolApprovals = { blocks, shadowDefaultTools: false };
-  if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-    return result;
-  }
-  const autoState = await resolveIntegrationToolAutoState();
+  // Auto is the session owner's choice for that session, so find the call's
+  // session first: a task's, or the one behind the conversation it names.
+  const taskId =
+    input.tokenType === 'run' ? await input.resolveTaskId?.() : null;
+  const fastConversationId =
+    input.tokenType === 'auth' && input.requestHeaders
+      ? readFastConversationIdHeader(input.requestHeaders)
+      : null;
+  const session = taskId
+    ? await getSessionForTask(db, taskId)
+    : fastConversationId
+      ? await getSessionForFastConversation(db, fastConversationId)
+      : null;
+  if (session) result.sessionId = session.id;
+  const autoState = await resolveIntegrationToolAutoState({
+    sessionId: session?.id,
+  });
   result.shadowDefaultTools = autoState.mode === 'shadow';
   if (autoState.mode === 'on' && input.tokenType === 'run') {
     result.defaultBlock = 'needs_approval';
@@ -101,8 +122,6 @@ export async function resolveProxyToolApprovalBlocks(input: {
   }
   const overrideModes = new Map<string, 'allow' | 'ask'>();
   if (input.tokenType === 'run') {
-    const taskId = await input.resolveTaskId?.();
-    const session = taskId ? await getSessionForTask(db, taskId) : null;
     const overrides = session
       ? await listIntegrationToolSessionOverrides(session.id)
       : [];
@@ -146,7 +165,20 @@ export function resolveProxyToolApprovalBlock(
   return approvals.blocks.get(toolName) ?? approvals.defaultBlock;
 }
 
-/** Shadow-assess a call to a default tool; never awaited. */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The Fast conversation a Session's integration call names, if any. */
+export function readFastConversationIdHeader(headers: Headers): string | null {
+  const value = headers.get(INTEGRATION_TOOL_FAST_CONVERSATION_HEADER)?.trim();
+  return value && UUID_PATTERN.test(value) ? value : null;
+}
+
+/**
+ * Shadow-assess a call to a default tool; never awaited. A call is assessed
+ * against what its user last asked: the task's latest prompt for a task, or
+ * the caller's own latest prompt in the Fast conversation it names.
+ */
 export function shadowProxyToolCall(
   approvals: ProxyToolApprovals,
   input: {
@@ -155,12 +187,28 @@ export function shadowProxyToolCall(
     args: unknown;
     userId: string | null;
     taskId: string | null;
+    fastConversationId?: string | null;
   },
 ): void {
   if (!approvals.shadowDefaultTools || approvals.blocks.has(input.toolName)) {
     return;
   }
-  recordIntegrationToolShadowEvaluationInBackground(input);
+  const { fastConversationId, ...call } = input;
+  const { taskId, userId } = call;
+  const resolveUserRequest = taskId
+    ? () => findLatestTaskUserRequest(taskId)
+    : fastConversationId && userId
+      ? () =>
+          findLatestFastConversationUserRequest({
+            conversationId: fastConversationId,
+            userId,
+          })
+      : undefined;
+  recordIntegrationToolShadowEvaluationInBackground({
+    ...call,
+    sessionId: approvals.sessionId,
+    ...(resolveUserRequest ? { resolveUserRequest } : {}),
+  });
 }
 
 /**

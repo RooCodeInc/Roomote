@@ -688,7 +688,7 @@ export function ModelReasoningPicker({
   }
 
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
+    <Popover modal open={open} onOpenChange={onOpenChange}>
       <BasicTooltip content={tooltip}>
         <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       </BasicTooltip>

@@ -2,7 +2,12 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import { sdk } from '@roomote/sdk/client';
-import type { TaskIntegrationToolApprovals } from '@roomote/types';
+import {
+  INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE,
+  describeIntegrationToolAutoAbsentDenial,
+  toIntegrationToolUserRequest,
+  type TaskIntegrationToolApprovals,
+} from '@roomote/types';
 
 import { parseDirectMcpConfig } from './mcp-config';
 
@@ -23,8 +28,8 @@ interface TaskToolApprovalAsk {
 }
 
 /**
- * The native approval rules for this run, or undefined when there are none
- * (the `integrationToolApprovals` experiment is off, or the lookup failed).
+ * The native approval rules for this run, or undefined when the lookup
+ * failed.
  * Best effort: the integration proxy refuses a gated call without an
  * approval whatever the agent's own configuration says.
  */
@@ -207,7 +212,9 @@ export function createTaskToolApprovalRelay(options: {
       );
       return;
     }
-    const userRequest = options.getUserRequest?.();
+    const userRequest = toIntegrationToolUserRequest(
+      options.getUserRequest?.(),
+    );
     const result = await api.request({
       ...tool,
       nativeRequestId: ask.requestId,
@@ -222,8 +229,12 @@ export function createTaskToolApprovalRelay(options: {
       await reply(
         ask,
         'reject',
-        `Auto mode blocked this tool call because ${result.reason} and the session owner was away. The call was not run. The session owner can allow this tool from its call in the transcript.`,
+        describeIntegrationToolAutoAbsentDenial(result.reason),
       );
+      return;
+    }
+    if (result.outcome === 'paused') {
+      await reply(ask, 'reject', INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE);
       return;
     }
     if (result.outcome === 'unavailable') {

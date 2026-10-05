@@ -1,6 +1,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
+import { INTEGRATION_TOOL_USER_REQUEST_MAX_CHARS } from '@roomote/types';
+
 import {
   getTaskToolApprovalStatus,
   requestTaskToolApproval,
@@ -21,6 +23,37 @@ const taskRunProcedure = authenticatedProcedure.use(async ({ ctx, next }) => {
   return next({ ctx: { ...ctx, auth: ctx.auth, runId: ctx.auth.runId } });
 });
 
+/**
+ * The origin and token this request came in with, for the proxy on that
+ * origin. The API hands routers its own request wrapper, so the headers are
+ * read from the underlying request when there is one.
+ */
+export function resolveIntegrationProxyAccess(
+  req: unknown,
+): { origin: string; authorization: string } | undefined {
+  const request = req as
+    | { url?: unknown; headers?: unknown; raw?: { headers?: unknown } }
+    | undefined;
+  const headers = (request?.raw?.headers ?? request?.headers) as
+    | { get?: unknown }
+    | undefined;
+  const authorization =
+    typeof headers?.get === 'function'
+      ? (headers.get as (name: string) => unknown).call(
+          headers,
+          'authorization',
+        )
+      : undefined;
+  if (typeof request?.url !== 'string' || typeof authorization !== 'string') {
+    return undefined;
+  }
+  try {
+    return { origin: new URL(request.url).origin, authorization };
+  } catch {
+    return undefined;
+  }
+}
+
 export const toolApprovalsRouter = router({
   /** Record a native ask from the task's agent. */
   request: taskRunProcedure
@@ -31,7 +64,10 @@ export const toolApprovalsRouter = router({
           toolName: z.string().min(1).max(200),
           nativeRequestId: z.string().min(1).max(200),
           args: z.unknown(),
-          userRequest: z.string().max(20_000).optional(),
+          userRequest: z
+            .string()
+            .max(INTEGRATION_TOOL_USER_REQUEST_MAX_CHARS)
+            .optional(),
         })
         .strict(),
     )
@@ -40,6 +76,7 @@ export const toolApprovalsRouter = router({
         runId: ctx.runId,
         actingUserId: (await resolveActorScopedUserContext(ctx.auth)).userId,
         resolveServers: () => resolveTaskRunMcpServerConfigs(ctx.auth, ctx.req),
+        integrationProxy: resolveIntegrationProxyAccess(ctx.req),
         ...input,
       }),
     ),

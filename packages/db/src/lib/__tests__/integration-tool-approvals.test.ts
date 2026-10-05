@@ -1,15 +1,16 @@
 import {
   db,
+  deploymentSettings,
   eq,
   integrationToolApprovalRequests,
   integrationToolAutoEvaluations,
   sessionFactory,
+  sql,
   sessions,
   taskFactory,
   userFactory,
 } from '../../server';
 import {
-  cancelOpenIntegrationToolApprovals,
   claimAutoApprovedIntegrationToolApproval,
   claimTaskIntegrationToolCall,
   decideIntegrationToolApproval,
@@ -22,6 +23,13 @@ import {
   IntegrationToolApprovalUnavailableError,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
+  hasRejectedIntegrationToolInSession,
+  listRecentIntegrationToolApprovalOutcomes,
+  getIntegrationToolAutoForSession,
+  isIntegrationToolAutoEnabledForSession,
+  isIntegrationToolAutoSuspendedForSession,
+  setIntegrationToolAutoForSession,
+  suspendIntegrationToolAutoForSession,
   listPendingIntegrationToolApprovals,
   markIntegrationToolApprovalConsumed,
   recordIntegrationToolAutoEvaluation,
@@ -32,10 +40,6 @@ import {
   upsertIntegrationToolUserPolicy,
   listIntegrationToolUserPolicies,
 } from '../integration-tool-approvals';
-import {
-  isDeploymentExperimentEnabledWithShareLock,
-  setDeploymentExperimentEnabled,
-} from '../deployment-experiments';
 import {
   getIntegrationToolAutoSettings,
   setIntegrationToolAutoSettings,
@@ -88,14 +92,7 @@ async function insertPending(
   });
 }
 
-// Claims only succeed while the experiment is on; each test starts from the
-// enabled state and the disable cases turn it off themselves.
-beforeEach(async () => {
-  await setDeploymentExperimentEnabled('integrationToolApprovals', true);
-});
-
 afterAll(async () => {
-  await setDeploymentExperimentEnabled('integrationToolApprovals', false);
   await db.delete(integrationToolApprovalRequests);
   for (const sessionId of sessionIds) {
     await db.delete(sessions).where(eq(sessions.id, sessionId));
@@ -122,9 +119,9 @@ describe('redactIntegrationToolArgs', () => {
       long: 'x'.repeat(500),
     }) as Record<string, unknown>;
     expect(redacted.text).toBe('hello');
-    expect(redacted.apiKey).toBe('[redacted]');
+    expect(redacted.apiKey).toBe('[value omitted]');
     expect((redacted.nested as Record<string, unknown>).authorization).toBe(
-      '[redacted]',
+      '[value omitted]',
     );
     expect((redacted.nested as Record<string, unknown>).note).toBe('ok');
     expect(String(redacted.long)).toContain('[truncated]');
@@ -264,6 +261,30 @@ describe('insertIntegrationToolApproval', () => {
     expect(approval.status).toBe('pending');
     expect(approval.integrationId).toBe(call.integrationId);
     expect(Date.parse(approval.expiresAt)).toBeGreaterThan(Date.now());
+  });
+
+  it('records a call made with no arguments', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const pending = await insertPending(context, null);
+    expect(pending.argsSummary).toEqual({});
+    const approved = await insertAutoApprovedIntegrationToolApproval(context, {
+      ...call,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(null),
+      argsSummary: null,
+      decidedBy: 'model',
+    });
+    expect(approved.approvalId).toBeTruthy();
+    const rejected = await insertAutoRejectedIntegrationToolApproval(context, {
+      ...call,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(null),
+      argsSummary: null,
+      autoEvaluation: { recommendation: 'ask', evaluatedAt: '' },
+    });
+    expect(rejected.approvalId).toBeTruthy();
   });
 
   it('reuses the open row for the same native request instead of stacking', async () => {
@@ -409,124 +430,120 @@ describe('expireIntegrationToolApproval', () => {
   });
 });
 
-describe('claims serialize against the experiment toggle', () => {
-  async function approvedManualRow(context: {
-    sessionId: string;
-    userId: string;
-  }) {
-    const pending = await insertPending(context);
-    await decideIntegrationToolApproval(context, {
-      approvalId: pending.approvalId,
-      decision: 'approved',
-    });
-    return pending.approvalId;
-  }
-
-  async function reservedAutoRow(context: {
-    sessionId: string;
-    userId: string;
-  }) {
-    const reservation = await insertAutoApprovedIntegrationToolApproval(
-      context,
-      {
+describe('auto-approved reservations', () => {
+  it('loses the claim to a rejection of the same tool in the session', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const reserve = (toolName: string) =>
+      insertAutoApprovedIntegrationToolApproval(context, {
         integrationId: call.integrationId,
-        toolName: call.toolName,
+        toolName,
         nativeRequestId: nextNativeRequestId(),
         argsFingerprint: fingerprint(),
         argsSummary: call.args,
-      },
-    );
-    return reservation.approvalId;
-  }
-
-  it('never claims once the disable has committed, even before its sweep runs', async () => {
-    // The toggle commits `enabled=false` first and sweeps second. A claim
-    // landing in between used to win and relay under a disabled experiment.
-    const userId = await user();
-    const context = { sessionId: await ownedSession(userId), userId };
-    const manual = await approvedManualRow(context);
-    const auto = await reservedAutoRow(context);
-
-    await setDeploymentExperimentEnabled('integrationToolApprovals', false);
-
-    await expect(
-      markIntegrationToolApprovalConsumed({
-        approvalId: manual,
-        requesterUserId: userId,
-      }),
-    ).resolves.toBe(false);
-    await expect(
-      claimAutoApprovedIntegrationToolApproval({
-        approvalId: auto,
-        requesterUserId: userId,
-      }),
-    ).resolves.toBe(false);
-
-    // The late sweep still finds both rows open and records the truth.
-    await cancelOpenIntegrationToolApprovals('experiment_disabled');
-    expect((await getIntegrationToolApproval(manual))?.status).toBe(
-      'cancelled',
-    );
-    expect((await getIntegrationToolApproval(auto))?.status).toBe('cancelled');
-  });
-
-  it('never claims a reservation inserted after the disable sweep already ran', async () => {
-    // The sweep only cancels rows that exist; a reservation written after it
-    // can only be stopped by the claim itself reading the experiment.
-    const userId = await user();
-    const context = { sessionId: await ownedSession(userId), userId };
-    await setDeploymentExperimentEnabled('integrationToolApprovals', false);
-    await cancelOpenIntegrationToolApprovals('experiment_disabled');
-
-    const auto = await reservedAutoRow(context);
-    await expect(
-      claimAutoApprovedIntegrationToolApproval({
-        approvalId: auto,
-        requesterUserId: userId,
-      }),
-    ).resolves.toBe(false);
-    expect((await getIntegrationToolApproval(auto))?.status).toBe('approved');
-  });
-
-  it('makes a concurrent disable wait for an in-flight claim instead of interleaving', async () => {
-    const userId = await user();
-    const context = { sessionId: await ownedSession(userId), userId };
-    const auto = await reservedAutoRow(context);
-
-    // Hold the same share lock the claim takes, then start a disable: it
-    // must block on the settings row until the lock holder commits.
-    let disableSettled = false;
-    let disable: Promise<unknown> = Promise.resolve();
-    await db.transaction(async (tx) => {
-      expect(
-        await isDeploymentExperimentEnabledWithShareLock(
-          'integrationToolApprovals',
-          tx,
-        ),
-      ).toBe(true);
-      disable = setDeploymentExperimentEnabled(
-        'integrationToolApprovals',
-        false,
-      ).then(() => {
-        disableSettled = true;
       });
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(disableSettled).toBe(false);
-    });
-    await disable;
-    expect(disableSettled).toBe(true);
-
-    // With the disable committed, the reservation can no longer be claimed.
-    await expect(
+    const guarded = (approvalId: string, toolName: string) =>
       claimAutoApprovedIntegrationToolApproval({
-        approvalId: auto,
+        approvalId,
         requesterUserId: userId,
-      }),
-    ).resolves.toBe(false);
-  });
-});
+        unlessToolRejected: {
+          sessionId,
+          integrationId: call.integrationId,
+          toolName,
+        },
+      });
 
-describe('auto-approved reservations', () => {
+    // No rejection yet: the guarded claim succeeds.
+    const before = await reserve(call.toolName);
+    await expect(guarded(before.approvalId, call.toolName)).resolves.toBe(true);
+
+    // The owner rejects a call to the tool while another is reserved.
+    const reserved = await reserve(call.toolName);
+    const rejected = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: rejected.approvalId,
+      decision: 'rejected',
+    });
+    await expect(guarded(reserved.approvalId, call.toolName)).resolves.toBe(
+      false,
+    );
+    expect(
+      (await getIntegrationToolApproval(reserved.approvalId))?.status,
+    ).toBe('cancelled');
+
+    // Another tool is unaffected.
+    const other = await reserve('other_tool');
+    await expect(guarded(other.approvalId, 'other_tool')).resolves.toBe(true);
+  });
+
+  it('makes a rejection wait for an Auto claim of the same tool in progress', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const pending = await insertPending(context);
+    const order: string[] = [];
+    let rejection: Promise<unknown> | undefined;
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${sessionId}:${call.integrationId}:${call.toolName}`}, 0))`,
+      );
+      rejection = decideIntegrationToolApproval(context, {
+        approvalId: pending.approvalId,
+        decision: 'rejected',
+      }).then(() => order.push('rejected'));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      order.push('claim committed');
+    });
+    await rejection;
+    expect(order).toEqual(['claim committed', 'rejected']);
+  });
+
+  it('waits for a rejection in progress and then loses the claim to it', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const reserved = await insertAutoApprovedIntegrationToolApproval(context, {
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: call.args,
+    });
+    const pending = await insertPending(context);
+
+    let claim: Promise<boolean> | undefined;
+    // The owner's rejection is mid-transaction when Auto tries to claim.
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${sessionId}:${call.integrationId}:${call.toolName}`}, 0))`,
+      );
+      await tx
+        .update(integrationToolApprovalRequests)
+        .set({
+          status: 'rejected',
+          decidedByUserId: userId,
+          decidedAt: sql`clock_timestamp()`,
+        })
+        .where(eq(integrationToolApprovalRequests.id, pending.approvalId));
+      claim = claimAutoApprovedIntegrationToolApproval({
+        approvalId: reserved.approvalId,
+        requesterUserId: userId,
+        unlessToolRejected: {
+          sessionId,
+          integrationId: call.integrationId,
+          toolName: call.toolName,
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    });
+
+    await expect(claim).resolves.toBe(false);
+    expect(
+      (await getIntegrationToolApproval(reserved.approvalId))?.status,
+    ).toBe('cancelled');
+  });
+
   it('inserts an unrelayed approved decision and claims it exactly once', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
@@ -540,8 +557,8 @@ describe('auto-approved reservations', () => {
         argsSummary: call.args,
       },
     );
-    // Unrelayed: the row is an ordinary approved decision the disable sweep
-    // can still cancel, never a terminal auto_approved record yet.
+    // Unrelayed: the row is an ordinary approved decision, never a terminal
+    // auto_approved record yet.
     expect(reservation.status).toBe('approved');
     await expect(
       claimAutoApprovedIntegrationToolApproval({
@@ -559,32 +576,6 @@ describe('auto-approved reservations', () => {
         requesterUserId: userId,
       }),
     ).resolves.toBe(false);
-  });
-
-  it('fails the claim when the disable sweep cancels the reservation first', async () => {
-    const userId = await user();
-    const sessionId = await ownedSession(userId);
-    const reservation = await insertAutoApprovedIntegrationToolApproval(
-      { sessionId, userId },
-      {
-        integrationId: call.integrationId,
-        toolName: call.toolName,
-        nativeRequestId: nextNativeRequestId(),
-        argsFingerprint: fingerprint(),
-        argsSummary: call.args,
-      },
-    );
-    await cancelOpenIntegrationToolApprovals('experiment_disabled');
-    await expect(
-      claimAutoApprovedIntegrationToolApproval({
-        approvalId: reservation.approvalId,
-        requesterUserId: userId,
-      }),
-    ).resolves.toBe(false);
-    // The audit tells the truth: cancelled, never auto_approved.
-    const row = await getIntegrationToolApproval(reservation.approvalId);
-    expect(row?.status).toBe('cancelled');
-    expect(row?.cancelReason).toBe('experiment_disabled');
   });
 });
 
@@ -650,6 +641,41 @@ describe('Auto mode', () => {
     await setIntegrationToolAutoSettings({ mode: 'off', policy: '' });
   });
 
+  it('does not revive a saved Auto-on mode when the nightly experiment is first enabled', async () => {
+    await db
+      .insert(deploymentSettings)
+      .values({
+        id: 'default',
+        metadata: {
+          integration_tool_auto: {
+            mode: 'on',
+            policy: 'Reads are fine. Never send messages.',
+          },
+        },
+        setupCompletedAt: null,
+      })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: {
+          metadata: sql`coalesce(${deploymentSettings.metadata}, '{}'::jsonb) - 'integration_tool_auto_nightly' || ${JSON.stringify(
+            {
+              integration_tool_auto: {
+                mode: 'on',
+                policy: 'Reads are fine. Never send messages.',
+              },
+            },
+          )}::jsonb`,
+        },
+      });
+
+    await expect(getIntegrationToolAutoSettings()).resolves.toEqual({
+      mode: 'off',
+      policy: 'Reads are fine. Never send messages.',
+    });
+
+    await setIntegrationToolAutoSettings({ mode: 'off', policy: '' });
+  });
+
   it('stores Always allow as a choice of its own, unlike the default', async () => {
     const userId = await user();
     const integrationId = `always-${Date.now()}`;
@@ -695,7 +721,7 @@ describe('Auto mode', () => {
     expect(row).toMatchObject({
       integrationId: call.integrationId,
       toolName: call.toolName,
-      argsSummary: { ...call.args, apiKey: '[redacted]' },
+      argsSummary: { ...call.args, apiKey: '[value omitted]' },
       evaluation,
     });
   });
@@ -839,57 +865,6 @@ describe("claiming a task's approved call", () => {
       },
     );
   });
-
-  it('claims nothing while the experiment is off', async () => {
-    const { userId, sessionId, taskId, approval } = await approvedTaskCall();
-    await decideIntegrationToolApproval(
-      { sessionId, userId },
-      { approvalId: approval.approvalId, decision: 'approved' },
-    );
-    await setDeploymentExperimentEnabled('integrationToolApprovals', false);
-    await expect(
-      claimTaskIntegrationToolCall({
-        taskId,
-        argsFingerprint: fingerprint(),
-      }),
-    ).resolves.toBe(false);
-  });
-});
-
-describe('cancelOpenIntegrationToolApprovals', () => {
-  it('cancels pending and approved-unclaimed rows with a reason and never resurrects them', async () => {
-    const userId = await user();
-    const sessionId = await ownedSession(userId);
-    const pending = await insertPending({ sessionId, userId });
-    const approved = await insertPending({ sessionId, userId });
-    await decideIntegrationToolApproval(
-      { sessionId, userId },
-      { approvalId: approved.approvalId, decision: 'approved' },
-    );
-    const cancelled = await cancelOpenIntegrationToolApprovals(
-      'experiment_disabled',
-    );
-    expect(cancelled).toBeGreaterThanOrEqual(2);
-    for (const id of [pending.approvalId, approved.approvalId]) {
-      const row = await getIntegrationToolApproval(id);
-      expect(row?.status).toBe('cancelled');
-      expect(row?.cancelReason).toBe('experiment_disabled');
-    }
-    // Approved-but-unclaimed can no longer be relayed for execution.
-    await expect(
-      markIntegrationToolApprovalConsumed({
-        approvalId: approved.approvalId,
-        requesterUserId: userId,
-      }),
-    ).resolves.toBe(false);
-    // Cancelled rows stay terminal: decisions land on nothing.
-    await expect(
-      decideIntegrationToolApproval(
-        { sessionId, userId },
-        { approvalId: pending.approvalId, decision: 'approved' },
-      ),
-    ).rejects.toThrow(IntegrationToolApprovalUnavailableError);
-  });
 });
 
 describe('listPendingIntegrationToolApprovals', () => {
@@ -904,6 +879,335 @@ describe('listPendingIntegrationToolApprovals', () => {
     expect(
       await listPendingIntegrationToolApprovals({ sessionId, userId }),
     ).toHaveLength(1);
+  });
+});
+
+describe('listRecentIntegrationToolApprovalOutcomes', () => {
+  it('returns only recent explicit decisions on calls in the same session, with their arguments', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+
+    const approved = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: approved.approvalId,
+      decision: 'approved',
+    });
+    await markIntegrationToolApprovalConsumed({
+      approvalId: approved.approvalId,
+      requesterUserId: userId,
+    });
+
+    const rejected = await insertPending(context, {
+      channel: 'C999',
+      text: 'not this call',
+    });
+    await decideIntegrationToolApproval(context, {
+      approvalId: rejected.approvalId,
+      decision: 'rejected',
+    });
+
+    const task = await taskFactory.create();
+    const taskApproval = await insertIntegrationToolApproval(context, {
+      ...call,
+      taskId: task.id,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: call.args,
+    });
+    await decideIntegrationToolApproval(context, {
+      approvalId: taskApproval.approvalId,
+      decision: 'approved',
+    });
+    await markIntegrationToolApprovalConsumed({
+      approvalId: taskApproval.approvalId,
+      requesterUserId: userId,
+    });
+
+    const automatic = await insertAutoApprovedIntegrationToolApproval(context, {
+      ...call,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: call.args,
+      decidedBy: 'model',
+    });
+    await claimAutoApprovedIntegrationToolApproval({
+      approvalId: automatic.approvalId,
+      requesterUserId: userId,
+    });
+
+    const otherSessionId = await ownedSession(userId);
+    const otherSessionApproval = await insertPending({
+      sessionId: otherSessionId,
+      userId,
+    });
+    await decideIntegrationToolApproval(
+      { sessionId: otherSessionId, userId },
+      { approvalId: otherSessionApproval.approvalId, decision: 'approved' },
+    );
+    await markIntegrationToolApprovalConsumed({
+      approvalId: otherSessionApproval.approvalId,
+      requesterUserId: userId,
+    });
+
+    const outcomes = await listRecentIntegrationToolApprovalOutcomes(context);
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes).toEqual(
+      expect.arrayContaining([
+        {
+          integrationId: call.integrationId,
+          toolName: call.toolName,
+          outcome: 'approved',
+          arguments: call.args,
+        },
+        {
+          integrationId: call.integrationId,
+          toolName: call.toolName,
+          outcome: 'rejected',
+          arguments: { channel: 'C999', text: 'not this call' },
+        },
+      ]),
+    );
+
+    // A task also sees what its owner decided on its own calls, and never
+    // what they decided for another task of the session.
+    const otherTask = await taskFactory.create();
+    const otherTaskApproval = await insertIntegrationToolApproval(context, {
+      ...call,
+      taskId: otherTask.id,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: { channel: 'C777', text: 'another task' },
+    });
+    await decideIntegrationToolApproval(context, {
+      approvalId: otherTaskApproval.approvalId,
+      decision: 'rejected',
+    });
+    const forTask = await listRecentIntegrationToolApprovalOutcomes({
+      ...context,
+      taskId: task.id,
+    });
+    expect(forTask).toHaveLength(3);
+    expect(forTask.filter((row) => row.outcome === 'approved')).toHaveLength(2);
+    expect(JSON.stringify(forTask)).not.toContain('another task');
+    const rejectedHere = {
+      ...context,
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+    };
+    await expect(
+      hasRejectedIntegrationToolInSession({
+        ...rejectedHere,
+        taskId: otherTask.id,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      listRecentIntegrationToolApprovalOutcomes(context),
+    ).resolves.toHaveLength(2);
+  });
+
+  it("counts a rejection of a task's call for that task only", async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const task = await taskFactory.create();
+    const otherTask = await taskFactory.create();
+    const rejected = await insertIntegrationToolApproval(context, {
+      ...call,
+      taskId: task.id,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: call.args,
+    });
+    await decideIntegrationToolApproval(context, {
+      approvalId: rejected.approvalId,
+      decision: 'rejected',
+    });
+    const tool = {
+      ...context,
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+    };
+    await expect(
+      hasRejectedIntegrationToolInSession({ ...tool, taskId: task.id }),
+    ).resolves.toBe(true);
+    await expect(
+      hasRejectedIntegrationToolInSession({ ...tool, taskId: otherTask.id }),
+    ).resolves.toBe(false);
+    await expect(hasRejectedIntegrationToolInSession(tool)).resolves.toBe(
+      false,
+    );
+  });
+});
+
+describe('hasRejectedIntegrationToolInSession', () => {
+  it('finds a rejection of the tool however many decisions came after it', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const tool = {
+      sessionId,
+      userId,
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+    };
+    expect(await hasRejectedIntegrationToolInSession(tool)).toBe(false);
+
+    const rejected = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: rejected.approvalId,
+      decision: 'rejected',
+    });
+    for (let index = 0; index < 7; index += 1) {
+      const approved = await insertIntegrationToolApproval(context, {
+        ...call,
+        toolName: 'other_tool',
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      });
+      await decideIntegrationToolApproval(context, {
+        approvalId: approved.approvalId,
+        decision: 'approved',
+      });
+      await markIntegrationToolApprovalConsumed({
+        approvalId: approved.approvalId,
+        requesterUserId: userId,
+      });
+    }
+
+    const recent = await listRecentIntegrationToolApprovalOutcomes(context);
+    expect(recent.some((outcome) => outcome.outcome === 'rejected')).toBe(
+      false,
+    );
+    expect(await hasRejectedIntegrationToolInSession(tool)).toBe(true);
+    expect(
+      await hasRejectedIntegrationToolInSession({
+        ...tool,
+        toolName: 'other_tool',
+      }),
+    ).toBe(false);
+    expect(
+      await hasRejectedIntegrationToolInSession({
+        ...tool,
+        sessionId: await ownedSession(userId),
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('Auto suspension for a session', () => {
+  it('suspends once, stays suspended, and leaves other Sessions alone', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const otherSessionId = await ownedSession(userId);
+
+    await expect(
+      isIntegrationToolAutoSuspendedForSession(sessionId),
+    ).resolves.toBe(false);
+    await expect(suspendIntegrationToolAutoForSession(sessionId)).resolves.toBe(
+      true,
+    );
+    // Only the first caller stops it, so the notice is posted once.
+    await expect(suspendIntegrationToolAutoForSession(sessionId)).resolves.toBe(
+      false,
+    );
+    await expect(
+      isIntegrationToolAutoSuspendedForSession(sessionId),
+    ).resolves.toBe(true);
+    await expect(
+      isIntegrationToolAutoSuspendedForSession(otherSessionId),
+    ).resolves.toBe(false);
+  });
+});
+
+describe('Auto for a session', () => {
+  it('is off until the owner turns it on, for that session only', async () => {
+    const userId = await user();
+    const otherUserId = await user();
+    const sessionId = await ownedSession(userId);
+    const otherSessionId = await ownedSession(userId);
+
+    await expect(
+      isIntegrationToolAutoEnabledForSession(sessionId),
+    ).resolves.toBe(false);
+    await expect(
+      getIntegrationToolAutoForSession({ sessionId, userId }),
+    ).resolves.toEqual({ enabled: false, suspended: false });
+
+    // Only the owner can change it, or even see it.
+    await expect(
+      setIntegrationToolAutoForSession({
+        sessionId,
+        userId: otherUserId,
+        enabled: true,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      getIntegrationToolAutoForSession({ sessionId, userId: otherUserId }),
+    ).resolves.toBeNull();
+    await expect(
+      isIntegrationToolAutoEnabledForSession(sessionId),
+    ).resolves.toBe(false);
+
+    await expect(
+      setIntegrationToolAutoForSession({ sessionId, userId, enabled: true }),
+    ).resolves.toBe(true);
+    await expect(
+      isIntegrationToolAutoEnabledForSession(sessionId),
+    ).resolves.toBe(true);
+    await expect(
+      isIntegrationToolAutoEnabledForSession(otherSessionId),
+    ).resolves.toBe(false);
+
+    await setIntegrationToolAutoForSession({
+      sessionId,
+      userId,
+      enabled: false,
+    });
+    await expect(
+      isIntegrationToolAutoEnabledForSession(sessionId),
+    ).resolves.toBe(false);
+  });
+
+  it('resumes a stopped session when the owner turns it on again', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    await setIntegrationToolAutoForSession({
+      sessionId,
+      userId,
+      enabled: true,
+    });
+    await suspendIntegrationToolAutoForSession(sessionId);
+    await expect(
+      getIntegrationToolAutoForSession({ sessionId, userId }),
+    ).resolves.toEqual({ enabled: true, suspended: true });
+
+    // Turning it off leaves the stop in place; turning it on lifts it.
+    await setIntegrationToolAutoForSession({
+      sessionId,
+      userId,
+      enabled: false,
+    });
+    await expect(
+      isIntegrationToolAutoSuspendedForSession(sessionId),
+    ).resolves.toBe(true);
+    await setIntegrationToolAutoForSession({
+      sessionId,
+      userId,
+      enabled: true,
+    });
+    await expect(
+      getIntegrationToolAutoForSession({ sessionId, userId }),
+    ).resolves.toEqual({ enabled: true, suspended: false });
+  });
+
+  it('is off for a session that does not exist', async () => {
+    await expect(
+      isIntegrationToolAutoEnabledForSession(
+        '00000000-0000-4000-8000-000000000000',
+      ),
+    ).resolves.toBe(false);
   });
 });
 
@@ -992,7 +1296,10 @@ describe('integration tool session overrides', () => {
       .from(integrationToolApprovalRequests)
       .where(eq(integrationToolApprovalRequests.sessionId, context.sessionId));
     expect(row?.status).toBe('auto_approved');
-    expect(row?.argsSummary).toEqual({ channel: 'C123', apiKey: '[redacted]' });
+    expect(row?.argsSummary).toEqual({
+      channel: 'C123',
+      apiKey: '[value omitted]',
+    });
     expect(await listPendingIntegrationToolApprovals(context)).toEqual([]);
     expect(
       await markIntegrationToolApprovalConsumed({

@@ -59,7 +59,8 @@ export function ServiceCredentials({ sessionId }: { sessionId: string }) {
           </DialogTitle>
           <DialogDescription>
             The key is encrypted in our deployment database and never sent to
-            the provider. Manage in Settings → Integrations.
+            the provider. Manage it on the Integrations page, or in Personal
+            settings if you choose Only me.
           </DialogDescription>
         </DialogHeader>
         {open ? (

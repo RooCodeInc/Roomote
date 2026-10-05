@@ -106,6 +106,34 @@ describe('SettingsShell', () => {
       screen.getByRole('link', { name: /sandboxes/i }),
     ).toBeInTheDocument();
     expect(screen.getByText('content')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /nightly experiments/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders the standalone Nightly page without settings navigation', () => {
+    render(
+      <SettingsShell
+        pageId="nightly-experiments"
+        standalone
+        titleOverride="Nightly Experiments"
+        descriptionOverride="Internal experiment switches. You really shouldn't mess with these."
+        adminOnly={true}
+      >
+        <div>content</div>
+      </SettingsShell>,
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Nightly Experiments' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Internal experiment switches. You really shouldn't mess with these.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
 
   it('hides sandboxes from the settings rail when cloud mode is enabled', () => {
@@ -177,7 +205,6 @@ describe('SettingsShell', () => {
 
   it('limits non-admin tokens to personal settings and blocks admin-only content without redirecting', () => {
     state.isAdmin = false;
-
     render(
       <SettingsShell pageId="personal" adminOnly={true}>
         <div>content</div>
@@ -190,6 +217,9 @@ describe('SettingsShell', () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('link', { name: /live previews/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /nightly experiments/i }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByText('Only admins can access this settings page.'),
