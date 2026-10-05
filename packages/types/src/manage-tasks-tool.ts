@@ -48,6 +48,19 @@ export const ROOMOTE_TASK_RUNTIME_MANAGEMENT_ACTIONS = [
 
 export const ROOMOTE_TASK_ID_PATTERN = /^[0-9a-z]{13}$/;
 
+export const roomoteMessageAttachmentSchema = z.object({
+  filename: z
+    .string()
+    .min(1)
+    .describe('Original file name, including extension'),
+  mimeType: z.string().min(1).describe('File MIME type'),
+  base64: z.string().min(1).describe('Base64-encoded file bytes'),
+});
+
+export type RoomoteMessageAttachment = z.infer<
+  typeof roomoteMessageAttachmentSchema
+>;
+
 export function shouldSearchTasks(input: {
   action: 'search' | 'search_tasks';
   pullRequest?: string;
@@ -118,6 +131,13 @@ export const roomoteManagementFieldSchemas = {
     .string()
     .optional()
     .describe('Initial request for start, or follow-up text for send_message'),
+  attachments: z
+    .array(roomoteMessageAttachmentSchema)
+    .max(20)
+    .optional()
+    .describe(
+      'Optional files for start or send_message (maximum 20). Each item requires filename, MIME type, and base64-encoded bytes. MIME types are trimmed and normalized before use. Supported image MIME types are delivered as images up to 2 MiB each; supported text and document files, including logs and diffs, are extracted into bounded prompt text up to 8 MiB each and 200,000 extracted characters total. Corrupt supported documents are rejected.',
+    ),
   prompt: z
     .string()
     .optional()

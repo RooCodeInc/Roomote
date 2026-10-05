@@ -347,7 +347,18 @@ describe('route policy enforcement', () => {
           tools?: Array<{
             name: string;
             inputSchema?: {
-              properties?: { action?: { enum?: string[] } };
+              properties?: {
+                action?: { enum?: string[] };
+                attachments?: {
+                  anyOf?: Array<{
+                    type?: string;
+                    items?: {
+                      required?: string[];
+                      properties?: Record<string, unknown>;
+                    };
+                  }>;
+                };
+              };
             };
           }>;
         };
@@ -374,6 +385,21 @@ describe('route policy enforcement', () => {
           'launch',
         ]),
       );
+      expect(manageTasks?.inputSchema?.properties?.attachments).toMatchObject({
+        anyOf: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'array',
+            items: expect.objectContaining({
+              required: ['filename', 'mimeType', 'base64'],
+              properties: expect.objectContaining({
+                filename: expect.any(Object),
+                mimeType: expect.any(Object),
+                base64: expect.any(Object),
+              }),
+            }),
+          }),
+        ]),
+      });
 
       const sessionSearchResponse = await createApiApp().request(
         'http://localhost/mcp',

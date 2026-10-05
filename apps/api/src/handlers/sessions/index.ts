@@ -30,6 +30,7 @@ import { queueFastAgentSurfaceReply } from '@roomote/sdk/server';
 import {
   SESSION_STATUSES,
   type RoomoteSearchSessionsResponse,
+  type RoomoteMessageAttachment,
   type SessionGoal,
   type RoomoteSessionChildTask,
   type RoomoteSessionMessagesResponse,
@@ -49,6 +50,7 @@ import {
   sendMessageToFastSessionForUser,
 } from '../tasks/fastSessionCommunication';
 import { getSessionRelayUpdates } from '../tasks/getRelayUpdates';
+import { prepareMessageAttachments } from '../tasks/messageAttachments';
 
 type SessionContext = Context<{
   Variables: Variables & { mcpAuth: McpAuth };
@@ -129,14 +131,30 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
   const sessionId = c.req.param('sessionId');
   if (!sessionId) return c.json({ error: 'sessionId is required' }, 400);
 
-  let body: { message?: string };
+  let body: { message?: string; attachments?: RoomoteMessageAttachment[] };
   try {
-    body = (await c.req.json()) as { message?: string };
+    body = (await c.req.json()) as {
+      message?: string;
+      attachments?: RoomoteMessageAttachment[];
+    };
   } catch {
     return c.json({ error: 'Invalid JSON body' }, 400);
   }
   const message = body.message?.trim();
   if (!message) return c.json({ error: 'message is required' }, 400);
+
+  let prepared;
+  try {
+    prepared = await prepareMessageAttachments({
+      message,
+      attachments: body.attachments,
+    });
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : 'Invalid attachments' },
+      400,
+    );
+  }
 
   try {
     const session = await findAccessibleSession(sessionId, c.get('mcpAuth'));
@@ -147,7 +165,9 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
     const result = await sendMessageToFastSessionForUser({
       sessionId: session.fastConversationId,
       userId,
-      message,
+      message: prepared.message,
+      images: prepared.images,
+      attachmentTexts: prepared.attachmentTexts,
     });
     if (result.success) {
       return c.json({
@@ -278,14 +298,30 @@ async function startSession(c: SessionContext): Promise<Response> {
     }
   }
 
-  let body: { message?: string };
+  let body: { message?: string; attachments?: RoomoteMessageAttachment[] };
   try {
-    body = (await c.req.json()) as { message?: string };
+    body = (await c.req.json()) as {
+      message?: string;
+      attachments?: RoomoteMessageAttachment[];
+    };
   } catch {
     return c.json({ error: 'Invalid JSON body' }, 400);
   }
   const message = body.message?.trim();
   if (!message) return c.json({ error: 'message is required' }, 400);
+
+  let prepared;
+  try {
+    prepared = await prepareMessageAttachments({
+      message,
+      attachments: body.attachments,
+    });
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : 'Invalid attachments' },
+      400,
+    );
+  }
 
   try {
     const conversation = {
@@ -304,7 +340,9 @@ async function startSession(c: SessionContext): Promise<Response> {
       sessionId: fastSession.id,
       userId,
       senderDisplayName: null,
-      question: message,
+      question: prepared.message,
+      images: prepared.images,
+      attachmentTexts: prepared.attachmentTexts,
       currentMessageId: `mcp-${randomUUID()}`,
     });
 

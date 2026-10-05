@@ -1,9 +1,11 @@
 import type { Context } from 'hono';
+import type { RoomoteMessageAttachment } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
 import { steerMessageToTask } from './sendMessageToTask';
 import { sendMessageToFastSessionForUser } from './fastSessionCommunication';
+import { prepareMessageAttachments } from './messageAttachments';
 
 /**
  * POST /api/tasks/:taskId/steer_message
@@ -32,6 +34,7 @@ export async function steerMessage(
   let body: {
     message: string;
     images?: string[];
+    attachments?: RoomoteMessageAttachment[];
     clientMessageId?: string;
     senderMode?: 'fast_agent';
   };
@@ -40,6 +43,7 @@ export async function steerMessage(
     body = (await c.req.json()) as {
       message: string;
       images?: string[];
+      attachments?: RoomoteMessageAttachment[];
       clientMessageId?: string;
       senderMode?: 'fast_agent';
     };
@@ -62,11 +66,28 @@ export async function steerMessage(
     return c.json({ error: 'senderMode is invalid' }, 400);
   }
 
+  let prepared;
+  try {
+    prepared = await prepareMessageAttachments({
+      message: body.message,
+      attachments: body.attachments,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: error instanceof Error ? error.message : 'Invalid attachments',
+      },
+      400,
+    );
+  }
+
+  const images = [...(body.images ?? []), ...(prepared.images ?? [])];
   let result = await steerMessageToTask({
     taskId,
     userId: auth.userId,
-    message: body.message,
-    images: body.images,
+    message: prepared.message,
+    quoteText: body.message,
+    images: images.length ? images : undefined,
     clientMessageId: body.clientMessageId?.trim() || undefined,
     senderMode: body.senderMode,
   });
@@ -75,8 +96,9 @@ export async function steerMessage(
     result = await sendMessageToFastSessionForUser({
       sessionId: taskId,
       userId: auth.userId,
-      message: body.message,
-      images: body.images,
+      message: prepared.message,
+      images: images.length ? images : undefined,
+      attachmentTexts: prepared.attachmentTexts,
     });
   }
 
