@@ -1,7 +1,6 @@
-import {
-  DEFAULT_PR_REVIEW_SETTINGS,
-  type PrReviewSettings,
-  type SourceControlAutomationWorkflow,
+import type {
+  PrReviewSettings,
+  SourceControlAutomationWorkflow,
 } from '@roomote/types';
 import {
   type Repository,
@@ -16,6 +15,7 @@ import {
 } from '@roomote/db/server';
 
 import { pickHostScopedRepository } from '../utils';
+import { getPrReviewTargetEligibility } from '../shared/pr-review-target-eligibility';
 import type { GitLabMergeRequestWebhook } from './types';
 
 type GitLabAutomationWebhookContext = Pick<
@@ -122,24 +122,18 @@ export async function getGitLabAutomationTargets({
   const reviewerSettings =
     workflow === 'pr_review' ? await getReviewCodeAutomationSettings() : null;
 
-  if (
-    workflow === 'pr_review' &&
-    (reviewerSettings?.enabled ?? DEFAULT_PR_REVIEW_SETTINGS.enabled) === false
-  ) {
+  const eligibility = getPrReviewTargetEligibility(
+    workflow,
+    reviewerSettings,
+    ignoreAuthorPolicy,
+    authorUsername ? isRoomoteGitLabUsername(authorUsername) : null,
+  );
+
+  if (eligibility === 'automation_disabled') {
     return { status: 'ok', targets: [] };
   }
 
-  const reviewerReviewsAllPrs =
-    reviewerSettings?.reviewAllPullRequestAuthors ??
-    DEFAULT_PR_REVIEW_SETTINGS.reviewAllPullRequestAuthors;
-
-  if (
-    workflow === 'pr_review' &&
-    !ignoreAuthorPolicy &&
-    authorUsername &&
-    !isRoomoteGitLabUsername(authorUsername) &&
-    !reviewerReviewsAllPrs
-  ) {
+  if (eligibility === 'author_not_allowed') {
     return {
       status: 'error',
       message: `GitLab MR author is not allowed: ${authorUsername}`,

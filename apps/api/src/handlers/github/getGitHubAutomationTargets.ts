@@ -1,7 +1,6 @@
-import {
-  DEFAULT_PR_REVIEW_SETTINGS,
-  type PrReviewSettings,
-  type SourceControlAutomationWorkflow,
+import type {
+  PrReviewSettings,
+  SourceControlAutomationWorkflow,
 } from '@roomote/types';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
@@ -21,6 +20,7 @@ import type {
   WebhookUser,
   WebhookTaskProperties,
 } from './types';
+import { getPrReviewTargetEligibility } from '../shared/pr-review-target-eligibility';
 
 type GitHubAutomationTarget = {
   id: string;
@@ -106,27 +106,20 @@ export const getGitHubAutomationTargets = async ({
   const reviewerSettings =
     workflow === 'pr_review' ? await getReviewCodeAutomationSettings() : null;
 
-  if (
-    workflow === 'pr_review' &&
-    (reviewerSettings?.enabled ?? DEFAULT_PR_REVIEW_SETTINGS.enabled) === false
-  ) {
+  const eligibility = getPrReviewTargetEligibility(
+    workflow,
+    reviewerSettings,
+    ignoreRoomoteAuthorRequirement,
+    collaboratorLogin
+      ? Boolean(GitHubSchemas.isRoomoteGitHubLogin(collaboratorLogin))
+      : null,
+  );
+
+  if (eligibility === 'automation_disabled') {
     return { status: 'ok', targets: [] };
   }
 
-  const reviewerReviewsAllPrs =
-    reviewerSettings?.reviewAllPullRequestAuthors ??
-    DEFAULT_PR_REVIEW_SETTINGS.reviewAllPullRequestAuthors;
-  const isRoomoteManagedAuthor = collaboratorLogin
-    ? Boolean(GitHubSchemas.isRoomoteGitHubLogin(collaboratorLogin))
-    : true;
-
-  if (
-    workflow === 'pr_review' &&
-    collaboratorLogin &&
-    !ignoreRoomoteAuthorRequirement &&
-    !isRoomoteManagedAuthor &&
-    !reviewerReviewsAllPrs
-  ) {
+  if (eligibility === 'author_not_allowed') {
     console.error(
       `[getGitHubAutomationTargets] [${githubInstallationId}, ${repository.full_name}] -> author_not_allowed`,
     );
