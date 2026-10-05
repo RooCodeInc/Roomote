@@ -415,13 +415,15 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
 
     let remaining = line;
     const freshPrefix = open ? `${open.opening}\n` : '';
+    const freshSuffixLength =
+      open && line.endsWith('\n') ? open.marker.length : suffixLength;
     const currentHasContent = open
       ? current !== `${open.opening}\n` && current !== `${open.opening}\r\n`
       : current.length > 0;
     if (
       currentHasContent &&
       line.length > limit - current.length - suffixLength &&
-      line.length <= limit - freshPrefix.length - suffixLength
+      line.length <= limit - freshPrefix.length - freshSuffixLength
     ) {
       flush();
     }
