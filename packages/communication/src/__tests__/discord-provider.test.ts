@@ -225,6 +225,28 @@ describe('DiscordCommunicationProvider', () => {
     }
   });
 
+  it('posts prose before a long table without a standalone empty code block', async () => {
+    let nonce = 123456789012345678n;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(nonce++),
+    });
+    const channelId = '400000000000000001';
+    const row = `| r0 | ${'x'.repeat(65)} |`;
+
+    await provider.postMessage({
+      channelId,
+      text: `${'S'.repeat(1_940)}\n\n\`\`\`text\n${row}\n\`\`\``,
+    });
+
+    const messages = server.state.messages[channelId] ?? [];
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.content).not.toContain('```');
+    expect(messages[1]?.content).toContain(`\`\`\`text\n${row}`);
+    expect(messages.every((message) => message.content.length <= 2_000)).toBe(
+      true,
+    );
+  });
+
   it('suppresses link unfurls on messages that carry no embeds of their own', async () => {
     // Discord unfurls any link into a preview card. Roomote posts task links
     // constantly, and Slack has always sent `unfurl_links: false`.
@@ -1358,6 +1380,21 @@ describe('DiscordCommunicationProvider', () => {
 });
 
 describe('chunkDiscordMessage', () => {
+  it.each(['\n', '\r\n'])(
+    'keeps the first fenced row with its opener after prose (%j)',
+    (newline) => {
+      const firstRow = `| r0 | ${'x'.repeat(newline === '\r\n' ? 36 : 38)} |`;
+      const text = `Summary${newline}${newline}\`\`\`text${newline}${firstRow}${newline}\`\`\``;
+      const chunks = chunkDiscordMessage(text, 60);
+      expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+      expect(chunks[0]).not.toContain('```');
+      expect(chunks[1]).toContain(`\`\`\`text${newline}${firstRow}`);
+      expect(
+        chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) % 2 === 0),
+      ).toBe(true);
+    },
+  );
+
   it('prefers newline boundaries without losing text', () => {
     expect(chunkDiscordMessage('first line\nsecond line', 12)).toEqual([
       'first line',
