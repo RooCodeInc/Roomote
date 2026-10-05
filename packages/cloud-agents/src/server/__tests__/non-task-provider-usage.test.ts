@@ -3643,14 +3643,14 @@ describe('resolveOpenCodeSmallModel', () => {
   it.each([
     {
       modality: 'audio' as const,
-      initialModel: 'google/gemini-helper',
+      initialModel: 'openai/text-primary',
     },
     {
       modality: 'video' as const,
-      initialModel: 'google/gemini-vision',
+      initialModel: 'openai/text-primary',
     },
   ])(
-    'uses the helper fallback for $modality when the media role is unset',
+    'uses the audio/video fallback for inherited $modality processing',
     async ({ modality, initialModel }) => {
       process.env = { ...originalEnv };
       mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
@@ -3658,6 +3658,8 @@ describe('resolveOpenCodeSmallModel', () => {
         R_SMALL_MODEL: 'openrouter/google/gemini-helper',
         R_SMALL_MODEL_FALLBACK: 'openrouter/google/gemini-helper-backup',
         R_SMALL_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+        R_AUDIO_VIDEO_MODEL_FALLBACK: 'openrouter/google/gemini-media-backup',
+        R_AUDIO_VIDEO_MODEL_FALLBACK_REASONING_EFFORT: 'low',
         R_VISION_MODEL: 'openrouter/google/gemini-vision',
         OPENROUTER_API_KEY: 'test-key',
         OPENCODE_CONFIG_CONTENT: '',
@@ -3668,6 +3670,18 @@ describe('resolveOpenCodeSmallModel', () => {
             {
               id: 'openrouter',
               models: {
+                'openai/text-primary': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+                'google/gemini-media-backup': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
                 'google/gemini-helper': {
                   capabilities: {
                     input: { [modality]: true },
@@ -3732,12 +3746,12 @@ describe('resolveOpenCodeSmallModel', () => {
         { providerID: 'openrouter', modelID: initialModel },
         {
           providerID: 'openrouter',
-          modelID: 'google/gemini-helper-backup',
+          modelID: 'google/gemini-media-backup',
         },
       ]);
       expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenLastCalledWith({
         runtimeEnv: expect.objectContaining({
-          R_MODEL: 'openrouter/google/gemini-helper-backup',
+          R_MODEL: 'openrouter/google/gemini-media-backup',
           R_MODEL_REASONING_EFFORT: 'low',
         }),
       });
@@ -3915,14 +3929,14 @@ describe('resolveOpenCodeSmallModel', () => {
   it.each([
     {
       modality: 'audio' as const,
-      preferredModel: 'google/gemini-helper',
+      preferredModel: 'openai/text-coding',
     },
     {
       modality: 'video' as const,
-      preferredModel: 'google/gemini-vision',
+      preferredModel: 'openai/text-coding',
     },
   ])(
-    'preserves the existing $modality helper order when the Audio and video model is unset',
+    'inherits the coding model for $modality when the Audio and video model is unset',
     async ({ modality, preferredModel }) => {
       process.env = { ...originalEnv };
       mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
@@ -3938,7 +3952,7 @@ describe('resolveOpenCodeSmallModel', () => {
               models: {
                 'openai/text-coding': {
                   capabilities: {
-                    input: { [modality]: false },
+                    input: { [modality]: true },
                     output: { text: true },
                   },
                 },
@@ -3990,7 +4004,70 @@ describe('resolveOpenCodeSmallModel', () => {
     },
   );
 
-  it('delivers Fast session audio directly to a capable session model when the Audio and video model is unset', async () => {
+  it.each(['audio', 'video'] as const)(
+    'reports unsupported inherited %s instead of selecting a capable helper or vision model',
+    async (modality) => {
+      process.env = { ...originalEnv };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/openai/text-coding',
+        R_SMALL_MODEL: 'openrouter/google/gemini-helper',
+        R_VISION_MODEL: 'openrouter/google/gemini-vision',
+      });
+      configProvidersMock.mockResolvedValue({
+        data: {
+          providers: [
+            {
+              id: 'openrouter',
+              models: Object.fromEntries(
+                [
+                  'openai/text-coding',
+                  'google/gemini-helper',
+                  'google/gemini-vision',
+                ].map((model) => [
+                  model,
+                  {
+                    capabilities: {
+                      input: { [modality]: model !== 'openai/text-coding' },
+                      output: { text: true },
+                    },
+                  },
+                ]),
+              ),
+            },
+          ],
+          default: {},
+        },
+        error: undefined,
+      });
+      const {
+        generateTrackedNonTaskText,
+        resolveNonTaskInputModalityDelivery,
+        NON_TASK_INFERENCE_SURFACES,
+      } = await import('../non-task-provider-usage.js');
+      await expect(
+        generateTrackedNonTaskText({
+          surface:
+            modality === 'audio'
+              ? NON_TASK_INFERENCE_SURFACES.chatAudioTranscription
+              : NON_TASK_INFERENCE_SURFACES.chatVideoDescription,
+          prompt: 'Read the attachment.',
+          requiredInputModality: modality,
+        }),
+      ).rejects.toMatchObject({
+        modality,
+        modelName: 'openrouter/openai/text-coding',
+      });
+      await expect(
+        resolveNonTaskInputModalityDelivery({ modality }),
+      ).rejects.toMatchObject({
+        modality,
+        modelName: 'openrouter/openai/text-coding',
+      });
+      expect(sessionPromptMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('uses inherited coding audio processing for Fast sessions instead of the orchestration or helper model', async () => {
     process.env = { ...originalEnv };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/text-coding',
@@ -4005,7 +4082,7 @@ describe('resolveOpenCodeSmallModel', () => {
             models: {
               'openai/text-coding': {
                 capabilities: {
-                  input: { audio: false },
+                  input: { audio: true },
                   output: { text: true },
                 },
               },
@@ -4037,8 +4114,9 @@ describe('resolveOpenCodeSmallModel', () => {
         modelRole: 'orchestration',
       }),
     ).resolves.toEqual({
-      delivery: 'direct',
+      delivery: 'helper',
       model: 'openrouter/google/gemini-session',
+      helperModel: 'openrouter/openai/text-coding',
     });
   });
 

@@ -1115,9 +1115,10 @@ async function resolveNonTaskModelRuntime(
     // session model temporarily takes over R_MODEL in selectedRuntimeEnv.
     visionModel:
       resolvedModelRuntimeEnv.R_VISION_MODEL ?? resolvedModelRuntimeEnv.R_MODEL,
-    // Unlike other role defaults, absence matters here: it preserves the
-    // pre-role audio/video routing instead of inheriting the coding model.
-    audioVideoModel: resolvedModelRuntimeEnv.R_AUDIO_VIDEO_MODEL,
+    audioVideoModel:
+      resolvedModelRuntimeEnv.R_AUDIO_VIDEO_MODEL ??
+      resolvedModelRuntimeEnv.R_MODEL ??
+      asString(parseOpenCodeConfigJson(readOpenCodeDebugConfig()).model),
     // An explicit model rides into the server lease env as the primary role
     // model so the config builder registers its provider — the deployment's
     // role models may not include it, and an unregistered Bedrock (or
@@ -2437,19 +2438,13 @@ async function runControlPlaneWithFallback<T>(
 ): Promise<T> {
   const role = params.modelRole ?? 'small';
   let runtime = await resolveNonTaskModelRuntime(params.model, role);
-  const audioVideoDescriptor = TASK_MODEL_ROLE_DESCRIPTORS.audioVideo;
-  const hasAudioVideoFallback = Boolean(
-    runtime.resolvedModelRuntimeEnv[audioVideoDescriptor.fallbackModelEnvVar],
-  );
   const fallbackRole =
     role === 'orchestration'
       ? 'orchestration'
       : role === 'small'
         ? 'helper'
         : role === 'audioVideo'
-          ? hasAudioVideoFallback || params.model || runtime.audioVideoModel
-            ? 'audioVideo'
-            : 'helper'
+          ? 'audioVideo'
           : undefined;
   const configuredFallbackDescriptor = fallbackRole
     ? TASK_MODEL_ROLE_DESCRIPTORS[fallbackRole]
