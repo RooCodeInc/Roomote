@@ -167,6 +167,7 @@ export async function sendMessage(
       userId: auth.userId,
       message: prepared.message,
       images: images.length ? images : undefined,
+      attachmentTexts: prepared.attachmentTexts,
     });
   }
 

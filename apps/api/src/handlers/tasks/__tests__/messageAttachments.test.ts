@@ -145,4 +145,30 @@ describe('prepareMessageAttachments', () => {
       }),
     ).rejects.toThrow('unsupported attachment type');
   });
+
+  it('keeps bounded extracted text when later attachments exceed the shared budget', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const result = await prepareMessageAttachments({
+      message: 'Inspect the logs',
+      attachments: [
+        {
+          filename: 'first.log',
+          mimeType: 'text/plain',
+          base64: Buffer.from('a'.repeat(200_001)).toString('base64'),
+        },
+        {
+          filename: 'second.log',
+          mimeType: 'text/plain',
+          base64: Buffer.from('second log').toString('base64'),
+        },
+      ],
+    });
+
+    expect(result.message).toContain('File attachment: first.log');
+    expect(result.message).toContain('File attachment: second.log');
+    expect(result.message).toContain('[omitted: attachment budget exhausted]');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('shared attachment text budget was exhausted'),
+    );
+  });
 });

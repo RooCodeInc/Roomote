@@ -107,8 +107,8 @@ export async function prepareMessageAttachments(input: {
   }
 
   const extracted = await extractPromptTextAttachments(textAttachments);
-  if (extracted.warnings.length > 0) {
-    throw new Error(extracted.warnings.join('; '));
+  for (const warning of extracted.warnings) {
+    console.warn(`[message-attachments] ${warning}`);
   }
 
   return {

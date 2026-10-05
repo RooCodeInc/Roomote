@@ -10,11 +10,13 @@ import { steerMessage } from '../steerMessage';
 const {
   mockSendMessageToTask,
   mockSteerMessageToTask,
+  mockSendMessageToFastSessionForUser,
   mockTaskRunsFindFirst,
   mockGetTaskHumanOwnerUserIds,
 } = vi.hoisted(() => ({
   mockSendMessageToTask: vi.fn(),
   mockSteerMessageToTask: vi.fn(),
+  mockSendMessageToFastSessionForUser: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockGetTaskHumanOwnerUserIds: vi.fn(),
 }));
@@ -39,7 +41,8 @@ vi.mock('../sendMessageToTask', () => ({
 }));
 
 vi.mock('../fastSessionCommunication', () => ({
-  sendMessageToFastSessionForUser: vi.fn(),
+  sendMessageToFastSessionForUser: (...args: unknown[]) =>
+    mockSendMessageToFastSessionForUser(...args),
 }));
 
 function createApp(authContext: RunTokenContext) {
@@ -86,6 +89,11 @@ describe('send_message / steer_message user context', () => {
     mockSendMessageToTask.mockResolvedValue({ success: true, result: {} });
     mockSteerMessageToTask.mockReset();
     mockSteerMessageToTask.mockResolvedValue({ success: true, result: {} });
+    mockSendMessageToFastSessionForUser.mockReset();
+    mockSendMessageToFastSessionForUser.mockResolvedValue({
+      success: true,
+      result: {},
+    });
     mockTaskRunsFindFirst.mockReset();
     mockGetTaskHumanOwnerUserIds.mockReset();
     mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
@@ -165,6 +173,58 @@ describe('send_message / steer_message user context', () => {
       expect.objectContaining({
         message: expect.stringContaining('connection refused'),
         quoteText: 'Review these files',
+      }),
+    );
+  });
+
+  it('preserves attachment texts when task IDs fall back to Fast sessions', async () => {
+    mockTaskRunsFindFirst.mockResolvedValue({
+      actingUserId: 'user-current',
+      taskId: 'task-review',
+    });
+    mockSendMessageToTask.mockResolvedValue({
+      success: false,
+      status: 404,
+      error: 'Task not found',
+    });
+    mockSteerMessageToTask.mockResolvedValue({
+      success: false,
+      status: 404,
+      error: 'Task not found',
+    });
+    const body = {
+      message: 'Inspect the log',
+      attachments: [
+        {
+          filename: 'failure.log',
+          mimeType: 'text/plain',
+          base64: Buffer.from('connection refused').toString('base64'),
+        },
+      ],
+    };
+
+    await post(
+      createApp(userlessRunAuth),
+      '/tasks/task-impl/send_message',
+      body,
+    );
+    await post(
+      createApp(userlessRunAuth),
+      '/tasks/task-impl/steer_message',
+      body,
+    );
+
+    expect(mockSendMessageToFastSessionForUser).toHaveBeenCalledTimes(2);
+    expect(mockSendMessageToFastSessionForUser).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        attachmentTexts: [expect.stringContaining('connection refused')],
+      }),
+    );
+    expect(mockSendMessageToFastSessionForUser).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        attachmentTexts: [expect.stringContaining('connection refused')],
       }),
     );
   });
