@@ -65,6 +65,23 @@ describe('Roomote MCP management contract', () => {
     expect(roomoteManagementFieldSchemas.sessionId.description).toContain(
       'responses return the canonical session ID',
     );
+    expect(
+      roomoteManagementFieldSchemas.attachments.safeParse([
+        {
+          filename: 'screenshot.png',
+          mimeType: 'image/png',
+          base64: 'cG5n',
+        },
+        {
+          filename: 'failure.log',
+          mimeType: 'text/plain',
+          base64: 'bG9n',
+        },
+      ]).success,
+    ).toBe(true);
+    expect(roomoteManagementFieldSchemas.attachments.description).toContain(
+      'start or send_message',
+    );
   });
 
   it('defaults communication to Sessions and lets taskId override naturally', () => {
