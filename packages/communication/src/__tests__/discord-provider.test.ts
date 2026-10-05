@@ -163,6 +163,44 @@ describe('DiscordCommunicationProvider', () => {
     ).toBe(true);
   });
 
+  it('moves a first fenced row after prose without posting an empty fence over HTTP', async () => {
+    const server = new MockDiscordServer();
+    const { baseUrl, close } = await server.listen();
+    const prose = `Summary ${'p'.repeat(990)}\n\n`;
+    const row = `| row 000 | ${'x'.repeat(974)} value |`;
+    let nonce = 123456789012345678n;
+    const provider = new DiscordCommunicationProvider({
+      botToken: server.botToken,
+      applicationId: server.application.id,
+      apiBaseUrl: baseUrl,
+      nonceFactory: () => String(nonce++),
+    });
+
+    try {
+      await provider.postMessage({
+        channelId: '400000000000000001',
+        text: `${prose}\`\`\`text\n${row}\n\`\`\``,
+      });
+
+      const stateResponse = await fetch(
+        `${baseUrl.replace(/\/api\/v10$/u, '')}/mock/state`,
+      );
+      const state = (await stateResponse.json()) as {
+        messages: Record<string, Array<{ content: string }>>;
+      };
+      const messages = state.messages['400000000000000001'] ?? [];
+      expect(messages).toHaveLength(2);
+      expect(messages[0]?.content).toBe(prose);
+      expect(messages[1]?.content).toContain(row);
+      expect(messages[1]?.content.match(/^```/gm)?.length ?? 0).toBe(2);
+      expect(messages.every((message) => message.content.length <= 2_000)).toBe(
+        true,
+      );
+    } finally {
+      await close();
+    }
+  });
+
   it('splits a fenced line when it is too long for a fresh message', async () => {
     let nonce = 123456789012345678n;
     const { server, provider } = createHarness({

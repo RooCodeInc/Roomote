@@ -313,7 +313,12 @@ function chunkDiscordPlainMessage(text: string, limit: number): string[] {
 function chunkDiscordFencedMessage(text: string, limit: number): string[] {
   const chunks: string[] = [];
   let current = '';
-  type Fence = { opening: string; marker: string };
+  type Fence = {
+    opening: string;
+    marker: string;
+    openingStart: number;
+    bodyStart: number;
+  };
   let open: Fence | null = null;
   const lines = text.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
 
@@ -325,6 +330,10 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
         : current,
     );
     current = open ? `${open.opening}\n` : '';
+    if (open) {
+      open.openingStart = 0;
+      open.bodyStart = current.length;
+    }
   };
 
   for (const line of lines) {
@@ -343,7 +352,12 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
     const opening: Fence | null =
       openingMatch &&
       !(openingMatch[1]?.startsWith('`') && openingMatch[2]?.includes('`'))
-        ? { opening: value, marker: openingMatch[1]! }
+        ? {
+            opening: value,
+            marker: openingMatch[1]!,
+            openingStart: current.length,
+            bodyStart: current.length + line.length,
+          }
         : null;
     const nextOpen: Fence | null = closing ? null : (opening ?? open);
     const suffixLength = nextOpen ? nextOpen.marker.length + 1 : 0;
@@ -368,14 +382,23 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
     let remaining = line;
     const freshPrefix = open ? `${open.opening}\n` : '';
     const currentHasContent = open
-      ? current !== `${open.opening}\n` && current !== `${open.opening}\r\n`
+      ? current.length > open.bodyStart
       : current.length > 0;
     if (
-      currentHasContent &&
       line.length > limit - current.length - suffixLength &&
       line.length <= limit - freshPrefix.length - suffixLength
     ) {
-      flush();
+      if (open && !currentHasContent) {
+        const beforeOpening = current.slice(0, open.openingStart);
+        if (beforeOpening) {
+          chunks.push(beforeOpening);
+          current = freshPrefix;
+          open.openingStart = 0;
+          open.bodyStart = current.length;
+        }
+      } else if (currentHasContent) {
+        flush();
+      }
     }
     while (remaining) {
       const capacity = limit - current.length - suffixLength;
