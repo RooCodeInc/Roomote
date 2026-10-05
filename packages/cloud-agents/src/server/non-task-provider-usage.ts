@@ -2338,20 +2338,17 @@ export async function generateTrackedNonTaskText(
         ...modalityParams,
         model: audioVideoModelOverride,
         reasoningEffort: audioVideoReasoningOverride,
-        ...(audioVideoModelOverride
-          ? { modelRole: 'audioVideo' as const }
-          : {}),
+        ...(audioVideoModality ? { modelRole: 'audioVideo' as const } : {}),
       },
-      async (runtime) => {
-        selectedAudioVideoModel =
-          audioVideoModelOverride ?? runtime.audioVideoModel;
-        const audioVideoReasoningEffort =
-          audioVideoModelOverride &&
-          runtime.catalogModelId !== audioVideoModelOverride
-            ? runtime.reasoningEffort
-            : (audioVideoReasoningOverride ??
-              runtime.resolvedModelRuntimeEnv
-                .R_AUDIO_VIDEO_MODEL_REASONING_EFFORT);
+      async (runtime, usingFallback) => {
+        selectedAudioVideoModel = usingFallback
+          ? runtime.catalogModelId
+          : (audioVideoModelOverride ?? runtime.audioVideoModel);
+        const audioVideoReasoningEffort = usingFallback
+          ? runtime.reasoningEffort
+          : (audioVideoReasoningOverride ??
+            runtime.resolvedModelRuntimeEnv
+              .R_AUDIO_VIDEO_MODEL_REASONING_EFFORT);
         const promptParams =
           audioVideoModality &&
           !modalityParams.reasoningEffort &&
@@ -2359,8 +2356,7 @@ export async function generateTrackedNonTaskText(
             ? { ...modalityParams, reasoningEffort: audioVideoReasoningEffort }
             : modalityParams;
         const model = await resolveModelForInputModality(
-          audioVideoModelOverride &&
-            runtime.catalogModelId !== audioVideoModelOverride
+          usingFallback && audioVideoModality
             ? { ...promptParams, model: runtime.catalogModelId }
             : promptParams,
           runtime,
@@ -2430,6 +2426,7 @@ async function runControlPlaneWithFallback<T>(
   params: GenerateTrackedNonTaskBaseParams,
   execute: (
     runtime: Awaited<ReturnType<typeof resolveNonTaskModelRuntime>>,
+    usingFallback: boolean,
   ) => Promise<T>,
 ): Promise<T> {
   const role = params.modelRole ?? 'small';
@@ -2464,7 +2461,7 @@ async function runControlPlaneWithFallback<T>(
 
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await execute(runtime);
+      return await execute(runtime, false);
     } catch (error) {
       const trigger = classifyModelFallbackTrigger(error, {
         retriesUsed: attempt - 1,
@@ -2489,7 +2486,7 @@ async function runControlPlaneWithFallback<T>(
           toProvider,
           toModel: runtime.catalogModelId,
         });
-        return execute(runtime);
+        return execute(runtime, true);
       }
       const failure = classifyNonTaskInferenceError(error);
       if (
