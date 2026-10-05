@@ -322,7 +322,7 @@ issue-search URL, but it does not represent that URL as a saved GitHub view.
 
 ## Start work from issues and pull requests
 
-Once the app is installed and an environment maps the repository:
+Once the app is installed and the repository is synced:
 
 - mention `@roomote` (or your deployment's GitHub App slug) in a pull request
   comment, review comment, or review to talk to Roomote about that pull request
@@ -340,6 +340,11 @@ Ask for a review in the mention (for example `@roomote review this`) and
 Roomote runs the Review Code automation's structured review on the current
 head, posts the findings on the pull request, and reports back in the same
 discussion.
+
+Review Code does not require the repository to be mapped to an environment.
+When an environment includes the repository, the review runs there; otherwise,
+Roomote uses a plain checkout of the active synced repository. Other coding work
+still requires a suitable environment when it needs environment-specific setup.
 
 To request a fresh review through GitHub, use **Re-run** on the Roomote code
 review check for the pull request's current head. Roomote ignores rerun events

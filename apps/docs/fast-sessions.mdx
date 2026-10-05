@@ -144,6 +144,13 @@ different: cancellation terminally ends the current run and shuts down its
 sandbox. Stop or cancellation errors appear on the card; check the resulting
 task status rather than assuming the request succeeded.
 
+While a Fast session is responding, the empty composer shows **Stop** in place
+of the send action. This interrupts the active response without deleting the
+session or its conversation history. Follow-ups sent while work is active wait
+in order above the composer. Select **Send now** on the oldest queued message to
+interrupt the active response and deliver that message next; Roomote keeps it
+visibly queued until delivery begins and does not let later messages bypass it.
+
 The session overflow menu in the workspace and each manageable Sessions-list
 row also offers **Stop**, **Archive**, and **Delete**. Stopping a session pauses
 all of its active tasks without permanently canceling them. Archiving is
