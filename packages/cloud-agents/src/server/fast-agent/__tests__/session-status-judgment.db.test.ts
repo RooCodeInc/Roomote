@@ -392,12 +392,15 @@ describe('processSessionStatusJudgmentBatch', () => {
       state: 'pending',
     });
     evaluateMock.mockResolvedValue(null);
+    const onDoneApplied = vi.fn();
 
     await processSessionStatusJudgmentBatch(undefined, {
       sessionIds: [session.id],
+      onDoneApplied,
     });
 
     expect(evaluateMock).not.toHaveBeenCalled();
+    expect(onDoneApplied).not.toHaveBeenCalled();
 
     const [judgment] = await db
       .select()

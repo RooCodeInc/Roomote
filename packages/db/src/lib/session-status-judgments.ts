@@ -308,6 +308,7 @@ export async function completeSessionStatusJudgment(
     probabilities?: Partial<Record<SessionStatusJudgmentOutcome, number>>;
     model?: string;
     errorCode?: string;
+    emitDoneWebhook?: boolean;
   },
 ): Promise<'applied' | 'ignored' | 'stale' | 'missing'> {
   return runInTransactionIfAvailable(database, async (tx) => {
@@ -356,7 +357,12 @@ export async function completeSessionStatusJudgment(
       )
       .returning({ id: sessionStatusJudgments.id });
 
-    if (updated && input.state === 'applied' && input.outcome === 'done') {
+    if (
+      updated &&
+      input.state === 'applied' &&
+      input.outcome === 'done' &&
+      input.emitDoneWebhook !== false
+    ) {
       const webhook = await tx.query.deploymentSettings.findFirst({
         where: eq(deploymentSettings.id, 'default'),
         columns: {

@@ -409,7 +409,8 @@ export async function processSessionStatusJudgmentBatch(
     if (
       result === 'applied' &&
       input.state === 'applied' &&
-      input.outcome === 'done'
+      input.outcome === 'done' &&
+      input.emitDoneWebhook !== false
     ) {
       try {
         options.onDoneApplied?.({
@@ -469,6 +470,7 @@ export async function processSessionStatusJudgmentBatch(
           confidence: 1,
           probabilities: { done: 1 },
           errorCode: liveWork ? 'live_work' : undefined,
+          emitDoneWebhook: false,
         });
         continue;
       }
