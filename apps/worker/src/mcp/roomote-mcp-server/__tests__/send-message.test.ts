@@ -46,9 +46,44 @@ describe('handleSendMessage', () => {
       {
         message: 'Please continue',
         images: undefined,
+        attachments: undefined,
       },
     );
     expect(tasksApiClient.sendMessageToTask).not.toHaveBeenCalled();
+  });
+
+  it('forwards screenshot and text attachments to the task API', async () => {
+    vi.mocked(tasksApiClient.steerMessageToTask).mockResolvedValueOnce({
+      success: true,
+      result: { sent: true },
+    });
+    const attachments = [
+      {
+        filename: 'screenshot.png',
+        mimeType: 'image/png',
+        base64: 'cG5n',
+      },
+      {
+        filename: 'failure.log',
+        mimeType: 'text/plain',
+        base64: 'bG9n',
+      },
+    ];
+
+    await handleSendMessage(
+      { taskId: 'task-1', message: 'Please continue', attachments },
+      config,
+    );
+
+    expect(tasksApiClient.steerMessageToTask).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      {
+        message: 'Please continue',
+        images: undefined,
+        attachments,
+      },
+    );
   });
 
   it('surfaces snapshot resumes with the new task run id', async () => {
@@ -82,6 +117,7 @@ describe('handleSendMessage', () => {
       {
         message: 'Please continue',
         images: undefined,
+        attachments: undefined,
       },
     );
     expect(tasksApiClient.sendMessageToTask).not.toHaveBeenCalled();
@@ -143,6 +179,7 @@ describe('handleSendMessage', () => {
       {
         message: '<review_result>Looks good</review_result>',
         images: undefined,
+        attachments: undefined,
         senderMode: 'linked_review_handoff',
       },
     );
@@ -170,6 +207,7 @@ describe('handleSendMessage', () => {
       {
         message: '<review_result type="send">No new delta</review_result>',
         images: undefined,
+        attachments: undefined,
         senderMode: 'linked_review_handoff',
       },
     );
@@ -199,6 +237,7 @@ describe('handleSendMessage', () => {
         message:
           '<code-review-results type="send">No new delta</code-review-results>',
         images: undefined,
+        attachments: undefined,
         senderMode: 'linked_review_handoff',
       },
     );
@@ -237,6 +276,7 @@ describe('handleSendMessage', () => {
       {
         message: '<code-review-results>No new delta</code-review-results>',
         images: undefined,
+        attachments: undefined,
         senderMode: 'linked_review_handoff',
       },
     );

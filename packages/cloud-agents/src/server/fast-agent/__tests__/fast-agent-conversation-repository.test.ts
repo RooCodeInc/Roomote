@@ -2418,6 +2418,13 @@ describe('Fast conversation repository', () => {
       deliveredAt: new Date(),
     });
     const inlineClaim = new Date(Date.now() + 60_000);
+    const reservedClaim = new Date(Date.now() + 60_000);
+    const reserved = await insertRow('steer-reserved', {
+      claimedUntil: reservedClaim,
+    });
+    const lapsed = await insertRow('steer-lapsed', {
+      claimedUntil: new Date(Date.now() - 60_000),
+    });
     const inline = await insertRow('steer-inline', {
       admission: 'inline',
       claimedUntil: inlineClaim,
@@ -2429,13 +2436,18 @@ describe('Fast conversation repository', () => {
       alsoPending,
       withdrawn,
       delivered,
+      reserved,
+      lapsed,
       inline,
     ]);
     // A withdrawn, settled, or inline-owned row is never handed to the steer.
-    expect([...claimed].sort()).toEqual([pending, alsoPending].sort());
+    // An active reservation also stays with its owner, while an expired claim
+    // can be recovered by this steer.
+    expect([...claimed].sort()).toEqual([pending, alsoPending, lapsed].sort());
     expect((await readClaim(pending))!.getTime()).toBeGreaterThan(before);
     expect(await readClaim(withdrawn)).toBeNull();
     expect(await readClaim(delivered)).toBeNull();
+    expect(await readClaim(reserved)).toEqual(reservedClaim);
 
     // After the steer delivers one row, only the undelivered claim goes back;
     // an inline owner's claim is never touched.

@@ -881,6 +881,7 @@ export async function claimFastAgentHumanFollowUpSteers(
   ids: string[],
 ): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
+  const now = new Date();
   const rows = await db
     .update(fastAgentParentEvents)
     .set({
@@ -893,6 +894,12 @@ export async function claimFastAgentHumanFollowUpSteers(
         isNull(fastAgentParentEvents.admission),
         isNull(fastAgentParentEvents.deliveredAt),
         isNull(fastAgentParentEvents.discardedAt),
+        // Re-check ownership atomically after selection. A Send now
+        // reservation or another native steer may have claimed the row.
+        or(
+          isNull(fastAgentParentEvents.claimedUntil),
+          lt(fastAgentParentEvents.claimedUntil, now),
+        ),
       ),
     )
     .returning({ id: fastAgentParentEvents.id });

@@ -77,7 +77,10 @@ export function registerRoomoteMemberTools(
             await invokeMemberApi(auth, '/sessions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message: params.message }),
+              body: JSON.stringify({
+                message: params.message,
+                attachments: params.attachments,
+              }),
             }),
           );
         }
@@ -262,7 +265,10 @@ export function registerRoomoteMemberTools(
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: params.message }),
+                body: JSON.stringify({
+                  message: params.message,
+                  attachments: params.attachments,
+                }),
               },
             ),
           );

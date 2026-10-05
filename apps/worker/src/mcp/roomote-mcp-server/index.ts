@@ -689,6 +689,7 @@ const manageTasksInputSchema = {
   taskId: roomoteManagementFieldSchemas.taskId,
   sessionId: roomoteManagementFieldSchemas.sessionId,
   message: roomoteManagementFieldSchemas.message,
+  attachments: roomoteManagementFieldSchemas.attachments,
   role: z
     .enum(['coding', 'helper', 'vision', 'codeReview', 'explore', 'planning'])
     .optional()
@@ -733,7 +734,10 @@ roomoteMcpServer.registerTool(
         if (!params.message?.trim()) {
           return errorResult('message is required for start');
         }
-        return handleStartSession(params.message, config);
+        return handleStartSession(
+          { message: params.message, attachments: params.attachments },
+          config,
+        );
       }
       case 'search': {
         const statusError = getRoomoteSearchStatusError({
@@ -879,11 +883,19 @@ roomoteMcpServer.registerTool(
         }
         return target.kind === 'task'
           ? handleSendMessage(
-              { taskId: target.id, message: params.message },
+              {
+                taskId: target.id,
+                message: params.message,
+                attachments: params.attachments,
+              },
               config,
             )
           : handleSendSessionMessage(
-              { sessionId: target.id, message: params.message },
+              {
+                sessionId: target.id,
+                message: params.message,
+                attachments: params.attachments,
+              },
               config,
             );
       }

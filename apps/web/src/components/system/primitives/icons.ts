@@ -222,6 +222,7 @@ export {
   VideoIcon,
   Volume2,
   VolumeX,
+  Webhook,
   Wrench,
   X,
   XIcon,

@@ -29,6 +29,15 @@ time, so new password sign-ups also receive a verification email (see
 [Account email verification](#account-email-verification) below). Sign-in
 is never blocked on verification.
 
+Admins can pause outbound email from **Settings > Communications > Email
+(AgentMail)** by turning off **Send email**. This keeps the inbox, credentials,
+webhook, and inbound email handling configured, but blocks every outbound email,
+including replies, task results, automation reports, notifications,
+verification messages, and password resets. Turning the switch back on resumes
+sending without provider reconfiguration. The deployment-level
+`R_EMAIL_CHANNEL_ENABLED` flag remains authoritative: the settings switch cannot
+enable email when that environment flag is off.
+
 ## Connect an AgentMail inbox
 
 Create an AgentMail account at [console.agentmail.to](https://console.agentmail.to),

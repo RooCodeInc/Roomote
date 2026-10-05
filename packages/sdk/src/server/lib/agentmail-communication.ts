@@ -1,6 +1,8 @@
 import { AgentMailCommunicationProvider } from '@roomote/communication/agentmail-provider';
-import { resolveAgentMailRuntimeCredentials } from '@roomote/db/server';
-import { isEmailChannelEnabled } from '@roomote/env';
+import {
+  isAgentMailOutboundEnabled,
+  resolveAgentMailRuntimeCredentials,
+} from '@roomote/db/server';
 
 import {
   recordAgentMailOutboundMessage,
@@ -32,7 +34,7 @@ type AgentMailCommunicationProviderRuntimeOptions = {
 export async function createAgentMailCommunicationProviderFromRuntimeCredentials(
   options?: AgentMailCommunicationProviderRuntimeOptions,
 ): Promise<AgentMailCommunicationProvider | null> {
-  if (!isEmailChannelEnabled()) {
+  if (!(await isAgentMailOutboundEnabled())) {
     return null;
   }
 

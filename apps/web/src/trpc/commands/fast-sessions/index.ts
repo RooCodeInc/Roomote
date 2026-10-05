@@ -11,6 +11,7 @@ import {
   createFastAgentWebTaskLauncher,
   FastAgentDurableRetryScheduledError,
   getOrCreateFastAgentSession,
+  requestFastAgentTurnStop,
   resolveApiBaseUrl,
   type FastAgentPlatformEventKind,
   type FastAgentPlatformEventVisibility,
@@ -82,6 +83,8 @@ import {
   getFastSessionPrReviewOfferStatus,
   getFastSessionTasks,
   hasFastSessionQueuedMessages,
+  releaseFastSessionQueuedMessageSteerReservation,
+  reserveFastSessionQueuedMessageForSteer,
   updateFastSessionPrReviewOfferStatus,
   withdrawFastSessionQueuedMessage,
   type FastSessionMessageCursor,
@@ -959,6 +962,67 @@ export async function deleteFastSessionQueuedMessageCommand(
     });
   }
   return { outcome };
+}
+
+export async function stopFastSessionCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId: string },
+): Promise<{
+  outcome: 'stopped' | 'not_running' | 'timed_out';
+}> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) throw new Error('Session not found');
+
+  return {
+    outcome: await requestFastAgentTurnStop({
+      surface: session.surface,
+      workspaceId: session.workspaceId,
+      conversationId: session.conversationId,
+    }),
+  };
+}
+
+/** Stop the active predecessor, then wake the oldest queued web follow-up. */
+export async function steerFastSessionQueuedMessageCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId: string; clientMessageId: string },
+): Promise<{
+  outcome: 'steered' | 'not_queued' | 'not_first' | 'timed_out';
+}> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) throw new Error('Session not found');
+
+  const reservation = await reserveFastSessionQueuedMessageForSteer({
+    sessionId: session.id,
+    clientMessageId: input.clientMessageId,
+  });
+  if (reservation.outcome !== 'reserved') return reservation;
+
+  let stopOutcome: 'stopped' | 'not_running' | 'timed_out';
+  try {
+    stopOutcome = await requestFastAgentTurnStop({
+      surface: session.surface,
+      workspaceId: session.workspaceId,
+      conversationId: session.conversationId,
+    });
+  } finally {
+    try {
+      await releaseFastSessionQueuedMessageSteerReservation(reservation);
+    } finally {
+      await wakeFastAgentParentEventNow({
+        conversationId: session.id,
+        eventKey: reservation.eventKey,
+      }).catch((error) => {
+        console.warn(
+          `[Fast Web] Failed to wake a steered queued message: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
+  }
+
+  return {
+    outcome: stopOutcome === 'timed_out' ? 'timed_out' : 'steered',
+  };
 }
 
 export async function startFastSessionGoalCommand(

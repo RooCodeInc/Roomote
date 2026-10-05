@@ -75,6 +75,7 @@ import {
   SessionQueuedMessageList,
   type SessionQueuedMessage,
   type SessionQueuedMessageDeleteOutcome,
+  type SessionQueuedMessageSteerOutcome,
 } from './SessionQueuedMessageList';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { describeValidationError } from '@/lib/validation-error';
@@ -240,7 +241,8 @@ type PendingResponseAction =
     }
   | { type: 'optimistic'; message: TranscriptOrder }
   | { type: 'commitOptimistic'; optimisticId: string }
-  | { type: 'rollbackOptimistic'; optimisticId: string };
+  | { type: 'rollbackOptimistic'; optimisticId: string }
+  | { type: 'settled' };
 
 function compareTranscriptOrder(a: TranscriptOrder, b: TranscriptOrder) {
   if (a.ts !== b.ts) return a.ts - b.ts;
@@ -329,6 +331,9 @@ export function pendingResponseReducer(
   state: PendingResponseState,
   action: PendingResponseAction,
 ): PendingResponseState {
+  if (action.type === 'settled') {
+    return { ...state, pendingAfter: null, optimisticRollback: null };
+  }
   if (action.type === 'hydrate' || action.type === 'messages') {
     let pendingAfter =
       action.type === 'hydrate'
@@ -744,6 +749,7 @@ export function FastSessionTranscript({
     setOptimisticMessages(next);
   }, []);
   const [isSending, setIsSending] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [pendingResponseState, dispatchPendingResponse] = useReducer(
     pendingResponseReducer,
     initialOptimisticMessage
@@ -981,6 +987,7 @@ export function FastSessionTranscript({
         }
         if (update.conversationResponding === false) {
           // The turn is over: any text no reply delivered is withdrawn.
+          dispatchPendingResponse({ type: 'settled' });
           clearStreamMessages();
         }
       } catch {
@@ -1780,6 +1787,44 @@ export function FastSessionTranscript({
     [sessionId, trpcClient],
   );
 
+  const stopSession = useCallback(async () => {
+    if (isStopping) return;
+    setIsStopping(true);
+    setReplyError(null);
+    try {
+      const { outcome } = await trpcClient.fastSessions.stop.mutate({
+        sessionId,
+      });
+      if (outcome === 'timed_out') {
+        setReplyError('The active response did not stop in time. Try again.');
+      } else {
+        setConversationResponding(false);
+        dispatchPendingResponse({ type: 'settled' });
+        clearStreamMessages();
+      }
+    } catch (error) {
+      setReplyError(
+        describeValidationError(error, 'Failed to stop the active response'),
+      );
+    } finally {
+      setIsStopping(false);
+    }
+  }, [clearStreamMessages, isStopping, sessionId, trpcClient]);
+
+  const steerQueuedMessage = useCallback(
+    async (
+      message: SessionQueuedMessage,
+    ): Promise<SessionQueuedMessageSteerOutcome> => {
+      const { outcome } =
+        await trpcClient.fastSessions.steerQueuedMessage.mutate({
+          sessionId,
+          clientMessageId: message.clientMessageId,
+        });
+      return outcome;
+    },
+    [sessionId, trpcClient],
+  );
+
   const handleReviewAction = useCallback(
     async (deliveryId: string, choice: PrReviewActionChoice) => {
       const result = await trpcClient.fastSessions.reviewAction.mutate({
@@ -2353,6 +2398,9 @@ export function FastSessionTranscript({
               queuedMessages={queuedMessages}
               currentUserId={currentUser?.userId ?? null}
               onDeleteQueuedMessage={deleteQueuedMessage}
+              onSteerQueuedMessage={steerQueuedMessage}
+              onStop={() => void stopSession()}
+              isStopping={isStopping}
               initialModel={sessionModel}
               initialReasoningEffort={sessionReasoningEffort}
               defaultModelId={defaultModelId}

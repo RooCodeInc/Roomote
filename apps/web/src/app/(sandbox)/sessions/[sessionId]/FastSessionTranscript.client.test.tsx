@@ -75,6 +75,8 @@ vi.mock('./CapabilityOfferCard', () => ({
 const {
   replyMutate,
   deleteQueuedMessageMutate,
+  steerQueuedMessageMutate,
+  stopSessionMutate,
   startGoalMutate,
   reviewActionMutate,
   updateModelSelectionMutate,
@@ -95,6 +97,8 @@ const {
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
   deleteQueuedMessageMutate: vi.fn(),
+  steerQueuedMessageMutate: vi.fn(),
+  stopSessionMutate: vi.fn(),
   startGoalMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
   updateModelSelectionMutate: vi.fn(),
@@ -219,6 +223,8 @@ vi.mock('@/trpc/client', () => ({
       },
       reply: { mutate: replyMutate },
       deleteQueuedMessage: { mutate: deleteQueuedMessageMutate },
+      steerQueuedMessage: { mutate: steerQueuedMessageMutate },
+      stop: { mutate: stopSessionMutate },
       startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
@@ -458,6 +464,9 @@ beforeEach(() => {
   FakeEventSource.instances = [];
   replyMutate.mockReset();
   deleteQueuedMessageMutate.mockReset();
+  steerQueuedMessageMutate.mockReset();
+  stopSessionMutate.mockReset();
+  stopSessionMutate.mockResolvedValue({ outcome: 'stopped' });
   startGoalMutate.mockReset();
   startGoalMutate.mockResolvedValue({ success: true, goal: {} });
   reviewActionMutate.mockReset();
@@ -3428,6 +3437,94 @@ describe('FastSessionTranscript', () => {
     expect(
       within(screen.getByRole('log')).getAllByText('Queued follow-up'),
     ).toHaveLength(1);
+  });
+
+  it('stops the active Session turn from the empty composer', async () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: true,
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    await waitFor(() =>
+      expect(stopSessionMutate).toHaveBeenCalledExactlyOnceWith({
+        sessionId: 'session-1',
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText('Working')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+  });
+
+  it('keeps a forced queued message visible until its delivered prompt arrives', async () => {
+    const steering = Promise.withResolvers<{ outcome: 'steered' }>();
+    steerQueuedMessageMutate.mockReturnValue(steering.promise);
+    const queuedMessage = {
+      id: 'parent-event-1',
+      clientMessageId: '11111111-1111-4111-8111-111111111111',
+      userId: 'current-user',
+      text: 'Apply this correction now',
+      timestamp: 2,
+    };
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        initialQueuedMessages={[queuedMessage]}
+        canReply
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send now' }));
+    expect(steerQueuedMessageMutate).toHaveBeenCalledExactlyOnceWith({
+      sessionId: 'session-1',
+      clientMessageId: queuedMessage.clientMessageId,
+    });
+    expect(
+      screen.getByRole('button', { name: 'Sending queued message' }),
+    ).toBeDisabled();
+    expect(screen.getByText(queuedMessage.text)).toBeInTheDocument();
+    expect(screen.getByRole('log')).not.toHaveTextContent(queuedMessage.text);
+
+    await act(async () => steering.resolve({ outcome: 'steered' }));
+    expect(screen.getByText(queuedMessage.text)).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', { queuedMessages: [] });
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'delivered-steer',
+              role: 'user',
+              text: queuedMessage.text,
+              ts: 3,
+            }),
+            eventId: `${queuedMessage.clientMessageId}:user`,
+            turnId: queuedMessage.clientMessageId,
+            metadata: {
+              visibleInTranscript: true,
+              clientMessageId: queuedMessage.clientMessageId,
+            },
+          },
+        ],
+      });
+    });
+
+    expect(
+      screen.queryByRole('list', { name: 'Queued messages' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('log')).toHaveTextContent(queuedMessage.text);
   });
 
   it('retires a locally queued follow-up once its steered prompt persists with the client id', async () => {

@@ -90,7 +90,9 @@ import {
   isPrivateSessionsExperimentEnabled,
   isNull,
   isXaiSubscriptionConnected,
+  lt,
   markSessionGoalForConversation,
+  or,
   releaseSessionGoalContinuation,
   createSessionStatusJudgmentRequest,
   settleSessionStatusJudgmentTurn,
@@ -98,6 +100,7 @@ import {
   touchSessionActivity,
   withEnvironmentVerificationRetryLock,
   resolveEffectiveModelRuntimeEnv,
+  resolveSessionIntegrationToolAutoOwner,
   fastAgentConversations,
 } from '@roomote/db/server';
 import { captureInstanceEvent } from '@roomote/telemetry/server';
@@ -419,11 +422,18 @@ async function getPendingFastAgentHumanFollowUps(
   sessionId: string,
   excludedEventId?: string,
 ) {
+  const now = new Date();
   return db.query.fastAgentParentEvents.findMany({
     where: and(
       eq(fastAgentParentEvents.conversationId, sessionId),
       isNull(fastAgentParentEvents.deliveredAt),
       isNull(fastAgentParentEvents.discardedAt),
+      // A queued-message Send now action reserves the row while stopping its
+      // predecessor. Native steering must not take it during that handoff.
+      or(
+        isNull(fastAgentParentEvents.claimedUntil),
+        lt(fastAgentParentEvents.claimedUntil, now),
+      ),
       // An inline-admitted row is a whole turn owned by a live process (or
       // awaiting queue resumption), never a steer for the current turn.
       isNull(fastAgentParentEvents.admission),
@@ -6806,6 +6816,13 @@ export async function answerFastAgentQuestion({
                         findRecentFastAgentToolResults({
                           conversationId: session.id,
                         }),
+                      resolveSessionOwner: async () =>
+                        toolApprovalOwnerUserId
+                          ? resolveSessionIntegrationToolAutoOwner({
+                              conversationId: session.id,
+                              ownerUserId: toolApprovalOwnerUserId,
+                            })
+                          : undefined,
                       signal: promptSignal,
                       // Auto stopped for this session: say so in the thread
                       // and end the turn. The notice closes the instruction,

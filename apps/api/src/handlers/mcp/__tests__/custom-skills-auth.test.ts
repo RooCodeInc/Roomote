@@ -184,7 +184,7 @@ it.each(['missing', 'deleted', 'unknown-run', 'unknown-user'] as const)(
       await db.delete(taskRuns).where(eq(taskRuns.id, context.runId));
     }
     const { name, response } = createSkill(context);
-    expect((await response).status).toBe(403);
+    expect((await response).status).toBe(state === 'unknown-run' ? 404 : 403);
     expect(
       await db.query.instanceSkills.findFirst({
         where: eq(instanceSkills.name, name),

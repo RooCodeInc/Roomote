@@ -82,6 +82,11 @@ type WorkerExitTaskRunState = Pick<
 >;
 
 type WorkerExitClassification = 'routine' | 'active_failure';
+type WorkerExitResult = {
+  disposition: WorkerBootstrapExitDisposition;
+  classification: WorkerExitClassification | 'bootstrap_failure';
+  shutdownReason: string | null;
+};
 
 function formatWorkerExitTimestamp(
   value: Date | null | undefined,
@@ -561,6 +566,14 @@ export abstract class BaseController {
     const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
     if (
+      taskRun.cancelRequestedAt ||
+      taskRun.canceledAt ||
+      taskRun.status === RunStatus.Canceled
+    ) {
+      return null;
+    }
+
+    if (
       taskRun.status === RunStatus.Pending ||
       taskRun.status === RunStatus.Dequeued
     ) {
@@ -602,6 +615,7 @@ export abstract class BaseController {
           and(
             eq(taskRuns.id, taskRun.id),
             eq(taskRuns.status, taskRun.status),
+            isNull(taskRuns.cancelRequestedAt),
             isNull(taskRuns.canceledAt),
           ),
         )
@@ -636,11 +650,16 @@ export abstract class BaseController {
         where: eq(taskRuns.id, taskRun.id),
         columns: {
           status: true,
+          cancelRequestedAt: true,
           canceledAt: true,
         },
       });
 
-      if (latestRun?.canceledAt || latestRun?.status === RunStatus.Canceled) {
+      if (
+        latestRun?.cancelRequestedAt ||
+        latestRun?.canceledAt ||
+        latestRun?.status === RunStatus.Canceled
+      ) {
         return null;
       }
 
@@ -705,7 +724,7 @@ export abstract class BaseController {
     taskRun: TaskRun,
     exitCode: number,
     launchDiagnostics?: string,
-  ): Promise<WorkerBootstrapExitDisposition> {
+  ): Promise<WorkerExitResult> {
     if (
       await this.claimWorkerBootstrapRestart(
         taskRun,
@@ -714,7 +733,11 @@ export abstract class BaseController {
       )
     ) {
       this.workerBootstrapRestartsAwaitingCleanup.add(taskRun.id);
-      return 'restart';
+      return {
+        disposition: 'restart',
+        classification: 'bootstrap_failure',
+        shutdownReason: 'bootstrap_restart_pending',
+      };
     }
 
     // Fold any captured launch output (stderr/stdout/probe) into the run's
@@ -733,12 +756,19 @@ export abstract class BaseController {
       },
     );
 
-    if (!failed) {
-      const currentState = await this.findWorkerExitState(taskRun.id);
-      this.recordWorkerExitObservation(taskRun, exitCode, currentState);
+    if (failed) {
+      return {
+        disposition: 'failed',
+        classification: 'bootstrap_failure',
+        shutdownReason: 'failed',
+      };
     }
 
-    return failed ? 'failed' : 'ignore';
+    const currentState = await this.findWorkerExitState(taskRun.id);
+    return {
+      disposition: 'ignore',
+      ...this.recordWorkerExitObservation(taskRun, exitCode, currentState),
+    };
   }
 
   private async findWorkerExitState(
@@ -762,7 +792,7 @@ export abstract class BaseController {
     taskRun: TaskRun,
     exitCode: number,
     state: WorkerExitTaskRunState | null,
-  ): void {
+  ): Pick<WorkerExitResult, 'classification' | 'shutdownReason'> {
     const observedAt = new Date();
     const shutdownReason = state
       ? getWorkerExitShutdownReason(state)
@@ -836,6 +866,8 @@ export abstract class BaseController {
     const log =
       classification === 'active_failure' ? console.warn : console.log;
     log(`[BaseController] ${message}: ${JSON.stringify(observation)}`);
+
+    return { classification, shutdownReason };
   }
 
   protected scheduleWorkerBootstrapRestart(taskRun: TaskRun): void {

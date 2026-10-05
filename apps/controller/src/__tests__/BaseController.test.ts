@@ -210,6 +210,7 @@ function makeTaskRun(overrides: Partial<TaskRun> = {}): TaskRun {
     prRepo: null,
     prNumber: null,
     prSha: null,
+    cancelRequestedAt: null,
     canceledAt: null,
     completedAt: null,
     ...overrides,
@@ -611,6 +612,41 @@ describe('BaseController.dequeueTaskRun', () => {
     expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
   });
 
+  it('does not dequeue a job whose cancellation was already requested', async () => {
+    const job = makeTaskRun({
+      id: 83,
+      status: RunStatus.Pending,
+      cancelRequestedAt: new Date(),
+    });
+
+    const result = await controller.testDequeueTaskRun(job);
+
+    expect(result).toBeNull();
+    expect(mockDbTransaction).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not revive a job with a cancellation request during the dequeue window', async () => {
+    const job = makeTaskRun({
+      id: 82,
+      status: RunStatus.Pending,
+    });
+
+    mockUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([]),
+    });
+    mockTaskRunsFindFirst.mockResolvedValueOnce({
+      status: RunStatus.Pending,
+      cancelRequestedAt: new Date(),
+      canceledAt: null,
+    });
+
+    const result = await controller.testDequeueTaskRun(job);
+
+    expect(result).toBeNull();
+    expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
+  });
+
   it('treats preparing jobs as recoverable before controller dequeue', async () => {
     const job = makeTaskRun({
       id: 80,
@@ -685,7 +721,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
 
     await expect(
       controller.testHandleWorkerExitBeforeStart(job, 1),
-    ).resolves.toBe('restart');
+    ).resolves.toEqual({
+      disposition: 'restart',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'bootstrap_restart_pending',
+    });
 
     expect(mockDbUpdateSet).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -729,7 +769,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
         makeTaskRun({ id: 42, status: RunStatus.Dequeued }),
         1,
       ),
-    ).resolves.toBe('failed');
+    ).resolves.toEqual({
+      disposition: 'failed',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'failed',
+    });
 
     expect(mockFinishRun).toHaveBeenCalledWith({
       id: 42,
@@ -749,7 +793,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
         1,
         'probe "worker --version" exited with code 1; probe stderr: Error: WORKER_API_URL is required',
       ),
-    ).resolves.toBe('failed');
+    ).resolves.toEqual({
+      disposition: 'failed',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'failed',
+    });
 
     const expectedError =
       'Worker process exited before claiming task run (exit code 1); ' +
@@ -784,7 +832,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
         1,
         'stderr: worker failed before claim',
       ),
-    ).resolves.toBe('restart');
+    ).resolves.toEqual({
+      disposition: 'restart',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'bootstrap_restart_pending',
+    });
 
     expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
@@ -814,7 +866,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       0,
     );
 
-    expect(claimed).toBe('ignore');
+    expect(claimed).toEqual({
+      disposition: 'ignore',
+      classification: 'routine',
+      shutdownReason: 'completed',
+    });
     expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
       'Detached worker exit treated as routine after the task run advanced',
@@ -830,6 +886,31 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       expect.objectContaining({
         level: 'info',
         signal: 'worker-exit-routine',
+      }),
+    );
+  });
+
+  it('reports unavailable lifecycle state when the exit-state read fails', async () => {
+    mockUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([]),
+    });
+    mockTaskRunsFindFirst.mockRejectedValueOnce(new Error('database offline'));
+
+    const result = await controller.testHandleWorkerExitBeforeStart(
+      makeTaskRun({ id: 42, status: RunStatus.Processing }),
+      137,
+    );
+
+    expect(result).toEqual({
+      disposition: 'ignore',
+      classification: 'routine',
+      shutdownReason: 'state_unavailable',
+    });
+    expect(mockCaptureControllerException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'database offline' }),
+      expect.objectContaining({
+        runId: 42,
+        phase: 'worker_exit_state_read',
       }),
     );
   });
@@ -851,7 +932,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       137,
     );
 
-    expect(claimed).toBe('ignore');
+    expect(claimed).toEqual({
+      disposition: 'ignore',
+      classification: 'active_failure',
+      shutdownReason: null,
+    });
     expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
       'Detached worker exited while the task run remained active',
@@ -887,7 +972,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       137,
     );
 
-    expect(claimed).toBe('ignore');
+    expect(claimed).toEqual({
+      disposition: 'ignore',
+      classification: 'routine',
+      shutdownReason: 'sleep_requested',
+    });
     expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
       'Detached worker exit treated as routine after the task run advanced',
@@ -959,7 +1048,11 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
         makeTaskRun({ id: 44, status: RunStatus.Dequeued }),
         1,
       ),
-    ).resolves.toBe('failed');
+    ).resolves.toEqual({
+      disposition: 'failed',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'failed',
+    });
 
     expect(mockCaptureControllerException).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'notification failed' }),

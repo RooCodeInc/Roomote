@@ -19,6 +19,11 @@ work to tasks. You can keep working locally and return to the same session for
 the result. When work must start directly in a known compute environment, your
 client can still use the explicit environment-targeted task launch action.
 
+Your client can include supported screenshots, files, logs, or documents when
+it starts a session or sends a follow-up. A message accepts up to 20 attachments
+and 16 MiB of decoded attachment data in total. See [File attachments](/file-attachments)
+for supported formats, processing behavior, and request limits.
+
 ### Check on and steer existing work
 
 Search finds Sessions by default. Once you find one, provide its Session ID to
@@ -56,7 +61,8 @@ This is useful when you want to:
 - find an earlier investigation or implementation
 - inspect a delegated task when you need its execution details
 - pull the result of a Roomote task into your current conversation
-- send follow-up instructions or cancel task work that is no longer needed
+- send follow-up instructions with supporting files or cancel task work that is
+  no longer needed
 
 Follow-up instructions normally wait behind the task's current turn. When the
 new instruction must take effect immediately, ask your MCP client to steer the

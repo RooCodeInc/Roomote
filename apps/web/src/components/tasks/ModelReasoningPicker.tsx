@@ -671,7 +671,10 @@ export function ModelReasoningPicker({
     return (
       <Drawer open={open} onOpenChange={onOpenChange} direction="bottom">
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-        <DrawerContent className="max-h-[80vh]">
+        <DrawerContent
+          overlayClassName="z-popover"
+          className="z-popover max-h-[80vh]"
+        >
           <DrawerTitle className="sr-only">
             Choose model and reasoning
           </DrawerTitle>

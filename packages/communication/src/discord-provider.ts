@@ -282,6 +282,13 @@ export function chunkDiscordMessage(
   limit = DISCORD_MAX_MESSAGE_LENGTH,
 ): string[] {
   if (text.length <= limit) return text ? [text] : [];
+  if (/^ {0,3}(?:`{3,}|~{3,})/mu.test(text)) {
+    return chunkDiscordFencedMessage(text, limit);
+  }
+  return chunkDiscordPlainMessage(text, limit);
+}
+
+function chunkDiscordPlainMessage(text: string, limit: number): string[] {
   const chunks: string[] = [];
   let remaining = text;
 
@@ -299,6 +306,195 @@ export function chunkDiscordMessage(
     remaining = remaining.slice(splitAt).trimStart();
   }
   if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+/** Keep each sent message's fenced sections independently renderable. */
+function chunkDiscordFencedMessage(text: string, limit: number): string[] {
+  const chunks: string[] = [];
+  let current = '';
+  type Fence = {
+    opening: string;
+    marker: string;
+    openingStart: number;
+    bodyStart: number;
+    continued: boolean;
+  };
+  let open: Fence | null = null;
+  const lines = text.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
+
+  const flush = () => {
+    if (!current) return;
+    if (open && !current.slice(open.bodyStart).trim()) {
+      const beforeOpening = current.slice(0, open.openingStart);
+      if (beforeOpening) {
+        chunks.push(...chunkDiscordPlainMessage(beforeOpening, limit));
+      }
+      current = `${open.opening}\n`;
+      open.openingStart = 0;
+      open.bodyStart = current.length;
+      return;
+    }
+    chunks.push(
+      open
+        ? `${current}${current.endsWith('\n') ? '' : '\n'}${open.marker}`
+        : current,
+    );
+    current = open ? `${open.opening}\n` : '';
+    if (open) {
+      open.openingStart = 0;
+      open.bodyStart = current.length;
+      open.continued = true;
+    }
+  };
+
+  for (const [index, line] of lines.entries()) {
+    const value = line.endsWith('\n')
+      ? line.slice(0, -1).replace(/\r$/u, '')
+      : line;
+    const closing: boolean = open
+      ? new RegExp(
+          `^ {0,3}${open.marker[0]}{${open.marker.length},}[ \\t]*$`,
+          'u',
+        ).test(value)
+      : false;
+    const openingMatch: RegExpExecArray | null = open
+      ? null
+      : /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(value);
+    const opening: Fence | null =
+      openingMatch &&
+      !(openingMatch[1]?.startsWith('`') && openingMatch[2]?.includes('`'))
+        ? {
+            opening: value,
+            marker: openingMatch[1]!,
+            openingStart: 0,
+            bodyStart: 0,
+            continued: false,
+          }
+        : null;
+    const nextOpen: Fence | null = closing ? null : (opening ?? open);
+    const suffixLength = nextOpen ? nextOpen.marker.length + 1 : 0;
+
+    // An unusually long delimiter/language cannot be wrapped safely. Keep
+    // the original plain splitting behavior rather than emitting oversized
+    // messages or manufacturing an invalid fence.
+    if (
+      (opening && line.length + suffixLength >= limit) ||
+      (closing && line.length + open!.opening.length + 1 > limit)
+    ) {
+      return chunkDiscordPlainMessage(text, limit);
+    }
+
+    if (opening || closing) {
+      let firstBodyLength = 0;
+      if (opening && current) {
+        for (let next = index + 1; next < lines.length; next += 1) {
+          const nextLine = lines[next]!;
+          firstBodyLength += nextLine.length;
+          if (!/^[ \t]*\r?\n$/u.test(nextLine)) break;
+          if (line.length + firstBodyLength + suffixLength > limit) break;
+        }
+      }
+      if (
+        opening &&
+        current &&
+        firstBodyLength > 0 &&
+        line.length + firstBodyLength + suffixLength <= limit &&
+        current.length + line.length + firstBodyLength + suffixLength > limit
+      ) {
+        // Keep blank code lines with the first row, without an empty fenced
+        // message after preceding prose.
+        flush();
+      }
+      if (current.length + line.length + suffixLength > limit) flush();
+      if (closing && open?.continued && current.length === open.bodyStart) {
+        current = '';
+        open = null;
+        continue;
+      }
+      current += line;
+      open = nextOpen;
+      if (opening && open) {
+        open.openingStart = current.length - line.length;
+        open.bodyStart = current.length;
+      }
+      continue;
+    }
+
+    let remaining = line;
+    const freshPrefix = open ? `${open.opening}\n` : '';
+    const freshSuffixLength =
+      open && line.endsWith('\n') ? open.marker.length : suffixLength;
+    const currentHasContent = open
+      ? current !== `${open.opening}\n` && current !== `${open.opening}\r\n`
+      : current.length > 0;
+    if (
+      currentHasContent &&
+      line.length > limit - current.length - suffixLength &&
+      line.length <= limit - freshPrefix.length - freshSuffixLength
+    ) {
+      flush();
+    }
+    while (remaining) {
+      const capacity = limit - current.length - suffixLength;
+      if (capacity <= 0) {
+        flush();
+        continue;
+      }
+      let take = Math.min(capacity, remaining.length);
+      if (
+        open &&
+        take < remaining.length &&
+        remaining[take] === '\r' &&
+        remaining[take + 1] === '\n'
+      ) {
+        // The whole CRLF pair cannot fit in the single reserved newline
+        // slot. Move content with it to the next chunk instead.
+        take -= 1;
+      }
+      if (
+        take < remaining.length &&
+        /[\uD800-\uDBFF]/u.test(remaining[take - 1] ?? '') &&
+        /[\uDC00-\uDFFF]/u.test(remaining[take] ?? '')
+      ) {
+        take -= 1;
+      }
+      if (
+        open &&
+        take < remaining.length &&
+        remaining[take] === '\n' &&
+        current.length + take + 1 + open.marker.length <= limit
+      ) {
+        // A line break at the boundary saves the synthetic newline before
+        // the closing marker. Take it with this chunk, including any CR.
+        take += 1;
+      }
+      if (take <= 0) {
+        // Backing off before CRLF can exhaust a partly filled chunk. Flush
+        // and retry under a fresh fence; only fall back if even that has no
+        // room to advance.
+        if (
+          open &&
+          current !== `${open.opening}\n` &&
+          current !== `${open.opening}\r\n`
+        ) {
+          flush();
+          continue;
+        }
+        return chunkDiscordPlainMessage(text, limit);
+      }
+      current += remaining.slice(0, take);
+      remaining = remaining.slice(take);
+      if (remaining) flush();
+    }
+  }
+  if (current) {
+    chunks.push(
+      open
+        ? `${current}${current.endsWith('\n') ? '' : '\n'}${open.marker}`
+        : current,
+    );
+  }
   return chunks;
 }
 

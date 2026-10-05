@@ -429,6 +429,10 @@ describe('roomote MCP tool descriptions', () => {
     const actionField = getInputSchemaField(manageTasksTool, 'action');
     const taskIdField = getInputSchemaField(manageTasksTool, 'taskId');
     const limitField = getInputSchemaField(manageTasksTool, 'limit');
+    const attachmentsField = getInputSchemaField(
+      manageTasksTool,
+      'attachments',
+    );
 
     expect(manageTasksTool.config.description).not.toContain('get_diagnostics');
     expect(manageTasksTool.config.description).not.toContain('get_events');
@@ -455,6 +459,9 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(limitField.description).toBe(
       'Positive result limit: 1 to 100 for search/get_updates (default 20), or 1 to 1000 for get_messages (task or session)',
+    );
+    expect(attachmentsField.description).toContain(
+      'Each item requires filename, MIME type, and base64-encoded bytes',
     );
     expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
       'targetTasks',

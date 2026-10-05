@@ -26,26 +26,25 @@ The Slack webhook handler requires a `slack_installations` row matching the mock
 
 ```bash
 # Check existing state
-PGPASSWORD=password psql -h localhost -U postgres -d development -c "SELECT id, team_id, organization_id, bot_user_id FROM slack_installations LIMIT 5;"
-PGPASSWORD=password psql -h localhost -U postgres -d development -c "SELECT id, slack_user_id, slack_team_id, user_id FROM slack_user_mappings LIMIT 5;"
+psql -h localhost -U postgres -d roomote_development -c "SELECT id, team_id, bot_user_id FROM slack_installations LIMIT 5;"
+psql -h localhost -U postgres -d roomote_development -c "SELECT id, slack_user_id, slack_team_id, user_id FROM slack_user_mappings LIMIT 5;"
 
-# Get a valid org and user for seeding
-PGPASSWORD=password psql -h localhost -U postgres -d development -c "SELECT id FROM organizations LIMIT 1;"
-PGPASSWORD=password psql -h localhost -U postgres -d development -c "SELECT id FROM users LIMIT 1;"
+# Get a valid user for seeding
+psql -h localhost -U postgres -d roomote_development -c "SELECT id FROM users LIMIT 1;"
 ```
 
-Then seed (adjust org_id and user_id from the queries above):
+Then seed (adjust `user_id` from the query above):
 
 ```sql
 -- Seed slack installation for mock team TROOMOTE
-INSERT INTO slack_installations (organization_id, team_id, team_name, app_id, bot_user_id, bot_token, installed_by_user_id, is_active)
-VALUES ('<org_id>', 'TROOMOTE', 'roomote-mock', 'AMOCK', 'BROOMOTE', 'xoxb-mock-token', '<user_id>', true)
+INSERT INTO slack_installations (team_id, team_name, team_domain, app_id, bot_user_id, bot_access_token, scopes, installed_by_user_id, is_active)
+VALUES ('TROOMOTE', 'roomote-mock', 'roomote-mock', 'AMOCK', 'BROOMOTE', 'xoxb-mock-token', '["app_mentions:read", "chat:write"]'::json, '<user_id>', true)
 ON CONFLICT (team_id) DO NOTHING;
 
 -- Seed user mapping for mock user UGRACE
-INSERT INTO slack_user_mappings (slack_user_id, slack_team_id, user_id, organization_id)
-VALUES ('UGRACE', 'TROOMOTE', '<user_id>', '<org_id>')
-ON CONFLICT ON CONSTRAINT slack_user_mappings_unique DO NOTHING;
+INSERT INTO slack_user_mappings (slack_user_id, slack_team_id, user_id)
+VALUES ('UGRACE', 'TROOMOTE', '<user_id>')
+ON CONFLICT (slack_user_id, slack_team_id) DO NOTHING;
 ```
 
 ## Step 2: Create a scenario file

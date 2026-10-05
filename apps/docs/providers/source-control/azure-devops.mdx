@@ -115,8 +115,7 @@ credential helper instead of exporting `ADO_TOKEN` into task shells.
 
 ## Service hooks and automations
 
-When Azure DevOps repositories are mapped into environments, Roomote ensures
-service hooks for:
+Roomote ensures service hooks on every synced Azure DevOps repository for:
 
 - pull request created/updated and PR comments (Review Code and task follow-up)
 - work item commented (`@roomote` on work items)
@@ -137,6 +136,10 @@ commenter must have a linked Azure DevOps account. Ask for a review in the
 mention (for example `@roomote review this`) and Roomote runs the Review Code
 automation's structured review on the current head, posts the findings on the
 pull request, and reports back in the same discussion.
+
+Review Code does not require the repository to be mapped to an environment.
+When an environment includes the repository, the review runs there; otherwise,
+Roomote uses a plain checkout of the active synced repository.
 
 ## Native pull request merging in sessions
 

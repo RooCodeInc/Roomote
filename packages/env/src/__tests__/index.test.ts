@@ -516,6 +516,17 @@ describe('Env', () => {
     expect(env.SANDBOX_OPENROUTER_API_KEY).toBe('sandbox-openrouter-key');
   });
 
+  it('accepts a private CIDR allow-list for session completion webhooks', () => {
+    const env = createRoomoteEnv({
+      ...process.env,
+      R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS: '127.0.0.1/32',
+    });
+
+    expect(env.R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS).toBe(
+      '127.0.0.1/32',
+    );
+  });
+
   it('supplies self-hosted local defaults outside production', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: NodeJS.ProcessEnv = {

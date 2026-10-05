@@ -978,10 +978,12 @@ function isOpenCodeSessionInvalid(error: unknown): boolean {
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
+  reasoningEffort?: ReasoningEffort,
 ): Promise<{
   model: string;
   catalogModelId: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
+  reasoningEffort?: ReasoningEffort;
 }> {
   const requestedModel = model?.trim();
   let resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv = {};
@@ -993,7 +995,15 @@ async function resolveNonTaskModelRuntime(
     // ProviderAuthError before a request is made.
     resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv(
       requestedModel
-        ? { runtimeEnv: { ...process.env, R_MODEL: requestedModel } }
+        ? {
+            runtimeEnv: {
+              ...process.env,
+              R_MODEL: requestedModel,
+              ...(reasoningEffort
+                ? { R_MODEL_REASONING_EFFORT: reasoningEffort }
+                : {}),
+            },
+          }
         : {},
     );
   } catch (error) {
@@ -1038,6 +1048,7 @@ async function resolveNonTaskModelRuntime(
     selectedRuntimeEnv = {
       ...resolvedModelRuntimeEnv,
       R_MODEL: resolvedModel,
+      ...(reasoningEffort ? { R_MODEL_REASONING_EFFORT: reasoningEffort } : {}),
     };
 
     if (modelRole === 'orchestration') {
@@ -1066,6 +1077,7 @@ async function resolveNonTaskModelRuntime(
     // request is made. The lease cache keys on env, so distinct explicit
     // models get their own servers instead of colliding.
     resolvedModelRuntimeEnv: selectedRuntimeEnv,
+    reasoningEffort,
   };
 }
 
@@ -1365,6 +1377,7 @@ async function runNonTaskSdkPrompt(
   runtime: {
     model: string;
     resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
+    reasoningEffort?: ReasoningEffort;
   },
   promptOptions: NonTaskSdkPromptOptions,
   options: {
@@ -1419,6 +1432,7 @@ async function runNonTaskSdkPrompt(
   parts: Array<{ type?: unknown; text?: unknown }>;
 }> {
   const { model, resolvedModelRuntimeEnv } = runtime;
+  const reasoningEffort = runtime.reasoningEffort ?? params.reasoningEffort;
   const timeoutMs = params.timeoutMs === undefined ? 120_000 : params.timeoutMs;
   const promptErrorLabel =
     options.promptErrorLabel ??
@@ -1433,11 +1447,10 @@ async function runNonTaskSdkPrompt(
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
-    preserveReasoning:
-      options.preserveReasoning ?? Boolean(params.reasoningEffort),
+    preserveReasoning: options.preserveReasoning ?? Boolean(reasoningEffort),
     promptOnlySubagents: options.promptOnlySubagents,
-    reasoningOverride: params.reasoningEffort
-      ? { model, effort: params.reasoningEffort }
+    reasoningOverride: reasoningEffort
+      ? { model, effort: reasoningEffort }
       : undefined,
     startTimeoutMs:
       timeoutMs === null
@@ -2201,7 +2214,12 @@ export async function generateTrackedNonTaskText(
     const model = await resolveModelForInputModality(params, runtime);
     return runNonTaskSdkPrompt(
       params,
-      { ...runtime, model },
+      {
+        ...runtime,
+        model,
+        reasoningEffort:
+          model === runtime.model ? runtime.reasoningEffort : undefined,
+      },
       {
         system: params.system,
         parts: [
@@ -2257,6 +2275,20 @@ async function runControlPlaneWithFallback<T>(
   const fallbackModel = fallbackEnvVar
     ? runtime.resolvedModelRuntimeEnv[fallbackEnvVar]
     : undefined;
+  const fallbackReasoningEnvVar =
+    role === 'orchestration'
+      ? 'R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT'
+      : role === 'small'
+        ? 'R_SMALL_MODEL_FALLBACK_REASONING_EFFORT'
+        : undefined;
+  const fallbackReasoningEffort = fallbackReasoningEnvVar
+    ? runtime.resolvedModelRuntimeEnv[fallbackReasoningEnvVar]
+    : undefined;
+  const validFallbackReasoningEffort = isReasoningEffort(
+    fallbackReasoningEffort,
+  )
+    ? fallbackReasoningEffort
+    : undefined;
 
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -2271,7 +2303,11 @@ async function runControlPlaneWithFallback<T>(
         fallbackModel !== runtime.catalogModelId
       ) {
         const fromModel = runtime.catalogModelId;
-        runtime = await resolveNonTaskModelRuntime(fallbackModel, 'primary');
+        runtime = await resolveNonTaskModelRuntime(
+          fallbackModel,
+          'primary',
+          validFallbackReasoningEffort,
+        );
         const fromProvider = getDisplayModelProviderId(fromModel) ?? 'opencode';
         const toProvider =
           getDisplayModelProviderId(runtime.catalogModelId) ?? 'opencode';

@@ -207,6 +207,29 @@ describe('route policy enforcement', () => {
   });
 
   describe('authenticated routes', () => {
+    it('does not expose run-token issuance through tRPC', async () => {
+      const response = await createApiApp().request(
+        'http://localhost/trpc/auth.createRunToken',
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer test-user-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ json: { runId: 123 } }),
+        },
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          json: {
+            data: { code: 'NOT_FOUND' },
+          },
+        },
+      });
+    });
+
     it('rejects unauthenticated task run log requests centrally', async () => {
       const response = await createApiApp().request(
         'http://localhost/api/task-runs/123/logs',
@@ -324,7 +347,18 @@ describe('route policy enforcement', () => {
           tools?: Array<{
             name: string;
             inputSchema?: {
-              properties?: { action?: { enum?: string[] } };
+              properties?: {
+                action?: { enum?: string[] };
+                attachments?: {
+                  anyOf?: Array<{
+                    type?: string;
+                    items?: {
+                      required?: string[];
+                      properties?: Record<string, unknown>;
+                    };
+                  }>;
+                };
+              };
             };
           }>;
         };
@@ -351,6 +385,21 @@ describe('route policy enforcement', () => {
           'launch',
         ]),
       );
+      expect(manageTasks?.inputSchema?.properties?.attachments).toMatchObject({
+        anyOf: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'array',
+            items: expect.objectContaining({
+              required: ['filename', 'mimeType', 'base64'],
+              properties: expect.objectContaining({
+                filename: expect.any(Object),
+                mimeType: expect.any(Object),
+                base64: expect.any(Object),
+              }),
+            }),
+          }),
+        ]),
+      });
 
       const sessionSearchResponse = await createApiApp().request(
         'http://localhost/mcp',

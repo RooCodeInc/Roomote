@@ -291,6 +291,16 @@ export const deploymentSettings = pgTable('deployment_settings', {
   // key) so deployments enabled before this toggle existed stay enabled
   // without a backfill.
   brainEnabled: boolean('brain_enabled'),
+  // Runtime outbound-only gate. The deployment env flag remains the
+  // authoritative channel gate; admins can only further disable sends here.
+  emailOutboundEnabled: boolean('email_outbound_enabled')
+    .notNull()
+    .default(true),
+  sessionDoneWebhookEnabled: boolean('session_done_webhook_enabled')
+    .notNull()
+    .default(false),
+  sessionDoneWebhookUrl: text('session_done_webhook_url'),
+  sessionDoneWebhookSecret: encryptedText('session_done_webhook_secret'),
   // Signed Roomote license key (RMLK1.<payload>.<signature>) raising the
   // deployment's seat limit above the free tier; null for unlicensed
   // deployments. Verified at read time, never trusted as stored.
@@ -5082,6 +5092,56 @@ export const sessionStatusJudgments = pgTable(
   ],
 );
 
+export type SessionDoneWebhookDeliveryStatus =
+  | 'pending'
+  | 'delivered'
+  | 'failed'
+  | 'skipped';
+
+/** Durable at-least-once delivery outbox for decision-model completion events. */
+export const sessionDoneWebhookDeliveries = pgTable(
+  'session_done_webhook_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    judgmentId: uuid('judgment_id')
+      .notNull()
+      .references(() => sessionStatusJudgments.id, { onDelete: 'cascade' }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<SessionDoneWebhookDeliveryStatus>(),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at').notNull().defaultNow(),
+    lastError: text('last_error'),
+    deliveredAt: timestamp('delivered_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_done_webhook_deliveries_judgment_unique').on(
+      table.judgmentId,
+    ),
+    index('session_done_webhook_deliveries_due_idx').on(
+      table.status,
+      table.nextAttemptAt,
+      table.leaseExpiresAt,
+    ),
+    check(
+      'session_done_webhook_deliveries_status_check',
+      sql`${table.status} in ('pending', 'delivered', 'failed', 'skipped')`,
+    ),
+    check(
+      'session_done_webhook_deliveries_attempts_check',
+      sql`${table.attempts} >= 0`,
+    ),
+  ],
+);
+
 /** Only a keyed hash of each substitute token is ever stored. */
 export const credentialEgressSubstitutes = pgTable(
   'credential_egress_substitutes',
@@ -5283,6 +5343,7 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   participants: many(sessionParticipants),
   pins: many(sessionPins),
   statusJudgments: many(sessionStatusJudgments),
+  doneWebhookDeliveries: many(sessionDoneWebhookDeliveries),
   usageEvents: many(llmUsageEvents),
 }));
 
@@ -5292,6 +5353,20 @@ export const sessionStatusJudgmentsRelations = relations(
     session: one(sessions, {
       fields: [sessionStatusJudgments.sessionId],
       references: [sessions.id],
+    }),
+  }),
+);
+
+export const sessionDoneWebhookDeliveriesRelations = relations(
+  sessionDoneWebhookDeliveries,
+  ({ one }) => ({
+    session: one(sessions, {
+      fields: [sessionDoneWebhookDeliveries.sessionId],
+      references: [sessions.id],
+    }),
+    judgment: one(sessionStatusJudgments, {
+      fields: [sessionDoneWebhookDeliveries.judgmentId],
+      references: [sessionStatusJudgments.id],
     }),
   }),
 );

@@ -69,9 +69,16 @@ const RETIRED_JOB_SCHEDULER_NAMES = [
   'CodeQualityAuditor',
   'CiFailureTriage',
   'ProviderUsageLimitCheck',
+  'SessionDoneWebhookDelivery',
 ] as const;
 
 type ScheduledJob = Job<unknown, void, string>;
+type SchedulerOptions = {
+  onSessionDoneApplied?: (event: {
+    sessionId: string;
+    judgmentId: string;
+  }) => void;
+};
 
 const AUTOMATION_JOBS: Record<
   ScheduledAutomationJobName,
@@ -263,7 +270,10 @@ const QUIET_JOB_NAMES: ReadonlySet<string> = new Set([
   ScheduledJobName.Heartbeat,
 ]);
 
-const runJobs = async (job: ScheduledJob): Promise<void> => {
+const runJobs = async (
+  job: ScheduledJob,
+  options: SchedulerOptions,
+): Promise<void> => {
   if (!QUIET_JOB_NAMES.has(job.name)) {
     console.log(`[runJobs] processing job ${job.id} of type ${job.name}`);
   }
@@ -305,7 +315,9 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
     case ScheduledJobName.BrainMaintenance:
       return brainMaintenanceJob();
     case ScheduledJobName.SessionsReconcile:
-      return sessionsReconcileJob();
+      return sessionsReconcileJob({
+        onDoneApplied: options.onSessionDoneApplied,
+      });
     case ScheduledJobName.ThreadFooterRefresh:
       return threadFooterRefreshJob();
     case ScheduledJobName.ReleaseAnnouncements:
@@ -344,7 +356,7 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
   }
 };
 
-export async function startScheduler() {
+export async function startScheduler(options: SchedulerOptions = {}) {
   const connection = getRedis();
 
   const queue = new Queue<unknown, void, SchedulerJobName>(QUEUE_NAME, {
@@ -370,11 +382,15 @@ export async function startScheduler() {
     throw error;
   }
 
-  const worker = new Worker<unknown, void, string>(QUEUE_NAME, runJobs, {
-    connection,
-    concurrency: 5,
-    autorun: true,
-  });
+  const worker = new Worker<unknown, void, string>(
+    QUEUE_NAME,
+    (job) => runJobs(job, options),
+    {
+      connection,
+      concurrency: 5,
+      autorun: true,
+    },
+  );
 
   worker.on('completed', (job) => {
     if (!QUIET_JOB_NAMES.has(job.name)) {

@@ -57,8 +57,10 @@ import {
   handleFastSessionPrReviewActionCommand,
   resolveFastSessionCapabilityOfferCommand,
   replyToFastSessionCommand,
+  steerFastSessionQueuedMessageCommand,
   startFastSessionGoalCommand,
   startFastSessionCommand,
+  stopFastSessionCommand,
   submitFastSessionUserInputCommand,
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
@@ -68,6 +70,8 @@ import {
 } from '../commands/fast-sessions/auto-tool-approvals';
 import {
   deleteFastSessionQueuedMessageInputSchema,
+  steerFastSessionQueuedMessageInputSchema,
+  stopFastSessionInputSchema,
   replyToFastSessionInputSchema,
   fastSessionAutoToolApprovalsInputSchema,
   setFastSessionAutoToolApprovalsInputSchema,
@@ -435,6 +439,7 @@ import {
   repairDiscordCommand,
   repairTelegramWebhookCommand,
   selectDiscordDestinationCommand,
+  setAgentMailOutboundEnabledCommand,
 } from '../commands/comms';
 import {
   getComputeStatusCommand,
@@ -576,6 +581,7 @@ import {
 } from '../commands/analytics';
 import {
   getMiscSettingsCommand,
+  setSessionDoneWebhookCommand,
   setDeploymentTimeZoneCommand,
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
@@ -2410,6 +2416,12 @@ export const appRouter = createRouter({
       getCommsStatusCommand(auth),
     ),
 
+    setAgentMailOutboundEnabled: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setAgentMailOutboundEnabledCommand(auth, input),
+      ),
+
     saveAuthConfig: protectedProcedure
       .input(
         z.object({
@@ -3395,6 +3407,16 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         deleteFastSessionQueuedMessageCommand(auth, input),
       ),
+    steerQueuedMessage: protectedProcedure
+      .input(steerFastSessionQueuedMessageInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        steerFastSessionQueuedMessageCommand(auth, input),
+      ),
+    stop: protectedProcedure
+      .input(stopFastSessionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        stopFastSessionCommand(auth, input),
+      ),
     startGoal: protectedProcedure
       .input(
         z.object({
@@ -3911,6 +3933,17 @@ export const appRouter = createRouter({
       .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))
       .mutation(({ ctx: { auth }, input }) =>
         setDeploymentTimeZoneCommand(auth, input),
+      ),
+    setSessionDoneWebhook: protectedProcedure
+      .input(
+        z.object({
+          enabled: z.boolean(),
+          url: z.string().trim().max(2_048).nullable(),
+          secret: z.string().trim().min(16).max(512).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setSessionDoneWebhookCommand(auth, input),
       ),
   }),
 

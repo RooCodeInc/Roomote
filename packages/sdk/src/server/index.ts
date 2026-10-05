@@ -187,6 +187,7 @@ export {
   recordInstalledRelease,
   type RecordInstalledReleaseResult,
 } from './lib/release-announcements';
+export { drainSessionDoneWebhookDeliveries } from './lib/session-done-webhooks';
 
 export {
   SLACK_ACCOUNT_LINK_EDUCATION_DELAY_MS,

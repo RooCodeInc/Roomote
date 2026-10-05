@@ -14,6 +14,7 @@ import type {
   RoomoteSessionSummary,
   RoomoteStartSessionResponse,
   RoomoteRelayUpdatesResponse,
+  RoomoteMessageAttachment,
 } from '@roomote/types';
 import type {
   RoomoteConfig,
@@ -69,6 +70,7 @@ async function apiFetch<T>(
 export async function startSession(
   config: RoomoteConfig,
   message: string,
+  attachments?: RoomoteMessageAttachment[],
 ): Promise<RoomoteStartSessionResponse> {
   return apiFetch(
     config,
@@ -76,7 +78,7 @@ export async function startSession(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, attachments }),
     },
     'Failed to start session',
   );
@@ -144,6 +146,7 @@ export async function sendMessageToSession(
   config: RoomoteConfig,
   sessionId: string,
   message: string,
+  attachments?: RoomoteMessageAttachment[],
 ): Promise<SendMessageResponse> {
   return apiFetch(
     config,
@@ -151,7 +154,7 @@ export async function sendMessageToSession(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, attachments }),
     },
     'Failed to send session message',
   );
@@ -371,6 +374,7 @@ export async function sendMessageToTask(
   params: {
     message: string;
     images?: string[];
+    attachments?: RoomoteMessageAttachment[];
     senderMode?: 'authenticated_user' | 'linked_review_handoff';
   },
 ): Promise<SendMessageResponse> {
@@ -610,6 +614,7 @@ export async function steerMessageToTask(
   params: {
     message: string;
     images?: string[];
+    attachments?: RoomoteMessageAttachment[];
   },
 ): Promise<SendMessageResponse> {
   return apiFetch(

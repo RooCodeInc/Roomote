@@ -194,6 +194,27 @@ describe('ModelReasoningPicker', () => {
     },
   );
 
+  it('keeps the mobile drawer above a nested New Session dialog', () => {
+    mobileState.current = true;
+
+    render(
+      <Dialog open>
+        <DialogContent aria-describedby={undefined}>
+          <DialogTitle>New Session</DialogTitle>
+          <Harness />
+        </DialogContent>
+      </Dialog>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    expect(document.querySelector('[data-slot="drawer-overlay"]')).toHaveClass(
+      'z-popover',
+    );
+    expect(document.querySelector('[data-slot="drawer-content"]')).toHaveClass(
+      'z-popover',
+    );
+  });
+
   it.each([
     ['standalone popover', false],
     ['nested New Session dialog', true],

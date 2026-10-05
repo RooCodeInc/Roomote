@@ -1,5 +1,8 @@
 import type { Context } from 'hono';
-import { isEnvVarRequestFulfillmentClientMessageId } from '@roomote/types';
+import {
+  isEnvVarRequestFulfillmentClientMessageId,
+  type RoomoteMessageAttachment,
+} from '@roomote/types';
 
 import type { Variables } from '../../types';
 import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
@@ -8,6 +11,7 @@ import {
   sendMessageToTask,
 } from './sendMessageToTask';
 import { sendMessageToFastSessionForUser } from './fastSessionCommunication';
+import { prepareMessageAttachments } from './messageAttachments';
 
 type PublicSendMessageSenderMode = Extract<
   SendMessageSenderMode,
@@ -17,6 +21,7 @@ type PublicSendMessageSenderMode = Extract<
 type SendMessageBody = {
   message: string;
   images?: string[];
+  attachments?: RoomoteMessageAttachment[];
   source?: string;
   clientMessageId?: string;
   senderMode?: PublicSendMessageSenderMode;
@@ -128,12 +133,29 @@ export async function sendMessage(
     return c.json({ error: 'senderMode is invalid' }, 400);
   }
 
+  let prepared;
+  try {
+    prepared = await prepareMessageAttachments({
+      message: body.message,
+      attachments: body.attachments,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: error instanceof Error ? error.message : 'Invalid attachments',
+      },
+      400,
+    );
+  }
+
+  const images = [...(body.images ?? []), ...(prepared.images ?? [])];
   let result = await sendMessageToTask({
     taskId,
     userId: auth.userId,
     authContext: auth.authContext,
-    message: body.message,
-    images: body.images,
+    message: prepared.message,
+    quoteText: body.message,
+    images: images.length ? images : undefined,
     source,
     clientMessageId,
     senderMode,
@@ -143,8 +165,9 @@ export async function sendMessage(
     result = await sendMessageToFastSessionForUser({
       sessionId: taskId,
       userId: auth.userId,
-      message: body.message,
-      images: body.images,
+      message: prepared.message,
+      images: images.length ? images : undefined,
+      attachmentTexts: prepared.attachmentTexts,
     });
   }
 

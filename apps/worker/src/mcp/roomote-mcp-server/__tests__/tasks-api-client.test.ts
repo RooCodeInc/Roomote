@@ -18,6 +18,8 @@ import {
   sendMessageToSession,
   startSession,
   getTaskUpdates,
+  sendMessageToTask,
+  steerMessageToTask,
 } from '../tasks-api-client.js';
 import type { RoomoteConfig } from '../types.js';
 
@@ -92,6 +94,90 @@ describe('session API', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ message: 'Continue' }),
+      }),
+    );
+  });
+
+  it('forwards screenshot and text attachments when starting and continuing sessions', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ queued: true }),
+    });
+    const attachments = [
+      {
+        filename: 'screenshot.png',
+        mimeType: 'image/png',
+        base64: 'cG5n',
+      },
+      {
+        filename: 'failure.log',
+        mimeType: 'text/plain',
+        base64: 'ZmFpbGVk',
+      },
+    ];
+
+    await startSession(config, 'Investigate this', attachments);
+    await sendMessageToSession(config, 'session-1', 'Continue', attachments);
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      'https://test-api.example.com/api/mcp/sessions',
+      expect.objectContaining({
+        body: JSON.stringify({ message: 'Investigate this', attachments }),
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://test-api.example.com/api/mcp/sessions/session-1/send_message',
+      expect.objectContaining({
+        body: JSON.stringify({ message: 'Continue', attachments }),
+      }),
+    );
+  });
+});
+
+describe('task message attachments API', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('forwards screenshot and text attachments through task send and steer endpoints', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true }),
+    });
+    const attachments = [
+      {
+        filename: 'screenshot.png',
+        mimeType: 'image/png',
+        base64: 'cG5n',
+      },
+      {
+        filename: 'change.diff',
+        mimeType: 'text/plain',
+        base64: 'ZGlmZg==',
+      },
+    ];
+
+    await sendMessageToTask(config, 'task-1', {
+      message: 'Review these',
+      attachments,
+    });
+    await steerMessageToTask(config, 'task-1', {
+      message: 'Review these',
+      attachments,
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      'https://test-api.example.com/api/mcp/tasks/task-1/send_message',
+      expect.objectContaining({
+        body: JSON.stringify({ message: 'Review these', attachments }),
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://test-api.example.com/api/mcp/tasks/task-1/steer_message',
+      expect.objectContaining({
+        body: JSON.stringify({ message: 'Review these', attachments }),
       }),
     );
   });

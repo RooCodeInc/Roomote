@@ -89,6 +89,19 @@ that enforce an equivalent host-level quota can explicitly set
 `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true`; Roomote then logs a warning and
 starts without `--storage-opt size`.
 
+Check storage before choosing Docker for a new self-hosted deployment. For
+Docker's `overlay2` driver, per-container `size` limits require an XFS backing
+filesystem mounted with project quotas (`pquota`). See
+[Docker's storage-option requirements](https://docs.docker.com/reference/cli/docker/container/run/#set-storage-driver-options-per-container)
+for the supported driver configurations. Allocating a larger VM disk alone
+does not enable this support.
+
+On an existing Docker host, `sudo docker info` shows the storage driver,
+backing filesystem, and Docker root directory. Prepare suitable storage
+before running local tasks, or configure a [hosted sandbox provider](/compute)
+in **Settings > Sandboxes**. The Roomote installer does not configure host
+filesystem quotas.
+
 Completed resumable tasks keep their stopped container and writable layer so a
 follow-up can restart the same workspace. Roomote retains at most 10 containers
 for 24 hours by default. Configure `DOCKER_STANDBY_MAX_COUNT` and
@@ -135,6 +148,10 @@ repositories.
 
 The validation runs in the background worker service (the process with Docker
 socket access), so it reflects exactly what task boots will see.
+
+Validation checks the daemon, image, and release archive. It does not test
+writable-layer disk quotas; that check happens when a real task container
+starts. Complete the small task above before considering Docker ready.
 
 ## Common issues
 

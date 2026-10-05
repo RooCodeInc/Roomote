@@ -144,6 +144,13 @@ different: cancellation terminally ends the current run and shuts down its
 sandbox. Stop or cancellation errors appear on the card; check the resulting
 task status rather than assuming the request succeeded.
 
+While a Fast session is responding, the empty composer shows **Stop** in place
+of the send action. This interrupts the active response without deleting the
+session or its conversation history. Follow-ups sent while work is active wait
+in order above the composer. Select **Send now** on the oldest queued message to
+interrupt the active response and deliver that message next; Roomote keeps it
+visibly queued until delivery begins and does not let later messages bypass it.
+
 The session overflow menu in the workspace and each manageable Sessions-list
 row also offers **Stop**, **Archive**, and **Delete**. Stopping a session pauses
 all of its active tasks without permanently canceling them. Archiving is
@@ -226,6 +233,74 @@ After at least four days (96 hours) without a newer visible user message,
 inactivity reconciliation can move a settled Session to **Done** before model
 classification. A newer visible user message releases the manual override so
 the Session can be classified from its current work again.
+
+## Receive session completion webhooks
+
+Deployment admins can configure a **Completion webhook** under **Settings >
+Deployment**. Roomote sends a `session.done` event whenever the configured
+judgment model classifies a settled session turn as **Done**. Manual status
+changes do not send this event.
+
+The endpoint must be an HTTP or HTTPS URL that Roomote can reach without a
+redirect. Roomote blocks private and special-use network destinations by
+default. Add a signing secret of at least 16 characters; Roomote encrypts the
+saved value and never displays it again.
+
+Self-hosted deployments can allow only the private receiver ranges they need:
+
+```bash
+R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS=127.0.0.1/32
+```
+
+Set the variable on the BullMQ service and restart it. This example permits a
+receiver on the same host when BullMQ runs directly on that host. In a
+container, `127.0.0.1` points to the BullMQ container itself; use a receiver
+hostname reachable from that container and allow its exact resolved CIDR
+instead. Multiple ranges are comma-separated.
+
+Each request is a JSON `POST` with a metadata-only payload:
+
+```json
+{
+  "id": "delivery-uuid",
+  "type": "session.done",
+  "version": 1,
+  "occurredAt": "2026-10-04T12:34:56.000Z",
+  "session": {
+    "id": "session-uuid",
+    "url": "https://roomote.example/sessions/session-uuid"
+  },
+  "status": {
+    "value": "done",
+    "source": "decision_model",
+    "judgmentId": "judgment-uuid",
+    "generation": 4,
+    "sourceKind": "fast_turn",
+    "sourceEventId": "turn-id"
+  },
+  "tasks": [{ "id": "task-id", "state": "completed" }]
+}
+```
+
+The request includes these headers:
+
+- `X-Roomote-Delivery`: the stable delivery ID from the payload
+- `X-Roomote-Event`: `session.done`
+- `X-Roomote-Timestamp`: the Unix timestamp used for signing
+- `X-Roomote-Signature-256`: `sha256=` followed by the hexadecimal HMAC-SHA256
+  of `<timestamp>.<exact request body>`
+
+Roomote retries network failures, timeouts, rate limits, and server errors.
+Delivery is at least once and ordering is not guaranteed, so receivers should
+deduplicate using `X-Roomote-Delivery`. The deployment webhook receives
+metadata for every session, including private sessions; the payload does not
+include titles, prompts, replies, repository names, or artifacts, and the
+session URL still requires normal Roomote access.
+
+Roomote queues the first delivery as soon as the durable **Done** judgment is
+applied. A separate one-minute scheduled drain remains as a recovery path for
+retries or a missed immediate queue signal; it does not delay the first
+attempt.
 
 Session rows show who or which automation started the work, its source and
 cost, and links to accumulated active pull requests. In the session workspace,

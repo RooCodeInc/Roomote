@@ -23,7 +23,9 @@ async function claimOrphanedTaskRun(): Promise<TaskRun | null> {
       WITH candidate AS (
         SELECT id
         FROM task_runs
-        WHERE (
+        WHERE cancel_requested_at IS NULL
+          AND canceled_at IS NULL
+          AND (
           (
             status = ${RunStatus.Pending}
             AND task_phase IS DISTINCT FROM ${WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE}

@@ -1,65 +1,64 @@
 ---
-title: Introduction
+title: Getting started
 icon: book-open
-description: Roomote is an open, self-hostable platform for cloud coding agents.
+description: Choose Roomote Cloud or self-hosting, complete setup, and run your first task.
 ---
 
-Roomote is an open, self-hostable platform for cloud coding agents. It runs
-Roomote agents in isolated sandboxes, connects them to your repositories, and
-lets your team start, follow, and review agent work from the web dashboard,
-Slack, Microsoft Teams, Telegram, Discord, email, and your source-control
-provider.
+Roomote agents work on your repositories in isolated sandboxes and return
+results you can review. Start, follow, and steer their work from the web
+dashboard, with optional connections to your team's chat and other tools.
 
-Use Roomote when agent work should be shared, reviewable, and available
-outside one developer's editor. You keep control of the deployment,
-repositories, inference provider, sandbox provider, and collaboration surfaces.
+This guide takes you from choosing where Roomote runs to completing your first
+repository task. Both hosting paths run the same Roomote product.
 
-## Highlights
+## 1. Choose where Roomote runs
 
-- **Quick setup** — a one-command installer brings up the full stack, then a
-  guided conversation helps you connect providers and start useful work.
-- **Self-hosted by default** — run Roomote on your own server and connect the
-  providers your team already uses.
-- **Self-configuring environments** — Roomote agents prepare their own
-  sandboxes from your repositories and setup guidance.
-- **Easy to use web dashboard** — launch, follow, and steer tasks from the
-  browser.
-- **Model agnostic** — bring your own key for OpenRouter, Anthropic, OpenAI,
-  and other inference providers.
-- **Source control integrations** — GitHub, GitLab, Gitea, Bitbucket Cloud, and
-  Azure DevOps.
-- **Conversation surfaces** — Slack, Microsoft Teams, Telegram, Discord, and
-  email through AgentMail.
-- **Choose your own sandbox provider** — including Docker-in-Docker on your
-  own host.
+<CardGroup cols={2}>
+  <Card title="Roomote Cloud" icon="cloud" href="/cloud">
+    Roomote manages hosting, networking, sandboxes, and upgrades for your
+    isolated deployment. You choose inference, connect repositories, and
+    decide what work to run.
+  </Card>
+  <Card title="Self-hosted" icon="server" href="/self-hosting">
+    Run Roomote on your own hardware or infrastructure you control. You manage
+    the host, networking, sandboxes, and maintenance, then connect inference
+    and repositories.
+  </Card>
+</CardGroup>
 
-## Where to go next
+A home server or **homelab is a self-hosted deployment**. So is a deployment on
+infrastructure you manage through a hosting provider, such as Railway or
+Render. The self-hosting guide helps you choose a host and prepare it before
+installation.
 
-- [Self-hosting](/self-hosting) — run Roomote on your own server with the
-  one-command installer or Docker Compose.
-- [How Roomote works](/how-roomote-works) — where work starts, how it
-  runs, and how results come back.
-- [What to ask Roomote](/use-cases) — frame asks so tasks stay scoped,
-  useful, and reviewable.
-- [Environments](/environments) — give Roomote the repositories, services,
-  secrets, and guidance it needs to run and verify work.
-- [Review a task](/tasks) — inspect the transcript, logs, diffs, and
-  previews before anything ships.
-- [Local development](/local-development) — set up the repository to
-  contribute to Roomote itself.
-- [How a Roomote deployment runs](/architecture) — how requests become
-  reviewable results and which operator settings shape the path.
+You access Roomote from a browser on Windows, macOS, or Linux. Each computer
+does not need its own installation.
+
+## 2. Complete setup and run your first task
+
+Once your deployment is ready, follow [Run your first task](/first-task).
+The guide walks through:
+
+1. Creating the administrator account and connecting inference, which gives
+   Roomote access to a model.
+2. Connecting a repository and checking that a sandbox is ready to run work.
+3. Running a small repository inspection task and reviewing the result.
+
+Have a repository you can authorize Roomote to access. For inference, use
+managed Roomote inference when offered, or bring a supported subscription or
+provider API key. The hosting guide explains what is already supplied.
+
+<Tip>
+  Slack and other communications providers are optional. You can complete
+  your first task entirely in the web dashboard, then connect chat when you
+  want to use it.
+</Tip>
 
 ## License
 
 Roomote is released under the Fair Core License 1.0 (FCL-1.0-ALv2) —
 source-available, with each release converting to Apache-2.0 two years after it
-is published. A deployment is free for up to 10 registered users;
-adding more users requires a paid license key (Settings → Users, or the
-`R_LICENSE_KEY` environment variable). You can [buy a self-hosted license on
-Roomote Cloud](https://cloud.roomote.dev/sign-up); purchased keys are refreshed
-annually from the Cloud portal, and licensed deployments report their current
-user count for subscription billing. The license prohibits disabling or
-circumventing the license key functionality. See
-the [LICENSE](https://github.com/RooCodeInc/Roomote/blob/main/LICENSE)
-file for details.
+is published. Self-hosted deployments are free for up to 10 registered users;
+more users require a paid license. See [License and seats](/users#license-and-seats)
+for license setup and the
+[LICENSE](https://github.com/RooCodeInc/Roomote/blob/main/LICENSE) for its terms.

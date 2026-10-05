@@ -2,6 +2,36 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.16.0 (2026-10-05)
+
+Roomote 1.16 expands session control and connected workflows with MCP file attachments, completion webhooks, outbound email controls, and more reliable reviews and runtime safeguards.
+
+### Highlights
+
+- Attach screenshots, files, logs, and documents when starting sessions or sending follow-ups through Roomote MCP.
+- Stop an active session response or send its oldest queued message immediately from the composer.
+- Send signed, retryable session completion webhooks and pause outbound email without disrupting inbound messages.
+- Review pull requests in active synced repositories even when they are not mapped to an environment.
+
+### Minor changes
+
+- Roomote MCP clients can now attach supported screenshots, files, logs, and documents when starting sessions or sending follow-up messages, with bounded per-message limits and explicit validation errors.
+- Deployment admins can now pause all outbound AgentMail email without removing credentials or interrupting inbound email processing.
+- Deployment admins can now send signed, retryable `session.done` webhooks when the decision model classifies a session as Done.
+
+### Patch changes
+
+- Automation submissions no longer create duplicate follow-up work items for the same finding.
+- Canceled tasks are no longer reclaimed and restarted during orphan recovery.
+- Session completion webhooks now represent only decision-model Done judgments instead of also firing when inactivity cleanup completes a session.
+- Composer attachment and responsive task-filter controls now have descriptive accessible names, and the mobile model picker stays visible above the New Session dialog.
+- Long Discord replies now preserve complete table rows and balanced code fences without splitting exact-limit fenced blocks or adding empty continuation fences.
+- Model fallbacks now stay distinct from each role's effective default and apply the configured fallback reasoning level to helper and orchestration control-plane calls.
+- Review Code can now review pull requests in active synced repositories that are not mapped to an environment, using a plain checkout when necessary across supported source-control providers.
+- Run-scoped credentials are now rejected after their associated task run completes, fails, or is canceled.
+- Active sessions can now be stopped from the composer, and the oldest queued message can be sent immediately without losing its queued state before delivery begins.
+- Running tasks now request approval when tool policies become stricter after the task starts instead of continuing with stale access or failing immediately.
+
 ## 1.15.1 (2026-10-02)
 
 Roomote 1.15.1 adds resilient model fallbacks, reduces Auto approval prompts, and fixes approval, sessions board, and task-detail edge cases.

@@ -4,6 +4,7 @@ import {
   completeSessionStatusJudgment,
   createSessionStatusJudgmentRequest,
   db,
+  deploymentSettings,
   eq,
   enqueueInactiveSessionStatusJudgmentRequests,
   fastAgentConversations,
@@ -11,6 +12,7 @@ import {
   pruneSessionStatusJudgmentHistory,
   refreshSessionInactivityDueAt,
   sessionFactory,
+  sessionDoneWebhookDeliveries,
   sessionStatusJudgments,
   sessions,
   settleSessionStatusJudgmentTurn,
@@ -24,6 +26,14 @@ const userIds: string[] = [];
 const conversationIds: string[] = [];
 
 afterEach(async () => {
+  await db
+    .update(deploymentSettings)
+    .set({
+      sessionDoneWebhookEnabled: false,
+      sessionDoneWebhookUrl: null,
+      sessionDoneWebhookSecret: null,
+    })
+    .where(eq(deploymentSettings.id, 'default'));
   while (sessionIds.length > 0) {
     await db.delete(sessions).where(eq(sessions.id, sessionIds.pop()!));
   }
@@ -298,6 +308,141 @@ describe('Session status judgment requests', () => {
       state: 'applied',
       outcome: 'done',
     });
+  });
+
+  it('queues one configured webhook delivery for each applied done judgment', async () => {
+    await db
+      .insert(deploymentSettings)
+      .values({
+        id: 'default',
+        sessionDoneWebhookEnabled: true,
+        sessionDoneWebhookUrl: 'https://example.com/webhooks/roomote',
+        sessionDoneWebhookSecret: 'test-secret',
+      })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: {
+          sessionDoneWebhookEnabled: true,
+          sessionDoneWebhookUrl: 'https://example.com/webhooks/roomote',
+          sessionDoneWebhookSecret: 'test-secret',
+        },
+      });
+    const session = await createSession();
+    const [request] = await db
+      .insert(sessionStatusJudgments)
+      .values({
+        sessionId: session.id,
+        sourceEventId: 'turn-with-webhook',
+        generation: 1,
+        sourceKind: 'fast_turn',
+        state: 'processing',
+        attempts: 1,
+      })
+      .returning();
+
+    await expect(
+      completeSessionStatusJudgment(db, {
+        id: request!.id,
+        sessionId: session.id,
+        generation: 1,
+        state: 'applied',
+        outcome: 'done',
+        confidence: 0.99,
+      }),
+    ).resolves.toBe('applied');
+
+    const deliveries = await db
+      .select()
+      .from(sessionDoneWebhookDeliveries)
+      .where(eq(sessionDoneWebhookDeliveries.judgmentId, request!.id));
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]).toMatchObject({
+      sessionId: session.id,
+      status: 'pending',
+      attempts: 0,
+    });
+  });
+
+  it('does not queue a decision-model webhook for inactivity completion', async () => {
+    await db
+      .insert(deploymentSettings)
+      .values({
+        id: 'default',
+        sessionDoneWebhookEnabled: true,
+        sessionDoneWebhookUrl: 'https://example.com/webhooks/roomote',
+        sessionDoneWebhookSecret: 'test-secret',
+      })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: {
+          sessionDoneWebhookEnabled: true,
+          sessionDoneWebhookUrl: 'https://example.com/webhooks/roomote',
+          sessionDoneWebhookSecret: 'test-secret',
+        },
+      });
+    const session = await createSession();
+    const [request] = await db
+      .insert(sessionStatusJudgments)
+      .values({
+        sessionId: session.id,
+        sourceEventId: 'inactivity-due:1234',
+        generation: 1,
+        sourceKind: 'fast_turn',
+        state: 'processing',
+        attempts: 1,
+      })
+      .returning();
+
+    await expect(
+      completeSessionStatusJudgment(db, {
+        id: request!.id,
+        sessionId: session.id,
+        generation: 1,
+        state: 'applied',
+        outcome: 'done',
+        confidence: 1,
+        probabilities: { done: 1 },
+        emitDoneWebhook: false,
+      }),
+    ).resolves.toBe('applied');
+
+    await expect(
+      db
+        .select()
+        .from(sessionDoneWebhookDeliveries)
+        .where(eq(sessionDoneWebhookDeliveries.judgmentId, request!.id)),
+    ).resolves.toHaveLength(0);
+  });
+
+  it('does not queue a webhook for non-done or unconfigured judgments', async () => {
+    const session = await createSession();
+    const [request] = await db
+      .insert(sessionStatusJudgments)
+      .values({
+        sessionId: session.id,
+        sourceEventId: 'turn-without-webhook',
+        generation: 1,
+        sourceKind: 'fast_turn',
+        state: 'processing',
+        attempts: 1,
+      })
+      .returning();
+
+    await completeSessionStatusJudgment(db, {
+      id: request!.id,
+      sessionId: session.id,
+      generation: 1,
+      state: 'applied',
+      outcome: 'done',
+      confidence: 0.99,
+    });
+
+    await expect(
+      db
+        .select()
+        .from(sessionDoneWebhookDeliveries)
+        .where(eq(sessionDoneWebhookDeliveries.judgmentId, request!.id)),
+    ).resolves.toHaveLength(0);
   });
 
   it('prunes old terminal history while retaining the latest board projection', async () => {
