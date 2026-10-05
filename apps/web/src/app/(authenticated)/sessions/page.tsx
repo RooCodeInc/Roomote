@@ -79,7 +79,7 @@ export default async function SessionsPage({
     timePeriod !== 'all' ||
     scope !== 'all' ||
     status ||
-    q ||
+    q?.trim() ||
     params.repository ||
     params.pullRequest ||
     (params.source && params.source !== 'all') ||

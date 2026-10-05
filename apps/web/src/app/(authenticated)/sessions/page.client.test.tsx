@@ -149,6 +149,7 @@ describe('Sessions list', () => {
     ['the default archive state', { archive: 'non-archived' }],
     ['a pagination cursor', { before: 'older-cursor' }],
     ['an unknown parameter', { q: undefined, unexpected: 'value' }],
+    ['a whitespace-only search', { q: '   ' }],
     ['the board view', { view: 'board' }],
   ])('shows the unfiltered empty state with %s', async (_, searchParams) => {
     sessionStatusState.current = [];
