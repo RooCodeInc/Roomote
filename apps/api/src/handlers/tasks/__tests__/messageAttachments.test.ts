@@ -131,6 +131,22 @@ describe('prepareMessageAttachments', () => {
     ).rejects.toThrow('file exceeds the 2 MiB attachment limit');
   });
 
+  it('normalizes padded image MIME types before downstream delivery', async () => {
+    const base64 = Buffer.from('png-bytes').toString('base64');
+    const result = await prepareMessageAttachments({
+      message: 'Inspect the screenshot',
+      attachments: [
+        {
+          filename: 'screenshot.png',
+          mimeType: ' IMAGE/PNG ',
+          base64,
+        },
+      ],
+    });
+
+    expect(result.images).toEqual([`data:image/png;base64,${base64}`]);
+  });
+
   it('rejects image filenames without a supported image MIME type', async () => {
     await expect(
       prepareMessageAttachments({
@@ -170,5 +186,21 @@ describe('prepareMessageAttachments', () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('shared attachment text budget was exhausted'),
     );
+  });
+
+  it('rejects corrupt supported documents instead of silently dropping them', async () => {
+    await expect(
+      prepareMessageAttachments({
+        message: 'Inspect the document',
+        attachments: [
+          {
+            filename: 'corrupt.docx',
+            mimeType:
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            base64: Buffer.from('not a valid DOCX archive').toString('base64'),
+          },
+        ],
+      }),
+    ).rejects.toThrow(/^corrupt\.docx: /u);
   });
 });

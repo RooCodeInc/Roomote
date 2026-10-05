@@ -51,6 +51,12 @@ function formatMebibytes(bytes: number): string {
   return `${bytes / (1024 * 1024)} MiB`;
 }
 
+function isAttachmentBudgetWarning(warning: string): boolean {
+  return warning.endsWith(
+    'omitted because the shared attachment text budget was exhausted.',
+  );
+}
+
 export async function prepareMessageAttachments(input: {
   message: string;
   attachments?: RoomoteMessageAttachment[];
@@ -71,10 +77,11 @@ export async function prepareMessageAttachments(input: {
   }> = [];
 
   for (const attachment of input.attachments) {
-    const isImage = isRoomotePromptImageMimeType(attachment.mimeType);
+    const mimeType = attachment.mimeType.trim().toLowerCase();
+    const isImage = isRoomotePromptImageMimeType(mimeType);
     const isTextExtractable = isRoomoteTextExtractableAttachment({
       filename: attachment.filename,
-      mimeType: attachment.mimeType,
+      mimeType,
     });
     if (!isImage && !isTextExtractable) {
       throw new Error(`${attachment.filename}: unsupported attachment type`);
@@ -95,18 +102,24 @@ export async function prepareMessageAttachments(input: {
     }
 
     if (isImage) {
-      images.push(`data:${attachment.mimeType};base64,${attachment.base64}`);
+      images.push(`data:${mimeType};base64,${attachment.base64}`);
       continue;
     }
 
     textAttachments.push({
       filename: attachment.filename,
-      mimeType: attachment.mimeType,
+      mimeType,
       bytes: Buffer.from(attachment.base64, 'base64'),
     });
   }
 
   const extracted = await extractPromptTextAttachments(textAttachments);
+  const extractionErrors = extracted.warnings.filter(
+    (warning) => !isAttachmentBudgetWarning(warning),
+  );
+  if (extractionErrors.length > 0) {
+    throw new Error(extractionErrors.join('; '));
+  }
   for (const warning of extracted.warnings) {
     console.warn(`[message-attachments] ${warning}`);
   }
