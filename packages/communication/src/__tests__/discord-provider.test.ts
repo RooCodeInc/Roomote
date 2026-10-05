@@ -239,6 +239,51 @@ describe('DiscordCommunicationProvider', () => {
     }
   });
 
+  it.each([
+    { bodyLength: 2_000, rowContentLength: 1_978 },
+    { bodyLength: 1_999, rowContentLength: 1_977 },
+  ])(
+    'keeps a $bodyLength-character fenced block whole over HTTP',
+    async ({ bodyLength, rowContentLength }) => {
+      const server = new MockDiscordServer();
+      const { baseUrl, close } = await server.listen();
+      let nonce = 123456789012345678n;
+      const provider = new DiscordCommunicationProvider({
+        botToken: server.botToken,
+        applicationId: server.application.id,
+        apiBaseUrl: baseUrl,
+        nonceFactory: () => String(nonce++),
+      });
+      const row = `| row | ${'x'.repeat(rowContentLength)} |`;
+      const fencedBlock = `\`\`\`text\n${row}\n\`\`\``;
+      expect(fencedBlock).toHaveLength(bodyLength);
+
+      try {
+        await provider.postMessage({
+          channelId: '400000000000000001',
+          text: `Summary\n\n${fencedBlock}`,
+        });
+
+        const stateResponse = await fetch(
+          `${baseUrl.replace(/\/api\/v10$/u, '')}/mock/state`,
+        );
+        const state = (await stateResponse.json()) as {
+          messages: Record<string, Array<{ content: string }>>;
+        };
+        const messages = state.messages['400000000000000001'] ?? [];
+        expect(messages.map((message) => message.content)).toEqual([
+          'Summary\n\n',
+          fencedBlock,
+        ]);
+        expect(
+          messages.every((message) => message.content.length <= 2_000),
+        ).toBe(true);
+      } finally {
+        await close();
+      }
+    },
+  );
+
   it('splits a fenced line when it is too long for a fresh message', async () => {
     let nonce = 123456789012345678n;
     const { server, provider } = createHarness({
