@@ -194,23 +194,28 @@ function resolveProviderKeyNames({
     (envVarName) => !DISABLED_MODEL_PROVIDER_ENV_VAR_NAME_SET.has(envVarName),
   );
 
-  if (configuredProviderKeys.length > 0) {
-    return configuredProviderKeys;
-  }
-
   const providerIds = resolvedRoomoteModels.flatMap((model) => {
     const providerId = resolveSetupModelProviderIdFromModel(model);
 
     return providerId ? [providerId] : [];
   });
-
-  return [
+  const catalogProviderKeys = [
     ...new Set(
       providerIds.flatMap((providerId) =>
         getModelProviderEnvKeyCandidates({ providerId }),
       ),
     ),
   ];
+
+  // R_MODEL_ENV_KEYS names extra custom provider credentials; it does not
+  // replace the catalog-derived set. Selected catalog models keep their own
+  // env keys (a Cloudflare model still needs its account and gateway values
+  // forwarded, or helper inference fails on a missing required header).
+  if (configuredProviderKeys.length > 0) {
+    return [...new Set([...configuredProviderKeys, ...catalogProviderKeys])];
+  }
+
+  return catalogProviderKeys;
 }
 
 /**

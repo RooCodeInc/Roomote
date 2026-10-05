@@ -306,6 +306,37 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
   });
 
+  it('keeps catalog provider values for the selected models alongside custom key names', async () => {
+    // R_MODEL_ENV_KEYS is an ADD mechanism for custom provider key names, not
+    // a replacement for the catalog-derived set: a Cloudflare model still
+    // needs its account and gateway values forwarded, or helper inference
+    // fails with a missing required header.
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
+        CUSTOM_LLM_TOKEN: 'saved-token',
+        CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'cf-token',
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+        CLOUDFLARE_AI_GATEWAY_ID: 'default',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_MODEL: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      CLOUDFLARE_AI_GATEWAY_ID: 'default',
+      CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'cf-token',
+      CUSTOM_LLM_TOKEN: 'saved-token',
+    });
+  });
+
   it('falls back to persisted roomoteSmallModel when the env var is absent', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {

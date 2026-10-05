@@ -27,6 +27,8 @@ describe('SetupDocs', () => {
     ['azure-cognitive-services', 'azure-foundry'],
     ['baseten', 'baseten'],
     ['chatgpt', 'chatgpt'],
+    ['cloudflare-ai-gateway', 'cloudflare-ai-gateway'],
+    ['cloudflare-workers-ai', 'cloudflare-workers-ai'],
     ['deepseek', 'deepseek'],
     ['github-copilot', 'github-copilot'],
     ['google', 'google-gemini'],
