@@ -95,6 +95,7 @@ export * from './lib/slack-installations';
 export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
 export * from './lib/agentmail-runtime-credentials';
+export * from './lib/agentmail-outbound-settings';
 export * from './lib/discord-runtime-credentials';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';

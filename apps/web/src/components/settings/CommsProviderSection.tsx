@@ -44,6 +44,11 @@ type CommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
   telegramBotUsername?: string | null;
   discord?: import('@/trpc/commands/comms').DiscordCommsStatus | null;
   agentmail?: AgentMailCommsStatus | null;
+  agentmailOutbound?: {
+    environmentEnabled: boolean;
+    persistedEnabled: boolean;
+    effectiveEnabled: boolean;
+  };
 };
 
 const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
@@ -88,6 +93,7 @@ import {
   Plug,
   RefreshCw,
   Spinner,
+  Switch,
   Trash2,
   TriangleAlert,
 } from '@/components/system';
@@ -358,6 +364,17 @@ export function CommsProviderSection({
   const agentMailStatusOnly = cloudEnabled && provider.id === 'agentmail';
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const setAgentMailOutboundEnabled = useMutation(
+    trpc.comms.setAgentMailOutboundEnabled.mutationOptions({
+      onSuccess: async () => {
+        toast.success('Email sending setting updated.');
+        await queryClient.invalidateQueries({
+          queryKey: trpc.comms.status.queryKey(),
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
   const repairTelegram = useMutation(
     trpc.comms.repairTelegram.mutationOptions({
       onSuccess: async () => {
@@ -648,6 +665,25 @@ export function CommsProviderSection({
           </p>
         ) : (
           <div className="space-y-8">
+            {provider.id === 'agentmail' && provider.agentmailOutbound ? (
+              <div className="flex gap-3">
+                <Switch
+                  aria-label="Allow Roomote to send email"
+                  checked={provider.agentmailOutbound.persistedEnabled}
+                  disabled={setAgentMailOutboundEnabled.isPending}
+                  onCheckedChange={(enabled) =>
+                    setAgentMailOutboundEnabled.mutate({ enabled })
+                  }
+                />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Send email</p>
+                  <p className="text-sm text-muted-foreground">
+                    Allow this instance to send email. Turning this off keeps
+                    AgentMail configured and does not stop incoming email.
+                  </p>
+                </div>
+              </div>
+            ) : null}
             {agentMailStatusOnly ? (
               <p className="text-sm text-muted-foreground">
                 Email is managed by Roomote Cloud.

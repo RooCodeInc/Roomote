@@ -5,6 +5,7 @@ import {
 } from '@roomote/env';
 
 import { getEnvLicenseKey } from './deployment-license';
+import { isAgentMailOutboundEnabled } from './agentmail-outbound-settings';
 import { resolveEffectiveDeploymentEnvVars } from './model-runtime-config';
 
 export type AgentMailRuntimeCredentials = {
@@ -186,6 +187,9 @@ export async function resolveAgentMailRuntimeCredentials(options?: {
  * allocate on their own.
  */
 export async function canSendAgentMailWithRuntimeCredentials(): Promise<boolean> {
+  if (!(await isAgentMailOutboundEnabled())) {
+    return false;
+  }
   if (isAgentMailCloudManaged()) {
     return true;
   }
