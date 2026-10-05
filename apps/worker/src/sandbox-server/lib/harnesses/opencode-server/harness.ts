@@ -4345,6 +4345,20 @@ export class OpenCodeServerHarness
     error: unknown,
     abortRetryingTurn: boolean,
   ): Promise<boolean> {
+    const queuedRecoveryPromptId = this.providerErrorRecoveryQueuedPromptId;
+
+    if (
+      this.savedSessionModelRecoveryAttempted &&
+      queuedRecoveryPromptId !== null &&
+      this.prompts.has(queuedRecoveryPromptId) &&
+      isOpenCodeProviderModelNotFoundError(error)
+    ) {
+      this.logger.info(
+        `Coalescing duplicate OpenCode model-not-found error while saved-model recovery is queued sessionId=${sessionId}`,
+      );
+      return true;
+    }
+
     if (
       this.savedSessionModelRecoveryAttempted ||
       !this.savedSessionModel ||
