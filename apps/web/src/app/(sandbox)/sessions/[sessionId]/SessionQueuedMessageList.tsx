@@ -5,6 +5,7 @@ import { useState } from 'react';
 import {
   BasicTooltip,
   Button,
+  CornerDownLeftIcon,
   ListEnd,
   Loader2,
   Trash2,
@@ -25,6 +26,11 @@ export type SessionQueuedMessage = {
  * agent already has it, so it can no longer be deleted.
  */
 export type SessionQueuedMessageDeleteOutcome = 'withdrawn' | 'not_queued';
+export type SessionQueuedMessageSteerOutcome =
+  | 'steered'
+  | 'not_queued'
+  | 'not_first'
+  | 'timed_out';
 
 type SessionQueuedMessageListProps = {
   queuedMessages: SessionQueuedMessage[];
@@ -34,6 +40,10 @@ type SessionQueuedMessageListProps = {
   onDelete?: (
     message: SessionQueuedMessage,
   ) => Promise<SessionQueuedMessageDeleteOutcome>;
+  /** Force the oldest queued message through by interrupting active work. */
+  onSteer?: (
+    message: SessionQueuedMessage,
+  ) => Promise<SessionQueuedMessageSteerOutcome>;
   className?: string;
 };
 
@@ -41,10 +51,17 @@ function QueuedMessageRow({
   message,
   currentUserId,
   onDelete,
-}: Pick<SessionQueuedMessageListProps, 'currentUserId' | 'onDelete'> & {
+  onSteer,
+  canSteer,
+}: Pick<
+  SessionQueuedMessageListProps,
+  'currentUserId' | 'onDelete' | 'onSteer'
+> & {
   message: SessionQueuedMessage;
+  canSteer: boolean;
 }) {
   const [pending, setPending] = useState(false);
+  const [steering, setSteering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const text =
     message.text.trim().length > 0 ? message.text : '(queued images)';
@@ -66,6 +83,26 @@ function QueuedMessageRow({
     }
   };
 
+  const steer = async () => {
+    if (!onSteer) return;
+    setSteering(true);
+    setError(null);
+    try {
+      const outcome = await onSteer(message);
+      if (outcome === 'not_queued') {
+        setError('Already sent to the agent.');
+      } else if (outcome === 'not_first') {
+        setError('Send the earlier queued message first.');
+      } else if (outcome === 'timed_out') {
+        setError('The active response did not stop in time. Try again.');
+      }
+    } catch {
+      setError('Could not send this message now. Try again.');
+    } finally {
+      setSteering(false);
+    }
+  };
+
   return (
     <li>
       <div className="flex min-h-9 min-w-0 items-center gap-1.5 px-4 py-1 text-xs text-muted-foreground">
@@ -74,6 +111,26 @@ function QueuedMessageRow({
           {text}
         </span>
         <span className="ml-auto shrink-0 pl-2">Queued</span>
+        {onSteer && canSteer ? (
+          <BasicTooltip content={steering ? 'Sending...' : 'Send now'}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="rounded-md focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={steering ? 'Sending queued message' : 'Send now'}
+              aria-busy={steering}
+              disabled={pending || steering}
+              onClick={() => void steer()}
+            >
+              {steering ? (
+                <Loader2 aria-hidden="true" className="animate-spin" />
+              ) : (
+                <CornerDownLeftIcon aria-hidden="true" />
+              )}
+            </Button>
+          </BasicTooltip>
+        ) : null}
         {onDelete ? (
           <BasicTooltip
             content={
@@ -91,7 +148,7 @@ function QueuedMessageRow({
                 pending ? 'Deleting queued message' : 'Delete queued message'
               }
               aria-busy={pending}
-              disabled={pending || !canDelete}
+              disabled={pending || steering || !canDelete}
               onClick={() => void remove()}
             >
               {pending ? (
@@ -116,6 +173,7 @@ export function SessionQueuedMessageList({
   queuedMessages,
   currentUserId,
   onDelete,
+  onSteer,
   className,
 }: SessionQueuedMessageListProps) {
   if (queuedMessages.length === 0) return null;
@@ -124,7 +182,7 @@ export function SessionQueuedMessageList({
       aria-label="Queued messages"
       className={cn('border-b border-border/50', className)}
     >
-      {queuedMessages.map((message) => (
+      {queuedMessages.map((message, index) => (
         // The client id survives the optimistic entry being replaced by the
         // server's row, so a pending delete keeps its state.
         <QueuedMessageRow
@@ -132,6 +190,8 @@ export function SessionQueuedMessageList({
           message={message}
           currentUserId={currentUserId}
           onDelete={onDelete}
+          onSteer={onSteer}
+          canSteer={index === 0}
         />
       ))}
     </ul>

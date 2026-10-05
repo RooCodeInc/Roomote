@@ -90,7 +90,9 @@ import {
   isPrivateSessionsExperimentEnabled,
   isNull,
   isXaiSubscriptionConnected,
+  lt,
   markSessionGoalForConversation,
+  or,
   releaseSessionGoalContinuation,
   createSessionStatusJudgmentRequest,
   settleSessionStatusJudgmentTurn,
@@ -420,11 +422,18 @@ async function getPendingFastAgentHumanFollowUps(
   sessionId: string,
   excludedEventId?: string,
 ) {
+  const now = new Date();
   return db.query.fastAgentParentEvents.findMany({
     where: and(
       eq(fastAgentParentEvents.conversationId, sessionId),
       isNull(fastAgentParentEvents.deliveredAt),
       isNull(fastAgentParentEvents.discardedAt),
+      // A queued-message Send now action reserves the row while stopping its
+      // predecessor. Native steering must not take it during that handoff.
+      or(
+        isNull(fastAgentParentEvents.claimedUntil),
+        lt(fastAgentParentEvents.claimedUntil, now),
+      ),
       // An inline-admitted row is a whole turn owned by a live process (or
       // awaiting queue resumption), never a steer for the current turn.
       isNull(fastAgentParentEvents.admission),

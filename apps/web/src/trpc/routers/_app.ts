@@ -57,8 +57,10 @@ import {
   handleFastSessionPrReviewActionCommand,
   resolveFastSessionCapabilityOfferCommand,
   replyToFastSessionCommand,
+  steerFastSessionQueuedMessageCommand,
   startFastSessionGoalCommand,
   startFastSessionCommand,
+  stopFastSessionCommand,
   submitFastSessionUserInputCommand,
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
@@ -68,6 +70,8 @@ import {
 } from '../commands/fast-sessions/auto-tool-approvals';
 import {
   deleteFastSessionQueuedMessageInputSchema,
+  steerFastSessionQueuedMessageInputSchema,
+  stopFastSessionInputSchema,
   replyToFastSessionInputSchema,
   fastSessionAutoToolApprovalsInputSchema,
   setFastSessionAutoToolApprovalsInputSchema,
@@ -3395,6 +3399,16 @@ export const appRouter = createRouter({
       .input(deleteFastSessionQueuedMessageInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         deleteFastSessionQueuedMessageCommand(auth, input),
+      ),
+    steerQueuedMessage: protectedProcedure
+      .input(steerFastSessionQueuedMessageInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        steerFastSessionQueuedMessageCommand(auth, input),
+      ),
+    stop: protectedProcedure
+      .input(stopFastSessionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        stopFastSessionCommand(auth, input),
       ),
     startGoal: protectedProcedure
       .input(

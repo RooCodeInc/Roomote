@@ -44,6 +44,8 @@ import {
   getFastSessionMessagesSince,
   getFastSessionDisplayTitle,
   getFastSessionSuggestableMessages,
+  releaseFastSessionQueuedMessageSteerReservation,
+  reserveFastSessionQueuedMessageForSteer,
   updateFastSessionPrReviewOfferStatus,
   withdrawFastSessionQueuedMessage,
 } from './fast-sessions';
@@ -2148,6 +2150,91 @@ describe('Session queries', () => {
       session.id,
     );
     expect(reloaded?.queuedMessages).toEqual(polled.queuedMessages);
+  });
+
+  it('reserves only the FIFO queue head for steering and keeps it queued until delivery', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'steer-queued-web-follow-up',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      surface: 'web',
+    });
+    const parent = {
+      sessionId: session.id,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: owner.id,
+        conversationId: session.conversationId,
+      },
+    };
+    const rows = await db
+      .insert(fastAgentParentEvents)
+      .values(
+        ['first-client', 'second-client'].map((clientMessageId, index) => ({
+          conversationId: session.id,
+          eventKey: `steer-${clientMessageId}`,
+          parent,
+          event: {
+            type: 'human_follow_up' as const,
+            eventId: clientMessageId,
+            currentMessageId: clientMessageId,
+            userId: owner.id,
+            question: `${index === 0 ? 'First' : 'Second'} queued message`,
+            webFollowUp: true,
+          },
+          createdAt: new Date(`2026-01-01T00:00:0${index + 1}.000Z`),
+        })),
+      )
+      .returning({ id: fastAgentParentEvents.id });
+
+    await expect(
+      reserveFastSessionQueuedMessageForSteer({
+        sessionId: session.id,
+        clientMessageId: 'second-client',
+      }),
+    ).resolves.toEqual({ outcome: 'not_first' });
+
+    const reservation = await reserveFastSessionQueuedMessageForSteer({
+      sessionId: session.id,
+      clientMessageId: 'first-client',
+    });
+    expect(reservation).toMatchObject({
+      outcome: 'reserved',
+      id: rows[0]!.id,
+      eventKey: 'steer-first-client',
+    });
+    expect(
+      (await getFastSessionMessagesSince(session.id, 0)).queuedMessages.map(
+        (message) => message.clientMessageId,
+      ),
+    ).toEqual(['first-client', 'second-client']);
+
+    if (reservation.outcome !== 'reserved') throw new Error('not reserved');
+    await releaseFastSessionQueuedMessageSteerReservation(reservation);
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'first-client:user',
+      turnSeq: 0,
+      role: 'user',
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      metadata: { visibleInTranscript: true, clientMessageId: 'first-client' },
+    });
+    await db
+      .update(fastAgentParentEvents)
+      .set({ deliveredAt: new Date() })
+      .where(eq(fastAgentParentEvents.id, rows[0]!.id));
+
+    const delivered = await getFastSessionMessagesSince(session.id, 0);
+    expect(
+      delivered.queuedMessages.map((message) => message.clientMessageId),
+    ).toEqual(['second-client']);
+    expect(delivered.messages).toEqual([
+      expect.objectContaining({
+        eventId: 'first-client:user',
+        metadata: expect.objectContaining({ clientMessageId: 'first-client' }),
+      }),
+    ]);
   });
 
   it('withdraws only the sender’s queued follow-up, and only before a delivery path takes it', async () => {

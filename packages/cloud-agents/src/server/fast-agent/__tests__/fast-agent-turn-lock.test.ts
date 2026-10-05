@@ -1,9 +1,14 @@
-const { acquireRedisLockMock } = vi.hoisted(() => ({
-  acquireRedisLockMock: vi.fn(),
-}));
+const { acquireRedisLockMock, redisEvalMock, redisGetMock } = vi.hoisted(
+  () => ({
+    acquireRedisLockMock: vi.fn(),
+    redisEvalMock: vi.fn(),
+    redisGetMock: vi.fn(),
+  }),
+);
 
 vi.mock('@roomote/redis', () => ({
   acquireRedisLock: acquireRedisLockMock,
+  getRedis: () => ({ eval: redisEvalMock, get: redisGetMock }),
 }));
 
 import {
@@ -11,9 +16,11 @@ import {
   acquireFastAgentTurnLock,
   buildFastAgentTurnLockKey,
   FastAgentProcessShutdownError,
+  FastAgentSessionStoppedError,
   FastAgentTurnLockLostError,
   markFastAgentShutdownCloseoutPending,
   markFastAgentShutdownCloseoutSettled,
+  requestFastAgentTurnStop,
   registerFastAgentTurnActivity,
 } from '../fast-agent-turn-lock';
 
@@ -28,6 +35,76 @@ function deferred<T>() {
 describe('Fast conversation turn locking', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    redisEvalMock.mockResolvedValue(0);
+    redisGetMock.mockResolvedValue(null);
+  });
+
+  it('stops only the turn generation that owned the lock when requested', async () => {
+    vi.useFakeTimers();
+    try {
+      let released = false;
+      const releaseRedisLock = Object.assign(
+        vi.fn(async () => {
+          released = true;
+        }),
+        {
+          ownerId: 'owner-1',
+          renewDetailed: vi.fn().mockResolvedValue('renewed'),
+        },
+      );
+      acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+      redisEvalMock.mockImplementation(async (_script, keyCount) =>
+        keyCount === 2 ? 'owner-1' : 1,
+      );
+      redisGetMock.mockImplementation(async (key: string) => {
+        if (key.includes('conversation-stop')) return 'owner-1';
+        return released ? null : 'owner-1';
+      });
+      const conversation = {
+        surface: 'web' as const,
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+      };
+      const lock = (await acquireFastAgentTurnLock({ conversation }))!;
+
+      const stopping = requestFastAgentTurnStop(conversation);
+      await vi.advanceTimersByTimeAsync(250);
+      expect(lock.signal.reason).toBeInstanceOf(FastAgentSessionStoppedError);
+
+      await lock();
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(stopping).resolves.toBe('stopped');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores a stale stop signal for a previous lock owner', async () => {
+    vi.useFakeTimers();
+    try {
+      const releaseRedisLock = Object.assign(
+        vi.fn().mockResolvedValue(undefined),
+        {
+          ownerId: 'owner-2',
+          renewDetailed: vi.fn().mockResolvedValue('renewed'),
+        },
+      );
+      acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+      redisGetMock.mockResolvedValue('owner-1');
+      const lock = await acquireFastAgentTurnLock({
+        conversation: {
+          surface: 'web',
+          workspaceId: 'workspace-1',
+          conversationId: 'conversation-1',
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(lock?.signal.aborted).toBe(false);
+      await lock?.();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serializes one stable conversation across reply destination changes', () => {
