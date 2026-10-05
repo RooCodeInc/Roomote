@@ -154,6 +154,7 @@ export async function sendMessage(
     userId: auth.userId,
     authContext: auth.authContext,
     message: prepared.message,
+    quoteText: body.message,
     images: images.length ? images : undefined,
     source,
     clientMessageId,

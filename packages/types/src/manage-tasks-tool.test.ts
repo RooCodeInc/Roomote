@@ -80,7 +80,10 @@ describe('Roomote MCP management contract', () => {
       ]).success,
     ).toBe(true);
     expect(roomoteManagementFieldSchemas.attachments.description).toContain(
-      'start or send_message',
+      'up to 2 MiB each',
+    );
+    expect(roomoteManagementFieldSchemas.attachments.description).toContain(
+      'up to 8 MiB each',
     );
   });
 

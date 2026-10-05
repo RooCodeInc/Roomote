@@ -86,6 +86,7 @@ export async function steerMessage(
     taskId,
     userId: auth.userId,
     message: prepared.message,
+    quoteText: body.message,
     images: images.length ? images : undefined,
     clientMessageId: body.clientMessageId?.trim() || undefined,
     senderMode: body.senderMode,

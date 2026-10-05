@@ -155,7 +155,7 @@ describe('MCP session routes', () => {
     expect(response.status).toBe(201);
     expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: 'Investigate the failure',
+        question: expect.stringContaining('connection refused'),
         images: [`data:image/png;base64,${screenshot}`],
         attachmentTexts: [expect.stringContaining('failure.log')],
       }),
@@ -671,7 +671,7 @@ describe('MCP session routes', () => {
     expect(response.status).toBe(200);
     expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: 'Review these files',
+        question: expect.stringContaining('- old\n+ new'),
         images: [`data:image/png;base64,${screenshot}`],
         attachmentTexts: [expect.stringContaining('change.diff')],
       }),

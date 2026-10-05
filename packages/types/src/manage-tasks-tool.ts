@@ -136,7 +136,7 @@ export const roomoteManagementFieldSchemas = {
     .max(20)
     .optional()
     .describe(
-      'Optional files for start or send_message. Each item requires filename, MIME type, and base64-encoded bytes. Supported screenshots are delivered as images; supported text and document files, including logs and diffs, are extracted into bounded prompt text using the same limits as web attachments.',
+      'Optional files for start or send_message (maximum 20). Each item requires filename, MIME type, and base64-encoded bytes. Supported image MIME types are delivered as images up to 2 MiB each; supported text and document files, including logs and diffs, are extracted into bounded prompt text up to 8 MiB each and 200,000 extracted characters total.',
     ),
   prompt: z
     .string()

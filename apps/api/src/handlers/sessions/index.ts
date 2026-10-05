@@ -165,7 +165,7 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
     const result = await sendMessageToFastSessionForUser({
       sessionId: session.fastConversationId,
       userId,
-      message,
+      message: prepared.message,
       images: prepared.images,
       attachmentTexts: prepared.attachmentTexts,
     });
@@ -340,7 +340,7 @@ async function startSession(c: SessionContext): Promise<Response> {
       sessionId: fastSession.id,
       userId,
       senderDisplayName: null,
-      question: message,
+      question: prepared.message,
       images: prepared.images,
       attachmentTexts: prepared.attachmentTexts,
       currentMessageId: `mcp-${randomUUID()}`,

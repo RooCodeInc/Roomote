@@ -1,3 +1,5 @@
+import { ROOMOTE_IMAGE_ATTACHMENT_MAX_BYTES } from '@roomote/cloud-agents';
+
 interface ImageValidationResult {
   isValid: boolean;
   error?: string;
@@ -10,7 +12,7 @@ interface ProcessedImage {
   type: string;
 }
 
-const MAX_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB per image (after compression).
+const MAX_IMAGE_SIZE = ROOMOTE_IMAGE_ATTACHMENT_MAX_BYTES;
 
 const MAX_ORIGINAL_IMAGE_SIZE = 50 * 1024 * 1024; // 50MB original file size limit.
 

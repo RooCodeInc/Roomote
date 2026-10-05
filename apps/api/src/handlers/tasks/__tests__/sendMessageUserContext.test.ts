@@ -139,7 +139,32 @@ describe('send_message / steer_message user context', () => {
     expect(mockSendMessageToTask).toHaveBeenCalledWith(
       expect.objectContaining({
         message: expect.stringContaining('connection refused'),
+        quoteText: 'Review these files',
         images: [`data:image/png;base64,${screenshot}`],
+      }),
+    );
+
+    mockSteerMessageToTask.mockResolvedValue({ success: true, result: {} });
+    const steerResponse = await post(
+      createApp(userlessRunAuth),
+      '/tasks/task-impl/steer_message',
+      {
+        message: 'Review these files',
+        attachments: [
+          {
+            filename: 'failure.log',
+            mimeType: 'text/plain',
+            base64: Buffer.from('connection refused').toString('base64'),
+          },
+        ],
+      },
+    );
+
+    expect(steerResponse.status).toBe(200);
+    expect(mockSteerMessageToTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('connection refused'),
+        quoteText: 'Review these files',
       }),
     );
   });
