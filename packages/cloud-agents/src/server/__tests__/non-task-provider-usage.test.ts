@@ -3642,6 +3642,110 @@ describe('resolveOpenCodeSmallModel', () => {
 
   it.each([
     {
+      modality: 'audio' as const,
+      initialModel: 'google/gemini-helper',
+    },
+    {
+      modality: 'video' as const,
+      initialModel: 'google/gemini-vision',
+    },
+  ])(
+    'uses the helper fallback for $modality when the media role is unset',
+    async ({ modality, initialModel }) => {
+      process.env = { ...originalEnv };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/openai/text-primary',
+        R_SMALL_MODEL: 'openrouter/google/gemini-helper',
+        R_SMALL_MODEL_FALLBACK: 'openrouter/google/gemini-helper-backup',
+        R_SMALL_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+        R_VISION_MODEL: 'openrouter/google/gemini-vision',
+        OPENROUTER_API_KEY: 'test-key',
+        OPENCODE_CONFIG_CONTENT: '',
+      });
+      configProvidersMock.mockResolvedValue({
+        data: {
+          providers: [
+            {
+              id: 'openrouter',
+              models: {
+                'google/gemini-helper': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+                'google/gemini-vision': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+                'google/gemini-helper-backup': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+              },
+            },
+          ],
+          default: {},
+        },
+        error: undefined,
+      });
+      sessionPromptMock
+        .mockResolvedValueOnce({
+          data: {
+            info: {
+              error: {
+                name: 'APIError',
+                data: { statusCode: 401, message: 'Invalid API key' },
+              },
+            },
+            parts: [],
+          },
+          error: undefined,
+        })
+        .mockResolvedValueOnce({
+          data: {
+            info: { error: null },
+            parts: [{ type: 'text', text: 'Fallback media response.' }],
+          },
+          error: undefined,
+        });
+
+      const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+        await import('../non-task-provider-usage.js');
+      await expect(
+        generateTrackedNonTaskText({
+          surface:
+            modality === 'audio'
+              ? NON_TASK_INFERENCE_SURFACES.chatAudioTranscription
+              : NON_TASK_INFERENCE_SURFACES.chatVideoDescription,
+          prompt: 'Read the attachment.',
+          requiredInputModality: modality,
+        }),
+      ).resolves.toBe('Fallback media response.');
+      expect(
+        sessionPromptMock.mock.calls.map(([request]) => request.model),
+      ).toEqual([
+        { providerID: 'openrouter', modelID: initialModel },
+        {
+          providerID: 'openrouter',
+          modelID: 'google/gemini-helper-backup',
+        },
+      ]);
+      expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenLastCalledWith({
+        runtimeEnv: expect.objectContaining({
+          R_MODEL: 'openrouter/google/gemini-helper-backup',
+          R_MODEL_REASONING_EFFORT: 'low',
+        }),
+      });
+    },
+  );
+
+  it.each([
+    {
       role: 'Audio and video model',
       runtimeEnv: {
         R_MODEL: 'openrouter/openai/text-primary',

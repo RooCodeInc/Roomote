@@ -29,6 +29,7 @@ import {
   classifyModelFallbackTrigger,
   getDisplayModelProviderId,
   MODEL_FALLBACK_PROVIDER_ERROR_RETRIES,
+  TASK_MODEL_ROLE_DESCRIPTORS,
 } from '@roomote/types';
 import { captureInstanceEvent } from '@roomote/telemetry/server';
 import type { z } from 'zod';
@@ -2431,27 +2432,37 @@ async function runControlPlaneWithFallback<T>(
 ): Promise<T> {
   const role = params.modelRole ?? 'small';
   let runtime = await resolveNonTaskModelRuntime(params.model, role);
-  const fallbackEnvVar =
+  const audioVideoDescriptor = TASK_MODEL_ROLE_DESCRIPTORS.audioVideo;
+  const hasAudioVideoFallback = Boolean(
+    runtime.resolvedModelRuntimeEnv[audioVideoDescriptor.fallbackModelEnvVar],
+  );
+  const fallbackRole =
     role === 'orchestration'
-      ? 'R_ORCHESTRATION_MODEL_FALLBACK'
+      ? 'orchestration'
       : role === 'small'
-        ? 'R_SMALL_MODEL_FALLBACK'
+        ? 'helper'
         : role === 'audioVideo'
-          ? 'R_AUDIO_VIDEO_MODEL_FALLBACK'
+          ? hasAudioVideoFallback || params.model || runtime.audioVideoModel
+            ? 'audioVideo'
+            : 'helper'
           : undefined;
-  const fallbackModel = fallbackEnvVar
-    ? runtime.resolvedModelRuntimeEnv[fallbackEnvVar]
+  const configuredFallbackDescriptor = fallbackRole
+    ? TASK_MODEL_ROLE_DESCRIPTORS[fallbackRole]
     : undefined;
-  const fallbackReasoningEnvVar =
-    role === 'orchestration'
-      ? 'R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT'
-      : role === 'small'
-        ? 'R_SMALL_MODEL_FALLBACK_REASONING_EFFORT'
-        : role === 'audioVideo'
-          ? 'R_AUDIO_VIDEO_MODEL_FALLBACK_REASONING_EFFORT'
-          : undefined;
-  const fallbackReasoningEffort = fallbackReasoningEnvVar
-    ? runtime.resolvedModelRuntimeEnv[fallbackReasoningEnvVar]
+  const fallbackDescriptor =
+    configuredFallbackDescriptor &&
+    (
+      configuredFallbackDescriptor.fallbackRuntime as readonly string[]
+    ).includes('control-plane')
+      ? configuredFallbackDescriptor
+      : undefined;
+  const fallbackModel = fallbackDescriptor
+    ? runtime.resolvedModelRuntimeEnv[fallbackDescriptor.fallbackModelEnvVar]
+    : undefined;
+  const fallbackReasoningEffort = fallbackDescriptor
+    ? runtime.resolvedModelRuntimeEnv[
+        fallbackDescriptor.fallbackReasoningEnvVar
+      ]
     : undefined;
   const validFallbackReasoningEffort = isReasoningEffort(
     fallbackReasoningEffort,
