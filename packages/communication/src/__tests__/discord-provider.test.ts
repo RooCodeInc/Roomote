@@ -179,7 +179,7 @@ describe('DiscordCommunicationProvider', () => {
     try {
       await provider.postMessage({
         channelId: '400000000000000001',
-        text: `${prose}\`\`\`text\n${row}\n\`\`\``,
+        text: `${prose}\`\`\`text\n\n${row}\n\`\`\``,
       });
 
       const stateResponse = await fetch(
@@ -192,6 +192,7 @@ describe('DiscordCommunicationProvider', () => {
       expect(messages).toHaveLength(2);
       expect(messages[0]?.content).toBe(prose);
       expect(messages[1]?.content).toContain(row);
+      expect(messages[1]?.content).toContain('```text\n\n');
       expect(messages[1]?.content.match(/^```/gm)?.length ?? 0).toBe(2);
       expect(messages.every((message) => message.content.length <= 2_000)).toBe(
         true,

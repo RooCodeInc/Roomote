@@ -375,8 +375,8 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
         line.length + firstBodyLength + suffixLength <= limit &&
         current.length + line.length + firstBodyLength + suffixLength > limit
       ) {
-        // Keep the first code line with its opener when preceding prose
-        // would otherwise leave room for only an empty fenced message.
+        // Keep blank code lines with the first row, without an empty fenced
+        // message after preceding prose.
         flush();
       }
       if (current.length + line.length + suffixLength > limit) flush();
