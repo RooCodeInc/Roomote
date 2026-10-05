@@ -439,6 +439,7 @@ import {
   repairDiscordCommand,
   repairTelegramWebhookCommand,
   selectDiscordDestinationCommand,
+  setAgentMailOutboundEnabledCommand,
 } from '../commands/comms';
 import {
   getComputeStatusCommand,
@@ -2414,6 +2415,12 @@ export const appRouter = createRouter({
     status: protectedProcedure.query(({ ctx: { auth } }) =>
       getCommsStatusCommand(auth),
     ),
+
+    setAgentMailOutboundEnabled: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setAgentMailOutboundEnabledCommand(auth, input),
+      ),
 
     saveAuthConfig: protectedProcedure
       .input(

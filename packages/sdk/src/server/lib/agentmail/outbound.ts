@@ -4,7 +4,6 @@ import {
   AgentMailApiClient,
   buildAgentMailEmailBody,
 } from '@roomote/communication';
-import { isEmailChannelEnabled } from '@roomote/env';
 import {
   agentmailConversationParticipants,
   agentmailConversations,
@@ -15,6 +14,7 @@ import {
   db,
   eq,
   isNull,
+  isAgentMailOutboundEnabled,
   resolveAgentMailRuntimeCredentials,
   users,
 } from '@roomote/db/server';
@@ -179,7 +179,7 @@ export async function listAgentMailOutboundIdentities(
 export async function listAvailableAgentMailOutboundIdentities(
   userId: string,
 ): Promise<AgentMailOutboundIdentity[]> {
-  if (!isEmailChannelEnabled()) {
+  if (!(await isAgentMailOutboundEnabled())) {
     return [];
   }
   if (!(await canSendAgentMailWithRuntimeCredentials())) {
@@ -232,7 +232,7 @@ export async function canStartAgentMailConversationWithUser(
   userId: string,
   identityId?: string,
 ): Promise<boolean> {
-  if (!isEmailChannelEnabled()) {
+  if (!(await isAgentMailOutboundEnabled())) {
     return false;
   }
   if (!(await canSendAgentMailWithRuntimeCredentials())) {
@@ -280,7 +280,7 @@ export async function prepareAgentMailConversation(input: {
   inboxId: string;
   messageId: null;
 } | null> {
-  if (!isEmailChannelEnabled()) return null;
+  if (!(await isAgentMailOutboundEnabled())) return null;
   const credentials = await resolveAgentMailRuntimeCredentials({
     allocate: true,
   });
@@ -338,7 +338,7 @@ export async function startAgentMailConversationWithResult(input: {
   /** A specific server-issued verified identity; never a raw address. */
   identityId?: string;
 }): Promise<StartAgentMailConversationResult> {
-  if (!isEmailChannelEnabled()) {
+  if (!(await isAgentMailOutboundEnabled())) {
     return { sent: false };
   }
   const credentials = await resolveAgentMailRuntimeCredentials({
@@ -562,7 +562,7 @@ export async function sendAgentMailSystemEmail(input: {
   logContext: string;
   clientSendId?: string;
 }): Promise<AgentMailSystemEmailResult> {
-  if (!isEmailChannelEnabled()) {
+  if (!(await isAgentMailOutboundEnabled())) {
     return { sent: false, reason: 'channel_disabled' };
   }
   const credentials = await resolveAgentMailRuntimeCredentials({

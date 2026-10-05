@@ -7,6 +7,8 @@ const {
   mockTxSelect,
   mockDbTransaction,
   mockResolveAgentMailRuntimeCredentials,
+  mockGetAgentMailOutboundSettings,
+  mockSetAgentMailOutboundEnabled,
   mockAgentMailClientConstructor,
   mockAgentMailListInboxes,
   mockAgentMailGetInbox,
@@ -46,6 +48,12 @@ const {
     webhookSecret: null as string | null,
     inboxId: null as string | null,
   })),
+  mockGetAgentMailOutboundSettings: vi.fn(async () => ({
+    environmentEnabled: true,
+    persistedEnabled: true,
+    effectiveEnabled: true,
+  })),
+  mockSetAgentMailOutboundEnabled: vi.fn(async (enabled: boolean) => enabled),
   mockAgentMailClientConstructor: vi.fn(),
   mockAgentMailListInboxes: vi.fn(),
   mockAgentMailGetInbox: vi.fn(),
@@ -137,6 +145,8 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn(),
   like: vi.fn(),
   resolveAgentMailRuntimeCredentials: mockResolveAgentMailRuntimeCredentials,
+  getAgentMailOutboundSettings: mockGetAgentMailOutboundSettings,
+  setAgentMailOutboundEnabled: mockSetAgentMailOutboundEnabled,
   invalidateAgentMailRuntimeCredentialsCache: vi.fn(),
   resolveEffectiveDeploymentEnvVars: mockResolveEffectiveDeploymentEnvVars,
   resolveInvocationIdentities: mockResolveInvocationIdentities,
@@ -278,6 +288,7 @@ import {
   repairTelegramWebhookCommand,
   saveCommsAuthConfigCommand,
   selectDiscordDestinationCommand,
+  setAgentMailOutboundEnabledCommand,
 } from './index';
 
 function buildMockAuth(
@@ -326,6 +337,11 @@ describe('comms commands', () => {
       apiKey: null,
       webhookSecret: null,
       inboxId: null,
+    });
+    mockGetAgentMailOutboundSettings.mockResolvedValue({
+      environmentEnabled: true,
+      persistedEnabled: true,
+      effectiveEnabled: true,
     });
     mockAgentMailListInboxes.mockResolvedValue({ inboxes: [] });
     mockAgentMailListWebhooks.mockResolvedValue({ webhooks: [] });
@@ -527,6 +543,26 @@ describe('comms commands', () => {
       expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalled();
     });
 
+    it('includes the persisted and effective outbound Email settings', async () => {
+      mockGetAgentMailOutboundSettings.mockResolvedValue({
+        environmentEnabled: true,
+        persistedEnabled: false,
+        effectiveEnabled: false,
+      });
+
+      const status = await getCommsStatusCommand(buildMockAuth());
+
+      expect(
+        status.providers.find((provider) => provider.id === 'agentmail'),
+      ).toMatchObject({
+        agentmailOutbound: {
+          environmentEnabled: true,
+          persistedEnabled: false,
+          effectiveEnabled: false,
+        },
+      });
+    });
+
     it('surfaces rejected token reasons on Telegram webhook status', async () => {
       mockResolveTelegramRuntimeCredentials.mockResolvedValue({
         botToken: 'bad-token',
@@ -551,6 +587,34 @@ describe('comms commands', () => {
         pendingUpdateCount: 0,
         lastErrorAtMs: null,
       });
+    });
+  });
+
+  describe('setAgentMailOutboundEnabledCommand', () => {
+    it('rejects non-admin users', async () => {
+      await expect(
+        setAgentMailOutboundEnabledCommand(buildMockAuth({ isAdmin: false }), {
+          enabled: false,
+        }),
+      ).rejects.toThrow('Unauthorized');
+      expect(mockSetAgentMailOutboundEnabled).not.toHaveBeenCalled();
+    });
+
+    it('persists the switch and returns its effective state', async () => {
+      mockGetAgentMailOutboundSettings.mockResolvedValue({
+        environmentEnabled: true,
+        persistedEnabled: false,
+        effectiveEnabled: false,
+      });
+
+      await expect(
+        setAgentMailOutboundEnabledCommand(buildMockAuth(), { enabled: false }),
+      ).resolves.toEqual({
+        environmentEnabled: true,
+        persistedEnabled: false,
+        effectiveEnabled: false,
+      });
+      expect(mockSetAgentMailOutboundEnabled).toHaveBeenCalledWith(false);
     });
   });
 

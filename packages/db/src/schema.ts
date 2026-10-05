@@ -291,6 +291,11 @@ export const deploymentSettings = pgTable('deployment_settings', {
   // key) so deployments enabled before this toggle existed stay enabled
   // without a backfill.
   brainEnabled: boolean('brain_enabled'),
+  // Runtime outbound-only gate. The deployment env flag remains the
+  // authoritative channel gate; admins can only further disable sends here.
+  emailOutboundEnabled: boolean('email_outbound_enabled')
+    .notNull()
+    .default(true),
   sessionDoneWebhookEnabled: boolean('session_done_webhook_enabled')
     .notNull()
     .default(false),
