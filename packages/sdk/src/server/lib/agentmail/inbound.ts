@@ -36,6 +36,7 @@ import {
   asc,
   db,
   eq,
+  isAgentMailOutboundEnabled,
   isNull,
   lt,
   lte,
@@ -325,6 +326,10 @@ async function maybeSendStrangerRefusal(input: {
   senderAddress: string;
   reason: keyof typeof STRANGER_REFUSAL_TEXT;
 }): Promise<void> {
+  if (!(await isAgentMailOutboundEnabled())) {
+    return;
+  }
+
   if (await isAgentMailAddressSuppressed(input.senderAddress)) {
     return;
   }
