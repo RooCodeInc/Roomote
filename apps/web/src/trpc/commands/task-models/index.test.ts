@@ -1209,6 +1209,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModel: null,
             roomoteSmallModel: 'openrouter/z-ai/glm-5.2',
             roomoteVisionModel: null,
+            roomoteAudioVideoModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
@@ -1216,6 +1217,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
+            roomoteAudioVideoModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
             roomoteExploreModelReasoningEffort: null,
             roomotePlanningModelReasoningEffort: null,
@@ -1330,6 +1332,9 @@ describe('lookupTaskModelCommand', () => {
     });
 
     expect(result).toMatchObject({ success: true });
+    if (!result.success) {
+      throw new Error('Expected model settings to save successfully.');
+    }
     expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         set: expect.objectContaining({
@@ -1338,6 +1343,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: 'openrouter/z-ai/glm-5.2',
+            roomoteAudioVideoModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
@@ -1345,6 +1351,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
+            roomoteAudioVideoModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
             roomoteExploreModelReasoningEffort: null,
             roomotePlanningModelReasoningEffort: null,
@@ -1404,6 +1411,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: null,
+            roomoteAudioVideoModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
@@ -1411,6 +1419,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
+            roomoteAudioVideoModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
             roomoteExploreModelReasoningEffort: null,
             roomotePlanningModelReasoningEffort: null,
@@ -1470,6 +1479,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModel: null,
             roomoteSmallModel: 'openrouter/anthropic/claude-haiku-4',
             roomoteVisionModel: null,
+            roomoteAudioVideoModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
@@ -1477,6 +1487,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
+            roomoteAudioVideoModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
             roomoteExploreModelReasoningEffort: null,
             roomotePlanningModelReasoningEffort: null,
@@ -1536,6 +1547,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: 'openrouter/anthropic/claude-sonnet-4',
+            roomoteAudioVideoModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
@@ -1543,6 +1555,7 @@ describe('lookupTaskModelCommand', () => {
             roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
+            roomoteAudioVideoModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
             roomoteExploreModelReasoningEffort: null,
             roomotePlanningModelReasoningEffort: null,
@@ -1634,6 +1647,7 @@ describe('lookupTaskModelCommand', () => {
       orchestrationModelId: selectedModelId,
       helperModelId: selectedModelId,
       visionModelId: selectedModelId,
+      audioVideoModelId: selectedModelId,
       codeReviewModelId: selectedModelId,
       exploreModelId: selectedModelId,
       planningModelId: selectedModelId,
@@ -1641,6 +1655,7 @@ describe('lookupTaskModelCommand', () => {
       orchestrationModelReasoningEffort: 'high',
       helperModelReasoningEffort: 'high',
       visionModelReasoningEffort: 'high',
+      audioVideoModelReasoningEffort: 'high',
       codeReviewModelReasoningEffort: 'high',
       exploreModelReasoningEffort: 'high',
       planningModelReasoningEffort: 'high',
@@ -1964,6 +1979,49 @@ describe('task model provider commands', () => {
     expect(result.models.some((model) => model.id.startsWith('google/'))).toBe(
       false,
     );
+  });
+
+  it('preserves capability metadata in Audio and video model options', async () => {
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OPENROUTER_API_KEY',
+    ]);
+    mockFindDeploymentSettings.mockResolvedValue({
+      taskModelSettings: {
+        models: [
+          {
+            id: 'openrouter/google/gemini-media',
+            displayName: 'Gemini media',
+            family: 'Gemini',
+            metadata: {
+              contextWindow: 1_000_000,
+              inputTypes: ['text', 'image', 'sound', 'video'],
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+            },
+          },
+        ],
+        allowedModelIds: ['openrouter/google/gemini-media'],
+        defaultModelId: 'openrouter/google/gemini-media',
+      },
+      runtimeModelConfig: null,
+    });
+
+    const result = await getTaskModelSettingsCommand(buildMockAuth());
+    const model = result.models.find(
+      ({ id }) => id === 'openrouter/google/gemini-media',
+    );
+    const option = result.helperModelOptions.find(
+      ({ id }) => id === 'openrouter/google/gemini-media',
+    );
+
+    expect(model?.metadata?.inputTypes).toEqual([
+      'text',
+      'image',
+      'sound',
+      'video',
+    ]);
+    expect(option?.metadata).toEqual(model?.metadata);
   });
 
   it('lists env-only coding overrides in the settings catalog', async () => {

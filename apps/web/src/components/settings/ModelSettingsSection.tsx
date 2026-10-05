@@ -21,6 +21,7 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
+  AudioLines,
   Code2,
   Dialog,
   DialogContent,
@@ -28,7 +29,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Eye,
+  Image,
   GitPullRequest,
   HandHelping,
   Input,
@@ -129,7 +130,7 @@ type SuggestionState = {
 type TaskModelRoleConfig = {
   role: TaskModelRole;
   label: string;
-  description: string;
+  description?: string;
   icon: LucideIcon;
   placeholder: string;
   reasoningAriaLabel: string;
@@ -207,11 +208,18 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   {
     role: 'vision',
     label: 'Vision model',
-    description:
-      'Used for image understanding and visual information extraction.',
-    icon: Eye,
+    icon: Image,
     placeholder: 'Select a vision model',
     reasoningAriaLabel: 'Vision model reasoning level',
+  },
+  {
+    role: 'audioVideo',
+    label: 'Audio and video model',
+    description:
+      'Used to transcribe audio and describe videos. Automatic chat-attachment transcription uses this deployment setting, not per-task overrides.',
+    icon: AudioLines,
+    placeholder: 'Select an audio and video model',
+    reasoningAriaLabel: 'Audio and video model reasoning level',
   },
   {
     role: 'codeReview',
@@ -242,6 +250,24 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   },
 ];
 
+function formatUnsupportedMediaInputs(
+  inputs: readonly ('image' | 'sound' | 'video')[],
+): string {
+  const labels = inputs.map((input) =>
+    input === 'image' ? 'images' : input === 'sound' ? 'audio' : 'video',
+  );
+
+  if (labels.length < 2) {
+    return labels[0] ?? '';
+  }
+
+  if (labels.length === 2) {
+    return `${labels[0]} or ${labels[1]}`;
+  }
+
+  return `${labels.slice(0, -1).join(', ')}, or ${labels.at(-1)}`;
+}
+
 function TaskModelRoleEditor({
   config,
   managedByEnv,
@@ -249,6 +275,7 @@ function TaskModelRoleEditor({
   selectValue,
   optionGroups,
   codingModelMetadata,
+  codingModelName,
   supportsReasoning,
   reasoningEffort,
   onModelChange,
@@ -264,6 +291,8 @@ function TaskModelRoleEditor({
   optionGroups: DisplayModelProviderGroup<EditableRuntimeModelOption>[];
   /** Metadata of the effective coding model, constraining the sentinel. */
   codingModelMetadata?: TaskModelMetadata | null;
+  /** Display name used when Vision inherits the coding model. */
+  codingModelName?: string | null;
   supportsReasoning: boolean;
   reasoningEffort: ReasoningEffort | null;
   onModelChange: (value: string) => void;
@@ -295,15 +324,44 @@ function TaskModelRoleEditor({
     ? [
         {
           id: SAME_AS_CODING_MODEL_VALUE,
-          displayName: 'Same as coding model',
-          // "Same as coding" resolves to the effective coding model, so its
-          // supported reasoning efforts constrain the picker as well.
-          metadata: codingModelMetadata ?? null,
+          displayName:
+            config.role === 'audioVideo'
+              ? 'Helper for audio, vision for video'
+              : 'Same as coding model',
+          // Inherited model roles use the coding model's capabilities. The
+          // unset media role routes audio and video independently.
+          metadata:
+            config.role === 'audioVideo' ? null : (codingModelMetadata ?? null),
         },
         ...models,
       ]
     : models;
   const selectedModel = pickerModels.find(({ id }) => id === selectValue);
+  const mediaInputTypes =
+    config.role === 'vision' || config.role === 'audioVideo'
+      ? selectValue === SAME_AS_CODING_MODEL_VALUE
+        ? config.role === 'vision'
+          ? codingModelMetadata?.inputTypes
+          : undefined
+        : selectedModel?.metadata?.inputTypes
+      : null;
+  const requestedMediaInputs =
+    config.role === 'vision'
+      ? (['image'] as const)
+      : config.role === 'audioVideo'
+        ? (['sound', 'video'] as const)
+        : [];
+  const unsupportedMediaInputs = mediaInputTypes?.length
+    ? requestedMediaInputs.filter((type) => !mediaInputTypes.includes(type))
+    : [];
+  const unsupportedMediaInputNames = formatUnsupportedMediaInputs(
+    unsupportedMediaInputs,
+  );
+  const warningModelName =
+    (config.role === 'vision' || config.role === 'audioVideo') &&
+    selectValue === SAME_AS_CODING_MODEL_VALUE
+      ? (codingModelName ?? 'The coding model')
+      : (selectedModel?.displayName ?? 'This model');
   const selectedReasoningEffort =
     reasoningEffort ?? DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role];
 
@@ -312,20 +370,26 @@ function TaskModelRoleEditor({
       <Icon className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1 space-y-2">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">{config.label}</span>
-            {(managedByEnv || reasoningManagedByEnv) && (
-              <BasicTooltip content={lockTooltip}>
-                <span
-                  aria-label={lockLabel}
-                  className="inline-flex text-muted-foreground"
-                >
-                  <Lock className="size-3.5" />
-                </span>
-              </BasicTooltip>
-            )}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">{config.label}</span>
+              {(managedByEnv || reasoningManagedByEnv) && (
+                <BasicTooltip content={lockTooltip}>
+                  <span
+                    aria-label={lockLabel}
+                    className="inline-flex text-muted-foreground"
+                  >
+                    <Lock className="size-3.5" />
+                  </span>
+                </BasicTooltip>
+              )}
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground">{config.description}</p>
+          {config.description ? (
+            <p className="text-xs text-muted-foreground">
+              {config.description}
+            </p>
+          ) : null}
         </div>
         {showDefaultLabel ? (
           <span className="text-xs font-medium text-muted-foreground">
@@ -360,6 +424,13 @@ function TaskModelRoleEditor({
           modelDisabled={managedByEnv}
           reasoningDisabled={reasoningManagedByEnv}
         />
+        {unsupportedMediaInputs.length > 0 && (
+          <p className="text-xs text-muted-foreground" role="status">
+            {config.role === 'audioVideo'
+              ? `${warningModelName} doesn't support ${unsupportedMediaInputNames}. Choose a model that does.`
+              : `${warningModelName} can't take ${unsupportedMediaInputNames}.`}
+          </p>
+        )}
         {children}
         {fallback}
       </div>
@@ -607,6 +678,7 @@ function getRecommendedRoleModelIds(
     orchestration: recommended.roomoteOrchestrationModel,
     helper: recommended.roomoteSmallModel,
     vision: recommended.roomoteVisionModel,
+    audioVideo: recommended.roomoteAudioVideoModel,
     codeReview: recommended.roomoteCodeReviewModel,
     explore: recommended.roomoteExploreModel,
     planning: recommended.roomotePlanningModel,
@@ -627,6 +699,7 @@ function getRecommendedRoleReasoningEfforts(
     orchestration: recommended.roomoteOrchestrationModelReasoningEffort,
     helper: recommended.roomoteSmallModelReasoningEffort,
     vision: recommended.roomoteVisionModelReasoningEffort,
+    audioVideo: recommended.roomoteAudioVideoModelReasoningEffort,
     codeReview: recommended.roomoteCodeReviewModelReasoningEffort,
     explore: recommended.roomoteExploreModelReasoningEffort,
     planning: recommended.roomotePlanningModelReasoningEffort,
@@ -719,6 +792,10 @@ function createEmptyTaskModelRoleDrafts(): TaskModelRoleDrafts {
       reasoningEffort: null,
     },
     vision: {
+      modelId: null,
+      reasoningEffort: null,
+    },
+    audioVideo: {
       modelId: null,
       reasoningEffort: null,
     },
@@ -1215,6 +1292,11 @@ export function ModelSettingsSection({
           reasoningEffort:
             settingsData.runtimeModels.visionModel.reasoningEffort,
         },
+        audioVideo: {
+          modelId: settingsData.runtimeModels.audioVideoModel.persistedModelId,
+          reasoningEffort:
+            settingsData.runtimeModels.audioVideoModel.reasoningEffort,
+        },
         codeReview: {
           modelId: settingsData.runtimeModels.codeReviewModel.persistedModelId,
           reasoningEffort:
@@ -1324,7 +1406,7 @@ export function ModelSettingsSection({
       id: option.id,
       displayName: option.displayName,
       family: option.family,
-      metadata: metadataById.get(option.id) ?? null,
+      metadata: metadataById.get(option.id) ?? option.metadata ?? null,
     }));
     const appendEffectiveModel = (
       effectiveModelId: string | null | undefined,
@@ -1336,6 +1418,7 @@ export function ModelSettingsSection({
         options.push({
           id: effectiveModelId,
           displayName: effectiveModelId,
+          metadata: metadataById.get(effectiveModelId) ?? null,
         });
       }
     };
@@ -1382,6 +1465,7 @@ export function ModelSettingsSection({
     orchestration: helperModelGroups,
     helper: helperModelGroups,
     vision: helperModelGroups,
+    audioVideo: helperModelGroups,
     codeReview: helperModelGroups,
     explore: helperModelGroups,
     planning: helperModelGroups,
@@ -1434,6 +1518,9 @@ export function ModelSettingsSection({
   const effectiveCodingModelMetadata =
     models.find((model) => model.id === roleSelectValues.coding)?.metadata ??
     null;
+  const effectiveCodingModelName =
+    models.find((model) => model.id === roleSelectValues.coding)?.displayName ??
+    (roleSelectValues.coding.split('/').at(-1) || null);
 
   // Reasoning selectors are hidden when the resolved model for a role is
   // known not to support configurable reasoning. Unknown support (missing
@@ -1474,6 +1561,7 @@ export function ModelSettingsSection({
       orchestration: null,
       helper: null,
       vision: null,
+      audioVideo: null,
       codeReview: null,
       explore: null,
       planning: null,
@@ -1711,6 +1799,7 @@ export function ModelSettingsSection({
         codeReviewModelId: draft.roles.codeReview.modelId,
         exploreModelId: draft.roles.explore.modelId,
         planningModelId: draft.roles.planning.modelId,
+        audioVideoModelId: draft.roles.audioVideo.modelId,
         codingModelReasoningEffort: draft.roles.coding.reasoningEffort,
         orchestrationModelReasoningEffort:
           draft.roles.orchestration.reasoningEffort,
@@ -1719,6 +1808,7 @@ export function ModelSettingsSection({
         codeReviewModelReasoningEffort: draft.roles.codeReview.reasoningEffort,
         exploreModelReasoningEffort: draft.roles.explore.reasoningEffort,
         planningModelReasoningEffort: draft.roles.planning.reasoningEffort,
+        audioVideoModelReasoningEffort: draft.roles.audioVideo.reasoningEffort,
         codingModelRoutingRules: prepareCodingModelRoutingRulesForSave(
           draft.codingModelRoutingRules,
         ),
@@ -1738,6 +1828,7 @@ export function ModelSettingsSection({
             result.fieldErrors.allowedModelIds ??
             result.fieldErrors.helperModelId ??
             result.fieldErrors.visionModelId ??
+            result.fieldErrors.audioVideoModelId ??
             result.fieldErrors.codeReviewModelId ??
             result.fieldErrors.exploreModelId ??
             result.fieldErrors.planningModelId ??
@@ -2338,6 +2429,7 @@ export function ModelSettingsSection({
                 selectValue={roleSelectValues[config.role]}
                 optionGroups={roleOptionGroups[config.role]}
                 codingModelMetadata={effectiveCodingModelMetadata}
+                codingModelName={effectiveCodingModelName}
                 supportsReasoning={roleSupportsReasoning[config.role]}
                 reasoningEffort={roleDrafts[config.role].reasoningEffort}
                 onModelChange={(value) =>

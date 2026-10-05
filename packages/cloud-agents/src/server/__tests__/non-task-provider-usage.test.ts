@@ -11,6 +11,7 @@ const {
   execFileMock,
   execFileSyncMock,
   mockResolveEffectiveModelRuntimeEnv,
+  mockTaskRunFindFirst,
   recordLlmUsageMock,
   sessionAbortMock,
   spawnMock,
@@ -27,6 +28,7 @@ const {
   execFileMock: vi.fn(),
   execFileSyncMock: vi.fn(),
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
+  mockTaskRunFindFirst: vi.fn(),
   recordLlmUsageMock: vi.fn(),
   sessionAbortMock: vi.fn(),
   spawnMock: vi.fn(),
@@ -52,8 +54,19 @@ vi.mock('node:net', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  and: (...args: unknown[]) => ({ type: 'and', args }),
+  db: {
+    query: {
+      taskRuns: {
+        findFirst: (...args: unknown[]) => mockTaskRunFindFirst(...args),
+      },
+    },
+  },
+  desc: (column: unknown) => ({ type: 'desc', column }),
+  eq: (column: unknown, value: unknown) => ({ type: 'eq', column, value }),
   recordLlmUsage: recordLlmUsageMock,
   resolveEffectiveModelRuntimeEnv: mockResolveEffectiveModelRuntimeEnv,
+  taskRuns: { id: 'taskRuns.id', taskId: 'taskRuns.taskId' },
 }));
 
 import {
@@ -128,6 +141,7 @@ describe('resolveOpenCodeSmallModel', () => {
     vi.clearAllMocks();
     process.env = originalEnv;
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({});
+    mockTaskRunFindFirst.mockResolvedValue(undefined);
     recordLlmUsageMock.mockResolvedValue({ recorded: true });
     spawnedServers.length = 0;
     let nextServerPort = 4100;
@@ -3326,6 +3340,9 @@ describe('resolveOpenCodeSmallModel', () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
       R_SMALL_MODEL: 'openrouter/google/gemini-3.6-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
+      R_AUDIO_VIDEO_MODEL: 'openrouter/google/gemini-3.6-flash',
+      R_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'low',
       OPENROUTER_API_KEY: 'test-key',
       OPENCODE_CONFIG_CONTENT: JSON.stringify({
         model: 'openrouter/openai/gpt-5.6-terra',
@@ -3385,7 +3402,6 @@ describe('resolveOpenCodeSmallModel', () => {
       surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
       prompt: 'Transcribe the audio.',
       requiredInputModality: 'audio',
-      reasoningEffort: 'low',
       files: [
         {
           mime: 'audio/mp4',
@@ -3438,21 +3454,314 @@ describe('resolveOpenCodeSmallModel', () => {
     });
   });
 
+  it('applies the task audio/video model and reasoning overrides to audio attachments', async () => {
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/text-primary',
+      R_AUDIO_VIDEO_MODEL: 'openrouter/google/gemini-deployment',
+      OPENROUTER_API_KEY: 'test-key',
+      OPENCODE_CONFIG_CONTENT: '',
+    });
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      payload: {
+        modelRoleOverrides: {
+          audioVideo: {
+            model: 'openrouter/google/gemini-task',
+            reasoningEffort: 'high',
+          },
+        },
+      },
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/text-primary': {
+                capabilities: {
+                  input: { audio: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-deployment': {
+                capabilities: {
+                  input: { audio: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-task': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [{ type: 'text', text: 'Transcribed using the task model.' }],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+    const result = await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+      taskId: 'task-with-audio-override',
+      prompt: 'Transcribe the audio.',
+      requiredInputModality: 'audio',
+    });
+
+    expect(result).toBe('Transcribed using the task model.');
+    expect(mockTaskRunFindFirst).toHaveBeenCalledWith({
+      where: {
+        type: 'eq',
+        column: 'taskRuns.taskId',
+        value: 'task-with-audio-override',
+      },
+      orderBy: { type: 'desc', column: 'taskRuns.id' },
+      columns: { payload: true },
+    });
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: { providerID: 'openrouter', modelID: 'google/gemini-task' },
+      }),
+      expect.anything(),
+    );
+    expect(
+      JSON.parse(
+        spawnMock.mock.calls.at(-1)?.[2]?.env?.OPENCODE_CONFIG_CONTENT ?? '{}',
+      ),
+    ).toMatchObject({
+      provider: {
+        openrouter: {
+          models: {
+            'google/gemini-task': {
+              options: { reasoning: { effort: 'high' } },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('uses the configured audio/video fallback after a deployment media provider failure', async () => {
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/text-primary',
+      R_SMALL_MODEL: 'openrouter/openai/text-helper',
+      R_SMALL_MODEL_FALLBACK: 'openrouter/openai/wrong-fallback',
+      R_AUDIO_VIDEO_MODEL: 'openrouter/google/gemini-media-primary',
+      R_AUDIO_VIDEO_MODEL_FALLBACK: 'openrouter/google/gemini-media-backup',
+      R_AUDIO_VIDEO_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+      OPENROUTER_API_KEY: 'test-key',
+      OPENCODE_CONFIG_CONTENT: '',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'google/gemini-media-primary': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-media-backup': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+    sessionPromptMock
+      .mockResolvedValueOnce({
+        data: {
+          info: {
+            error: {
+              name: 'APIError',
+              data: { statusCode: 401, message: 'Invalid API key' },
+            },
+          },
+          parts: [],
+        },
+        error: undefined,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          info: { error: null },
+          parts: [{ type: 'text', text: 'Fallback transcription.' }],
+        },
+        error: undefined,
+      });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+    await expect(
+      generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+        prompt: 'Transcribe the audio.',
+        requiredInputModality: 'audio',
+      }),
+    ).resolves.toBe('Fallback transcription.');
+    expect(
+      sessionPromptMock.mock.calls.map(([request]) => request.model),
+    ).toEqual([
+      {
+        providerID: 'openrouter',
+        modelID: 'google/gemini-media-primary',
+      },
+      {
+        providerID: 'openrouter',
+        modelID: 'google/gemini-media-backup',
+      },
+    ]);
+    expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenLastCalledWith({
+      runtimeEnv: expect.objectContaining({
+        R_MODEL: 'openrouter/google/gemini-media-backup',
+        R_MODEL_REASONING_EFFORT: 'low',
+      }),
+    });
+  });
+
   it.each([
     {
-      role: 'primary',
+      modality: 'audio' as const,
+      initialModel: 'google/gemini-helper',
+    },
+    {
+      modality: 'video' as const,
+      initialModel: 'google/gemini-vision',
+    },
+  ])(
+    'uses the helper fallback for $modality when the media role is unset',
+    async ({ modality, initialModel }) => {
+      process.env = { ...originalEnv };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/openai/text-primary',
+        R_SMALL_MODEL: 'openrouter/google/gemini-helper',
+        R_SMALL_MODEL_FALLBACK: 'openrouter/google/gemini-helper-backup',
+        R_SMALL_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+        R_VISION_MODEL: 'openrouter/google/gemini-vision',
+        OPENROUTER_API_KEY: 'test-key',
+        OPENCODE_CONFIG_CONTENT: '',
+      });
+      configProvidersMock.mockResolvedValue({
+        data: {
+          providers: [
+            {
+              id: 'openrouter',
+              models: {
+                'google/gemini-helper': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+                'google/gemini-vision': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+                'google/gemini-helper-backup': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+              },
+            },
+          ],
+          default: {},
+        },
+        error: undefined,
+      });
+      sessionPromptMock
+        .mockResolvedValueOnce({
+          data: {
+            info: {
+              error: {
+                name: 'APIError',
+                data: { statusCode: 401, message: 'Invalid API key' },
+              },
+            },
+            parts: [],
+          },
+          error: undefined,
+        })
+        .mockResolvedValueOnce({
+          data: {
+            info: { error: null },
+            parts: [{ type: 'text', text: 'Fallback media response.' }],
+          },
+          error: undefined,
+        });
+
+      const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+        await import('../non-task-provider-usage.js');
+      await expect(
+        generateTrackedNonTaskText({
+          surface:
+            modality === 'audio'
+              ? NON_TASK_INFERENCE_SURFACES.chatAudioTranscription
+              : NON_TASK_INFERENCE_SURFACES.chatVideoDescription,
+          prompt: 'Read the attachment.',
+          requiredInputModality: modality,
+        }),
+      ).resolves.toBe('Fallback media response.');
+      expect(
+        sessionPromptMock.mock.calls.map(([request]) => request.model),
+      ).toEqual([
+        { providerID: 'openrouter', modelID: initialModel },
+        {
+          providerID: 'openrouter',
+          modelID: 'google/gemini-helper-backup',
+        },
+      ]);
+      expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenLastCalledWith({
+        runtimeEnv: expect.objectContaining({
+          R_MODEL: 'openrouter/google/gemini-helper-backup',
+          R_MODEL_REASONING_EFFORT: 'low',
+        }),
+      });
+    },
+  );
+
+  it.each([
+    {
+      role: 'Audio and video model',
       runtimeEnv: {
-        R_MODEL: 'openrouter/google/gemini-primary',
+        R_MODEL: 'openrouter/openai/text-primary',
         R_SMALL_MODEL: 'openrouter/openai/text-small',
+        R_AUDIO_VIDEO_MODEL: 'openrouter/google/gemini-primary',
+        R_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'low',
       },
       selectedModel: 'google/gemini-primary',
     },
     {
-      role: 'vision',
+      role: 'audioVideo',
       runtimeEnv: {
         R_MODEL: 'openrouter/openai/text-primary',
         R_SMALL_MODEL: 'openrouter/openai/text-small',
-        R_VISION_MODEL: 'openrouter/google/gemini-vision',
+        R_AUDIO_VIDEO_MODEL: 'openrouter/google/gemini-vision',
+        R_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'low',
       },
       selectedModel: 'google/gemini-vision',
     },
@@ -3501,7 +3810,6 @@ describe('resolveOpenCodeSmallModel', () => {
         surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
         prompt: 'Transcribe the audio.',
         requiredInputModality: 'audio',
-        reasoningEffort: 'low',
       });
 
       expect(sessionPromptMock).toHaveBeenCalledWith(
@@ -3529,7 +3837,7 @@ describe('resolveOpenCodeSmallModel', () => {
     },
   );
 
-  it('prefers the configured vision model for video prompts', async () => {
+  it('uses only the configured Audio and video model for video prompts', async () => {
     process.env = {
       ...originalEnv,
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
@@ -3537,7 +3845,8 @@ describe('resolveOpenCodeSmallModel', () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
       R_SMALL_MODEL: 'openrouter/google/gemini-3.6-flash',
-      R_VISION_MODEL: 'openrouter/google/gemini-3.6-pro',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
+      R_AUDIO_VIDEO_MODEL: 'openrouter/google/gemini-3.6-pro',
     });
     configProvidersMock.mockResolvedValue({
       data: {
@@ -3603,13 +3912,146 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
-  it('rejects native file prompts when configured models lack the modality', async () => {
+  it.each([
+    {
+      modality: 'audio' as const,
+      preferredModel: 'google/gemini-helper',
+    },
+    {
+      modality: 'video' as const,
+      preferredModel: 'google/gemini-vision',
+    },
+  ])(
+    'preserves the existing $modality helper order when the Audio and video model is unset',
+    async ({ modality, preferredModel }) => {
+      process.env = { ...originalEnv };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/openai/text-coding',
+        R_SMALL_MODEL: 'openrouter/google/gemini-helper',
+        R_VISION_MODEL: 'openrouter/google/gemini-vision',
+      });
+      configProvidersMock.mockResolvedValue({
+        data: {
+          providers: [
+            {
+              id: 'openrouter',
+              models: {
+                'openai/text-coding': {
+                  capabilities: {
+                    input: { [modality]: false },
+                    output: { text: true },
+                  },
+                },
+                'google/gemini-helper': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+                'google/gemini-vision': {
+                  capabilities: {
+                    input: { [modality]: true },
+                    output: { text: true },
+                  },
+                },
+              },
+            },
+          ],
+          default: {},
+        },
+        error: undefined,
+      });
+      sessionPromptMock.mockResolvedValue({
+        data: {
+          info: { error: null },
+          parts: [{ type: 'text', text: 'Attachment understood.' }],
+        },
+        error: undefined,
+      });
+
+      const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+        await import('../non-task-provider-usage.js');
+      await expect(
+        generateTrackedNonTaskText({
+          surface:
+            modality === 'audio'
+              ? NON_TASK_INFERENCE_SURFACES.chatAudioTranscription
+              : NON_TASK_INFERENCE_SURFACES.chatVideoDescription,
+          prompt: 'Read the attachment.',
+          requiredInputModality: modality,
+        }),
+      ).resolves.toBe('Attachment understood.');
+      expect(sessionPromptMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: { providerID: 'openrouter', modelID: preferredModel },
+        }),
+        expect.anything(),
+      );
+    },
+  );
+
+  it('delivers Fast session audio directly to a capable session model when the Audio and video model is unset', async () => {
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/text-coding',
+      R_ORCHESTRATION_MODEL: 'openrouter/google/gemini-session',
+      R_SMALL_MODEL: 'openrouter/google/gemini-helper',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/text-coding': {
+                capabilities: {
+                  input: { audio: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-session': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-helper': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const { resolveNonTaskInputModalityDelivery } =
+      await import('../non-task-provider-usage.js');
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'audio',
+        modelRole: 'orchestration',
+      }),
+    ).resolves.toEqual({
+      delivery: 'direct',
+      model: 'openrouter/google/gemini-session',
+    });
+  });
+
+  it('does not fall back to Vision or helper when the selected media model lacks audio', async () => {
     process.env = {
       ...originalEnv,
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
     };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'openrouter/google/gemini-audio-helper',
+      R_VISION_MODEL: 'openrouter/google/gemini-audio-helper',
+      R_AUDIO_VIDEO_MODEL: 'openrouter/openai/gpt-5.6-terra',
     });
     configProvidersMock.mockResolvedValue({
       data: {
@@ -3620,6 +4062,65 @@ describe('resolveOpenCodeSmallModel', () => {
               'openai/gpt-5.6-terra': {
                 capabilities: {
                   input: { audio: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-audio-helper': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+        prompt: 'Transcribe the audio.',
+        requiredInputModality: 'audio',
+      }),
+    ).rejects.toMatchObject({
+      name: 'NonTaskInputModalityUnsupportedError',
+      message: expect.stringMatching(
+        /Audio and video model.*(?:GPT 5\.6 Terra|gpt-5\.6-terra).*Settings > Models > Audio and video model/u,
+      ),
+    });
+    expect(configProvidersMock).toHaveBeenCalled();
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('does not use the helper or Vision model as a video fallback when the media model lacks video input', async () => {
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-6-luna',
+      R_SMALL_MODEL: 'openrouter/google/gemini-video-helper',
+      R_VISION_MODEL: 'openrouter/openai/gpt-6-luna',
+      R_AUDIO_VIDEO_MODEL: 'openrouter/openai/gpt-6-luna',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/gpt-6-luna': {
+                capabilities: {
+                  input: { video: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-video-helper': {
+                capabilities: {
+                  input: { video: true },
                   output: { text: true },
                 },
               },
@@ -3639,16 +4140,16 @@ describe('resolveOpenCodeSmallModel', () => {
 
     await expect(
       generateTrackedNonTaskText({
-        surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
-        prompt: 'Transcribe the audio.',
-        requiredInputModality: 'audio',
+        surface: NON_TASK_INFERENCE_SURFACES.chatVideoDescription,
+        prompt: 'Describe the video.',
+        requiredInputModality: 'video',
       }),
     ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
     expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 
-  it('tries a configured model the provider catalog does not list yet', async () => {
-    // A newly released helper model has no models.dev entry, so the provider
+  it('tries the Audio and video model when the provider catalog does not list it yet', async () => {
+    // A newly released media model has no models.dev entry, so the provider
     // catalog carries no modality metadata for it at all. Missing metadata is
     // not proof the model rejects audio: the transcription call should try it
     // instead of telling the user no configured model supports audio input.
@@ -3656,6 +4157,8 @@ describe('resolveOpenCodeSmallModel', () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
       R_SMALL_MODEL: 'openrouter/google/gemini-3.9-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.9-flash',
+      R_AUDIO_VIDEO_MODEL: 'openrouter/google/gemini-3.9-flash',
       OPENROUTER_API_KEY: 'test-key',
       OPENCODE_CONFIG_CONTENT: '',
     });
@@ -3706,7 +4209,7 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
-  it('tries a custom OpenAI-compatible provider model with defaulted modality metadata', async () => {
+  it('tries a custom OpenAI-compatible media model with defaulted modality metadata', async () => {
     // Models served through an OpenAI-compatible provider (the Roomote
     // inference gateway, LiteLLM, Ollama, named custom providers) are
     // registered in OpenCode with defaulted text-only capabilities, so the
@@ -3716,6 +4219,8 @@ describe('resolveOpenCodeSmallModel', () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'roomote/openai/gpt-5.6-terra',
       R_SMALL_MODEL: 'roomote/google/gemini-3.6-flash',
+      R_VISION_MODEL: 'roomote/google/gemini-3.6-flash',
+      R_AUDIO_VIDEO_MODEL: 'roomote/google/gemini-3.6-flash',
       ROOMOTE_INFERENCE_API_KEY: 'test-key',
       OPENCODE_CONFIG_CONTENT: '',
     });
@@ -3779,6 +4284,8 @@ describe('resolveOpenCodeSmallModel', () => {
     process.env = { ...originalEnv };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/acme/audio-only-1',
+      R_VISION_MODEL: 'openrouter/acme/audio-only-1',
+      R_AUDIO_VIDEO_MODEL: 'openrouter/acme/audio-only-1',
       OPENROUTER_API_KEY: 'test-key',
       OPENCODE_CONFIG_CONTENT: '',
     });
@@ -3825,6 +4332,8 @@ describe('resolveOpenCodeSmallModel', () => {
     process.env = { ...originalEnv };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'roomote/acme/audio-speaker-1',
+      R_VISION_MODEL: 'roomote/acme/audio-speaker-1',
+      R_AUDIO_VIDEO_MODEL: 'roomote/acme/audio-speaker-1',
       ROOMOTE_INFERENCE_API_KEY: 'test-key',
       OPENCODE_CONFIG_CONTENT: '',
     });

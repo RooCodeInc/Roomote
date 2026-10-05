@@ -1443,7 +1443,9 @@ describe('fetchResolvedRuntimeEnvVars', () => {
   it('mirrors resolved model env to legacy ROOMOTE_* aliases for pre-rename snapshot workers', async () => {
     mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
+      R_AUDIO_VIDEO_MODEL: 'google/gemini-audio-video',
       R_MODEL_REASONING_EFFORT: 'high',
+      R_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'medium',
       R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
       ANTHROPIC_API_KEY: 'sk-ant',
     });
@@ -1455,8 +1457,12 @@ describe('fetchResolvedRuntimeEnvVars', () => {
     expect(envVars).toMatchObject({
       R_MODEL: 'anthropic/claude-test',
       ROOMOTE_MODEL: 'anthropic/claude-test',
+      R_AUDIO_VIDEO_MODEL: 'google/gemini-audio-video',
+      ROOMOTE_AUDIO_VIDEO_MODEL: 'google/gemini-audio-video',
       R_MODEL_REASONING_EFFORT: 'high',
       ROOMOTE_MODEL_REASONING_EFFORT: 'high',
+      R_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'medium',
+      ROOMOTE_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'medium',
       R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
       ROOMOTE_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
       MY_APP_CONFIG: 'value',
