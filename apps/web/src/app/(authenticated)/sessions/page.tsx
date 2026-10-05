@@ -74,8 +74,17 @@ export default async function SessionsPage({
     ? (params.archive as SessionArchiveFilter)
     : 'non-archived';
   const timePeriod = parseTimePeriodParam(period ?? null, 'all');
-  const hasAppliedFilters = Object.entries(params).some(
-    ([key, value]) => key !== 'view' && Boolean(value),
+  const hasAppliedFilters = Boolean(
+    (user && user !== 'all') ||
+    timePeriod !== 'all' ||
+    scope !== 'all' ||
+    status ||
+    q ||
+    params.repository ||
+    params.pullRequest ||
+    (params.source && params.source !== 'all') ||
+    params.model ||
+    archive !== 'non-archived',
   );
   const clearFiltersHref =
     view === 'board' ? '/sessions?view=board' : '/sessions';
@@ -159,7 +168,7 @@ export default async function SessionsPage({
                   </EmptyDescription>
                 </>
               ) : (
-                <EmptyDescription>No sessions yet.</EmptyDescription>
+                <EmptyDescription>No sessions found.</EmptyDescription>
               )}
             </EmptyHeader>
           </Empty>
