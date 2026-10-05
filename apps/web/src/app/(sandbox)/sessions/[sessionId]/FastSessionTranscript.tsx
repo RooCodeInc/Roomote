@@ -49,10 +49,11 @@ import {
   MessageUiOptionsProvider,
   Shimmer,
 } from '@/components/ai-elements';
+import { type SlackMentionScope } from '@/components/ai-elements/slack-mention-context';
 import {
-  SlackMentionProvider,
-  type SlackMentionScope,
-} from '@/components/ai-elements/slack-mention-context';
+  buildSlackTranscriptMentionText,
+  SlackMentionTranscriptProvider,
+} from '@/components/ai-elements/slack-message-references';
 import { WorkspaceHeader } from '@/components/layout';
 import {
   Alert,
@@ -74,6 +75,7 @@ import {
   SessionQueuedMessageList,
   type SessionQueuedMessage,
   type SessionQueuedMessageDeleteOutcome,
+  type SessionQueuedMessageSteerOutcome,
 } from './SessionQueuedMessageList';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { describeValidationError } from '@/lib/validation-error';
@@ -239,7 +241,8 @@ type PendingResponseAction =
     }
   | { type: 'optimistic'; message: TranscriptOrder }
   | { type: 'commitOptimistic'; optimisticId: string }
-  | { type: 'rollbackOptimistic'; optimisticId: string };
+  | { type: 'rollbackOptimistic'; optimisticId: string }
+  | { type: 'settled' };
 
 function compareTranscriptOrder(a: TranscriptOrder, b: TranscriptOrder) {
   if (a.ts !== b.ts) return a.ts - b.ts;
@@ -328,6 +331,9 @@ export function pendingResponseReducer(
   state: PendingResponseState,
   action: PendingResponseAction,
 ): PendingResponseState {
+  if (action.type === 'settled') {
+    return { ...state, pendingAfter: null, optimisticRollback: null };
+  }
   if (action.type === 'hydrate' || action.type === 'messages') {
     let pendingAfter =
       action.type === 'hydrate'
@@ -743,6 +749,7 @@ export function FastSessionTranscript({
     setOptimisticMessages(next);
   }, []);
   const [isSending, setIsSending] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [pendingResponseState, dispatchPendingResponse] = useReducer(
     pendingResponseReducer,
     initialOptimisticMessage
@@ -980,6 +987,7 @@ export function FastSessionTranscript({
         }
         if (update.conversationResponding === false) {
           // The turn is over: any text no reply delivered is withdrawn.
+          dispatchPendingResponse({ type: 'settled' });
           clearStreamMessages();
         }
       } catch {
@@ -1153,6 +1161,22 @@ export function FastSessionTranscript({
     }
     return { messageCount, assistantCount };
   }, [serverMessages]);
+  const promptHistory = useMemo(
+    () =>
+      [...serverMessages.values()]
+        .sort(compareTranscriptMessages)
+        .flatMap((message) => {
+          const text = getTranscriptMessageText(message);
+          return message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+            message.role === 'user' &&
+            message.metadata?.visibleInTranscript !== false &&
+            message.metadata?.turnSource === 'human' &&
+            text?.trim()
+            ? [text]
+            : [];
+        }),
+    [serverMessages],
+  );
 
   const pendingInputRequest = useMemo(
     () => findPendingSessionInputRequest(messages),
@@ -1532,6 +1556,13 @@ export function FastSessionTranscript({
     streamMessages,
     liveVoiceUiMessages,
   ]);
+  const slackMentionText = useMemo(
+    () =>
+      buildSlackTranscriptMentionText({
+        messages: [...uiMessagesBeforeInput, ...uiMessagesAfterInput],
+      }),
+    [uiMessagesAfterInput, uiMessagesBeforeInput],
+  );
   const transcriptWorking =
     isSending ||
     conversationResponding === true ||
@@ -1751,6 +1782,44 @@ export function FastSessionTranscript({
           new Set(current).add(message.clientMessageId),
         );
       }
+      return outcome;
+    },
+    [sessionId, trpcClient],
+  );
+
+  const stopSession = useCallback(async () => {
+    if (isStopping) return;
+    setIsStopping(true);
+    setReplyError(null);
+    try {
+      const { outcome } = await trpcClient.fastSessions.stop.mutate({
+        sessionId,
+      });
+      if (outcome === 'timed_out') {
+        setReplyError('The active response did not stop in time. Try again.');
+      } else {
+        setConversationResponding(false);
+        dispatchPendingResponse({ type: 'settled' });
+        clearStreamMessages();
+      }
+    } catch (error) {
+      setReplyError(
+        describeValidationError(error, 'Failed to stop the active response'),
+      );
+    } finally {
+      setIsStopping(false);
+    }
+  }, [clearStreamMessages, isStopping, sessionId, trpcClient]);
+
+  const steerQueuedMessage = useCallback(
+    async (
+      message: SessionQueuedMessage,
+    ): Promise<SessionQueuedMessageSteerOutcome> => {
+      const { outcome } =
+        await trpcClient.fastSessions.steerQueuedMessage.mutate({
+          sessionId,
+          clientMessageId: message.clientMessageId,
+        });
       return outcome;
     },
     [sessionId, trpcClient],
@@ -2159,7 +2228,10 @@ export function FastSessionTranscript({
     <MessageUiOptionsProvider
       value={{ displayMode, hidePrReviewActions: true }}
     >
-      <SlackMentionProvider scope={slackMentionScope}>
+      <SlackMentionTranscriptProvider
+        scope={slackMentionScope}
+        text={slackMentionText}
+      >
         <WorkspaceHeader
           className="py-3.25"
           contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
@@ -2320,11 +2392,15 @@ export function FastSessionTranscript({
               onSend={sendReply}
               historyMessageCount={suggestionHistory.messageCount}
               assistantMessageCount={suggestionHistory.assistantCount}
+              promptHistory={promptHistory}
               taskStateRevision={taskStateRevision}
               agentWorking={agentWorking}
               queuedMessages={queuedMessages}
               currentUserId={currentUser?.userId ?? null}
               onDeleteQueuedMessage={deleteQueuedMessage}
+              onSteerQueuedMessage={steerQueuedMessage}
+              onStop={() => void stopSession()}
+              isStopping={isStopping}
               initialModel={sessionModel}
               initialReasoningEffort={sessionReasoningEffort}
               defaultModelId={defaultModelId}
@@ -2353,6 +2429,7 @@ export function FastSessionTranscript({
               onModelSelectionChange={(selection) => {
                 modelSelectionRef.current = selection;
               }}
+              toolApprovalsSessionId={secretSessionId}
             />
             {replyError ? (
               <Alert
@@ -2381,7 +2458,7 @@ export function FastSessionTranscript({
             />
           </div>
         ) : null}
-      </SlackMentionProvider>
+      </SlackMentionTranscriptProvider>
     </MessageUiOptionsProvider>
   );
 }

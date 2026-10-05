@@ -2,6 +2,7 @@ import {
   act,
   createEvent,
   fireEvent,
+  cleanup,
   render,
   screen,
   within,
@@ -47,6 +48,24 @@ vi.mock('@/hooks/useSessionIntegrationToolApprovals', () => ({
   }),
 }));
 
+const autoToolApprovals = vi.hoisted(() => ({
+  state: undefined as
+    | { available: boolean; enabled: boolean; suspended: boolean }
+    | undefined,
+  setEnabled: vi.fn(),
+  sessionIds: [] as string[],
+}));
+vi.mock('@/hooks/useSessionAutoToolApprovals', () => ({
+  useSessionAutoToolApprovals: (sessionId: string) => {
+    autoToolApprovals.sessionIds.push(sessionId);
+    return {
+      state: autoToolApprovals.state,
+      isSaving: false,
+      setEnabled: autoToolApprovals.setEnabled,
+    };
+  },
+}));
+
 vi.mock('./CapabilityOfferCard', () => ({
   CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
     <div>Capability offer: {offer.capability}</div>
@@ -56,6 +75,8 @@ vi.mock('./CapabilityOfferCard', () => ({
 const {
   replyMutate,
   deleteQueuedMessageMutate,
+  steerQueuedMessageMutate,
+  stopSessionMutate,
   startGoalMutate,
   reviewActionMutate,
   updateModelSelectionMutate,
@@ -64,6 +85,7 @@ const {
   openTasksPanel,
   narrationState,
   composerSuggestionState,
+  slackReferencesState,
   voiceStatusQuery,
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
@@ -75,6 +97,8 @@ const {
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
   deleteQueuedMessageMutate: vi.fn(),
+  steerQueuedMessageMutate: vi.fn(),
+  stopSessionMutate: vi.fn(),
   startGoalMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
   updateModelSelectionMutate: vi.fn(),
@@ -84,6 +108,14 @@ const {
   narrationState: { enabled: false },
   composerSuggestionState: {
     data: undefined as { suggestion: string; messageCount: number } | undefined,
+  },
+  slackReferencesState: {
+    data: undefined as
+      | {
+          users: Record<string, { name: string; profileUrl: string | null }>;
+          channels: Record<string, { name: string; url: string | null }>;
+        }
+      | undefined,
   },
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
@@ -191,6 +223,8 @@ vi.mock('@/trpc/client', () => ({
       },
       reply: { mutate: replyMutate },
       deleteQueuedMessage: { mutate: deleteQueuedMessageMutate },
+      steerQueuedMessage: { mutate: steerQueuedMessageMutate },
+      stop: { mutate: stopSessionMutate },
       startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
@@ -244,7 +278,12 @@ vi.mock('@/trpc/client', () => ({
 // these tests exercise the transcript, not suggestions.
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: () => ({ data: composerSuggestionState.data }),
+  useQuery: (options: { queryKey?: readonly unknown[] }) => ({
+    data:
+      options.queryKey?.[0] === 'slack.resolveUsers'
+        ? slackReferencesState.data
+        : composerSuggestionState.data,
+  }),
   useQueryClient: () => ({ invalidateQueries }),
 }));
 
@@ -425,6 +464,9 @@ beforeEach(() => {
   FakeEventSource.instances = [];
   replyMutate.mockReset();
   deleteQueuedMessageMutate.mockReset();
+  steerQueuedMessageMutate.mockReset();
+  stopSessionMutate.mockReset();
+  stopSessionMutate.mockResolvedValue({ outcome: 'stopped' });
   startGoalMutate.mockReset();
   startGoalMutate.mockResolvedValue({ success: true, goal: {} });
   reviewActionMutate.mockReset();
@@ -434,6 +476,7 @@ beforeEach(() => {
   );
   narrationState.enabled = false;
   composerSuggestionState.data = undefined;
+  slackReferencesState.data = undefined;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
   invalidateQueries.mockReset();
@@ -471,6 +514,48 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  it('renders resolved Slack references in assistant output', async () => {
+    cleanup();
+    slackReferencesState.data = {
+      users: {
+        U123: {
+          name: 'Maya',
+          profileUrl: 'https://acme.slack.com/team/U123',
+        },
+      },
+      channels: {
+        C456: {
+          name: 'ops',
+          url: 'https://acme.slack.com/archives/C456',
+        },
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="fast-session"
+        initialMessages={[
+          textMessage({
+            id: 'assistant-slack-references',
+            role: 'assistant',
+            text: 'Post in <#C456> and ask <@U123>.',
+            ts: 1,
+          }),
+        ]}
+      />,
+    );
+
+    expect(await screen.findByRole('link', { name: '#ops' })).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/archives/C456',
+    );
+    expect(await screen.findByRole('link', { name: '@Maya' })).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/team/U123',
+    );
+    cleanup();
+  });
+
   /**
    * A completed `prepare_integration_key` call at `ts` that created
    * `pendingRef`, persisted as the tool returns it or under a result wrapper.
@@ -520,6 +605,45 @@ describe('FastSessionTranscript', () => {
     nativeSessionId: 'opencode-1',
     nativeMessageId: null,
     createdAt: new Date(ts),
+  });
+
+  it('offers the tool approvals mode in the composer to the session owner only', () => {
+    autoToolApprovals.state = {
+      available: true,
+      enabled: false,
+      suspended: false,
+    };
+    autoToolApprovals.sessionIds.length = 0;
+    autoToolApprovals.setEnabled.mockClear();
+    const { unmount } = render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const chip = screen.getByRole('button', { name: /^Tool approvals/ });
+    expect(chip).toHaveTextContent('Run');
+    // Approvals are keyed on the unified session, not the Fast conversation.
+    expect(autoToolApprovals.sessionIds).toContain('canonical-session');
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByRole('option', { name: /^Auto/ }));
+    expect(autoToolApprovals.setEnabled).toHaveBeenCalledWith(true);
+    unmount();
+
+    // Someone else's session: nothing to choose.
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(
+      screen.queryByRole('button', { name: /^Tool approvals/ }),
+    ).not.toBeInTheDocument();
+    autoToolApprovals.state = undefined;
   });
 
   it('shows a pending-key card for the owner and opens the key dialog from it', async () => {
@@ -808,6 +932,7 @@ describe('FastSessionTranscript', () => {
     userName = null,
     userEmail = null,
     userImageUrl = null,
+    turnSource,
   }: {
     id: string;
     role: 'user' | 'assistant';
@@ -820,6 +945,7 @@ describe('FastSessionTranscript', () => {
     userName?: string | null;
     userEmail?: string | null;
     userImageUrl?: string | null;
+    turnSource?: 'human' | 'platform_event';
   }) => ({
     id,
     eventId: `${id}:event`,
@@ -836,6 +962,7 @@ describe('FastSessionTranscript', () => {
       visibleInTranscript: visible,
       ...(inputKind ? { inputKind } : {}),
       ...(userId ? { userId } : {}),
+      ...(turnSource ? { turnSource } : {}),
     },
     payload: {},
     source: 'web',
@@ -998,13 +1125,15 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    const summary = screen.getByText('Saved to memory');
-    expect(summary).toBeInTheDocument();
-    expect(summary.closest('details')).not.toHaveAttribute('open');
-    fireEvent.click(summary);
-    expect(summary.closest('details')).toHaveAttribute('open');
+    const toolHeader = screen.getByRole('button', {
+      name: 'Saved to memory Completed',
+    });
+    expect(toolHeader).toBeInTheDocument();
+    expect(toolHeader).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toolHeader);
+    expect(toolHeader).toHaveAttribute('aria-expanded', 'true');
     expect(
-      screen.getByText('Staging deploys use the release branch.'),
+      screen.getByText(/Staging deploys use the release branch\./),
     ).toBeInTheDocument();
   });
 
@@ -1038,7 +1167,9 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(screen.getByText('Saved to memory')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Saved to memory Completed' }),
+    ).toBeInTheDocument();
   });
 
   it('restores each Session draft and scroll position without focusing after a direct switch', () => {
@@ -3308,6 +3439,94 @@ describe('FastSessionTranscript', () => {
     ).toHaveLength(1);
   });
 
+  it('stops the active Session turn from the empty composer', async () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: true,
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    await waitFor(() =>
+      expect(stopSessionMutate).toHaveBeenCalledExactlyOnceWith({
+        sessionId: 'session-1',
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText('Working')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+  });
+
+  it('keeps a forced queued message visible until its delivered prompt arrives', async () => {
+    const steering = Promise.withResolvers<{ outcome: 'steered' }>();
+    steerQueuedMessageMutate.mockReturnValue(steering.promise);
+    const queuedMessage = {
+      id: 'parent-event-1',
+      clientMessageId: '11111111-1111-4111-8111-111111111111',
+      userId: 'current-user',
+      text: 'Apply this correction now',
+      timestamp: 2,
+    };
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        initialQueuedMessages={[queuedMessage]}
+        canReply
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send now' }));
+    expect(steerQueuedMessageMutate).toHaveBeenCalledExactlyOnceWith({
+      sessionId: 'session-1',
+      clientMessageId: queuedMessage.clientMessageId,
+    });
+    expect(
+      screen.getByRole('button', { name: 'Sending queued message' }),
+    ).toBeDisabled();
+    expect(screen.getByText(queuedMessage.text)).toBeInTheDocument();
+    expect(screen.getByRole('log')).not.toHaveTextContent(queuedMessage.text);
+
+    await act(async () => steering.resolve({ outcome: 'steered' }));
+    expect(screen.getByText(queuedMessage.text)).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', { queuedMessages: [] });
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'delivered-steer',
+              role: 'user',
+              text: queuedMessage.text,
+              ts: 3,
+            }),
+            eventId: `${queuedMessage.clientMessageId}:user`,
+            turnId: queuedMessage.clientMessageId,
+            metadata: {
+              visibleInTranscript: true,
+              clientMessageId: queuedMessage.clientMessageId,
+            },
+          },
+        ],
+      });
+    });
+
+    expect(
+      screen.queryByRole('list', { name: 'Queued messages' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('log')).toHaveTextContent(queuedMessage.text);
+  });
+
   it('retires a locally queued follow-up once its steered prompt persists with the client id', async () => {
     authenticatedUserState.user = {
       userId: 'current-user',
@@ -3650,6 +3869,66 @@ describe('FastSessionTranscript', () => {
       ).not.toBeInTheDocument();
     },
   );
+
+  it('recalls only visible persisted human prompts in transcript order', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First user prompt',
+            ts: 1,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Assistant reply',
+            ts: 2,
+          }),
+          textMessage({
+            id: 'platform-1',
+            role: 'user',
+            text: 'Platform event',
+            ts: 3,
+            turnSource: 'platform_event',
+          }),
+          textMessage({
+            id: 'user-2',
+            role: 'user',
+            text: '  Latest user prompt\n',
+            ts: 4,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'hidden-user',
+            role: 'user',
+            text: 'Hidden prompt',
+            ts: 5,
+            visible: false,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'blank-user',
+            role: 'user',
+            text: ' \n ',
+            ts: 6,
+            turnSource: 'human',
+          }),
+        ]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveValue('  Latest user prompt\n');
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveValue('First user prompt');
+  });
 
   it('shows a later suggestion hint on the focused composer after a successful send', async () => {
     composerSuggestionState.data = {

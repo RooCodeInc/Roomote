@@ -14,6 +14,7 @@ const {
   lookupSlackUserMappingMock,
   recordInboundSlackConversationMessageMock,
   processFastAgentMessageMock,
+  createFastAgentSlackLiveTaskLauncherMock,
   findSessionAttentionNotificationReplyMock,
 } = vi.hoisted(() => ({
   fetchThreadMessagesMock: vi.fn(),
@@ -29,6 +30,7 @@ const {
   lookupSlackUserMappingMock: vi.fn(),
   recordInboundSlackConversationMessageMock: vi.fn(),
   processFastAgentMessageMock: vi.fn(),
+  createFastAgentSlackLiveTaskLauncherMock: vi.fn(() => vi.fn()),
   findSessionAttentionNotificationReplyMock: vi.fn(),
 }));
 
@@ -58,7 +60,8 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
   acquireSlackFastRootBindingLock: acquireRootBindingLockMock,
-  createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
+  createFastAgentSlackLiveTaskLauncher:
+    createFastAgentSlackLiveTaskLauncherMock,
   hasPendingRoutingConfirmation: hasPendingRoutingConfirmationMock,
   markSlackThreadExplicitMentionRequired:
     markSlackThreadExplicitMentionRequiredMock,
@@ -229,7 +232,6 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         confidence: 1,
         probabilities: { roomote: 1, participant: 0, unclear: 0 },
       },
-      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
 
     await expect(
@@ -305,6 +307,9 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         directedAtRoomote: true,
         event: expect.objectContaining({ text: '<@UBOT> please continue' }),
       }),
+    );
+    expect(createFastAgentSlackLiveTaskLauncherMock).toHaveBeenCalledWith(
+      expect.objectContaining({ visibleInTranscript: true }),
     );
     expect(evaluateTypeSafeJudgmentsMock).not.toHaveBeenCalled();
   });
@@ -552,7 +557,6 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         confidence: 0.92,
         probabilities: { roomote: 0.03, participant: 0.92, unclear: 0.05 },
       },
-      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
 
     await expect(
@@ -642,7 +646,6 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         confidence: 0.82,
         probabilities: { roomote: 0.82, participant: 0.1, unclear: 0.08 },
       },
-      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
 
     await expect(
@@ -745,7 +748,6 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         confidence: 0.95,
         probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
       },
-      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanMessage('U111', THREAD_TS, '<@UBOT> please fix the bug'),

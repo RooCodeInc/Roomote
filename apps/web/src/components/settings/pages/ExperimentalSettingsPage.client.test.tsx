@@ -55,7 +55,26 @@ vi.mock(
   }),
 );
 
+vi.mock(
+  '@/components/settings/AutomationLaunchCriteriaExperimentalSetting',
+  () => ({
+    AutomationLaunchCriteriaExperimentalSetting: () => (
+      <div>Custom automation launch criteria setting</div>
+    ),
+  }),
+);
+
+vi.mock('@/components/settings/JevgrepExperimentalSetting', () => ({
+  JevgrepExperimentalSetting: () => <div>Jevgrep code search setting</div>,
+}));
+
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
+
+vi.mock('@/components/settings/JudgementExperimentalSetting', () => ({
+  JudgementExperimentalSetting: () => (
+    <div>Judgement repository rules setting</div>
+  ),
+}));
 
 describe('ExperimentalSettingsPage', () => {
   beforeEach(() => {
@@ -65,13 +84,17 @@ describe('ExperimentalSettingsPage', () => {
     state.isFetching = false;
   });
 
-  it('keeps experimental settings admin-only and hides Auto tool approvals', () => {
+  it('keeps customer-preview settings admin-only and omits internal experiments', () => {
     render(<ExperimentalSettingsPage />);
 
     expect(screen.getByTestId('experimental-settings')).toHaveAttribute(
       'data-admin-only',
       'true',
     );
+    expect(screen.getByText('Jevgrep code search setting')).toBeInTheDocument();
+    expect(
+      screen.getByText('Judgement repository rules setting'),
+    ).toBeInTheDocument();
     expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(
       screen.getByText('Browser notifications setting'),
@@ -82,6 +105,15 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.getByText('Task communication triage setting'),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Session status judgment setting'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Sessions board setting'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Custom automation launch criteria setting'),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
   });
 

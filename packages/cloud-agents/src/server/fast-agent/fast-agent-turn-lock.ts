@@ -1,4 +1,4 @@
-import { acquireRedisLock } from '@roomote/redis';
+import { acquireRedisLock, getRedis } from '@roomote/redis';
 import type {
   FastAgentConversation,
   FastAgentTurnActivity,
@@ -10,8 +10,22 @@ const FAST_AGENT_TURN_LOCK_TTL_SECONDS = 600;
 const FAST_AGENT_TURN_LOCK_RENEW_MS =
   (FAST_AGENT_TURN_LOCK_TTL_SECONDS * 1_000) / 3;
 const FAST_AGENT_TURN_LOCK_RETRY_MS = 500;
+const FAST_AGENT_TURN_STOP_PREFIX = 'fast-agent:conversation-stop:';
+const FAST_AGENT_TURN_STOP_TTL_SECONDS = 60;
+const FAST_AGENT_TURN_STOP_POLL_MS = 250;
+const FAST_AGENT_TURN_STOP_WAIT_MS = 15_000;
+const FAST_AGENT_TURN_STOP_WAIT_POLL_MS = 100;
 const FAST_AGENT_ACTIVITY_CLEANUP_TIMEOUT_MS = 5_000;
+const REQUEST_TURN_STOP_SCRIPT = `local owner=redis.call('get',KEYS[1]); if not owner then return false end; redis.call('set',KEYS[2],owner,'EX',ARGV[1]); return owner`;
+const CLEAR_TURN_STOP_SCRIPT = `if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end`;
 type TurnActivityCleanup = Pick<FastAgentTurnActivity, 'settle' | 'dispose'>;
+type FastAgentConversationLockIdentity =
+  | FastAgentConversation
+  | {
+      surface: FastAgentConversation['surface'];
+      workspaceId: string;
+      conversationId: string;
+    };
 const turnActivityRegistrations = new WeakMap<
   AbortSignal,
   (activity: TurnActivityCleanup) => () => void
@@ -45,6 +59,13 @@ export class FastAgentProcessShutdownError extends Error {
   constructor(public readonly signal: NodeJS.Signals) {
     super(`Fast turn interrupted by process shutdown (${signal}).`);
     this.name = 'FastAgentProcessShutdownError';
+  }
+}
+
+export class FastAgentSessionStoppedError extends Error {
+  constructor() {
+    super('Fast session turn stopped by the user.');
+    this.name = 'FastAgentSessionStoppedError';
   }
 }
 
@@ -165,9 +186,47 @@ export async function waitForActiveFastAgentTurnsToSettle(
 
 /** Serialize every human and platform-generated Fast turn for one chat. */
 export function buildFastAgentTurnLockKey(
-  conversation: FastAgentConversation,
+  conversation: FastAgentConversationLockIdentity,
 ): string {
   return `${FAST_AGENT_TURN_LOCK_PREFIX}${conversation.surface}:${conversation.workspaceId}:${conversation.conversationId}`;
+}
+
+function buildFastAgentTurnStopKey(
+  conversation: FastAgentConversationLockIdentity,
+): string {
+  return `${FAST_AGENT_TURN_STOP_PREFIX}${conversation.surface}:${conversation.workspaceId}:${conversation.conversationId}`;
+}
+
+export type FastAgentTurnStopOutcome = 'stopped' | 'not_running' | 'timed_out';
+
+/**
+ * Stop exactly the turn that owns the conversation lock when this request is
+ * accepted. The lock owner token prevents a late request from aborting a
+ * successor turn after the conversation changes hands.
+ */
+export async function requestFastAgentTurnStop(
+  conversation: FastAgentConversationLockIdentity,
+): Promise<FastAgentTurnStopOutcome> {
+  const redis = getRedis();
+  const lockKey = buildFastAgentTurnLockKey(conversation);
+  const stopKey = buildFastAgentTurnStopKey(conversation);
+  const owner = await redis.eval(
+    REQUEST_TURN_STOP_SCRIPT,
+    2,
+    lockKey,
+    stopKey,
+    FAST_AGENT_TURN_STOP_TTL_SECONDS.toString(),
+  );
+  if (typeof owner !== 'string' || owner.length === 0) return 'not_running';
+
+  const deadline = Date.now() + FAST_AGENT_TURN_STOP_WAIT_MS;
+  while (Date.now() < deadline) {
+    if ((await redis.get(lockKey)) !== owner) return 'stopped';
+    await new Promise((resolve) =>
+      setTimeout(resolve, FAST_AGENT_TURN_STOP_WAIT_POLL_MS),
+    );
+  }
+  return 'timed_out';
 }
 
 export async function acquireFastAgentTurnLock(params: {
@@ -193,12 +252,35 @@ export async function acquireFastAgentTurnLock(params: {
       ttlSeconds: FAST_AGENT_TURN_LOCK_TTL_SECONDS,
     });
     if (release) {
+      const stopKey = buildFastAgentTurnStopKey(params.conversation);
       const ownership = new AbortController();
       let redisReleased = false;
       let turnSettlement: Promise<void> | undefined;
       let ownershipLost = false;
       let activity: TurnActivityCleanup | undefined;
       let redisReleasePromise: Promise<void> | undefined;
+      let stopRequestPending = false;
+      const stopRequestTimer = setInterval(() => {
+        if (stopRequestPending || ownership.signal.aborted) return;
+        stopRequestPending = true;
+        void getRedis()
+          .get(stopKey)
+          .then((requestedOwner) => {
+            if (requestedOwner === release.ownerId) {
+              ownership.abort(new FastAgentSessionStoppedError());
+              clearInterval(stopRequestTimer);
+            }
+          })
+          .catch((error) => {
+            console.warn(
+              `[Fast Agent] Failed to check the Session stop signal: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          })
+          .finally(() => {
+            stopRequestPending = false;
+          });
+      }, FAST_AGENT_TURN_STOP_POLL_MS);
+      stopRequestTimer.unref();
       const disposeActivity = (target = activity) => {
         try {
           void target?.dispose().catch((error) => {
@@ -278,6 +360,10 @@ export async function acquireFastAgentTurnLock(params: {
             disposeActivity(cleanup);
             redisReleased = true;
             clearInterval(renewalTimer);
+            clearInterval(stopRequestTimer);
+            await getRedis()
+              .eval(CLEAR_TURN_STOP_SCRIPT, 1, stopKey, release.ownerId)
+              .catch(() => undefined);
             await release();
             void releaseTurnLock.afterRelease?.().catch((error) => {
               console.warn(

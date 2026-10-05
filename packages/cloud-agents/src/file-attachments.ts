@@ -1,4 +1,7 @@
 export const ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS = 200_000;
+export const ROOMOTE_FILE_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+export const ROOMOTE_IMAGE_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
+export const ROOMOTE_MESSAGE_ATTACHMENTS_MAX_BYTES = 16 * 1024 * 1024;
 
 const TEXT_ATTACHMENT_EXTENSIONS = [
   'txt',
@@ -190,17 +193,23 @@ function normalizeMimeType(mimeType: string | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+export function isRoomotePromptImageMimeType(
+  mimeType: string | undefined,
+): boolean {
+  const normalizedMimeType = normalizeMimeType(mimeType);
+  return (
+    normalizedMimeType !== null &&
+    PROMPT_IMAGE_ATTACHMENT_MIME_TYPES.has(normalizedMimeType)
+  );
+}
+
 export function isRoomoteImageAttachment(input: {
   filename?: string;
   mimeType?: string;
 }): boolean {
-  const normalizedMimeType = normalizeMimeType(input.mimeType);
   // SVG is supported as an attachment, but not as inline prompt image input.
   // Downstream model paths reject it, so keep it eligible for text extraction.
-  if (
-    normalizedMimeType &&
-    PROMPT_IMAGE_ATTACHMENT_MIME_TYPES.has(normalizedMimeType)
-  ) {
+  if (isRoomotePromptImageMimeType(input.mimeType)) {
     return true;
   }
 

@@ -253,7 +253,6 @@ describe('evaluateUnmentionedThreadReplyRouting', () => {
 function addresseeAnswer(
   choice: 'roomote' | 'participant' | 'unclear',
   probability: number,
-  closingAcknowledgement = 0.05,
 ) {
   const rest = (1 - probability) / 2;
   return {
@@ -267,7 +266,6 @@ function addresseeAnswer(
         unclear: choice === 'unclear' ? probability : rest,
       },
     },
-    closingAcknowledgement: { type: 'noul', noul: closingAcknowledgement },
   };
 }
 
@@ -587,9 +585,9 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledOnce();
   });
 
-  it('keeps an acknowledgement addressed to Roomote silent', async () => {
+  it('asks only who the reply is for, leaving a bare "thanks" to Fast', async () => {
     mockEvaluateTypeSafeJudgments.mockResolvedValue(
-      addresseeAnswer('roomote', 0.95, 0.9),
+      addresseeAnswer('roomote', 0.95),
     );
 
     await expect(
@@ -597,31 +595,14 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
         eventText: 'hmm ok, thanks',
         threadMessages: twoHumanThread,
       }),
-    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
-
-    const { questions } = mockEvaluateTypeSafeJudgments.mock.calls[0]![0];
-    expect(Object.keys(questions)).toEqual([
-      'addressee',
-      'closingAcknowledgement',
-    ]);
-    expect(questions.closingAcknowledgement.type).toBe('noul');
-  });
-
-  it('routes a remark aimed at Roomote that is not an acknowledgement', async () => {
-    mockEvaluateTypeSafeJudgments.mockResolvedValue(
-      addresseeAnswer('roomote', 0.6, 0.3),
-    );
-
-    await expect(
-      resolve({
-        eventText: 'Lol you ARE Roomote',
-        threadMessages: twoHumanThread,
-      }),
     ).resolves.toEqual({
       shouldRoute: true,
       interjectionDetected: false,
       routedByJudgmentModel: true,
     });
+
+    const { questions } = mockEvaluateTypeSafeJudgments.mock.calls[0]![0];
+    expect(Object.keys(questions)).toEqual(['addressee']);
   });
 
   it('fails closed when the addressee probabilities do not form a distribution', async () => {
@@ -720,23 +701,6 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
         threadMessages: twoHumanThread,
       }),
     ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
-  });
-
-  it('fails closed when the acknowledgement answer is malformed', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    mockEvaluateTypeSafeJudgments.mockResolvedValue({
-      ...addresseeAnswer('roomote', 0.95),
-      closingAcknowledgement: { type: 'noul', noul: 2 },
-    });
-
-    await expect(
-      resolve({
-        eventText: 'Can you check this?',
-        threadMessages: twoHumanThread,
-      }),
-    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid'));
-    warn.mockRestore();
   });
 
   it('fails closed when a configured judgment answer is malformed', async () => {

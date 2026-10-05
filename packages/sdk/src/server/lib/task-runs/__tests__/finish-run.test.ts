@@ -128,7 +128,12 @@ function makeTxSelectChain() {
 }
 
 const mockDbSelect = vi.fn().mockImplementation(() => makeSelectChain());
-const mockDbUpdateWhere = vi.fn().mockResolvedValue(undefined);
+const mockDbUpdateReturning = vi.fn().mockResolvedValue([{ id: 'task-1' }]);
+const mockDbUpdateWhere = vi.fn().mockImplementation(() =>
+  Object.assign(Promise.resolve(undefined), {
+    returning: (...args: unknown[]) => mockDbUpdateReturning(...args),
+  }),
+);
 const mockDbUpdateSet = vi.fn().mockReturnValue({
   where: (...args: unknown[]) => mockDbUpdateWhere(...args),
 });
@@ -229,6 +234,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     ),
   parseReviewSummaryMarkerSha: (body: string) =>
     body.match(/roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1],
+  parseReviewSummaryResultMetadata: () => ({ format: 'legacy' }),
   getMarkedSection: ({
     content,
     startMarker,

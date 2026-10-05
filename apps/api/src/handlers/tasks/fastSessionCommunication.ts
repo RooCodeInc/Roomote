@@ -106,6 +106,7 @@ export async function sendMessageToFastSessionForUser(params: {
   userId: string;
   message: string;
   images?: string[];
+  attachmentTexts?: string[];
 }): Promise<
   | { success: true; result: { sessionId: string; queued: true } }
   | { success: false; status: 404 | 409; error: string }
@@ -129,6 +130,7 @@ export async function sendMessageToFastSessionForUser(params: {
     senderDisplayName: null,
     question: params.message,
     images: params.images,
+    attachmentTexts: params.attachmentTexts,
     currentMessageId: `mcp-${randomUUID()}`,
   });
   if (!queued) {

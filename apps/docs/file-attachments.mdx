@@ -41,6 +41,18 @@ earlier files can leave later files included by name only.
 Text-extracted files are limited to 8 MB each. Image, video, and provider
 transport limits vary by surface.
 
+## Limits and API errors
+
+A message can include up to 20 files and up to 16 MiB of decoded attachment
+data in total. The complete HTTP request body, including base64 encoding and
+other message fields, is capped at 24 MiB.
+
+Direct API requests that exceed the file count or decoded-data limit return
+HTTP 400 with `{"error":"maximum 20 attachments"}` or
+`{"error":"attachments exceed the 16 MiB total limit"}`, respectively. A
+request body over 24 MiB returns HTTP 413 with
+`{"error":"Message payload is too large"}`.
+
 ## Accepted file types
 
 | Content type    | File types                                                                                                                                    |

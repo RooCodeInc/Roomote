@@ -28,6 +28,10 @@ const sandboxMessagesState = vi.hoisted(() => ({
   messages: [] as unknown[],
 }));
 
+const slackMentionState = vi.hoisted(() => ({
+  text: null as string | null,
+}));
+
 const historyControlsState = vi.hoisted(() => ({
   isError: false,
   isRetrying: false,
@@ -85,6 +89,29 @@ vi.mock('@/components/ai-elements/message-ui-options', () => ({
     </div>
   ),
 }));
+
+vi.mock(
+  '@/components/ai-elements/slack-message-references',
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import('@/components/ai-elements/slack-message-references')
+      >();
+    return {
+      ...actual,
+      SlackMentionTranscriptProvider: ({
+        children,
+        text,
+      }: {
+        children: ReactNode;
+        text: string;
+      }) => {
+        slackMentionState.text = text;
+        return <>{children}</>;
+      },
+    };
+  },
+);
 
 vi.mock('./hooks', () => ({
   useSandboxMessages: () => ({
@@ -222,6 +249,9 @@ vi.mock('@/components/system', () => ({
   }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button {...props}>{children}</button>
   ),
+  Bug: () => <svg aria-hidden="true" />,
+  FileText: () => <svg aria-hidden="true" />,
+  GitPullRequest: () => <svg aria-hidden="true" />,
   Lightbulb: () => <svg aria-hidden="true" />,
   Skeleton: ({ className }: { className?: string }) => (
     <div className={className} />
@@ -248,6 +278,7 @@ describe('Messages', () => {
     narrationModeState.enabled = false;
     taskPhaseState.phase = null;
     sandboxMessagesState.messages = [];
+    slackMentionState.text = null;
     historyControlsState.isError = false;
     historyControlsState.isRetrying = false;
     historyControlsState.hasOlderMessages = false;
@@ -258,6 +289,38 @@ describe('Messages', () => {
     scrollState.element = null;
     scrollState.stopScroll.mockClear();
     mockBuildAcpRenderBlocks.mockReturnValue([]);
+  });
+
+  it('does not resolve hidden session prompt references', () => {
+    sandboxMessagesState.messages = [
+      {
+        role: 'assistant',
+        text: 'Hidden row with <@Uhidden-row>.',
+        visibleInTranscript: false,
+      },
+      {
+        role: 'assistant',
+        text: 'Visible reply with <@Uvisible>.',
+      },
+    ];
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            taskRun: null,
+            prompt: {
+              role: 'user',
+              text: 'Hidden prompt with <@Uhidden>.',
+              visibleInTranscript: false,
+            },
+          } as never
+        }
+      />,
+    );
+
+    expect(slackMentionState.text).toBe('Visible reply with <@Uvisible>.');
   });
 
   it('offers retry when initial conversation history fails', async () => {
@@ -750,6 +813,33 @@ describe('Messages', () => {
       expect.objectContaining({
         displayMode: 'default',
         shouldHideFirstMessage: false,
+      }),
+    );
+  });
+
+  it('renders a visible command-style initial prompt in the task transcript', () => {
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            prompt: {
+              text: '$review-code Check this change',
+              visibleInTranscript: true,
+            },
+            taskRun: { id: 1 },
+          } as never
+        }
+      />,
+    );
+
+    expect(
+      screen.getByText('$review-code Check this change'),
+    ).toBeInTheDocument();
+    expect(mockBuildAcpRenderBlocks).toHaveBeenCalledWith(
+      [],
+      expect.objectContaining({
+        shouldHideFirstMessage: true,
       }),
     );
   });

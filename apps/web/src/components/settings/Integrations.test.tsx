@@ -1152,6 +1152,12 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Asana')).toBeInTheDocument();
     expect(
+      screen.getByRole('button', { name: 'Add Asana' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Add' }),
+    ).not.toBeInTheDocument();
+    expect(
       screen.queryByRole('button', { name: 'Disable Linear' }),
     ).not.toBeInTheDocument();
   });
@@ -2738,7 +2744,7 @@ describe('Integrations settings', () => {
       ?.parentElement as HTMLElement;
 
     fireEvent.click(
-      within(voiceCatalogRow).getByRole('button', { name: 'Add' }),
+      within(voiceCatalogRow).getByRole('button', { name: 'Add Voice' }),
     );
 
     expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(

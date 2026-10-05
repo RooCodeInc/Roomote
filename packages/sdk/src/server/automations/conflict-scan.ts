@@ -45,6 +45,7 @@ import type { RepositoryRow } from '../lib/pull-requests/source-control-pull-req
 
 import {
   emptyJobResult,
+  resolveAutomationRunContext,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -189,26 +190,35 @@ const CONFLICT_RESOLVER_INTERVAL_MS: Record<string, number> = {
  * from missed webhooks or transient API failures.
  */
 export async function conflictScanJob(
-  opts: AutomationRunOpts = {},
+  opts: AutomationRunOpts,
 ): Promise<AutomationJobResult> {
   console.log(`${LOG_PREFIX} Starting scheduled conflict scan`);
 
   const result = emptyJobResult();
+  const { isExplicitRun, taskTrigger } = resolveAutomationRunContext(
+    opts.context,
+  );
 
   const runtime = await getAutomationRuntime('conflict_resolver');
   const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
+  const intervalMs =
+    frequency === 'on_demand'
+      ? isExplicitRun
+        ? 0
+        : undefined
+      : frequency
+        ? CONFLICT_RESOLVER_INTERVAL_MS[frequency]
+        : undefined;
 
-  if (!frequency || frequency === 'off') {
+  if (!frequency || frequency === 'off' || intervalMs === undefined) {
     result.skippedReason = 'Automation is disabled.';
     return result;
   }
 
   // Frequency gating: skip if last run was too recent for the configured
   // frequency.
-  const intervalMs = CONFLICT_RESOLVER_INTERVAL_MS[frequency];
-
   if (
-    !opts.manualTrigger &&
+    !isExplicitRun &&
     intervalMs &&
     runtime.lastRunAt &&
     Date.now() - runtime.lastRunAt.getTime() < intervalMs
@@ -404,7 +414,7 @@ export async function conflictScanJob(
                 },
                 workflow: 'pr_conflict_resolve',
                 surface: 'github',
-                trigger: opts.manualTrigger ? 'manual' : 'schedule',
+                trigger: taskTrigger,
                 prLinkage: {
                   provider: 'github',
                   host: repo.host ?? 'github.com',
@@ -486,7 +496,7 @@ export async function conflictScanJob(
       repos: providerNeutralRepos,
       conflictResolverLabel,
       conflictResolverMaxPrAgeDays,
-      manualTrigger: Boolean(opts.manualTrigger),
+      taskTrigger,
       result,
     });
 
@@ -533,13 +543,13 @@ async function scanProviderNeutralRepos({
   repos,
   conflictResolverLabel,
   conflictResolverMaxPrAgeDays,
-  manualTrigger,
+  taskTrigger,
   result,
 }: {
   repos: RepositoryRow[];
   conflictResolverLabel: string;
   conflictResolverMaxPrAgeDays: number;
-  manualTrigger: boolean;
+  taskTrigger: 'schedule' | 'manual' | 'webhook';
   result: AutomationJobResult;
 }): Promise<{ candidateCount: number; conflictingCount: number }> {
   let candidateCount = 0;
@@ -685,7 +695,7 @@ async function scanProviderNeutralRepos({
             },
             workflow: 'pr_conflict_resolve',
             surface: provider,
-            trigger: manualTrigger ? 'manual' : 'schedule',
+            trigger: taskTrigger,
             prLinkage: {
               provider,
               // Host-scope the task association so later dedup lookups for

@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import { isAgentMailOutboundEnabled } from '@roomote/db/server';
+
 import type {
   CommunicationChannelMessagesResult,
   CommunicationPostMessageInput,
@@ -45,6 +47,13 @@ export class AgentMailApiError extends Error {
   ) {
     super(message);
     this.name = 'AgentMailApiError';
+  }
+}
+
+export class AgentMailOutboundDisabledError extends Error {
+  constructor() {
+    super('Outbound email is disabled for this Roomote instance.');
+    this.name = 'AgentMailOutboundDisabledError';
   }
 }
 
@@ -331,6 +340,14 @@ async function callAgentMailApi<T>(params: {
   body?: Record<string, unknown>;
   idempotencyKey?: string;
 }): Promise<T> {
+  const isOutboundSend =
+    params.method === 'POST' &&
+    (/^\/v0\/inboxes\/[^/]+\/messages\/send$/u.test(params.path) ||
+      /^\/v0\/inboxes\/[^/]+\/messages\/[^/]+\/reply$/u.test(params.path));
+  if (isOutboundSend && !(await isAgentMailOutboundEnabled())) {
+    throw new AgentMailOutboundDisabledError();
+  }
+
   const url = `${params.apiBaseUrl}${params.path}`;
   let lastError: unknown;
 

@@ -9,7 +9,6 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const state = vi.hoisted(() => ({
   setOpen: vi.fn(),
   user: {},
-  dizzyEnabled: false,
 }));
 
 vi.mock('next/image', () => ({
@@ -59,10 +58,6 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
 }));
 
-vi.mock('@/hooks/useDizzyExperiment', () => ({
-  useDizzyExperiment: () => state.dizzyEnabled,
-}));
-
 vi.mock('../UserMenu', () => ({
   UserMenu: () => <div>UserMenu</div>,
 }));
@@ -88,7 +83,6 @@ import { NavbarHeader } from './NavbarHeader';
 describe('NavbarHeader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    state.dizzyEnabled = false;
   });
 
   it('renders the current Roomote mark in the mobile header', () => {
@@ -99,18 +93,6 @@ describe('NavbarHeader', () => {
       'src',
       '/logos/r.svg',
     );
-  });
-
-  it('spins the mobile logo only when Dizzy is enabled', () => {
-    const view = render(<NavbarHeader />);
-    const logo = screen.getByAltText('Roomote');
-
-    expect(logo).not.toHaveClass('motion-safe:animate-spin');
-
-    state.dizzyEnabled = true;
-    view.rerender(<NavbarHeader />);
-
-    expect(logo).toHaveClass('motion-safe:animate-spin');
   });
 
   it('opens the command palette from the mobile search button', () => {

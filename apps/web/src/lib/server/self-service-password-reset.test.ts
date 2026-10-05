@@ -2,12 +2,12 @@ const {
   bootstrapWebRuntimeEnvMock,
   isEmailChannelEnabledMock,
   redisEvalMock,
-  resolveAgentMailRuntimeCredentialsMock,
+  canSendAgentMailWithRuntimeCredentialsMock,
 } = vi.hoisted(() => ({
   bootstrapWebRuntimeEnvMock: vi.fn(),
   isEmailChannelEnabledMock: vi.fn(),
   redisEvalMock: vi.fn(),
-  resolveAgentMailRuntimeCredentialsMock: vi.fn(),
+  canSendAgentMailWithRuntimeCredentialsMock: vi.fn(),
 }));
 
 vi.mock('./bootstrap-runtime-env', () => ({
@@ -17,7 +17,8 @@ vi.mock('./env', () => ({
   isEmailChannelEnabled: isEmailChannelEnabledMock,
 }));
 vi.mock('@roomote/db/server', () => ({
-  resolveAgentMailRuntimeCredentials: resolveAgentMailRuntimeCredentialsMock,
+  canSendAgentMailWithRuntimeCredentials:
+    canSendAgentMailWithRuntimeCredentialsMock,
 }));
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({ eval: redisEvalMock }),
@@ -33,11 +34,7 @@ describe('self-service password reset', () => {
     vi.clearAllMocks();
     bootstrapWebRuntimeEnvMock.mockResolvedValue(undefined);
     isEmailChannelEnabledMock.mockReturnValue(true);
-    resolveAgentMailRuntimeCredentialsMock.mockResolvedValue({
-      apiKey: 'agentmail-key',
-      inboxId: 'roomote@example.agentmail.to',
-      webhookSecret: null,
-    });
+    canSendAgentMailWithRuntimeCredentialsMock.mockResolvedValue(true);
     redisEvalMock.mockResolvedValue(1);
   });
 
@@ -45,25 +42,16 @@ describe('self-service password reset', () => {
     isEmailChannelEnabledMock.mockReturnValue(false);
 
     await expect(isSelfServicePasswordResetAvailable()).resolves.toBe(false);
-    expect(resolveAgentMailRuntimeCredentialsMock).not.toHaveBeenCalled();
+    expect(canSendAgentMailWithRuntimeCredentialsMock).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { apiKey: null, inboxId: 'roomote@example.agentmail.to' },
-    { apiKey: 'agentmail-key', inboxId: null },
-  ])(
-    'requires configured AgentMail delivery credentials',
-    async (credentials) => {
-      resolveAgentMailRuntimeCredentialsMock.mockResolvedValue({
-        ...credentials,
-        webhookSecret: null,
-      });
+  it('requires AgentMail delivery (configured, or allocated by Cloud on send)', async () => {
+    canSendAgentMailWithRuntimeCredentialsMock.mockResolvedValue(false);
 
-      await expect(isSelfServicePasswordResetAvailable()).resolves.toBe(false);
-    },
-  );
+    await expect(isSelfServicePasswordResetAvailable()).resolves.toBe(false);
+  });
 
-  it('reports availability with the channel, API key, and inbox configured', async () => {
+  it('reports availability when the channel can deliver', async () => {
     await expect(isSelfServicePasswordResetAvailable()).resolves.toBe(true);
   });
 

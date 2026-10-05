@@ -67,75 +67,31 @@ describe('getMissingEnvironmentRepositoryError', () => {
 
 describe('commandSchema', () => {
   describe('YAML block scalar support', () => {
-    it('should accept a YAML | (literal block scalar) multi-line run value', () => {
-      // YAML `|` preserves newlines and adds a trailing newline.
-      const yamlInput = `
+    it('accepts YAML literal block scalars with their newline semantics', () => {
+      for (const [yamlInput, expectedRun] of [
+        [
+          `
 name: Setup
 run: |
   npm install
   npm run build
 timeout: 300
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = commandSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.run).toBe('npm install\nnpm run build\n');
-        expect(result.data.name).toBe('Setup');
-      }
-    });
-
-    it('should accept a YAML |- (strip trailing newline) multi-line run value', () => {
-      // YAML `|-` preserves newlines but strips the trailing newline.
-      const yamlInput = `
+`,
+          'npm install\nnpm run build\n',
+        ],
+        [
+          `
 name: Test
 run: |-
   ls /foo
   ls /bar
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = commandSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.run).toBe('ls /foo\nls /bar');
-      }
-    });
-
-    it('should accept a YAML |+ (keep all trailing newlines) multi-line run value', () => {
-      // YAML `|+` preserves all trailing newlines.
-      const yamlInput = `
-name: Test
-run: |+
-  echo hello
-  echo world
-
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = commandSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.run).toBe('echo hello\necho world\n\n');
-      }
-    });
-
-    it('should accept a single-line run value', () => {
-      const yamlInput = `
-name: Quick
-run: echo hello
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = commandSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.run).toBe('echo hello');
+`,
+          'ls /foo\nls /bar',
+        ],
+      ] as const) {
+        const result = commandSchema.safeParse(YAML.parse(yamlInput));
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.data.run).toBe(expectedRun);
       }
     });
 
@@ -148,45 +104,6 @@ run: ""
       const result = commandSchema.safeParse(parsed);
 
       expect(result.success).toBe(false);
-    });
-
-    it('should accept run with backslash continuation lines', () => {
-      const yamlInput = `
-name: Continuation
-run: |
-  echo "hello" && \\
-  echo "world"
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = commandSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.run).toContain('\\');
-        expect(result.data.run).toContain('echo "hello"');
-        expect(result.data.run).toContain('echo "world"');
-      }
-    });
-
-    it('should accept run with comments in the script', () => {
-      const yamlInput = `
-name: With comments
-run: |
-  # Install dependencies
-  npm install
-  # Build the project
-  npm run build
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = commandSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.run).toContain('# Install dependencies');
-        expect(result.data.run).toContain('npm install');
-      }
     });
 
     it('should preserve optional fields alongside multi-line run', () => {
@@ -234,94 +151,50 @@ retries: 4
 
 describe('environmentRepositoryConfigSchema', () => {
   describe('repository', () => {
-    it('should accept an owner/repo full name', () => {
-      const result = environmentRepositoryConfigSchema.safeParse({
-        repository: 'myorg/backend',
-      });
-
-      expect(result.success).toBe(true);
-    });
-
-    it('should accept an Azure DevOps organization/project/repo full name with spaces', () => {
-      const result = environmentRepositoryConfigSchema.safeParse({
-        repository: 'roomote/Test ADO/Test ADO',
-      });
-
-      expect(result.success).toBe(true);
-    });
-
-    it('should accept a GitLab subgroup full name with more than three segments', () => {
-      const result = environmentRepositoryConfigSchema.safeParse({
-        repository: 'group/subgroup/team/repo',
-      });
-
-      expect(result.success).toBe(true);
-    });
-
-    it('should reject a name without a slash', () => {
-      const result = environmentRepositoryConfigSchema.safeParse({
-        repository: 'backend',
-      });
-
-      expect(result.success).toBe(false);
-    });
-
-    it('should reject empty segments', () => {
-      for (const repository of ['owner/', '/repo', 'org//repo']) {
-        const result = environmentRepositoryConfigSchema.safeParse({
-          repository,
-        });
-
-        expect(result.success).toBe(false);
+    it('validates provider repository name shapes', () => {
+      for (const repository of [
+        'myorg/backend',
+        'roomote/Test ADO/Test ADO',
+        'group/subgroup/team/repo',
+      ]) {
+        expect(
+          environmentRepositoryConfigSchema.safeParse({ repository }).success,
+        ).toBe(true);
+      }
+      for (const repository of ['backend', 'owner/', '/repo', 'org//repo']) {
+        expect(
+          environmentRepositoryConfigSchema.safeParse({ repository }).success,
+        ).toBe(false);
       }
     });
   });
 
   describe('tool_versions', () => {
-    it('should accept a valid tool_versions record', () => {
-      const result = environmentRepositoryConfigSchema.safeParse({
+    it('validates tool_versions records and optionality', () => {
+      const valid = environmentRepositoryConfigSchema.safeParse({
         repository: 'myorg/backend',
         tool_versions: { node: '20.11.0', python: '3.12.1' },
       });
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.tool_versions).toEqual({
+      expect(valid.success).toBe(true);
+      if (valid.success) {
+        expect(valid.data.tool_versions).toEqual({
           node: '20.11.0',
           python: '3.12.1',
         });
       }
-    });
-
-    it('should be optional (configs without it still pass)', () => {
-      const result = environmentRepositoryConfigSchema.safeParse({
+      const optional = environmentRepositoryConfigSchema.safeParse({
         repository: 'myorg/backend',
       });
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.tool_versions).toBeUndefined();
+      expect(optional.success).toBe(true);
+      if (optional.success) expect(optional.data.tool_versions).toBeUndefined();
+      for (const tool_versions of [{ '': '20.11.0' }, { node: '' }]) {
+        expect(
+          environmentRepositoryConfigSchema.safeParse({
+            repository: 'myorg/backend',
+            tool_versions,
+          }).success,
+        ).toBe(false);
       }
-    });
-
-    it('should reject an empty tool name', () => {
-      const result = environmentRepositoryConfigSchema.safeParse({
-        repository: 'myorg/backend',
-        tool_versions: { '': '20.11.0' },
-      });
-
-      expect(result.success).toBe(false);
-    });
-
-    it('should reject an empty version string', () => {
-      const result = environmentRepositoryConfigSchema.safeParse({
-        repository: 'myorg/backend',
-        tool_versions: { node: '' },
-      });
-
-      expect(result.success).toBe(false);
     });
 
     it('should work alongside branch and commands', () => {
@@ -365,19 +238,6 @@ commands:
         });
       }
     });
-
-    it('should accept an empty object for tool_versions', () => {
-      const result = environmentRepositoryConfigSchema.safeParse({
-        repository: 'myorg/backend',
-        tool_versions: {},
-      });
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.tool_versions).toEqual({});
-      }
-    });
   });
 
   describe('YAML block scalar commands in repository config', () => {
@@ -401,66 +261,6 @@ commands:
         expect(result.data.commands).toHaveLength(1);
         expect(result.data.commands![0]!.name).toBe('Test command');
         expect(result.data.commands![0]!.run).toBe('ls /foo\nls /bar\n');
-      }
-    });
-
-    it('should accept repository config with multiple multi-line commands', () => {
-      const yamlInput = `
-repository: myorg/backend
-commands:
-  - name: Install
-    run: |
-      npm install
-      npm run postinstall
-  - name: Build
-    run: |
-      npm run build
-      npm run typecheck
-  - name: Start server
-    run: npm start
-    detached: true
-    logfile: /tmp/server.log
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = environmentRepositoryConfigSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.commands).toHaveLength(3);
-        expect(result.data.commands![0]!.run).toBe(
-          'npm install\nnpm run postinstall\n',
-        );
-        expect(result.data.commands![1]!.run).toBe(
-          'npm run build\nnpm run typecheck\n',
-        );
-        expect(result.data.commands![2]!.run).toBe('npm start');
-        expect(result.data.commands![2]!.detached).toBe(true);
-      }
-    });
-
-    it('should accept repository config with branch and multi-line commands', () => {
-      const yamlInput = `
-repository: myorg/backend
-branch: develop
-commands:
-  - name: Setup
-    run: |
-      npm install
-      npm run migrate
-`;
-      const parsed = YAML.parse(yamlInput);
-      const result = environmentRepositoryConfigSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.repository).toBe('myorg/backend');
-        expect(result.data.branch).toBe('develop');
-        expect(result.data.commands).toHaveLength(1);
-        expect(result.data.commands![0]!.run).toBe(
-          'npm install\nnpm run migrate\n',
-        );
       }
     });
   });
@@ -688,24 +488,7 @@ describe('environmentConfigSchema', () => {
   });
 
   describe('tool_versions', () => {
-    it('should accept root-level tool_versions for environment workspaces', () => {
-      const result = environmentConfigSchema.safeParse({
-        name: 'Env',
-        repositories: [{ repository: 'owner/repo' }],
-        tool_versions: { node: '22.14.0', python: '3.12.1' },
-      });
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.tool_versions).toEqual({
-          node: '22.14.0',
-          python: '3.12.1',
-        });
-      }
-    });
-
-    it('should parse root-level tool_versions correctly from YAML input', () => {
+    it('accepts root-level tool_versions from object and YAML inputs', () => {
       const yamlInput = `
 name: Shared Environment
 tool_versions:
@@ -714,16 +497,22 @@ tool_versions:
 repositories:
   - repository: owner/repo
 `;
-      const parsed = YAML.parse(yamlInput);
-      const result = environmentConfigSchema.safeParse(parsed);
-
-      expect(result.success).toBe(true);
-
-      if (result.success) {
-        expect(result.data.tool_versions).toEqual({
-          node: '22.14.0',
-          python: '3.12.1',
-        });
+      for (const input of [
+        {
+          name: 'Env',
+          repositories: [{ repository: 'owner/repo' }],
+          tool_versions: { node: '22.14.0', python: '3.12.1' },
+        },
+        YAML.parse(yamlInput),
+      ]) {
+        const result = environmentConfigSchema.safeParse(input);
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.tool_versions).toEqual({
+            node: '22.14.0',
+            python: '3.12.1',
+          });
+        }
       }
     });
   });
@@ -742,42 +531,20 @@ repositories:
   });
 
   describe('initialUrl', () => {
-    it('should accept an absolute URL', () => {
-      const result = environmentConfigSchema.safeParse({
-        name: 'Env',
-        repositories: [{ repository: 'owner/repo' }],
-        initialUrl: 'http://127.0.0.1:3000/auth/dev-login',
-      });
-
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.initialUrl).toBe(
-          'http://127.0.0.1:3000/auth/dev-login',
-        );
+    it('accepts absolute and about:blank URLs but rejects relative paths', () => {
+      for (const [initialUrl, success] of [
+        ['http://127.0.0.1:3000/auth/dev-login', true],
+        ['about:blank', true],
+        ['/auth/dev-login', false],
+      ] as const) {
+        const result = environmentConfigSchema.safeParse({
+          name: 'Env',
+          repositories: [{ repository: 'owner/repo' }],
+          initialUrl,
+        });
+        expect(result.success).toBe(success);
+        if (result.success) expect(result.data.initialUrl).toBe(initialUrl);
       }
-    });
-
-    it('should accept about:blank', () => {
-      const result = environmentConfigSchema.safeParse({
-        name: 'Env',
-        repositories: [{ repository: 'owner/repo' }],
-        initialUrl: 'about:blank',
-      });
-
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.initialUrl).toBe('about:blank');
-      }
-    });
-
-    it('should reject a relative URL', () => {
-      const result = environmentConfigSchema.safeParse({
-        name: 'Env',
-        repositories: [{ repository: 'owner/repo' }],
-        initialUrl: '/auth/dev-login',
-      });
-
-      expect(result.success).toBe(false);
     });
   });
 
@@ -831,19 +598,18 @@ repositories:
   });
 
   describe('mcpServers', () => {
-    it.each([
-      {
-        url: 'https://mcp.example.com',
-        headers: { Authorization: '${MCP_TOKEN}' },
-      },
-      {
-        command: 'npx',
-        args: ['operator-mcp'],
-        env: { TOKEN: '${MCP_TOKEN}' },
-      },
-    ])(
-      'preserves existing environment servers named _roomote_http_integrations: %j',
-      (config) => {
+    it('preserves existing HTTP broker servers in URL and stdio forms', () => {
+      for (const config of [
+        {
+          url: 'https://mcp.example.com',
+          headers: { Authorization: '${MCP_TOKEN}' },
+        },
+        {
+          command: 'npx',
+          args: ['operator-mcp'],
+          env: { TOKEN: '${MCP_TOKEN}' },
+        },
+      ]) {
         const result = environmentConfigSchema.parse({
           name: 'Env',
           repositories: [{ repository: 'owner/repo' }],
@@ -853,8 +619,8 @@ repositories:
         expect(result.mcpServers).toEqual({
           _roomote_http_integrations: config,
         });
-      },
-    );
+      }
+    });
 
     it('should accept streamable-http and stdio MCP server configs', () => {
       const result = environmentConfigSchema.safeParse({

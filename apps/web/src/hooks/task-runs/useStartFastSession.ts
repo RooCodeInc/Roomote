@@ -38,6 +38,8 @@ type StartFastSessionVariables = {
   reasoningEffort?: ReasoningEffort | null;
   /** Stable client identity used to recover an ambiguous initial submit. */
   conversationId?: string;
+  /** Start the session with Auto tool approvals on. */
+  autoToolApprovals?: boolean;
   /** Launch into a chosen workspace without a Fast decision. */
   pinnedLaunch?: {
     launchId: string;

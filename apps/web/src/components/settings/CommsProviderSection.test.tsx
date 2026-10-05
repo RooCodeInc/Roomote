@@ -47,6 +47,11 @@ type CommsProviderStatus = {
       errorMessage: string | null;
     };
   } | null;
+  agentmailOutbound?: {
+    environmentEnabled: boolean;
+    persistedEnabled: boolean;
+    effectiveEnabled: boolean;
+  };
 };
 
 const state = vi.hoisted(() => ({
@@ -112,6 +117,7 @@ const mutations = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
   updateRouterDebug: vi.fn(),
   refetchSlackChannels: vi.fn(),
+  setAgentMailOutboundEnabled: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
@@ -154,6 +160,16 @@ vi.mock('@tanstack/react-query', () => ({
         ? state.createSlackAppIsPending
         : state.updateRouterDebugIsPending,
     mutate: (input: unknown) => {
+      if (options.mutationName === 'setAgentMailOutboundEnabled') {
+        mutations.setAgentMailOutboundEnabled(input);
+        options.onSuccess?.({
+          environmentEnabled: true,
+          persistedEnabled: (input as { enabled: boolean }).enabled,
+          effectiveEnabled: (input as { enabled: boolean }).enabled,
+        });
+        return;
+      }
+
       if (input && typeof input === 'object' && 'configToken' in input) {
         options.onSuccess?.({
           success: true,
@@ -235,6 +251,12 @@ vi.mock('@/trpc/client', () => ({
     },
     comms: {
       status: { queryKey: () => ['comms', 'status'] },
+      setAgentMailOutboundEnabled: {
+        mutationOptions: (options: unknown) => ({
+          ...(options as Record<string, unknown>),
+          mutationName: 'setAgentMailOutboundEnabled',
+        }),
+      },
       repairTelegram: {
         mutationOptions: (options: unknown) => options,
       },
@@ -364,6 +386,23 @@ vi.mock('@/components/system', () => ({
   ),
   Sparkles: () => <svg aria-hidden="true" />,
   Spinner: () => <span>loading</span>,
+  Switch: ({
+    checked,
+    onCheckedChange,
+    ...props
+  }: {
+    checked: boolean;
+    onCheckedChange: (checked: boolean) => void;
+    'aria-label': string;
+  }) => (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onCheckedChange(!checked)}
+      {...props}
+    />
+  ),
   Trash2: () => <svg aria-hidden="true" />,
   TriangleAlert: () => <svg aria-hidden="true" />,
 }));
@@ -610,6 +649,11 @@ function buildAgentMailProvider(
     runtimeSatisfied: true,
     savedSatisfied: false,
     setupSatisfied: true,
+    agentmailOutbound: {
+      environmentEnabled: true,
+      persistedEnabled: true,
+      effectiveEnabled: true,
+    },
     agentmail: {
       inboxAddress: 'workspace@roomote.me',
       inboxEmail: 'workspace@roomote.me',
@@ -1501,7 +1545,29 @@ describe('CommsProviderSection', () => {
       ).not.toBeInTheDocument();
     });
 
-    it('shows when Cloud-managed Email has not been provisioned', () => {
+    it('updates the instance Email sending switch without removing setup', () => {
+      render(
+        <CommsProviderSection
+          provider={buildAgentMailProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole('switch', { name: 'Allow Roomote to send email' }),
+      );
+
+      expect(mutations.setAgentMailOutboundEnabled).toHaveBeenCalledWith({
+        enabled: false,
+      });
+      expect(screen.getByText('AgentMail API Key')).toBeVisible();
+      expect(screen.getByText(/does not stop incoming email/i)).toBeVisible();
+    });
+
+    it('explains that Cloud-managed Email allocates its inbox on first send', () => {
       state.cloudEnabled = true;
       render(
         <CommsProviderSection
@@ -1519,7 +1585,7 @@ describe('CommsProviderSection', () => {
 
       expect(
         screen.getByText(
-          'Managed Email is unavailable. Roomote Cloud has not provisioned an inbox for this deployment.',
+          "Roomote Cloud creates this deployment's inbox the first time Roomote sends an email.",
         ),
       ).toBeVisible();
       expect(screen.queryByText('AgentMail API Key')).not.toBeInTheDocument();

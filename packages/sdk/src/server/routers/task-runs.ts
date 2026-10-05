@@ -1,9 +1,23 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { db, eq, slackInstallations } from '@roomote/db/server';
+import {
+  evaluateJudgeFileCriteria,
+  evaluateRepositoryJudgement,
+} from '@roomote/cloud-agents/server/judge-file';
+import { resolveJudgmentBackend } from '@roomote/cloud-agents/server/typesafe-judgment';
+import { applyTaskModelSelectionToRun } from '@roomote/cloud-agents/server';
+import { captureInstanceEvent } from '@roomote/telemetry/server';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
+import {
+  db,
+  eq,
+  isDeploymentExperimentEnabled,
+  slackInstallations,
+} from '@roomote/db/server';
 
 import {
   RunStatus,
+  JUDGE_MAX_CRITERIA_PER_REQUEST,
   runEventSources,
   runEventTypes,
   communicationProviderSchema,
@@ -19,6 +33,11 @@ import {
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   LLM_USAGE_COST_SOURCES,
   type AcpPersistedEnvelope,
+  ACP_ENVELOPE_EVENT_TYPES,
+  MODEL_FALLBACK_NOTICE_PAYLOAD_KEY,
+  getDisplayModelProviderId,
+  TASK_MODEL_ROLES,
+  type TaskModelRole,
 } from '@roomote/types';
 import {
   getCommunicationMessages,
@@ -161,6 +180,61 @@ const workerReleaseMetadataSchema = z.object({
   workerCommit: z.string().optional(),
 });
 
+const judgeFileCriterionInputSchema = z
+  .object({
+    id: z.string().min(1),
+    rule: z.string().min(1),
+  })
+  .strict();
+
+const judgeFileStateSchema = z
+  .object({
+    path: z.string().min(1),
+    patch: z.string().max(100_000),
+    patchTruncated: z.boolean(),
+    finalContent: z.string().max(100_000),
+    finalContentTruncated: z.boolean(),
+  })
+  .strict();
+
+const judgeFileCriteriaInputSchema = z
+  .object({
+    runId: z.number(),
+    state: judgeFileStateSchema,
+    criteria: z
+      .array(judgeFileCriterionInputSchema)
+      .min(1)
+      .max(JUDGE_MAX_CRITERIA_PER_REQUEST),
+  })
+  .strict();
+
+const repositoryJudgementRequestSchema = z
+  .object({
+    kind: z.literal('judge'),
+    rule: z.string().min(1).max(23000),
+    evidence: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1).max(4096),
+            kind: z.enum(['patch', 'before', 'after', 'context']),
+            line: z.number().int().positive(),
+            text: z.string().max(23000),
+            oid: z.string().max(64).optional(),
+          })
+          .strict(),
+      )
+      .max(2000),
+    focusPaths: z.array(z.string().max(4096)).max(2000),
+    complete: z.boolean(),
+    unresolved: z.array(z.string().max(4096)).max(2000),
+  })
+  .strict()
+  .refine(
+    (request) => Buffer.byteLength(JSON.stringify(request)) <= 23000,
+    'Judgement evidence exceeds the request budget',
+  );
+
 function runTokenOnlyScoped<T extends z.ZodType>(
   schema: T,
   extractRunId: keyof z.infer<T> | ((input: z.infer<T>) => number),
@@ -199,6 +273,14 @@ function runTokenOnlyScoped<T extends z.ZodType>(
       return next({ ctx: { ...ctx, runId: ctx.auth.runId } });
     });
 }
+
+const TASK_FALLBACK_ROLES = TASK_MODEL_ROLES.filter(
+  (role): role is Exclude<TaskModelRole, 'orchestration'> =>
+    role !== 'orchestration',
+) as [
+  Exclude<TaskModelRole, 'orchestration'>,
+  ...Array<Exclude<TaskModelRole, 'orchestration'>>,
+];
 
 export const taskRunsRouter = router({
   findFirstById: runScoped(z.number(), (id) => id).query(({ input }) =>
@@ -352,6 +434,91 @@ export const taskRunsRouter = router({
       userId,
       envelope: input.envelope,
     });
+  }),
+  applyModelFallback: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      taskId: z.string(),
+      sessionId: z.string().optional(),
+      role: z.enum(TASK_FALLBACK_ROLES),
+      fromModelId: z.string().min(1),
+      toModelId: z.string().min(1),
+      toReasoningEffort: z
+        .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+        .nullable(),
+      errorSummary: z.string().min(1).max(280),
+      trigger: z.enum(['immediate', 'after_retries']),
+    }),
+    'runId',
+  ).mutation(async ({ ctx, input }) => {
+    const run = await findTaskRun(input.runId);
+    const payload = run?.payload;
+    const activeModel =
+      input.role === 'coding' || input.role === 'codeReview'
+        ? payload?.harnessModelOverrides?.['opencode-server']
+        : payload?.modelRoleOverrides?.[input.role]?.model;
+    if (activeModel && activeModel !== input.fromModelId) {
+      return { status: 'already_applied' as const };
+    }
+
+    const selection = await applyTaskModelSelectionToRun({
+      runId: input.runId,
+      role:
+        input.role === 'coding' || input.role === 'codeReview'
+          ? 'coding'
+          : input.role,
+      model: input.toModelId,
+      reasoningEffort: input.toReasoningEffort,
+      expectedModel: input.fromModelId,
+    });
+    if (!selection.applied) {
+      return { status: 'already_applied' as const };
+    }
+    const fromProvider =
+      getDisplayModelProviderId(input.fromModelId) ?? 'opencode';
+    const toProvider = getDisplayModelProviderId(input.toModelId) ?? 'opencode';
+    const safeErrorSummary = redactSecrets(input.errorSummary).slice(0, 280);
+    const notice = {
+      role: input.role,
+      trigger: input.trigger,
+      fromProvider,
+      fromModelId: input.fromModelId,
+      errorSummary: safeErrorSummary,
+      toProvider,
+      toModelId: input.toModelId,
+      toReasoningEffort: input.toReasoningEffort,
+    };
+    const envelope = {
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: 'Switching to fallback model' }],
+      metadata: {
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        [MODEL_FALLBACK_NOTICE_PAYLOAD_KEY]: notice,
+      },
+      payload: {
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        text: 'Switching to fallback model',
+        [MODEL_FALLBACK_NOTICE_PAYLOAD_KEY]: notice,
+      },
+    } as unknown as AcpPersistedEnvelope;
+    const userId =
+      'userId' in ctx.auth ? (ctx.auth.userId ?? undefined) : undefined;
+    await recordTaskMessageEnvelope({
+      runId: input.runId,
+      taskId: input.taskId,
+      userId,
+      envelope,
+    });
+    void captureInstanceEvent('model_fallback_switched', {
+      fromProvider,
+      fromModel: input.fromModelId,
+      toProvider,
+      toModel: input.toModelId,
+    });
+    return { status: 'applied' as const };
   }),
   recordInferenceUsage: runTokenOnlyScoped(
     z.object({
@@ -1013,6 +1180,60 @@ export const taskRunsRouter = router({
     z.object({ runId: z.number() }),
     'runId',
   ).query(({ ctx, input }) => getResolvedRuntimeEnvVars(ctx.auth, input)),
+
+  isJevgrepEnabled: runScoped(z.object({ runId: z.number() }), 'runId').query(
+    async () => {
+      if (!(await isDeploymentExperimentEnabled('jevgrep'))) return false;
+      const backend = await resolveJudgmentBackend({ bypassCache: true });
+      return Boolean(backend && backend.provider !== 'roomote');
+    },
+  ),
+
+  isRepositoryJudgementEnabled: runTokenOnlyScoped(
+    z.object({ runId: z.number() }),
+    'runId',
+  ).query(async () => {
+    if (!(await isDeploymentExperimentEnabled('judgement'))) return false;
+    const backend = await resolveJudgmentBackend({ bypassCache: true });
+    return Boolean(backend && backend.provider !== 'roomote');
+  }),
+
+  evaluateRepositoryJudgement: runTokenOnlyScoped(
+    z
+      .object({ runId: z.number(), request: repositoryJudgementRequestSchema })
+      .strict(),
+    'runId',
+  ).mutation(async ({ input }) => {
+    try {
+      const answer = await evaluateRepositoryJudgement(input.request);
+      return answer
+        ? { kind: 'answered' as const, answer }
+        : { kind: 'unavailable' as const };
+    } catch {
+      return { kind: 'error' as const };
+    }
+  }),
+
+  // Retained for workers from the previous release.
+  evaluateJudgeFileCriteria: runTokenOnlyScoped(
+    judgeFileCriteriaInputSchema,
+    'runId',
+  ).mutation(async ({ input }) => {
+    try {
+      const evaluations = await evaluateJudgeFileCriteria({
+        state: input.state,
+        criteria: input.criteria,
+      });
+
+      return evaluations
+        ? { kind: 'answered' as const, evaluations }
+        : { kind: 'unavailable' as const };
+    } catch {
+      // The worker turns this into a privacy-safe visible warning and keeps
+      // task completion fail-open, matching other optional judgment surfaces.
+      return { kind: 'error' as const };
+    }
+  }),
 
   refreshGitHubTokenWithMetadata: runScoped(
     z.object({ runId: z.number() }),

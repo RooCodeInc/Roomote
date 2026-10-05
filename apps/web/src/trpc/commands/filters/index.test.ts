@@ -1,8 +1,10 @@
 import {
   db,
+  environmentFactory,
   eq,
   repositories,
   repositoryFactory,
+  runFactory,
   taskFactory,
   taskPullRequests,
   userFactory,
@@ -111,5 +113,48 @@ describe('getPullRequestsForFilterCommand', () => {
         (option) => option.value === `gitlab:${repository}#123|host:gitlab.com`,
       ),
     ).toHaveLength(1);
+  });
+
+  it('returns PR options for an environment-backed repository selection', async () => {
+    const owner = await userFactory.create();
+    const environment = await environmentFactory.create({
+      createdByUserId: owner.id,
+      name: `Filter environment ${crypto.randomUUID()}`,
+    });
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      repositoryName: 'filter-environment/repository',
+      state: 'completed',
+    });
+    await runFactory.create({
+      taskId: task.id,
+      payload: {
+        repo: 'filter-environment/repository',
+        description: 'Environment-backed task',
+        environmentId: environment.id,
+      },
+    });
+    await db.insert(taskPullRequests).values({
+      taskId: task.id,
+      repository: 'filter-environment/repository',
+      prNumber: 321,
+      prUrl: 'https://github.com/filter-environment/repository/pull/321',
+      sourceControlProvider: 'github',
+      host: 'github.com',
+    });
+
+    const options = await getPullRequestsForFilterCommand(
+      {
+        userId: owner.id,
+        isAdmin: true,
+      } as UserAuthSuccess,
+      { repositoryName: `env:${environment.id}` },
+    );
+
+    expect(options).toEqual([
+      expect.objectContaining({
+        value: 'github:filter-environment/repository#321|host:github.com',
+      }),
+    ]);
   });
 });

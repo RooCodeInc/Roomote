@@ -1,6 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AgentMailApiClient, AgentMailApiError } from '../agentmail-provider';
+const mockIsAgentMailOutboundEnabled = vi.hoisted(() =>
+  vi.fn(async () => true),
+);
+
+vi.mock('@roomote/db/server', () => ({
+  isAgentMailOutboundEnabled: mockIsAgentMailOutboundEnabled,
+}));
+
+import {
+  AgentMailApiClient,
+  AgentMailApiError,
+  AgentMailOutboundDisabledError,
+} from '../agentmail-provider';
+
+beforeEach(() => {
+  mockIsAgentMailOutboundEnabled.mockResolvedValue(true);
+});
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -80,6 +96,44 @@ describe('AgentMailApiError', () => {
 
     expect(error).toBeInstanceOf(AgentMailApiError);
     expect((error as AgentMailApiError).status).toBe(403);
+  });
+});
+
+describe('AgentMail outbound gate', () => {
+  it('blocks message sends and replies before calling AgentMail', async () => {
+    mockIsAgentMailOutboundEnabled.mockResolvedValue(false);
+    const fetchImpl = vi.fn();
+    const client = new AgentMailApiClient({
+      apiKey: 'am_test',
+      apiBaseUrl: 'https://agentmail.test',
+      fetch: fetchImpl,
+    });
+
+    await expect(
+      client.sendMessage('roomote@example.com', {
+        to: ['user@example.com'],
+        subject: 'Blocked',
+      }),
+    ).rejects.toBeInstanceOf(AgentMailOutboundDisabledError);
+    await expect(
+      client.replyToMessage('roomote@example.com', 'message-1', {
+        text: 'Blocked',
+      }),
+    ).rejects.toBeInstanceOf(AgentMailOutboundDisabledError);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('does not apply the outbound-only gate to provider setup calls', async () => {
+    mockIsAgentMailOutboundEnabled.mockResolvedValue(false);
+    const fetchImpl = vi.fn(async () => jsonResponse({ inboxes: [] }));
+    const client = new AgentMailApiClient({
+      apiKey: 'am_test',
+      apiBaseUrl: 'https://agentmail.test',
+      fetch: fetchImpl as typeof fetch,
+    });
+
+    await expect(client.listInboxes()).resolves.toEqual({ inboxes: [] });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 });
 

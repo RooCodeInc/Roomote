@@ -1,3 +1,10 @@
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  evaluateTypeSafeJudgmentsWithUsage: vi.fn().mockResolvedValue({
+    answers: { relevant: { type: 'noul', noul: 0.9 } },
+    usage: { inputTokens: 120, outputTokens: 8, totalTokens: 128 },
+  }),
+}));
+
 import { Hono } from 'hono';
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
@@ -33,6 +40,7 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   taskRuns: { id: 'id' },
+  isDeploymentExperimentEnabled: vi.fn().mockResolvedValue(true),
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
   getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
@@ -1503,5 +1511,54 @@ describe('inference gateway', () => {
 
     expect(response.status).toBe(405);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('Jevgrep gateway', () => {
+  const request = {
+    state: 'synthetic source',
+    questions: { relevant: { type: 'noul', instructions: 'Relevant?' } },
+  };
+  const path = '/api/inference/jevgrep/v1/systemone';
+  const post = (auth: Variables['authContext'], body: unknown = request) =>
+    createApp(auth).request(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  beforeEach(() => mockFindTaskRun.mockResolvedValue({ id: 42 }));
+
+  it('requires run authentication before accepting source', async () => {
+    expect((await post(createUserToken())).status).toBe(403);
+    expect((await post(undefined)).status).toBe(403);
+  });
+  it('requires an existing task run', async () => {
+    mockFindTaskRun.mockResolvedValue(undefined);
+    expect((await post(createRunToken())).status).toBe(404);
+  });
+  it('accepts native CLI evaluations through the authenticated gateway', async () => {
+    const response = await post(createRunToken());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      answers: { relevant: { type: 'noul', noul: 0.9 } },
+      usage: { input_tokens: 120, output_tokens: 8, total_tokens: 128 },
+    });
+  });
+  it('rejects oversized source before evaluation', async () => {
+    expect(
+      (
+        await post(createRunToken(), {
+          ...request,
+          state: 'x'.repeat(2 * 1024 * 1024),
+        })
+      ).status,
+    ).toBe(413);
+  });
+  it('does not expose other upstream paths', async () => {
+    const response = await createApp(createRunToken()).request(
+      '/api/inference/jevgrep/v1/account',
+      { method: 'GET' },
+    );
+    expect(response.status).toBe(404);
   });
 });

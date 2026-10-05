@@ -5,6 +5,7 @@ import {
   formatSingleLineLog,
   getEffectiveAllowedMcpToolNames,
   type RunTokenContext,
+  isExitedRunStatus,
   isMcpToolAllowed,
   isUserToken,
   parseMcpJsonRpcPayload,
@@ -32,6 +33,7 @@ import {
   shadowProxyToolCall,
   type ProxyToolApprovals,
 } from './tool-approval-enforcement';
+import { decideUnaskedTaskToolCall } from './unasked-task-tool-call';
 
 type JsonRpcRequestId = string | number | null;
 
@@ -232,9 +234,9 @@ export async function resolveRunTokenTaskId(
 }
 
 /**
- * Validates that the run token's run still exists. No principal equality
- * check: the run-scoped token IS the authorization (only that run's sandbox
- * holds it). The token's userId is mint-time attribution while
+ * Validates that the run token's run still exists and remains active. No
+ * principal equality check: the run-scoped token IS the authorization (only
+ * that run's sandbox holds it). The token's userId is mint-time attribution while
  * `task_runs.actingUserId` is current-steering attribution — web steer and
  * follow-up delivery mutate the acting user mid-run, so the two legitimately
  * diverge and must not be compared for authorization.
@@ -243,7 +245,7 @@ async function verifyTaskRunTokenTargetExists(
   auth: RunTokenContext,
 ): Promise<Response | null> {
   const taskRun = await db.query.taskRuns.findFirst({
-    columns: { id: true },
+    columns: { id: true, status: true },
     where: eq(taskRuns.id, auth.runId),
   });
 
@@ -252,6 +254,14 @@ async function verifyTaskRunTokenTargetExists(
       404,
       -32000,
       'Task run not found for this MCP token',
+    );
+  }
+
+  if (isExitedRunStatus(taskRun.status)) {
+    return jsonRpcErrorResponse(
+      403,
+      -32000,
+      'Task run is no longer active for this MCP token',
     );
   }
 
@@ -1002,6 +1012,7 @@ export function createMcpProxy(config: McpProxyConfig) {
           tokenType: auth.tokenType,
           resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(auth),
           resolveTaskId: () => resolveRunTokenTaskId(auth),
+          requestHeaders: c.req.raw.headers,
         });
       } catch (error) {
         // Fail closed: an unreadable policy must not let a gated tool run.
@@ -1163,12 +1174,48 @@ export function createMcpProxy(config: McpProxyConfig) {
           );
         }
         if (!approved) {
-          return jsonRpcErrorResponse(
-            403,
-            -32000,
-            describeProxyToolApprovalBlock(gatedToolName, 'needs_approval'),
-            getJsonRpcRequestId(parsedBody),
-          );
+          // Nothing to claim: the task's agent did not ask first. Ask for it.
+          let decision: Awaited<ReturnType<typeof decideUnaskedTaskToolCall>>;
+          try {
+            decision = await decideUnaskedTaskToolCall({
+              runId: auth.runId,
+              taskId: await resolveRunTokenTaskId(auth),
+              integrationId: credentials.toolApprovalIntegrationId,
+              policyScope: credentials.toolApprovalPolicyScope,
+              toolName: gatedToolName,
+              args: callArguments,
+              resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(auth),
+              endpoint: {
+                url: c.req.url,
+                authorization: c.req.raw.headers.get('authorization'),
+              },
+              signal: c.req.raw.signal,
+            });
+          } catch (error) {
+            // Fail closed: a decision that could not be made is not one.
+            console.error(
+              formatSingleLineLog(`${logPrefix} Failed to ask for approval`, {
+                requestId,
+                toolName: gatedToolName,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+            decision = {
+              allowed: false,
+              message: describeProxyToolApprovalBlock(
+                gatedToolName,
+                'needs_approval',
+              ),
+            };
+          }
+          if (!decision.allowed) {
+            return jsonRpcErrorResponse(
+              403,
+              -32000,
+              decision.message,
+              getJsonRpcRequestId(parsedBody),
+            );
+          }
         }
       }
 

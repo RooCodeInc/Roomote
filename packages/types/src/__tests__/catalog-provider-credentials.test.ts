@@ -16,18 +16,17 @@ describe('mergeCatalogProviderCredentialConfig', () => {
     ).toBe(providerConfig);
   });
 
-  it.each([
-    ['zai/glm-5.3', 'zai', 'ZAI_API_KEY'],
-    ['zai-coding-plan/glm-5.3', 'zai-coding-plan', 'ZAI_CODING_PLAN_API_KEY'],
-    ['opencode-go/kimi-k3', 'opencode-go', 'OPENCODE_GO_API_KEY'],
-    [
-      'azure-cognitive-services/gpt-5.6-sol',
-      'azure-cognitive-services',
-      'AZURE_COGNITIVE_SERVICES_API_KEY',
-    ],
-  ])(
-    'binds %s to the env var Roomote stores its key under',
-    (modelId, providerId, envVarName) => {
+  it('binds each catalog provider to the env var Roomote stores its key under', () => {
+    for (const [modelId, providerId, envVarName] of [
+      ['zai/glm-5.3', 'zai', 'ZAI_API_KEY'],
+      ['zai-coding-plan/glm-5.3', 'zai-coding-plan', 'ZAI_CODING_PLAN_API_KEY'],
+      ['opencode-go/kimi-k3', 'opencode-go', 'OPENCODE_GO_API_KEY'],
+      [
+        'azure-cognitive-services/gpt-5.6-sol',
+        'azure-cognitive-services',
+        'AZURE_COGNITIVE_SERVICES_API_KEY',
+      ],
+    ] as const) {
       // OpenCode's catalog names a different env var for each of these, so
       // without the binding the request is sent with no key at all.
       const merged = mergeCatalogProviderCredentialConfig({}, {}, [modelId]);
@@ -35,8 +34,8 @@ describe('mergeCatalogProviderCredentialConfig', () => {
       expect(merged).toEqual({
         [providerId]: { options: { apiKey: `{env:${envVarName}}` } },
       });
-    },
-  );
+    }
+  });
 
   it('keeps Azure AI Foundry off the Azure OpenAI key', () => {
     // Both use the Azure SDK, which reads AZURE_API_KEY by default, so an
@@ -97,20 +96,6 @@ describe('mergeCatalogProviderCredentialConfig', () => {
           ['google/gemini-3.8-flash'],
         ),
       ).toBe(providerConfig);
-    });
-  });
-
-  it('keeps Z.AI and the Z.AI Coding Plan on their own credentials', () => {
-    const merged = mergeCatalogProviderCredentialConfig({}, {}, [
-      'zai/glm-5.3',
-      'zai-coding-plan/glm-5.3',
-    ]);
-
-    expect(merged).toMatchObject({
-      zai: { options: { apiKey: '{env:ZAI_API_KEY}' } },
-      'zai-coding-plan': {
-        options: { apiKey: '{env:ZAI_CODING_PLAN_API_KEY}' },
-      },
     });
   });
 

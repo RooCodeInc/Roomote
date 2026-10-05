@@ -3,6 +3,7 @@ import type { UserAuthSuccess } from '@/types';
 const {
   mockAuthUserFindFirst,
   mockIsEmailChannelEnabled,
+  mockIsAgentMailOutboundEnabled,
   mockAgentMailGetInbox,
   mockRedisEval,
   mockHeaders,
@@ -10,6 +11,7 @@ const {
 } = vi.hoisted(() => ({
   mockAuthUserFindFirst: vi.fn(),
   mockIsEmailChannelEnabled: vi.fn(),
+  mockIsAgentMailOutboundEnabled: vi.fn(),
   mockAgentMailGetInbox: vi.fn(),
   mockRedisEval: vi.fn(),
   mockHeaders: vi.fn(),
@@ -24,6 +26,8 @@ vi.mock('@roomote/db/server', () => ({
   },
   authUsers: { id: 'auth_users.id' },
   eq: vi.fn(),
+  isAgentMailOutboundEnabled: mockIsAgentMailOutboundEnabled,
+  isAgentMailCloudManaged: vi.fn(() => false),
   resolveAgentMailRuntimeCredentials: vi.fn(async () => ({
     apiKey: 'api-key',
     webhookSecret: 'webhook-secret',
@@ -64,6 +68,7 @@ describe('getLinkedEmailAccountsCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsEmailChannelEnabled.mockReturnValue(true);
+    mockIsAgentMailOutboundEnabled.mockResolvedValue(true);
     mockAuthUserFindFirst.mockResolvedValue({
       email: 'login@example.com',
       emailVerified: false,
@@ -118,6 +123,21 @@ describe('getLinkedEmailAccountsCommand', () => {
       verificationDeliveryAvailable: false,
       canViewInboxAddress: true,
       inboxEmail: null,
+    });
+  });
+
+  it('does not offer verification resend while persisted outbound email is disabled', async () => {
+    mockIsAgentMailOutboundEnabled.mockResolvedValue(false);
+
+    await expect(
+      getLinkedEmailAccountsCommand({
+        ...mockAuth,
+        isAdmin: true,
+      }),
+    ).resolves.toMatchObject({
+      emailEnabled: true,
+      verificationDeliveryAvailable: false,
+      inboxEmail: 'deliverable@example.com',
     });
   });
 

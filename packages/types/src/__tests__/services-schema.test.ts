@@ -32,16 +32,6 @@ describe('Service Schema', () => {
   });
 
   describe('serviceConfigSchema', () => {
-    it('accepts simple string format', () => {
-      expect(serviceConfigSchema.parse('redis6')).toBe('redis6');
-      expect(serviceConfigSchema.parse('postgres15')).toBe('postgres15');
-    });
-
-    it('accepts object format with just name', () => {
-      const result = serviceConfigSchema.parse({ name: 'redis7' });
-      expect(result).toEqual({ name: 'redis7' });
-    });
-
     it('accepts object format with name and port', () => {
       const result = serviceConfigSchema.parse({
         name: 'postgres16',

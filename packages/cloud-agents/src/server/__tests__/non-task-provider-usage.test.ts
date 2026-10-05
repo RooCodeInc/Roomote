@@ -682,6 +682,252 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('keeps relaying permission asks after the instance is disposed under the prompt', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    const ask = (id: string) => ({
+      id,
+      sessionID: 'session-1',
+      permission: 'workspace_pay_invoice',
+      tool: { messageID: `message-${id}`, callID: `call-${id}` },
+    });
+    // An ask raised while no stream was open is only in the pending list.
+    const permissionListMock = vi.fn(async () => ({
+      data: [ask('ask-in-gap')],
+      error: undefined,
+    }));
+    createOpencodeClientMock.mockReturnValue({
+      config: { providers: configProvidersMock },
+      event: { subscribe: eventSubscribeMock },
+      permission: { list: permissionListMock, reply: vi.fn() },
+      session: {
+        abort: sessionAbortMock,
+        children: sessionChildrenMock,
+        create: sessionCreateMock,
+        messages: sessionMessagesMock,
+        promptAsync: sessionPromptAsyncMock,
+        prompt: sessionPromptMock,
+      },
+    });
+    // A tool-configuration refresh disposes the instance just before the
+    // prompt, and that disposal closes the stream the prompt just opened.
+    eventSubscribeMock
+      .mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: 'server.instance.disposed' as const,
+            properties: { directory: '/tmp/roomote-fast-native-test' },
+          };
+        })(),
+      })
+      .mockImplementationOnce(async (_query, { signal }) => ({
+        stream: (async function* () {
+          // The reopened stream repeats the listed ask and adds a new one.
+          yield {
+            type: 'permission.asked' as const,
+            properties: ask('ask-in-gap'),
+          };
+          yield {
+            type: 'permission.asked' as const,
+            properties: ask('ask-live'),
+          };
+          await new Promise((resolve) =>
+            signal.addEventListener('abort', resolve, { once: true }),
+          );
+        })(),
+      }));
+    let markAsksRelayed!: () => void;
+    const asksRelayed = new Promise<void>((resolve) => {
+      markAsksRelayed = resolve;
+    });
+    const relayedAskIds: string[] = [];
+    const onPermissionAsked = vi.fn((request: { requestId: string }) => {
+      relayedAskIds.push(request.requestId);
+      if (relayedAskIds.length === 2) markAsksRelayed();
+    });
+    sessionPromptMock.mockImplementation(async () => {
+      await asksRelayed;
+      return {
+        data: {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            time: { created: 100, completed: 200 },
+          },
+          parts: [{ type: 'text', text: 'paid after approval' }],
+        },
+        error: undefined,
+      };
+    });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+    const disposeInstanceBeforeSession = { completed: false };
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'Pay the invoice.',
+          modelRole: 'primary',
+        },
+        {},
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          disposeInstanceBeforeSession,
+          onPermissionAsked,
+        },
+      ),
+    ).resolves.toBe('paid after approval');
+
+    expect(disposeInstanceBeforeSession.completed).toBe(true);
+    expect(eventSubscribeMock).toHaveBeenCalledTimes(2);
+    expect(permissionListMock).toHaveBeenCalledWith(
+      { directory: '/tmp/roomote-fast-native-test' },
+      { signal: expect.any(AbortSignal) },
+    );
+    // Each ask reaches the approval bridge exactly once.
+    expect(relayedAskIds).toEqual(['ask-in-gap', 'ask-live']);
+    expect(onPermissionAsked).toHaveBeenCalledWith(
+      {
+        requestId: 'ask-live',
+        sessionId: 'session-1',
+        permission: 'workspace_pay_invoice',
+        messageId: 'message-ask-live',
+        callId: 'call-ask-live',
+      },
+      expect.anything(),
+    );
+  });
+
+  it('retries the pending-ask lookup after a refresh and fails the prompt when it cannot be read', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    const ask = {
+      id: 'ask-in-gap',
+      sessionID: 'session-1',
+      permission: 'workspace_pay_invoice',
+    };
+    const permissionListMock = vi.fn();
+    createOpencodeClientMock.mockReturnValue({
+      config: { providers: configProvidersMock },
+      event: { subscribe: eventSubscribeMock },
+      permission: { list: permissionListMock, reply: vi.fn() },
+      session: {
+        abort: sessionAbortMock,
+        children: sessionChildrenMock,
+        create: sessionCreateMock,
+        messages: sessionMessagesMock,
+        promptAsync: sessionPromptAsyncMock,
+        prompt: sessionPromptMock,
+      },
+    });
+    const disposedThenOpen = () => {
+      eventSubscribeMock
+        .mockResolvedValueOnce({
+          stream: (async function* () {
+            yield {
+              type: 'server.instance.disposed' as const,
+              properties: { directory: '/tmp/roomote-fast-native-test' },
+            };
+          })(),
+        })
+        .mockImplementationOnce(async (_query, { signal }) => ({
+          // The reopened stream stays open and quiet until the prompt ends.
+          stream: (async function* () {
+            yield { type: 'server.connected' as const, properties: {} };
+            await new Promise((resolve) =>
+              signal.addEventListener('abort', resolve, { once: true }),
+            );
+          })(),
+        }));
+    };
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+    const run = (onPermissionAsked: () => void) =>
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'Pay the invoice.',
+          modelRole: 'primary',
+        },
+        {},
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          disposeInstanceBeforeSession: { completed: false },
+          onPermissionAsked,
+        },
+      );
+
+    // The new instance is still settling: one failed read, then the ask.
+    disposedThenOpen();
+    permissionListMock
+      .mockResolvedValueOnce({ data: undefined, error: { name: 'Busy' } })
+      .mockResolvedValueOnce({ data: [ask], error: undefined });
+    let markRelayed!: () => void;
+    const relayed = new Promise<void>((resolve) => {
+      markRelayed = resolve;
+    });
+    const onPermissionAsked = vi.fn(() => markRelayed());
+    sessionPromptMock.mockImplementation(async () => {
+      await relayed;
+      return {
+        data: {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            time: { created: 100, completed: 200 },
+          },
+          parts: [{ type: 'text', text: 'paid after approval' }],
+        },
+        error: undefined,
+      };
+    });
+    await expect(run(onPermissionAsked)).resolves.toBe('paid after approval');
+    expect(permissionListMock).toHaveBeenCalledTimes(2);
+    expect(onPermissionAsked).toHaveBeenCalledOnce();
+
+    // The pending asks cannot be read at all: the prompt fails instead of
+    // waiting on an ask nobody will answer.
+    disposedThenOpen();
+    permissionListMock.mockReset();
+    permissionListMock.mockRejectedValue(new Error('instance unavailable'));
+    sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+    const unanswered = vi.fn();
+    await expect(run(unanswered)).rejects.toThrow('instance unavailable');
+    expect(permissionListMock).toHaveBeenCalledTimes(4);
+    expect(unanswered).not.toHaveBeenCalled();
+
+    // The event stream itself cannot be reopened: the prompt fails too.
+    eventSubscribeMock
+      .mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: 'server.instance.disposed' as const,
+            properties: { directory: '/tmp/roomote-fast-native-test' },
+          };
+        })(),
+      })
+      .mockRejectedValueOnce(new Error('event stream unavailable'));
+    await expect(run(unanswered)).rejects.toThrow('event stream unavailable');
+    expect(unanswered).not.toHaveBeenCalled();
+  });
+
   it('records completed Fast OpenCode usage with a stable event key', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.4',
@@ -1620,6 +1866,215 @@ describe('resolveOpenCodeSmallModel', () => {
         openrouter: {
           models: {
             'z-ai/glm-5.2': {
+              options: { reasoning: { effort: 'high' } },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it.each(
+    [
+      {
+        role: 'small' as const,
+        roleEnv: {
+          R_SMALL_MODEL: 'openrouter/openai/gpt-5.6-luna',
+          R_SMALL_MODEL_REASONING_EFFORT: 'medium',
+          R_SMALL_MODEL_FALLBACK: 'openrouter/z-ai/glm-5.2',
+          R_SMALL_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+        },
+      },
+      {
+        role: 'orchestration' as const,
+        roleEnv: {
+          R_ORCHESTRATION_MODEL: 'openrouter/openai/gpt-5.6-sol',
+          R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
+          R_ORCHESTRATION_MODEL_FALLBACK: 'openrouter/z-ai/glm-5.2',
+          R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+        },
+      },
+    ].flatMap((testCase) =>
+      (['text', 'object'] as const).map((output) => ({ ...testCase, output })),
+    ),
+  )(
+    'uses the configured $role fallback reasoning in $output provider config',
+    async ({ role, roleEnv, output }) => {
+      process.env = { ...originalEnv };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_MODEL_REASONING_EFFORT: 'xhigh',
+        OPENROUTER_API_KEY: 'test-key',
+        ...roleEnv,
+      });
+      sessionPromptMock
+        .mockResolvedValueOnce({
+          data: {
+            info: {
+              error: {
+                name: 'APIError',
+                data: { statusCode: 401, message: 'Invalid API key' },
+              },
+            },
+            parts: [],
+          },
+          error: undefined,
+        })
+        .mockResolvedValueOnce({
+          data: {
+            info: { error: null, structured: { answer: 'fallback response' } },
+            parts: [{ type: 'text', text: 'fallback response' }],
+          },
+          error: undefined,
+        });
+
+      const {
+        generateTrackedNonTaskText,
+        generateTrackedNonTaskObject,
+        NON_TASK_INFERENCE_SURFACES,
+      } = await import('../non-task-provider-usage.js');
+      const params = {
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: role,
+        prompt: 'Answer.',
+      };
+
+      if (output === 'text') {
+        await expect(generateTrackedNonTaskText(params)).resolves.toBe(
+          'fallback response',
+        );
+      } else {
+        await expect(
+          generateTrackedNonTaskObject({
+            ...params,
+            reasoningEffort: 'high',
+            schema: z.object({ answer: z.string() }),
+          }),
+        ).resolves.toEqual({ object: { answer: 'fallback response' } });
+      }
+      expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenLastCalledWith({
+        runtimeEnv: expect.objectContaining({
+          R_MODEL: 'openrouter/z-ai/glm-5.2',
+          R_MODEL_REASONING_EFFORT: 'low',
+        }),
+      });
+      expect(spawnMock.mock.calls.at(-1)?.[2]?.env).toMatchObject({
+        R_MODEL: 'openrouter/z-ai/glm-5.2',
+        R_MODEL_REASONING_EFFORT: 'low',
+      });
+      expect(
+        JSON.parse(
+          spawnMock.mock.calls.at(-1)?.[2]?.env?.OPENCODE_CONFIG_CONTENT ??
+            '{}',
+        ),
+      ).toMatchObject({
+        provider: {
+          openrouter: {
+            models: {
+              'z-ai/glm-5.2': {
+                options: { reasoning: { effort: 'low' } },
+              },
+            },
+          },
+        },
+      });
+    },
+  );
+
+  it("keeps modality reroutes from inheriting another model's fallback reasoning", async () => {
+    process.env = { ...originalEnv };
+    const fallbackModel = 'openrouter/openai/gpt-5.4';
+    const visionModel = 'openrouter/google/gemini-3.6-pro';
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_SMALL_MODEL_FALLBACK: fallbackModel,
+      R_SMALL_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+      R_VISION_MODEL: visionModel,
+      R_VISION_MODEL_REASONING_EFFORT: 'high',
+      OPENROUTER_API_KEY: 'test-key',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'google/gemini-3.6-pro': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+              'openai/gpt-5.4': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+              'z-ai/glm-5.2': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+    sessionPromptMock
+      .mockResolvedValueOnce({
+        data: {
+          info: {
+            error: {
+              name: 'APIError',
+              data: { statusCode: 401, message: 'Invalid API key' },
+            },
+          },
+          parts: [],
+        },
+        error: undefined,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          info: { error: null },
+          parts: [{ type: 'text', text: 'Image described.' }],
+        },
+        error: undefined,
+      });
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'small',
+        prompt: 'Describe the image.',
+        requiredInputModality: 'image',
+        reasoningEffort: 'high',
+      }),
+    ).resolves.toBe('Image described.');
+    expect(sessionPromptMock).toHaveBeenCalledTimes(2);
+    for (const [request] of sessionPromptMock.mock.calls) {
+      expect(request.model).toEqual({
+        providerID: 'openrouter',
+        modelID: 'google/gemini-3.6-pro',
+      });
+    }
+    const fallbackServer = spawnMock.mock.calls
+      .filter((call) => call[2]?.env?.R_MODEL === fallbackModel)
+      .at(-1);
+    expect(fallbackServer).toBeDefined();
+    expect(
+      JSON.parse(fallbackServer?.[2]?.env?.OPENCODE_CONFIG_CONTENT ?? '{}'),
+    ).toMatchObject({
+      provider: {
+        openrouter: {
+          models: {
+            'google/gemini-3.6-pro': {
               options: { reasoning: { effort: 'high' } },
             },
           },
@@ -3266,13 +3721,23 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
-  it.each(['audio', 'video'] as const)(
-    'uses the coding model for %s when the Audio and video model inherits coding',
-    async (modality) => {
+  it.each([
+    {
+      modality: 'audio' as const,
+      preferredModel: 'google/gemini-helper',
+    },
+    {
+      modality: 'video' as const,
+      preferredModel: 'google/gemini-vision',
+    },
+  ])(
+    'preserves the existing $modality helper order when the Audio and video model is unset',
+    async ({ modality, preferredModel }) => {
       process.env = { ...originalEnv };
       mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-        R_MODEL: 'openrouter/google/gemini-3.8-flash',
-        R_SMALL_MODEL: 'openrouter/openai/text-helper',
+        R_MODEL: 'openrouter/openai/text-coding',
+        R_SMALL_MODEL: 'openrouter/google/gemini-helper',
+        R_VISION_MODEL: 'openrouter/google/gemini-vision',
       });
       configProvidersMock.mockResolvedValue({
         data: {
@@ -3280,15 +3745,21 @@ describe('resolveOpenCodeSmallModel', () => {
             {
               id: 'openrouter',
               models: {
-                'google/gemini-3.8-flash': {
+                'openai/text-coding': {
+                  capabilities: {
+                    input: { [modality]: false },
+                    output: { text: true },
+                  },
+                },
+                'google/gemini-helper': {
                   capabilities: {
                     input: { [modality]: true },
                     output: { text: true },
                   },
                 },
-                'openai/text-helper': {
+                'google/gemini-vision': {
                   capabilities: {
-                    input: { [modality]: false },
+                    input: { [modality]: true },
                     output: { text: true },
                   },
                 },
@@ -3321,79 +3792,64 @@ describe('resolveOpenCodeSmallModel', () => {
       ).resolves.toBe('Attachment understood.');
       expect(sessionPromptMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: {
-            providerID: 'openrouter',
-            modelID: 'google/gemini-3.8-flash',
-          },
+          model: { providerID: 'openrouter', modelID: preferredModel },
         }),
         expect.anything(),
       );
     },
   );
 
-  it.each(['audio', 'video'] as const)(
-    'delivers %s through the coding fallback when the Audio and video model inherits coding',
-    async (modality) => {
-      process.env = { ...originalEnv };
-      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-        R_MODEL: 'openrouter/google/gemini-3.8-flash',
-        R_ORCHESTRATION_MODEL: 'openrouter/openai/text-orchestrator',
-      });
-      configProvidersMock.mockResolvedValue({
-        data: {
-          providers: [
-            {
-              id: 'openrouter',
-              models: {
-                'google/gemini-3.8-flash': {
-                  capabilities: {
-                    input: { [modality]: true },
-                    output: { text: true },
-                  },
+  it('delivers Fast session audio directly to a capable session model when the Audio and video model is unset', async () => {
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/text-coding',
+      R_ORCHESTRATION_MODEL: 'openrouter/google/gemini-session',
+      R_SMALL_MODEL: 'openrouter/google/gemini-helper',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/text-coding': {
+                capabilities: {
+                  input: { audio: false },
+                  output: { text: true },
                 },
-                'openai/text-orchestrator': {
-                  capabilities: {
-                    input: { [modality]: false },
-                    output: { text: true },
-                  },
+              },
+              'google/gemini-session': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-helper': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: true },
                 },
               },
             },
-          ],
-          default: {},
-        },
-        error: undefined,
-      });
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
 
-      const {
-        resolveNonTaskInputModalityDelivery,
-        NonTaskInputModalityUnsupportedError,
-      } = await import('../non-task-provider-usage.js');
-      await expect(
-        resolveNonTaskInputModalityDelivery({
-          modality,
-          modelRole: 'orchestration',
-        }),
-      ).resolves.toEqual({
-        delivery: 'helper',
-        model: 'openrouter/openai/text-orchestrator',
-        helperModel: 'openrouter/google/gemini-3.8-flash',
-      });
-      await expect(
-        resolveNonTaskInputModalityDelivery({ modality, modelRole: 'primary' }),
-      ).resolves.toEqual({
-        delivery: 'direct',
-        model: 'openrouter/google/gemini-3.8-flash',
-      });
-      await expect(
-        resolveNonTaskInputModalityDelivery({
-          modality,
-          modelRole: 'primary',
-          skipSessionModel: true,
-        }),
-      ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
-    },
-  );
+    const { resolveNonTaskInputModalityDelivery } =
+      await import('../non-task-provider-usage.js');
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'audio',
+        modelRole: 'orchestration',
+      }),
+    ).resolves.toEqual({
+      delivery: 'direct',
+      model: 'openrouter/google/gemini-session',
+    });
+  });
 
   it('does not fall back to Vision or helper when the selected media model lacks audio', async () => {
     process.env = {

@@ -7,8 +7,8 @@ import { toast } from 'sonner';
 import { useTRPC } from '@/trpc/client';
 
 import {
-  ArrowLeftRight,
   ArrowRight,
+  ArrowRightLeft,
   Badge,
   BasicTooltip,
   Brain,
@@ -93,6 +93,7 @@ import type {
   UserTaskModelMapping,
   UserTaskModelMappingPreset,
   UserTaskModelMappingRole,
+  ModelFallbackConfig,
 } from '@roomote/types';
 
 type EditableTaskModel = {
@@ -279,6 +280,8 @@ function TaskModelRoleEditor({
   onModelChange,
   onReasoningChange,
   children,
+  fallback,
+  showDefaultLabel,
 }: {
   config: TaskModelRoleConfig;
   managedByEnv: boolean;
@@ -294,6 +297,8 @@ function TaskModelRoleEditor({
   onModelChange: (value: string) => void;
   onReasoningChange: (value: ReasoningEffort | null) => void;
   children?: ReactNode;
+  fallback?: ReactNode;
+  showDefaultLabel?: boolean;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const Icon = config.icon;
@@ -379,6 +384,11 @@ function TaskModelRoleEditor({
             </p>
           ) : null}
         </div>
+        {showDefaultLabel ? (
+          <span className="text-xs font-medium text-muted-foreground">
+            Default
+          </span>
+        ) : null}
         <ModelReasoningPicker
           open={pickerOpen}
           onOpenChange={setPickerOpen}
@@ -415,6 +425,7 @@ function TaskModelRoleEditor({
           </p>
         )}
         {children}
+        {fallback}
       </div>
     </div>
   );
@@ -526,8 +537,9 @@ function UseRecommendedDefaultsAction({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm">
-          Use a mapping preset
+        <Button variant="ghost" size="sm" aria-label="Use a mapping preset">
+          <span className="hidden sm:inline">Use a mapping preset</span>
+          <span className="sm:hidden">Presets</span>
           <ChevronDown />
         </Button>
       </PopoverTrigger>
@@ -574,14 +586,16 @@ function UseRecommendedDefaultsAction({
                   <CommandItem
                     key={preset.id}
                     value={`${provider.label} ${preset.label}`}
-                    aria-label={`${provider.label}: ${preset.label}${preset.default ? ' (default)' : ''}`}
+                    aria-label={`${provider.label}: ${preset.label}${preset.default && preset.label !== 'Default' ? ' (default)' : ''}`}
                     onSelect={() => {
                       setOpen(false);
                       onSelectProvider(provider, preset);
                     }}
                   >
                     {preset.label}
-                    {preset.default && ' (default)'}
+                    {preset.default &&
+                      preset.label !== 'Default' &&
+                      ' (default)'}
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -1002,6 +1016,13 @@ export function ModelSettingsSection({
   );
   const lookupMutation = useMutation(trpc.taskModels.lookup.mutationOptions());
   const updateMutation = useMutation(trpc.taskModels.update.mutationOptions());
+  const updateFallbacksMutation = useMutation(
+    trpc.taskModels.updateFallbacks?.mutationOptions?.() ?? {
+      mutationFn: async () => {
+        throw new Error('Fallback settings are unavailable.');
+      },
+    },
+  );
   const createCustomPresetMutation = useMutation(
     trpc.taskModels.customPresets.create.mutationOptions(),
   );
@@ -1037,6 +1058,13 @@ export function ModelSettingsSection({
   );
   const [codingModelRoutingRules, setCodingModelRoutingRules] =
     useState<CodingModelRoutingRulesDraft>([]);
+  const [modelFallbacks, setModelFallbacks] = useState<ModelFallbackConfig>({
+    enabled: false,
+    roles: {},
+  });
+  const [fallbackPickerOpen, setFallbackPickerOpen] = useState<
+    Partial<Record<TaskModelRole, boolean>>
+  >({});
   const [newModelId, setNewModelId] = useState('');
   const [newModelProvider, setNewModelProvider] =
     useState<SetupModelProviderId>('openrouter');
@@ -1219,6 +1247,9 @@ export function ModelSettingsSection({
     if (!settingsData) {
       return;
     }
+    setModelFallbacks(
+      settingsData.modelFallbacks ?? { enabled: false, roles: {} },
+    );
 
     const nextDraft = {
       models: settingsData.models.map(
@@ -1294,6 +1325,24 @@ export function ModelSettingsSection({
     setRoleDrafts(nextDraft.roles);
     setCodingModelRoutingRules(nextDraft.codingModelRoutingRules);
   }, [settingsData]);
+
+  const persistFallbacks = async (next: ModelFallbackConfig) => {
+    const previous = modelFallbacks;
+    setModelFallbacks(next);
+    try {
+      await updateFallbacksMutation.mutateAsync(next);
+      await queryClient.invalidateQueries({
+        queryKey: trpc.taskModels.get.queryKey(),
+      });
+    } catch (error) {
+      setModelFallbacks(previous);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Failed to save fallback models.',
+      );
+    }
+  };
 
   const enabledModelSet = useMemo(
     () => new Set(enabledModelIds),
@@ -2129,12 +2178,14 @@ export function ModelSettingsSection({
         const model = mappingModelOptionsByRole[role].find(
           (option) => option.id === modelId,
         );
-        const reasoningEffort =
-          model?.metadata?.supportsReasoning === false
-            ? null
-            : (currentRoles[role].reasoningEffort ??
-              status?.reasoningEffort ??
-              DEFAULT_MODEL_ROLE_REASONING_EFFORTS[role]);
+        const requestedReasoningEffort =
+          currentRoles[role].reasoningEffort ??
+          status?.reasoningEffort ??
+          DEFAULT_MODEL_ROLE_REASONING_EFFORTS[role];
+        const reasoningEffort = normalizeReasoningEffortForModel(
+          requestedReasoningEffort,
+          model?.metadata,
+        );
 
         return [role, { modelId: modelId ?? '', reasoningEffort }];
       }),
@@ -2318,23 +2369,43 @@ export function ModelSettingsSection({
   return (
     <div className="space-y-6">
       <Section
-        icon={ArrowLeftRight}
+        icon={ArrowRightLeft}
         title="Model mapping"
         action={
-          <UseRecommendedDefaultsAction
-            providers={sortedConnectedProviders}
-            customPresets={customPresets}
-            getUnavailableRoles={getUnavailableCustomPresetRoles}
-            onSelectProvider={(provider, preset) =>
-              setMappingDialog({ kind: 'provider', provider, preset })
-            }
-            onSelectCustom={(preset) =>
-              setMappingDialog({ kind: 'custom', preset })
-            }
-            onAddCustom={openCreatePresetDialog}
-          />
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Switch
+                aria-label="Fallback config"
+                checked={modelFallbacks.enabled}
+                disabled={updateFallbacksMutation.isPending}
+                onCheckedChange={(enabled) =>
+                  void persistFallbacks({ ...modelFallbacks, enabled })
+                }
+              />
+              <span className="text-sm">Fallback config</span>
+            </div>
+            <UseRecommendedDefaultsAction
+              providers={sortedConnectedProviders}
+              customPresets={customPresets}
+              getUnavailableRoles={getUnavailableCustomPresetRoles}
+              onSelectProvider={(provider, preset) =>
+                setMappingDialog({ kind: 'provider', provider, preset })
+              }
+              onSelectCustom={(preset) =>
+                setMappingDialog({ kind: 'custom', preset })
+              }
+              onAddCustom={openCreatePresetDialog}
+            />
+          </div>
         }
       >
+        {modelFallbacks.enabled ? (
+          <p className="text-sm text-muted-foreground">
+            Pick default and fallback models for each role. Fallbacks are used
+            when the provider for the default model isn&apos;t responding or has
+            run out of credits.
+          </p>
+        ) : null}
         <div className="divide-y divide-background">
           {TASK_MODEL_ROLE_CONFIGS.map((config) => {
             const status =
@@ -2365,6 +2436,100 @@ export function ModelSettingsSection({
                 }
                 onReasoningChange={(value) =>
                   updateRoleReasoningEffort(config.role, value)
+                }
+                showDefaultLabel={modelFallbacks.enabled}
+                fallback={
+                  modelFallbacks.enabled ? (
+                    <div className="space-y-2 pt-1">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        Fallback
+                      </span>
+                      <ModelReasoningPicker
+                        open={fallbackPickerOpen[config.role] === true}
+                        onOpenChange={(open) =>
+                          setFallbackPickerOpen((current) => ({
+                            ...current,
+                            [config.role]: open,
+                          }))
+                        }
+                        trigger={
+                          <ModelReasoningPickerTrigger
+                            label={
+                              modelFallbacks.roles[config.role]
+                                ? (models.find(
+                                    (model) =>
+                                      model.id ===
+                                      modelFallbacks.roles[config.role]
+                                        ?.modelId,
+                                  )?.displayName ?? 'None')
+                                : 'None'
+                            }
+                            reasoningEffort={
+                              modelFallbacks.roles[config.role]
+                                ?.reasoningEffort ?? null
+                            }
+                            appearance="select"
+                            ariaLabel={`${config.label} fallback model and reasoning`}
+                          />
+                        }
+                        models={[
+                          {
+                            id: '__none__',
+                            displayName: 'None',
+                            metadata: null,
+                          },
+                          ...roleOptionGroups[config.role].flatMap((group) =>
+                            group.items.filter(
+                              (model) =>
+                                model.id !== resolvedModelIds[config.role],
+                            ),
+                          ),
+                        ]}
+                        model={
+                          modelFallbacks.roles[config.role]?.modelId ??
+                          '__none__'
+                        }
+                        onModelChange={(modelId) => {
+                          const roles = { ...modelFallbacks.roles };
+                          if (modelId === '__none__') {
+                            delete roles[config.role];
+                          } else {
+                            const metadata = models.find(
+                              (model) => model.id === modelId,
+                            )?.metadata;
+                            roles[config.role] = {
+                              modelId,
+                              reasoningEffort: normalizeReasoningEffortForModel(
+                                DEFAULT_MODEL_ROLE_REASONING_EFFORTS[
+                                  config.role
+                                ],
+                                metadata,
+                              ),
+                            };
+                          }
+                          void persistFallbacks({ ...modelFallbacks, roles });
+                        }}
+                        reasoningEffort={
+                          modelFallbacks.roles[config.role]?.reasoningEffort ??
+                          null
+                        }
+                        defaultReasoningEffort={
+                          DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role]
+                        }
+                        onReasoningEffortChange={(reasoningEffort) => {
+                          const current = modelFallbacks.roles[config.role];
+                          if (!current) return;
+                          void persistFallbacks({
+                            ...modelFallbacks,
+                            roles: {
+                              ...modelFallbacks.roles,
+                              [config.role]: { ...current, reasoningEffort },
+                            },
+                          });
+                        }}
+                      />
+                    </div>
+                  ) : undefined
                 }
               >
                 {config.role === 'coding' ? (

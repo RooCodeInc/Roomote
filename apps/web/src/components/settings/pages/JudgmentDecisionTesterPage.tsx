@@ -1,0 +1,626 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+
+import { SettingsShell } from '@/components/settings/SettingsShell';
+import {
+  Badge,
+  Button,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Skeleton,
+  Textarea,
+} from '@/components/system';
+import { useTRPC } from '@/trpc/client';
+import {
+  JudgmentExamplePresets,
+  type LoadedJudgmentExample,
+} from './JudgmentExamplePresets';
+
+type Target = 'configured' | 'roomote';
+type ModelChoice = Target | 'both';
+
+function targetsFor(choice: ModelChoice | undefined): Target[] {
+  if (!choice) return [];
+  return choice === 'both' ? ['configured', 'roomote'] : [choice];
+}
+type Question = {
+  type: 'noul' | 'choice' | 'score';
+  instructions: string;
+  criteria?:
+    | Record<string, string>
+    | string[]
+    | { true: string; false: string };
+};
+type Answer = {
+  type?: string;
+  noul?: number;
+  choice?: string;
+  score?: number;
+  confidence?: number;
+  probabilities?: Record<string, number>;
+};
+type TestResult =
+  | {
+      ok: true;
+      provider: string;
+      model: string;
+      answers: Record<string, Answer>;
+      invalid: string[];
+      latencyMs: number;
+    }
+  | { ok: false; provider: string | null; error: string; latencyMs?: number };
+
+const ERROR_MESSAGES: Record<string, string> = {
+  timeout: 'Timed out.',
+  request_failed: 'The request failed.',
+  http_401: 'The model rejected the credentials (HTTP 401).',
+  http_403: 'The model refused the request (HTTP 403).',
+  http_429: 'The model is rate limiting (HTTP 429).',
+};
+
+function describeError(error: string): string {
+  return (
+    ERROR_MESSAGES[error] ??
+    (error.startsWith('http_')
+      ? `The model returned HTTP ${error.slice(5)}.`
+      : error)
+  );
+}
+
+/** Options in display order, with the probability each answer gives them. */
+function optionsFor(
+  question: Question,
+  answer: Answer | undefined,
+): Array<{ key: string; label: string; probability?: number }> {
+  if (question.type === 'noul') {
+    const yes = answer?.noul;
+    return [
+      { key: 'yes', label: 'yes', probability: yes },
+      {
+        key: 'no',
+        label: 'no',
+        probability: yes === undefined ? undefined : 1 - yes,
+      },
+    ];
+  }
+  if (question.type === 'choice') {
+    const keys = Array.isArray(question.criteria)
+      ? question.criteria
+      : Object.keys(question.criteria ?? {});
+    return keys.map((key) => ({
+      key,
+      label: key,
+      probability: answer?.probabilities?.[key],
+    }));
+  }
+  const levels = Array.isArray(question.criteria) ? question.criteria : [];
+  return levels.map((level, index) => ({
+    key: String(index),
+    label: `${index} · ${level}`,
+    probability:
+      answer?.probabilities?.[String(index)] ??
+      (answer?.score !== undefined && Math.round(answer.score) === index
+        ? answer.confidence
+        : undefined),
+  }));
+}
+
+/** What an option means, for its tooltip: the criteria text Roomote sends. */
+function optionDescription(question: Question, key: string): string {
+  const criteria = question.criteria;
+  if (question.type === 'noul') {
+    const pair = criteria as { true?: string; false?: string } | undefined;
+    return (key === 'yes' ? pair?.true : pair?.false) ?? key;
+  }
+  if (question.type === 'choice' && criteria && !Array.isArray(criteria)) {
+    return (criteria as Record<string, string>)[key] ?? key;
+  }
+  return Array.isArray(criteria) ? (criteria[Number(key)] ?? key) : key;
+}
+
+function pickOf(
+  question: Question,
+  answer: Answer | undefined,
+): string | undefined {
+  if (!answer) return undefined;
+  if (question.type === 'noul')
+    return answer.noul === undefined
+      ? undefined
+      : answer.noul >= 0.5
+        ? 'yes'
+        : 'no';
+  if (question.type === 'choice') return answer.choice;
+  return answer.score === undefined
+    ? undefined
+    : String(Math.round(answer.score));
+}
+
+function ProbabilityBar({
+  value,
+  secondary,
+}: {
+  value?: number;
+  secondary?: boolean;
+}) {
+  return (
+    <div className="relative h-4 overflow-hidden rounded-sm bg-muted">
+      <div
+        className={
+          secondary
+            ? 'absolute inset-y-0 left-0 bg-amber-500/80'
+            : 'absolute inset-y-0 left-0 bg-primary/80'
+        }
+        style={{ width: `${Math.round((value ?? 0) * 100)}%` }}
+      />
+      <span className="absolute inset-y-0 right-1 text-[11px] leading-4 tabular-nums text-foreground">
+        {value === undefined ? '–' : `${Math.round(value * 100)}%`}
+      </span>
+    </div>
+  );
+}
+
+export function JudgmentDecisionTesterPage() {
+  const trpc = useTRPC();
+  const catalogQuery = useQuery(
+    trpc.taskModels.judgment.decisionCatalog.queryOptions(),
+  );
+  const test = useMutation(
+    trpc.taskModels.judgment.testDecision.mutationOptions(),
+  );
+  const catalog = catalogQuery.data;
+
+  const [decisionId, setDecisionId] = useState<string>();
+  const [stateText, setStateText] = useState('');
+  const [questionsText, setQuestionsText] = useState('');
+  const [modelChoice, setModelChoice] = useState<ModelChoice>();
+  const [inputError, setInputError] = useState<string>();
+  const [loadedExample, setLoadedExample] = useState<LoadedJudgmentExample>();
+  const [repeats, setRepeats] = useState(1);
+  const [running, setRunning] = useState(false);
+  const [runs, setRuns] = useState<
+    Array<{
+      label: string;
+      state: unknown;
+      questions: Record<string, Question>;
+      results: Partial<Record<Target, TestResult>>;
+      example?: LoadedJudgmentExample;
+      edited: boolean;
+    }>
+  >([]);
+  const [runIndex, setRunIndex] = useState(0);
+
+  const decision = useMemo(
+    () =>
+      catalog?.decisions.find((d) => d.id === decisionId) ??
+      catalog?.decisions[0],
+    [catalog, decisionId],
+  );
+
+  useEffect(() => {
+    if (!decision) return;
+    setStateText(JSON.stringify(decision.sampleState, null, 2));
+    setQuestionsText(JSON.stringify(decision.questions, null, 2));
+    test.reset();
+    setLoadedExample(undefined);
+    setInputError(undefined);
+    // Reset only when the decision changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decision?.id]);
+
+  const availableTargets = (
+    Object.keys(catalog?.targets ?? {}) as Target[]
+  ).filter((target) => catalog?.targets[target].available);
+
+  const modelOptions: Array<{ value: ModelChoice; label: string }> = [
+    ...availableTargets.map((target) => ({
+      value: target as ModelChoice,
+      label: catalog!.targets[target].label,
+    })),
+    ...(availableTargets.length === 2
+      ? [{ value: 'both' as const, label: 'Both, side by side' }]
+      : []),
+  ];
+  const selectedChoice =
+    modelChoice && modelOptions.some((o) => o.value === modelChoice)
+      ? modelChoice
+      : modelOptions[0]?.value;
+
+  const run = async () => {
+    let state: unknown;
+    let questions: Record<string, Question>;
+    try {
+      state = JSON.parse(stateText);
+    } catch (error) {
+      setInputError(`State is not valid JSON: ${(error as Error).message}`);
+      return;
+    }
+    try {
+      questions = JSON.parse(questionsText);
+    } catch (error) {
+      setInputError(
+        `Questions are not valid JSON: ${(error as Error).message}`,
+      );
+      return;
+    }
+    const chosen = targetsFor(selectedChoice);
+    if (!chosen.length) {
+      setInputError('Choose a model to ask.');
+      return;
+    }
+    setInputError(undefined);
+    setRunning(true);
+    try {
+      for (let index = 0; index < repeats; index++) {
+        const results = await test.mutateAsync({
+          state: state as Record<string, unknown>,
+          questions: questions as never,
+          targets: chosen,
+        });
+        setRuns((previous) =>
+          [
+            {
+              label: `${loadedExample?.label ?? decision?.label ?? 'Custom'} · run ${index + 1}`,
+              state,
+              questions,
+              results: results as Partial<Record<Target, TestResult>>,
+              example: loadedExample,
+              edited: Boolean(
+                loadedExample &&
+                (stateText !== loadedExample.stateText ||
+                  questionsText !== loadedExample.questionsText),
+              ),
+            },
+            ...previous,
+          ].slice(0, 10),
+        );
+        setRunIndex(0);
+      }
+    } catch (error) {
+      setInputError(
+        error instanceof Error ? error.message : 'The request failed.',
+      );
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const selectedRun = runs[runIndex];
+  const results = selectedRun?.results ?? {};
+  const asked = selectedRun?.questions ?? {};
+  const answeredTargets = (Object.keys(results) as Target[]).filter(
+    (t) => results[t],
+  );
+
+  return (
+    <SettingsShell
+      pageId="models"
+      adminOnly={true}
+      titleOverride="Test decisions"
+      descriptionOverride="Ask the judgment model one of Roomote's decisions by hand. Test decisions go to the configured model but are not recorded for comparison or training."
+      boundedContentOnDesktop
+    >
+      <div className="space-y-4 md:min-h-0 md:flex-1 md:overflow-y-auto">
+        {catalogQuery.isPending ? (
+          <Skeleton className="h-64 w-full" />
+        ) : catalog ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <fieldset disabled={running} className="min-w-0 space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="judgment-decision">Decision</Label>
+                <Select value={decision?.id} onValueChange={setDecisionId}>
+                  <SelectTrigger id="judgment-decision" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {catalog.decisions.map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {decision && (
+                  <p className="text-xs text-muted-foreground">
+                    {decision.description}
+                  </p>
+                )}
+                {decision?.note && (
+                  <p className="text-xs text-muted-foreground">
+                    {decision.note}
+                  </p>
+                )}
+              </div>
+
+              {decision?.id === 'repository-judgement' && (
+                <JudgmentExamplePresets
+                  onLoad={(example) => {
+                    setLoadedExample(example);
+                    setStateText(example.stateText);
+                    setQuestionsText(example.questionsText);
+                    setInputError(undefined);
+                  }}
+                />
+              )}
+              {loadedExample && (
+                <p className="text-xs text-muted-foreground">
+                  Loaded: {loadedExample.label} · {loadedExample.stage}
+                  {stateText !== loadedExample.stateText ||
+                  questionsText !== loadedExample.questionsText
+                    ? ' · edited'
+                    : ''}
+                </p>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="judgment-state">State (JSON)</Label>
+                <Textarea
+                  id="judgment-state"
+                  value={stateText}
+                  onChange={(event) => setStateText(event.target.value)}
+                  spellCheck={false}
+                  className="min-h-56 max-h-96 overflow-y-auto font-mono text-xs"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <Select
+                  value={selectedChoice}
+                  onValueChange={(value) =>
+                    setModelChoice(value as ModelChoice)
+                  }
+                  disabled={modelOptions.length === 0}
+                >
+                  <SelectTrigger
+                    aria-label="Model"
+                    className="w-full sm:w-auto sm:min-w-56"
+                  >
+                    <SelectValue placeholder="No judgment model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {modelOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={String(repeats)}
+                  onValueChange={(value) => setRepeats(Number(value))}
+                >
+                  <SelectTrigger aria-label="Repetitions" className="w-auto">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">One run</SelectItem>
+                    <SelectItem value="3">Three runs</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={() => void run()}
+                  disabled={running || availableTargets.length === 0}
+                >
+                  {running ? 'Asking…' : 'Ask'}
+                </Button>
+              </div>
+              {availableTargets.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No judgment model is configured. Choose one under Judgment
+                  model on the Models page.
+                </p>
+              )}
+              {inputError && (
+                <p className="text-sm text-destructive">{inputError}</p>
+              )}
+              <details className="space-y-1.5">
+                <summary className="cursor-pointer text-sm text-muted-foreground">
+                  Edit questions (JSON)
+                </summary>
+                <Textarea
+                  id="judgment-questions"
+                  aria-label="Questions (JSON)"
+                  value={questionsText}
+                  onChange={(event) => setQuestionsText(event.target.value)}
+                  spellCheck={false}
+                  className="min-h-40 max-h-96 overflow-y-auto font-mono text-xs"
+                />
+              </details>
+            </fieldset>
+
+            <div className="min-w-0 space-y-3">
+              {runs.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="judgment-run">Recent runs</Label>
+                  <Select
+                    value={String(runIndex)}
+                    onValueChange={(value) => setRunIndex(Number(value))}
+                  >
+                    <SelectTrigger id="judgment-run" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {runs.map((item, index) => (
+                        <SelectItem key={index} value={String(index)}>
+                          {index + 1} · {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedRun?.example && (
+                    <p className="text-xs text-muted-foreground">
+                      Expected: {selectedRun.example.expected} · Violation
+                      cutoff: {Math.round(selectedRun.example.threshold * 100)}%
+                      · {selectedRun.example.stage}
+                      {selectedRun.edited ? ' · edited input' : ''}. This is a
+                      packet answer; verify final status with a full check.
+                    </p>
+                  )}
+                </div>
+              )}
+              {selectedRun && (
+                <details className="space-y-1.5">
+                  <summary className="cursor-pointer text-sm text-muted-foreground">
+                    View tested input
+                  </summary>
+                  <pre className="max-h-64 overflow-auto rounded-md border p-3 text-xs">
+                    {JSON.stringify(
+                      {
+                        state: selectedRun.state,
+                        questions: selectedRun.questions,
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
+              )}
+              {answeredTargets.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  Answers appear here.
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {answeredTargets.map((target, index) => {
+                      const result = results[target]!;
+                      return (
+                        <Badge
+                          key={target}
+                          variant={result.ok ? 'secondary' : 'destructive'}
+                        >
+                          <span
+                            className={
+                              index === 1 ? 'text-amber-600' : undefined
+                            }
+                          >
+                            {catalog.targets[target].label}
+                          </span>
+                          {result.ok
+                            ? ` · ${result.latencyMs} ms${result.invalid.length ? ` · ${result.invalid.length} invalid` : ''}`
+                            : ` · ${describeError(result.error)}`}
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                  {Object.entries(asked).map(([questionId, question]) => (
+                    <div
+                      key={questionId}
+                      className="space-y-1.5 border-t pt-3 first:border-t-0 first:pt-0"
+                    >
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="font-mono text-sm font-semibold">
+                          {questionId}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {question.type}
+                        </span>
+                        {answeredTargets.map((target) => {
+                          const result = results[target];
+                          const answer = result?.ok
+                            ? result.answers[questionId]
+                            : undefined;
+                          const violationProbability =
+                            selectedRun?.example && question.type === 'noul'
+                              ? answer?.noul
+                              : undefined;
+                          const pick =
+                            violationProbability !== undefined
+                              ? violationProbability >=
+                                selectedRun!.example!.threshold
+                                ? 'flagged'
+                                : 'below cutoff'
+                              : pickOf(question, answer);
+                          const invalid =
+                            result?.ok && result.invalid.includes(questionId);
+                          return pick !== undefined || invalid ? (
+                            <span key={target} className="text-xs">
+                              {catalog.targets[target].label}:{' '}
+                              <strong>
+                                {invalid ? 'invalid answer' : pick}
+                              </strong>
+                              {violationProbability !== undefined && (
+                                <span>
+                                  {' '}
+                                  · violation probability{' '}
+                                  {Math.round(violationProbability * 100)}%
+                                </span>
+                              )}
+                              {result?.ok &&
+                                result.answers[questionId]?.confidence !==
+                                  undefined && (
+                                  <span>
+                                    {' '}
+                                    · confidence{' '}
+                                    {Math.round(
+                                      result.answers[questionId]!.confidence! *
+                                        100,
+                                    )}
+                                    %
+                                    {selectedRun?.example &&
+                                    result.answers[questionId]!.confidence! <
+                                      selectedRun.example.threshold
+                                      ? ' (below threshold)'
+                                      : ''}
+                                  </span>
+                                )}
+                            </span>
+                          ) : null;
+                        })}
+                      </div>
+                      <div
+                        className="grid items-center gap-x-3 gap-y-1 text-xs"
+                        style={{
+                          gridTemplateColumns: `minmax(5rem, max-content) repeat(${answeredTargets.length}, minmax(0, 1fr))`,
+                        }}
+                      >
+                        {optionsFor(question, undefined).map((option) => (
+                          <div key={option.key} className="contents">
+                            <span
+                              className="truncate font-mono"
+                              title={optionDescription(question, option.key)}
+                            >
+                              {selectedRun?.example && question.type === 'noul'
+                                ? option.key === 'yes'
+                                  ? 'violation'
+                                  : 'no violation'
+                                : option.label}
+                            </span>
+                            {answeredTargets.map((target, index) => {
+                              const result = results[target];
+                              const answer = result?.ok
+                                ? result.answers[questionId]
+                                : undefined;
+                              const value = optionsFor(question, answer).find(
+                                (o) => o.key === option.key,
+                              )?.probability;
+                              return (
+                                <ProbabilityBar
+                                  key={target}
+                                  value={value}
+                                  secondary={index === 1}
+                                />
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-destructive">
+            Could not load the decisions.
+          </p>
+        )}
+      </div>
+    </SettingsShell>
+  );
+}

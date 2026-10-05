@@ -311,6 +311,23 @@ describe('Slack thread reply quotes', () => {
     );
   });
 
+  it('keeps emoji shortcode syntax in ordinary replies for Slack markdown parsing', async () => {
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    const text = 'Completed :white_check_mark: and ✅.';
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(postMessageDetailedMock.mock.calls[0]?.[0]?.blocks).toContainEqual({
+      type: 'markdown',
+      text,
+    });
+  });
+
   it('consumes an older pending quote without rendering it when the turn is suppressed', async () => {
     buildThreadReplyImageBlocksMock.mockResolvedValue([]);
     getNextSlackReplyQuoteSuppressionMock.mockResolvedValue('suppression-1');
@@ -464,6 +481,43 @@ describe('Slack thread reply quotes', () => {
         ],
       }),
     );
+  });
+
+  it('renders shortcode emoji in the automation result card without changing Unicode', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: { channel: 'C123', customAutomationId: 'automation-1' },
+    });
+    getCustomAutomationByIdMock.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Daily demo ideas',
+      scheduleMode: 'daily',
+    });
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    const text = 'Completed :white_check_mark: and ✅.';
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+
+    expect(response.status).toBe(200);
+    const outbound = postMessageDetailedMock.mock.calls[0]?.[0];
+    const contentBlock = outbound.blocks[0]?.child_blocks.find(
+      (block: { type?: string }) => block.type === 'rich_text',
+    );
+    expect(contentBlock).toEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text: 'Completed ✅ and ✅.' }],
+        },
+      ],
+    });
   });
 
   it.each([0, 1, 2])(

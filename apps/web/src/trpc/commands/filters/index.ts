@@ -60,6 +60,20 @@ function getCategoryCondition(category: string | null | undefined) {
   return taskCategory ? [inArray(tasks.workflow, taskCategory.workflows)] : [];
 }
 
+function getRepositoryFilterCondition(repositoryName: string) {
+  if (repositoryName.startsWith('env:')) {
+    const environmentId = repositoryName.slice(4);
+    return sql`EXISTS (
+      SELECT 1
+      FROM ${taskRuns}
+      WHERE ${taskRuns.taskId} = ${tasks.id}
+        AND ${taskRuns.payload}->>'environmentId' = ${environmentId}
+    )`;
+  }
+
+  return eq(tasks.repositoryName, repositoryName);
+}
+
 export async function getUsersOnlyForFilterCommand(
   auth: UserAuthSuccess,
   input: {
@@ -86,7 +100,7 @@ export async function getUsersOnlyForFilterCommand(
   }
 
   if (input.repositoryName) {
-    whereConditions.push(eq(tasks.repositoryName, input.repositoryName));
+    whereConditions.push(getRepositoryFilterCondition(input.repositoryName));
   }
 
   whereConditions.push(...getCategoryCondition(input.category));
@@ -238,7 +252,7 @@ export async function getPullRequestsForFilterCommand(
   const whereConditions = [...getVisibleTaskHistoryConditions(auth)];
 
   if (input.repositoryName) {
-    whereConditions.push(eq(tasks.repositoryName, input.repositoryName));
+    whereConditions.push(getRepositoryFilterCondition(input.repositoryName));
   }
 
   if (input.userId) {
@@ -361,20 +375,7 @@ export async function getModelsForFilterCommand(
   const conditions = [...getVisibleTaskHistoryConditions(auth)];
 
   if (input.repositoryName) {
-    if (input.repositoryName.startsWith('env:')) {
-      const environmentId = input.repositoryName.slice(4);
-
-      conditions.push(
-        sql`EXISTS (
-          SELECT 1
-          FROM ${taskRuns}
-          WHERE ${taskRuns.taskId} = ${tasks.id}
-            AND ${taskRuns.payload}->>'environmentId' = ${environmentId}
-        )`,
-      );
-    } else {
-      conditions.push(eq(tasks.repositoryName, input.repositoryName));
-    }
+    conditions.push(getRepositoryFilterCondition(input.repositoryName));
   }
 
   if (input.userId) {

@@ -6,13 +6,16 @@ import {
   type CommunicationProvider,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
-import { getAutomationRuntime } from '@roomote/db/server';
+import {
+  db,
+  ensureSessionForTask,
+  getAutomationRuntime,
+} from '@roomote/db/server';
 import {
   resolveAutomationRuntimeDestination,
   resolveAutomationRepositoryDestination,
   listConnectedCommunicationProviders,
   runAutomationNow,
-  type AutomationRunNowResult,
   type ResolvedAutomationDestination,
 } from '@roomote/sdk/server';
 
@@ -36,6 +39,10 @@ async function assertManualTriggerIsRunnable(
 
   if (!descriptor) {
     throw new Error(`Unsupported automation: ${String(automationKey)}`);
+  }
+
+  if (automationKey === 'manager_stats') {
+    throw new Error('Manager Stats does not support on-demand runs.');
   }
 
   const runtime = await getAutomationRuntime(automationKey);
@@ -170,7 +177,7 @@ async function assertManualTriggerIsRunnable(
 export async function triggerAutomationCommand(
   auth: UserAuthSuccess,
   input: { automationKey: TriggerableBackgroundAutomationKey },
-): Promise<AutomationRunNowResult> {
+) {
   assertAdmin(auth);
 
   if (!isTriggerableBackgroundAutomationKey(input.automationKey)) {
@@ -182,7 +189,13 @@ export async function triggerAutomationCommand(
     auth,
   );
 
-  return runAutomationNow(input.automationKey, {
+  const result = await runAutomationNow(input.automationKey, {
+    context: { trigger: 'manual' },
     ...(destination ? { destination } : {}),
   });
+
+  if (result.outcome !== 'launched') return result;
+
+  const session = await ensureSessionForTask(db, { taskId: result.taskId });
+  return { ...result, sessionId: session.id };
 }

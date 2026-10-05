@@ -64,7 +64,7 @@ describe('buildAutoAddedTaskModelSettings', () => {
     expect(result!.taskModelSettings.defaultModelId).toBe('xai/grok-4.7');
   });
 
-  it('seeds GPT-6 Luna as the default for a fresh OpenAI connection', () => {
+  it('seeds GPT 5.6 Luna as the default while retaining GPT-6 routes', () => {
     const result = buildAutoAddedTaskModelSettings({
       provider: OPENAI,
       persistedTaskModelSettings: null,
@@ -74,15 +74,20 @@ describe('buildAutoAddedTaskModelSettings', () => {
     const modelIds = result!.taskModelSettings.models?.map((model) => model.id);
 
     expect(modelIds).toEqual(
-      expect.arrayContaining(['openai/gpt-6-sol', 'openai/gpt-6-luna']),
+      expect.arrayContaining([
+        'openai/gpt-5.6-sol',
+        'openai/gpt-6-sol',
+        'openai/gpt-6.1-sol',
+        'openai/gpt-5.6-luna',
+        'openai/gpt-6-luna',
+      ]),
     );
-    expect(modelIds).not.toEqual(
-      expect.arrayContaining(['openai/gpt-5.6-sol', 'openai/gpt-5.6-luna']),
+    expect(result!.taskModelSettings.defaultModelId).toBe(
+      'openai/gpt-5.6-luna',
     );
-    expect(result!.taskModelSettings.defaultModelId).toBe('openai/gpt-6-luna');
   });
 
-  it('seeds the OpenCode Go GPT-6 Luna route as the fresh default', () => {
+  it('seeds the OpenCode Go GPT 5.6 Luna route as the fresh default', () => {
     const provider = getSetupModelProvider('opencode-go');
     const result = buildAutoAddedTaskModelSettings({
       provider,
@@ -90,11 +95,14 @@ describe('buildAutoAddedTaskModelSettings', () => {
       connectedProviderIds: new Set(['opencode-go']),
     });
 
-    expect(
-      result!.taskModelSettings.models?.map((model) => model.id),
-    ).toContain('opencode-go/gpt-6-luna');
+    expect(result!.taskModelSettings.models?.map((model) => model.id)).toEqual(
+      expect.arrayContaining([
+        'opencode-go/gpt-5.6-luna',
+        'opencode-go/gpt-6-luna',
+      ]),
+    );
     expect(result!.taskModelSettings.defaultModelId).toBe(
-      'opencode-go/gpt-6-luna',
+      'opencode-go/gpt-5.6-luna',
     );
   });
 
@@ -278,8 +286,8 @@ describe('buildAutoAddedTaskModelSettings', () => {
     const bedrock = getSetupModelProvider('amazon-bedrock');
     const metadataCatalog: ModelsDevCatalog = {
       models: {
-        'anthropic/claude-sonnet-5': {
-          name: 'Claude Sonnet 5',
+        'anthropic/claude-sonnet-5-5': {
+          name: 'Claude Sonnet 5.5',
           limit: { context: 205_000 },
           cost: { input: 1, output: 3.2 },
         },
@@ -297,7 +305,8 @@ describe('buildAutoAddedTaskModelSettings', () => {
 
     expect(
       result?.addedModels.find(
-        (model) => model.id === 'bedrock-mantle/anthropic.claude-sonnet-5',
+        (model) =>
+          model.id === 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       )?.metadata,
     ).toMatchObject({
       contextWindow: 205_000,
@@ -411,7 +420,7 @@ describe('appendRecommendedTaskModels', () => {
       connectedProviderIds: new Set(['amazon-bedrock']),
       metadataCatalog: {
         models: {
-          'anthropic/claude-sonnet-5': {
+          'anthropic/claude-sonnet-5-5': {
             limit: { context: 205_000 },
             cost: { input: 1, output: 3.2 },
           },
@@ -423,7 +432,8 @@ describe('appendRecommendedTaskModels', () => {
 
     expect(
       result.find(
-        (model) => model.id === 'bedrock-mantle/anthropic.claude-sonnet-5',
+        (model) =>
+          model.id === 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       )?.metadata,
     ).toMatchObject({
       contextWindow: 205_000,

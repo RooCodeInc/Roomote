@@ -100,7 +100,7 @@ describe('getGiteaAutomationTargets', () => {
     });
   });
 
-  it('enforces environment mapping for review automation', async () => {
+  it('returns reviewer targets for repositories without an environment mapping', async () => {
     mockSelectWhere.mockResolvedValue([]);
 
     const result = await getGiteaAutomationTargets({
@@ -111,11 +111,7 @@ describe('getGiteaAutomationTargets', () => {
       },
     });
 
-    expect(result).toEqual({
-      status: 'error',
-      message:
-        'no environment mapping associated with [gitea:42, acme/backend]',
-    });
+    expect(result).toMatchObject({ status: 'ok', targets: [{}] });
   });
 
   it('applies PR author policy unless explicitly ignored', async () => {
@@ -201,7 +197,7 @@ describe('getGiteaAutomationTargets', () => {
     expect(mockGetReviewCodeAutomationSettings).not.toHaveBeenCalled();
   });
 
-  it('still enforces environment mapping after a linked sender is resolved', async () => {
+  it('returns a linked-sender target for repositories without an environment mapping', async () => {
     mockAuthAccountsFindFirst.mockResolvedValue({ userId: 'commenter-user-1' });
     mockSelectWhere.mockResolvedValue([]);
 
@@ -216,10 +212,9 @@ describe('getGiteaAutomationTargets', () => {
       requireLinkedSenderAccount: true,
     });
 
-    expect(result).toEqual({
-      status: 'error',
-      message:
-        'no environment mapping associated with [gitea:42, acme/backend]',
+    expect(result).toMatchObject({
+      status: 'ok',
+      targets: [{ userId: 'commenter-user-1' }],
     });
   });
 

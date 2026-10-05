@@ -417,7 +417,13 @@ describe('startPreviewSetupTaskCommand', () => {
 
     const enqueueInput = vi.mocked(enqueueTask).mock.calls.at(-1)?.[0] as {
       title: string;
-      task: { payload: { description: string; environmentId?: string } };
+      task: {
+        payload: {
+          description: string;
+          environmentId?: string;
+          visibleInTranscript?: boolean;
+        };
+      };
     };
     expect(enqueueInput.title).toMatch(/^Fix live previews: /);
     expect(enqueueInput.task.payload.environmentId).toBe(environment.id);
@@ -432,6 +438,7 @@ describe('startPreviewSetupTaskCommand', () => {
     expect(enqueueInput.task.payload.description).toContain(
       'manage_environments',
     );
+    expect(enqueueInput.task.payload.visibleInTranscript).toBe(false);
   });
 
   it('launches with the setup change request by default', async () => {
@@ -452,12 +459,19 @@ describe('startPreviewSetupTaskCommand', () => {
 
     const enqueueInput = vi.mocked(enqueueTask).mock.calls.at(-1)?.[0] as {
       title: string;
-      task: { payload: { description: string; environmentId?: string } };
+      task: {
+        payload: {
+          description: string;
+          environmentId?: string;
+          visibleInTranscript?: boolean;
+        };
+      };
     };
     expect(enqueueInput.title).toMatch(/^Set up live previews: /);
     expect(enqueueInput.task.payload.environmentId).toBe(environment.id);
     expect(enqueueInput.task.payload.description).toContain(
       ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
     );
+    expect(enqueueInput.task.payload.visibleInTranscript).toBe(false);
   });
 });

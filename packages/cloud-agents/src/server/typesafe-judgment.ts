@@ -19,6 +19,10 @@ import {
   NON_TASK_INFERENCE_SURFACES,
   resolveNonTaskHelperModel,
 } from './non-task-provider-usage';
+import {
+  getDecisionModelRequirements,
+  type JudgmentDecisionId,
+} from './judgment-decision-policy';
 
 /**
  * Optional judgment-model backend. A judgment model answers typed questions
@@ -217,9 +221,13 @@ async function resolveJudgmentBackendUncached(): Promise<
 }
 
 /** Cached briefly because judgments sit on hot paths. */
-export async function resolveJudgmentBackend(): Promise<
-  JudgmentBackend | undefined
-> {
+export async function resolveJudgmentBackend(
+  options: { bypassCache?: boolean } = {},
+): Promise<JudgmentBackend | undefined> {
+  // Source-disclosure decisions must observe settings across API processes;
+  // invalidating one process's cache when settings are saved is insufficient.
+  if (options.bypassCache) return resolveJudgmentBackendUncached();
+
   const now = Date.now();
 
   if (cachedBackend && cachedBackend.expiresAt > now) {
@@ -323,7 +331,7 @@ class JudgmentResponseParseError extends Error {
   }
 }
 
-type JudgmentRequestRole = 'primary' | 'shadow';
+type JudgmentRequestRole = 'primary' | 'shadow' | 'test';
 
 type JudgmentUsageOutcome =
   | 'success'
@@ -921,23 +929,106 @@ async function requestVercelGateway(
   }
 }
 
-/**
- * Ask Jev a set of independent questions over the same state. Returns `null`
- * when no judgment model is configured so callers can keep their existing
- * behavior; throws on transport, HTTP, or response-shape failures so callers
- * can log and fall back.
- */
-export async function evaluateTypeSafeJudgments<
+/** One request to `backend`, answers normalized to Roomote's shape. */
+async function requestFromBackend(
+  backend: JudgmentBackend,
+  state: unknown,
+  questions: Record<string, TypeSafeQuestion>,
+  timeoutMs: number,
+  tracking: JudgmentTracking,
+): Promise<{
+  answers: Record<string, unknown> | undefined;
+  response: TrackedJudgmentResponse | undefined;
+}> {
+  switch (backend.provider) {
+    case 'roomote':
+      return requestRoomoteDecisions(
+        backend,
+        state,
+        questions,
+        timeoutMs,
+        tracking,
+      );
+    case 'typesafe':
+      return requestNativeDecisions(
+        backend.apiKey,
+        state,
+        questions,
+        timeoutMs,
+        { url: TYPESAFE_API_URL, model: TYPESAFE_MODEL },
+        tracking,
+      );
+    case 'openrouter': {
+      const request = await requestNativeDecisions(
+        backend.apiKey,
+        state,
+        questions,
+        timeoutMs,
+        { url: OPENROUTER_DECISIONS_URL, model: OPENROUTER_JEV_MODEL_ID },
+        tracking,
+      );
+      return {
+        answers: withDerivedConfidence(request.answers),
+        response: request.response,
+      };
+    }
+    case 'vercel':
+      return requestVercelGateway(
+        backend.apiKey,
+        state,
+        questions,
+        timeoutMs,
+        tracking,
+      );
+  }
+}
+
+type TypeSafeJudgmentParams<
   TQuestions extends Record<string, TypeSafeQuestion>,
->(params: {
+> = {
   /** JSON-serializable context the questions are answered over. */
   state: unknown;
   questions: TQuestions;
   timeoutMs?: number;
-}): Promise<TypeSafeAnswers<TQuestions> | null> {
-  const backend = await resolveJudgmentBackend();
+  decision?: JudgmentDecisionId;
+  excludeRoomoteModel?: boolean;
+  /** Read the current provider before sending source, ignoring the hot-path cache. */
+  bypassBackendCache?: boolean;
+  /** Disable secondary evaluation for source-retrieval requests. */
+  skipShadow?: boolean;
+};
 
-  if (!backend) {
+/**
+ * Ask the configured judgment backend a set of independent questions over the
+ * same state. Unregistered decisions are Jev-only; returns `null` when the
+ * required backend is unavailable so callers can keep their existing behavior.
+ * Throws on transport, HTTP, or response-shape failures so callers can log and
+ * fall back.
+ */
+export async function evaluateTypeSafeJudgments<
+  TQuestions extends Record<string, TypeSafeQuestion>,
+>(
+  params: TypeSafeJudgmentParams<TQuestions>,
+): Promise<TypeSafeAnswers<TQuestions> | null> {
+  const result = await evaluateTypeSafeJudgmentsWithUsage(params);
+  return result?.answers ?? null;
+}
+
+/** Return normalized token counts for callers that pace requests using usage. */
+export async function evaluateTypeSafeJudgmentsWithUsage<
+  TQuestions extends Record<string, TypeSafeQuestion>,
+>(
+  params: TypeSafeJudgmentParams<TQuestions>,
+): Promise<{
+  answers: TypeSafeAnswers<TQuestions>;
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+} | null> {
+  const excludeRoomoteModel = decisionModelExcludesRoomoteModel(params);
+  const backend = await resolveJudgmentBackend({
+    bypassCache: params.bypassBackendCache,
+  });
+
+  if (!backend || (excludeRoomoteModel && backend.provider === 'roomote')) {
     return null;
   }
 
@@ -957,61 +1048,13 @@ export async function evaluateTypeSafeJudgments<
   let response: TrackedJudgmentResponse | undefined;
 
   try {
-    switch (backend.provider) {
-      case 'roomote': {
-        const request = await requestRoomoteDecisions(
-          backend,
-          params.state,
-          params.questions,
-          timeoutMs,
-          tracking,
-        );
-        answers = request.answers;
-        response = request.response;
-        break;
-      }
-      case 'typesafe': {
-        const request = await requestNativeDecisions(
-          backend.apiKey,
-          params.state,
-          params.questions,
-          timeoutMs,
-          { url: TYPESAFE_API_URL, model: TYPESAFE_MODEL },
-          tracking,
-        );
-        answers = request.answers;
-        response = request.response;
-        break;
-      }
-      case 'openrouter': {
-        const request = await requestNativeDecisions(
-          backend.apiKey,
-          params.state,
-          params.questions,
-          timeoutMs,
-          {
-            url: OPENROUTER_DECISIONS_URL,
-            model: OPENROUTER_JEV_MODEL_ID,
-          },
-          tracking,
-        );
-        response = request.response;
-        answers = withDerivedConfidence(request.answers);
-        break;
-      }
-      case 'vercel': {
-        const request = await requestVercelGateway(
-          backend.apiKey,
-          params.state,
-          params.questions,
-          timeoutMs,
-          tracking,
-        );
-        answers = request.answers;
-        response = request.response;
-        break;
-      }
-    }
+    ({ answers, response } = await requestFromBackend(
+      backend,
+      params.state,
+      params.questions,
+      timeoutMs,
+      tracking,
+    ));
 
     for (const [questionId, question] of Object.entries(params.questions)) {
       if (!isValidAnswer(question, answers?.[questionId])) {
@@ -1027,7 +1070,11 @@ export async function evaluateTypeSafeJudgments<
     throw error;
   }
 
-  if (backend.provider !== 'roomote' && Env.R_JUDGMENT_SHADOW === 'on') {
+  if (
+    !params.skipShadow &&
+    backend.provider !== 'roomote' &&
+    Env.R_JUDGMENT_SHADOW === 'on'
+  ) {
     void shadowRoomoteJudgment(backend.provider, requestId, params, answers);
   }
 
@@ -1040,7 +1087,115 @@ export async function evaluateTypeSafeJudgments<
     });
   }
 
-  return answers as TypeSafeAnswers<TQuestions>;
+  const usage = parseJudgmentUsage(response);
+  const tokenCount = (value: number | undefined) =>
+    value !== undefined && Number.isSafeInteger(value) ? value : undefined;
+  return {
+    answers: answers as TypeSafeAnswers<TQuestions>,
+    usage: {
+      inputTokens: tokenCount(usage.inputTokens),
+      outputTokens: tokenCount(usage.outputTokens),
+      totalTokens: tokenCount(usage.totalTokens),
+    },
+  };
+}
+
+/**
+ * `configured` is the backend Roomote uses for decisions; `roomote` is the
+ * Roomote-run upstream, which answers when selected or shadows Jev.
+ */
+export type JudgmentTestTarget = 'configured' | 'roomote';
+
+export type JudgmentTestResult =
+  | {
+      ok: true;
+      provider: JudgmentBackend['provider'];
+      model: string;
+      answers: Record<string, unknown>;
+      /** Question ids whose answer Roomote would reject. */
+      invalid: string[];
+      latencyMs: number;
+    }
+  | {
+      ok: false;
+      provider: JudgmentBackend['provider'] | null;
+      error: string;
+      latencyMs?: number;
+    };
+
+const TEST_TIMEOUT_MS = 20_000;
+
+/**
+ * Ask one judgment backend directly, for the admin decision tester. Unlike
+ * evaluateTypeSafeJudgments it never shadows or captures the decision,
+ * reports invalid answers instead of throwing, and can ask the Roomote-run
+ * upstream even while Jev is the configured backend. Usage is recorded with
+ * the `test` role.
+ */
+export async function testJudgmentBackend(params: {
+  state: unknown;
+  questions: Record<string, TypeSafeQuestion>;
+  target: JudgmentTestTarget;
+}): Promise<JudgmentTestResult> {
+  let backend: JudgmentBackend | undefined;
+  if (params.target === 'roomote') {
+    const upstream = resolveRoomoteJudgmentUpstream();
+    backend = upstream ? { provider: 'roomote', ...upstream } : undefined;
+  } else {
+    backend = await resolveJudgmentBackend();
+  }
+
+  if (!backend) {
+    return {
+      ok: false,
+      provider: null,
+      error:
+        params.target === 'roomote'
+          ? 'The Roomote judgment model is not configured on this deployment.'
+          : 'No judgment model is configured.',
+    };
+  }
+
+  const tracking: JudgmentTracking = {
+    requestId: randomUUID(),
+    provider: backend.provider,
+    model: judgmentModelForBackend(backend),
+    role: 'test',
+  };
+  const started = Date.now();
+  let response: TrackedJudgmentResponse | undefined;
+
+  try {
+    const request = await requestFromBackend(
+      backend,
+      params.state,
+      params.questions,
+      TEST_TIMEOUT_MS,
+      tracking,
+    );
+    response = request.response;
+    const answers = request.answers ?? {};
+    const invalid = Object.entries(params.questions)
+      .filter(([id, question]) => !isValidAnswer(question, answers[id]))
+      .map(([id]) => id);
+    response?.finish(invalid.length > 0 ? 'validation_error' : 'success');
+    return {
+      ok: true,
+      provider: backend.provider,
+      model: tracking.model,
+      answers,
+      invalid,
+      latencyMs: Date.now() - started,
+    };
+  } catch (error) {
+    response?.finish('response_error');
+    return {
+      ok: false,
+      provider: backend.provider,
+      error: shadowFailureCategory(error),
+      latencyMs: Date.now() - started,
+    };
+  }
 }
 
 function asNumber(value: unknown): number | undefined {
@@ -1187,6 +1342,8 @@ export function resetDecisionModelCache(): void {
 }
 
 export type DecisionModelRequirements = {
+  /** The decision being evaluated; unregistered decisions are Jev-only. */
+  decision?: JudgmentDecisionId;
   /**
    * The decision runs on every turn or task, so it needs a judgment backend
    * (Jev or the Roomote-run model); the helper fallback would be an LLM call
@@ -1197,16 +1354,28 @@ export type DecisionModelRequirements = {
    * The model Roomote trains (the `roomote` upstream, hosted or self-hosted)
    * is not yet trusted with this decision, so only Jev answers it; with no
    * Jev backend it is not asked, and the helper fallback is not used either.
+   * An explicit value overrides the decision registry for a deliberate opt-in.
    * Separate from `highVolume`, which is about cost, not quality.
    */
   excludeRoomoteModel?: boolean;
+  /** Do not send a secondary Roomote shadow request for this decision. */
+  skipShadow?: boolean;
 };
+
+function decisionModelExcludesRoomoteModel(
+  options: Pick<DecisionModelRequirements, 'decision' | 'excludeRoomoteModel'>,
+): boolean {
+  return (
+    options.excludeRoomoteModel ??
+    getDecisionModelRequirements(options.decision).excludeRoomoteModel
+  );
+}
 
 function meetsRequirements(
   value: DecisionModelResolution,
   options: DecisionModelRequirements,
 ): boolean {
-  if (options.excludeRoomoteModel) {
+  if (decisionModelExcludesRoomoteModel(options)) {
     return value.kind === 'judgment' && !value.roomoteModel;
   }
   return !options.highVolume || value.supportsHighVolumeDecisions;
@@ -1233,7 +1402,10 @@ export async function resolveDecisionModel(
 
   const backend = await resolveJudgmentBackend();
 
-  if (!backend && (options.highVolume || options.excludeRoomoteModel)) {
+  if (
+    !backend &&
+    (options.highVolume || decisionModelExcludesRoomoteModel(options))
+  ) {
     return null;
   }
 
@@ -1336,9 +1508,11 @@ function buildHelperDecisionPrompt(
 }
 
 /**
- * Evaluate a decision through Jev when available and otherwise through the
- * deployment helper model. High-volume callers must opt in and are skipped
- * unless the resolved model explicitly supports that workload.
+ * Evaluate a decision through its registered judgment policy. New and
+ * unregistered decisions are Jev-only; registered trained decisions may use
+ * the Roomote model. Helper fallback remains available to existing ordinary
+ * decisions, while high-volume callers are skipped unless the resolved model
+ * explicitly supports that workload.
  */
 export async function evaluateDecisionModel<
   TQuestions extends Record<string, TypeSafeQuestion>,
@@ -1351,9 +1525,10 @@ export async function evaluateDecisionModel<
     taskId?: string | null;
   } & DecisionModelRequirements,
 ): Promise<TypeSafeAnswers<TQuestions> | null> {
+  const excludeRoomoteModel = decisionModelExcludesRoomoteModel(params);
   const decisionModel = await resolveDecisionModel({
     highVolume: params.highVolume === true,
-    excludeRoomoteModel: params.excludeRoomoteModel === true,
+    excludeRoomoteModel,
   });
 
   if (!decisionModel) {
@@ -1361,7 +1536,7 @@ export async function evaluateDecisionModel<
   }
 
   if (decisionModel.kind === 'judgment') {
-    return evaluateTypeSafeJudgments(params);
+    return evaluateTypeSafeJudgments({ ...params, excludeRoomoteModel });
   }
 
   const { object } = await generateTrackedNonTaskObject({

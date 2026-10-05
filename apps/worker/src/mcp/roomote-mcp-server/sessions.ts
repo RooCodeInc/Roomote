@@ -7,13 +7,16 @@ import {
 } from './tasks-api-client.js';
 import { catchError, jsonResult } from './tool-result.js';
 import type { RoomoteConfig, ToolResult } from './types.js';
+import type { RoomoteMessageAttachment } from '@roomote/types';
 
 export async function handleStartSession(
-  message: string,
+  params: { message: string; attachments?: RoomoteMessageAttachment[] },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   try {
-    return jsonResult(await startSession(config, message));
+    return jsonResult(
+      await startSession(config, params.message, params.attachments),
+    );
   } catch (error) {
     return catchError(error);
   }
@@ -60,12 +63,21 @@ export async function handleGetSessionMessages(
 }
 
 export async function handleSendSessionMessage(
-  params: { sessionId: string; message: string },
+  params: {
+    sessionId: string;
+    message: string;
+    attachments?: RoomoteMessageAttachment[];
+  },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   try {
     return jsonResult(
-      await sendMessageToSession(config, params.sessionId, params.message),
+      await sendMessageToSession(
+        config,
+        params.sessionId,
+        params.message,
+        params.attachments,
+      ),
     );
   } catch (error) {
     return catchError(error);

@@ -24,6 +24,7 @@ import {
   authUsers,
   db,
   eq,
+  setAgentMailOutboundEnabled,
   userFactory,
   users,
 } from '@roomote/db/server';
@@ -126,9 +127,12 @@ describe('agentmail webhook event outbox (real database)', () => {
     process.env.R_AGENTMAIL_INBOX_ID = INBOX;
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mocks.evaluateTypeSafeJudgments.mockReset();
     mocks.evaluateTypeSafeJudgments.mockResolvedValue(null);
+    await getRedis().del(
+      `agentmail:stranger_refusal:daily:${new Date().toISOString().slice(0, 10)}`,
+    );
   });
 
   it('acknowledges and drops deliveries while the email channel is disabled', async () => {
@@ -561,6 +565,61 @@ describe('agentmail webhook event outbox (real database)', () => {
       await deliverStranger(rejectedThread, rejectedSender);
       expect(refusalAttempts).toBe(1);
     } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not consume stranger-refusal claims or daily quota while outbound email is disabled', async () => {
+    const originalFetch = globalThis.fetch;
+    let refusalAttempts = 0;
+    globalThis.fetch = (async () => {
+      refusalAttempts += 1;
+      return new Response(JSON.stringify({ message_id: 'm-refusal' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const sender = `${randomUUID()}@example.com`;
+    const threadId = `thread-${randomUUID()}`;
+    const dailyKey = `agentmail:stranger_refusal:daily:${new Date().toISOString().slice(0, 10)}`;
+    const redis = getRedis();
+    const dailyCountBefore = await redis.get(dailyKey);
+
+    try {
+      await setAgentMailOutboundEnabled(false);
+      const deliveryId = `msg_${randomUUID()}`;
+      await recordAgentMailWebhookEvent({
+        deliveryId,
+        eventId: null,
+        eventType: 'message.received',
+        payload: messageReceivedPayload({
+          eventId: `evt_${randomUUID()}`,
+          threadId,
+          messageId: `m-${randomUUID()}`,
+          from: sender,
+          text: 'Hello from a stranger while outbound email is disabled',
+        }),
+      });
+
+      await processAgentMailWebhookEvent(deliveryId);
+
+      const eventRow = await db.query.agentmailWebhookEvents.findFirst({
+        where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
+      });
+      expect(eventRow?.state).toBe('processed');
+      expect(refusalAttempts).toBe(0);
+      expect(await redis.get(dailyKey)).toBe(dailyCountBefore);
+      expect(
+        await redis.get(
+          `agentmail:stranger_refusal:${INBOX}:${threadId}:${sender}`,
+        ),
+      ).toBeNull();
+      expect(
+        await redis.get(`agentmail:stranger_refusal:sender:${sender}`),
+      ).toBeNull();
+    } finally {
+      await setAgentMailOutboundEnabled(true);
       globalThis.fetch = originalFetch;
     }
   });

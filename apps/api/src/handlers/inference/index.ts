@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { evaluateJevgrepRequest } from './jevgrep';
 
 import {
   formatSingleLineLog,
@@ -340,6 +342,8 @@ function inputContainsVisionContent(input: unknown[]): boolean {
  */
 export const inference = new Hono<{ Variables: Variables }>();
 
+inference.use('/jevgrep/*', bodyLimit({ maxSize: 2 * 1024 * 1024 }));
+
 inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   const startedAt = Date.now();
   const requestId = crypto.randomUUID();
@@ -364,6 +368,22 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
 
   if (!taskRun) {
     return c.json({ error: 'Task run not found for this token' }, 404);
+  }
+
+  if (providerId === 'jevgrep') {
+    if (
+      method !== 'POST' ||
+      extractUpstreamPath(pathname, providerId) !== '/v1/systemone'
+    ) {
+      return c.json({ error: 'Unsupported Jevgrep endpoint' }, 404);
+    }
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400);
+    }
+    return evaluateJevgrepRequest(body);
   }
 
   const provider = getInferenceProvider(providerId);

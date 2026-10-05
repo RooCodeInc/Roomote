@@ -133,7 +133,7 @@ describe('getGitLabAutomationTargets', () => {
     expect(mockGetReviewCodeAutomationSettings).not.toHaveBeenCalled();
   });
 
-  it('still enforces environment mapping after a linked sender is resolved', async () => {
+  it('returns a linked-sender target for repositories without an environment mapping', async () => {
     mockAuthAccountsFindFirst.mockResolvedValue({ userId: 'linked-user-1' });
     mockSelectWhere.mockResolvedValue([]);
 
@@ -147,10 +147,9 @@ describe('getGitLabAutomationTargets', () => {
       requireLinkedSenderAccount: true,
     });
 
-    expect(result).toEqual({
-      status: 'error',
-      message:
-        'no environment mapping associated with [gitlab:42, acme/backend]',
+    expect(result).toMatchObject({
+      status: 'ok',
+      targets: [{ userId: 'linked-user-1' }],
     });
   });
 

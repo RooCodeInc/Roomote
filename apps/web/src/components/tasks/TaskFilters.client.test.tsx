@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import {
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
@@ -112,6 +112,52 @@ describe('TaskFilters', () => {
     useRepositoriesForFilterMock.mockReturnValue({ data: [] });
     useModelsForFilterMock.mockReturnValue({ data: [] });
     usePullRequestsForFilterMock.mockReturnValue({ data: [] });
+  });
+
+  it('names every filter trigger independently of its responsive visible text', () => {
+    const { rerender } = render(
+      <TaskFilters
+        {...baseProps}
+        showTaskType
+        taskTypes={[]}
+        onTaskTypesChange={vi.fn()}
+      />,
+    );
+
+    for (const name of [
+      'User filter: You',
+      'Environment filter: Environment',
+      'Pull request filter: PR',
+      'Model filter: Model',
+      'Task type filter: No Types',
+      'Time filter: Time',
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
+
+    rerender(
+      <TaskFilters
+        {...baseProps}
+        userId="all"
+        repositoryName={NO_REPOSITORIES}
+        model="custom-model"
+        timePeriod={7}
+        showTaskType={false}
+        showRepository={false}
+        showPullRequest={false}
+        showModel={false}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'User filter: Any User' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Time filter: Last 7 Days' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Environment filter:/ }),
+    ).not.toBeInTheDocument();
   });
 
   it('forwards the active category to the filter hooks', () => {

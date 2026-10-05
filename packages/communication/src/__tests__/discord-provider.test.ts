@@ -109,6 +109,245 @@ describe('DiscordCommunicationProvider', () => {
     });
   });
 
+  it('keeps LF table rows whole when they fit in a fresh fenced message', async () => {
+    let nonce = 123456789012345678n;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(nonce++),
+    });
+    const channelId = '400000000000000001';
+    const rows = Array.from({ length: 104 }, (_, index) => {
+      const label = String(index).padStart(3, '0');
+      return `| row ${label} | ${'x'.repeat(974)} value |`;
+    });
+    const text = `\`\`\`text\n${rows.join('\n')}\n\`\`\``;
+
+    await provider.postMessage({ channelId, text });
+
+    const messages = server.state.messages[channelId] ?? [];
+    expect(messages.length).toBeGreaterThan(1);
+    for (const message of messages) {
+      expect(message.content.length).toBeLessThanOrEqual(2_000);
+      expect(message.content.match(/^```/gm)?.length ?? 0).toBe(2);
+    }
+    expect(
+      rows.every((row) =>
+        messages.some((message) => message.content.includes(row)),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps CRLF table rows whole when they fit in a fresh fenced message', async () => {
+    let nonce = 123456789012345678n;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(nonce++),
+    });
+    const channelId = '400000000000000001';
+    const rows = Array.from({ length: 101 }, (_, index) => {
+      const label = String(index).padStart(3, '0');
+      return `| row ${label} | ${'x'.repeat(973)} value |`;
+    });
+    const text = `\`\`\`text\r\n${rows.join('\r\n')}\r\n\`\`\``;
+
+    await provider.postMessage({ channelId, text });
+
+    const messages = server.state.messages[channelId] ?? [];
+    expect(messages.length).toBeGreaterThan(1);
+    for (const message of messages) {
+      expect(message.content.length).toBeLessThanOrEqual(2_000);
+      expect(message.content.match(/^```/gm)?.length ?? 0).toBe(2);
+    }
+    expect(
+      rows.every((row) =>
+        messages.some((message) => message.content.includes(row)),
+      ),
+    ).toBe(true);
+  });
+
+  it('moves a first fenced row after prose without posting an empty fence over HTTP', async () => {
+    const server = new MockDiscordServer();
+    const { baseUrl, close } = await server.listen();
+    const prose = `Summary ${'p'.repeat(990)}\n\n`;
+    const row = `| row 000 | ${'x'.repeat(974)} value |`;
+    let nonce = 123456789012345678n;
+    const provider = new DiscordCommunicationProvider({
+      botToken: server.botToken,
+      applicationId: server.application.id,
+      apiBaseUrl: baseUrl,
+      nonceFactory: () => String(nonce++),
+    });
+
+    try {
+      await provider.postMessage({
+        channelId: '400000000000000001',
+        text: `${prose}\`\`\`text\n\n${row}\n\`\`\``,
+      });
+
+      const stateResponse = await fetch(
+        `${baseUrl.replace(/\/api\/v10$/u, '')}/mock/state`,
+      );
+      const state = (await stateResponse.json()) as {
+        messages: Record<string, Array<{ content: string }>>;
+      };
+      const messages = state.messages['400000000000000001'] ?? [];
+      expect(messages).toHaveLength(2);
+      expect(messages[0]?.content).toBe(prose);
+      expect(messages[1]?.content).toContain(row);
+      expect(messages[1]?.content).toContain('```text\n\n');
+      expect(messages[1]?.content.match(/^```/gm)?.length ?? 0).toBe(2);
+      expect(messages.every((message) => message.content.length <= 2_000)).toBe(
+        true,
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it('keeps near-limit prose bounded before fenced blank lines over HTTP', async () => {
+    const server = new MockDiscordServer();
+    const { baseUrl, close } = await server.listen();
+    let nonce = 123456789012345678n;
+    const provider = new DiscordCommunicationProvider({
+      botToken: server.botToken,
+      applicationId: server.application.id,
+      apiBaseUrl: baseUrl,
+      nonceFactory: () => String(nonce++),
+    });
+
+    try {
+      await provider.postMessage({
+        channelId: '400000000000000001',
+        text: `${'a'.repeat(1_998)}\n\`\`\`text\n\n\ncode\n\`\`\``,
+      });
+
+      const stateResponse = await fetch(
+        `${baseUrl.replace(/\/api\/v10$/u, '')}/mock/state`,
+      );
+      const state = (await stateResponse.json()) as {
+        messages: Record<string, Array<{ content: string }>>;
+      };
+      const messages = state.messages['400000000000000001'] ?? [];
+      expect(messages.map((message) => message.content.length)).toEqual([
+        1_999, 18,
+      ]);
+      expect(messages[0]?.content).not.toContain('```');
+      expect(messages[1]?.content).toBe('```text\n\n\ncode\n```');
+      expect(messages.every((message) => message.content.length <= 2_000)).toBe(
+        true,
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it.each([
+    { bodyLength: 2_000, rowContentLength: 1_978 },
+    { bodyLength: 1_999, rowContentLength: 1_977 },
+  ])(
+    'keeps a $bodyLength-character fenced block whole over HTTP',
+    async ({ bodyLength, rowContentLength }) => {
+      const server = new MockDiscordServer();
+      const { baseUrl, close } = await server.listen();
+      let nonce = 123456789012345678n;
+      const provider = new DiscordCommunicationProvider({
+        botToken: server.botToken,
+        applicationId: server.application.id,
+        apiBaseUrl: baseUrl,
+        nonceFactory: () => String(nonce++),
+      });
+      const row = `| row | ${'x'.repeat(rowContentLength)} |`;
+      const fencedBlock = `\`\`\`text\n${row}\n\`\`\``;
+      expect(fencedBlock).toHaveLength(bodyLength);
+
+      try {
+        await provider.postMessage({
+          channelId: '400000000000000001',
+          text: `Summary\n\n${fencedBlock}`,
+        });
+
+        const stateResponse = await fetch(
+          `${baseUrl.replace(/\/api\/v10$/u, '')}/mock/state`,
+        );
+        const state = (await stateResponse.json()) as {
+          messages: Record<string, Array<{ content: string }>>;
+        };
+        const messages = state.messages['400000000000000001'] ?? [];
+        expect(messages.map((message) => message.content)).toEqual([
+          'Summary\n\n',
+          fencedBlock,
+        ]);
+        expect(
+          messages.every((message) => message.content.length <= 2_000),
+        ).toBe(true);
+      } finally {
+        await close();
+      }
+    },
+  );
+
+  it('does not prepend an empty fence to prose after an exact-limit fenced block', async () => {
+    const channelId = '400000000000000001';
+    const fencedBlock = `\`\`\`text\n${'x'.repeat(1_988)}\n\`\`\``;
+    const text = `${fencedBlock}\nAfter`;
+    expect(fencedBlock).toHaveLength(2_000);
+    expect(chunkDiscordMessage(text)).toEqual([fencedBlock, 'After']);
+
+    let nonce = 123456789012345678n;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(nonce++),
+    });
+    await provider.postMessage({ channelId, text });
+
+    expect(
+      (server.state.messages[channelId] ?? []).map(({ content }) => content),
+    ).toEqual([fencedBlock, 'After']);
+  });
+
+  it('splits a fenced line when it is too long for a fresh message', async () => {
+    let nonce = 123456789012345678n;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(nonce++),
+    });
+    const channelId = '400000000000000001';
+    const row = `| row | ${'x'.repeat(2_100)} value |`;
+
+    await provider.postMessage({
+      channelId,
+      text: `\`\`\`text\n${row}\n\`\`\``,
+    });
+
+    const messages = server.state.messages[channelId] ?? [];
+    expect(messages.length).toBeGreaterThan(1);
+    expect(messages.some((message) => message.content.includes(row))).toBe(
+      false,
+    );
+    for (const message of messages) {
+      expect(message.content.length).toBeLessThanOrEqual(2_000);
+      expect(message.content.match(/^```/gm)?.length ?? 0).toBe(2);
+    }
+  });
+
+  it('posts prose before a long table without a standalone empty code block', async () => {
+    let nonce = 123456789012345678n;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(nonce++),
+    });
+    const channelId = '400000000000000001';
+    const row = `| r0 | ${'x'.repeat(65)} |`;
+
+    await provider.postMessage({
+      channelId,
+      text: `${'S'.repeat(1_940)}\n\n\`\`\`text\n${row}\n\`\`\``,
+    });
+
+    const messages = server.state.messages[channelId] ?? [];
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.content).not.toContain('```');
+    expect(messages[1]?.content).toContain(`\`\`\`text\n${row}`);
+    expect(messages.every((message) => message.content.length <= 2_000)).toBe(
+      true,
+    );
+  });
+
   it('suppresses link unfurls on messages that carry no embeds of their own', async () => {
     // Discord unfurls any link into a preview card. Roomote posts task links
     // constantly, and Slack has always sent `unfurl_links: false`.
@@ -1242,10 +1481,231 @@ describe('DiscordCommunicationProvider', () => {
 });
 
 describe('chunkDiscordMessage', () => {
+  it.each(['\n', '\r\n'])(
+    'keeps the first fenced row with its opener after prose (%j)',
+    (newline) => {
+      const firstRow = `| r0 | ${'x'.repeat(newline === '\r\n' ? 36 : 38)} |`;
+      const text = `Summary${newline}${newline}\`\`\`text${newline}${firstRow}${newline}\`\`\``;
+      const chunks = chunkDiscordMessage(text, 60);
+      expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+      expect(chunks[0]).not.toContain('```');
+      expect(chunks[1]).toContain(`\`\`\`text${newline}${firstRow}`);
+      expect(
+        chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) % 2 === 0),
+      ).toBe(true);
+    },
+  );
+
+  it.each(['\n', '\r\n'])(
+    'keeps leading blank lines with the first fenced row after prose (%j)',
+    (newline) => {
+      for (const blankCount of [1, 2]) {
+        const firstRow = `| r0 | ${'x'.repeat((newline === '\r\n' ? 34 : 37) - (blankCount - 1) * newline.length)} |`;
+        const blankLines = newline.repeat(blankCount);
+        const text = `Summary${newline}${newline}\`\`\`text${newline}${blankLines}${firstRow}${newline}\`\`\``;
+        const chunks = chunkDiscordMessage(text, 60);
+        expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+        expect(chunks[0]).not.toContain('```');
+        expect(chunks[1]).toContain(
+          `\`\`\`text${newline}${blankLines}${firstRow}`,
+        );
+        expect(
+          chunks.every(
+            (chunk) => (chunk.match(/^```/gm)?.length ?? 0) % 2 === 0,
+          ),
+        ).toBe(true);
+      }
+    },
+  );
+
+  it('moves an indented blank line with the first fenced row after prose', () => {
+    const firstRow = `| r0 | ${'x'.repeat(35)} |`;
+    const chunks = chunkDiscordMessage(
+      `Summary\n\n\`\`\`text\n  \n${firstRow}\n\`\`\``,
+      60,
+    );
+    expect(chunks[0]).not.toContain('```');
+    expect(chunks[1]).toContain(`\`\`\`text\n  \n${firstRow}`);
+    expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+  });
+
+  it('never adds leading code blank lines to near-limit prose', () => {
+    const prose = `${'p'.repeat(58)}\n`;
+    const chunks = chunkDiscordMessage(
+      `${prose}\`\`\`text\n\n\n| r0 | x |\n\`\`\``,
+      60,
+    );
+    expect(chunks[0]).toBe(prose);
+    expect(chunks[1]).toContain('```text\n\n\n| r0 | x |');
+    expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+  });
+
+  it('does not emit empty fences when a row fits without its leading blank', () => {
+    const prose = `${'p'.repeat(47)}\n`;
+    const row = `${'x'.repeat(47)}\n`;
+    const chunks = chunkDiscordMessage(
+      `${prose}\`\`\`text\n\n${row}\`\`\``,
+      60,
+    );
+    expect(chunks).toEqual([prose, `\`\`\`text\n${row}\`\`\``]);
+    expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+  });
+
   it('prefers newline boundaries without losing text', () => {
     expect(chunkDiscordMessage('first line\nsecond line', 12)).toEqual([
       'first line',
       'second line',
     ]);
+  });
+
+  it('preserves a boundary-sized fenced message without synthetic markers', () => {
+    const text = `\`\`\`js\n${'x'.repeat(1_990)}\n\`\`\``;
+    expect(text.length).toBe(2_000);
+    expect(chunkDiscordMessage(text)).toEqual([text]);
+  });
+
+  it('splits long fenced lines while retaining the language and exact content', () => {
+    const body = '🧪'.repeat(1_100);
+    const chunks = chunkDiscordMessage(`~~~typescript\n${body}\n~~~`, 80);
+    expect(chunks.length).toBeGreaterThan(2);
+    expect(chunks.every((chunk) => chunk.length <= 80)).toBe(true);
+    expect(chunks.every((chunk) => chunk.startsWith('~~~typescript\n'))).toBe(
+      true,
+    );
+    expect(chunks.every((chunk) => chunk.endsWith('\n~~~'))).toBe(true);
+    expect(
+      chunks
+        .map((chunk) => chunk.slice('~~~typescript\n'.length, -'\n~~~'.length))
+        .join(''),
+    ).toBe(body);
+  });
+
+  it('recognizes closing delimiters and does not treat code-looking lines as closers', () => {
+    const text = `\`\`\`ts\n${'x'.repeat(110)}\n\`\`\`not a close\n${'y'.repeat(90)}\n\`\`\`\nplain ending`;
+    const chunks = chunkDiscordMessage(text, 60);
+    expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+    expect(
+      chunks.filter((chunk) => chunk.includes('not a close')),
+    ).toHaveLength(1);
+    expect(chunks.at(-1)).toContain('plain ending');
+    expect(chunks.at(-1)?.endsWith('```')).toBe(false);
+  });
+
+  it('keeps a fence opening at a chunk boundary and later plain text outside it', () => {
+    const text = `${'p'.repeat(47)}\n\`\`\`js\n${'x'.repeat(90)}\n\`\`\`\nAfter`;
+    const chunks = chunkDiscordMessage(text, 50);
+    expect(chunks.every((chunk) => chunk.length <= 50)).toBe(true);
+    expect(chunks[0]).toBe(`${'p'.repeat(47)}\n`);
+    expect(
+      chunks
+        .slice(1)
+        .every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) % 2 === 0),
+    ).toBe(true);
+    expect(chunks.at(-1)).toContain('After');
+  });
+
+  it('recognizes CRLF fence closers at a short chunk boundary', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`ts\r\n${'x'.repeat(80)}\r\n\`\`\`\r\nOutside`,
+      40,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+    expect(
+      chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) % 2 === 0),
+    ).toBe(true);
+    expect(chunks.join('')).toMatch(/```\r\nOutside$/u);
+  });
+
+  it('keeps a CRLF pair together when it meets the fenced chunk boundary', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`ts\r\n${'x'.repeat(28)}\r\nsecond line\r\n\`\`\``,
+      40,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+    expect(chunks[0]).toBe(`\`\`\`ts\r\n${'x'.repeat(28)}\r\n\`\`\``);
+    expect(chunks[1]).toMatch(/^```ts\nsecond line/u);
+    expect(
+      chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) === 2),
+    ).toBe(true);
+  });
+
+  it('does not add a blank line when a fenced split falls before CRLF', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`ts\r\n${'x'.repeat(29)}\r\nsecond line\r\n\`\`\``,
+      40,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+    expect(chunks[1]).toMatch(/^```ts\nx\r\nsecond line/u);
+    expect(
+      chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) === 2),
+    ).toBe(true);
+  });
+
+  it('retries the next fenced chunk when CRLF backoff consumes capacity', () => {
+    const text = `\`\`\`ts\r\n${'x'.repeat(26)}\r\nx\r\nsecond line\r\n\`\`\``;
+    const chunks = chunkDiscordMessage(text, 40);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+    expect(
+      chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) === 2),
+    ).toBe(true);
+    expect(chunks[1]).toMatch(/^```ts\nx\r\nsecond line/u);
+    for (let limit = 24; limit <= 60; limit += 1) {
+      const nearby = chunkDiscordMessage(text, limit);
+      expect(nearby.every((chunk) => chunk.length <= limit)).toBe(true);
+      expect(
+        nearby.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) === 2),
+      ).toBe(true);
+    }
+  });
+
+  it('keeps a surrogate pair intact when backing off before CRLF', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`ts\r\n${'x'.repeat(27)}🧪\r\nsecond line\r\n\`\`\``,
+      40,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+    expect(chunks[1]).toMatch(/^```ts\n🧪\r\nsecond line/u);
+    expect(
+      chunks.some((chunk) => /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u.test(chunk)),
+    ).toBe(false);
+  });
+
+  it('avoids empty continuation lines across nearby CRLF boundaries', () => {
+    const text = `\`\`\`ts\r\n${'x'.repeat(50)}\r\nsecond line\r\n\`\`\``;
+    for (let limit = 24; limit <= 60; limit += 1) {
+      const chunks = chunkDiscordMessage(text, limit);
+      expect(chunks.every((chunk) => chunk.length <= limit)).toBe(true);
+      expect(
+        chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) === 2),
+      ).toBe(true);
+      expect(chunks.some((chunk) => /^```ts\n\r\n/u.test(chunk))).toBe(false);
+    }
+  });
+
+  it('does not duplicate an LF when it meets the fenced chunk boundary', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`ts\n${'x'.repeat(30)}\nsecond line\n\`\`\``,
+      40,
+    );
+    expect(chunks[0]).toBe(`\`\`\`ts\n${'x'.repeat(30)}\n\`\`\``);
+    expect(chunks[1]).toMatch(/^```ts\nsecond line/u);
+  });
+
+  it('bounds chunks even when a fence language is too long to repeat', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`${'a'.repeat(80)}\nbody\n\`\`\``,
+      40,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 40)).toBe(true);
+  });
+
+  it('does not stall when the opening line and closing overhead exhaust the budget', () => {
+    const chunks = chunkDiscordMessage(
+      `\`\`\`${'a'.repeat(30)}\nbody\n\`\`\``,
+      39,
+    );
+    expect(chunks.every((chunk) => chunk.length <= 39)).toBe(true);
+    expect(chunks.length).toBeGreaterThan(1);
   });
 });

@@ -398,9 +398,9 @@ const chartInput = z.object({
 })
 
 export default {
-  description: "Deliver a user-visible reply. Write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
+  description: "Deliver a user-visible reply. Automation replies require an explicit message containing only the finished announcement, result, or clarification, without progress narration or tool activity. For other replies, write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
   args: {
-    message: z.string().min(1).optional().describe("Markdown reply text. Omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
+    message: z.string().min(1).optional().describe("Markdown reply text. Required for automation replies; include only the finished announcement, result, or clarification. For other replies, omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded images to attach. Never claim an image or screenshot is attached, shown, or included unless this list is non-empty. If attachment delivery fails, reply with an accessible artifact viewer link and say that the image could not be attached."),
     videoArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded videos explicitly selected for native Slack delivery. Recover IDs and viewer links with manage_tasks get_summary. Never claim a video is attached unless selected here and delivery succeeds; when native delivery fails or is unavailable, share only its viewer link without an error or unavailability explanation."),
@@ -426,6 +426,19 @@ export default {
     purpose: z.enum(["ack", "closeout"]),
   },
   execute: (args, context) => invoke("send_chat_reaction", args, context),
+}
+`,
+
+  [FAST_AGENT_NATIVE_TOOL_NAMES.evaluateAutomationLaunchCriteria]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Evaluate the saved launch criteria for this custom automation after gathering the relevant current evidence with read-only tools. A confident stop ends the run quietly before delegated work or any destination reply.",
+  args: {
+    findingsReport: z.string().trim().min(1).max(12000).describe("Concise findings report grounded in the read-only tool results gathered so far"),
+  },
+  execute: (args, context) => invoke("evaluate_automation_launch_criteria", args, context),
 }
 `,
 
@@ -1631,9 +1644,11 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
+    automationLaunchCriteriaEnabled?: boolean;
+    brainEnabled?: boolean;
     /**
-     * Per-tool approval rules in OpenCode config-permission shape, applied to the parent build agent
-     * and the helper subagents in the generated per-conversation config.
+     * Per-tool approval rules in OpenCode config-permission shape, applied to every agent in the
+     * generated per-conversation config, subagents included.
      * Rules live in config rather than the session ruleset so a policy
      * change never strands stale state in a persisted session: this file is
      * rewritten every turn, and a policy change disposes the directory's
@@ -1686,10 +1701,15 @@ export async function getFastAgentNativeToolRuntime(
   );
   runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
   runtime.codeModeIntegrationsActive = true;
-  // Approval rules apply to the parent build agent and to the helper
-  // subagents. OpenCode merges this per-directory config over the shared
-  // server config, so a permission-only entry extends the existing advisor
-  // and judge definitions instead of replacing them.
+  // Approval rules apply to every agent: the top-level permission covers any
+  // subagent the model starts (including OpenCode's built-in ones), which
+  // would otherwise call integration tools under the default allow. Session
+  // calls are not gated at the proxy, so these native asks are the only
+  // gate. The build, advisor, and judge entries repeat the rules because an
+  // agent's own permission takes precedence over the top-level one. OpenCode
+  // merges this per-directory config over the shared server config, so a
+  // permission-only entry extends the existing advisor and judge definitions
+  // instead of replacing them.
   const toolApprovalAgentEntries = options.toolApprovalPermission
     ? {
         permission: options.toolApprovalPermission,
@@ -1698,6 +1718,7 @@ export async function getFastAgentNativeToolRuntime(
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
+      ...toolApprovalAgentEntries,
       // Keep the parent's fail-closed filter on its agent rather than on the
       // session. OpenCode copies session deny rules into task-created child
       // sessions, which would otherwise give advisor and judge the parent's
@@ -1715,6 +1736,9 @@ export async function getFastAgentNativeToolRuntime(
               serviceCredentialPrepareEnabled:
                 options.serviceCredentialPrepareEnabled,
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
+              automationLaunchCriteriaEnabled:
+                options.automationLaunchCriteriaEnabled,
+              brainEnabled: options.brainEnabled,
             },
           ),
           ...toolApprovalAgentEntries,

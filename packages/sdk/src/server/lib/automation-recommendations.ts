@@ -1169,9 +1169,13 @@ export async function runAutomationRecommendationInitialRunJob(
               outcome: 'skipped' as const,
               reason: 'Review Code runs from pull-request events.',
             }
-          : await runAutomationNow(candidate.automationKey)
+          : await runAutomationNow(candidate.automationKey, {
+              context: { trigger: 'manual' },
+            })
         : claimed.automationId
-          ? await runCustomAutomationNow(claimed.automationId)
+          ? await runCustomAutomationNow(claimed.automationId, {
+              trigger: 'manual',
+            })
           : {
               outcome: 'failed' as const,
               error: 'Recommendation automation was not created.',

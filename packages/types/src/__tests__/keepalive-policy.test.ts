@@ -12,16 +12,18 @@ import {
 } from '../keepalive-policy';
 
 describe('inferLaunchClassForTaskType', () => {
-  it.each([
-    [TaskPayloadKind.GithubPrReview, 'maintenance'],
-    [TaskPayloadKind.GithubPrReviewSync, 'maintenance'],
-    [TaskPayloadKind.Scan, 'maintenance'],
-    [TaskPayloadKind.McpRecommendations, 'maintenance'],
-    [TaskPayloadKind.GithubPrConflictResolve, 'maintenance'],
-    [TaskPayloadKind.GithubPrReviewFollowUp, 'human'],
-    [TaskPayloadKind.SnapshotEnvironment, 'maintenance'],
-  ])('maps %s to the %s launch class', (taskType, launchClass) => {
-    expect(inferLaunchClassForTaskType(taskType)).toBe(launchClass);
+  it('maps supported task types to their launch classes', () => {
+    for (const [taskType, launchClass] of [
+      [TaskPayloadKind.GithubPrReview, 'maintenance'],
+      [TaskPayloadKind.GithubPrReviewSync, 'maintenance'],
+      [TaskPayloadKind.Scan, 'maintenance'],
+      [TaskPayloadKind.McpRecommendations, 'maintenance'],
+      [TaskPayloadKind.GithubPrConflictResolve, 'maintenance'],
+      [TaskPayloadKind.GithubPrReviewFollowUp, 'human'],
+      [TaskPayloadKind.SnapshotEnvironment, 'maintenance'],
+    ] as const) {
+      expect(inferLaunchClassForTaskType(taskType)).toBe(launchClass);
+    }
   });
 });
 
@@ -84,57 +86,30 @@ describe('resolveKeepaliveMs', () => {
     expect(DEFAULT_MAINTENANCE_KEEPALIVE_MS).toBe(5 * 60 * 1000);
   });
 
-  it('uses the human default in production-like environments', () => {
-    expect(
-      resolveKeepaliveMs({
-        launchClass: 'human',
-        appEnv: 'production',
-        defaultKeepaliveMs,
-        delegatedKeepaliveMs,
-        sandboxTimeoutMs,
-      }),
-    ).toBe(delegatedKeepaliveMs);
+  it('resolves launch-class defaults across environments', () => {
+    for (const [launchClass, appEnv, expected] of [
+      ['human', 'production', delegatedKeepaliveMs],
+      ['human', 'development', defaultKeepaliveMs],
+      ['automation', 'production', DEFAULT_AUTOMATION_KEEPALIVE_MS],
+      ['maintenance', 'production', DEFAULT_MAINTENANCE_KEEPALIVE_MS],
+    ] as const) {
+      expect(
+        resolveKeepaliveMs({
+          launchClass,
+          appEnv,
+          defaultKeepaliveMs,
+          delegatedKeepaliveMs,
+          sandboxTimeoutMs,
+        }),
+      ).toBe(expected);
+    }
   });
 
-  it('keeps the shorter human default in development', () => {
-    expect(
-      resolveKeepaliveMs({
-        launchClass: 'human',
-        appEnv: 'development',
-        defaultKeepaliveMs,
-        delegatedKeepaliveMs,
-        sandboxTimeoutMs,
-      }),
-    ).toBe(defaultKeepaliveMs);
-  });
-
-  it('uses a one-minute keepalive for automation tasks', () => {
-    expect(
-      resolveKeepaliveMs({
-        launchClass: 'automation',
-        appEnv: 'production',
-        defaultKeepaliveMs,
-        delegatedKeepaliveMs,
-        sandboxTimeoutMs,
-      }),
-    ).toBe(DEFAULT_AUTOMATION_KEEPALIVE_MS);
-  });
-
-  it('uses the maintenance keepalive for maintenance tasks', () => {
-    expect(
-      resolveKeepaliveMs({
-        launchClass: 'maintenance',
-        appEnv: 'production',
-        defaultKeepaliveMs,
-        delegatedKeepaliveMs,
-        sandboxTimeoutMs,
-      }),
-    ).toBe(DEFAULT_MAINTENANCE_KEEPALIVE_MS);
-  });
-
-  it.each([TaskPayloadKind.GithubPrReview, TaskPayloadKind.GithubPrReviewSync])(
-    'uses the maintenance keepalive for %s jobs',
-    (taskType) => {
+  it('uses the maintenance keepalive for review jobs', () => {
+    for (const taskType of [
+      TaskPayloadKind.GithubPrReview,
+      TaskPayloadKind.GithubPrReviewSync,
+    ]) {
       expect(
         resolveKeepaliveMs({
           taskType,
@@ -145,8 +120,8 @@ describe('resolveKeepaliveMs', () => {
           sandboxTimeoutMs,
         }),
       ).toBe(DEFAULT_MAINTENANCE_KEEPALIVE_MS);
-    },
-  );
+    }
+  });
 
   it('keeps an immediate keepalive for PR review follow-up jobs', () => {
     expect(

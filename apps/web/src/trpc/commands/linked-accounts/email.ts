@@ -2,6 +2,8 @@ import {
   authUsers,
   db,
   eq,
+  isAgentMailOutboundEnabled,
+  isAgentMailCloudManaged,
   resolveAgentMailRuntimeCredentials,
 } from '@roomote/db/server';
 import { AgentMailApiClient } from '@roomote/communication';
@@ -39,15 +41,17 @@ return count`,
 
 export async function getLinkedEmailAccountsCommand(auth: UserAuthSuccess) {
   const emailEnabled = isEmailChannelEnabled();
-  const [authUser, credentials] = await Promise.all([
+  const [authUser, credentials, outboundEnabled] = await Promise.all([
     db.query.authUsers.findFirst({
       where: eq(authUsers.id, auth.userId),
       columns: { email: true, emailVerified: true },
     }),
     emailEnabled ? resolveAgentMailRuntimeCredentials() : Promise.resolve(null),
+    isAgentMailOutboundEnabled(),
   ]);
   const verificationDeliveryAvailable = Boolean(
-    emailEnabled && credentials?.apiKey && credentials.inboxId,
+    outboundEnabled &&
+    ((credentials?.apiKey && credentials.inboxId) || isAgentMailCloudManaged()),
   );
   let inboxEmail: string | null = null;
 

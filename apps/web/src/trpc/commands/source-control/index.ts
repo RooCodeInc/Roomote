@@ -522,6 +522,7 @@ async function configureAdoWebhooks(
     actorUserId,
     logPrefix: '[configureAdoWebhooks]',
     removalDescription: 'remove service hooks from unmapped repositories',
+    scopeToEnvironmentMappings: false,
   });
 }
 

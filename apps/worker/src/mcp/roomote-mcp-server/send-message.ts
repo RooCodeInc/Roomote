@@ -1,4 +1,8 @@
-import { TaskPayloadKind, isLinkedReviewResultsMessage } from '@roomote/types';
+import {
+  TaskPayloadKind,
+  isLinkedReviewResultsMessage,
+  type RoomoteMessageAttachment,
+} from '@roomote/types';
 
 import { sendMessageToTask, steerMessageToTask } from './tasks-api-client.js';
 import { errorResult, successResult, catchError } from './tool-result.js';
@@ -48,7 +52,12 @@ function resolveSenderMode(
 }
 
 export async function handleSendMessage(
-  params: { taskId: string; message: string; images?: string[] },
+  params: {
+    taskId: string;
+    message: string;
+    images?: string[];
+    attachments?: RoomoteMessageAttachment[];
+  },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   try {
@@ -58,11 +67,13 @@ export async function handleSendMessage(
         ? await sendMessageToTask(config, params.taskId, {
             message: params.message,
             images: params.images,
+            attachments: params.attachments,
             senderMode,
           })
         : await steerMessageToTask(config, params.taskId, {
             message: params.message,
             images: params.images,
+            attachments: params.attachments,
           });
 
     if (!result.success) {

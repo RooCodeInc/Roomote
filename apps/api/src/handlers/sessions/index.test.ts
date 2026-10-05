@@ -45,6 +45,7 @@ import {
 
 import type { Variables } from '../../types';
 import { mcpAuthMiddleware } from '../mcp/middleware';
+import { ROOMOTE_MESSAGE_REQUEST_MAX_BYTES } from '../tasks/messageAttachments';
 import { findAccessibleSession, sessionsRouter } from '.';
 
 const createdSessionIds: string[] = [];
@@ -117,6 +118,69 @@ describe('MCP session routes', () => {
         question: 'Investigate the failing deployment',
       }),
     );
+  });
+
+  it('forwards screenshot and log attachments when starting a session', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const sessionId = crypto.randomUUID();
+    const fastConversationId = crypto.randomUUID();
+    mocks.getOrCreateFastAgentSession.mockResolvedValue({
+      id: fastConversationId,
+      created: true,
+    });
+    mocks.getSessionForFastConversation.mockResolvedValue({ id: sessionId });
+    mocks.queueFastAgentSurfaceReply.mockResolvedValue(true);
+
+    const screenshot = Buffer.from('png-bytes').toString('base64');
+    const response = await createApp(user.id).request('/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Investigate the failure',
+        attachments: [
+          {
+            filename: 'screenshot.png',
+            mimeType: 'image/png',
+            base64: screenshot,
+          },
+          {
+            filename: 'failure.log',
+            mimeType: 'text/plain',
+            base64: Buffer.from('connection refused').toString('base64'),
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('connection refused'),
+        images: [`data:image/png;base64,${screenshot}`],
+        attachmentTexts: [expect.stringContaining('failure.log')],
+      }),
+    );
+  });
+
+  it('rejects oversized initial Session requests before route handling', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+
+    const response = await createApp(user.id).request('/sessions', {
+      method: 'POST',
+      headers: {
+        'content-length': String(ROOMOTE_MESSAGE_REQUEST_MAX_BYTES + 1),
+        'content-type': 'application/json',
+      },
+      body: '{}',
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Message payload is too large',
+    });
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
   });
 
   it('starts as the durable owner of a bot-triggered task with no acting user', async () => {
@@ -576,6 +640,91 @@ describe('MCP session routes', () => {
         question: 'Continue from Fast conversation link',
       }),
     );
+  });
+
+  it('forwards screenshot and diff attachments when continuing a session', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    createdConversationIds.push(conversation!.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      fastConversationId: conversation!.id,
+      sourceSurface: 'web',
+      sourceTrigger: 'message',
+    });
+    createdSessionIds.push(session.id);
+    mocks.queueFastAgentSurfaceReply.mockResolvedValue(true);
+    const screenshot = Buffer.from('png-bytes').toString('base64');
+
+    const response = await createApp(owner.id).request(
+      `/sessions/${session.id}/send_message`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Review these files',
+          attachments: [
+            {
+              filename: 'screenshot.png',
+              mimeType: 'image/png',
+              base64: screenshot,
+            },
+            {
+              filename: 'change.diff',
+              mimeType: 'text/plain',
+              base64: Buffer.from('- old\n+ new').toString('base64'),
+            },
+          ],
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('- old\n+ new'),
+        images: [`data:image/png;base64,${screenshot}`],
+        attachmentTexts: [expect.stringContaining('change.diff')],
+      }),
+    );
+  });
+
+  it('checks session access before processing attachments', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+
+    const response = await createApp(owner.id).request(
+      `/sessions/${crypto.randomUUID()}/send_message`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Review this file',
+          attachments: [
+            {
+              filename: 'failure.log',
+              mimeType: 'text/plain',
+              base64: 'not base64!',
+            },
+          ],
+        }),
+      },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Session not found',
+    });
   });
 
   it('resolves a Fast conversation URL and repairs its missing Session row', async () => {

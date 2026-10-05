@@ -3732,6 +3732,13 @@ describe('OpenCodeServerHarness', () => {
       persistedEnvelopes.push(envelope),
     );
 
+    const userMessageIdOfPrompt = (callIndex: number): string =>
+      (
+        client.promptAsync.mock.calls[callIndex]?.[0] as {
+          request: { messageID: string };
+        }
+      ).request.messageID;
+
     const emitApplyPatchPart = (state: Record<string, unknown>) =>
       client.emit({
         type: 'message.part.updated',
@@ -3782,6 +3789,7 @@ describe('OpenCodeServerHarness', () => {
         properties: {
           info: {
             id: 'msg_1',
+            parentID: userMessageIdOfPrompt(0),
             sessionID: 'ses_1',
             role: 'assistant',
             time: { completed: 1 },
@@ -3837,6 +3845,7 @@ describe('OpenCodeServerHarness', () => {
         properties: {
           info: {
             id: 'msg_2',
+            parentID: userMessageIdOfPrompt(1),
             sessionID: 'ses_1',
             role: 'assistant',
             time: { completed: 2 },

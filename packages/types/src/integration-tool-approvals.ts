@@ -83,15 +83,17 @@ export interface IntegrationToolApprovalMetadata {
 }
 
 /**
- * Deployment-wide Auto mode. `on`: every call to a tool nobody has made a
- * choice about (the default mode) is risk-assessed by the decision model
- * first; a routine call runs, anything else asks the Session owner when they
- * are present and is blocked with a tool error when they are away. A manual
- * choice always wins: Always allow is never assessed, Ask first always asks,
- * Reject always blocks. `off`: default tools run as they always have. While
- * off, and only with a hosted judgment model configured, the assessment still
- * runs in the background and is recorded, so its judgment can be checked
- * against real calls before it is turned on.
+ * Auto mode. It is the session owner's choice for one session and starts
+ * off. The stored `mode` here does not turn Auto on; it is kept for N-1
+ * rollback compatibility. With Auto on for a session, every call to a tool
+ * nobody has made a choice about (the default mode) is risk-assessed by the
+ * decision model first; a routine call runs, anything else asks the session
+ * owner when they are present and is blocked with a tool error when they are
+ * away. A manual choice always wins: Always allow is never assessed, Ask
+ * first always asks, Reject always blocks. With Auto off, default tools run
+ * without a check. While off, and only with a hosted judgment model
+ * configured, the assessment still runs in the background and is recorded,
+ * so its judgment can be checked against real calls.
  */
 export const INTEGRATION_TOOL_AUTO_MODES = ['off', 'on'] as const;
 export type IntegrationToolAutoMode =
@@ -116,6 +118,25 @@ export const integrationToolAutoSettingsSchema = z.object({
   ),
   policy: z.string().max(INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH),
 });
+
+/**
+ * What the agent is told when Auto denies a call because the session owner
+ * was away. A denied call leaves nothing in the transcript to allow later,
+ * so this points the agent at what the owner can actually do.
+ */
+export function describeIntegrationToolAutoAbsentDenial(
+  reason: string,
+): string {
+  return `Auto mode blocked this tool call because ${reason} and the session owner was away. The call was not run. Continue without it and tell the owner what was skipped; they can ask for it again while they are in the session and approve it when asked.`;
+}
+
+/**
+ * What the agent is told when Auto stops for its session because a call
+ * could not be assessed. The call does not run, the owner is told in the
+ * thread, and later calls ask them.
+ */
+export const INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE =
+  'Auto approvals are paused for this session because calls cannot be checked right now, so this call was not run. Stop here: do not retry it or call other tools. The session owner has been told; when they reply, tools will ask them before running.';
 
 /**
  * A decision model's risk assessment of one Auto-gated call, recorded on the

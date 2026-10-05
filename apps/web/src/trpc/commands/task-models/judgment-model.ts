@@ -66,7 +66,9 @@ type JudgmentModelSettings = {
 
 type TypeSafeKeyCheck = 'verified' | 'unverified';
 
-function assertAdmin(auth: UserAuthSuccess): asserts auth is UserAuthSuccess {
+export function assertAdmin(
+  auth: UserAuthSuccess,
+): asserts auth is UserAuthSuccess {
   if (!auth.isAdmin) {
     throw new Error('Unauthorized');
   }
@@ -109,7 +111,7 @@ async function isOpenRouterConnected(): Promise<boolean> {
  * is deliberately no Settings field, so an admin cannot point routing text at
  * an arbitrary server from the browser.
  */
-function isRoomoteUpstreamConfigured(): boolean {
+export function isRoomoteUpstreamConfigured(): boolean {
   return isConfiguredEnvValue(process.env[JUDGMENT_UPSTREAM_URL_ENV_VAR_NAME]);
 }
 

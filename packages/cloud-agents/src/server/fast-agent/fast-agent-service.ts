@@ -20,6 +20,7 @@ import {
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_DESTINATIONS_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
+  CHAT_MESSAGE_SEND_TOOL_NAME,
   CHAT_REACTION_EMOJI_TOOL_NAME,
   FAST_EXECUTION,
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
@@ -64,6 +65,9 @@ import {
   FIND_INTEGRATION_TOOLS_TOOL,
   LIST_REPOSITORIES_MAX_LIMIT,
   matchIntegrationTools,
+  classifyModelFallbackTrigger,
+  getDisplayModelProviderId,
+  MODEL_FALLBACK_NOTICE_PAYLOAD_KEY,
 } from '@roomote/types';
 import {
   and,
@@ -76,6 +80,7 @@ import {
   claimSessionGoalContinuation,
   getSessionGoalForConversation,
   getDeploymentTaskModelOptions,
+  isDeploymentExperimentEnabled,
   getSessionForFastConversation,
   getSessionForTask,
   getActiveRecipeVerificationTaskId,
@@ -85,12 +90,20 @@ import {
   isPrivateSessionsExperimentEnabled,
   isNull,
   isXaiSubscriptionConnected,
+  lt,
   markSessionGoalForConversation,
+  or,
   releaseSessionGoalContinuation,
+  createSessionStatusJudgmentRequest,
+  settleSessionStatusJudgmentTurn,
   sql,
   touchSessionActivity,
   withEnvironmentVerificationRetryLock,
+  resolveEffectiveModelRuntimeEnv,
+  resolveSessionIntegrationToolAutoOwner,
+  fastAgentConversations,
 } from '@roomote/db/server';
+import { captureInstanceEvent } from '@roomote/telemetry/server';
 import {
   buildFastSessionUrl,
   buildSelectedTaskSessionUrl,
@@ -197,6 +210,9 @@ import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   findFastAgentActiveInferenceRetryNotice,
+  findFastAgentRepliesBeforeHumanPrompt,
+  findRecentFastAgentToolResults,
+  listRecentFastAgentHumanUserPromptTexts,
   claimFastAgentHumanFollowUpSteers,
   markFastAgentDurableTurnDelivered,
   markFastAgentInferenceRetryNoticeInterruption,
@@ -234,9 +250,12 @@ import {
   resolveFastAgentToolApprovalSession,
   integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
-  shouldDisposeInstanceForToolApprovalRules,
+  shouldDisposeInstanceForToolConfig,
 } from './fast-agent-tool-approvals';
-import { resolveFastAgentToolApprovalUserRequest } from './fast-agent-tool-approval-context';
+import {
+  resolveFastAgentToolApprovalSessionUserMessages,
+  resolveFastAgentToolApprovalUserRequest,
+} from './fast-agent-tool-approval-context';
 import {
   callFastAgentIntegration,
   clearFastAgentIntegrationToolCache,
@@ -273,6 +292,7 @@ import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
+  type FastAgentAutomationToolResult,
   type FastAgentHumanInput,
   type FastAgentInputPreset,
   isFastAgentCommunicationConversation,
@@ -376,16 +396,16 @@ const FAST_AGENT_HUMAN_STEER_MAX_FILES = 16;
 const FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES = 24 * 1024 * 1024;
 
 /**
- * Process-local record of the compiled tool-approval rules hash whose
- * per-conversation OpenCode instance last booted with. Entries die with the
- * process, exactly like the instances they describe: after a restart there
- * is no live instance, and the next instance boots from the freshly
- * rewritten per-conversation config, so an unknown record is fresh state,
- * never stale. A recorded hash that differs from the current turn's rules
- * means the cached instance still holds last turn's agent state and is
- * disposed (sessions persist on disk) rather than rebuilt.
+ * Process-local tool-config state for each per-conversation OpenCode instance.
+ * Unconfirmed entries describe the tail of the queued config sequence until a
+ * successful disposal boots that config. Entries die with the process, exactly
+ * like the instances they describe: after a restart there is no live instance,
+ * so a missing record is fresh state, never stale.
  */
-const fastAgentToolApprovalRulesHashes = new Map<string, string | null>();
+const fastAgentToolConfigStates = new Map<
+  string,
+  { fingerprint: string; confirmed: boolean }
+>();
 
 function buildFastAgentNativeSteerMessageId(
   rowId: string,
@@ -402,11 +422,18 @@ async function getPendingFastAgentHumanFollowUps(
   sessionId: string,
   excludedEventId?: string,
 ) {
+  const now = new Date();
   return db.query.fastAgentParentEvents.findMany({
     where: and(
       eq(fastAgentParentEvents.conversationId, sessionId),
       isNull(fastAgentParentEvents.deliveredAt),
       isNull(fastAgentParentEvents.discardedAt),
+      // A queued-message Send now action reserves the row while stopping its
+      // predecessor. Native steering must not take it during that handoff.
+      or(
+        isNull(fastAgentParentEvents.claimedUntil),
+        lt(fastAgentParentEvents.claimedUntil, now),
+      ),
       // An inline-admitted row is a whole turn owned by a live process (or
       // awaiting queue resumption), never a steer for the current turn.
       isNull(fastAgentParentEvents.admission),
@@ -456,6 +483,34 @@ async function setFastSessionResponding(
     respondingUntil: responding
       ? new Date(Date.now() + FAST_RESPONDING_LEASE_MS)
       : null,
+  });
+}
+
+async function beginFastTurnStatusJudgment(
+  fastConversationId: string,
+  turnId: string,
+): Promise<void> {
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  if (!session) return;
+  await createSessionStatusJudgmentRequest(db, {
+    sessionId: session.id,
+    sourceEventId: turnId,
+    sourceKind: 'fast_turn',
+    state: 'awaiting_settlement',
+  });
+}
+
+async function settleFastTurnStatusJudgment(
+  fastConversationId: string,
+  turnId: string,
+  visible: boolean,
+): Promise<void> {
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  if (!session) return;
+  await settleSessionStatusJudgmentTurn(db, {
+    sessionId: session.id,
+    sourceEventId: turnId,
+    visible,
   });
 }
 
@@ -515,6 +570,10 @@ const launchTaskArgsSchema = z.object({
     .enum(['standard', 'environment_setup', 'environment_verification'])
     .optional()
     .default('standard'),
+});
+
+const automationLaunchCriteriaArgsSchema = z.object({
+  findingsReport: z.string().trim().min(1).max(12_000),
 });
 
 const ensureEnvironmentArgsSchema = z.object({
@@ -912,6 +971,11 @@ type FastAgentInferenceRetryOptions = {
    */
   consumeRetryBudgetReset?: () => boolean;
   signal?: AbortSignal;
+  switchToFallback?: (
+    error: unknown,
+    failure: FastAgentInferenceFailure,
+    retriesUsed: number,
+  ) => Promise<boolean>;
 };
 
 /**
@@ -1106,6 +1170,19 @@ function resolveFastAgentInferenceRetryDelayMs(
   );
 }
 
+/**
+ * Posted in the thread when Auto stops for a session because a call could
+ * not be assessed. The turn ends here; the user's reply continues it, and
+ * from then on tools ask before running.
+ */
+function formatFastAgentAutoPausedNotice(tool: {
+  integrationName: string;
+  toolName: string;
+}): string {
+  const toolLabel = tool.toolName.replace(/[_-]+/g, ' ').trim();
+  return `Automatic approvals aren't available right now, so I paused Auto for this session and stopped before running ${toolLabel} from ${tool.integrationName}. Reply when you're ready to continue, and I'll ask you before running tools.`;
+}
+
 function formatFastAgentInferenceRetryNotice(
   notice: FastAgentInferenceRetryNotice,
 ): string {
@@ -1258,6 +1335,16 @@ async function runFastAgentInferenceWithRetries<T>(
       }
 
       const failure = classifyNonTaskInferenceError(error);
+      if (
+        options.canRetry?.(error, failure) !== false &&
+        (await options.switchToFallback?.(error, failure, totalRetryCount))
+      ) {
+        totalRetryCount = 0;
+        rejectionRetryUsed = false;
+        retryNumber = -1;
+        await options.prepareRetry?.();
+        continue;
+      }
       if (
         failure.retryable &&
         totalRetryCount < FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN &&
@@ -1936,6 +2023,8 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  automationLaunchCriteriaRequired = false,
+  automationLaunchRootRequired = false,
   platformEventTimestampMs,
   automationReport = false,
   taskCommunicationTriage,
@@ -1984,6 +2073,10 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** True only for a custom automation occurrence with a saved launch rule. */
+  automationLaunchCriteriaRequired?: boolean;
+  /** A continued automation run cannot safely report until this root exists. */
+  automationLaunchRootRequired?: boolean;
   /** Original durable admission time for a projected platform receipt. */
   platformEventTimestampMs?: number;
   /** The settling delegated task ran for a custom automation; its closeout is
@@ -2055,6 +2148,27 @@ export async function answerFastAgentQuestion({
     userId,
   });
   const platformEvent = turnSource === 'platform_event';
+  const automationReply =
+    platformEvent && (platformEventKind === 'automation' || automationReport);
+  const automationLaunchCriteriaExperimentEnabled =
+    await isDeploymentExperimentEnabled('automationLaunchCriteria').catch(
+      (error: unknown) => {
+        console.warn(
+          `[Fast Agent] Could not read custom automation launch-criteria experiment: ${formatErrorForLog(error)}`,
+        );
+        return false;
+      },
+    );
+  const automationLaunchGateRequired =
+    platformEvent &&
+    platformEventKind === 'automation' &&
+    automationLaunchCriteriaExperimentEnabled &&
+    automationLaunchCriteriaRequired;
+  let automationLaunchGateState: 'pending' | 'continued' | 'stopped' =
+    automationLaunchGateRequired ? 'pending' : 'continued';
+  let automationLaunchGateStopped = false;
+  const automationLaunchToolResults: FastAgentAutomationToolResult[] = [];
+  let automationLaunchToolResultBytes = 0;
   const resolvedDirectedAtRoomote =
     directedAtRoomote ?? (!platformEvent && !allowSilentAmbientReply);
   const humanInput = input ?? ({ type: 'message' } as const);
@@ -2598,7 +2712,9 @@ export async function answerFastAgentQuestion({
       ? promptText
       : promptText.startsWith(delivered)
         ? promptText.slice(delivered.length)
-        : replyTextTracker.unconsumedText();
+        : automationReply
+          ? promptText
+          : replyTextTracker.unconsumedText();
     replyTextTracker.consumeUnconsumed();
     return remainder;
   };
@@ -3196,11 +3312,12 @@ export async function answerFastAgentQuestion({
   const postRecordedSystemCloseout = async (
     message: string,
     post: () => Promise<void>,
+    purpose: 'closeout' | 'clarification' = 'closeout',
   ) => {
     startSurfaceActivity();
     const call = await beginCanonicalToolEvent({
       title: FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
-      args: { purpose: 'closeout', message },
+      args: { purpose, message },
     });
     try {
       await post();
@@ -3598,6 +3715,18 @@ export async function answerFastAgentQuestion({
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
+    let modelRuntimeEnv: Record<string, string> = {};
+    try {
+      modelRuntimeEnv = await resolveEffectiveModelRuntimeEnv();
+    } catch {
+      // A missing or unavailable fallback config preserves existing behavior.
+    }
+    let orchestrationFallbackModel =
+      modelRuntimeEnv.R_ORCHESTRATION_MODEL_FALLBACK;
+    const orchestrationFallbackReasoning =
+      modelRuntimeEnv['R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT'];
+    let orchestrationFallbackUsed = false;
+    const fallbackExpectedStoredModel = session.model;
     currentSessionPrivacy = session.privacy ?? 'shared';
     currentPrivateOwnerUserId = session.privateOwnerUserId ?? null;
     privateSessionsExperimentEnabled =
@@ -3692,6 +3821,13 @@ export async function answerFastAgentQuestion({
         );
       });
     }
+    if (substantiveHumanInput) {
+      await beginFastTurnStatusJudgment(session.id, turnId).catch((error) => {
+        console.warn(
+          `[sessions] Failed to invalidate the prior status judgment: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
     await setFastSessionResponding(
       session.id,
       true,
@@ -3749,6 +3885,8 @@ export async function answerFastAgentQuestion({
       : null;
     // A resumed run re-persists the same prompt; it keeps the attempt's
     // place and time so the transcript still reads in order.
+    const userPromptTs =
+      previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now();
     const userEvent = previousAttempt?.prompt
       ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
       : allocateCanonicalEvent('user');
@@ -3756,8 +3894,7 @@ export async function answerFastAgentQuestion({
       {
         ...userEvent,
         turnId,
-        ts:
-          previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now(),
+        ts: userPromptTs,
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
         contentBlocks: buildFastAgentUserContentBlocks(
@@ -3900,6 +4037,8 @@ export async function answerFastAgentQuestion({
       platformEventHandling,
       platformEventVisibility,
       platformEventKind,
+      automationLaunchCriteriaRequired: automationLaunchGateRequired,
+      automationLaunchCriteriaExperimentEnabled,
       automationReport,
       ...(taskCommunicationTriage ? { taskCommunicationTriage } : {}),
       taskCommunicationTriageEnabled,
@@ -4333,6 +4472,124 @@ export async function answerFastAgentQuestion({
       // Next-turn durability is automatic: the refreshed integrations flow
       // into the runtime config written at the next turn's setup.
     };
+    const captureAutomationLaunchToolResult = (
+      call: FastAgentMcpToolCall,
+      result: unknown,
+    ): void => {
+      if (
+        !automationLaunchGateRequired ||
+        automationLaunchGateState !== 'pending'
+      ) {
+        return;
+      }
+
+      const sanitize = (value: unknown, depth = 0): unknown => {
+        if (typeof value === 'string') return redactSecrets(value);
+        if (Array.isArray(value)) {
+          return depth >= 6
+            ? '[truncated]'
+            : value.slice(0, 80).map((item) => sanitize(item, depth + 1));
+        }
+        if (!value || typeof value !== 'object') return value;
+        if (depth >= 6) return '[truncated]';
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .slice(0, 80)
+            .map(([key, item]) => [
+              key,
+              /(?:token|secret|password|passwd|api.?key|authorization|cookie)/iu.test(
+                key,
+              )
+                ? '[redacted]'
+                : sanitize(item, depth + 1),
+            ]),
+        );
+      };
+
+      let output: string;
+      try {
+        output = JSON.stringify(sanitize(result)) ?? String(result);
+      } catch {
+        output = String(result);
+      }
+      const maxEntryBytes = 4_000;
+      const maxTotalBytes = 20_000;
+      if (Buffer.byteLength(output, 'utf8') > maxEntryBytes) {
+        output = `${Buffer.from(output, 'utf8')
+          .subarray(0, maxEntryBytes - 32)
+          .toString('utf8')}…[truncated]`;
+      }
+      const entry: FastAgentAutomationToolResult = {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        result: output,
+      };
+      const entryBytes = Buffer.byteLength(output, 'utf8');
+      while (
+        automationLaunchToolResults.length >= 12 ||
+        automationLaunchToolResultBytes + entryBytes > maxTotalBytes
+      ) {
+        const removed = automationLaunchToolResults.shift();
+        if (!removed) break;
+        automationLaunchToolResultBytes -= Buffer.byteLength(
+          removed.result,
+          'utf8',
+        );
+      }
+      automationLaunchToolResults.push(entry);
+      automationLaunchToolResultBytes += entryBytes;
+    };
+    const evaluateAutomationLaunchGate = async (
+      findingsReport: string,
+      instructionVersion = currentInstructionVersion,
+    ): Promise<'continue' | 'stop'> => {
+      if (!automationLaunchGateRequired) return 'continue';
+      if (automationLaunchGateState === 'stopped') return 'stop';
+      if (automationLaunchGateState === 'continued') return 'continue';
+
+      let decision: 'continue' | 'stop' = 'continue';
+      try {
+        decision =
+          (
+            await adapter.evaluateAutomationLaunchCriteria?.({
+              findingsReport: findingsReport.slice(0, 12_000),
+              rawToolResults: [...automationLaunchToolResults],
+            })
+          )?.decision ?? 'continue';
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Automation launch evaluation failed open: ${formatErrorForLog(error)}`,
+        );
+      }
+
+      if (decision === 'stop') {
+        automationLaunchGateState = 'stopped';
+        automationLaunchGateStopped = true;
+        closedInstructionVersions.add(instructionVersion);
+        return 'stop';
+      }
+
+      try {
+        const updatedConversation = await adapter.prepareAutomationLaunch?.();
+        if (updatedConversation) conversation = updatedConversation;
+      } catch (error) {
+        if (automationLaunchRootRequired) {
+          console.warn(
+            `[Fast Agent] Required automation destination root creation failed; aborting the run: ${formatErrorForLog(error)}`,
+          );
+          throw error;
+        }
+        // A provider root is best effort after a continue. The automation
+        // still runs, and its adapter can use the rootless route if creation
+        // failed. Some destinations, such as Telegram DMs, require the root
+        // to keep the report in the automation's thread.
+        console.warn(
+          `[Fast Agent] Deferred automation destination setup failed; continuing with the existing route: ${formatErrorForLog(error)}`,
+        );
+      }
+      automationLaunchGateState = 'continued';
+      return 'continue';
+    };
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
     ): Promise<unknown> => {
@@ -4353,6 +4610,19 @@ export async function answerFastAgentQuestion({
             success: false,
             error:
               'This platform event may only be presented to the user with a closeout.',
+          };
+        }
+
+        if (
+          automationLaunchGateRequired &&
+          automationLaunchGateState !== 'continued' &&
+          call.integrationId === ROOMOTE_MCP_ID &&
+          call.toolName === CHAT_MESSAGE_SEND_TOOL_NAME
+        ) {
+          return {
+            success: false,
+            error:
+              'Call evaluate_automation_launch_criteria before sending a chat message.',
           };
         }
 
@@ -4490,10 +4760,12 @@ export async function answerFastAgentQuestion({
           );
         }
         const response = { success: true, result };
+        captureAutomationLaunchToolResult(call, response);
         await finishCanonicalToolEvent(canonicalToolEvent, response);
         return response;
       } catch (error) {
         const failure = toolFailure(error);
+        captureAutomationLaunchToolResult(call, failure);
         if (canonicalToolEvent) {
           await finishCanonicalToolEvent(canonicalToolEvent, failure);
         }
@@ -4729,7 +5001,24 @@ export async function answerFastAgentQuestion({
             };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Gather the evidence needed for the saved launch criteria and call evaluate_automation_launch_criteria before sending a reply.',
+              };
+            }
             const args = chatReplyArgsSchema.parse(call.args);
+            if (automationReply && args.message === undefined) {
+              return {
+                success: false,
+                error:
+                  'Automation replies require an explicit message containing only the finished announcement, result, or clarification. Call send_chat_reply again with message; omit progress narration and tool activity.',
+              };
+            }
             if (args.message === undefined) await waitForSettledReplyText();
             const message = (
               args.message ?? replyTextTracker.unconsumedText()
@@ -4971,6 +5260,17 @@ export async function answerFastAgentQuestion({
               };
             }
 
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before creating an environment or starting delegated work.',
+              };
+            }
+
             try {
               await adapter.assertTaskLaunch?.();
             } catch (error) {
@@ -5063,6 +5363,16 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before showing a widget.',
+              };
+            }
             const args = showWidgetArgsSchema.parse(call.args);
             const result = await prepareShowWidget(args);
             if (!result.success) {
@@ -5101,6 +5411,16 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before launching delegated work.',
+              };
+            }
             const args = launchTaskArgsSchema.parse(call.args);
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
@@ -5333,6 +5653,16 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before starting a pull request review.',
+              };
+            }
             const args = reviewPullRequestArgsSchema.parse(call.args);
             const conversationTarget =
               getConversationPullRequestTarget(conversation);
@@ -5710,6 +6040,16 @@ export async function answerFastAgentQuestion({
                 error: 'Task-start retry is unavailable for this turn.',
               };
             }
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before retrying delegated work.',
+              };
+            }
             if (retriedTaskStart) {
               return { success: false, error: 'Startup was already retried.' };
             }
@@ -5865,6 +6205,16 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued'
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before requesting a response from the automation owner.',
+              };
+            }
             if (conversation.surface !== 'web') {
               return {
                 success: false,
@@ -6012,6 +6362,18 @@ export async function answerFastAgentQuestion({
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool: {
             const args = callIntegrationToolArgsSchema.parse(call.args);
+            if (
+              automationLaunchGateRequired &&
+              automationLaunchGateState !== 'continued' &&
+              args.integrationId === ROOMOTE_MCP_ID &&
+              args.toolName === CHAT_MESSAGE_SEND_TOOL_NAME
+            ) {
+              return {
+                success: false,
+                error:
+                  'Call evaluate_automation_launch_criteria before sending a chat message.',
+              };
+            }
             if (isFastAgentNativeIntegration(args.integrationId)) {
               return nativeIntegrationError(args.integrationId);
             }
@@ -6020,6 +6382,32 @@ export async function answerFastAgentQuestion({
               toolName: args.toolName,
               args: args.args ?? {},
             });
+          }
+          case FAST_AGENT_NATIVE_TOOL_NAMES.evaluateAutomationLaunchCriteria: {
+            if (!automationLaunchGateRequired) {
+              return {
+                success: false,
+                error:
+                  'This automation has no saved launch criteria to evaluate.',
+              };
+            }
+            if (!adapter.evaluateAutomationLaunchCriteria) {
+              return {
+                success: false,
+                error:
+                  'The launch criteria check is unavailable for this automation session.',
+              };
+            }
+            const args = automationLaunchCriteriaArgsSchema.parse(call.args);
+            const decision = await evaluateAutomationLaunchGate(
+              args.findingsReport,
+              instructionVersion,
+            );
+            return {
+              success: true,
+              decision,
+              ...(decision === 'stop' ? { closed: true } : {}),
+            };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
@@ -6152,42 +6540,53 @@ export async function answerFastAgentQuestion({
         });
       }
       await settleDurableTurn();
+      await settleFastTurnStatusJudgment(
+        session.id,
+        turnId,
+        Boolean(lastVisibleMessage || visibleUpdatePosted),
+      ).catch((error) => {
+        console.warn(
+          `[sessions] Failed to queue the settled status judgment: ${formatErrorForLog(error)}`,
+        );
+      });
       await mirrorPendingMessages();
       await notifyUserAttention();
       return lastVisibleMessage;
     }
     diagnostics.markInferenceQueued();
-    // Tool-approval rules ride in the generated per-conversation agent
-    // config, which is rewritten on every turn, so a persisted OpenCode
-    // session can never carry stale approval rules across a restart: the
-    // servers are disposable child processes and the next instance boots
-    // from the current config. The only stale case is within one process,
-    // where the directory's cached instance still holds the agent state from
-    // a previous turn's config. A policy or experiment change then disposes
-    // that instance — preserving the session id, transcript, and context —
-    // instead of rebuilding the session. An unknown record after a restart
-    // is fresh state and must not dispose: that would be a false-positive
-    // cache break.
+    // Tool exposure and approval rules ride in the generated per-conversation
+    // agent config, which is rewritten on every turn. A persisted OpenCode
+    // session cannot carry stale config across a restart because its server is
+    // a disposable child process. Within one process, however, the directory's
+    // cached instance must be refreshed when either value changes.
+    const brainEnabled = await isBrainEnabled();
     const toolApprovalRulesHash = toolApprovalRules?.hash ?? null;
-    const previousToolApprovalRulesHash = fastAgentToolApprovalRulesHashes.has(
-      session.id,
-    )
-      ? (fastAgentToolApprovalRulesHashes.get(session.id) ?? null)
-      : undefined;
-    const toolApprovalDisposeInstance =
-      shouldDisposeInstanceForToolApprovalRules({
-        recordedHash: previousToolApprovalRulesHash,
-        currentHash: toolApprovalRulesHash,
-      });
-    const toolApprovalDisposeState = toolApprovalDisposeInstance
+    const toolConfigFingerprint = JSON.stringify({
+      brainEnabled,
+      toolApprovalRulesHash,
+    });
+    const previousToolConfigState = fastAgentToolConfigStates.get(session.id);
+    const toolConfigDisposeInstance = shouldDisposeInstanceForToolConfig({
+      recordedHash:
+        previousToolConfigState === undefined
+          ? undefined
+          : previousToolConfigState.confirmed
+            ? previousToolConfigState.fingerprint
+            : null,
+      currentHash: toolConfigFingerprint,
+    });
+    const toolConfigDisposeState = toolConfigDisposeInstance
       ? { completed: false }
       : undefined;
-    if (toolApprovalDisposeInstance) {
+    if (toolConfigDisposeInstance) {
       console.info(
-        `[Fast Agent] Tool approval rules changed for session ${session.id}; refreshing the OpenCode instance.`,
+        `[Fast Agent] Tool configuration changed for session ${session.id}; refreshing the OpenCode instance.`,
       );
     }
-    fastAgentToolApprovalRulesHashes.set(session.id, toolApprovalRulesHash);
+    fastAgentToolConfigStates.set(session.id, {
+      fingerprint: toolConfigFingerprint,
+      confirmed: !toolConfigDisposeInstance,
+    });
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       persistedSessionId: session.openCodeSessionId,
@@ -6234,6 +6633,8 @@ export async function answerFastAgentQuestion({
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
             addRemoteMcpEnabled: !platformEvent,
+            automationLaunchCriteriaEnabled: automationLaunchGateRequired,
+            brainEnabled,
             ...(toolApprovalRules
               ? {
                   toolApprovalPermission: integrationToolApprovalRulesToConfig(
@@ -6363,6 +6764,14 @@ export async function answerFastAgentQuestion({
                   isFastAgentApprovalChatSurface(conversation.surface)
                     ? conversation.surface
                     : undefined;
+                let priorHumanMessagesPromise: Promise<string[]> | undefined;
+                const resolvePriorHumanMessages = () =>
+                  (priorHumanMessagesPromise ??=
+                    listRecentFastAgentHumanUserPromptTexts({
+                      conversationId: session.id,
+                      beforeTs: userPromptTs,
+                      currentEventId: userEvent.eventId,
+                    }));
                 // Native per-tool approval bridge for gated code-mode
                 // integration calls. Web conversations surface the pending
                 // card in the Session transcript; chat-originated
@@ -6379,15 +6788,58 @@ export async function answerFastAgentQuestion({
                       surface: conversation.surface as FastAgentSurface,
                       integrations: availableIntegrations,
                       autoToolKeys: toolApprovalRules.autoToolKeys,
-                      resolveUserRequest: () =>
+                      resolveUserRequest: async () =>
                         resolveFastAgentToolApprovalUserRequest({
                           turnSource,
                           substantiveHumanInput,
                           question,
-                          compatibilityMessages: session.compatibilityMessages,
+                          priorHumanMessages: await resolvePriorHumanMessages(),
                           steeredHumanRequests,
                         }),
+                      resolveSessionUserMessages: async () =>
+                        resolveFastAgentToolApprovalSessionUserMessages({
+                          turnSource,
+                          substantiveHumanInput,
+                          question,
+                          priorHumanMessages: await resolvePriorHumanMessages(),
+                          steeredHumanRequests,
+                        }),
+                      resolveAgentMessageRepliedTo: async () =>
+                        turnSource === 'human'
+                          ? findFastAgentRepliesBeforeHumanPrompt({
+                              conversationId: session.id,
+                              beforeTs: userPromptTs,
+                              currentEventId: userEvent.eventId,
+                            })
+                          : undefined,
+                      resolveRecentToolResults: () =>
+                        findRecentFastAgentToolResults({
+                          conversationId: session.id,
+                        }),
+                      resolveSessionOwner: async () =>
+                        toolApprovalOwnerUserId
+                          ? resolveSessionIntegrationToolAutoOwner({
+                              conversationId: session.id,
+                              ownerUserId: toolApprovalOwnerUserId,
+                            })
+                          : undefined,
                       signal: promptSignal,
+                      // Auto stopped for this session: say so in the thread
+                      // and end the turn. The notice closes the instruction,
+                      // so the model's next message is cut off as a
+                      // trailing one; the user's reply continues with cards.
+                      onAutoSuspended: async (tool) => {
+                        const message = formatFastAgentAutoPausedNotice(tool);
+                        await postRecordedSystemCloseout(
+                          message,
+                          () =>
+                            postReply(
+                              { purpose: 'clarification', message },
+                              true,
+                            ),
+                          'clarification',
+                        );
+                      },
                       ...(approvalNotificationSurface
                         ? {
                             notify: async (approval) => {
@@ -6489,10 +6941,10 @@ export async function answerFastAgentQuestion({
                       // stale approval rules across a restart or a policy
                       // change.
                       permission: FAST_AGENT_SESSION_PERMISSIONS,
-                      ...(toolApprovalDisposeState
+                      ...(toolConfigDisposeState
                         ? {
                             disposeInstanceBeforeSession:
-                              toolApprovalDisposeState,
+                              toolConfigDisposeState,
                           }
                         : {}),
                       ...(toolApprovalBridge
@@ -6788,6 +7240,105 @@ export async function answerFastAgentQuestion({
                 noteInferenceRecoveryProgress();
                 return true;
               },
+              switchToFallback: async (error, _failure, retriesUsed) => {
+                if (
+                  orchestrationFallbackUsed ||
+                  !orchestrationFallbackModel ||
+                  orchestrationFallbackModel === model
+                ) {
+                  return false;
+                }
+                const trigger = classifyModelFallbackTrigger(error, {
+                  retriesUsed,
+                });
+                if (!trigger) return false;
+                const fromModel =
+                  model ?? modelRuntimeEnv.R_ORCHESTRATION_MODEL;
+                if (!fromModel) return false;
+                const nextReasoning = REASONING_EFFORT_VALUES.includes(
+                  orchestrationFallbackReasoning as ReasoningEffort,
+                )
+                  ? (orchestrationFallbackReasoning as ReasoningEffort)
+                  : null;
+                const fromProvider =
+                  getDisplayModelProviderId(fromModel) ?? 'opencode';
+                const toProvider =
+                  getDisplayModelProviderId(orchestrationFallbackModel) ??
+                  'opencode';
+                const errorSummary = redactSecrets(
+                  classifyNonTaskInferenceError(error).message,
+                ).slice(0, 280);
+                const notice = {
+                  role: 'orchestration' as const,
+                  trigger,
+                  fromProvider,
+                  fromModelId: fromModel,
+                  errorSummary,
+                  toProvider,
+                  toModelId: orchestrationFallbackModel,
+                  toReasoningEffort: nextReasoning,
+                };
+                const [updatedConversation] = await db
+                  .update(fastAgentConversations)
+                  .set({
+                    model: orchestrationFallbackModel,
+                    reasoningEffort: nextReasoning,
+                    updatedAt: new Date(),
+                  })
+                  .where(
+                    and(
+                      eq(fastAgentConversations.id, session.id),
+                      sql`${fastAgentConversations.model} is not distinct from ${fallbackExpectedStoredModel}`,
+                    ),
+                  )
+                  .returning({ id: fastAgentConversations.id });
+                if (!updatedConversation) return false;
+                try {
+                  await upsertFastAgentMessage({
+                    sessionId: session.id,
+                    insertOnly: true,
+                    message: {
+                      eventId: `${turnId}:model-fallback:0`,
+                      turnId,
+                      turnSeq: 1_999_999_999,
+                      ts: Date.now(),
+                      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+                      role: 'assistant',
+                      contentBlocks: [
+                        { type: 'text', text: 'Switching to fallback model' },
+                      ],
+                      metadata: {
+                        visibleInTranscript: true,
+                        [MODEL_FALLBACK_NOTICE_PAYLOAD_KEY]: notice,
+                      },
+                      payload: {
+                        text: 'Switching to fallback model',
+                        [MODEL_FALLBACK_NOTICE_PAYLOAD_KEY]: notice,
+                      },
+                      source: 'roomote',
+                    },
+                  });
+                  await adapter.postReply({
+                    purpose: 'progress',
+                    message: `Switching to fallback model: ${fromProvider} failed (${errorSummary}). Continuing with ${orchestrationFallbackModel}.`,
+                  });
+                } catch (noticeError) {
+                  console.warn(
+                    `[Fast Agent] Failed to persist or post model fallback notice: ${formatErrorForLog(noticeError)}`,
+                  );
+                }
+                void captureInstanceEvent('model_fallback_switched', {
+                  fromProvider,
+                  fromModel,
+                  toProvider,
+                  toModel: orchestrationFallbackModel,
+                });
+                model = orchestrationFallbackModel;
+                reasoningEffort = nextReasoning;
+                orchestrationFallbackUsed = true;
+                orchestrationFallbackModel = undefined;
+                return true;
+              },
               prepareRetry: () => {
                 if (pendingImageHelperFallback) {
                   const fallback = pendingImageHelperFallback;
@@ -6863,22 +7414,20 @@ export async function answerFastAgentQuestion({
         }
       },
     });
-    if (toolApprovalDisposeState) {
-      // A failed dispose leaves the cached instance on the previous turn's
-      // rules. Restore the previous record so the next turn retries the
-      // refresh instead of trusting a stale instance.
+    if (toolConfigDisposeState) {
+      // The map tracks the tail of the queued config sequence. Only confirm
+      // this turn when no later distinct config replaced it; failed disposal
+      // leaves the tail unconfirmed so matching queued turns still refresh.
       void promptTextPromise
         .catch(() => undefined)
         .then(() => {
-          if (toolApprovalDisposeState.completed) return;
-          if (previousToolApprovalRulesHash === undefined) {
-            fastAgentToolApprovalRulesHashes.delete(session.id);
-          } else {
-            fastAgentToolApprovalRulesHashes.set(
-              session.id,
-              previousToolApprovalRulesHash,
-            );
-          }
+          if (!toolConfigDisposeState.completed) return;
+          const pendingState = fastAgentToolConfigStates.get(session.id);
+          if (pendingState?.fingerprint !== toolConfigFingerprint) return;
+          fastAgentToolConfigStates.set(session.id, {
+            fingerprint: toolConfigFingerprint,
+            confirmed: true,
+          });
         });
     }
     const promptText = await promptTextPromise.finally(() => {
@@ -6886,6 +7435,22 @@ export async function answerFastAgentQuestion({
     });
 
     throwIfTurnCancelled();
+    if (
+      automationLaunchGateRequired &&
+      automationLaunchGateState === 'pending'
+    ) {
+      const findingsReport = resolveTerminalReplyText(promptText).trim();
+      await evaluateAutomationLaunchGate(
+        findingsReport || 'The session did not produce a findings report.',
+      );
+    }
+    if (automationLaunchGateStopped) {
+      closedInstructionVersions.add(currentInstructionVersion);
+      diagnostics.recordSilentCompletion();
+      await settleDurableTurn();
+      await mirrorPendingMessages();
+      return '';
+    }
     const terminalInstructionVersion =
       completedOpenCodeInstructionVersion ?? currentInstructionVersion;
     if (
@@ -6949,6 +7514,15 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    await settleFastTurnStatusJudgment(
+      session.id,
+      turnId,
+      Boolean(lastVisibleMessage || visibleUpdatePosted),
+    ).catch((error) => {
+      console.warn(
+        `[sessions] Failed to queue the settled status judgment: ${formatErrorForLog(error)}`,
+      );
+    });
     if (
       (substantiveHumanInput || steeredHumanRequests.length > 0) &&
       !setupSession &&
@@ -7126,6 +7700,16 @@ export async function answerFastAgentQuestion({
       }
       throw signal.reason instanceof Error ? signal.reason : error;
     }
+    if (
+      automationLaunchGateRequired &&
+      automationLaunchGateState === 'pending' &&
+      platformEvent
+    ) {
+      // The read/evaluate turn never reached a safe decision. Do not deliver
+      // an error or create work before the gate can continue; let the durable
+      // parent event retry the Session turn.
+      throw error;
+    }
     if (canonicalConversationId) {
       // The system-posted closeout below is mirrored to compatibility history,
       // not to OpenCode's live transcript. Force the next turn to bootstrap so
@@ -7221,6 +7805,17 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    if (canonicalConversationId) {
+      await settleFastTurnStatusJudgment(
+        canonicalConversationId,
+        turnId,
+        Boolean(lastVisibleMessage || visibleUpdatePosted),
+      ).catch((error) => {
+        console.warn(
+          `[sessions] Failed to queue the settled status judgment: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
     await notifyUserAttention();
     return lastVisibleMessage || message;
   } finally {

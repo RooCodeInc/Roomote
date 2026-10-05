@@ -1,0 +1,75 @@
+{
+  "ruleId": "criterion_8",
+  "examples": [
+    {
+      "name": "Unnecessary exclusivity in a save instruction",
+      "path": "docs/setup.md",
+      "before": "Save rules in `.judgement/rules.json`.\n",
+      "after": "Save rules in `.judgement/rules.json`, the only policy location.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Past implementation aside in setup guide",
+      "path": "docs/setup.md",
+      "before": "Open Settings to connect your account.\n",
+      "after": "Open Settings to connect your account. We used to put this in the sidebar before the redesign.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Removed alternative in ordinary setup instructions",
+      "path": "docs/setup.md",
+      "before": "Save the configuration in `config.json`.\n",
+      "after": "Save the configuration in `config.json`, not the old YAML file we no longer use.\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Direct save instruction",
+      "path": "docs/setup.md",
+      "before": "Create a rules file.\n",
+      "after": "Save rules in `.judgement/rules.json`.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Direct setup action",
+      "path": "docs/setup.md",
+      "before": "Configure access.\n",
+      "after": "Open Settings to connect your account.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Migration guide requires old and new paths",
+      "path": "docs/migration.md",
+      "before": "# Upgrade from version 1\nUpdate your configuration.\n",
+      "after": "# Upgrade from version 1\nMove your existing `settings.yml` to `config.json` before starting version 2.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Release notes describe the change",
+      "path": "CHANGELOG.md",
+      "before": "## Version 2\nImprovements.\n",
+      "after": "## Version 2\nConfiguration now lives in `config.json`; the version 1 YAML format is no longer accepted.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Supported choices with practical tradeoffs",
+      "path": "docs/setup.md",
+      "before": "Choose a storage option.\n",
+      "after": "Choose local storage for offline access or shared storage to collaborate across devices.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Security restriction is actionable",
+      "path": "docs/setup.md",
+      "before": "Configure the callback URL.\n",
+      "after": "Only HTTPS callback URLs are accepted to protect credentials in transit.\n",
+      "expected": "pass"
+    },
+    {
+      "name": "Explicit bad and good examples",
+      "path": "docs/writing.md",
+      "before": "## Writing examples\nUse direct instructions.\n",
+      "after": "## Writing examples\nAvoid: \"Save rules here, the only policy location.\"\nPrefer: \"Save rules here.\"\n",
+      "expected": "pass"
+    }
+  ]
+}

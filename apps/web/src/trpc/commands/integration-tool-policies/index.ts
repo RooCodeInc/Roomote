@@ -68,7 +68,8 @@ export async function setIntegrationToolPoliciesCommand(
   return listIntegrationToolPolicies();
 }
 
-const autoApprovalsEnabled = () =>
+const autoApprovalsEnabled = (auth: UserAuthSuccess) =>
+  auth.nightlyExperimentsEnabled === true &&
   isDeploymentExperimentEnabled('integrationToolAutoApprovals');
 
 /**
@@ -205,12 +206,18 @@ export async function setPersonalIntegrationToolPoliciesCommand(
 /**
  * Deployment-wide Auto mode, admin only. `model` names what Auto will
  * consult: Jev, or null when there is no Jev backend (the helper model and
- * the model Roomote trains are not used for Auto yet).
+ * the model Roomote trains are not used for Auto).
  */
 export async function getIntegrationToolAutoSettingsCommand(
   auth: UserAuthSuccess,
 ) {
   assertAdmin(auth);
+  if (!(await autoApprovalsEnabled(auth))) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Auto tool approvals are not enabled.',
+    });
+  }
   const [settings, model] = await Promise.all([
     getIntegrationToolAutoSettings(),
     resolveDecisionModel(AUTO_DECISION_REQUIREMENTS).catch(() => null),
@@ -231,7 +238,7 @@ export async function setIntegrationToolAutoSettingsCommand(
   input: IntegrationToolAutoSettings,
 ) {
   assertAdmin(auth);
-  if (!(await autoApprovalsEnabled())) {
+  if (!(await autoApprovalsEnabled(auth))) {
     throw new TRPCError({
       code: 'NOT_FOUND',
       message: 'Auto tool approvals are not enabled.',

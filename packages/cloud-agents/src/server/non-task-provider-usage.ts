@@ -25,10 +25,17 @@ import {
   toBedrockMantleRuntimeModelId,
   type ReasoningEffort,
 } from '@roomote/types';
+import {
+  classifyModelFallbackTrigger,
+  getDisplayModelProviderId,
+  MODEL_FALLBACK_PROVIDER_ERROR_RETRIES,
+} from '@roomote/types';
+import { captureInstanceEvent } from '@roomote/telemetry/server';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
 import { decodeInferenceErrorEnvelope } from './inference-error-envelope';
+import { streamOpenCodeEventsAcrossDisposal } from './opencode-event-stream';
 import {
   DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
   leaseOpenCodeSdkServer,
@@ -39,6 +46,10 @@ import {
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 const NON_TASK_SESSION_ABORT_TIMEOUT_MS = 5_000;
 const NON_TASK_USAGE_EVENT_BARRIER_TIMEOUT_MS = 1_000;
+// After an instance refresh the pending permission asks are read again; the
+// new instance may still be settling, so a failed read is retried briefly.
+const PENDING_PERMISSION_LOOKUP_RETRIES = 3;
+const PENDING_PERMISSION_LOOKUP_RETRY_DELAY_MS = 200;
 const NON_TASK_USAGE_RECONCILE_TIMEOUT_MS = 5_000;
 type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
@@ -480,7 +491,11 @@ export interface NonTaskOpenCodePermissionAskHelpers {
   }) => Promise<
     | {
         input?: unknown;
-        toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        toolCalls?: Array<{
+          tool?: unknown;
+          input?: unknown;
+          status?: unknown;
+        }>;
         /** Completed tool results earlier in the paused call's turn. */
         readContent?: string;
       }
@@ -506,7 +521,7 @@ export function findPausedOpenCodeToolCall(
 ):
   | {
       input?: unknown;
-      toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+      toolCalls?: Array<{ tool?: unknown; input?: unknown; status?: unknown }>;
       readContent?: string;
     }
   | undefined {
@@ -535,7 +550,11 @@ export function findPausedOpenCodeToolCall(
             .filter(
               (entry): entry is Record<string, unknown> => entry !== undefined,
             )
-            .map((entry) => ({ tool: entry.tool, input: entry.input }))
+            .map((entry) => ({
+              tool: entry.tool,
+              input: entry.input,
+              ...(entry.status === undefined ? {} : { status: entry.status }),
+            }))
         : undefined;
       return {
         input: state?.input,
@@ -992,12 +1011,14 @@ function isOpenCodeSessionInvalid(error: unknown): boolean {
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' | 'orchestration' | 'audioVideo' = 'small',
+  reasoningEffort?: ReasoningEffort,
 ): Promise<{
   model: string;
   catalogModelId: string;
   visionModel: string | undefined;
   audioVideoModel: string | undefined;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
+  reasoningEffort?: ReasoningEffort;
 }> {
   const requestedModel = model?.trim();
   let resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv = {};
@@ -1009,7 +1030,15 @@ async function resolveNonTaskModelRuntime(
     // ProviderAuthError before a request is made.
     resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv(
       requestedModel
-        ? { runtimeEnv: { ...process.env, R_MODEL: requestedModel } }
+        ? {
+            runtimeEnv: {
+              ...process.env,
+              R_MODEL: requestedModel,
+              ...(reasoningEffort
+                ? { R_MODEL_REASONING_EFFORT: reasoningEffort }
+                : {}),
+            },
+          }
         : {},
     );
   } catch (error) {
@@ -1059,6 +1088,7 @@ async function resolveNonTaskModelRuntime(
     selectedRuntimeEnv = {
       ...resolvedModelRuntimeEnv,
       R_MODEL: resolvedModel,
+      ...(reasoningEffort ? { R_MODEL_REASONING_EFFORT: reasoningEffort } : {}),
     };
 
     if (modelRole === 'orchestration') {
@@ -1084,10 +1114,9 @@ async function resolveNonTaskModelRuntime(
     // session model temporarily takes over R_MODEL in selectedRuntimeEnv.
     visionModel:
       resolvedModelRuntimeEnv.R_VISION_MODEL ?? resolvedModelRuntimeEnv.R_MODEL,
-    audioVideoModel:
-      resolvedModelRuntimeEnv.R_AUDIO_VIDEO_MODEL ??
-      resolvedModelRuntimeEnv.R_MODEL ??
-      asString(parseOpenCodeConfigJson(readOpenCodeDebugConfig()).model),
+    // Unlike other role defaults, absence matters here: it preserves the
+    // pre-role audio/video routing instead of inheriting the coding model.
+    audioVideoModel: resolvedModelRuntimeEnv.R_AUDIO_VIDEO_MODEL,
     // An explicit model rides into the server lease env as the primary role
     // model so the config builder registers its provider — the deployment's
     // role models may not include it, and an unregistered Bedrock (or
@@ -1095,6 +1124,7 @@ async function resolveNonTaskModelRuntime(
     // request is made. The lease cache keys on env, so distinct explicit
     // models get their own servers instead of colliding.
     resolvedModelRuntimeEnv: selectedRuntimeEnv,
+    reasoningEffort,
   };
 }
 
@@ -1262,19 +1292,25 @@ async function resolveModelForInputModality(
     return runtime.model;
   }
 
-  const requiresAudioVideoModel = modality === 'audio' || modality === 'video';
-  const audioVideoModel = params.model ?? runtime.audioVideoModel;
-  const modalityModels = requiresAudioVideoModel
-    ? [audioVideoModel]
-    : [
-        runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
-        runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
-      ];
+  const audioVideoModel =
+    modality === 'audio' || modality === 'video'
+      ? (params.model ?? runtime.audioVideoModel)
+      : undefined;
+  const modalityModels =
+    modality === 'image' || modality === 'video'
+      ? [
+          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+        ]
+      : [
+          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+        ];
   const model = await findModelSupportingInputModality({
     env: runtime.resolvedModelRuntimeEnv,
     modality,
-    candidates: requiresAudioVideoModel
-      ? modalityModels
+    candidates: audioVideoModel
+      ? [audioVideoModel]
       : [
           params.model,
           ...modalityModels,
@@ -1287,11 +1323,7 @@ async function resolveModelForInputModality(
   if (!model) {
     throw new NonTaskInputModalityUnsupportedError(
       modality,
-      requiresAudioVideoModel
-        ? audioVideoModel
-          ? getTaskModelDisplayName(audioVideoModel)
-          : undefined
-        : undefined,
+      audioVideoModel ? getTaskModelDisplayName(audioVideoModel) : undefined,
     );
   }
   return model;
@@ -1356,11 +1388,14 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   const env = runtime.resolvedModelRuntimeEnv;
   const sessionModel = runtime.model;
   const modality = params.modality;
-  const usesAudioVideoModel = modality === 'audio' || modality === 'video';
+  const audioVideoModel =
+    modality === 'audio' || modality === 'video'
+      ? runtime.audioVideoModel
+      : undefined;
   const visionModel = runtime.visionModel;
   const helperCandidates = (
-    usesAudioVideoModel
-      ? [runtime.audioVideoModel]
+    audioVideoModel
+      ? [audioVideoModel]
       : [env.R_VISION_MODEL, env.R_SMALL_MODEL, env.R_MODEL]
   )
     .map((candidate) =>
@@ -1370,16 +1405,16 @@ export async function resolveNonTaskInputModalityDelivery(params: {
       (candidate): candidate is string =>
         Boolean(candidate) &&
         (candidate !== sessionModel ||
-          (usesAudioVideoModel && !params.skipSessionModel)),
+          (Boolean(audioVideoModel) && !params.skipSessionModel)),
     );
   const model = await findModelSupportingInputModality({
     env,
     modality,
     candidates:
-      usesAudioVideoModel || params.skipSessionModel
+      audioVideoModel || params.skipSessionModel
         ? helperCandidates
         : [sessionModel, ...helperCandidates],
-    defaultFirstCandidateOnUnknown: usesAudioVideoModel
+    defaultFirstCandidateOnUnknown: audioVideoModel
       ? true
       : !params.skipSessionModel,
     timeoutMs: params.timeoutMs,
@@ -1387,11 +1422,7 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   if (!model) {
     throw new NonTaskInputModalityUnsupportedError(
       params.modality,
-      usesAudioVideoModel
-        ? runtime.audioVideoModel
-          ? getTaskModelDisplayName(runtime.audioVideoModel)
-          : undefined
-        : undefined,
+      audioVideoModel ? getTaskModelDisplayName(audioVideoModel) : undefined,
     );
   }
   if (model === sessionModel) {
@@ -1400,9 +1431,8 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   const runtimeModelId = (candidate: string | undefined) =>
     candidate ? toBedrockMantleRuntimeModelId(candidate) : undefined;
   const helperReasoningEffort =
-    model ===
-    runtimeModelId(usesAudioVideoModel ? runtime.audioVideoModel : visionModel)
-      ? usesAudioVideoModel
+    model === runtimeModelId(audioVideoModel ?? visionModel)
+      ? audioVideoModel
         ? env.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT
         : env.R_VISION_MODEL_REASONING_EFFORT
       : model === runtimeModelId(env.R_SMALL_MODEL)
@@ -1448,6 +1478,7 @@ async function runNonTaskSdkPrompt(
   runtime: {
     model: string;
     resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
+    reasoningEffort?: ReasoningEffort;
   },
   promptOptions: NonTaskSdkPromptOptions,
   options: {
@@ -1502,6 +1533,7 @@ async function runNonTaskSdkPrompt(
   parts: Array<{ type?: unknown; text?: unknown }>;
 }> {
   const { model, resolvedModelRuntimeEnv } = runtime;
+  const reasoningEffort = runtime.reasoningEffort ?? params.reasoningEffort;
   const timeoutMs = params.timeoutMs === undefined ? 120_000 : params.timeoutMs;
   const promptErrorLabel =
     options.promptErrorLabel ??
@@ -1516,11 +1548,10 @@ async function runNonTaskSdkPrompt(
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
-    preserveReasoning:
-      options.preserveReasoning ?? Boolean(params.reasoningEffort),
+    preserveReasoning: options.preserveReasoning ?? Boolean(reasoningEffort),
     promptOnlySubagents: options.promptOnlySubagents,
-    reasoningOverride: params.reasoningEffort
-      ? { model, effort: params.reasoningEffort }
+    reasoningOverride: reasoningEffort
+      ? { model, effort: reasoningEffort }
       : undefined,
     startTimeoutMs:
       timeoutMs === null
@@ -1615,6 +1646,34 @@ async function runNonTaskSdkPrompt(
           throw error;
         }
       },
+    };
+    // One ask is relayed once, however it is learned of: its event, or the
+    // pending list read after the event stream had to be reopened.
+    const relayedPermissionAskIds = new Set<string>();
+    const relayPermissionAsk = (ask: {
+      id: string;
+      sessionID: string;
+      permission: string;
+      tool?: { messageID?: string; callID?: string };
+    }) => {
+      if (relayedPermissionAskIds.has(ask.id)) return;
+      relayedPermissionAskIds.add(ask.id);
+      try {
+        options.onPermissionAsked?.(
+          {
+            requestId: ask.id,
+            sessionId: ask.sessionID,
+            permission: ask.permission,
+            ...(ask.tool?.messageID ? { messageId: ask.tool.messageID } : {}),
+            ...(ask.tool?.callID ? { callId: ask.tool.callID } : {}),
+          },
+          permissionAskHelpers,
+        );
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
     };
     let sessionId = options.session?.id;
     if (sessionId && options.validateSession) {
@@ -1738,14 +1797,72 @@ async function runNonTaskSdkPrompt(
     // through OpenCode's whole backoff, or time out, instead of failing fast.
     try {
       const subscribeStartedAtMs = Date.now();
-      const subscription = await client.event.subscribe(
-        { directory: sessionDirectory },
-        { signal: eventAbortController.signal },
-      );
+      const subscribeToEvents = () =>
+        client.event.subscribe(
+          { directory: sessionDirectory },
+          { signal: eventAbortController.signal },
+        );
+      const subscription = await subscribeToEvents();
       setupTiming.eventSubscribeMs = Date.now() - subscribeStartedAtMs;
+      const events = streamOpenCodeEventsAcrossDisposal({
+        stream: subscription.stream,
+        resubscribe: async () => {
+          console.info(
+            '[NonTaskProviderUsage] OpenCode instance was disposed mid-prompt; reopening its event stream.',
+          );
+          return (await subscribeToEvents()).stream;
+        },
+        // Without a stream nothing can answer an ask, so the prompt stops
+        // rather than wait on one.
+        onResubscribeFailed: (error) => {
+          rejectSessionError(
+            new NonTaskOpenCodePromptError(error, promptErrorLabel),
+          );
+        },
+        // An ask raised while no stream was open was never relayed, and the
+        // reopened stream will not repeat it. The lookup can fail while the
+        // new instance is still settling, so it is retried; if the pending
+        // asks cannot be read at all, the prompt fails here rather than wait
+        // on an ask nobody will answer.
+        onResubscribed: async () => {
+          if (!options.onPermissionAsked) return;
+          for (let attempt = 0; ; attempt += 1) {
+            const pending = await client.permission
+              .list(
+                { directory: sessionDirectory },
+                { signal: eventAbortController.signal },
+              )
+              .catch((error: unknown) => ({ data: undefined, error }));
+            if (eventAbortController.signal.aborted) return;
+            if (!pending.error && pending.data) {
+              for (const ask of pending.data) relayPermissionAsk(ask);
+              return;
+            }
+            if (attempt >= PENDING_PERMISSION_LOOKUP_RETRIES) {
+              rejectSessionError(
+                new NonTaskOpenCodePromptError(
+                  pending.error ??
+                    new Error(
+                      'OpenCode pending permission asks could not be read.',
+                    ),
+                  promptErrorLabel,
+                ),
+              );
+              return;
+            }
+            await new Promise((resolve) =>
+              setTimeout(
+                resolve,
+                PENDING_PERMISSION_LOOKUP_RETRY_DELAY_MS * (attempt + 1),
+              ),
+            );
+          }
+        },
+        signal: eventAbortController.signal,
+      });
       eventMonitor = (async () => {
         try {
-          for await (const event of subscription.stream) {
+          for await (const event of events) {
             if (
               (event.type === 'session.created' ||
                 event.type === 'session.updated') &&
@@ -1923,27 +2040,7 @@ async function runNonTaskSdkPrompt(
               // and native reply), never by this monitor: a consumer
               // failure must not reject the prompt stream, and the pause
               // itself is the intended behavior.
-              try {
-                const properties = event.properties;
-                options.onPermissionAsked?.(
-                  {
-                    requestId: properties.id,
-                    sessionId: properties.sessionID,
-                    permission: properties.permission,
-                    ...(properties.tool?.messageID
-                      ? { messageId: properties.tool.messageID }
-                      : {}),
-                    ...(properties.tool?.callID
-                      ? { callId: properties.tool.callID }
-                      : {}),
-                  },
-                  permissionAskHelpers,
-                );
-              } catch (error) {
-                console.warn(
-                  `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
-                );
-              }
+              relayPermissionAsk(event.properties);
             } else if (
               event.type === 'session.error' &&
               event.properties.sessionID === sessionId
@@ -2230,46 +2327,73 @@ export async function generateTrackedNonTaskText(
   const modalityParams = audioVideoModelOverride
     ? { ...params, model: audioVideoModelOverride }
     : params;
-  const runtime = await resolveNonTaskModelRuntime(
-    audioVideoModelOverride,
-    params.modelRole,
-  );
-  const model = await resolveModelForInputModality(modalityParams, runtime);
-  const audioVideoReasoningEffort =
-    params.reasoningEffort ??
-    taskAudioVideoOverride?.reasoningEffort ??
-    runtime.resolvedModelRuntimeEnv.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT;
-  const promptParams =
-    audioVideoModality &&
-    !modalityParams.reasoningEffort &&
-    isReasoningEffort(audioVideoReasoningEffort)
-      ? { ...modalityParams, reasoningEffort: audioVideoReasoningEffort }
-      : modalityParams;
+  const audioVideoReasoningOverride =
+    params.reasoningEffort ?? taskAudioVideoOverride?.reasoningEffort;
 
   let data: Awaited<ReturnType<typeof runNonTaskSdkPrompt>>;
+  let selectedAudioVideoModel = audioVideoModelOverride;
   try {
-    data = await runNonTaskSdkPrompt(
-      promptParams,
-      { ...runtime, model },
+    data = await runControlPlaneWithFallback(
       {
-        system: params.system,
-        parts: [
-          {
-            type: 'text',
-            text: buildOpenCodePrompt({
-              prompt: params.prompt,
-              maxOutputTokens: params.maxOutputTokens,
-            }),
-          },
-          ...(params.files ?? []).map((file) => ({
-            type: 'file' as const,
-            mime: file.mime,
-            ...(file.filename ? { filename: file.filename } : {}),
-            url: file.url,
-          })),
-        ],
+        ...modalityParams,
+        model: audioVideoModelOverride,
+        reasoningEffort: audioVideoReasoningOverride,
+        ...(audioVideoModelOverride
+          ? { modelRole: 'audioVideo' as const }
+          : {}),
       },
-      { promptErrorLabel: 'OpenCode text prompt failed' },
+      async (runtime) => {
+        selectedAudioVideoModel =
+          audioVideoModelOverride ?? runtime.audioVideoModel;
+        const audioVideoReasoningEffort =
+          audioVideoModelOverride &&
+          runtime.catalogModelId !== audioVideoModelOverride
+            ? runtime.reasoningEffort
+            : (audioVideoReasoningOverride ??
+              runtime.resolvedModelRuntimeEnv
+                .R_AUDIO_VIDEO_MODEL_REASONING_EFFORT);
+        const promptParams =
+          audioVideoModality &&
+          !modalityParams.reasoningEffort &&
+          isReasoningEffort(audioVideoReasoningEffort)
+            ? { ...modalityParams, reasoningEffort: audioVideoReasoningEffort }
+            : modalityParams;
+        const model = await resolveModelForInputModality(
+          audioVideoModelOverride &&
+            runtime.catalogModelId !== audioVideoModelOverride
+            ? { ...promptParams, model: runtime.catalogModelId }
+            : promptParams,
+          runtime,
+        );
+        return runNonTaskSdkPrompt(
+          promptParams,
+          {
+            ...runtime,
+            model,
+            reasoningEffort:
+              model === runtime.model ? runtime.reasoningEffort : undefined,
+          },
+          {
+            system: params.system,
+            parts: [
+              {
+                type: 'text',
+                text: buildOpenCodePrompt({
+                  prompt: params.prompt,
+                  maxOutputTokens: params.maxOutputTokens,
+                }),
+              },
+              ...(params.files ?? []).map((file) => ({
+                type: 'file' as const,
+                mime: file.mime,
+                ...(file.filename ? { filename: file.filename } : {}),
+                url: file.url,
+              })),
+            ],
+          },
+          { promptErrorLabel: 'OpenCode text prompt failed' },
+        );
+      },
     );
   } catch (error) {
     if (
@@ -2278,7 +2402,9 @@ export async function generateTrackedNonTaskText(
     ) {
       throw new NonTaskInputModalityUnsupportedError(
         audioVideoModality,
-        getTaskModelDisplayName(model),
+        selectedAudioVideoModel
+          ? getTaskModelDisplayName(selectedAudioVideoModel)
+          : undefined,
       );
     }
     throw error;
@@ -2298,6 +2424,83 @@ export async function generateTrackedNonTaskText(
   }
 
   return text;
+}
+
+async function runControlPlaneWithFallback<T>(
+  params: GenerateTrackedNonTaskBaseParams,
+  execute: (
+    runtime: Awaited<ReturnType<typeof resolveNonTaskModelRuntime>>,
+  ) => Promise<T>,
+): Promise<T> {
+  const role = params.modelRole ?? 'small';
+  let runtime = await resolveNonTaskModelRuntime(params.model, role);
+  const fallbackEnvVar =
+    role === 'orchestration'
+      ? 'R_ORCHESTRATION_MODEL_FALLBACK'
+      : role === 'small'
+        ? 'R_SMALL_MODEL_FALLBACK'
+        : role === 'audioVideo'
+          ? 'R_AUDIO_VIDEO_MODEL_FALLBACK'
+          : undefined;
+  const fallbackModel = fallbackEnvVar
+    ? runtime.resolvedModelRuntimeEnv[fallbackEnvVar]
+    : undefined;
+  const fallbackReasoningEnvVar =
+    role === 'orchestration'
+      ? 'R_ORCHESTRATION_MODEL_FALLBACK_REASONING_EFFORT'
+      : role === 'small'
+        ? 'R_SMALL_MODEL_FALLBACK_REASONING_EFFORT'
+        : role === 'audioVideo'
+          ? 'R_AUDIO_VIDEO_MODEL_FALLBACK_REASONING_EFFORT'
+          : undefined;
+  const fallbackReasoningEffort = fallbackReasoningEnvVar
+    ? runtime.resolvedModelRuntimeEnv[fallbackReasoningEnvVar]
+    : undefined;
+  const validFallbackReasoningEffort = isReasoningEffort(
+    fallbackReasoningEffort,
+  )
+    ? fallbackReasoningEffort
+    : undefined;
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await execute(runtime);
+    } catch (error) {
+      const trigger = classifyModelFallbackTrigger(error, {
+        retriesUsed: attempt - 1,
+      });
+      if (
+        trigger &&
+        fallbackModel &&
+        fallbackModel !== runtime.catalogModelId
+      ) {
+        const fromModel = runtime.catalogModelId;
+        runtime = await resolveNonTaskModelRuntime(
+          fallbackModel,
+          'primary',
+          validFallbackReasoningEffort,
+        );
+        const fromProvider = getDisplayModelProviderId(fromModel) ?? 'opencode';
+        const toProvider =
+          getDisplayModelProviderId(runtime.catalogModelId) ?? 'opencode';
+        void captureInstanceEvent('model_fallback_switched', {
+          fromProvider,
+          fromModel,
+          toProvider,
+          toModel: runtime.catalogModelId,
+        });
+        return execute(runtime);
+      }
+      const failure = classifyNonTaskInferenceError(error);
+      if (
+        !fallbackModel ||
+        !failure.retryable ||
+        attempt > MODEL_FALLBACK_PROVIDER_ERROR_RETRIES
+      ) {
+        throw error;
+      }
+    }
+  }
 }
 
 export async function generateTrackedNonTaskTextInOpenCodeSession(
@@ -2381,36 +2584,33 @@ async function generateTrackedNonTaskObjectWithSdk<
 >(
   params: GenerateTrackedNonTaskObjectParams<TSchema>,
 ): Promise<{ object: z.output<TSchema> }> {
-  const resolvedRuntime = await resolveNonTaskModelRuntime(
-    params.model,
-    params.modelRole,
-  );
-
-  const data = await runNonTaskSdkPrompt(
-    params,
-    resolvedRuntime,
-    {
-      system: params.system,
-      format: {
-        type: 'json_schema',
-        schema: buildNonTaskStructuredOutputJsonSchema(params.schema),
-        retryCount:
-          params.structuredOutputRetryCount ??
-          DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
-      },
-      parts: [
-        {
-          type: 'text',
-          text: buildOpenCodePrompt({
-            prompt: params.prompt,
-            maxOutputTokens: params.maxOutputTokens,
-          }),
+  const data = await runControlPlaneWithFallback(params, (resolvedRuntime) =>
+    runNonTaskSdkPrompt(
+      params,
+      resolvedRuntime,
+      {
+        system: params.system,
+        format: {
+          type: 'json_schema',
+          schema: buildNonTaskStructuredOutputJsonSchema(params.schema),
+          retryCount:
+            params.structuredOutputRetryCount ??
+            DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
         },
-      ],
-    },
-    {
-      promptErrorLabel: `OpenCode structured prompt failed (model ${resolvedRuntime.model})`,
-    },
+        parts: [
+          {
+            type: 'text',
+            text: buildOpenCodePrompt({
+              prompt: params.prompt,
+              maxOutputTokens: params.maxOutputTokens,
+            }),
+          },
+        ],
+      },
+      {
+        promptErrorLabel: `OpenCode structured prompt failed (model ${resolvedRuntime.model})`,
+      },
+    ),
   );
 
   const structured = (data.info as { structured?: unknown }).structured;

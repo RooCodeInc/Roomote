@@ -1,0 +1,1 @@
+ALTER TABLE "deployment_settings" ADD COLUMN "email_outbound_enabled" boolean DEFAULT true NOT NULL;

@@ -65,6 +65,44 @@ describe('Roomote MCP management contract', () => {
     expect(roomoteManagementFieldSchemas.sessionId.description).toContain(
       'responses return the canonical session ID',
     );
+    expect(
+      roomoteManagementFieldSchemas.attachments.safeParse([
+        {
+          filename: 'screenshot.png',
+          mimeType: 'image/png',
+          base64: 'cG5n',
+        },
+        {
+          filename: 'failure.log',
+          mimeType: 'text/plain',
+          base64: 'bG9n',
+        },
+      ]).success,
+    ).toBe(true);
+    expect(
+      roomoteManagementFieldSchemas.attachments.safeParse(
+        Array.from({ length: 21 }, () => ({
+          filename: 'failure.log',
+          mimeType: 'text/plain',
+          base64: 'bG9n',
+        })),
+      ).success,
+    ).toBe(false);
+    expect(roomoteManagementFieldSchemas.attachments.description).toContain(
+      '16 MiB decoded total',
+    );
+    expect(roomoteManagementFieldSchemas.attachments.description).toContain(
+      'up to 2 MiB each',
+    );
+    expect(roomoteManagementFieldSchemas.attachments.description).toContain(
+      'up to 8 MiB each',
+    );
+    expect(roomoteManagementFieldSchemas.attachments.description).toContain(
+      'MIME types are trimmed and normalized',
+    );
+    expect(roomoteManagementFieldSchemas.attachments.description).toContain(
+      'Corrupt supported documents are rejected',
+    );
   });
 
   it('defaults communication to Sessions and lets taskId override naturally', () => {

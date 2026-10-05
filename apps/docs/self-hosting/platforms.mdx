@@ -1,0 +1,87 @@
+---
+title: Hosting platforms
+icon: cloud-cog
+description: Deploy Roomote in your Railway, Render, or other hosting account, then run your first task.
+---
+
+A deployment in your own hosting account is a self-hosted Roomote deployment.
+The platform runs the infrastructure; you manage the deployment, credentials,
+updates, and costs. If you want Roomote to manage the deployment for you,
+follow [Roomote Cloud](/cloud).
+
+## Before you start
+
+Have these ready:
+
+- a hosting account with billing available for the template's services
+- a supported inference subscription or provider API key with available credit
+- permission to connect one repository for your first task
+- a hosted sandbox account, such as Modal, E2B, or Daytona, for Railway or
+  Render; those platforms cannot run Roomote's local Docker task provider
+
+Hosting, model inference, and sandbox execution are separate resources. The
+Railway and Render templates provision the application and its datastores.
+You connect inference and sandbox credentials in Roomote after deployment.
+
+## 1. Deploy the application
+
+Choose your hosting platform:
+
+<Tabs>
+  <Tab title="Railway">
+    1. Open the [stable Roomote template](https://railway.com/deploy/Rj2cFo?referralCode=roomote).
+    2. Review the services and costs, then deploy it in your Railway account.
+    3. Wait for the `web` and `api` services to report healthy.
+    4. Open the web service's public domain at `/setup`. Copy `SETUP_TOKEN`
+       from the API service's **Variables** tab into the setup form.
+
+    For a custom domain, set its full HTTPS URL in the template's `R_APP_URL`
+    input, attach the domain to the web service, and finish DNS before
+    opening setup on that domain. See the
+    [Railway deployment guide](https://github.com/RooCodeInc/Roomote/blob/main/deploy/railway/README.md)
+    for domain setup, service configuration, and maintenance.
+  </Tab>
+  <Tab title="Render">
+    1. Open the [Roomote Blueprint](https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote).
+    2. Review the services and costs, then deploy it in your Render account.
+       The Blueprint uses paid instances.
+    3. Wait for `roomote-web` and `roomote-api` to report live.
+    4. Open the web service's public domain at `/setup`. Copy `SETUP_TOKEN`
+       from the `roomote-shared` environment group into the setup form.
+
+    See the
+    [Render deployment guide](https://github.com/RooCodeInc/Roomote/blob/main/deploy/render/README.md)
+    for first-boot troubleshooting, custom domains, and maintenance.
+  </Tab>
+</Tabs>
+
+Keep the setup token private. **Check:** The Roomote setup page loads over
+HTTPS and accepts the token.
+
+## 2. Complete setup and run a task
+
+Continue to **[Run your first task](/first-task)**. Create the administrator
+account, connect inference and a repository, and configure your hosted
+sandbox provider when Roomote asks where the task should run.
+
+Modal is the template default for Railway and Render. Have its token pair
+ready, or choose another supported provider and follow its setup instructions
+in Roomote. A deployed application still needs a working sandbox provider to
+run repository tasks.
+
+Live previews need additional wildcard-domain configuration on these
+platforms. The first-task guide uses a repository inspection task, so you can
+finish it before enabling previews. Follow your platform's deployment guide
+when you are ready to add them.
+
+## Other deployment options
+
+- [Coolify](https://github.com/RooCodeInc/Roomote/blob/main/deploy/coolify/README.md)
+  runs the maintained Compose template on a server you manage.
+- [Fly.io](https://github.com/RooCodeInc/Roomote/blob/main/deploy/fly/README.md)
+  provides a maintained deployment configuration with hosted sandboxes.
+- [Advanced Compose configuration](https://github.com/RooCodeInc/Roomote/blob/main/SELF_HOSTING.md#production-compose-with-caddy)
+  is available for operators managing the stack directly.
+
+Each option continues to the same [first-task guide](/first-task) once its
+Roomote URL is ready.

@@ -171,7 +171,7 @@ function sortTaskModelOptionsById<T extends { id: string }>(models: T[]): T[] {
 export const TASK_MODEL_CATALOG: readonly TaskModelOption[] =
   mapRecommendedTaskModels(OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS);
 
-export const DEFAULT_TASK_MODEL_ID = 'openrouter/openai/gpt-6-luna';
+export const DEFAULT_TASK_MODEL_ID = 'openrouter/openai/gpt-5.6-luna';
 const LEGACY_DEFAULT_TASK_MODEL_ID = 'roomote-model-default';
 
 const TASK_MODEL_CATALOG_BY_ID = new Map<string, TaskModelOption>(

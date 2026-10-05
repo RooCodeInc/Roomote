@@ -4,16 +4,17 @@ import {
   AgentMailApiClient,
   buildAgentMailEmailBody,
 } from '@roomote/communication';
-import { isEmailChannelEnabled } from '@roomote/env';
 import {
   agentmailConversationParticipants,
   agentmailConversations,
   agentmailSuppressions,
   and,
   authUsers,
+  canSendAgentMailWithRuntimeCredentials,
   db,
   eq,
   isNull,
+  isAgentMailOutboundEnabled,
   resolveAgentMailRuntimeCredentials,
   users,
 } from '@roomote/db/server';
@@ -178,11 +179,10 @@ export async function listAgentMailOutboundIdentities(
 export async function listAvailableAgentMailOutboundIdentities(
   userId: string,
 ): Promise<AgentMailOutboundIdentity[]> {
-  if (!isEmailChannelEnabled()) {
+  if (!(await isAgentMailOutboundEnabled())) {
     return [];
   }
-  const credentials = await resolveAgentMailRuntimeCredentials();
-  if (!credentials.apiKey || !credentials.inboxId) {
+  if (!(await canSendAgentMailWithRuntimeCredentials())) {
     return [];
   }
   return listAgentMailOutboundIdentities(userId);
@@ -232,11 +232,10 @@ export async function canStartAgentMailConversationWithUser(
   userId: string,
   identityId?: string,
 ): Promise<boolean> {
-  if (!isEmailChannelEnabled()) {
+  if (!(await isAgentMailOutboundEnabled())) {
     return false;
   }
-  const credentials = await resolveAgentMailRuntimeCredentials();
-  if (!credentials.apiKey || !credentials.inboxId) {
+  if (!(await canSendAgentMailWithRuntimeCredentials())) {
     return false;
   }
   const resolution = await resolveAgentMailOutboundRecipient(
@@ -281,8 +280,10 @@ export async function prepareAgentMailConversation(input: {
   inboxId: string;
   messageId: null;
 } | null> {
-  if (!isEmailChannelEnabled()) return null;
-  const credentials = await resolveAgentMailRuntimeCredentials();
+  if (!(await isAgentMailOutboundEnabled())) return null;
+  const credentials = await resolveAgentMailRuntimeCredentials({
+    allocate: true,
+  });
   if (!credentials.apiKey || !credentials.inboxId) return null;
   const resolution = await resolveAgentMailOutboundIdentity(
     input.userId,
@@ -337,10 +338,12 @@ export async function startAgentMailConversationWithResult(input: {
   /** A specific server-issued verified identity; never a raw address. */
   identityId?: string;
 }): Promise<StartAgentMailConversationResult> {
-  if (!isEmailChannelEnabled()) {
+  if (!(await isAgentMailOutboundEnabled())) {
     return { sent: false };
   }
-  const credentials = await resolveAgentMailRuntimeCredentials();
+  const credentials = await resolveAgentMailRuntimeCredentials({
+    allocate: true,
+  });
   if (!credentials.apiKey || !credentials.inboxId) {
     return { sent: false };
   }
@@ -559,10 +562,12 @@ export async function sendAgentMailSystemEmail(input: {
   logContext: string;
   clientSendId?: string;
 }): Promise<AgentMailSystemEmailResult> {
-  if (!isEmailChannelEnabled()) {
+  if (!(await isAgentMailOutboundEnabled())) {
     return { sent: false, reason: 'channel_disabled' };
   }
-  const credentials = await resolveAgentMailRuntimeCredentials();
+  const credentials = await resolveAgentMailRuntimeCredentials({
+    allocate: true,
+  });
   if (!credentials.apiKey || !credentials.inboxId) {
     return { sent: false, reason: 'not_configured' };
   }

@@ -90,8 +90,9 @@ discussion.
 ## Enable review automation
 
 GitLab merge-request reviews use the same Review Code automation targeting
-model as GitHub. After syncing repositories, associate the GitLab repository
-with the intended environment and enable Review Code automation for that target.
+model as GitHub. After syncing repositories, enable Review Code automation. A repository
+doesn't need an environment: reviews run in the environment that includes the
+repository when one exists, and otherwise on a plain checkout of the repository.
 
 Open or reopened merge request events enqueue initial review tasks. Update
 events enqueue sync reviews when GitLab includes `oldrev`, which indicates a

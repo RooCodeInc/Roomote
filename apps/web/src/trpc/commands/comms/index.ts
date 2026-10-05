@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   DiscordBotTokenValidationError,
   discordGatewaySessions,
+  getAgentMailOutboundSettings,
   invalidateAgentMailRuntimeCredentialsCache,
   invalidateDiscordRuntimeCredentialsCache,
   normalizeDiscordBotToken,
@@ -15,6 +16,7 @@ import {
   invalidateTeamsBotRuntimeCredentialsCache,
   invalidateSlackSigningSecretCache,
   resolveInvocationIdentities,
+  setAgentMailOutboundEnabled,
   normalizeTelegramBotToken,
   db,
   environmentVariables,
@@ -179,6 +181,7 @@ export type CommsProviderStatus = Omit<
   telegramBotUsername?: string | null;
   discord?: DiscordCommsStatus | null;
   agentmail?: AgentMailCommsStatus | null;
+  agentmailOutbound?: AgentMailOutboundStatus;
 };
 
 export type CommsStatus = Omit<SetupAuthStatus, 'providers'> & {
@@ -209,6 +212,10 @@ export type AgentMailCommsStatus = {
   inboxEmail: string | null;
   webhook: AgentMailWebhookStatus;
 };
+
+type AgentMailOutboundStatus = Awaited<
+  ReturnType<typeof getAgentMailOutboundSettings>
+>;
 
 type DiscordGatewayPhase =
   | 'starting'
@@ -1365,6 +1372,7 @@ function withAdditionalCommsProviders(
     telegramWebhook: TelegramWebhookStatus | null;
     discord: DiscordCommsStatus | null;
     agentmail: AgentMailCommsStatus | null;
+    agentmailOutbound: AgentMailOutboundStatus;
     invocationIdentities: InvocationIdentity[];
   },
 ): CommsStatus {
@@ -1374,6 +1382,7 @@ function withAdditionalCommsProviders(
     telegramWebhook,
     discord,
     agentmail,
+    agentmailOutbound,
     invocationIdentities,
   } = options;
   const telegramBotUsername =
@@ -1415,7 +1424,9 @@ function withAdditionalCommsProviders(
         ? { telegramWebhook, telegramBotUsername }
         : {}),
       ...(definition.id === 'discord' ? { discord } : {}),
-      ...(definition.id === 'agentmail' ? { agentmail } : {}),
+      ...(definition.id === 'agentmail'
+        ? { agentmail, agentmailOutbound }
+        : {}),
     };
   };
 
@@ -1446,6 +1457,7 @@ export async function getCommsStatusCommand(
     telegramWebhook,
     discord,
     agentmail,
+    agentmailOutbound,
     invocationIdentities,
   ] = await Promise.all([
     getPersistedEnvironmentVariableNames(),
@@ -1453,6 +1465,7 @@ export async function getCommsStatusCommand(
     getTelegramWebhookStatus(),
     getDiscordCommsStatus(),
     getAgentMailCommsStatus(),
+    getAgentMailOutboundSettings(),
     resolveInvocationIdentities(),
   ]);
 
@@ -1468,9 +1481,19 @@ export async function getCommsStatusCommand(
       telegramWebhook,
       discord,
       agentmail,
+      agentmailOutbound,
       invocationIdentities,
     },
   );
+}
+
+export async function setAgentMailOutboundEnabledCommand(
+  auth: UserAuthSuccess,
+  input: { enabled: boolean },
+): Promise<AgentMailOutboundStatus> {
+  assertAdmin(auth);
+  await setAgentMailOutboundEnabled(input.enabled);
+  return getAgentMailOutboundSettings();
 }
 
 export async function saveCommsAuthConfigCommand(

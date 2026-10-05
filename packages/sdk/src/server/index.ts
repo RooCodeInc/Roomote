@@ -69,6 +69,14 @@ export {
   type AutomationSignalPrefetchJob,
 } from './lib/automation-recommendations';
 export {
+  BUILT_IN_AUTOMATION_WEBHOOK_QUEUE_NAME,
+  builtInAutomationWebhookJobSchema,
+  enqueueBuiltInAutomationWebhook,
+  hashBuiltInAutomationWebhookToken,
+  matchesBuiltInAutomationWebhookToken,
+  type BuiltInAutomationWebhookJob,
+} from './lib/built-in-automation-webhook';
+export {
   CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
   resolveDefaultAutomationTarget,
   type AutomationDestinationCapabilities,
@@ -179,6 +187,7 @@ export {
   recordInstalledRelease,
   type RecordInstalledReleaseResult,
 } from './lib/release-announcements';
+export { drainSessionDoneWebhookDeliveries } from './lib/session-done-webhooks';
 
 export {
   SLACK_ACCOUNT_LINK_EDUCATION_DELAY_MS,

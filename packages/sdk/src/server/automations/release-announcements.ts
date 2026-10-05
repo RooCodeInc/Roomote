@@ -12,7 +12,7 @@ import {
 } from './types';
 
 export async function releaseAnnouncementsJob(
-  opts: AutomationRunOpts = {},
+  opts: AutomationRunOpts,
 ): Promise<AutomationJobResult> {
   const result = emptyJobResult();
   const runtime = await getAutomationRuntime('release_announcements');

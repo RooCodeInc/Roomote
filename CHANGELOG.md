@@ -2,6 +2,154 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.15.1 (2026-10-02)
+
+Roomote 1.15.1 adds resilient model fallbacks, reduces Auto approval prompts, and fixes approval, sessions board, and task-detail edge cases.
+
+### Highlights
+
+- Configure per-role model fallbacks that keep work moving through eligible provider failures and make each switch visible to users.
+- Fewer unnecessary Auto approval prompts.
+- Review the correct arguments when an agent calls the same integration tool several times at once.
+- Keep manually active sessions and human command-style prompts visible in the views where users expect them.
+
+### Patch changes
+
+- Fix tool approvals showing and checking the wrong arguments when an agent calls the same tool several times at once.
+- Add configurable per-role model fallbacks with sticky runtime switching, provider-error retry classification, user-visible notices, notifications, and anonymous telemetry.
+- Keep manually active sessions visible in the sessions board's Active lane.
+- Keep human prompts that begin with commands visible in task details while continuing to hide generated setup and automation prompts.
+- Reduce unnecessary Auto approval prompts for harmless actions and for steps a session's owner already approved.
+- Apply model fallbacks to subagents that use the "Same as coding" model.
+
+## 1.15.0 (2026-09-30)
+
+Roomote 1.15 makes sessions and automation runs easier to follow while adding opt-in Judgement repository rules, prompt history, and more reliable approval and resume flows.
+
+### Highlights
+
+- Successful manual automation launches now link directly to the exact session they started, making it easier to follow the run and any delegated work.
+- Admins can now opt into Judgement repository rules under Experimental settings to give coding tasks a Jev-backed skill and command for authoring, testing, calibrating, and enforcing repository-specific checks.
+- Task and session composers can now recall earlier prompts with ArrowUp while preserving multiline editing, input-method composition, and suggestion behavior.
+- The Sessions board now supports mouse, touch, and keyboard drag-and-drop status changes, archive filtering, and per-lane filters for faster session triage.
+
+### Minor changes
+
+- Successful manual automation launches now link directly to the exact session they started, making it easier to follow the run and any delegated work.
+- Admins can now opt into Judgement repository rules under Experimental settings to give coding tasks a Jev-backed skill and command for authoring, testing, calibrating, and enforcing repository-specific checks.
+- Task and session composers can now recall earlier prompts with ArrowUp while preserving multiline editing, input-method composition, and suggestion behavior.
+- The Sessions board now supports mouse, touch, and keyboard drag-and-drop status changes, archive filtering, and per-lane filters for faster session triage.
+
+### Patch changes
+
+- Fix tool approvals failing for tool calls made without arguments, which were rejected instead of asking for approval.
+- Automation sessions with an open Roomote-created pull request now remain in Needs input until the pull request is reviewed, merged, or closed.
+- Follow-ups on existing tasks no longer fail with a source-control token error after a repository in the task's workspace is deleted or removed from the GitHub App.
+- Apply tool approval choices to integration calls that a session's subagents make, so those calls ask for approval like any other.
+
+## 1.14.0 (2026-09-30)
+
+Roomote 1.14 expands automation triggers and session workflows while adding GPT-6.1 Sol and staged repository Judgement checks.
+
+### Highlights
+
+- Start eligible built-in automations on demand or through secure webhooks, and schedule Manager Stats daily, weekly, or monthly.
+- Use the generally available sessions board, automatic status classification, and authorized manual status controls.
+- Choose GPT-6.1 Sol across supported providers and ChatGPT Fast mode, including differentiated recommendation presets.
+- Check staged repository changes against Judgement rules with deployment-managed inference, local calibration tools, and Settings examples.
+
+### Minor changes
+
+- Eligible built-in automations can now run on demand or from secure, revocable webhooks with bounded per-run input, while Manager Stats supports daily, weekly, and monthly schedules.
+- Add GPT-6.1 Sol across supported provider routes and ChatGPT Fast mode, and use it in differentiated recommendation presets while preserving saved selections and GPT-6 Sol availability.
+- Repository rules now run as staged pre-commit Judgement checks using deployment-managed inference, with `.judgement/rules.json`, local test and calibration commands, and labeled examples in the Settings decision tester.
+- The sessions board and automatic status classification are now generally available, with authorized manual status controls and animated status moves that respect reduced-motion preferences.
+
+### Patch changes
+
+- Brain expansion and synthesis now use deployment helper models correctly in gateway mode instead of forwarding the helper sentinel to upstream providers.
+- Experimental Jevgrep code search now upgrades to version 0.5.0 in existing sandboxes, guides Explore to try bounded semantic search for unclear subsystem implementations, and preserves provider token counts so searches release conservative rate-limit reservations based on actual usage.
+- Slack-backed transcripts now resolve user and channel references into readable links, and automation reports correctly render Markdown links with bracketed titles.
+
+## 1.13.4 (2026-09-29)
+
+Roomote 1.13.4 keeps automation and Session workflows quiet and controllable while expanding optional code search, model availability, and repository safeguards.
+
+### Highlights
+
+- Use optional Jevgrep code search to find relevant repository code from natural-language questions, with ordinary search fallback.
+- Set Session statuses directly and let inactivity settle completed Sessions without disrupting active work.
+- Use Claude Sonnet 5.5 on supported providers and opt repositories into bounded, fail-open JUDGE.json policies.
+- Keep automation reports focused, no-op runs quiet, and Slack emoji shortcodes rendering correctly.
+
+### Patch changes
+
+- Prevent automation reports from including earlier progress narration when posting their final result.
+- Custom automation settings are easier to scan and validate, while no-op runs stay silent until a meaningful report, clarification, delegated task, or failure needs delivery.
+- New provider connections can discover Claude Sonnet 5.5 through supported catalog-backed routes while existing Claude Sonnet 5 selections remain usable.
+- Add optional Jevgrep code search under Settings > Experimental. When enabled with a configured Jev judgment model, coding tasks receive the `jg` CLI and its agent skill for finding relevant source from natural-language questions. Provider credentials stay on the server. The experiment is off by default and falls back to ordinary code search when setup or evaluation is unavailable.
+- Repositories can opt into completion-time JUDGE.json policies that evaluate the final diff and provide bounded repair feedback while keeping invalid or unavailable judgment models fail-open.
+- Authorized Session managers can set manual statuses across the Sessions board, list, and workspace, while Done remains informational and inactivity handling releases manual status overrides when newer user work arrives.
+- Session filters now honor selected environments and the Has PR option, so filtered lists no longer include unrelated Sessions without the requested scope or pull request.
+- Slack automation reports now render recognized emoji shortcodes in prose and link labels instead of leaving the shortcode text visible.
+- Web app pages can be zoomed by users who need larger content without changing the remaining viewport behavior.
+
+## 1.13.3 (2026-09-27)
+
+Roomote 1.13.3 restores differentiated model choices and keeps Fast event delivery reliable when generated context contains invalid characters.
+
+### Highlights
+
+- Choose differentiated model mapping presets for provider-specific role recommendations, while Default keeps GPT 5.6 Luna as the current baseline.
+- Keep Fast pull-request and task operations working when generated parent-event context contains PostgreSQL-incompatible NUL characters.
+
+### Patch changes
+
+- Model mapping presets now keep each provider's differentiated role recommendations instead of flattening every recommended option to GPT 5.6 Luna, while the new Default preset still uses the current Luna route and existing selections remain unchanged.
+- Fast parent events now remove PostgreSQL-incompatible NUL characters from nested payloads before durable admission, so pull-request and task operations no longer fail solely because generated context contains a NUL while ordinary payloads and event ordering remain unchanged.
+
+## 1.13.2 (2026-09-26)
+
+Roomote 1.13.2 expands evaluated session judgment support while keeping setup and transcript experiences reliable.
+
+### Highlights
+
+- Use the Roomote judgment model for evaluated session status classification when the experiment is enabled.
+- See saved-to-memory events in the same expandable tool rows as other session and task activity.
+- Reopen a completed setup link without leaving the setup page on a loading spinner.
+
+### Patch changes
+
+- The Roomote judgment model now supports evaluated session status classification when enabled, while decisions outside its policy keep the existing safe fallback.
+- Saved-to-memory events in session and task transcripts now use the same expandable tool row as other tool activity, preserving the saved facts and memory label.
+- Reopening a completed setup link now returns admins to Home instead of leaving the setup page on a loading spinner.
+
+## 1.13.1 (2026-09-25)
+
+Roomote 1.13.1 improves automation triggers, judgment-model setup, model selection, and reliability across Sessions, tasks, and chat providers.
+
+### Highlights
+
+- Run custom automations on demand or from a private POST webhook with bounded input and independent runs.
+- Run the optional CPU judgment sidecar on self-hosted deployments and test judgment decisions from Settings.
+- Enable the optional Sessions board and status classification while keeping access and lifecycle changes under admin control.
+- Keep Discord images, model pickers, Session workspaces, and task sandboxes reliable through common recovery paths.
+
+### Patch changes
+
+- Custom automations can now run on demand or from a private POST webhook, with bounded one-run input, independent runs, credential rotation, and rate limiting.
+- Roomote Cloud now creates a managed email inbox when a deployment first sends email, so deployments that never send mail do not allocate an unused inbox.
+- Custom model mapping presets now save supported reasoning values without mutating provider recommendations, and validation names the Advisor role correctly.
+- Discord Fast replies now deliver selected task screenshots, including deferred and retry paths, instead of silently dropping image attachments.
+- Self-hosted deployments can run a CPU decision model beside the stack, so the Memory check, reply addressing, and Roomote's other typed decisions work without a Jev key or a GPU. The judgment sidecar serves `roomote/roomote-judgment-gliner`, a GLiNER 2.5 model fine-tuned on Roomote's decisions, behind the same decision contract Roomote's `roomote` judgment backend calls, capped at 4 GB and 4 CPUs by default. It is opt-in like Memory: the `judgment` compose profile in the self-host and production Compose files, and an idle service in the Railway, Render, and Coolify templates that stays unused until `R_JUDGMENT_UPSTREAM_URL` points at it. The image is published as `ghcr.io/roocodeinc/roomote-judgment`. `docker-compose.self-host.yml` now passes `R_JUDGMENT_MODEL`, `R_JUDGMENT_UPSTREAM_URL`, and `R_JUDGMENT_UPSTREAM_API_KEY` to the app services.
+- Admins can test the judgment model by hand under **Settings > Models > Test decisions**. The page lists each decision Roomote asks it, with the exact questions and an editable sample state, and shows each answer's probabilities and latency. It can ask the Roomote judgment model beside Jev when both are configured. Test decisions go to the configured judgment model but are never captured or shadowed.
+- New provider connections and fresh deployments now use GPT 5.6 Luna as the coding default while keeping GPT-6 models available, and existing explicit model selections stay unchanged.
+- Long model lists in New Session and model pickers now respond to mouse-wheel and trackpad scrolling while preserving keyboard and focus behavior.
+- Stopped, failed, and canceled task runs now release their sandboxes through bounded cleanup, reducing stale capacity usage and preventing leaked sandboxes from blocking new work.
+- Narrowing a Session window no longer crashes when task panels are removed and resized together.
+- Add an optional Sessions board with judgment-model status classification. An administrator can enable each experiment deployment-wide; members see the board only for sessions they can already access.
+- In multi-person Slack, Discord, and Teams threads, acknowledgements addressed to Roomote now use the same addressee routing as other replies before deciding whether to respond.
+
 ## 1.13.0 (2026-09-23)
 
 Roomote 1.13 brings automation Results to everyone, lets you control integration access, adds reusable personal model mappings, and makes Sessions easier to manage.

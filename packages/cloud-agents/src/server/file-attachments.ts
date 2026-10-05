@@ -7,9 +7,9 @@ import * as XLSX from 'xlsx';
 import {
   isRoomoteTextExtractableAttachment,
   ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS,
+  ROOMOTE_FILE_ATTACHMENT_MAX_BYTES,
 } from '../file-attachments';
 
-const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const TRUNCATED_MARKER = '[truncated]';
 const OMITTED_ATTACHMENT_MARKER = '[omitted: attachment budget exhausted]';
 
@@ -252,9 +252,9 @@ async function extractAttachmentText(
   const extension = getNormalizedExtension(input.filename);
   const mimeType = normalizeMimeType(input.mimeType);
 
-  if (buffer.byteLength > MAX_ATTACHMENT_BYTES) {
+  if (buffer.byteLength > ROOMOTE_FILE_ATTACHMENT_MAX_BYTES) {
     throw new Error(
-      `File exceeds the ${Math.round(MAX_ATTACHMENT_BYTES / (1024 * 1024))} MB attachment limit.`,
+      `File exceeds the ${Math.round(ROOMOTE_FILE_ATTACHMENT_MAX_BYTES / (1024 * 1024))} MB attachment limit.`,
     );
   }
 

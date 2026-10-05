@@ -10,7 +10,6 @@ import {
   repositories,
   githubInstallations,
   githubUserMappings,
-  environmentRepositoryMappings,
   getReviewCodeAutomationSettings,
   eq,
   and,
@@ -112,26 +111,6 @@ export const getGitHubAutomationTargets = async ({
     (reviewerSettings?.enabled ?? DEFAULT_PR_REVIEW_SETTINGS.enabled) === false
   ) {
     return { status: 'ok', targets: [] };
-  }
-
-  const repositoryEnvironmentIds = await db
-    .select({
-      environmentId: environmentRepositoryMappings.environmentId,
-    })
-    .from(environmentRepositoryMappings)
-    .where(
-      eq(environmentRepositoryMappings.repositoryId, result.repositories.id),
-    );
-
-  if (workflow === 'pr_review' && repositoryEnvironmentIds.length === 0) {
-    console.error(
-      `[getGitHubAutomationTargets] [${githubInstallationId}, ${repository.full_name}] -> no_environment_mapping`,
-    );
-
-    return {
-      status: 'error',
-      message: `no environment mapping associated with [${githubInstallationId}, ${repository.full_name}]`,
-    };
   }
 
   const reviewerReviewsAllPrs =

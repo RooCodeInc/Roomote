@@ -91,6 +91,53 @@ describe('Results commands', () => {
         sourceTaskId: sourceTask.id,
       })
       .returning({ id: automationResults.id });
+    const [skippedReport] = await db
+      .insert(automationResults)
+      .values({
+        userId: user.id,
+        resultVisibility: 'shared',
+        automationName: 'Daily report',
+        content: 'No matching report.',
+        priority: 'normal',
+        dedupeKey: `test:${user.id}:skipped-report`,
+        launchCriteriaSnapshot: {
+          runWhen: {
+            all: [
+              {
+                id: 'new_regression',
+                ask: 'Does `report` describe a new regression?',
+                type: 'yes_no',
+                criteria: {
+                  true: 'New regression.',
+                  false: 'No new regression.',
+                },
+                min: 0.75,
+              },
+            ],
+            onUncertain: 'skip',
+          },
+        },
+        launchCriteriaAnswers: {
+          runWhen: { new_regression: { type: 'noul', noul: 0.1 } },
+        },
+        launchCriteriaOutcome: { runWhen: 'skipped' },
+      })
+      .returning({ id: automationResults.id });
+    const [skippedCriteriaReport] = await db
+      .insert(automationResults)
+      .values({
+        userId: user.id,
+        resultVisibility: 'shared',
+        automationName: 'Daily report',
+        content: 'No qualifying regression was found.',
+        priority: 'normal',
+        dedupeKey: `test:${user.id}:skipped-criteria-report`,
+        launchCriteriaSnapshot: {
+          launchCriteria: 'Only investigate new regressions.',
+        },
+        launchCriteriaOutcome: { launchCriteria: 'skipped' },
+      })
+      .returning({ id: automationResults.id });
     const [suggestion] = await db
       .insert(workItems)
       .values({
@@ -114,6 +161,12 @@ describe('Results commands', () => {
         suggestion!.id,
         report!.id,
       ]);
+      expect(results.some((result) => result.id === skippedReport!.id)).toBe(
+        false,
+      );
+      expect(
+        results.some((result) => result.id === skippedCriteriaReport!.id),
+      ).toBe(false);
       expect(results).toEqual([
         expect.objectContaining({
           id: suggestion!.id,
@@ -161,7 +214,13 @@ describe('Results commands', () => {
       await db.delete(workItems).where(eq(workItems.id, suggestion!.id));
       await db
         .delete(automationResults)
-        .where(eq(automationResults.id, report!.id));
+        .where(
+          inArray(automationResults.id, [
+            report!.id,
+            skippedReport!.id,
+            skippedCriteriaReport!.id,
+          ]),
+        );
       await db.delete(tasks).where(eq(tasks.id, sourceTask.id));
       await db.delete(users).where(eq(users.id, user.id));
     }

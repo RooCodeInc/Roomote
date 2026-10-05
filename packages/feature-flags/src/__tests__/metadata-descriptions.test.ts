@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  DEPLOYMENT_EXPERIMENT_AUDIENCE,
   DEPLOYMENT_EXPERIMENT_AUDIENCES,
+  DEPLOYMENT_EXPERIMENT_CONFIG,
   DEPLOYMENT_EXPERIMENT_IDS,
+  getDeploymentExperimentConfig,
   getBooleanMetadataDescriptorByKey,
   getDeploymentExperimentAudience,
   getDeploymentExperimentIdsForAudience,
   getDeploymentExperimentValues,
+  isDeploymentExperimentRuntimeReadable,
 } from '../index';
 
 describe('metadata descriptions', () => {
@@ -25,6 +27,8 @@ describe('metadata descriptions', () => {
     'code_mode_integrations_experiment_enabled',
     'integration_tool_approvals_experiment_enabled',
     'results_page_enabled',
+    'session_status_judgment_experiment_enabled',
+    'sessions_board_experiment_enabled',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
@@ -40,38 +44,79 @@ describe('metadata descriptions', () => {
     expect(
       getBooleanMetadataDescriptorByKey('anonymous_analytics_enabled').kind,
     ).toBe('deployment-control');
+    expect(
+      getBooleanMetadataDescriptorByKey(
+        'automation_launch_criteria_experiment_enabled',
+      ).kind,
+    ).toBe('deployment-control');
   });
 
   it('enables deployment experiments only from explicit true metadata', () => {
     expect(
+      getDeploymentExperimentValues(undefined).automationLaunchCriteria,
+    ).toBe(false);
+    expect(
       getDeploymentExperimentValues({
         results_page_enabled: true,
         private_sessions_experiment_enabled: true,
+        dizzy_experiment_enabled: true,
+        session_status_judgment_experiment_enabled: true,
+        sessions_board_experiment_enabled: true,
+        automation_launch_criteria_experiment_enabled: true,
         integration_keys_enabled: 'true',
       }),
     ).toEqual({
+      jevgrep: false,
+      judgement: false,
       privateSessions: true,
       browserNotifications: false,
       integrationToolAutoApprovals: false,
       sessionTaskCommunicationTriage: false,
-      dizzy: false,
+      automationLaunchCriteria: true,
     });
   });
 
+  it('requires explicit opt-in for Judgement', () => {
+    expect(getDeploymentExperimentValues(undefined).judgement).toBe(false);
+    expect(
+      getDeploymentExperimentValues({ judgement_experiment_enabled: 'true' })
+        .judgement,
+    ).toBe(false);
+    expect(
+      getDeploymentExperimentValues({ judgement_experiment_enabled: true })
+        .judgement,
+    ).toBe(true);
+  });
+
   it('requires an explicit supported audience for every experiment', () => {
-    expect(Object.keys(DEPLOYMENT_EXPERIMENT_AUDIENCE).sort()).toEqual(
+    expect(Object.keys(DEPLOYMENT_EXPERIMENT_CONFIG).sort()).toEqual(
       [...DEPLOYMENT_EXPERIMENT_IDS].sort(),
     );
     expect(
-      Object.values(DEPLOYMENT_EXPERIMENT_AUDIENCE).every((audience) =>
+      Object.values(DEPLOYMENT_EXPERIMENT_CONFIG).every(({ audience }) =>
         DEPLOYMENT_EXPERIMENT_AUDIENCES.includes(audience),
       ),
     ).toBe(true);
     expect(getDeploymentExperimentAudience('unclassifiedFeature')).toBe(
       undefined,
     );
+    expect(getDeploymentExperimentAudience('automationLaunchCriteria')).toBe(
+      'internal-nightly',
+    );
+    expect(getDeploymentExperimentConfig('dizzy')).toBeUndefined();
     expect(getDeploymentExperimentIdsForAudience('internal-nightly')).toEqual([
-      'dizzy',
+      'integrationToolAutoApprovals',
+      'automationLaunchCriteria',
     ]);
+  });
+
+  it('classifies member-readable runtime state in the same experiment contract', () => {
+    expect(
+      isDeploymentExperimentRuntimeReadable('integrationToolAutoApprovals'),
+    ).toBe(true);
+    expect(
+      isDeploymentExperimentRuntimeReadable('automationLaunchCriteria'),
+    ).toBe(false);
+    expect(isDeploymentExperimentRuntimeReadable('unknown')).toBe(false);
   });
 });

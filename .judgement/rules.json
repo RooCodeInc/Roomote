@@ -1,0 +1,54 @@
+{
+  "criteria": [
+    {
+      "rule": "Do not expose worker-only authentication or proxy credentials through environments passed to task-controlled code. Judge whether the change carries those credentials across the worker-to-task boundary. Non-sensitive runtime variables, credentials explicitly intended for task use, and clearly synthetic test values are allowed. Keeping worker credentials inside trusted worker operations is allowed.",
+      "files": [
+        "apps/worker/src/env/**/*.ts",
+        "apps/worker/src/run-task/**/*.ts",
+        "apps/worker/src/sandbox-server/**/*.ts",
+        "apps/worker/src/command-executor/**/*.ts"
+      ],
+      "threshold": 0.75,
+      "id": "criterion_2"
+    },
+    {
+      "rule": "User-facing or API responses must not expose raw exception messages, stack traces, SQL queries, config or environment values, file paths, credentials, or other server internals; return an intentionally sanitized error while logging only bounded diagnostics server-side. Intentionally safe validation, not-found, authentication, provider, or health messages, authenticated operator diagnostics designed for that audience, redacted or sanitized errors, and test or fixture assertions are allowed; do not pass through raw exception objects or unsanitized internal details.",
+      "files": [
+        "apps/api/src/handlers/**/*.ts",
+        "apps/api/src/middleware/**/*.ts",
+        "packages/sdk/src/server/**/*.ts"
+      ],
+      "threshold": 0.8,
+      "id": "criterion_3"
+    },
+    {
+      "rule": "In user-visible setup or agent prose, state the user's goal, needed capability, outcome, or decision in ordinary language; do not name, locate, or instruct the user to interact with internal cards, rails, dialogs, panels, buttons, presets, setup steps, or state labels, and do not ask the user to paste credentials in chat. Trusted UI descriptions, internal tool schemas, comments, tests or fixtures, and trusted public documentation that needs to explain controls are allowed, but user-facing setup prose must not expose those control mechanics.",
+      "files": [
+        "packages/cloud-agents/src/server/fast-agent/**/*.ts",
+        "packages/cloud-agents/src/server/*prompt*.ts",
+        "packages/cloud-agents/src/system-prompt.ts",
+        "apps/worker/src/run-task/**/*prompt*.ts"
+      ],
+      "threshold": 0.85,
+      "id": "criterion_4"
+    },
+    {
+      "rule": "In user-facing UI, task, and setup copy, communicate user value, current state, or available actions rather than implementation details or feature mechanics. Avoid labels or descriptions such as 'default off' and detailed explanations of how a feature works in descriptive task or setup text. Necessary control labels, status, accessibility, error or recovery, permission, configuration-consequence, and security copy are allowed, as are tests or fixtures and trusted public documentation.",
+      "files": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"],
+      "threshold": 0.85,
+      "id": "criterion_6"
+    },
+    {
+      "rule": "In user-facing prose, treat \"session\" and \"task\" as ordinary nouns rather than proper nouns; use lowercase \"session\" and \"task\" except at sentence beginnings, in title case, or when quoting an exact UI label.",
+      "files": ["**/!(pnpm-lock.yaml|*/**)"],
+      "threshold": 0.75,
+      "id": "criterion_7"
+    },
+    {
+      "rule": "Release notes, migration instructions, security or compatibility requirements, and quoted writing examples are exempt from this rule. In ordinary explanatory and instructional prose, state the current location, behavior, or action directly. Do not add unnecessary asides about previous iterations or removed alternatives, or unnecessary exclusivity such as \"the only policy location\". Comparisons between supported options are allowed when they help the reader choose. A statement that restricts allowed protocols, credentials, access, or data handling is a security requirement, not unnecessary exclusivity.",
+      "files": ["**/!(pnpm-lock.yaml|*/**)"],
+      "threshold": 0.75,
+      "id": "criterion_8"
+    }
+  ]
+}

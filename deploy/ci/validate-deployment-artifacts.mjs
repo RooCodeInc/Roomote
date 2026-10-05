@@ -176,6 +176,7 @@ const composeEnv = {
   DOCKER_WORKER_IMAGE: 'roomote-worker:deployment-ci',
   ENCRYPTION_KEY: 'deployment-ci-encryption-key',
   GBRAIN_IMAGE: '',
+  JUDGMENT_IMAGE: '',
   IMAGE_NAMESPACE: 'roomote',
   IMAGE_REGISTRY: 'localhost',
   JOB_AUTH_PRIVATE_KEY: 'deployment-ci-job-private-key',
@@ -320,6 +321,16 @@ function validateComposeShape(shape) {
           config.services.gbrain?.depends_on?.postgres?.required === false,
         'installer-production: gbrain must wait for optional local Postgres health',
       );
+      const expectedJudgmentImage = `${composeEnv.IMAGE_REGISTRY}/${composeEnv.IMAGE_NAMESPACE}/roomote-judgment:${composeEnv.ROOMOTE_VERSION}`;
+      assert(
+        config.services.judgment?.image === expectedJudgmentImage,
+        `installer-production: judgment must default to matching release image ${expectedJudgmentImage}`,
+      );
+      assert(
+        JSON.stringify(config.services.judgment?.profiles) ===
+          JSON.stringify(['judgment']),
+        'installer-production: judgment must stay behind its opt-in profile',
+      );
     }
 
     if (
@@ -384,6 +395,17 @@ assert(
     JSON.stringify(railway.services.gbrain?.backup_schedules) ===
       JSON.stringify(['DAILY', 'WEEKLY']),
   'railway: gbrain must retain daily and weekly volume backups',
+);
+assert(
+  railway.services.judgment?.env?.JUDGMENT_BIND === '::' &&
+    railway.services.judgment?.env?.JUDGMENT_PRELOAD === 'false',
+  'railway: judgment must bind the IPv6 private network and idle without its model',
+);
+assert(
+  railway.services.api.env.R_JUDGMENT_UPSTREAM_URL === '' &&
+    railway.services.bullmq.env.R_JUDGMENT_UPSTREAM_URL ===
+      '${{api.R_JUDGMENT_UPSTREAM_URL}}',
+  'railway: the decision model must stay off until R_JUDGMENT_UPSTREAM_URL is set on api',
 );
 
 const gbrainEntrypoint = read('.docker/gbrain/entrypoint.sh');

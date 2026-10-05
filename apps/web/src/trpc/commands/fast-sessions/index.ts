@@ -11,6 +11,7 @@ import {
   createFastAgentWebTaskLauncher,
   FastAgentDurableRetryScheduledError,
   getOrCreateFastAgentSession,
+  requestFastAgentTurnStop,
   resolveApiBaseUrl,
   type FastAgentPlatformEventKind,
   type FastAgentPlatformEventVisibility,
@@ -44,6 +45,7 @@ import {
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
   isPrivateSessionsExperimentEnabled,
+  setIntegrationToolAutoForSession,
   sql,
 } from '@roomote/db/server';
 import {
@@ -81,6 +83,8 @@ import {
   getFastSessionPrReviewOfferStatus,
   getFastSessionTasks,
   hasFastSessionQueuedMessages,
+  releaseFastSessionQueuedMessageSteerReservation,
+  reserveFastSessionQueuedMessageForSteer,
   updateFastSessionPrReviewOfferStatus,
   withdrawFastSessionQueuedMessage,
   type FastSessionMessageCursor,
@@ -92,6 +96,10 @@ import {
 } from '@/lib/server/artifact-signature';
 import type { PinnedFastSessionLaunchInput } from './input';
 import { startPinnedFastSessionLaunch } from './pinned-launch';
+import {
+  canAssessAutoToolApprovals,
+  isAutoToolApprovalsExperimentEnabled,
+} from './auto-tool-approvals';
 
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
@@ -462,6 +470,7 @@ export async function startFastSessionCommand(
     privacy?: 'shared' | 'private';
     pinnedLaunch?: PinnedFastSessionLaunchInput;
     voiceCall?: boolean;
+    autoToolApprovals?: boolean;
   },
 ): Promise<{
   sessionId: string;
@@ -474,7 +483,23 @@ export async function startFastSessionCommand(
   ) {
     throw new Error('Private sessions are not enabled for this deployment.');
   }
+  if (input.autoToolApprovals) {
+    if (!(await isAutoToolApprovalsExperimentEnabled(auth))) {
+      throw new Error('Auto tool approvals are not enabled.');
+    }
+    // The same rule as choosing Auto mid-session: without something to
+    // assess calls with, the first tool call would only pause the session.
+    if (!(await canAssessAutoToolApprovals())) {
+      throw new Error('Auto isn’t available yet.');
+    }
+  }
   if (input.pinnedLaunch) {
+    if (input.autoToolApprovals) {
+      // The task would start before Auto could be turned on for its session.
+      throw new Error(
+        'Auto cannot be turned on when starting a pinned environment task.',
+      );
+    }
     if (input.privacy === 'private') {
       throw new Error(
         'Private sessions cannot start as pinned environment tasks.',
@@ -507,6 +532,18 @@ export async function startFastSessionCommand(
     reasoningEffort: null,
   });
   const unifiedSession = await ensureSessionForFastConversation(db, session.id);
+  // Before the first turn, so its tool calls are already assessed. The
+  // owner asked for the check; without it the turn must not run.
+  if (
+    input.autoToolApprovals &&
+    !(await setIntegrationToolAutoForSession({
+      sessionId: unifiedSession.id,
+      userId: auth.userId,
+      enabled: true,
+    }))
+  ) {
+    throw new Error('Could not turn Auto on for this session.');
+  }
 
   const kickoffTurnId = input.conversationId
     ? `web-kickoff:${session.id}`
@@ -925,6 +962,67 @@ export async function deleteFastSessionQueuedMessageCommand(
     });
   }
   return { outcome };
+}
+
+export async function stopFastSessionCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId: string },
+): Promise<{
+  outcome: 'stopped' | 'not_running' | 'timed_out';
+}> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) throw new Error('Session not found');
+
+  return {
+    outcome: await requestFastAgentTurnStop({
+      surface: session.surface,
+      workspaceId: session.workspaceId,
+      conversationId: session.conversationId,
+    }),
+  };
+}
+
+/** Stop the active predecessor, then wake the oldest queued web follow-up. */
+export async function steerFastSessionQueuedMessageCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId: string; clientMessageId: string },
+): Promise<{
+  outcome: 'steered' | 'not_queued' | 'not_first' | 'timed_out';
+}> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) throw new Error('Session not found');
+
+  const reservation = await reserveFastSessionQueuedMessageForSteer({
+    sessionId: session.id,
+    clientMessageId: input.clientMessageId,
+  });
+  if (reservation.outcome !== 'reserved') return reservation;
+
+  let stopOutcome: 'stopped' | 'not_running' | 'timed_out';
+  try {
+    stopOutcome = await requestFastAgentTurnStop({
+      surface: session.surface,
+      workspaceId: session.workspaceId,
+      conversationId: session.conversationId,
+    });
+  } finally {
+    try {
+      await releaseFastSessionQueuedMessageSteerReservation(reservation);
+    } finally {
+      await wakeFastAgentParentEventNow({
+        conversationId: session.id,
+        eventKey: reservation.eventKey,
+      }).catch((error) => {
+        console.warn(
+          `[Fast Web] Failed to wake a steered queued message: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
+  }
+
+  return {
+    outcome: stopOutcome === 'timed_out' ? 'timed_out' : 'steered',
+  };
 }
 
 export async function startFastSessionGoalCommand(

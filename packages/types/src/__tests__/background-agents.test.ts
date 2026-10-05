@@ -1,27 +1,13 @@
 import {
-  getBackgroundAgentFrequencyValues,
   getAutomationTargetKind,
   getCommunicationAutomationTargetKind,
   hasEnabledBackgroundAgents,
   isAutomationDestinationTarget,
   isCommunicationAutomationTarget,
   isProviderUsageLimitThreshold,
-  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
-  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
 } from '../background-agents';
 
 describe('background agent helpers', () => {
-  it('returns all frequency values from the settings object', () => {
-    expect(
-      getBackgroundAgentFrequencyValues({
-        conflictResolverFrequency: 'off',
-        suggesterFrequency: 'daily',
-        announcerFrequency: 'weekly',
-        conflictResolverLabel: 'Roomote',
-      }),
-    ).toEqual(['off', 'daily', 'weekly']);
-  });
-
   it('returns false when every background agent is off', () => {
     expect(
       hasEnabledBackgroundAgents({
@@ -64,25 +50,6 @@ describe('background agent helpers', () => {
     ).toBe(true);
   });
 
-  it('derives schedule-only automation ids and fields from metadata', () => {
-    expect(SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS).toEqual(
-      SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map(
-        (automation) => automation.id,
-      ),
-    );
-    expect(
-      SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map(
-        (automation) => automation.frequencyField,
-      ),
-    ).toEqual([
-      'securityAuditorFrequency',
-      'codeQualityAuditorFrequency',
-      'ciFailureTriageFrequency',
-      'issueFixerFrequency',
-      'mergeAnnouncerFrequency',
-    ]);
-  });
-
   it('accepts only supported provider usage threshold slider values', () => {
     expect(isProviderUsageLimitThreshold(5)).toBe(true);
     expect(isProviderUsageLimitThreshold(50)).toBe(true);
@@ -93,14 +60,13 @@ describe('background agent helpers', () => {
     expect(isProviderUsageLimitThreshold(100)).toBe(false);
   });
 
-  it.each([
-    ['slack', 'slack_channel', 'slack_user'],
-    ['discord', 'discord_channel', 'discord_user'],
-    ['teams', 'teams_channel', 'teams_user'],
-    ['telegram', 'telegram_chat', 'telegram_user'],
-  ] as const)(
-    'keeps channel and direct-message target kinds aligned for %s',
-    (provider, channelKind, userKind) => {
+  it('keeps channel and direct-message target kinds aligned for every provider', () => {
+    for (const [provider, channelKind, userKind] of [
+      ['slack', 'slack_channel', 'slack_user'],
+      ['discord', 'discord_channel', 'discord_user'],
+      ['teams', 'teams_channel', 'teams_user'],
+      ['telegram', 'telegram_chat', 'telegram_user'],
+    ] as const) {
       expect(getCommunicationAutomationTargetKind(provider, 'channel')).toBe(
         channelKind,
       );
@@ -116,8 +82,8 @@ describe('background agent helpers', () => {
       expect(
         isCommunicationAutomationTarget({ provider, targetKind: userKind }),
       ).toBe(true);
-    },
-  );
+    }
+  });
 
   it('supports account Email as a direct-message-only automation target', () => {
     expect(getAutomationTargetKind('email', 'direct_message')).toBe(

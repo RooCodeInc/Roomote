@@ -72,12 +72,20 @@ async function resolveTokenOptionsForRepositoryNames({
   missingMessagePrefix,
   spanningMessagePrefix,
   repositoryRows,
+  skipUnavailableRepositories = false,
 }: {
   taskRun: TaskRun;
   repositoryNames: string[];
   missingMessagePrefix: string;
   spanningMessagePrefix: string;
   repositoryRows?: Repository[];
+  /**
+   * Stamped checkout scopes are frozen at task creation, so a repository
+   * deleted or removed from the GitHub App later would otherwise block every
+   * resume of the task. Drop those names (with a warning) as long as at least
+   * one stamped repository is still available.
+   */
+  skipUnavailableRepositories?: boolean;
 }): Promise<
   Extract<CreateGitHubTokenOptions, { type: 'installationId' }> & {
     installationId: string;
@@ -113,8 +121,14 @@ async function resolveTokenOptionsForRepositoryNames({
   );
 
   if (missingRepositories.length > 0) {
-    throw new Error(
-      `${missingMessagePrefix} for task run ${taskRun.id}: ${missingRepositories.join(', ')}`,
+    if (!skipUnavailableRepositories || selectedRepoRows.length === 0) {
+      throw new Error(
+        `${missingMessagePrefix} for task run ${taskRun.id}: ${missingRepositories.join(', ')}`,
+      );
+    }
+
+    console.warn(
+      `[resolveTaskRunGitHubTokenOptions] ${missingMessagePrefix} for task run ${taskRun.id}; minting without them: ${missingRepositories.join(', ')}`,
     );
   }
 
@@ -297,6 +311,7 @@ async function resolveTaskRunGitHubTokenOptions(
         repositoryNames: stampedRepositories,
         missingMessagePrefix: 'Stamped repositories not found',
         spanningMessagePrefix: 'Stamped repositories',
+        skipUnavailableRepositories: true,
       });
     } catch (error) {
       // Extra advertised checkouts can span GitHub App installations. Mint the
@@ -333,6 +348,7 @@ async function resolveTaskRunGitHubTokenOptions(
       repositoryNames: stampedRepositories,
       missingMessagePrefix: 'Stamped repositories not found',
       spanningMessagePrefix: 'Stamped repositories',
+      skipUnavailableRepositories: true,
     });
   }
 

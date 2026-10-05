@@ -7,6 +7,10 @@ import {
   inArray,
   repositories,
   repositoryFactory,
+  sessionFactory,
+  sessionStatusJudgments,
+  sessionTasks,
+  sessions,
   taskFactory,
   taskPullRequests,
   taskRuns,
@@ -32,10 +36,14 @@ vi.mock('@roomote/telemetry/server', () => ({
 }));
 
 const taskIds: string[] = [];
+const sessionIds: string[] = [];
 const repositoryIds: string[] = [];
 const userIds: string[] = [];
 
 afterEach(async () => {
+  if (sessionIds.length > 0) {
+    await db.delete(sessions).where(inArray(sessions.id, sessionIds.splice(0)));
+  }
   if (taskIds.length > 0) {
     await db.delete(tasks).where(inArray(tasks.id, taskIds.splice(0)));
   }
@@ -132,6 +140,55 @@ it('does not close or requeue memories for the same PR reference on another host
     { runId: target.run.id, status: 'pending' },
     { runId: other.run.id, status: 'done' },
   ]);
+});
+
+it('supersedes an open-PR needs-input judgment when the PR closes', async () => {
+  const repository = `outcome-${randomUUID()}/repo`;
+  const fixture = await createAssociation(repository, 'a.example', {
+    createdByRoomote: true,
+  });
+  const session = await sessionFactory.create();
+  sessionIds.push(session.id);
+  await db.insert(sessionTasks).values({
+    sessionId: session.id,
+    taskId: fixture.task.id,
+    origin: 'direct_launch',
+  });
+  await db.insert(sessionStatusJudgments).values({
+    sessionId: session.id,
+    sourceEventId: 'open-pr-handoff',
+    generation: 1,
+    sourceKind: 'task_terminal',
+    state: 'applied',
+    outcome: 'needs_input',
+    confidence: 1,
+    probabilities: { needs_input: 1 },
+  });
+
+  await updateTaskPrStatus('gitea', repository, 42, 'closed', {
+    host: 'a.example',
+  });
+
+  const judgments = await db.query.sessionStatusJudgments.findMany({
+    where: eq(sessionStatusJudgments.sessionId, session.id),
+    orderBy: (judgment, { asc }) => [asc(judgment.generation)],
+  });
+  expect(judgments).toHaveLength(2);
+  expect(judgments[1]).toMatchObject({
+    generation: 2,
+    sourceKind: 'task_terminal',
+    state: 'pending',
+  });
+  expect(judgments[1]?.sourceEventId).toContain(':closed:');
+
+  await updateTaskPrStatus('gitea', repository, 42, 'closed', {
+    host: 'a.example',
+  });
+  expect(
+    await db.query.sessionStatusJudgments.findMany({
+      where: eq(sessionStatusJudgments.sessionId, session.id),
+    }),
+  ).toHaveLength(2);
 });
 
 it.each(sourceControlProviders)(

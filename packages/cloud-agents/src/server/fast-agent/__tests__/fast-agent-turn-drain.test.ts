@@ -1,9 +1,14 @@
-const { acquireRedisLockMock } = vi.hoisted(() => ({
-  acquireRedisLockMock: vi.fn(),
-}));
+const { acquireRedisLockMock, redisEvalMock, redisGetMock } = vi.hoisted(
+  () => ({
+    acquireRedisLockMock: vi.fn(),
+    redisEvalMock: vi.fn().mockResolvedValue(0),
+    redisGetMock: vi.fn().mockResolvedValue(null),
+  }),
+);
 
 vi.mock('@roomote/redis', () => ({
   acquireRedisLock: acquireRedisLockMock,
+  getRedis: () => ({ eval: redisEvalMock, get: redisGetMock }),
 }));
 
 const { releaseDurableClaimMock } = vi.hoisted(() => ({

@@ -31,18 +31,14 @@ describe('resolveOpenRouterVariantModelAlias', () => {
     });
   });
 
-  it('returns null for OpenRouter models without a variant suffix', () => {
-    expect(
-      resolveOpenRouterVariantModelAlias('openrouter/z-ai/glm-5.2'),
-    ).toBeNull();
-  });
-
-  it('returns null for non-OpenRouter models even when the ID contains a colon', () => {
-    expect(resolveOpenRouterVariantModelAlias('ollama/llama3:8b')).toBeNull();
-  });
-
-  it('returns null for model IDs that cannot be parsed', () => {
-    expect(resolveOpenRouterVariantModelAlias('not-a-model')).toBeNull();
+  it('returns null for non-variant, non-OpenRouter, and malformed model IDs', () => {
+    for (const modelId of [
+      'openrouter/z-ai/glm-5.2',
+      'ollama/llama3:8b',
+      'not-a-model',
+    ]) {
+      expect(resolveOpenRouterVariantModelAlias(modelId)).toBeNull();
+    }
   });
 });
 

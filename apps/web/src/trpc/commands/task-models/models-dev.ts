@@ -279,7 +279,9 @@ export function resolveModelsDevSlug(modelId: string): string {
     return `${KIMI_FOR_CODING_MODELS_DEV_PROVIDER_PREFIX}${slug.slice(KIMI_FOR_CODING_PROVIDER_PREFIX.length)}`;
   }
   if (slug.startsWith(BEDROCK_MANTLE_PROVIDER_PREFIX)) {
-    const mantleModelId = slug.slice(BEDROCK_MANTLE_PROVIDER_PREFIX.length);
+    const mantleModelId = slug
+      .slice(BEDROCK_MANTLE_PROVIDER_PREFIX.length)
+      .replace(/^global\./u, '');
     const labSeparatorIndex = mantleModelId.indexOf('.');
     if (labSeparatorIndex > 0) {
       return `${mantleModelId.slice(0, labSeparatorIndex)}/${mantleModelId.slice(labSeparatorIndex + 1)}`;

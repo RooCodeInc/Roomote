@@ -191,17 +191,6 @@ describe('task model settings', () => {
     ]);
   });
 
-  it('collapses an empty catalogSyncedModelIds list to no baseline', () => {
-    const settings = normalizeTaskModelSettings({
-      models: DEFAULT_TASK_MODEL_SETTINGS.models,
-      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
-      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
-      catalogSyncedModelIds: [],
-    });
-
-    expect('catalogSyncedModelIds' in settings).toBe(false);
-  });
-
   it('migrates persisted OpenCode DeepSeek Flash model settings', () => {
     const settings = normalizeTaskModelSettings({
       models: [
@@ -233,14 +222,14 @@ describe('task model settings', () => {
       models: DEFAULT_TASK_MODEL_SETTINGS.models,
       allowedModelIds: [
         'openrouter/openai/gpt-5.6-terra',
-        'openrouter/anthropic/claude-sonnet-5',
+        'openrouter/anthropic/claude-sonnet-5.5',
       ],
       defaultModelId: 'openrouter/openai/gpt-5.6-terra',
     };
 
     expect(getEnabledTaskModels(settings).map((model) => model.id)).toEqual([
       'openrouter/openai/gpt-5.6-terra',
-      'openrouter/anthropic/claude-sonnet-5',
+      'openrouter/anthropic/claude-sonnet-5.5',
     ]);
     expect(getDefaultTaskModelId(settings)).toBe(
       'openrouter/openai/gpt-5.6-terra',

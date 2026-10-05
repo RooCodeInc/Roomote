@@ -5,12 +5,34 @@ const MAX_DEPTH = 6;
 const MAX_COLLECTION_ITEMS = 50;
 const MASKED_VALUE = '[value omitted]';
 
+/**
+ * Credentials recognizable by their published prefix alone. A value with no
+ * such prefix cannot be told from any other long string here.
+ */
 const SECRET_VALUE_PATTERNS = [
+  // OpenAI, OpenRouter, Anthropic
   /\bsk-(?:or-)?[A-Za-z0-9_-]{12,}\b/,
-  /\bgh[po]_[A-Za-z0-9]{16,}\b/,
+  // Stripe secret, restricted and organization keys, and webhook signing
+  // secrets
+  /\b[sr]k_(?:live|test|org)_(?:(?:live|test)_)?[A-Za-z0-9]{16,}\b/,
+  /\bwhsec_[A-Za-z0-9]{24,}\b/,
+  // GitHub
+  /\bgh[pousr]_[A-Za-z0-9]{16,}\b/,
   /\bgithub_pat_[A-Za-z0-9_]{16,}\b/,
-  /\bxox[bpa]-[A-Za-z0-9-]{12,}\b/,
+  // GitLab
+  /\bglpat-[A-Za-z0-9_-]{20,}/,
+  // Slack
+  /\bxox[abeprs]-[A-Za-z0-9-]{12,}\b/,
+  /\bxapp-[A-Za-z0-9-]{12,}\b/,
+  // AWS access key ids
   /\bAKIA[0-9A-Z]{16}\b/,
+  // Google API keys
+  /\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/,
+  // npm, SendGrid, Linear, Hugging Face
+  /\bnpm_[A-Za-z0-9]{36}\b/,
+  /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/,
+  /\blin_api_[A-Za-z0-9]{32,}\b/,
+  /\bhf_[A-Za-z0-9]{30,}\b/,
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
 ];
 
@@ -36,20 +58,25 @@ const PERCENT_ENCODED_RUN = /[^\s"'<>]*%[0-9A-Fa-f]{2}[^\s"'<>]*/g;
 const PRIVATE_KEY_BLOCK =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
 
+/** Mask recognized credentials in free text, leaving the rest in place. */
+export function maskIntegrationToolText(text: string): string {
+  let masked = text.replace(PRIVATE_KEY_BLOCK, MASKED_VALUE);
+  for (const pattern of SECRET_VALUE_PATTERNS) {
+    masked = masked.replace(new RegExp(pattern.source, 'g'), MASKED_VALUE);
+  }
+  // Percent-encoded credentials only match once decoded; mask the whole run.
+  return masked.replace(PERCENT_ENCODED_RUN, (run) =>
+    hasSecretShapedString(run) ? MASKED_VALUE : run,
+  );
+}
+
 /**
  * Tool results the agent read, prepared for the judgment model: recognized
  * credentials are masked in place (the surrounding text is the evidence) and
  * only the most recent text is kept, since the paused call follows it.
  */
 export function boundIntegrationToolReadContent(text: string): string {
-  let masked = text.replace(PRIVATE_KEY_BLOCK, MASKED_VALUE);
-  for (const pattern of SECRET_VALUE_PATTERNS) {
-    masked = masked.replace(new RegExp(pattern.source, 'g'), MASKED_VALUE);
-  }
-  // Percent-encoded credentials only match once decoded; mask the whole run.
-  masked = masked.replace(PERCENT_ENCODED_RUN, (run) =>
-    hasSecretShapedString(run) ? MASKED_VALUE : run,
-  );
+  const masked = maskIntegrationToolText(text);
   return masked.length > READ_CONTENT_MAX_LENGTH
     ? `[earlier content omitted]…${masked.slice(-READ_CONTENT_MAX_LENGTH)}`
     : masked;

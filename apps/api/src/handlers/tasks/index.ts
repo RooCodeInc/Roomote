@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 
 import type { Variables } from '../../types';
 import { searchTasks } from './searchTasks';
@@ -21,6 +22,7 @@ import { listTaskModels } from './listModels';
 import { saveTaskMemory } from './saveTaskMemory';
 import { recordAutomationResult } from './recordAutomationResult';
 import { updatePersonalization } from './updatePersonalization';
+import { ROOMOTE_MESSAGE_REQUEST_MAX_BYTES } from './messageAttachments';
 
 export const tasksRouter = new Hono<{ Variables: Variables }>();
 
@@ -33,7 +35,21 @@ tasksRouter.get('/:taskId/compute_logs', getTaskComputeLogs);
 tasksRouter.post('/', launchTask);
 tasksRouter.post('/:taskId/cancel', cancelTask);
 tasksRouter.post('/:taskId/stop', stopTask);
+tasksRouter.use(
+  '/:taskId/send_message',
+  bodyLimit({
+    maxSize: ROOMOTE_MESSAGE_REQUEST_MAX_BYTES,
+    onError: (c) => c.json({ error: 'Message payload is too large' }, 413),
+  }),
+);
 tasksRouter.post('/:taskId/send_message', sendMessage);
+tasksRouter.use(
+  '/:taskId/steer_message',
+  bodyLimit({
+    maxSize: ROOMOTE_MESSAGE_REQUEST_MAX_BYTES,
+    onError: (c) => c.json({ error: 'Message payload is too large' }, 413),
+  }),
+);
 tasksRouter.post('/:taskId/steer_message', steerMessage);
 tasksRouter.post('/:taskId/describe_video', describeVideo);
 tasksRouter.post('/:taskId/source_control', manageSourceControl);

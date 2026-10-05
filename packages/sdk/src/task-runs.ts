@@ -214,6 +214,10 @@ export const recordMessageEnvelope = (
   options: AppRouterInput['taskRuns']['recordMessageEnvelope'],
 ) => client.taskRuns.recordMessageEnvelope.mutate(options);
 
+export const applyModelFallback = (
+  options: AppRouterInput['taskRuns']['applyModelFallback'],
+) => client.taskRuns.applyModelFallback.mutate(options);
+
 export const claimShowWidgetFallbackDelivery = (
   options: AppRouterInput['taskRuns']['claimShowWidgetFallbackDelivery'],
 ) => client.taskRuns.claimShowWidgetFallbackDelivery.mutate(options);
@@ -402,6 +406,14 @@ export const fetchSnapshotEnv = (
 export const getResolvedRuntimeEnvVars = (
   options: AppRouterInput['taskRuns']['getResolvedRuntimeEnvVars'],
 ) => client.taskRuns.getResolvedRuntimeEnvVars.query(options);
+
+export const isJevgrepEnabled = (
+  options: AppRouterInput['taskRuns']['isJevgrepEnabled'],
+) => client.taskRuns.isJevgrepEnabled.query(options);
+
+export const evaluateJudgeFileCriteria = (
+  options: AppRouterInput['taskRuns']['evaluateJudgeFileCriteria'],
+) => client.taskRuns.evaluateJudgeFileCriteria.mutate(options);
 
 export const refreshGitHubTokenWithMetadata = (
   options: AppRouterInput['taskRuns']['refreshGitHubTokenWithMetadata'],

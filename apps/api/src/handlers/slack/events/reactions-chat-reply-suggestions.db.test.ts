@@ -206,6 +206,7 @@ describe('Slack suggestion reaction execution-root persistence', () => {
     });
     expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
       expect.objectContaining({
+        visibleInTranscript: false,
         event: expect.objectContaining({
           ts: 'successful-execution-root',
           thread_ts: 'successful-execution-root',

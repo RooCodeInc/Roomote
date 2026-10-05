@@ -56,6 +56,8 @@ export * from './lib/tasks';
 export * from './lib/sessions';
 export * from './lib/service-credentials';
 export * from './lib/integration-tool-approvals';
+export * from './lib/integration-tool-auto-owner';
+export * from './lib/integration-tool-auto-task-context';
 export * from './lib/integration-tool-auto-settings';
 export * from './lib/credential-egress';
 export * from './lib/session-goals';
@@ -93,6 +95,7 @@ export * from './lib/slack-installations';
 export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
 export * from './lib/agentmail-runtime-credentials';
+export * from './lib/agentmail-outbound-settings';
 export * from './lib/discord-runtime-credentials';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';
@@ -118,6 +121,7 @@ export * from './lib/managed-access';
 export * from './lib/user-personalization';
 export * from './lib/personal-preferences';
 export * from './lib/deployment-experiments';
+export * from './lib/session-status-judgments';
 export * from './lib/private-sessions-experiment';
 export * from './fixtures/development-fixtures';
 
@@ -148,6 +152,10 @@ export {
   taskPinsRelations,
   sessions,
   sessionGoals,
+  sessionStatusJudgments,
+  sessionStatusJudgmentsRelations,
+  sessionDoneWebhookDeliveries,
+  sessionDoneWebhookDeliveriesRelations,
   sessionsRelations,
   sessionTasks,
   sessionTasksRelations,
@@ -308,9 +316,12 @@ export type {
   SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,
+  SessionManualStatus,
   SessionOwnerKind,
   SessionSourceSurface,
   SessionStatus,
+  SessionStatusJudgmentSourceKind,
+  SessionStatusJudgmentState,
   SessionTaskOrigin,
   SessionParticipantRole,
   SessionBackfillPhase,

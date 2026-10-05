@@ -91,6 +91,7 @@ export async function launchTelegramTask(input: {
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
   workspace: TelegramWorkspaceSelection;
+  visibleInTranscript?: boolean;
   createTopicForTask?: boolean;
   /** The session that owns this task; its transcript gets the kickoff. */
   fastAgentParent?: FastAgentParent;
@@ -139,6 +140,9 @@ export async function launchTelegramTask(input: {
         ...(createdTopic ? { telegramTaskTopic: true } : {}),
         ...(input.fastAgentParent
           ? buildFastAgentChildTaskMetadata(input.fastAgentParent)
+          : {}),
+        ...(input.visibleInTranscript !== undefined
+          ? { visibleInTranscript: input.visibleInTranscript }
           : {}),
       },
     };

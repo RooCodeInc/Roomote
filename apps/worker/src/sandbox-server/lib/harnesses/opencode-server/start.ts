@@ -3,7 +3,7 @@ import net from 'node:net';
 
 import { execa, type ResultPromise } from 'execa';
 
-import type { ReasoningEffort } from '@roomote/types';
+import type { ReasoningEffort, TaskModelRole } from '@roomote/types';
 
 import type { HarnessLogger } from '../../../../logging';
 
@@ -33,6 +33,21 @@ interface StartOpenCodeServerHarnessOptions {
   initialSessionId?: string;
   modelOverride?: string;
   reasoningEffortOverride?: ReasoningEffort;
+  fallbackModel?: string;
+  fallbackReasoningEffort?: ReasoningEffort;
+  fallbackRole?: TaskModelRole;
+  activeModelId?: string;
+  agentFallbacks?: Partial<
+    Record<
+      string,
+      {
+        role: TaskModelRole;
+        activeModelId: string;
+        fallbackModel: string;
+        fallbackReasoningEffort?: ReasoningEffort;
+      }
+    >
+  >;
   developerInstructionsContent?: string;
   /**
    * Invoked when the OpenCode server subprocess exits while the task was not
@@ -150,6 +165,11 @@ export async function startOpenCodeServerHarness({
   initialSessionId,
   modelOverride,
   reasoningEffortOverride,
+  fallbackModel,
+  fallbackReasoningEffort,
+  fallbackRole,
+  activeModelId,
+  agentFallbacks,
   developerInstructionsContent,
   onUnexpectedExit,
   onDiagnostic,
@@ -338,6 +358,11 @@ export async function startOpenCodeServerHarness({
       commandEnv,
       initialSessionId,
       model,
+      fallbackModel,
+      fallbackReasoningEffort,
+      fallbackRole,
+      activeModelId,
+      agentFallbacks,
       stopHookReminderStallTimeoutMs: parseTimeoutMs(
         process.env.ROOMOTE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS,
       ),
