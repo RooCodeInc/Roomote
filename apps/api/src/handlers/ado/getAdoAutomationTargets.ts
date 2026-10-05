@@ -9,7 +9,6 @@ import {
   authAccounts,
   db,
   repositories,
-  environmentRepositoryMappings,
   getReviewCodeAutomationSettings,
   desc,
   eq,
@@ -153,20 +152,6 @@ export async function getAdoAutomationTargets({
     (reviewerSettings?.enabled ?? DEFAULT_PR_REVIEW_SETTINGS.enabled) === false
   ) {
     return { status: 'ok', targets: [] };
-  }
-
-  const repositoryEnvironmentIds = await db
-    .select({
-      environmentId: environmentRepositoryMappings.environmentId,
-    })
-    .from(environmentRepositoryMappings)
-    .where(eq(environmentRepositoryMappings.repositoryId, repo.id));
-
-  if (workflow === 'pr_review' && repositoryEnvironmentIds.length === 0) {
-    return {
-      status: 'error',
-      message: `no environment mapping associated with [ado:${repositoryId}, ${repo.fullName}]`,
-    };
   }
 
   const reviewerReviewsAllPrs =

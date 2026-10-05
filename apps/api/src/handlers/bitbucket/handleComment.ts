@@ -12,10 +12,7 @@ import { PRODUCT_NAME } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
-import {
-  buildSourceControlAccountLinkRequiredMessage,
-  buildSourceControlEnvironmentRequiredMessage,
-} from '../source-control-account-linking';
+import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
 import {
   getBitbucketAutomationTargets,
   getBitbucketUsername,
@@ -141,9 +138,6 @@ export async function handleBitbucketComment(
   const target =
     targetsResult.status === 'ok' ? targetsResult.targets[0] : undefined;
 
-  const requiresEnvironment =
-    targetsResult.status === 'error' &&
-    targetsResult.message.includes('no environment mapping');
   const requiresAccountLink =
     targetsResult.status === 'error' &&
     targetsResult.code === 'account_link_required';
@@ -153,18 +147,14 @@ export async function handleBitbucketComment(
       ...mentionResponseTarget,
       body: requiresAccountLink
         ? await buildSourceControlAccountLinkRequiredMessage('bitbucket')
-        : requiresEnvironment
-          ? buildSourceControlEnvironmentRequiredMessage('bitbucket')
-          : buildReviewerGateMissComment(),
+        : buildReviewerGateMissComment(),
     });
 
     return {
       status: 'ok',
       message: requiresAccountLink
         ? 'account_link_required'
-        : requiresEnvironment
-          ? 'environment_required'
-          : 'reviewer_gate_miss',
+        : 'reviewer_gate_miss',
     };
   }
 

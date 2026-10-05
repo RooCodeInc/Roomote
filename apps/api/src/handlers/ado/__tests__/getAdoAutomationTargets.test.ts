@@ -114,7 +114,7 @@ describe('getAdoAutomationTargets', () => {
     });
   });
 
-  it('enforces environment mapping for review automation', async () => {
+  it('returns reviewer targets for repositories without an environment mapping', async () => {
     mockSelectWhere.mockResolvedValue([]);
 
     const result = await getAdoAutomationTargets({
@@ -122,10 +122,9 @@ describe('getAdoAutomationTargets', () => {
       payload,
     });
 
-    expect(result).toEqual({
-      status: 'error',
-      message:
-        'no environment mapping associated with [ado:repo-1, acme/Platform/backend]',
+    expect(result).toMatchObject({
+      status: 'ok',
+      targets: [{ id: 'ado:pr_review:repo-1' }],
     });
   });
 
