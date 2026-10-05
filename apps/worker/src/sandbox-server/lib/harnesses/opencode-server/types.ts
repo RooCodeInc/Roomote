@@ -2,6 +2,20 @@ export interface OpenCodeSession {
   id: string;
   title?: string;
   parentID?: string;
+  model?: {
+    id: string;
+    providerID: string;
+    variant?: string;
+  };
+}
+
+export interface OpenCodeProviderRegistry {
+  all: Array<{
+    id: string;
+    models: Record<string, unknown>;
+  }>;
+  connected: string[];
+  default: Record<string, string>;
 }
 
 export interface OpenCodeMessageInfo {

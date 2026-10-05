@@ -30,7 +30,14 @@ export type OpenCodeProviderErrorRecovery = {
 // OpenCode's own typed error names, not provider vocabulary. These are the
 // only non-HTTP signals: they never carry a status because they are raised
 // client-side before or instead of an HTTP response.
-const TERMINAL_ERROR_NAMES = new Set(['contextoverflowerror']);
+const CONTEXT_OVERFLOW_ERROR_NAMES = new Set(['contextoverflowerror']);
+const TERMINAL_ERROR_NAMES = new Set([
+  ...CONTEXT_OVERFLOW_ERROR_NAMES,
+  'providermodelnotfounderror',
+]);
+const PROVIDER_MODEL_NOT_FOUND_ERROR_NAMES = new Set([
+  'providermodelnotfounderror',
+]);
 const POLICY_ERROR_NAMES = new Set(['contentfiltererror']);
 const CONNECTION_RESET_MESSAGE = 'connection reset by server';
 
@@ -133,7 +140,17 @@ function hasErrorName(values: unknown[], names: Set<string>): boolean {
 }
 
 export function isOpenCodeContextOverflowError(error: unknown): boolean {
-  return hasErrorName(collectProviderErrorValues(error), TERMINAL_ERROR_NAMES);
+  return hasErrorName(
+    collectProviderErrorValues(error),
+    CONTEXT_OVERFLOW_ERROR_NAMES,
+  );
+}
+
+export function isOpenCodeProviderModelNotFoundError(error: unknown): boolean {
+  return hasErrorName(
+    collectProviderErrorValues(error),
+    PROVIDER_MODEL_NOT_FOUND_ERROR_NAMES,
+  );
 }
 
 export function isOpenCodeRetryableTransportError(error: unknown): boolean {

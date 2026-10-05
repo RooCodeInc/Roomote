@@ -102,6 +102,7 @@ import {
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
   isOpenCodeContextOverflowError,
+  isOpenCodeProviderModelNotFoundError,
   isOpenCodeRetryableTransportError,
   isOpenCodeTerminalProviderError,
   resolveOpenCodeProviderErrorRetryDelayMs,
@@ -133,6 +134,7 @@ interface OpenCodeServerHarnessOptions {
   commandEnv?: Record<string, string>;
   initialSessionId?: string;
   model?: string;
+  preserveSavedSessionModel?: boolean;
   activeModelId?: string;
   fallbackModel?: string;
   fallbackReasoningEffort?: ReasoningEffort;
@@ -1641,6 +1643,7 @@ export class OpenCodeServerHarness
   private readonly normalizedWorkspacePath: string;
   private readonly logger: OpenCodeServerHarnessOptions['logger'];
   private readonly model: OpenCodeModelSelection | undefined;
+  private readonly preserveSavedSessionModel: boolean;
   private readonly activeModelId: string | undefined;
   private readonly fallbackModel: string | undefined;
   private readonly fallbackReasoningEffort: ReasoningEffort | undefined;
@@ -1722,6 +1725,8 @@ export class OpenCodeServerHarness
   private disposed = false;
   private sessionId: string | undefined;
   private resumedSessionPendingValidation = false;
+  private savedSessionModel: OpenCodeModelSelection | undefined;
+  private savedSessionModelRecoveryAttempted = false;
   /** Greatest message id observed in the current OpenCode session. */
   private latestSessionMessageId: string | undefined;
   private inFlight = false;
@@ -1824,6 +1829,7 @@ export class OpenCodeServerHarness
     this.model = options.model
       ? resolveOpenCodeModelSelection(options.model)
       : undefined;
+    this.preserveSavedSessionModel = options.preserveSavedSessionModel === true;
     this.activeModelId = options.activeModelId;
     this.fallbackModel = options.fallbackModel;
     this.fallbackReasoningEffort = options.fallbackReasoningEffort;
@@ -3570,6 +3576,8 @@ export class OpenCodeServerHarness
         signal: this.composeSessionCreateSignal(),
       });
       this.sessionId = session.id;
+      this.savedSessionModel = undefined;
+      this.savedSessionModelRecoveryAttempted = false;
       this.latestSessionMessageId = undefined;
       this.logger.info(
         `Created OpenCode session sessionId=${session.id} elapsedMs=${
@@ -3731,6 +3739,8 @@ export class OpenCodeServerHarness
 
   private async validateResumedSession(sessionId: string): Promise<boolean> {
     this.latestSessionMessageId = undefined;
+    this.savedSessionModel = undefined;
+    this.savedSessionModelRecoveryAttempted = false;
 
     try {
       const messages = await this.client.messages({
@@ -3746,6 +3756,10 @@ export class OpenCodeServerHarness
         this.recordSessionMessageId(message.info.id);
       }
 
+      if (this.preserveSavedSessionModel) {
+        await this.resolveSavedSessionModel(sessionId);
+      }
+
       return true;
     } catch (error) {
       this.logger.warn(
@@ -3754,6 +3768,45 @@ export class OpenCodeServerHarness
         }`,
       );
       return false;
+    }
+  }
+
+  private async resolveSavedSessionModel(sessionId: string): Promise<void> {
+    try {
+      const [session, providers] = await Promise.all([
+        this.client.session({
+          sessionId,
+          signal: this.eventAbortController.signal,
+        }),
+        this.client.providers(this.eventAbortController.signal),
+      ]);
+      const providerId = session.model?.providerID?.trim();
+      const modelId = session.model?.id?.trim();
+      const registeredProvider = providers.all.find(
+        (provider) => provider.id === providerId,
+      );
+      const modelIsRegistered = Boolean(
+        providerId &&
+        modelId &&
+        registeredProvider &&
+        Object.hasOwn(registeredProvider.models, modelId) &&
+        providers.connected.includes(providerId),
+      );
+
+      if (!modelIsRegistered || !providerId || !modelId) {
+        this.logger.info(
+          `OpenCode resumed session has no usable registered model; using the deployment default sessionId=${sessionId}`,
+        );
+        return;
+      }
+
+      this.savedSessionModel = resolveOpenCodeModelSelection(
+        `${providerId}/${modelId}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `OpenCode could not resolve the resumed session model; using the deployment default sessionId=${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -3951,12 +4004,13 @@ export class OpenCodeServerHarness
     this.submittedUserMessageIds.add(messageID);
     this.messageRoleById.set(messageID, 'user');
     const agent = this.resolvePromptAgent();
+    const promptModel = this.savedSessionModel ?? this.model;
     // Architect-agent prompts omit the request-level model so the agent-level
     // planning model from the generated OpenCode config applies; without a
     // configured planning model OpenCode falls back to the config's top-level
     // model, which already reflects any per-task override.
     const shouldSendRequestModel = Boolean(
-      this.model && agent !== OPENCODE_ARCHITECT_AGENT,
+      promptModel && agent !== OPENCODE_ARCHITECT_AGENT,
     );
     try {
       await this.client.promptAsync({
@@ -3964,11 +4018,11 @@ export class OpenCodeServerHarness
         signal: this.eventAbortController.signal,
         request: {
           messageID,
-          ...(shouldSendRequestModel && this.model
+          ...(shouldSendRequestModel && promptModel
             ? {
                 model: {
-                  providerID: this.model.providerID,
-                  modelID: this.model.modelID,
+                  providerID: promptModel.providerID,
+                  modelID: promptModel.modelID,
                 },
               }
             : {}),
@@ -4125,6 +4179,14 @@ export class OpenCodeServerHarness
       const exhaustedRetryBudget =
         retryAttempt !== undefined &&
         retryAttempt >= MAX_OPENCODE_INTERNAL_RETRY_ATTEMPTS;
+
+      if (
+        sessionId &&
+        (await this.recoverSavedSessionModelNotFound(sessionId, status, true))
+      ) {
+        return;
+      }
+
       const fallbackTrigger = this.resolveFallbackTrigger(
         status,
         Math.max(
@@ -4276,6 +4338,57 @@ export class OpenCodeServerHarness
       trigger,
       sessionId,
     });
+  }
+
+  private async recoverSavedSessionModelNotFound(
+    sessionId: string,
+    error: unknown,
+    abortRetryingTurn: boolean,
+  ): Promise<boolean> {
+    if (
+      this.savedSessionModelRecoveryAttempted ||
+      !this.savedSessionModel ||
+      !this.model ||
+      this.savedSessionModel.qualifiedModel === this.model.qualifiedModel ||
+      !isOpenCodeProviderModelNotFoundError(error)
+    ) {
+      return false;
+    }
+
+    this.savedSessionModelRecoveryAttempted = true;
+    this.savedSessionModel = undefined;
+
+    if (abortRetryingTurn) {
+      this.armReplayAbortErrorSuppression();
+      try {
+        await this.client.abort({
+          sessionId,
+          signal: this.eventAbortController.signal,
+        });
+      } catch (abortError) {
+        this.logger.warn(
+          `Failed to abort OpenCode before saved-model recovery sessionId=${sessionId}: ${abortError instanceof Error ? abortError.message : String(abortError)}`,
+        );
+      }
+    }
+
+    const recovery = getOpenCodeProviderErrorRecovery({
+      name: 'UnknownError',
+      data: { message: 'The saved session model is no longer available.' },
+    });
+
+    if (!recovery) {
+      return false;
+    }
+
+    this.logger.warn(
+      `OpenCode saved session model is no longer registered; retrying with the deployment default sessionId=${sessionId}`,
+    );
+    await this.recoverProviderSessionError(sessionId, error, {
+      ...recovery,
+      maxRetries: 1,
+    });
+    return true;
   }
 
   private async requestChildModelFallback(
@@ -4440,6 +4553,13 @@ export class OpenCodeServerHarness
       this.logger.info(
         `Suppressing expected OpenCode MessageAbortedError after an intentional interrupt (queued replay or task cancel) sessionId=${sessionId ?? 'unknown'}`,
       );
+      return;
+    }
+
+    if (
+      sessionId &&
+      (await this.recoverSavedSessionModelNotFound(sessionId, error, false))
+    ) {
       return;
     }
 

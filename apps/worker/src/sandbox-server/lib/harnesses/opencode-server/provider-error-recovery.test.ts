@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
+  isOpenCodeContextOverflowError,
+  isOpenCodeProviderModelNotFoundError,
   isOpenCodeTerminalProviderError,
   isOpenCodeRetryableTransportError,
   resolveOpenCodeProviderErrorRetryDelayMs,
@@ -10,6 +12,20 @@ import {
 } from './provider-error-recovery';
 
 describe('getOpenCodeProviderErrorRecovery', () => {
+  it('treats ProviderModelNotFoundError as terminal without calling it context overflow', () => {
+    const error = {
+      name: 'UnknownError',
+      data: JSON.stringify({
+        cause: { name: 'ProviderModelNotFoundError' },
+      }),
+    };
+
+    expect(isOpenCodeProviderModelNotFoundError(error)).toBe(true);
+    expect(isOpenCodeContextOverflowError(error)).toBe(false);
+    expect(isOpenCodeTerminalProviderError(error)).toBe(true);
+    expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
+  });
+
   it('gives status-less policy codes the generic bounded retry budget', () => {
     // Only OpenCode's typed ContentFilterError selects the policy prompt;
     // provider policy code vocabulary is not classified.

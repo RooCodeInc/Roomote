@@ -358,6 +358,7 @@ export async function startOpenCodeServerHarness({
       commandEnv,
       initialSessionId,
       model,
+      preserveSavedSessionModel: modelOverride === undefined,
       fallbackModel,
       fallbackReasoningEffort,
       fallbackRole,

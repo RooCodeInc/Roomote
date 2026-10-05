@@ -36,6 +36,8 @@ import {
 import type {
   OpenCodeGlobalEvent,
   OpenCodeMessageInfo,
+  OpenCodeProviderRegistry,
+  OpenCodeSession,
   OpenCodeSessionMessage,
 } from '../opencode-server/types';
 
@@ -53,6 +55,19 @@ class FakeOpenCodeServerClient {
     async (_options?: { title?: string; signal?: AbortSignal }) => ({
       id: 'ses_1',
       title: 'test',
+    }),
+  );
+  session = vi.fn(
+    async ({ sessionId }: { sessionId: string }): Promise<OpenCodeSession> => ({
+      id: sessionId,
+      model: { providerID: 'test-provider', id: 'main-model' },
+    }),
+  );
+  providers = vi.fn(
+    async (): Promise<OpenCodeProviderRegistry> => ({
+      all: [{ id: 'test-provider', models: { 'main-model': {} } }],
+      connected: ['test-provider'],
+      default: { 'test-provider': 'main-model' },
     }),
   );
   promptAsync = vi.fn(async (_options: unknown) => undefined);
@@ -128,6 +143,7 @@ function createHarness(
     >;
     model?: string;
     initialSessionId?: string;
+    preserveSavedSessionModel?: boolean;
   } = {},
 ) {
   const harness = new OpenCodeServerHarness({
@@ -137,6 +153,7 @@ function createHarness(
     commandEnv: options.commandEnv,
     initialSessionId: options.initialSessionId,
     model: options.model ?? TEST_OPENCODE_MODEL,
+    preserveSavedSessionModel: options.preserveSavedSessionModel,
     eventStreamReadyTimeoutMs: 100,
     executeToolProgressInitialDelayMs:
       options.executeToolProgressInitialDelayMs,
@@ -2928,6 +2945,7 @@ describe('OpenCodeServerHarness', () => {
       await vi.waitFor(() => {
         expect(client.promptAsync).toHaveBeenCalledTimes(1);
       });
+
       await client.emit({
         type: 'session.status',
         properties: { sessionID: 'ses_1', status: { type: 'busy' } },
@@ -6782,6 +6800,209 @@ describe('OpenCodeServerHarness', () => {
       });
     } finally {
       harness.dispose();
+    }
+  });
+
+  it('preserves a registered saved model when resuming a session', async () => {
+    const client = new FakeOpenCodeServerClient();
+    client.session.mockResolvedValueOnce({
+      id: 'ses_prior',
+      model: { providerID: 'saved-provider', id: 'saved-model' },
+    });
+    client.providers.mockResolvedValueOnce({
+      all: [{ id: 'saved-provider', models: { 'saved-model': {} } }],
+      connected: ['saved-provider'],
+      default: { 'saved-provider': 'saved-model' },
+    });
+    const { harness } = createHarness(client, {
+      initialSessionId: 'ses_prior',
+      model: 'default-provider/default-model',
+      preserveSavedSessionModel: true,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Continue.', visibleInTranscript: true },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        sessionId: 'ses_prior',
+        request: {
+          model: {
+            providerID: 'saved-provider',
+            modelID: 'saved-model',
+          },
+        },
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it.each([
+    {
+      name: 'missing',
+      savedModel: undefined,
+      providers: { all: [], connected: [], default: {} },
+    },
+    {
+      name: 'unregistered',
+      savedModel: { providerID: 'removed-provider', id: 'removed-model' },
+      providers: {
+        all: [{ id: 'removed-provider', models: {} }],
+        connected: ['removed-provider'],
+        default: {},
+      },
+    },
+    {
+      name: 'disconnected',
+      savedModel: { providerID: 'saved-provider', id: 'saved-model' },
+      providers: {
+        all: [{ id: 'saved-provider', models: { 'saved-model': {} } }],
+        connected: [],
+        default: {},
+      },
+    },
+  ])(
+    'uses the deployment default when the saved session model is $name',
+    async ({ savedModel, providers }) => {
+      const client = new FakeOpenCodeServerClient();
+      client.session.mockResolvedValueOnce({
+        id: 'ses_prior',
+        ...(savedModel ? { model: savedModel } : {}),
+      });
+      client.providers.mockResolvedValueOnce(providers);
+      const { harness } = createHarness(client, {
+        initialSessionId: 'ses_prior',
+        model: 'default-provider/default-model',
+        preserveSavedSessionModel: true,
+      });
+
+      try {
+        await connectHarness(harness, client);
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: { text: 'Continue.', visibleInTranscript: true },
+        });
+
+        await vi.waitFor(() => {
+          expect(client.promptAsync).toHaveBeenCalledTimes(1);
+        });
+        expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+          request: {
+            model: {
+              providerID: 'default-provider',
+              modelID: 'default-model',
+            },
+          },
+        });
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
+  it('retries ProviderModelNotFoundError once with the deployment default', async () => {
+    vi.useFakeTimers();
+    const client = new FakeOpenCodeServerClient();
+    client.session.mockResolvedValueOnce({
+      id: 'ses_prior',
+      model: { providerID: 'saved-provider', id: 'saved-model' },
+    });
+    client.providers.mockResolvedValueOnce({
+      all: [{ id: 'saved-provider', models: { 'saved-model': {} } }],
+      connected: ['saved-provider'],
+      default: { 'saved-provider': 'saved-model' },
+    });
+    const { harness } = createHarness(client, {
+      initialSessionId: 'ses_prior',
+      model: 'default-provider/default-model',
+      preserveSavedSessionModel: true,
+      providerErrorBaseDelayMs: 1_000,
+      providerErrorMaxDelayMs: 1_000,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Continue.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_prior',
+          error: {
+            name: 'ProviderModelNotFoundError',
+            data: { message: 'Model is not registered' },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_prior' },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        request: {
+          model: {
+            providerID: 'saved-provider',
+            modelID: 'saved-model',
+          },
+        },
+      });
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        request: {
+          model: {
+            providerID: 'default-provider',
+            modelID: 'default-model',
+          },
+        },
+      });
+      const firstMessageId = (
+        client.promptAsync.mock.calls[0]?.[0] as {
+          request: { messageID: string };
+        }
+      ).request.messageID;
+      const retryMessageId = (
+        client.promptAsync.mock.calls[1]?.[0] as {
+          request: { messageID: string };
+        }
+      ).request.messageID;
+      expect(retryMessageId).not.toBe(firstMessageId);
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_prior',
+          error: {
+            name: 'ProviderModelNotFoundError',
+            data: { message: 'Default model is not registered' },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_prior' },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
     }
   });
 
