@@ -156,4 +156,48 @@ describe('OpenCodeServerClient timeouts', () => {
     );
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' });
   });
+
+  it('reads saved session model state and the registered provider catalog', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: 'ses/saved',
+            model: { providerID: 'provider-a', id: 'model-a' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            all: [{ id: 'provider-a', models: { 'model-a': {} } }],
+            connected: ['provider-a'],
+            default: { 'provider-a': 'model-a' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new OpenCodeServerClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      workspacePath: '/sandbox/repos',
+      logger: createLogger() as never,
+    });
+
+    await expect(client.session({ sessionId: 'ses/saved' })).resolves.toEqual({
+      id: 'ses/saved',
+      model: { providerID: 'provider-a', id: 'model-a' },
+    });
+    await expect(client.providers()).resolves.toMatchObject({
+      connected: ['provider-a'],
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      '/session/ses%2Fsaved?directory=%2Fsandbox%2Frepos',
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
+      '/provider?directory=%2Fsandbox%2Frepos',
+    );
+  });
 });

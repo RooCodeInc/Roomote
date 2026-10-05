@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
+  isOpenCodeContextOverflowError,
+  isOpenCodeProviderModelNotFoundError,
   isOpenCodeTerminalProviderError,
   isOpenCodeRetryableTransportError,
   resolveOpenCodeProviderErrorRetryDelayMs,
@@ -10,6 +12,64 @@ import {
 } from './provider-error-recovery';
 
 describe('getOpenCodeProviderErrorRecovery', () => {
+  it.each([
+    'Model not found: saved-provider/saved-model',
+    'ProviderModelNotFoundError: Model not found: saved-provider/saved-model',
+  ])(
+    'treats the OpenCode 1.18.30 UnknownError message as terminal: %s',
+    (message) => {
+      const error = {
+        name: 'UnknownError',
+        data: {
+          message,
+          stack: `ProviderModelNotFoundError: ${message}\n    at Provider.getModel`,
+        },
+      };
+
+      expect(isOpenCodeProviderModelNotFoundError(error)).toBe(true);
+      expect(isOpenCodeContextOverflowError(error)).toBe(false);
+      expect(isOpenCodeTerminalProviderError(error)).toBe(true);
+      expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
+    },
+  );
+
+  it.each([
+    {
+      name: 'UnknownError',
+      data: {
+        message: 'Request failed after Model not found: provider/model',
+      },
+    },
+    {
+      name: 'UnknownError',
+      data: {
+        message: 'Upstream connection closed unexpectedly.',
+        stack: 'ProviderModelNotFoundError: Model not found: provider/model',
+      },
+    },
+  ])(
+    'keeps non-prefix model-not-found text on the ordinary retry path',
+    (error) => {
+      expect(isOpenCodeProviderModelNotFoundError(error)).toBe(false);
+      expect(isOpenCodeTerminalProviderError(error)).toBe(false);
+      expect(getOpenCodeProviderErrorRecovery(error)).toMatchObject({
+        kind: 'provider_error',
+        maxRetries: 6,
+      });
+    },
+  );
+
+  it('keeps a generic UnknownError 404 on its existing terminal path', () => {
+    const error = {
+      name: 'UnknownError',
+      data: { message: 'Route not found', statusCode: 404 },
+    };
+
+    expect(isOpenCodeProviderModelNotFoundError(error)).toBe(false);
+    expect(isOpenCodeTerminalProviderError(error)).toBe(true);
+    expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
+  });
+
   it('gives status-less policy codes the generic bounded retry budget', () => {
     // Only OpenCode's typed ContentFilterError selects the policy prompt;
     // provider policy code vocabulary is not classified.

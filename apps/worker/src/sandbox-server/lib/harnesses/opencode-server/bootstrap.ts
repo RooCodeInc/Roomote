@@ -212,7 +212,11 @@ export async function prepareOpenCodeCommandEnv(options: {
   reasoningEffortOverride?: ReasoningEffort;
   developerInstructionsContent?: string;
   logger: HarnessLogger;
-}): Promise<{ commandEnv: Record<string, string>; model?: string }> {
+}): Promise<{
+  commandEnv: Record<string, string>;
+  model?: string;
+  modelOverrideApplied: boolean;
+}> {
   const commandEnv = normalizeOpenCodeRuntimeEnv(options.runtimeEnv);
   const parsedMcpServers = Object.fromEntries(
     Object.entries(options.mcpServers ?? {}).flatMap(([name, config]) => {
@@ -234,15 +238,16 @@ export async function prepareOpenCodeCommandEnv(options: {
     throw new Error('OpenCode command environment did not resolve HOME.');
   }
 
-  const { configContent, openCodeConfigDir, model } = generateOpenCodeConfig({
-    homeDir,
-    runtimeEnv: commandEnv,
-    developerInstructionsContent: options.developerInstructionsContent,
-    mcpServers: normalizeOpenCodeMcpServers(parsedMcpServers, commandEnv),
-    toolApprovalPermission: options.toolApprovalPermission,
-    model: options.model,
-    reasoningEffortOverride: options.reasoningEffortOverride,
-  });
+  const { configContent, openCodeConfigDir, model, modelOverrideApplied } =
+    generateOpenCodeConfig({
+      homeDir,
+      runtimeEnv: commandEnv,
+      developerInstructionsContent: options.developerInstructionsContent,
+      mcpServers: normalizeOpenCodeMcpServers(parsedMcpServers, commandEnv),
+      toolApprovalPermission: options.toolApprovalPermission,
+      model: options.model,
+      reasoningEffortOverride: options.reasoningEffortOverride,
+    });
   commandEnv.OPENCODE_CONFIG_CONTENT = configContent;
   // Prevent the checked-out repo's opencode.json / .opencode plugins and MCP
   // servers from merging into the harness. Additive repo MCP would otherwise
@@ -292,7 +297,7 @@ export async function prepareOpenCodeCommandEnv(options: {
     } model=${model ?? 'roomote-model-default'} pluginSeedVersion=${pluginSeedVersion}`,
   );
 
-  return { commandEnv, model };
+  return { commandEnv, model, modelOverrideApplied };
 }
 
 function quoteForBash(value: string): string {
