@@ -208,6 +208,7 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   {
     role: 'vision',
     label: 'Vision model',
+    description: 'Used to understand images.',
     icon: Image,
     placeholder: 'Select a vision model',
     reasoningAriaLabel: 'Vision model reasoning level',
@@ -215,8 +216,7 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   {
     role: 'audioVideo',
     label: 'Audio and video model',
-    description:
-      'Used to transcribe audio and describe videos. Automatic chat-attachment transcription uses this deployment setting, not per-task overrides.',
+    description: 'Used to transcribe audio and describe videos.',
     icon: AudioLines,
     placeholder: 'Select an audio and video model',
     reasoningAriaLabel: 'Audio and video model reasoning level',
@@ -324,14 +324,8 @@ function TaskModelRoleEditor({
     ? [
         {
           id: SAME_AS_CODING_MODEL_VALUE,
-          displayName:
-            config.role === 'audioVideo'
-              ? 'Helper for audio, vision for video'
-              : 'Same as coding model',
-          // Inherited model roles use the coding model's capabilities. The
-          // unset media role routes audio and video independently.
-          metadata:
-            config.role === 'audioVideo' ? null : (codingModelMetadata ?? null),
+          displayName: 'Same as coding model',
+          metadata: codingModelMetadata ?? null,
         },
         ...models,
       ]
@@ -340,9 +334,7 @@ function TaskModelRoleEditor({
   const mediaInputTypes =
     config.role === 'vision' || config.role === 'audioVideo'
       ? selectValue === SAME_AS_CODING_MODEL_VALUE
-        ? config.role === 'vision'
-          ? codingModelMetadata?.inputTypes
-          : undefined
+        ? codingModelMetadata?.inputTypes
         : selectedModel?.metadata?.inputTypes
       : null;
   const requestedMediaInputs =

@@ -591,18 +591,17 @@ describe('ModelSettingsSection', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('describes unset media routing and accepts a supported explicit model', async () => {
+  it('inherits coding capabilities for media and accepts a supported explicit model', async () => {
     settingsData.current = buildSettingsData();
     renderModelSettingsSection();
 
     expect(
-      screen.getByText(
-        'Used to transcribe audio and describe videos. Automatic chat-attachment transcription uses this deployment setting, not per-task overrides.',
-      ),
+      screen.getByText('Used to transcribe audio and describe videos.'),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/doesn't support audio or video/u),
-    ).not.toBeInTheDocument();
+      screen.getByText(/doesn't support audio or video/u),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Used to understand images.')).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', {
         name: 'Audio and video model and reasoning',
@@ -610,7 +609,7 @@ describe('ModelSettingsSection', () => {
     );
     expect(
       await screen.findByRole('option', {
-        name: 'Helper for audio, vision for video',
+        name: 'Same as coding model',
       }),
     ).toBeInTheDocument();
     fireEvent.click(
