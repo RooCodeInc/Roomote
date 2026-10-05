@@ -45,6 +45,7 @@ export type LockResult<T> = { acquired: true; value: T } | { acquired: false };
 export type RedisLockRenewResult = 'renewed' | 'lost' | 'error';
 
 export type RedisLockHandle = (() => Promise<void>) & {
+  ownerId: string;
   renew: (ttlSeconds?: number) => Promise<boolean>;
   renewDetailed: (ttlSeconds?: number) => Promise<RedisLockRenewResult>;
 };
@@ -110,6 +111,7 @@ export async function acquireRedisLock(
     await safeRelease(redis, key, ownerId);
   }) as RedisLockHandle;
 
+  release.ownerId = ownerId;
   release.renew = async (ttlSeconds = ttl) =>
     safeRenew(redis, key, ownerId, ttlSeconds);
 

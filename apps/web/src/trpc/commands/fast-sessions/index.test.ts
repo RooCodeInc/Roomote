@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   acquireTurnLock: vi.fn(),
+  requestTurnStop: vi.fn(),
   admitHumanFollowUp: vi.fn(),
   answerQuestion: vi.fn(),
   findAccessibleSession: vi.fn(),
@@ -21,6 +22,9 @@ const mocks = vi.hoisted(() => ({
   startSessionGoal: vi.fn(),
   getFastSessionTasks: vi.fn(),
   hasQueuedMessages: vi.fn(),
+  reserveQueuedMessage: vi.fn(),
+  releaseQueuedMessageReservation: vi.fn(),
+  wakeParentEventNow: vi.fn(),
   currentEpochSeconds: vi.fn(),
   createSessionArtifact: vi.fn(),
   createConversationArtifact: vi.fn(),
@@ -47,6 +51,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   createFastAgentWebTaskLauncher: mocks.createWebTaskLauncher,
   FastAgentDurableRetryScheduledError: class FastAgentDurableRetryScheduledError extends Error {},
   getOrCreateFastAgentSession: mocks.getOrCreateSession,
+  requestFastAgentTurnStop: mocks.requestTurnStop,
   resolveApiBaseUrl: vi.fn(),
   upsertFastAgentMessage: mocks.upsertMessage,
 }));
@@ -59,7 +64,7 @@ vi.mock('@roomote/sdk/server', () => ({
   persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),
   resolveUserMcpServerConfigs: vi.fn(),
   wakeFastAgentParentEventAt: vi.fn(),
-  wakeFastAgentParentEventNow: vi.fn(),
+  wakeFastAgentParentEventNow: mocks.wakeParentEventNow,
   wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
   startFastSessionGoal: mocks.startSessionGoal,
 }));
@@ -94,6 +99,9 @@ vi.mock('@/lib/server/fast-sessions', () => ({
   getFastSessionPrReviewOfferStatus: mocks.getOfferStatus,
   getFastSessionTasks: mocks.getFastSessionTasks,
   hasFastSessionQueuedMessages: mocks.hasQueuedMessages,
+  reserveFastSessionQueuedMessageForSteer: mocks.reserveQueuedMessage,
+  releaseFastSessionQueuedMessageSteerReservation:
+    mocks.releaseQueuedMessageReservation,
   updateFastSessionPrReviewOfferStatus: mocks.updateOfferStatus,
 }));
 
@@ -125,9 +133,85 @@ import {
   startFastSessionCommand,
   startFastSessionGoalCommand,
   startSetupFastSessionCommand,
+  steerFastSessionQueuedMessageCommand,
+  stopFastSessionCommand,
   updateFastSessionModelSelectionCommand,
   submitFastSessionUserInputCommand,
 } from './index';
+
+describe('Fast Session turn controls', () => {
+  const session = {
+    id: 'session-1',
+    surface: 'web' as const,
+    workspaceId: 'user-1',
+    conversationId: 'conversation-1',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findAccessibleSession.mockResolvedValue(session);
+    mocks.requestTurnStop.mockResolvedValue('stopped');
+    mocks.releaseQueuedMessageReservation.mockResolvedValue(undefined);
+    mocks.wakeParentEventNow.mockResolvedValue(undefined);
+  });
+
+  it('stops the active turn through its canonical conversation identity', async () => {
+    await expect(
+      stopFastSessionCommand(auth, { sessionId: session.id }),
+    ).resolves.toEqual({ outcome: 'stopped' });
+    expect(mocks.requestTurnStop).toHaveBeenCalledExactlyOnceWith({
+      surface: 'web',
+      workspaceId: 'user-1',
+      conversationId: 'conversation-1',
+    });
+  });
+
+  it('holds the oldest queued message until its predecessor stops, then wakes delivery', async () => {
+    const reservation = {
+      outcome: 'reserved' as const,
+      id: 'parent-event-1',
+      eventKey: 'queued-event-1',
+      claimedUntil: new Date('2026-01-01T00:00:30.000Z'),
+    };
+    mocks.reserveQueuedMessage.mockResolvedValue(reservation);
+
+    await expect(
+      steerFastSessionQueuedMessageCommand(auth, {
+        sessionId: session.id,
+        clientMessageId: '11111111-1111-4111-8111-111111111111',
+      }),
+    ).resolves.toEqual({ outcome: 'steered' });
+
+    expect(mocks.reserveQueuedMessage).toHaveBeenCalledExactlyOnceWith({
+      sessionId: session.id,
+      clientMessageId: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(mocks.requestTurnStop).toHaveBeenCalledOnce();
+    expect(
+      mocks.releaseQueuedMessageReservation,
+    ).toHaveBeenCalledExactlyOnceWith(reservation);
+    expect(mocks.wakeParentEventNow).toHaveBeenCalledExactlyOnceWith({
+      conversationId: session.id,
+      eventKey: reservation.eventKey,
+    });
+    expect(mocks.requestTurnStop.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.releaseQueuedMessageReservation.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('does not interrupt work when the requested queue row is no longer first', async () => {
+    mocks.reserveQueuedMessage.mockResolvedValue({ outcome: 'not_first' });
+
+    await expect(
+      steerFastSessionQueuedMessageCommand(auth, {
+        sessionId: session.id,
+        clientMessageId: '11111111-1111-4111-8111-111111111111',
+      }),
+    ).resolves.toEqual({ outcome: 'not_first' });
+    expect(mocks.requestTurnStop).not.toHaveBeenCalled();
+    expect(mocks.releaseQueuedMessageReservation).not.toHaveBeenCalled();
+  });
+});
 
 describe('getFastSessionTasksCommand', () => {
   it('adds stable image and video preview URLs to session artifacts', async () => {

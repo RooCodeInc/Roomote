@@ -52,6 +52,7 @@ import {
   SessionQueuedMessageList,
   type SessionQueuedMessage,
   type SessionQueuedMessageDeleteOutcome,
+  type SessionQueuedMessageSteerOutcome,
 } from './SessionQueuedMessageList';
 import { SessionWakeups } from './SessionWakeups';
 
@@ -212,16 +213,28 @@ function VoiceConversationPanel({ voice }: { voice: SessionVoiceControls }) {
 function SessionSubmit({
   sending,
   prompt,
+  agentWorking,
+  stopping,
+  onStop,
 }: {
   sending: boolean;
   prompt: string;
+  agentWorking: boolean;
+  stopping: boolean;
+  onStop?: () => void;
 }) {
   const attachments = usePromptInputAttachments();
   const hasAttachments = attachments.files.length > 0;
+  const showStopButton = agentWorking && !prompt.trim() && !hasAttachments;
 
   return (
     <PromptInputSubmit
-      disabled={sending || (!prompt.trim() && !hasAttachments)}
+      status={showStopButton ? 'streaming' : undefined}
+      onStop={showStopButton ? onStop : undefined}
+      disabled={
+        stopping ||
+        (!showStopButton && (sending || (!prompt.trim() && !hasAttachments)))
+      }
     />
   );
 }
@@ -240,6 +253,9 @@ export function SessionPromptInput({
   queuedMessages = [],
   currentUserId = null,
   onDeleteQueuedMessage,
+  onSteerQueuedMessage,
+  onStop,
+  isStopping = false,
   initialModel = null,
   initialReasoningEffort = null,
   defaultModelId = null,
@@ -272,6 +288,11 @@ export function SessionPromptInput({
   onDeleteQueuedMessage?: (
     message: SessionQueuedMessage,
   ) => Promise<SessionQueuedMessageDeleteOutcome>;
+  onSteerQueuedMessage?: (
+    message: SessionQueuedMessage,
+  ) => Promise<SessionQueuedMessageSteerOutcome>;
+  onStop?: () => void;
+  isStopping?: boolean;
   initialModel?: string | null;
   initialReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
@@ -483,6 +504,7 @@ export function SessionPromptInput({
         queuedMessages={queuedMessages}
         currentUserId={currentUserId}
         onDelete={onDeleteQueuedMessage}
+        onSteer={onSteerQueuedMessage}
       />
       <PromptInputRoot
         onSubmit={handleSubmit}
@@ -583,7 +605,13 @@ export function SessionPromptInput({
                 onClick={voiceDictation.toggle}
                 disabled={isBusy}
               />
-              <SessionSubmit sending={controlsDisabled} prompt={prompt} />
+              <SessionSubmit
+                sending={controlsDisabled}
+                prompt={prompt}
+                agentWorking={agentWorking}
+                stopping={isStopping}
+                onStop={onStop}
+              />
             </div>
           </PromptInputFooter>
         ) : null}

@@ -21,7 +21,8 @@ function createMockRedis(overrides: Partial<Redis> = {}): Redis {
 
 describe('acquireRedisLock', () => {
   it('returns a release function when the lock is acquired', async () => {
-    const redis = createMockRedis();
+    const set = vi.fn().mockResolvedValue('OK');
+    const redis = createMockRedis({ set: set as unknown as Redis['set'] });
 
     const release = await acquireRedisLock('test-lock', { redis });
 
@@ -35,6 +36,7 @@ describe('acquireRedisLock', () => {
       30,
       'NX',
     );
+    expect(release?.ownerId).toBe(set.mock.calls[0]?.[1]);
   });
 
   it('returns null when the lock is already held', async () => {

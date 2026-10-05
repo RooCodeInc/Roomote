@@ -711,6 +711,96 @@ type FastSessionQueuedMessageWithdrawal =
   | 'not_queued'
   | 'forbidden';
 
+type FastSessionQueuedMessageSteerReservation =
+  | {
+      outcome: 'reserved';
+      id: string;
+      eventKey: string;
+      claimedUntil: Date;
+    }
+  | { outcome: 'not_queued' | 'not_first' };
+
+/**
+ * Reserve the oldest visible web follow-up while its active predecessor is
+ * being stopped. The exact claim timestamp is the reservation token, so a
+ * stale cleanup cannot release a later delivery owner's claim.
+ */
+export async function reserveFastSessionQueuedMessageForSteer(params: {
+  sessionId: string;
+  clientMessageId: string;
+}): Promise<FastSessionQueuedMessageSteerReservation> {
+  const [oldest] = await db
+    .select({
+      id: fastAgentParentEvents.id,
+      eventKey: fastAgentParentEvents.eventKey,
+      clientMessageId: sql<string>`${fastAgentParentEvents.event} ->> 'currentMessageId'`,
+    })
+    .from(fastAgentParentEvents)
+    .where(
+      and(
+        eq(fastAgentParentEvents.conversationId, params.sessionId),
+        fastSessionQueuedFollowUpWhere,
+      ),
+    )
+    .orderBy(
+      asc(fastAgentParentEvents.createdAt),
+      asc(fastAgentParentEvents.id),
+    )
+    .limit(1);
+  if (!oldest) return { outcome: 'not_queued' };
+  if (oldest.clientMessageId !== params.clientMessageId) {
+    return { outcome: 'not_first' };
+  }
+
+  const claimedUntil = new Date(Date.now() + 30_000);
+  const [reserved] = await db
+    .update(fastAgentParentEvents)
+    .set({ claimedUntil, updatedAt: new Date() })
+    .where(
+      and(
+        eq(fastAgentParentEvents.id, oldest.id),
+        eq(fastAgentParentEvents.attempts, 0),
+        isNull(fastAgentParentEvents.claimedUntil),
+        isNull(fastAgentParentEvents.deliveredAt),
+        isNull(fastAgentParentEvents.discardedAt),
+        isNull(fastAgentParentEvents.admission),
+        sql`not exists (
+          select 1 from ${fastAgentMessages}
+          where ${fastAgentMessages.conversationId} = ${params.sessionId}
+            and ${fastAgentMessages.eventId} = ${`${params.clientMessageId}:user`}
+        )`,
+      ),
+    )
+    .returning({ id: fastAgentParentEvents.id });
+  return reserved
+    ? {
+        outcome: 'reserved',
+        id: reserved.id,
+        eventKey: oldest.eventKey,
+        claimedUntil,
+      }
+    : { outcome: 'not_queued' };
+}
+
+export async function releaseFastSessionQueuedMessageSteerReservation(
+  reservation: Extract<
+    FastSessionQueuedMessageSteerReservation,
+    { outcome: 'reserved' }
+  >,
+): Promise<void> {
+  await db
+    .update(fastAgentParentEvents)
+    .set({ claimedUntil: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(fastAgentParentEvents.id, reservation.id),
+        eq(fastAgentParentEvents.claimedUntil, reservation.claimedUntil),
+        isNull(fastAgentParentEvents.deliveredAt),
+        isNull(fastAgentParentEvents.discardedAt),
+      ),
+    );
+}
+
 /**
  * Withdraw a web follow-up that is still waiting in the Session queue. Only
  * its sender may withdraw it, and only before any delivery path has taken

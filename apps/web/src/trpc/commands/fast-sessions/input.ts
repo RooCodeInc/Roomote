@@ -129,6 +129,16 @@ export const deleteFastSessionQueuedMessageInputSchema = z.object({
   clientMessageId: z.string().uuid(),
 });
 
+export const steerFastSessionQueuedMessageInputSchema = z.object({
+  sessionId: z.string().uuid(),
+  /** The client id of the oldest queued reply to send now. */
+  clientMessageId: z.string().uuid(),
+});
+
+export const stopFastSessionInputSchema = z.object({
+  sessionId: z.string().uuid(),
+});
+
 export const fastSessionPrReviewActionInputSchema = z.object({
   sessionId: z.string().uuid(),
   deliveryId: z.string().uuid(),

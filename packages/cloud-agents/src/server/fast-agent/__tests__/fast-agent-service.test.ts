@@ -447,6 +447,12 @@ vi.mock('../fast-agent-turn-lock', () => ({
       this.name = 'FastAgentProcessShutdownError';
     }
   },
+  FastAgentSessionStoppedError: class extends Error {
+    constructor() {
+      super('Fast session turn stopped by the user.');
+      this.name = 'FastAgentSessionStoppedError';
+    }
+  },
   markFastAgentShutdownCloseoutPending: mocks.markShutdownCloseoutPending,
   markFastAgentShutdownCloseoutSettled: mocks.markShutdownCloseoutSettled,
 }));
@@ -478,6 +484,7 @@ import {
 } from '../fast-agent-conversation';
 import {
   FastAgentProcessShutdownError,
+  FastAgentSessionStoppedError,
   FastAgentTurnLockLostError,
   registerFastAgentTurnActivity,
 } from '../fast-agent-turn-lock';
@@ -7989,9 +7996,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     });
 
-    it('does not resume a deliberately cancelled turn', async () => {
+    it('invalidates native state and does not replay a user-stopped turn', async () => {
       const controller = new AbortController();
-      const cancelled = new Error('Fast suggestion launch settlement failed.');
+      const cancelled = new FastAgentSessionStoppedError();
       mocks.generateText.mockImplementationOnce(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
@@ -8010,6 +8017,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).rejects.toBe(cancelled);
 
       expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
+      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
       expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
         'durable-row-1',
         'Turn interrupted without replay (turn_aborted).',
