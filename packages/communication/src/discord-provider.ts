@@ -313,18 +313,37 @@ function chunkDiscordPlainMessage(text: string, limit: number): string[] {
 function chunkDiscordFencedMessage(text: string, limit: number): string[] {
   const chunks: string[] = [];
   let current = '';
-  type Fence = { opening: string; marker: string };
+  type Fence = {
+    opening: string;
+    marker: string;
+    openingStart: number;
+    bodyStart: number;
+  };
   let open: Fence | null = null;
   const lines = text.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
 
   const flush = () => {
     if (!current) return;
+    if (open && !current.slice(open.bodyStart).trim()) {
+      const beforeOpening = current.slice(0, open.openingStart);
+      if (beforeOpening) {
+        chunks.push(...chunkDiscordPlainMessage(beforeOpening, limit));
+      }
+      current = `${open.opening}\n`;
+      open.openingStart = 0;
+      open.bodyStart = current.length;
+      return;
+    }
     chunks.push(
       open
         ? `${current}${current.endsWith('\n') ? '' : '\n'}${open.marker}`
         : current,
     );
     current = open ? `${open.opening}\n` : '';
+    if (open) {
+      open.openingStart = 0;
+      open.bodyStart = current.length;
+    }
   };
 
   for (const [index, line] of lines.entries()) {
@@ -343,7 +362,12 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
     const opening: Fence | null =
       openingMatch &&
       !(openingMatch[1]?.startsWith('`') && openingMatch[2]?.includes('`'))
-        ? { opening: value, marker: openingMatch[1]! }
+        ? {
+            opening: value,
+            marker: openingMatch[1]!,
+            openingStart: 0,
+            bodyStart: 0,
+          }
         : null;
     const nextOpen: Fence | null = closing ? null : (opening ?? open);
     const suffixLength = nextOpen ? nextOpen.marker.length + 1 : 0;
@@ -382,6 +406,10 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
       if (current.length + line.length + suffixLength > limit) flush();
       current += line;
       open = nextOpen;
+      if (opening && open) {
+        open.openingStart = current.length - line.length;
+        open.bodyStart = current.length;
+      }
       continue;
     }
 

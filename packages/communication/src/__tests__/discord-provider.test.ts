@@ -1477,6 +1477,17 @@ describe('chunkDiscordMessage', () => {
     expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
   });
 
+  it('does not emit empty fences when a row fits without its leading blank', () => {
+    const prose = `${'p'.repeat(47)}\n`;
+    const row = `${'x'.repeat(47)}\n`;
+    const chunks = chunkDiscordMessage(
+      `${prose}\`\`\`text\n\n${row}\`\`\``,
+      60,
+    );
+    expect(chunks).toEqual([prose, `\`\`\`text\n${row}\`\`\``]);
+    expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+  });
+
   it('prefers newline boundaries without losing text', () => {
     expect(chunkDiscordMessage('first line\nsecond line', 12)).toEqual([
       'first line',
