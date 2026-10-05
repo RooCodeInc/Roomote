@@ -678,6 +678,34 @@ describe('MCP session routes', () => {
     );
   });
 
+  it('checks session access before processing attachments', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+
+    const response = await createApp(owner.id).request(
+      `/sessions/${crypto.randomUUID()}/send_message`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Review this file',
+          attachments: [
+            {
+              filename: 'failure.log',
+              mimeType: 'text/plain',
+              base64: 'not base64!',
+            },
+          ],
+        }),
+      },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Session not found',
+    });
+  });
+
   it('resolves a Fast conversation URL and repairs its missing Session row', async () => {
     const owner = await userFactory.create();
     createdUserIds.push(owner.id);

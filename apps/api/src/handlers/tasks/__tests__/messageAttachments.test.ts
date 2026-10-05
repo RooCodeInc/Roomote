@@ -3,7 +3,11 @@ import {
   ROOMOTE_IMAGE_ATTACHMENT_MAX_BYTES,
 } from '@roomote/cloud-agents';
 
-import { prepareMessageAttachments } from '../messageAttachments';
+import { tasksRouter } from '../index';
+import {
+  prepareMessageAttachments,
+  ROOMOTE_MESSAGE_REQUEST_MAX_BYTES,
+} from '../messageAttachments';
 
 describe('prepareMessageAttachments', () => {
   it('preserves message-only calls unchanged', async () => {
@@ -79,6 +83,50 @@ describe('prepareMessageAttachments', () => {
         ],
       }),
     ).rejects.toThrow('file exceeds the 8 MiB attachment limit');
+  });
+
+  it('rejects more than 20 attachments', async () => {
+    await expect(
+      prepareMessageAttachments({
+        message: 'Inspect the logs',
+        attachments: Array.from({ length: 21 }, (_, index) => ({
+          filename: `failure-${index}.log`,
+          mimeType: 'text/plain',
+          base64: Buffer.from('failure').toString('base64'),
+        })),
+      }),
+    ).rejects.toThrow('maximum 20 attachments');
+  });
+
+  it('rejects oversized message request bodies before route handling', async () => {
+    const response = await tasksRouter.request('/task-id/send_message', {
+      method: 'POST',
+      headers: {
+        'content-length': String(ROOMOTE_MESSAGE_REQUEST_MAX_BYTES + 1),
+        'content-type': 'application/json',
+      },
+      body: '{}',
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Message payload is too large',
+    });
+  });
+
+  it('rejects attachments over a 16 MiB aggregate decoded-byte budget', async () => {
+    const sixMebibytes = Buffer.alloc(6 * 1024 * 1024, 97).toString('base64');
+
+    await expect(
+      prepareMessageAttachments({
+        message: 'Inspect the logs',
+        attachments: Array.from({ length: 3 }, (_, index) => ({
+          filename: `failure-${index}.log`,
+          mimeType: 'text/plain',
+          base64: sixMebibytes,
+        })),
+      }),
+    ).rejects.toThrow('attachments exceed the 16 MiB total limit');
   });
 
   it('rejects invalid base64', async () => {

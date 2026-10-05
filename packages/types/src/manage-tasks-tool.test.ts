@@ -79,6 +79,18 @@ describe('Roomote MCP management contract', () => {
         },
       ]).success,
     ).toBe(true);
+    expect(
+      roomoteManagementFieldSchemas.attachments.safeParse(
+        Array.from({ length: 21 }, () => ({
+          filename: 'failure.log',
+          mimeType: 'text/plain',
+          base64: 'bG9n',
+        })),
+      ).success,
+    ).toBe(false);
+    expect(roomoteManagementFieldSchemas.attachments.description).toContain(
+      '16 MiB decoded total',
+    );
     expect(roomoteManagementFieldSchemas.attachments.description).toContain(
       'up to 2 MiB each',
     );
