@@ -1,7 +1,6 @@
 import { render, screen } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
-  experimentEnabled: true,
   parentSession: { sessionId: 'session-1' } as { sessionId: string } | null,
   pending: [] as { approvalId: string; taskId: string | null }[],
   approvalsHook: vi.fn(),
@@ -13,11 +12,6 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     sessions: { forTask: { queryOptions: (input: unknown) => input } },
-  }),
-}));
-vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
-  useIntegrationToolApprovalsExperiment: () => ({
-    enabled: mocks.experimentEnabled,
   }),
 }));
 vi.mock('@/hooks/useSessionIntegrationToolApprovals', () => ({
@@ -44,7 +38,6 @@ import { PendingToolApprovalsPanel } from './PendingToolApprovalsPanel';
 
 describe('PendingToolApprovalsPanel', () => {
   beforeEach(() => {
-    mocks.experimentEnabled = true;
     mocks.parentSession = { sessionId: 'session-1' };
     mocks.pending = [
       { approvalId: 'mine', taskId: 'task-1' },
@@ -58,14 +51,13 @@ describe('PendingToolApprovalsPanel', () => {
     const card = screen.getByTestId('approvals');
     expect(card.dataset.session).toBe('session-1');
     expect(card.textContent).toBe('mine');
-    expect(mocks.approvalsHook).toHaveBeenCalledWith('session-1', true);
+    expect(mocks.approvalsHook).toHaveBeenCalledWith('session-1');
   });
 
-  it('renders nothing without a Session, and reads nothing with the experiment off', () => {
+  it('renders nothing without a Session', () => {
     mocks.parentSession = null;
-    mocks.experimentEnabled = false;
     const { container } = render(<PendingToolApprovalsPanel taskId="task-1" />);
     expect(container.innerHTML).toBe('');
-    expect(mocks.approvalsHook).toHaveBeenLastCalledWith(undefined, false);
+    expect(mocks.approvalsHook).toHaveBeenLastCalledWith(undefined);
   });
 });

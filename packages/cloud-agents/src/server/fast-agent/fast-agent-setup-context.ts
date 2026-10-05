@@ -229,7 +229,7 @@ export function buildFastAgentSetupAdapter(
         ).map((integration) => ({
           id: integration.id,
           label: integration.name,
-          description: `Connect ${integration.name} in Settings.`,
+          description: `Connect ${integration.name} on the Integrations page.`,
         }));
         if (options.length === 0) {
           await completeEmptySetupIntegrationDiscovery(context);

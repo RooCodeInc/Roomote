@@ -119,6 +119,12 @@ import { z } from 'zod';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { startMcpToolTestServer } from '../../__tests__/mcp-tool-client-fixture';
 
+/** What a deployment-proxy call sends: fresh auth and its conversation. */
+const proxyHeaders = (token: string, conversationId = 'session-1') => ({
+  Authorization: `Bearer ${token}`,
+  'x-roomote-fast-conversation-id': conversationId,
+});
+
 const auditContext = {
   userId: 'user-1',
   apiBaseUrl: 'https://api.example.com',
@@ -261,7 +267,7 @@ describe('fast-agent integration broker', () => {
     ).toEqual(response);
     expect(mocks.callMcpTool).toHaveBeenCalledWith(
       expect.objectContaining({
-        headers: { Authorization: 'Bearer fresh-actor-token' },
+        headers: proxyHeaders('fresh-actor-token'),
         args,
       }),
     );
@@ -338,9 +344,10 @@ describe('fast-agent integration broker', () => {
       expect(mocks.callMcpTool).toHaveBeenCalledWith(
         expect.objectContaining({
           args,
-          headers: {
-            Authorization: `Bearer ${humanTurn ? 'session-broker-token' : 'control-plane-token'}`,
-          },
+          headers: proxyHeaders(
+            humanTurn ? 'session-broker-token' : 'control-plane-token',
+            'persisted-conversation',
+          ),
         }),
       );
     },
@@ -373,9 +380,10 @@ describe('fast-agent integration broker', () => {
       expect(mocks.createSessionBrokerToken).not.toHaveBeenCalled();
       expect(mocks.callMcpTool).toHaveBeenCalledWith(
         expect.objectContaining({
-          headers: {
-            Authorization: `Bearer ${deploymentProxy ? 'control-plane-token' : 'upstream-token'}`,
-          },
+          // Only a deployment-proxy call names its conversation.
+          headers: deploymentProxy
+            ? proxyHeaders('control-plane-token')
+            : { Authorization: 'Bearer upstream-token' },
         }),
       );
     },
@@ -492,7 +500,7 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledWith(
       expect.objectContaining({
         url: 'https://api.example.com/api/mcp/sentry',
-        headers: { Authorization: 'Bearer control-plane-token' },
+        headers: proxyHeaders('control-plane-token'),
         args,
       }),
     );
@@ -670,7 +678,7 @@ describe('fast-agent integration broker', () => {
       expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
         expect.objectContaining({
           url: 'https://api.example.com/api/mcp/betterstack',
-          headers: { Authorization: 'Bearer control-plane-token' },
+          headers: proxyHeaders('control-plane-token'),
           toolName: name,
           args,
         }),
@@ -902,7 +910,7 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledWith(
       expect.objectContaining({
         url: 'https://api.example.com/api/mcp-routing/gitlab',
-        headers: { Authorization: 'Bearer fresh-token' },
+        headers: proxyHeaders('fresh-token'),
       }),
     );
   });
@@ -997,7 +1005,7 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledWith(
       expect.objectContaining({
         url: 'https://api.example.com/api/mcp-routing/gitlab',
-        headers: { Authorization: 'Bearer fresh-revoked-actor-token' },
+        headers: proxyHeaders('fresh-revoked-actor-token'),
       }),
     );
   });
@@ -1193,7 +1201,7 @@ describe('fast-agent integration broker', () => {
       ).resolves.toEqual({ result: { id: 5 } });
       expect(mocks.callMcpTool).toHaveBeenCalledWith({
         url: 'https://api.example.com/api/mcp/bitbucket',
-        headers: { Authorization: 'Bearer fresh-call-token' },
+        headers: proxyHeaders('fresh-call-token'),
         toolName: 'add_pull_request_comment',
         args,
         signal: expect.any(AbortSignal),
@@ -1929,7 +1937,7 @@ describe('fast-agent integration broker', () => {
 
     expect(mocks.callMcpTool).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp/notion',
-      headers: { Authorization: 'Bearer control-plane-token' },
+      headers: proxyHeaders('control-plane-token'),
       toolName: 'search',
       args: { query: 'roadmap' },
       signal: expect.any(AbortSignal),

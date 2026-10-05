@@ -13,6 +13,7 @@ import {
   getCommunicationThreadIdFromTaskPayload,
   getFastAgentParentFromPayload,
   getTerminalProviderErrorFromMessageData,
+  getModelFallbackNoticeFromMessageData,
 } from '@roomote/types';
 import {
   type Task,
@@ -109,6 +110,7 @@ function buildMarkdownNotificationText(
   run: NotifiedRun,
   error: string,
   source: string,
+  fallbackNotice: boolean,
 ): string {
   const taskUrl = getTaskUrl({
     taskId: run.taskId,
@@ -116,15 +118,19 @@ function buildMarkdownNotificationText(
   });
 
   return [
-    TASK_TURN_PROVIDER_ERROR_TEXT,
-    `**Error details:** ${error}`,
+    fallbackNotice ? error : TASK_TURN_PROVIDER_ERROR_TEXT,
+    fallbackNotice ? null : `**Error details:** ${error}`,
     taskUrl ? formatMarkdownLink('Open the task', taskUrl) : null,
   ]
     .filter((part): part is string => part !== null)
     .join('\n\n');
 }
 
-async function notifyTeams(run: NotifiedRun, error: string): Promise<boolean> {
+async function notifyTeams(
+  run: NotifiedRun,
+  error: string,
+  fallbackNotice: boolean,
+): Promise<boolean> {
   const provider =
     await createTeamsCommunicationProviderFromRuntimeCredentials();
 
@@ -154,7 +160,7 @@ async function notifyTeams(run: NotifiedRun, error: string): Promise<boolean> {
     serviceUrl,
     ...(threadId ? { threadId } : {}),
     ...(replyToMessageId ? { replyToMessageId } : {}),
-    text: buildMarkdownNotificationText(run, error, 'teams'),
+    text: buildMarkdownNotificationText(run, error, 'teams', fallbackNotice),
     textFormat: 'markdown',
   });
 
@@ -170,6 +176,7 @@ async function notifyThreadedMarkdownProvider(
   run: NotifiedRun,
   error: string,
   provider: 'discord' | 'telegram' | 'agentmail',
+  fallbackNotice: boolean,
 ): Promise<boolean> {
   const adapter =
     provider === 'discord'
@@ -201,7 +208,7 @@ async function notifyThreadedMarkdownProvider(
     channelId,
     ...(threadId ? { threadId } : {}),
     ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
-    text: buildMarkdownNotificationText(run, error, provider),
+    text: buildMarkdownNotificationText(run, error, provider, fallbackNotice),
     textFormat: 'markdown',
   });
 
@@ -213,7 +220,11 @@ async function notifyThreadedMarkdownProvider(
  * never touches the started message or its Cancel button: the task is still
  * live and resumable, so its controls must stay usable.
  */
-async function notifySlack(run: NotifiedRun, error: string): Promise<boolean> {
+async function notifySlack(
+  run: NotifiedRun,
+  error: string,
+  fallbackNotice: boolean,
+): Promise<boolean> {
   const slackInstallation = await db.query.slackInstallations.findFirst({
     where: and(eq(slackInstallations.isActive, true)),
   });
@@ -234,7 +245,9 @@ async function notifySlack(run: NotifiedRun, error: string): Promise<boolean> {
     return false;
   }
 
-  const text = `:warning: ${escapeSlackMrkdwnText(error)}`;
+  const text = fallbackNotice
+    ? error
+    : `:warning: ${escapeSlackMrkdwnText(error)}`;
 
   // `SlackNotifier.postMessage` logs and returns no timestamp on API or
   // transport failure instead of throwing, so the returned ts is the only
@@ -245,7 +258,9 @@ async function notifySlack(run: NotifiedRun, error: string): Promise<boolean> {
     channel,
     thread_ts: threadTs ?? run.task.slackThreadTs ?? undefined,
     text,
-    blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }],
+    blocks: fallbackNotice
+      ? [{ type: 'markdown', text }]
+      : [{ type: 'section', text: { type: 'mrkdwn', text } }],
     unfurl_links: false,
     unfurl_media: false,
   });
@@ -280,6 +295,7 @@ async function notifySourceThreadOfTerminalProviderError(input: {
   taskId: string;
   ts: number;
   errorSummary: string;
+  preformatted?: boolean;
 }): Promise<void> {
   const run = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, input.runId),
@@ -292,6 +308,7 @@ async function notifySourceThreadOfTerminalProviderError(input: {
 
   const parent = getFastAgentParentFromPayload(run.payload);
   if (parent) {
+    if (input.preformatted) return;
     const error = redactSecrets(input.errorSummary).trim();
     if (!error) return;
 
@@ -318,7 +335,9 @@ async function notifySourceThreadOfTerminalProviderError(input: {
     return;
   }
 
-  const error = formatChannelProviderError(input.errorSummary);
+  const error = input.preformatted
+    ? redactSecrets(input.errorSummary).trim()
+    : formatChannelProviderError(input.errorSummary);
 
   if (!error) {
     // Unrecognized or unsafe-to-echo error text. The full detail stays in the
@@ -343,21 +362,27 @@ async function notifySourceThreadOfTerminalProviderError(input: {
   }
 
   let delivered = false;
+  const fallbackNotice = input.preformatted === true;
 
   try {
     switch (provider) {
       case 'slack':
-        delivered = await notifySlack(run, error);
+        delivered = await notifySlack(run, error, fallbackNotice);
         break;
       case 'teams':
-        delivered = await notifyTeams(run, error);
+        delivered = await notifyTeams(run, error, fallbackNotice);
         break;
       case 'discord':
       case 'telegram':
       case 'agentmail':
         // Email threads get the same threaded markdown notice; the adapter
         // resolves the reply route from the conversation id in threadId.
-        delivered = await notifyThreadedMarkdownProvider(run, error, provider);
+        delivered = await notifyThreadedMarkdownProvider(
+          run,
+          error,
+          provider,
+          fallbackNotice,
+        );
         break;
     }
   } finally {
@@ -387,6 +412,68 @@ async function notifySourceThreadOfTerminalProviderError(input: {
   console.log(
     `[turnProviderError] Reported provider error to ${provider} thread for run ${input.runId}`,
   );
+}
+
+export async function maybeNotifySourceThreadOfModelFallback(input: {
+  runId: number;
+  taskId: string;
+  envelope: AcpPersistedEnvelope;
+}): Promise<void> {
+  const notice =
+    getModelFallbackNoticeFromMessageData(asRecord(input.envelope.metadata)) ??
+    getModelFallbackNoticeFromMessageData(asRecord(input.envelope.payload));
+  if (!notice) return;
+
+  const safeNotice = {
+    ...notice,
+    errorSummary: redactSecrets(notice.errorSummary).trim(),
+  };
+  // Provider prose stays in the task transcript and the redacted owning-session
+  // event. Direct customer channels receive only Roomote-controlled text so a
+  // provider cannot inject Markdown, mentions, or links into the conversation.
+  const text =
+    'Switching to a fallback model after the active provider failed. Continuing the task.';
+  try {
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.runId),
+      with: { task: true },
+    });
+    if (!run || run.taskId !== input.taskId) return;
+
+    const parent = getFastAgentParentFromPayload(run.payload);
+    if (parent) {
+      await enqueueFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'task_model_fallback',
+          taskId: run.taskId,
+          runId: run.id,
+          messageTs: input.envelope.ts,
+          fallback: safeNotice,
+          taskUrl: getTaskUrl({
+            taskId: run.taskId,
+            utm: {
+              campaign: 'fast-delegation-model-fallback',
+              source: parent.conversation.surface,
+            },
+          }),
+        },
+      });
+      return;
+    }
+
+    await notifySourceThreadOfTerminalProviderError({
+      runId: input.runId,
+      taskId: input.taskId,
+      ts: input.envelope.ts,
+      errorSummary: text,
+      preformatted: true,
+    });
+  } catch (error) {
+    console.warn(
+      `[modelFallback] Failed to notify the source thread for run ${input.runId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /**

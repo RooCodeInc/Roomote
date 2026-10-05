@@ -40,7 +40,7 @@ const REPLY_MAX_CHARS = 6_000;
 const SAVED_MEMORY_MAX_CHARS = 6_000;
 const MAX_MEMORIES_PER_TURN = 3;
 
-const MEMORY_GATE_QUESTIONS = {
+export const MEMORY_GATE_QUESTIONS = {
   statedDurable: {
     type: 'noul',
     instructions:
@@ -199,6 +199,7 @@ export async function saveFastAgentPostTurnMemory(input: {
       SAVED_MEMORY_MAX_CHARS,
     );
     const answers = await evaluateDecisionModel({
+      decision: 'fast-agent-post-turn-memory',
       state: { request, reply, saved_memories: savedMemories },
       questions: MEMORY_GATE_QUESTIONS,
       timeoutMs: MEMORY_GATE_TIMEOUT_MS,

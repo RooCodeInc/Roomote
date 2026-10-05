@@ -5,6 +5,8 @@ minimumReleaseAge: 10080
 # jose@6.2.4 is the version already pinned in the lockfile; allow
 # lockfile-affecting changes while it finishes maturing.
 minimumReleaseAgeExclude:
+  # First-party release reviewed with the Judgement integration.
+  - "@roo-code/judgement@0.4.1"
   - jose
   # Allow the patched releases while they finish maturing.
   - brace-expansion

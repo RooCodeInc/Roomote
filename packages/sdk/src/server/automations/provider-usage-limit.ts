@@ -39,6 +39,7 @@ import {
 } from './destination';
 import {
   emptyJobResult,
+  resolveAutomationRunContext,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
@@ -328,15 +329,23 @@ async function postProviderUsageLimitViaCommunicationAdapter(params: {
 }
 
 export async function providerUsageLimitJob(
-  opts: AutomationRunOpts = {},
+  opts: AutomationRunOpts,
   dependencyOverrides: Partial<ProviderUsageLimitDependencies> = {},
 ): Promise<AutomationJobResult> {
   const dependencies = { ...defaultDependencies, ...dependencyOverrides };
   const result = emptyJobResult();
+  const { isExplicitRun, isManualRun } = resolveAutomationRunContext(
+    opts.context,
+  );
   const runtime = await dependencies.getRuntime('provider_usage_limit');
 
   if (!runtime.enabled) {
     result.skippedReason = 'Automation is disabled.';
+    return result;
+  }
+
+  if (!isExplicitRun && runtime.scheduleMode === 'on_demand') {
+    result.skippedReason = 'Automation has no scheduled run.';
     return result;
   }
 
@@ -370,7 +379,7 @@ export async function providerUsageLimitJob(
       ? configuredThreshold
       : DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD;
   const snapshots = await dependencies.getSnapshots();
-  const alerts: ProviderUsageLimitAlert[] = opts.manualTrigger
+  const alerts: ProviderUsageLimitAlert[] = isManualRun
     ? snapshots.map((snapshot) => ({
         snapshot,
         threshold,
@@ -379,7 +388,7 @@ export async function providerUsageLimitJob(
     : [];
   const claimedKeys: string[] = [];
 
-  if (!opts.manualTrigger) {
+  if (!isManualRun) {
     const redis = dependencies.getRedisClient();
     for (const snapshot of snapshots) {
       const newlyClaimed: Array<{ threshold: number; key: string }> = [];

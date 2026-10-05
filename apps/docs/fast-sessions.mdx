@@ -125,6 +125,10 @@ requirements, pagination limits, and the code-search deprecation.
 A session header shows the other people currently viewing that session. Your
 own avatar is omitted from the viewer list.
 
+Select the generated title in the header to rename the session. A title you set
+manually stays in the workspace and Sessions list instead of being replaced by
+later generated titles.
+
 A session timeline shows prompts, replies, and delegated execution activity.
 Execution cards show their status, workspace, pull requests, artifacts, latest
 error, and cost. Select a card to open its details panel. For a live nested
@@ -139,6 +143,13 @@ The parent session and sibling tasks continue. Explicitly canceling the task is
 different: cancellation terminally ends the current run and shuts down its
 sandbox. Stop or cancellation errors appear on the card; check the resulting
 task status rather than assuming the request succeeded.
+
+The session overflow menu in the workspace and each manageable Sessions-list
+row also offers **Stop**, **Archive**, and **Delete**. Stopping a session pauses
+all of its active tasks without permanently canceling them. Archiving is
+reversible and hides the session and its linked tasks from ordinary lists and
+search until it is unarchived. Deleting a session uses the existing confirmation
+and cleanup safeguards.
 
 On desktop, you can keep several task workspaces open beside the session,
 resize them, and switch between the conversation and task panels without losing
@@ -169,18 +180,120 @@ and can send an evidence-backed correction when a task is drifting from the
 request. Routine status stays quiet. Follow-through stops when the session's
 coding work settles instead of leaving a recurring monitor behind.
 
+Admins can enable **Task communication triage** under **Settings > Experimental**
+to decide which delegated-task updates should reach the session between reports.
+With a judgment model configured, Roomote keeps routine activity quiet and
+surfaces blockers, changed assumptions, consequential choices, useful
+milestones, or off-track work. The setting is off by default. Without a
+configured judgment model, activity digests are dropped and explicit task
+reports continue as before.
+
 **Session info** shows the total inference cost for the conversation and its
 attached tasks. Open the cost breakdown to separate direct session orchestration
 from each task's usage.
 
 The sessions page supports a list of pinned and recent sessions with unread
-indicators. Common scope, status, and time filters stay visible; turn on
-advanced filters for user, environment, pull request, model, and source. Active
-advanced filters remain visible until you clear them. Search matches session and task titles,
-repositories, and conversation text. Queries of at least three characters
-include transcript matches and show a highlighted excerpt. **Ready** is not a
-terminal state: you can reply or start another execution in the same session
-later.
+indicators. Common scope, status, archive state, and time filters stay visible;
+turn on advanced filters for user, environment, pull request, model, and source.
+Active advanced filters remain visible until you clear them. Search matches
+session and task titles, repositories, and conversation text. Queries of at
+least three characters include transcript matches and show a highlighted
+excerpt. **Ready** is not a terminal state: you can reply or start another
+execution in the same session later.
+
+The Sessions page shows the list by default and includes a board view with
+**Active**, **Needs input**, **Blocked**, **Ready**, and **Done** columns. Members
+see the board only for sessions they can already access. Select a lane heading
+to filter the board to that status. On desktop, drag a card between lanes to
+change its status; keyboard users can pick up, move, and drop the focused card
+with the controls announced by the board.
+
+The deployment's configured judgment model classifies settled Session outcomes.
+The judgment uses recent visible conversation and child-task summaries. Active
+work and structured input requests continue to use their deterministic status;
+uncertain judgments fall back to the existing status. A Done column is
+informational and never closes, cancels, or archives a session or task.
+
+An authorized Session manager can choose **Active**, **Needs input**,
+**Blocked**, **Ready**, or **Done** from the shared overflow menu on the Sessions
+board, list, or workspace. Manual **Done** only changes the Session's displayed
+outcome; it does not stop tasks or archive the Session.
+
+When an automation creates a pull request, the session remains **Needs input**
+while that pull request is open so the review handoff stays visible. Merging or
+closing the pull request releases that handoff for status re-evaluation.
+After at least four days (96 hours) without a newer visible user message,
+inactivity reconciliation can move a settled Session to **Done** before model
+classification. A newer visible user message releases the manual override so
+the Session can be classified from its current work again.
+
+## Receive session completion webhooks
+
+Deployment admins can configure a **Completion webhook** under **Settings >
+Deployment**. Roomote sends a `session.done` event whenever the configured
+judgment model classifies a settled session turn as **Done**. Manual status
+changes do not send this event.
+
+The endpoint must be an HTTP or HTTPS URL that Roomote can reach without a
+redirect. Roomote blocks private and special-use network destinations by
+default. Add a signing secret of at least 16 characters; Roomote encrypts the
+saved value and never displays it again.
+
+Self-hosted deployments can allow only the private receiver ranges they need:
+
+```bash
+R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS=127.0.0.1/32
+```
+
+Set the variable on the BullMQ service and restart it. This example permits a
+receiver on the same host when BullMQ runs directly on that host. In a
+container, `127.0.0.1` points to the BullMQ container itself; use a receiver
+hostname reachable from that container and allow its exact resolved CIDR
+instead. Multiple ranges are comma-separated.
+
+Each request is a JSON `POST` with a metadata-only payload:
+
+```json
+{
+  "id": "delivery-uuid",
+  "type": "session.done",
+  "version": 1,
+  "occurredAt": "2026-10-04T12:34:56.000Z",
+  "session": {
+    "id": "session-uuid",
+    "url": "https://roomote.example/sessions/session-uuid"
+  },
+  "status": {
+    "value": "done",
+    "source": "decision_model",
+    "judgmentId": "judgment-uuid",
+    "generation": 4,
+    "sourceKind": "fast_turn",
+    "sourceEventId": "turn-id"
+  },
+  "tasks": [{ "id": "task-id", "state": "completed" }]
+}
+```
+
+The request includes these headers:
+
+- `X-Roomote-Delivery`: the stable delivery ID from the payload
+- `X-Roomote-Event`: `session.done`
+- `X-Roomote-Timestamp`: the Unix timestamp used for signing
+- `X-Roomote-Signature-256`: `sha256=` followed by the hexadecimal HMAC-SHA256
+  of `<timestamp>.<exact request body>`
+
+Roomote retries network failures, timeouts, rate limits, and server errors.
+Delivery is at least once and ordering is not guaranteed, so receivers should
+deduplicate using `X-Roomote-Delivery`. The deployment webhook receives
+metadata for every session, including private sessions; the payload does not
+include titles, prompts, replies, repository names, or artifacts, and the
+session URL still requires normal Roomote access.
+
+Roomote queues the first delivery as soon as the durable **Done** judgment is
+applied. A separate one-minute scheduled drain remains as a recovery path for
+retries or a missed immediate queue signal; it does not delay the first
+attempt.
 
 Session rows show who or which automation started the work, its source and
 cost, and links to accumulated active pull requests. In the session workspace,
@@ -218,6 +331,11 @@ follow-ups continue the same conversation with full context. For conversations
 that live on another surface, Roomote posts the answer back into the originating
 thread with a quoted copy of your web message, so the conversation stays in one
 place for everyone following it there.
+
+In an empty reply box, press ArrowUp to recall earlier prompts from the visible
+conversation. Continue pressing ArrowUp to move backward through prompt history;
+ordinary multiline editing, suggestions, and input-method composition keep
+their normal keyboard behavior.
 
 For substantive requests, Roomote sends a brief acknowledgement before it starts
 model-invoked work. An eligible Slack message may receive an acknowledgement
@@ -258,6 +376,11 @@ conversations ordered without losing instructions that arrive during active
 work.
 
 Session turns also survive API or worker interruptions. Roomote durably admits the turn before acknowledging it, records every action the turn takes as it happens, and resumes unfinished work on another process. The resumed run receives the transcript of its earlier attempt, up to the point it was cut off, so it continues from there instead of repeating actions or asking you to send the request again. If the cut lands on the final reply itself, the resumed run finishes from the transcript: a reply that was recorded is not posted again, and a reply the process died while posting goes out once more without another model request. This covers turns started by a typed message, by an emoji reaction, and by platform events such as a setup kickoff. Provider-side retry waits are honored the same way: short waits keep the turn in place, and longer waits park it durably until the scheduled time.
+
+When an admin configured an orchestration fallback, an eligible provider failure
+switches the session to that model before a long retry is parked. The fallback
+remains selected for later turns and resumed work until someone changes the
+session model manually.
 
 ### Code Mode Integrations
 
@@ -363,3 +486,33 @@ grant those permissions. Replies are attributed to the teammate who sent them.
 The sessions list and filter options remain scoped to the member's existing
 visibility permissions. Direct-link viewing does not make other members' custom
 automations discoverable in those lists.
+
+## Private sessions
+
+Private sessions are an experimental, owner-only boundary for work that uses a
+personal or otherwise private integration. They are disabled by default. An
+administrator can enable **Private Sessions** under **Settings > Experimental**;
+members can then choose **Private** when starting a new session. A private
+integration is available only in a private session owned by the member whose
+account is connected.
+
+Roomote carries the owner and privacy state into delegated tasks, retries, and
+snapshot resumes. Normal Roomote APIs limit the session, transcript, logs,
+artifacts, search, and status to the owner, and private content is excluded
+from shared memory and ordinary tool audits. Turning the experiment off blocks
+new private sessions and private integration calls, but owners can still access
+and delete existing private sessions. Starting a new private session is
+required; Roomote does not convert an existing shared session into a private
+one.
+
+Private sessions keep the agent's normal tools and permissions. Roomote asks the
+owner before publishing private content to a pull request, chat channel, shared
+integration, automation, or skill, but that instruction is guidance rather than
+a technical block. Review the proposed destination before approving it.
+
+The boundary is enforced through Roomote's normal UI and APIs. It does not hide
+content from deployment operators with direct infrastructure access, upstream
+integration providers, configured inference providers, native agent-session
+infrastructure, or retained backups. Deleting a private session stops active
+linked tasks and removes Roomote-managed records and artifacts; provider-side
+history deletion depends on the provider's capabilities and retention terms.

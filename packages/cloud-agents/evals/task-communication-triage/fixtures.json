@@ -1,0 +1,429 @@
+[
+  {
+    "name": "opening narration",
+    "expected": "quiet",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, find and fix the bug where saving a note creates two copies of it. Keep changes in the sandbox; do not open a pull request.",
+        "Users say saving a note creates two copies. Find and fix that in the sandbox, no PR."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will find and fix the duplicate-save problem in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "assistant_message",
+            "text": "I'll trace the save path from the editor through the notes store, reproduce the duplicate in the browser, then make the smallest fix."
+          },
+          {
+            "kind": "plan",
+            "text": "[doing] Trace the save path\n[todo] Reproduce the duplicate\n[todo] Fix and validate"
+          },
+          {
+            "kind": "tools",
+            "text": "Read src/editor/Editor.tsx; rg -n 'saveNote' src"
+          }
+        ]
+      }
+    },
+    "note": "Routine start-of-work narration."
+  },
+  {
+    "name": "plan progress only",
+    "expected": "quiet",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, find and fix the bug where saving a note creates two copies of it. Keep changes in the sandbox; do not open a pull request.",
+        "Users say saving a note creates two copies. Find and fix that in the sandbox, no PR."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will find and fix the duplicate-save problem in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "plan",
+            "text": "[done] Trace the save path\n[doing] Reproduce the duplicate\n[todo] Fix and validate"
+          },
+          {
+            "kind": "tools",
+            "text": "pnpm dev; Open http://localhost:5173"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "finding consistent with the ask",
+    "expected": "quiet",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, find and fix the bug where saving a note creates two copies of it. Keep changes in the sandbox; do not open a pull request.",
+        "Users say saving a note creates two copies. Find and fix that in the sandbox, no PR."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will find and fix the duplicate-save problem in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "assistant_message",
+            "text": "The duplicate comes from the save button handler firing on both mousedown and click, so one press calls saveNote twice. I'm removing the extra listener and adding a test."
+          }
+        ]
+      }
+    },
+    "note": "The task confirmed the reported bug; nothing the user would redirect."
+  },
+  {
+    "name": "wrong premise: reported bug is a feature",
+    "expected": "reaches_session",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, find and fix the bug where saving a note creates two copies of it. Keep changes in the sandbox; do not open a pull request.",
+        "Users say saving a note creates two copies. Find and fix that in the sandbox, no PR."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will find and fix the duplicate-save problem in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "assistant_message",
+            "text": "Saving only writes one note. The second copy is created on purpose by the 'Keep a backup copy' preference, which is on by default for new accounts and files the copy under Backups. I'll change the default so new accounts don't get backup copies."
+          }
+        ]
+      }
+    },
+    "note": "The premise is wrong and the planned fix changes a deliberate default."
+  },
+  {
+    "name": "judgment call: builds a subsystem nobody asked for",
+    "expected": "reaches_session",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, add an 'Export as Markdown' button to the note toolbar that downloads the current note. Keep changes in the sandbox; do not open a pull request."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will add the export button and validate it in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "assistant_message",
+            "text": "There is no export pipeline yet, so I'm adding a general export framework with pluggable Markdown, HTML, and PDF writers and a new Export settings page, then wiring the toolbar button to the Markdown writer."
+          }
+        ]
+      }
+    },
+    "note": "Scope grew well past one button."
+  },
+  {
+    "name": "judgment call: works around a frozen directory",
+    "expected": "reaches_session",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, add an 'Export as Markdown' button to the note toolbar that downloads the current note. Keep changes in the sandbox; do not open a pull request.",
+        "Add an Export as Markdown button to the note toolbar. Sandbox only, no PR. Also, src/sync/ belongs to the sync team and is frozen this week, so don't edit anything in there."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will add the export button and validate it in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "assistant_message",
+            "text": "Note content is only readable through src/sync/store.ts, which is frozen. I'll avoid editing it by monkey-patching its exported getNote at startup from a new src/export/patch.ts so the export button can read unsynced drafts."
+          }
+        ]
+      }
+    },
+    "note": "Honors the letter of the constraint through a non-obvious workaround."
+  },
+  {
+    "name": "off track: edits the frozen directory",
+    "expected": "reaches_session",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, add an 'Export as Markdown' button to the note toolbar that downloads the current note. Keep changes in the sandbox; do not open a pull request.",
+        "Add an Export as Markdown button to the note toolbar. Sandbox only, no PR. Also, src/sync/ belongs to the sync team and is frozen this week, so don't edit anything in there."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will add the export button and validate it in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "assistant_message",
+            "text": "I've added a toMarkdown() helper to src/sync/store.ts next to getNote and wired the toolbar button to it."
+          },
+          {
+            "kind": "tools",
+            "text": "Edit src/sync/store.ts; Edit src/editor/Toolbar.tsx"
+          }
+        ]
+      }
+    },
+    "note": "Breaks a constraint the user stated after launch; should steer."
+  },
+  {
+    "name": "routine implementation detail",
+    "expected": "quiet",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, add an 'Export as Markdown' button to the note toolbar that downloads the current note. Keep changes in the sandbox; do not open a pull request."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will add the export button and validate it in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "assistant_message",
+            "text": "The Markdown conversion reuses the existing noteToMarkdown() helper in src/format/markdown.ts. I've added the button to Toolbar.tsx and I'm writing a test that checks the downloaded file name."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "blocked on the user",
+    "expected": "reaches_session",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, pick a new default color theme. Propose three options and ask the user to choose before changing anything.",
+        "Have the task propose three default themes and ask me to pick before it changes anything."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will propose options and wait for your pick before changing anything."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "question",
+            "text": "Which default theme should Harbor Notes use? (options: Harbor Blue, Sandstone, Midnight)"
+          }
+        ]
+      }
+    },
+    "note": "The task is waiting on a choice only the user can make."
+  },
+  {
+    "name": "progress report, routine",
+    "expected": "quiet",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, add an 'Export as Markdown' button to the note toolbar that downloads the current note. Keep changes in the sandbox; do not open a pull request."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will add the export button and validate it in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_report",
+        "purpose": "progress",
+        "text": "The export button is in place and unit tests pass. I'm running the browser check next."
+      }
+    }
+  },
+  {
+    "name": "closeout report",
+    "expected": "reaches_session",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, add an 'Export as Markdown' button to the note toolbar that downloads the current note. Keep changes in the sandbox; do not open a pull request."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will add the export button and validate it in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_report",
+        "purpose": "closeout",
+        "text": "Added an Export as Markdown button to the note toolbar. It downloads the current note as <title>.md using the existing noteToMarkdown() helper. Unit and browser checks pass. Changes are in the sandbox only; no PR was opened."
+      }
+    }
+  },
+  {
+    "name": "closeout the user already heard",
+    "expected": "quiet",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, add an 'Export as Markdown' button to the note toolbar that downloads the current note. Keep changes in the sandbox; do not open a pull request."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will add the export button and validate it in the sandbox without opening a PR.",
+        "Added the Export as Markdown button: it downloads the current note as <title>.md, and unit and browser checks pass. Nothing was pushed."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_report",
+        "purpose": "closeout",
+        "text": "Added an Export as Markdown button that downloads the current note as <title>.md. Unit and browser checks pass; no PR was opened."
+      }
+    },
+    "note": "Same result was already relayed."
+  },
+  {
+    "name": "milestone for a watching user",
+    "expected": "reaches_session",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "5_to_20_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, add an 'Export as Markdown' button to the note toolbar that downloads the current note. Keep changes in the sandbox; do not open a pull request."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will add the export button and validate it in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "assistant_message",
+            "text": "A preview build with the new export button is running at the sandbox preview URL; you can try it now while I finish the browser test."
+          }
+        ]
+      }
+    },
+    "note": "Something to try now, and the user is watching."
+  },
+  {
+    "name": "milestone that can wait",
+    "expected": "quiet",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": false,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, add an 'Export as Markdown' button to the note toolbar that downloads the current note. Keep changes in the sandbox; do not open a pull request."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will add the export button and validate it in the sandbox without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "assistant_message",
+            "text": "A preview build with the new export button is running at the sandbox preview URL while I finish the browser test."
+          }
+        ]
+      }
+    },
+    "note": "User is away and heard from the Session moments ago; the closeout will cover it."
+  },
+  {
+    "name": "wrong premise: thing to change does not exist",
+    "expected": "reaches_session",
+    "state": {
+      "surface": "web",
+      "requesterIsPresent": true,
+      "silenceSinceRequesterLastHeard": "under_5_minutes",
+      "whatTheRequesterAskedFor": [
+        "In the harbor-notes repository, remove the old 'Share to Twitter' button from the note menu. Sandbox only, no PR."
+      ],
+      "whatTheRequesterWasAlreadyTold": [
+        "The Harbor Notes task is running. It will remove the Share to Twitter button without opening a PR."
+      ],
+      "task": {
+        "title": "Harbor Notes task"
+      },
+      "update": {
+        "kind": "task_activity",
+        "items": [
+          {
+            "kind": "assistant_message",
+            "text": "There is no Share to Twitter button anywhere in the app or its history. The note menu has a generic 'Share link' item that copies a URL. I'll leave the menu unchanged unless told otherwise."
+          }
+        ]
+      }
+    }
+  }
+]

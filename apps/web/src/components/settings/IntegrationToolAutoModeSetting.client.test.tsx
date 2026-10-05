@@ -45,33 +45,24 @@ describe('IntegrationToolAutoModeSetting', () => {
     state.setAuto.mockClear();
   });
 
-  it('shows the current mode and keeps the guidance behind a disclosure', () => {
+  it('has no deployment-wide switch: Auto is turned on per session', () => {
     render(<IntegrationToolAutoModeSetting />);
-    expect(screen.getByRole('radio', { name: /^Off/ })).toBeChecked();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Let Roomote handle routine work and ask before anything risky. When you're away, risky calls are blocked. Your other tool choices stay the same.",
-      ),
+      screen.getByText(/choose Auto from the tool approvals menu/),
     ).toBeInTheDocument();
     expect(
-      screen.queryByLabelText('Additional instructions'),
-    ).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Additional instructions' }),
-    );
-    expect(
-      screen.getByLabelText('Additional instructions'),
-    ).toBeInTheDocument();
+      screen.getByRole('link', { name: 'Integrations page' }),
+    ).toHaveAttribute('href', '/integrations');
   });
 
-  it('switches the mode and saves the guidance separately', async () => {
-    render(<IntegrationToolAutoModeSetting />);
-    fireEvent.click(screen.getByRole('radio', { name: /^On/ }));
-    expect(state.setAuto).toHaveBeenLastCalledWith({ mode: 'on', policy: '' });
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Additional instructions' }),
-    );
+  it('always shows the guidance and saves it without changing the stored mode', async () => {
+    const { rerender } = render(<IntegrationToolAutoModeSetting />);
+    expect(
+      screen.getByPlaceholderText(
+        'For example: Anything that moves money needs a person to approve it.',
+      ),
+    ).toBeInTheDocument();
     const guidance = screen.getByLabelText('Additional instructions');
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
     fireEvent.change(guidance, { target: { value: 'Reads only.' } });
@@ -82,20 +73,45 @@ describe('IntegrationToolAutoModeSetting', () => {
         policy: 'Reads only.',
       }),
     );
+
+    // A mode saved by an earlier release is kept as it was.
+    state.settings = {
+      mode: 'on',
+      policy: 'Existing guidance',
+      model: { kind: 'judgment' },
+    };
+    rerender(<IntegrationToolAutoModeSetting />);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+        'Existing guidance',
+      ),
+    );
+    fireEvent.change(screen.getByLabelText('Additional instructions'), {
+      target: { value: 'New guidance' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(state.setAuto).toHaveBeenLastCalledWith({
+        mode: 'on',
+        policy: 'New guidance',
+      }),
+    );
   });
 
-  it('cannot be turned on until the deployment is set up for it, and says so plainly', () => {
+  it('says when Auto has no hosted model to assess with', () => {
+    render(<IntegrationToolAutoModeSetting />);
+    expect(
+      screen.queryByText('Auto mode isn’t available yet.'),
+    ).not.toBeInTheDocument();
+
     state.settings = {
       mode: 'off',
-      policy: '',
-      model: { kind: 'helper', model: 'openai/gpt-5.6-mini' },
+      policy: 'Existing guidance',
+      model: { kind: 'helper', model: 'openai/gpt-test' },
     };
     render(<IntegrationToolAutoModeSetting />);
-    expect(screen.getByRole('radio', { name: /^On/ })).toBeDisabled();
     expect(
       screen.getByText('Auto mode isn’t available yet.'),
     ).toBeInTheDocument();
-    // No mechanics leak into the card.
-    expect(screen.queryByText(/judgment|decision model|LLM/)).toBeNull();
   });
 });

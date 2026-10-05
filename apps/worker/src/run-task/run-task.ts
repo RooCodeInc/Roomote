@@ -3,6 +3,7 @@ import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
   buildInferenceGatewayUrl,
+  buildInferenceProviderRecoveryPrompt,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
@@ -23,6 +24,8 @@ import {
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
 } from '@roomote/types';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -43,17 +46,14 @@ import {
   type LinearSessionMessage,
 } from '@roomote/linear/client';
 import { prependSlackMessages } from '@roomote/slack/client';
-import {
-  peekTaskFollowUps,
-  prependCommunicationMessages,
-  removeTaskFollowUp,
-} from '@roomote/communication/messages';
+import { prependCommunicationMessages } from '@roomote/communication/messages';
 
 import {
   HarnessManager,
   createInitialTaskState,
   createServer,
 } from '../sandbox-server';
+import { TaskCommandName } from '../sandbox-server/lib/harness';
 import { recordChatTurnStart } from '../mcp/roomote-mcp-server/chat-reply-satisfaction';
 import { recordSandboxPromptSlackTurnStart } from '../sandbox-server/procedures/slackReplyTurnTracking';
 import { type IntegrationMcpOptions } from '../commands/setup/setup-mcps';
@@ -88,6 +88,8 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { installZeroCli } from '../commands/setup/agent-clis';
+import { buildJevgrepTerminalEnv, setupJevgrep } from './jevgrep';
+import { buildJudgementTerminalEnv, setupJudgement } from './judgement-proxy';
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
@@ -118,6 +120,7 @@ import {
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
+import { installRepositoryJudgement } from './repository-judgement';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -737,6 +740,8 @@ export const runTask = async ({
     logger,
     getResult: () => taskRun.result,
   };
+  let closeJudgementProxy: (() => Promise<void>) | undefined;
+  let closeJevgrepProxy: (() => Promise<void>) | undefined;
 
   try {
     const harnessType = resolveWorkerCodingHarness(taskRun.harness);
@@ -815,14 +820,10 @@ export const runTask = async ({
     for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
       delete runtimeEnv[envVarName];
     }
-    for (const modelEnvVarName of [
-      'R_MODEL',
-      'R_SMALL_MODEL',
-      'R_VISION_MODEL',
-      'R_CODE_REVIEW_MODEL',
-      'R_EXPLORE_MODEL',
-      'R_PLANNING_MODEL',
-    ] as const) {
+    for (const modelEnvVarName of TASK_MODEL_ROLES.flatMap((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [descriptor.modelEnvVar, descriptor.fallbackModelEnvVar];
+    })) {
       const modelId = runtimeEnv[modelEnvVarName];
 
       if (modelId && isTaskModelIdDisabled(modelId)) {
@@ -951,8 +952,28 @@ export const runTask = async ({
 
     const homeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
+    const judgementEnabled = await setupJudgement({
+      runtimeEnv,
+      homeDir,
+      logger,
+      registerCleanup: (close) => {
+        closeJudgementProxy = close;
+      },
+    });
+
+    const jevgrepEnabled = await setupJevgrep({
+      runId: taskRun.id,
+      homeDir,
+      trpcUrl: workerEnv.trpcUrl,
+      runtimeEnv,
+      logger,
+      registerCleanup: (close) => {
+        closeJevgrepProxy = close;
+      },
+    });
+
     // Admin opt-in for Zero: only install the CLI / activate the skill when
-    // Settings > Integrations has Zero enabled for the deployment.
+    // the Integrations page has Zero enabled for the deployment.
     let zeroIntegrationEnabled = false;
 
     try {
@@ -992,6 +1013,8 @@ export const runTask = async ({
       excludeSkillNames: [
         ...FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
         ...(zeroIntegrationEnabled ? [] : ['zero']),
+        ...(jevgrepEnabled ? [] : ['jevgrep']),
+        ...(judgementEnabled ? [] : ['judgement']),
       ],
     });
 
@@ -1151,6 +1174,9 @@ export const runTask = async ({
       runId: taskRun.id,
       logger,
     });
+    for (const repositoryPath of Object.values(repoPaths ?? {})) {
+      await installRepositoryJudgement(repositoryPath, logger);
+    }
     const persistRuntimeState = createRuntimeStatePersister(
       taskRun.id,
       recordWorkerRuntimeEvent,
@@ -1447,6 +1473,54 @@ export const runTask = async ({
       prepareQueuedPromptActorScope,
     });
     pollingState.isConnected = harness.isConnected;
+    harness.on('modelFallbackRequested', async (request) => {
+      try {
+        if (request.role === 'orchestration') return;
+        await sdk.taskRuns.applyModelFallback({
+          runId: taskRun.id,
+          taskId: taskRun.taskId,
+          role: request.role,
+          fromModelId: request.fromModelId,
+          toModelId: request.toModelId,
+          toReasoningEffort: request.toReasoningEffort,
+          errorSummary: request.errorSummary,
+          trigger: request.trigger,
+          ...(request.sessionId ? { sessionId: request.sessionId } : {}),
+        });
+        const freshRun = await sdk.taskRuns.findFirstById(taskRun.id);
+        if (freshRun?.payload && typeof freshRun.payload === 'object') {
+          taskRun.payload = freshRun.payload;
+        }
+        await harness.requestReconnect?.({
+          reason: 'Switching to fallback model',
+        });
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: request.agentType
+              ? `The ${request.agentType} delegation failed because its provider was unavailable. Its model fallback is active now. Re-run that delegation and continue without repeating completed work.`
+              : buildInferenceProviderRecoveryPrompt(),
+            visibleInTranscript: false,
+            source: 'model-fallback-recovery',
+          },
+        });
+      } catch (error) {
+        logger.error(
+          `[runTask] Failed to apply model fallback: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        await harness.requestReconnect?.({
+          reason: 'Recovering after model fallback failed to persist',
+        });
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: buildInferenceProviderRecoveryPrompt(),
+            visibleInTranscript: false,
+            source: 'model-fallback-recovery',
+          },
+        });
+      }
+    });
 
     const sandboxTimeoutMs =
       Number(process.env.SANDBOX_TIMEOUT_MS) || SANDBOX_TIMEOUT_MS;
@@ -1865,7 +1939,8 @@ export const runTask = async ({
     };
 
     // Web/API follow-ups the API queued while the sandbox could not take
-    // commands. Each entry is removed only after the runtime accepts it, so
+    // commands, read through the task-run API because sandboxes never get
+    // Redis credentials. Each entry is removed only after the runtime accepts it, so
     // anything left behind is retried on the next tick and the API keeps
     // queueing later follow-ups behind it.
     // The runtime lives in this process, so this set is exactly as durable as
@@ -1879,19 +1954,21 @@ export const runTask = async ({
       }
 
       taskFollowUpDrainPromise = (async () => {
-        const queued = await peekTaskFollowUps(taskRun.id);
+        const queued = await sdk.taskRuns.peekTaskFollowUps({
+          runId: taskRun.id,
+        });
 
         for (const { raw, message } of queued) {
           if (!message) {
             logger.warn(
               `[runTask] Dropping unparseable queued task follow-up for run ${taskRun.id}`,
             );
-            await removeTaskFollowUp(taskRun.id, raw);
+            await sdk.taskRuns.removeTaskFollowUp({ runId: taskRun.id, raw });
             continue;
           }
 
           if (deliveredTaskFollowUpIds.has(message.clientMessageId)) {
-            await removeTaskFollowUp(taskRun.id, raw);
+            await sdk.taskRuns.removeTaskFollowUp({ runId: taskRun.id, raw });
             continue;
           }
 
@@ -1946,7 +2023,7 @@ export const runTask = async ({
             }
 
             if (prepared.skippedMismatch) {
-              await removeTaskFollowUp(taskRun.id, raw);
+              await sdk.taskRuns.removeTaskFollowUp({ runId: taskRun.id, raw });
               continue;
             }
 
@@ -1967,7 +2044,7 @@ export const runTask = async ({
           }
 
           deliveredTaskFollowUpIds.add(message.clientMessageId);
-          await removeTaskFollowUp(taskRun.id, raw);
+          await sdk.taskRuns.removeTaskFollowUp({ runId: taskRun.id, raw });
         }
       })().finally(() => {
         taskFollowUpDrainPromise = null;
@@ -2234,7 +2311,16 @@ export const runTask = async ({
       port: SANDBOX_SERVER_PORT,
       workingDirectory: workspacePath,
       harnessLogger: logger,
-      userEnv: () => workerEnv.buildUserFacingEnv(),
+      userEnv: () =>
+        buildJudgementTerminalEnv(
+          buildJevgrepTerminalEnv(
+            workerEnv.buildUserFacingEnv(),
+            runtimeEnv,
+            homeDir,
+          ),
+          runtimeEnv,
+          homeDir,
+        ),
       harness,
       harnessManager,
       runId: taskRun.id,
@@ -2568,6 +2654,8 @@ export const runTask = async ({
       : resolvedResult;
   } finally {
     activeWorkerCrashContext = null;
+    await closeJudgementProxy?.();
+    await closeJevgrepProxy?.();
   }
 };
 

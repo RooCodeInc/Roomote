@@ -4,10 +4,18 @@ import { useState, type SyntheticEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import {
+  getSessionStatusLabel,
+  SESSION_MANUAL_STATUSES,
+  type SessionManualStatus,
+  type SessionStatus,
+} from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
+import { useSessionStatusMutation } from '@/components/sessions/use-session-status-mutation';
 import {
+  Activity,
   Archive,
   Button,
   Dialog,
@@ -19,6 +27,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   MoreVertical,
   Square,
@@ -31,13 +44,16 @@ export const SESSION_DELETION_DESCRIPTION =
 export function SessionActions({
   sessionId,
   listRow = false,
+  status,
 }: {
   sessionId: string;
   listRow?: boolean;
+  status?: SessionStatus | SessionManualStatus | null;
 }) {
   const trpc = useTRPC();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const currentStatus = status ?? 'ready';
   const stopTasks = useMutation(
     trpc.sessions.stopTasks.mutationOptions({
       onSuccess: (result) => {
@@ -98,8 +114,12 @@ export function SessionActions({
       onError: () => toast.error('Failed to delete session.'),
     }),
   );
+  const setStatus = useSessionStatusMutation();
   const isPending =
-    stopTasks.isPending || archiveSession.isPending || deleteSession.isPending;
+    stopTasks.isPending ||
+    archiveSession.isPending ||
+    deleteSession.isPending ||
+    setStatus.isPending;
   const stopPropagation = (event: SyntheticEvent) => {
     if (!listRow) return;
     event.stopPropagation();
@@ -138,8 +158,37 @@ export function SessionActions({
             className="flex cursor-pointer items-center gap-2"
           >
             <Square className="size-4" />
-            Stop tasks
+            Stop all tasks
           </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="flex cursor-pointer items-center gap-2">
+              <Activity className="size-4" />
+              Mark session as...
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup
+                value={currentStatus}
+                onValueChange={(value) => {
+                  if (value === currentStatus) return;
+                  setStatus.mutate({
+                    sessionId,
+                    status: value as SessionManualStatus,
+                  });
+                }}
+              >
+                {SESSION_MANUAL_STATUSES.map((nextStatus) => (
+                  <DropdownMenuRadioItem
+                    key={nextStatus}
+                    value={nextStatus}
+                    disabled={isPending || nextStatus === currentStatus}
+                    className="capitalize"
+                  >
+                    {getSessionStatusLabel(nextStatus)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuItem
             onClick={() => archiveSession.mutate({ sessionId })}
             disabled={isPending}

@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+import { Dialog, DialogContent, DialogTitle } from '@/components/system';
+
 const launchModels = vi.hoisted(() => ({
   data: undefined as
     | {
@@ -72,6 +74,69 @@ describe('ModelSelect real controls', () => {
       expect(
         screen.getByRole('option', { name: 'Alpha Terra (Default)' }),
       ).toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    ['standalone popover', false],
+    ['nested dialog', true],
+  ])(
+    'allows mouse-wheel and trackpad scrolling on the %s',
+    (_surface, nestedInDialog) => {
+      render(
+        nestedInDialog ? (
+          <Dialog open>
+            <DialogContent aria-describedby={undefined}>
+              <DialogTitle>Choose a model</DialogTitle>
+              <ModelSelect onValueChange={vi.fn()} />
+            </DialogContent>
+          </Dialog>
+        ) : (
+          <ModelSelect onValueChange={vi.fn()} />
+        ),
+      );
+      fireEvent.click(screen.getByRole('combobox'));
+
+      const list = screen.getByRole('listbox');
+      Object.defineProperties(list, {
+        clientHeight: { configurable: true, value: 300 },
+        scrollHeight: { configurable: true, value: 600 },
+      });
+      const firstOption = screen.getAllByRole('option')[0]!;
+
+      const mouseWheel = new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        deltaMode: WheelEvent.DOM_DELTA_LINE,
+        deltaY: 3,
+      });
+      expect(firstOption.dispatchEvent(mouseWheel)).toBe(true);
+      expect(mouseWheel.defaultPrevented).toBe(false);
+
+      for (const deltaY of [1, 2, 1]) {
+        const trackpadStep = new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+          deltaY,
+        });
+        expect(firstOption.dispatchEvent(trackpadStep)).toBe(true);
+        expect(trackpadStep.defaultPrevented).toBe(false);
+      }
+
+      if (nestedInDialog) {
+        const outerDialog = document.querySelector(
+          '[data-slot="dialog-content"]',
+        );
+        expect(outerDialog).not.toBeNull();
+        const outsideList = new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 100,
+        });
+        expect(outerDialog?.dispatchEvent(outsideList)).toBe(false);
+        expect(outsideList.defaultPrevented).toBe(true);
+      }
     },
   );
 

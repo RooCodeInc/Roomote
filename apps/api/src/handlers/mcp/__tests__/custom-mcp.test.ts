@@ -14,6 +14,7 @@ const {
   mockGetValidAccessToken,
   mockResolveApprovalBlocks,
   mockClaimTaskToolCall,
+  mockDecideUnasked,
 } = vi.hoisted(() => ({
   mockEnv: {
     R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS: undefined as string | undefined,
@@ -31,6 +32,18 @@ const {
     }> => ({ blocks: new Map(), shadowDefaultTools: false }),
   ),
   mockClaimTaskToolCall: vi.fn(async () => false),
+  mockDecideUnasked: vi.fn(
+    async (
+      _input: unknown,
+    ): Promise<{ allowed: true } | { allowed: false; message: string }> => ({
+      allowed: false,
+      message: 'Tool "dangerous_tool" needs approval before it runs.',
+    }),
+  ),
+}));
+
+vi.mock('../unasked-task-tool-call', () => ({
+  decideUnaskedTaskToolCall: mockDecideUnasked,
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -422,6 +435,7 @@ describe('createCustomMcpProxy', () => {
     const body = (await response.json()) as { error: { message: string } };
 
     expect(body.error.message).toContain('reconnected');
+    expect(body.error.message).toContain('on the Integrations page');
   });
 
   it('403s deny-listed tool calls without contacting the upstream', async () => {
@@ -474,6 +488,7 @@ describe('createCustomMcpProxy', () => {
         shadowDefaultTools: false,
       }));
       mockClaimTaskToolCall.mockReset().mockResolvedValue(false);
+      mockDecideUnasked.mockClear();
     });
 
     it('resolves policies under the server name for the calling token', async () => {
@@ -523,6 +538,39 @@ describe('createCustomMcpProxy', () => {
       const body = (await response.json()) as { error: { message: string } };
       expect(body.error.message).toContain('needs approval');
       expect(lastUpstreamHeaders).toBeNull();
+    });
+
+    it("asks on the task's behalf when its agent did not, and runs the call if that allows it", async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map(),
+        defaultBlock: 'needs_approval',
+        shadowDefaultTools: false,
+      });
+      mockDecideUnasked.mockResolvedValueOnce({ allowed: true });
+
+      const response = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'any_tool', arguments: { q: 1 } },
+      });
+
+      expect(response.status).toBe(200);
+      expect(lastUpstreamHeaders).not.toBeNull();
+      expect(mockDecideUnasked).toHaveBeenCalledWith(
+        expect.objectContaining({
+          integrationId: 'internal-tools',
+          policyScope: 'deployment',
+          toolName: 'any_tool',
+          args: { q: 1 },
+          endpoint: expect.objectContaining({
+            url: expect.stringContaining('/'),
+          }),
+        }),
+      );
     });
 
     it("runs a gated call once the Session owner's approval of it is claimed", async () => {

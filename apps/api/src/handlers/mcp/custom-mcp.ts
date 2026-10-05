@@ -94,7 +94,7 @@ export function createCustomMcpProxy() {
             401,
             server.ownerUserId
               ? `Custom MCP server '${server.name}' needs to be reconnected in Personal settings`
-              : `Custom MCP server '${server.name}' needs to be reconnected by a deployment admin in Settings > Integrations`,
+              : `Custom MCP server '${server.name}' needs to be reconnected by a deployment admin on the Integrations page`,
           );
         }
 

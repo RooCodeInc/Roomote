@@ -15,7 +15,7 @@ function buildSecurityAuditorPrompt(params: {
   destination: ResolvedAutomationDestination;
   hasMorePullRequests: boolean;
   mergedPullRequests: MergedPullRequest[];
-  manualTrigger: boolean;
+  trigger: 'scheduled' | 'manual' | 'webhook';
   repositoryCoverage: RepositoryCoverage[];
   scanMode: MergedPullRequestAuditScanMode;
   recentThreadFeedback?: string | null;

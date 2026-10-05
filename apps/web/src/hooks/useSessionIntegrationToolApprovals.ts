@@ -4,9 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import type { IntegrationToolApprovals } from '@roomote/types';
 
 /**
- * The requester's view of experiment-gated (`integrationToolApprovals`)
- * integration tool approvals waiting on an answer. Read from the same
- * requester-only route the decision buttons submit to.
+ * The requester's view of integration tool approvals waiting on an answer.
+ * Read from the same requester-only route the decision buttons submit to.
  */
 function sessionIntegrationToolApprovalsQueryKey(sessionId: string) {
   return ['session-integration-tool-approvals', sessionId] as const;
@@ -26,11 +25,10 @@ async function fetchSessionIntegrationToolApprovals(
 
 export function useSessionIntegrationToolApprovals(
   sessionId: string | undefined,
-  enabled: boolean,
 ) {
   return useQuery({
     queryKey: sessionIntegrationToolApprovalsQueryKey(sessionId ?? ''),
-    enabled: Boolean(sessionId) && enabled,
+    enabled: Boolean(sessionId),
     queryFn: ({ signal }) =>
       fetchSessionIntegrationToolApprovals(sessionId ?? '', signal),
     staleTime: 5_000,

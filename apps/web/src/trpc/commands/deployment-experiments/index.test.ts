@@ -4,15 +4,21 @@ import type { UserAuthSuccess } from '@/types';
 
 import {
   getDeploymentExperimentsCommand,
+  getNightlyExperimentsCommand,
   setDeploymentExperimentCommand,
+  setNightlyExperimentCommand,
 } from './index';
 
-function auth(userId: string, isAdmin: boolean): UserAuthSuccess {
-  return { userId, isAdmin } as UserAuthSuccess;
+function auth(
+  userId: string,
+  isAdmin: boolean,
+  nightlyExperimentsEnabled = false,
+): UserAuthSuccess {
+  return { userId, isAdmin, nightlyExperimentsEnabled } as UserAuthSuccess;
 }
 
 describe('deployment experiment commands', () => {
-  it('returns one fail-closed value set for users with conflicting legacy preferences', async () => {
+  it('ignores legacy per-user Results metadata when reading shared experiments', async () => {
     const [first, second] = await Promise.all([
       userFactory.create({
         metadata: {
@@ -36,6 +42,7 @@ describe('deployment experiment commands', () => {
     );
 
     expect(firstValues).toEqual(secondValues);
+    expect(firstValues).not.toHaveProperty('results');
   });
 
   it('allows only admins to update shared values and leaves user metadata dormant', async () => {
@@ -49,20 +56,20 @@ describe('deployment experiment commands', () => {
 
     await expect(
       setDeploymentExperimentCommand(auth(member.id, false), {
-        id: 'results',
+        id: 'privateSessions',
         enabled: true,
       }),
     ).rejects.toThrow('Unauthorized');
 
     await expect(
       setDeploymentExperimentCommand(auth(admin.id, true), {
-        id: 'results',
+        id: 'privateSessions',
         enabled: true,
       }),
-    ).resolves.toMatchObject({ results: true });
+    ).resolves.toMatchObject({ privateSessions: true });
     await expect(
       getDeploymentExperimentsCommand(auth(member.id, false)),
-    ).resolves.toMatchObject({ results: true });
+    ).resolves.toMatchObject({ privateSessions: true });
 
     await expect(
       db.query.users.findFirst({
@@ -72,5 +79,76 @@ describe('deployment experiment commands', () => {
     ).resolves.toMatchObject({
       metadata: { results_page_enabled: true },
     });
+  });
+
+  it('blocks customer admins and members from nightly data and mutations', async () => {
+    const [admin, member] = await Promise.all([
+      userFactory.create({ role: 'admin' }),
+      userFactory.create({ role: 'member' }),
+    ]);
+
+    await expect(
+      getNightlyExperimentsCommand(auth(admin.id, true, false)),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      setNightlyExperimentCommand(auth(admin.id, true, false), {
+        id: 'privateSessions',
+        enabled: true,
+      }),
+    ).rejects.toThrow('Unauthorized');
+
+    await expect(
+      getNightlyExperimentsCommand(auth(member.id, false, true)),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
+      setNightlyExperimentCommand(auth(member.id, false, true), {
+        id: 'privateSessions',
+        enabled: true,
+      }),
+    ).rejects.toThrow('Unauthorized');
+  });
+
+  it('allows an enabled internal admin to read nightly values without moving customer previews', async () => {
+    const admin = await userFactory.create({ role: 'admin' });
+
+    await expect(
+      getNightlyExperimentsCommand(auth(admin.id, true, true)),
+    ).resolves.toEqual({
+      integrationToolAutoApprovals: false,
+      automationLaunchCriteria: false,
+    });
+    await expect(
+      getDeploymentExperimentsCommand(auth(admin.id, true, true)),
+    ).resolves.toHaveProperty('privateSessions');
+    await expect(
+      setNightlyExperimentCommand(auth(admin.id, true, true), {
+        id: 'privateSessions',
+        enabled: true,
+      }),
+    ).rejects.toThrow('Unauthorized');
+  });
+
+  it('keeps launch criteria on the Nightly control path and out of customer previews', async () => {
+    const admin = await userFactory.create({ role: 'admin' });
+    const internalAuth = auth(admin.id, true, true);
+
+    await expect(
+      setNightlyExperimentCommand(internalAuth, {
+        id: 'automationLaunchCriteria',
+        enabled: true,
+      }),
+    ).resolves.toMatchObject({ automationLaunchCriteria: true });
+    await expect(
+      getNightlyExperimentsCommand(internalAuth),
+    ).resolves.toMatchObject({ automationLaunchCriteria: true });
+    await expect(
+      getDeploymentExperimentsCommand(internalAuth),
+    ).resolves.not.toHaveProperty('automationLaunchCriteria');
+    await expect(
+      setDeploymentExperimentCommand(internalAuth, {
+        id: 'automationLaunchCriteria',
+        enabled: false,
+      }),
+    ).rejects.toThrow('Unauthorized');
   });
 });

@@ -2,6 +2,7 @@ export { getFastSessionComposerSuggestionCommand } from './composer-suggestion';
 
 import { randomUUID } from 'node:crypto';
 import { after } from 'next/server';
+import { TRPCError } from '@trpc/server';
 
 import {
   acquireFastAgentTurnLock,
@@ -43,6 +44,7 @@ import {
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
   isPrivateSessionsExperimentEnabled,
+  setIntegrationToolAutoForSession,
   sql,
 } from '@roomote/db/server';
 import {
@@ -76,10 +78,13 @@ import {
   findReadableFastSession,
   buildFastSessionPrReviewDestinationKey,
   getFastSessionById,
+  getFastSessionTranscriptPage,
   getFastSessionPrReviewOfferStatus,
   getFastSessionTasks,
   hasFastSessionQueuedMessages,
   updateFastSessionPrReviewOfferStatus,
+  withdrawFastSessionQueuedMessage,
+  type FastSessionMessageCursor,
 } from '@/lib/server/fast-sessions';
 import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
 import {
@@ -88,6 +93,10 @@ import {
 } from '@/lib/server/artifact-signature';
 import type { PinnedFastSessionLaunchInput } from './input';
 import { startPinnedFastSessionLaunch } from './pinned-launch';
+import {
+  canAssessAutoToolApprovals,
+  isAutoToolApprovalsExperimentEnabled,
+} from './auto-tool-approvals';
 
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
@@ -458,6 +467,7 @@ export async function startFastSessionCommand(
     privacy?: 'shared' | 'private';
     pinnedLaunch?: PinnedFastSessionLaunchInput;
     voiceCall?: boolean;
+    autoToolApprovals?: boolean;
   },
 ): Promise<{
   sessionId: string;
@@ -470,7 +480,23 @@ export async function startFastSessionCommand(
   ) {
     throw new Error('Private sessions are not enabled for this deployment.');
   }
+  if (input.autoToolApprovals) {
+    if (!(await isAutoToolApprovalsExperimentEnabled(auth))) {
+      throw new Error('Auto tool approvals are not enabled.');
+    }
+    // The same rule as choosing Auto mid-session: without something to
+    // assess calls with, the first tool call would only pause the session.
+    if (!(await canAssessAutoToolApprovals())) {
+      throw new Error('Auto isn’t available yet.');
+    }
+  }
   if (input.pinnedLaunch) {
+    if (input.autoToolApprovals) {
+      // The task would start before Auto could be turned on for its session.
+      throw new Error(
+        'Auto cannot be turned on when starting a pinned environment task.',
+      );
+    }
     if (input.privacy === 'private') {
       throw new Error(
         'Private sessions cannot start as pinned environment tasks.',
@@ -503,6 +529,18 @@ export async function startFastSessionCommand(
     reasoningEffort: null,
   });
   const unifiedSession = await ensureSessionForFastConversation(db, session.id);
+  // Before the first turn, so its tool calls are already assessed. The
+  // owner asked for the check; without it the turn must not run.
+  if (
+    input.autoToolApprovals &&
+    !(await setIntegrationToolAutoForSession({
+      sessionId: unifiedSession.id,
+      userId: auth.userId,
+      enabled: true,
+    }))
+  ) {
+    throw new Error('Could not turn Auto on for this session.');
+  }
 
   const kickoffTurnId = input.conversationId
     ? `web-kickoff:${session.id}`
@@ -745,6 +783,22 @@ export async function getFastSessionMessagesCommand(
   };
 }
 
+export async function getFastSessionOlderMessagesCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    cursor: FastSessionMessageCursor;
+  },
+) {
+  const page = await getFastSessionTranscriptPage(
+    auth,
+    input.sessionId,
+    input.cursor,
+  );
+  if (!page) throw new Error('Session not found');
+  return page;
+}
+
 export async function updateFastSessionModelSelectionCommand(
   auth: UserAuthSuccess,
   input: {
@@ -877,6 +931,34 @@ export async function replyToFastSessionCommand(
     admission: admission.kind === 'turn' ? 'turn' : 'queued',
     clientMessageId,
   };
+}
+
+/**
+ * Withdraw the caller's own follow-up while it still waits in the Session
+ * queue. `not_queued` means delivery already started or the message is no
+ * longer pending, so there is nothing left to withdraw.
+ */
+export async function deleteFastSessionQueuedMessageCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId: string; clientMessageId: string },
+): Promise<{ outcome: 'withdrawn' | 'not_queued' }> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) {
+    throw new Error('Session not found');
+  }
+
+  const outcome = await withdrawFastSessionQueuedMessage({
+    sessionId: session.id,
+    clientMessageId: input.clientMessageId,
+    userId: auth.userId,
+  });
+  if (outcome === 'forbidden') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Only the sender can delete a queued message',
+    });
+  }
+  return { outcome };
 }
 
 export async function startFastSessionGoalCommand(

@@ -83,7 +83,7 @@ it('prefills a single-key consent flow, then dismisses with a toast while the se
   expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   expect(
     screen.getByText(
-      'The key is encrypted in our deployment database and never sent to the provider. Manage in Settings → Integrations.',
+      'The key is encrypted in our deployment database and never sent to the provider. Manage it on the Integrations page, or in Personal settings if you choose Only me.',
     ),
   ).toBeInTheDocument();
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();

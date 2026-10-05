@@ -806,6 +806,125 @@
       "when": 1790045030792,
       "tag": "0114_broad_penance",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1790244563222,
+      "tag": "0115_numerous_carnage",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1790267313410,
+      "tag": "0116_overrated_romulus",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1790277926752,
+      "tag": "0117_black_titania",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1790328297868,
+      "tag": "0118_silky_boomer",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1790331860594,
+      "tag": "0119_sticky_pestilence",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1790592315185,
+      "tag": "0120_condemned_sunfire",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1790593423243,
+      "tag": "0121_youthful_bastion",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1790593938357,
+      "tag": "0122_classy_screwball",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1790595078941,
+      "tag": "0123_heavy_doctor_strange",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1790595640979,
+      "tag": "0124_modern_hercules",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1790596831236,
+      "tag": "0125_boring_nico_minoru",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1790605452042,
+      "tag": "0126_living_sleeper",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1790675830722,
+      "tag": "0127_harsh_silvermane",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1790789915082,
+      "tag": "0128_cooing_madripoor",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1790851193806,
+      "tag": "0129_chunky_metal_master",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1790867366761,
+      "tag": "0130_red_quasimodo",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1791147224887,
+      "tag": "0131_famous_valkyrie",
+      "breakpoints": true
     }
   ]
 }

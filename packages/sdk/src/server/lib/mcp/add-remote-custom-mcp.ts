@@ -169,7 +169,7 @@ function findMatchingRemoteMcpServer<
   );
   if (nameMatch && urlMatch && nameMatch.id !== urlMatch.id) {
     throw new Error(
-      'The requested name and URL match different custom MCP servers. Review them in Settings.',
+      'The requested name and URL match different custom MCP servers. Review them on the Integrations page or in Personal settings.',
     );
   }
   return nameMatch ?? urlMatch;

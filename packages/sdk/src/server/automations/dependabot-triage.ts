@@ -21,14 +21,14 @@ function buildDependabotTriagePrompt({
   destination,
   repositoryFullNames,
   repositoryCoverage,
-  manualTrigger,
+  trigger,
   recentThreadFeedback,
 }: {
   channelId: string;
   destination: ResolvedAutomationDestination;
   repositoryFullNames: string[];
   repositoryCoverage: RepositoryCoverage[];
-  manualTrigger: boolean;
+  trigger: 'scheduled' | 'manual' | 'webhook';
   recentThreadFeedback?: string | null;
 }): string {
   const promptContext = buildDestinationPromptContext(destination);
@@ -62,7 +62,7 @@ Treat repository-level gaps such as Dependabot alerts being disabled for a repos
 <task_context>
   <source>background-automation</source>
   <run_mode>read_only</run_mode>
-  <trigger>${manualTrigger ? 'manual' : 'scheduled'}</trigger>
+  <trigger>${trigger}</trigger>
   <alert_scope>current_open_dependabot_alerts</alert_scope>
   <${promptContext.channelTag}>${promptContext.destinationRef}</${promptContext.channelTag}>
   <repository_scope>
@@ -81,7 +81,7 @@ ${recentThreadFeedback?.trim() ? `Recent feedback from earlier Dependabot triage
 
 export const dependabotTriageJob = createScheduledTriageJob({
   automationKey: 'dependabot_triage',
-  async buildScanTask({ channelId, destination, manualTrigger }) {
+  async buildScanTask({ channelId, destination, trigger }) {
     if (!(await hasActiveGitHubInstallation())) {
       return { kind: 'skip', reason: 'GitHub is not configured' };
     }
@@ -118,7 +118,7 @@ export const dependabotTriageJob = createScheduledTriageJob({
             destination,
             repositoryFullNames: selectedRepositories,
             repositoryCoverage,
-            manualTrigger,
+            trigger,
             recentThreadFeedback,
           }),
           trigger: 'scheduled',

@@ -24,16 +24,16 @@ survives triage.
 ## Ingredients
 
 - A channel receiving support escalations, such as `#support-inbound`, with Roomote invited
-- [Auto-respond channels](/automations#channel-automations), or a ticketing workflow that mentions Roomote
+- [Auto-respond channels](/automation-configuration#channel-automations), or a ticketing workflow that mentions Roomote
 - A [custom skill](/skills#when-to-use-a-custom-skill), enabled for the product environment
 - Observability and data integrations such as [Sentry](/integrations/sentry), [Grafana](/integrations/grafana), [Better Stack](/integrations/better-stack), [Supabase](/integrations/supabase), [Neon](/integrations/neon), or [Snowflake](/integrations/snowflake), or a custom MCP server for your stack
 - An environment for the product repositories, with read-only production credentials where integrations do not cover the required system
 
 ## Steps
 
-1. Connect the integrations your triage needs under **Settings > Integrations**.
+1. Connect the integrations your triage needs on the **Integrations** page.
 2. Under **Settings > Skills**, add the custom skill below and enable it for the environment your product runs in.
-3. Add the escalation channel under **Settings > Automations > Auto-respond to channels** and paste the launch criteria.
+3. Add the escalation channel under **Automations > Auto-respond to channels** and paste the launch criteria.
 4. Repost a resolved historical ticket and compare Roomote's triage with what actually happened.
 5. Tighten the skill with what you learn. The skill is the control you will keep tuning.
 

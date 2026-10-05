@@ -12,6 +12,7 @@ import {
   getWebBundledEnvFilePaths,
   isAutoGenerateKeysEnabled,
   isBrainConfigured,
+  isEnvFlagEnabled,
   isExposedBindHost,
   isRoomoteCloudEnabled,
   rehydrateEnv,
@@ -79,6 +80,28 @@ describe('Env', () => {
           ...productionCoreEnv,
           R_HTTP_INTEGRATIONS_ENABLED: value,
         }).R_HTTP_INTEGRATIONS_ENABLED,
+      ).toBe(value === 'true' || value === '1');
+    }
+  });
+
+  it('recognizes normalized boolean opt-in flag values', () => {
+    expect(isEnvFlagEnabled(true)).toBe(true);
+    expect(isEnvFlagEnabled(false)).toBe(false);
+    expect(isEnvFlagEnabled('1')).toBe(true);
+    expect(isEnvFlagEnabled(' TRUE ')).toBe(true);
+    expect(isEnvFlagEnabled(undefined)).toBe(false);
+  });
+
+  it('keeps internal nightly experiments off unless the operator opts in', () => {
+    expect(
+      createRoomoteEnv(productionCoreEnv).R_NIGHTLY_EXPERIMENTS_ENABLED,
+    ).toBe(false);
+    for (const value of ['true', '1', 'false', '0']) {
+      expect(
+        createRoomoteEnv({
+          ...productionCoreEnv,
+          R_NIGHTLY_EXPERIMENTS_ENABLED: value,
+        }).R_NIGHTLY_EXPERIMENTS_ENABLED,
       ).toBe(value === 'true' || value === '1');
     }
   });
@@ -491,6 +514,17 @@ describe('Env', () => {
     });
 
     expect(env.SANDBOX_OPENROUTER_API_KEY).toBe('sandbox-openrouter-key');
+  });
+
+  it('accepts a private CIDR allow-list for session completion webhooks', () => {
+    const env = createRoomoteEnv({
+      ...process.env,
+      R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS: '127.0.0.1/32',
+    });
+
+    expect(env.R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS).toBe(
+      '127.0.0.1/32',
+    );
   });
 
   it('supplies self-hosted local defaults outside production', () => {

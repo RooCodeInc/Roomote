@@ -32,7 +32,6 @@ import {
   buildInProgressReviewSummaryBody,
   buildReviewSummaryBody,
 } from './githubPrReviewComment';
-import { runGithubPrReviewPrescreen } from './githubPrReviewPrescreen';
 import { standardTask } from './standardTask';
 
 function buildGitLabMergeRequestReviewPrompt({
@@ -432,14 +431,8 @@ export async function githubPrReview({
   );
 
   const { diff, changedFiles } = await GitHubCli.fetchDiff(prParams);
-  const reviewPrescreenPromise = runGithubPrReviewPrescreen({
-    title: pr.title,
-    changedFiles,
-    diff,
-  });
   const reviewComments = await GitHubCli.fetchReviewComments(prParams);
   const issueComments = await GitHubCli.fetchIssueComments(prParams);
-  const reviewPrescreen = await reviewPrescreenPromise;
 
   /**
    * Top-level Review Comment
@@ -539,7 +532,6 @@ export async function githubPrReview({
         lineLimit: 5_000,
         charLimit: 100_000,
       }),
-      review_prescreen: reviewPrescreen,
       existing_review_comments: getReviewComments(reviewComments),
       issue_comments: getIssueComments(issueComments),
     },

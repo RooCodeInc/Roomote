@@ -240,6 +240,100 @@ describe('createHarness', () => {
     expect(getHarnessModelOverrideMock).toHaveBeenCalledTimes(1);
   });
 
+  it('builds subagent fallbacks against the effective coding model when roles inherit it', async () => {
+    startOpenCodeServerHarnessMock.mockResolvedValue({
+      harness: createConnectedHarness(),
+      subprocess: createPendingSubprocess(),
+    });
+
+    await createHarness({
+      harnessType: 'opencode-server',
+      workspacePath: '/tmp/workspace',
+      runtimeEnv: {
+        R_MODEL: 'openai/gpt-coding',
+        R_VISION_MODEL_FALLBACK: 'anthropic/vision-fallback',
+        R_VISION_MODEL_FALLBACK_REASONING_EFFORT: 'low',
+        R_EXPLORE_MODEL: 'openai/explore',
+        R_EXPLORE_MODEL_FALLBACK: 'anthropic/explore-fallback',
+        R_PLANNING_MODEL_FALLBACK: 'openai/gpt-coding',
+      },
+      harnessSessionId: undefined,
+      cancelSignal: new AbortController().signal,
+      integrations: {} as never,
+      mcpTaskEnv: {},
+      taskRun: { id: 6, taskId: 'task-6', payload: {} } as never,
+      callbacks: {} as never,
+      context: {} as never,
+      logger: createLogger(),
+    });
+
+    const startOptions = startOpenCodeServerHarnessMock.mock.calls[0]?.[0] as {
+      agentFallbacks?: Record<string, unknown>;
+    };
+    expect(startOptions.agentFallbacks).toEqual({
+      visual: {
+        role: 'vision',
+        activeModelId: 'openai/gpt-coding',
+        fallbackModel: 'anthropic/vision-fallback',
+        fallbackReasoningEffort: 'low',
+      },
+      judge: {
+        role: 'vision',
+        activeModelId: 'openai/gpt-coding',
+        fallbackModel: 'anthropic/vision-fallback',
+        fallbackReasoningEffort: 'low',
+      },
+      explore: {
+        role: 'explore',
+        activeModelId: 'openai/explore',
+        fallbackModel: 'anthropic/explore-fallback',
+      },
+    });
+  });
+
+  it('uses the per-task model override as the inherited subagent model', async () => {
+    startOpenCodeServerHarnessMock.mockResolvedValue({
+      harness: createConnectedHarness(),
+      subprocess: createPendingSubprocess(),
+    });
+
+    await createHarness({
+      harnessType: 'opencode-server',
+      workspacePath: '/tmp/workspace',
+      runtimeEnv: {
+        R_MODEL: 'openai/gpt-coding',
+        R_PLANNING_MODEL_FALLBACK: 'anthropic/advisor-fallback',
+      },
+      harnessSessionId: undefined,
+      cancelSignal: new AbortController().signal,
+      integrations: {} as never,
+      mcpTaskEnv: {},
+      taskRun: {
+        id: 7,
+        taskId: 'task-7',
+        payload: {
+          harnessModelOverrides: {
+            'opencode-server': 'provider-id/model-id',
+          },
+        },
+      } as never,
+      callbacks: {} as never,
+      context: {} as never,
+      logger: createLogger(),
+    });
+
+    const startOptions = startOpenCodeServerHarnessMock.mock.calls[0]?.[0] as {
+      agentFallbacks?: Record<string, unknown>;
+    };
+    expect(startOptions.agentFallbacks).toEqual({
+      advisor: {
+        role: 'planning',
+        activeModelId: 'provider-id/model-id',
+        fallbackModel: 'anthropic/advisor-fallback',
+      },
+    });
+  });
+
   it('overlays per-task model role overrides onto the spawn env and re-reads them on respawn', async () => {
     const firstHarness = createConnectedHarness();
     const secondHarness = createConnectedHarness();

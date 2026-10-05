@@ -1,8 +1,14 @@
 import { z } from 'zod';
 
+import {
+  extractVisibleAcpPromptText,
+  isSystemInjectedAcpPromptText,
+  normalizeTranscriptUserText,
+} from './acp';
+
 /**
- * Experiment-gated (`integrationToolApprovals`) per-integration-tool approval
- * policies and requests for code-mode integration calls in Sessions.
+ * Per-integration-tool approval policies and requests for code-mode
+ * integration calls in Sessions.
  *
  * Policies are deployment-scoped and admin-configured: one row per
  * (integration, tool) selects the approval mode, and the absence of a row is
@@ -77,15 +83,17 @@ export interface IntegrationToolApprovalMetadata {
 }
 
 /**
- * Deployment-wide Auto mode. `on`: every call to a tool nobody has made a
- * choice about (the default mode) is risk-assessed by the decision model
- * first; a routine call runs, anything else asks the Session owner when they
- * are present and is blocked with a tool error when they are away. A manual
- * choice always wins: Always allow is never assessed, Ask first always asks,
- * Reject always blocks. `off`: default tools run as they always have. While
- * off, and only with a hosted judgment model configured, the assessment still
- * runs in the background and is recorded, so its judgment can be checked
- * against real calls before it is turned on.
+ * Auto mode. It is the session owner's choice for one session and starts
+ * off. The stored `mode` here does not turn Auto on; it is kept for N-1
+ * rollback compatibility. With Auto on for a session, every call to a tool
+ * nobody has made a choice about (the default mode) is risk-assessed by the
+ * decision model first; a routine call runs, anything else asks the session
+ * owner when they are present and is blocked with a tool error when they are
+ * away. A manual choice always wins: Always allow is never assessed, Ask
+ * first always asks, Reject always blocks. With Auto off, default tools run
+ * without a check. While off, and only with a hosted judgment model
+ * configured, the assessment still runs in the background and is recorded,
+ * so its judgment can be checked against real calls.
  */
 export const INTEGRATION_TOOL_AUTO_MODES = ['off', 'on'] as const;
 export type IntegrationToolAutoMode =
@@ -112,6 +120,25 @@ export const integrationToolAutoSettingsSchema = z.object({
 });
 
 /**
+ * What the agent is told when Auto denies a call because the session owner
+ * was away. A denied call leaves nothing in the transcript to allow later,
+ * so this points the agent at what the owner can actually do.
+ */
+export function describeIntegrationToolAutoAbsentDenial(
+  reason: string,
+): string {
+  return `Auto mode blocked this tool call because ${reason} and the session owner was away. The call was not run. Continue without it and tell the owner what was skipped; they can ask for it again while they are in the session and approve it when asked.`;
+}
+
+/**
+ * What the agent is told when Auto stops for its session because a call
+ * could not be assessed. The call does not run, the owner is told in the
+ * thread, and later calls ask them.
+ */
+export const INTEGRATION_TOOL_AUTO_PAUSED_AGENT_MESSAGE =
+  'Auto approvals are paused for this session because calls cannot be checked right now, so this call was not run. Stop here: do not retry it or call other tools. The session owner has been told; when they reply, tools will ask them before running.';
+
+/**
  * A decision model's risk assessment of one Auto-gated call, recorded on the
  * call's audit row. In shadow mode it decides nothing. The assessment can
  * recommend running the call or asking its owner.
@@ -126,6 +153,8 @@ export interface IntegrationToolAutoEvaluation {
   answers?: Record<string, number>;
   /** Why there are no answers: nothing could evaluate the call. */
   unavailable?: 'no_model' | 'error';
+  /** Deterministic policy reason that did not require a model judgment. */
+  reason?: string;
   evaluatedAt: string;
 }
 
@@ -161,6 +190,92 @@ export const integrationToolApprovalDecisionSchema = z.object({
 export type IntegrationToolApprovalDecision = z.infer<
   typeof integrationToolApprovalDecisionSchema
 >;
+
+/** Compact enough for Telegram callback_data (64 bytes). No authority is
+ * conveyed by the callback: the database still checks the mapped requester. */
+export function buildIntegrationToolApprovalCallback(
+  approvalId: string,
+  decision: IntegrationToolApprovalDecision['decision'],
+): string {
+  const code = { approved: 'o', approved_for_session: 's', rejected: 'd' }[
+    decision
+  ];
+  return `ita:${approvalId}:${code}`;
+}
+
+export function parseIntegrationToolApprovalCallback(
+  value?: string,
+): IntegrationToolApprovalDecision | null {
+  const match =
+    /^ita:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):([osd])$/iu.exec(
+      value ?? '',
+    );
+  if (!match) return null;
+  return {
+    approvalId: match[1]!,
+    decision: (
+      { o: 'approved', s: 'approved_for_session', d: 'rejected' } as const
+    )[match[2]!.toLowerCase() as 'o' | 's' | 'd'],
+  };
+}
+
+export function integrationToolApprovalButtons(approvalId: string) {
+  return [
+    [
+      {
+        text: 'Allow once',
+        callbackData: buildIntegrationToolApprovalCallback(
+          approvalId,
+          'approved',
+        ),
+      },
+      {
+        text: 'Allow for session',
+        callbackData: buildIntegrationToolApprovalCallback(
+          approvalId,
+          'approved_for_session',
+        ),
+      },
+      {
+        text: 'Deny',
+        callbackData: buildIntegrationToolApprovalCallback(
+          approvalId,
+          'rejected',
+        ),
+      },
+    ],
+  ];
+}
+
+/** Only the persisted, redacted argument summary may be displayed in chat. */
+export function integrationToolApprovalMessage(
+  approval: IntegrationToolApprovalMetadata,
+): string {
+  const summary = JSON.stringify(approval.argsSummary);
+  return `Approval needed: ${approval.integrationId} / ${approval.toolName}${summary && summary !== '{}' && summary !== 'null' ? `\nArguments (redacted): ${summary.slice(0, 1200)}${summary.length > 1200 ? '…' : ''}` : ''}`;
+}
+
+export const INTEGRATION_TOOL_APPROVAL_SLACK_ACTION_ID =
+  'integration_tool_approval';
+
+export function integrationToolApprovalSlackBlocks(
+  approval: IntegrationToolApprovalMetadata,
+) {
+  return [
+    { type: 'markdown', text: integrationToolApprovalMessage(approval) },
+    {
+      type: 'actions',
+      elements: integrationToolApprovalButtons(approval.approvalId)[0]!.map(
+        (button) => ({
+          type: 'button',
+          text: { type: 'plain_text', text: button.text },
+          action_id: INTEGRATION_TOOL_APPROVAL_SLACK_ACTION_ID,
+          value: button.callbackData,
+        }),
+      ),
+    },
+  ];
+}
 
 export const integrationToolPolicyUpsertSchema = z.object({
   integrationId: z.string().min(1).max(200),
@@ -270,6 +385,43 @@ export function integrationToolModeIsAutoAssessed(input: {
   return (
     input.policyMode === undefined && input.sessionOverrideMode === undefined
   );
+}
+
+/**
+ * Names the Fast conversation behind a deployment-proxy integration call, so
+ * the proxy can shadow-assess it against that conversation's latest prompt
+ * from the calling user. Never forwarded upstream.
+ */
+export const INTEGRATION_TOOL_FAST_CONVERSATION_HEADER =
+  'x-roomote-fast-conversation-id';
+
+/** The longest user request Auto mode is shown for one tool call. */
+export const INTEGRATION_TOOL_USER_REQUEST_MAX_CHARS = 20_000;
+
+/** Whether the prompt carries a task `<request>…</request>` envelope. */
+function hasRequestEnvelope(text: string): boolean {
+  const start = text.indexOf('<request>');
+  return start !== -1 && text.includes('</request>', start);
+}
+
+/**
+ * What the user asked for, as Auto mode is shown it next to a tool call:
+ * the visible text of their latest prompt, without Roomote's injected
+ * wrapper blocks, the task `<request>` envelope, or chat-surface envelopes,
+ * bounded in length. Undefined when nothing visible remains.
+ */
+export function toIntegrationToolUserRequest(
+  promptText: string | null | undefined,
+): string | undefined {
+  if (!promptText) return undefined;
+  const visible = normalizeTranscriptUserText(
+    isSystemInjectedAcpPromptText(promptText) || hasRequestEnvelope(promptText)
+      ? extractVisibleAcpPromptText(promptText)
+      : promptText,
+  )?.trim();
+  return visible
+    ? visible.slice(0, INTEGRATION_TOOL_USER_REQUEST_MAX_CHARS)
+    : undefined;
 }
 
 /**

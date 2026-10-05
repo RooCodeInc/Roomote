@@ -11,7 +11,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   Input,
@@ -35,7 +34,6 @@ import {
 import type { CustomMcpServerVisibility } from '@roomote/types';
 import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 
 import type { IntegrationItem } from './integration-card';
 import { IntegrationToolApprovalList } from './IntegrationToolApprovalControls';
@@ -750,17 +748,14 @@ function CustomToolManagementDialog({
   scope,
   open,
   onOpenChange,
-  onSaved,
 }: {
   server: ListedServer | null;
   scope: CustomMcpServerVisibility;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
 }) {
   const trpc = useTRPC();
   const { isAdmin } = useAuthorizedUser();
-  const approvalsExperiment = useIntegrationToolApprovalsExperiment();
   // A custom server mounts under its name. Shared servers take the
   // deployment-wide, admin-managed approval policies; a personal server takes
   // its owner's personal policies, which apply to their own Sessions only.
@@ -770,43 +765,6 @@ function CustomToolManagementDialog({
       { enabled: open && Boolean(server), retry: false },
     ),
   );
-  const setDisabledTools = useMutation(
-    trpc.customMcpServers.setDisabledTools.mutationOptions(),
-  );
-  const [disabledNames, setDisabledNames] = useState<Set<string>>(new Set());
-  const loadedKey = useMemo(
-    () =>
-      toolsQuery.data
-        ? `${server?.id}:${toolsQuery.data.tools.map((tool) => tool.name).join(',')}`
-        : null,
-    [server?.id, toolsQuery.data],
-  );
-
-  useEffect(() => {
-    if (!loadedKey || !toolsQuery.data) return;
-    setDisabledNames(
-      new Set(
-        toolsQuery.data.tools
-          .filter((tool) => !tool.enabled)
-          .map((tool) => tool.name),
-      ),
-    );
-  }, [loadedKey, toolsQuery.data]);
-
-  const legacyAvailability =
-    !approvalsExperiment.isLoading &&
-    !approvalsExperiment.enabled &&
-    (scope === 'owner' || isAdmin);
-  const save = async () => {
-    if (!server) return;
-    await setDisabledTools.mutateAsync({
-      id: server.id,
-      disabledTools: [...disabledNames],
-    });
-    onSaved();
-    onOpenChange(false);
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="2xl">
@@ -840,38 +798,9 @@ function CustomToolManagementDialog({
               canManage={scope === 'owner' || isAdmin}
               open={open}
               tools={toolsQuery.data?.tools ?? []}
-              isToolEnabled={(toolName) => !disabledNames.has(toolName)}
-              onToggleTool={(toolName, enabled) =>
-                setDisabledNames((current) => {
-                  const next = new Set(current);
-                  if (enabled) next.delete(toolName);
-                  else next.add(toolName);
-                  return next;
-                })
-              }
-              toggleDisabled={setDisabledTools.isPending}
             />
           </div>
         )}
-
-        {legacyAvailability && !toolsQuery.isPending && !toolsQuery.isError ? (
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={save}
-              disabled={setDisabledTools.isPending}
-            >
-              {setDisabledTools.isPending ? <Loading /> : 'Save'}
-            </Button>
-          </DialogFooter>
-        ) : null}
       </DialogContent>
     </Dialog>
   );
@@ -885,8 +814,8 @@ function CustomToolManagementDialog({
  * section of its own.
  */
 /**
- * `deployment` (the default) lists the servers everyone shares, for Settings
- * → Integrations; `owner` lists the viewer's own private servers, for
+ * `deployment` (the default) lists the servers everyone shares, for the
+ * Integrations page; `owner` lists the viewer's own private servers, for
  * Personal settings. Members see shared servers they did not add read-only.
  */
 export function useCustomMcpServers(
@@ -1132,7 +1061,6 @@ export function useCustomMcpServers(
             setToolsServer(null);
           }
         }}
-        onSaved={refresh}
       />
     </>
   );

@@ -36,6 +36,10 @@
       "import": "./src/server/lib/request-instance-ping.ts",
       "require": "./src/server/lib/request-instance-ping.ts"
     },
+    "./server/task-tool-approvals": {
+      "import": "./src/server/lib/task-tool-approvals.ts",
+      "require": "./src/server/lib/task-tool-approvals.ts"
+    },
     "./server/docker-environment-validation": {
       "import": "./src/server/lib/docker-environment-validation.ts",
       "require": "./src/server/lib/docker-environment-validation.ts"
@@ -142,7 +146,7 @@
     "htmlparser2": "8.0.2",
     "superjson": "^2.2.6",
     "turndown": "7.2.0",
-    "undici": "^7.29.0",
+    "undici": "^7.29.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {

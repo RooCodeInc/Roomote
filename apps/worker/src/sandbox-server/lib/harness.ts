@@ -9,6 +9,11 @@ import type {
   TaskEnvVarRequestVariable,
   TaskEvent,
 } from '@roomote/types';
+import type {
+  ModelFallbackTrigger,
+  ReasoningEffort,
+  TaskModelRole,
+} from '@roomote/types';
 
 /** Internal task-message signal for an unrecoverable provider failure. */
 export const TERMINAL_PROVIDER_ERROR_SAY = 'terminal_provider_error';
@@ -295,6 +300,18 @@ export interface HarnessEvents {
   runtimeTurnCompleted: [event: AcpTurnCompletedEvent];
   runtimeInferenceUsage: [event: HarnessInferenceUsageEvent];
   commandError: [error: HarnessCommandError];
+  modelFallbackRequested: [
+    request: {
+      role: TaskModelRole;
+      fromModelId: string;
+      toModelId: string;
+      toReasoningEffort: ReasoningEffort | null;
+      errorSummary: string;
+      trigger: ModelFallbackTrigger;
+      sessionId?: string;
+      agentType?: string;
+    },
+  ];
 }
 
 /**

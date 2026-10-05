@@ -2,7 +2,6 @@
 
 import {
   type TaskPayload,
-  DEFAULT_CODING_HARNESS,
   getTaskInitiatorLinkedUserId,
   DEFAULT_LAUNCH_CODING_HARNESS,
   getCommunicationChannelFromTaskPayload,
@@ -75,24 +74,38 @@ describe('getTaskInitiatorLinkedUserId', () => {
 });
 
 describe('isSourceControlTaskSurface', () => {
-  it.each(['github', 'gitlab', 'gitea', 'bitbucket', 'ado'] as const)(
-    'recognizes %s',
-    (surface) => {
+  it('recognizes every supported source-control surface', () => {
+    for (const surface of [
+      'github',
+      'gitlab',
+      'gitea',
+      'bitbucket',
+      'ado',
+    ] as const) {
       expect(isSourceControlTaskSurface(surface)).toBe(true);
-    },
-  );
+    }
+  });
 
-  it.each(['web', 'slack', 'teams', 'telegram', 'discord', 'linear'] as const)(
-    'excludes %s',
-    (surface) => {
+  it('excludes non-source-control surfaces', () => {
+    for (const surface of [
+      'web',
+      'slack',
+      'teams',
+      'telegram',
+      'discord',
+      'linear',
+    ] as const) {
       expect(isSourceControlTaskSurface(surface)).toBe(false);
-    },
-  );
+    }
+  });
 });
 
 describe('isPrReviewTaskRun', () => {
-  it('returns true for GithubPrReview type', () => {
-    const payload: TaskPayload<typeof TaskPayloadKind.GithubPrReview> = {
+  it('recognizes PR review payloads and rejects ordinary task types', () => {
+    const payload: TaskPayload<
+      | typeof TaskPayloadKind.GithubPrReview
+      | typeof TaskPayloadKind.GithubPrReviewSync
+    > = {
       repo: 'owner/repo',
       prNumber: 123,
       prTitle: 'Test PR',
@@ -100,79 +113,48 @@ describe('isPrReviewTaskRun', () => {
       headSha: 'abc123',
     };
 
-    expect(isPrReviewTaskRun(TaskPayloadKind.GithubPrReview, payload)).toBe(
-      true,
-    );
-  });
-
-  it('returns true for GithubPrReviewSync type', () => {
-    const payload: TaskPayload<typeof TaskPayloadKind.GithubPrReviewSync> = {
-      repo: 'owner/repo',
-      prNumber: 123,
-      prTitle: 'Test PR',
-      prUrl: 'https://github.com/owner/repo/pull/123',
-      headSha: 'abc123',
-    };
-
-    expect(isPrReviewTaskRun(TaskPayloadKind.GithubPrReviewSync, payload)).toBe(
-      true,
-    );
-  });
-
-  it('returns false for non-PR review types', () => {
-    const payload: TaskPayload<typeof TaskPayloadKind.StandardTask> = {
-      repo: 'owner/repo',
-      description: 'Test task',
-    };
-
-    expect(isPrReviewTaskRun(TaskPayloadKind.SlackAppMention, payload)).toBe(
-      false,
-    );
+    for (const taskType of [
+      TaskPayloadKind.GithubPrReview,
+      TaskPayloadKind.GithubPrReviewSync,
+    ]) {
+      expect(isPrReviewTaskRun(taskType, payload)).toBe(true);
+    }
+    expect(
+      isPrReviewTaskRun(TaskPayloadKind.SlackAppMention, {
+        repo: 'owner/repo',
+        description: 'Test task',
+      }),
+    ).toBe(false);
   });
 });
 
 describe('shouldUseAppTokenOnly', () => {
-  it('returns true for GithubPrReview', () => {
-    expect(shouldUseAppTokenOnly(TaskPayloadKind.GithubPrReview)).toBe(true);
-  });
-
-  it('returns true for GithubPrReviewSync', () => {
-    expect(shouldUseAppTokenOnly(TaskPayloadKind.GithubPrReviewSync)).toBe(
-      true,
-    );
-  });
-
-  it('returns true for GithubPrReviewFollowUp (review follow-up)', () => {
-    expect(shouldUseAppTokenOnly(TaskPayloadKind.GithubPrReviewFollowUp)).toBe(
-      true,
-    );
-  });
-
-  it('returns false for StandardTask', () => {
-    expect(shouldUseAppTokenOnly(TaskPayloadKind.StandardTask)).toBe(false);
-  });
-
-  it('returns false for LinearAgentSession', () => {
-    expect(shouldUseAppTokenOnly(TaskPayloadKind.LinearAgentSession)).toBe(
-      false,
-    );
-  });
-
-  it('returns false for SlackAppMention', () => {
-    expect(shouldUseAppTokenOnly(TaskPayloadKind.SlackAppMention)).toBe(false);
+  it('classifies review payloads separately from ordinary task surfaces', () => {
+    for (const taskType of [
+      TaskPayloadKind.GithubPrReview,
+      TaskPayloadKind.GithubPrReviewSync,
+      TaskPayloadKind.GithubPrReviewFollowUp,
+    ]) {
+      expect(shouldUseAppTokenOnly(taskType)).toBe(true);
+    }
+    for (const taskType of [
+      TaskPayloadKind.StandardTask,
+      TaskPayloadKind.LinearAgentSession,
+      TaskPayloadKind.SlackAppMention,
+    ]) {
+      expect(shouldUseAppTokenOnly(taskType)).toBe(false);
+    }
   });
 });
 
 describe('isResumableTaskPayloadKind', () => {
-  it('returns true for StandardTask jobs', () => {
-    expect(isResumableTaskPayloadKind(TaskPayloadKind.StandardTask)).toBe(true);
-  });
-
-  it('returns true for Suggested Tasks jobs', () => {
-    expect(isResumableTaskPayloadKind(TaskPayloadKind.Scan)).toBe(true);
-  });
-
-  it('returns false for GithubPrReview', () => {
+  it('classifies resumable and non-resumable payloads', () => {
+    for (const taskType of [
+      TaskPayloadKind.StandardTask,
+      TaskPayloadKind.Scan,
+    ]) {
+      expect(isResumableTaskPayloadKind(taskType)).toBe(true);
+    }
     expect(isResumableTaskPayloadKind(TaskPayloadKind.GithubPrReview)).toBe(
       false,
     );
@@ -182,10 +164,6 @@ describe('isResumableTaskPayloadKind', () => {
 describe('coding harness defaults', () => {
   it('uses opencode as the default launch harness', () => {
     expect(DEFAULT_LAUNCH_CODING_HARNESS).toBe('opencode-server');
-  });
-
-  it('uses opencode as the default coding harness', () => {
-    expect(DEFAULT_CODING_HARNESS).toBe('opencode-server');
   });
 
   it('allows only opencode-server for new launch requests', () => {
@@ -275,7 +253,7 @@ describe('suggestion priority display constants', () => {
 });
 
 describe('work item status constants', () => {
-  it('exposes the unified launch state machine', () => {
+  it('exposes the unified launch state machine and active states', () => {
     expect(WORK_ITEM_STATUSES).toEqual([
       'open',
       'launching',
@@ -283,9 +261,6 @@ describe('work item status constants', () => {
       'failed',
       'dismissed',
     ]);
-  });
-
-  it('treats open/launching/launched as active for dedup', () => {
     expect(WORK_ITEM_ACTIVE_STATUSES).toEqual([
       'open',
       'launching',
@@ -295,13 +270,10 @@ describe('work item status constants', () => {
 });
 
 describe('Task Tool invocation helpers', () => {
-  it('uses the packaged-skill delimiter for task tool invocations', () => {
+  it('uses the OpenCode delimiter for task tool invocations', () => {
     expect(getTaskToolInvocation('review-code', 'opencode-server')).toBe(
       '$review-code',
     );
-  });
-
-  it('defaults to the OpenCode delimiter when no harness is provided', () => {
     expect(getTaskToolInvocation('review-code')).toBe('$review-code');
   });
 
@@ -431,76 +403,47 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.slackChannel).toBe('C123');
   });
 
-  it('allows GitLab target branch metadata on PR review payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      type: TaskPayloadKind.GithubPrReview,
-      userId: 'user-1',
-      payload: {
+  it('preserves target branch metadata across provider-specific PR reviews', () => {
+    for (const scenario of [
+      {
+        provider: 'gitlab',
         repo: 'acme/backend',
-        sourceControlProvider: 'gitlab',
-        prNumber: 42,
-        prTitle: 'Update backend',
         prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
-        headSha: 'abc123',
-        branchName: 'feature/test',
-        targetBranch: 'main',
       },
-    });
-
-    if (parsed.type !== TaskPayloadKind.GithubPrReview) {
-      throw new Error('Expected GithubPrReview task');
-    }
-
-    expect(parsed.payload.targetBranch).toBe('main');
-  });
-
-  it('allows Gitea target branch metadata on PR review payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      type: TaskPayloadKind.GithubPrReview,
-      userId: 'user-1',
-      payload: {
+      {
+        provider: 'gitea',
         repo: 'acme/backend',
-        sourceControlProvider: 'gitea',
-        prNumber: 42,
-        prTitle: 'Update backend',
         prUrl: 'https://git.example.com/acme/backend/pulls/42',
-        headSha: 'abc123',
-        branchName: 'feature/test',
-        targetBranch: 'main',
       },
-    });
-
-    if (parsed.type !== TaskPayloadKind.GithubPrReview) {
-      throw new Error('Expected GithubPrReview task');
-    }
-
-    expect(parsed.payload.sourceControlProvider).toBe('gitea');
-    expect(parsed.payload.targetBranch).toBe('main');
-  });
-
-  it('allows Azure DevOps target branch metadata on PR review payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      type: TaskPayloadKind.GithubPrReview,
-      userId: 'user-1',
-      payload: {
+      {
+        provider: 'ado',
         repo: 'acme/Platform/backend',
-        sourceControlProvider: 'ado',
-        prNumber: 42,
-        prTitle: 'Update backend',
         prUrl:
           'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
-        headSha: 'abc123',
-        branchName: 'feature/test',
-        targetBranch: 'main',
       },
-    });
+    ] as const) {
+      const parsed = taskSpecSchema.parse({
+        type: TaskPayloadKind.GithubPrReview,
+        userId: 'user-1',
+        payload: {
+          repo: scenario.repo,
+          sourceControlProvider: scenario.provider,
+          prNumber: 42,
+          prTitle: 'Update backend',
+          prUrl: scenario.prUrl,
+          headSha: 'abc123',
+          branchName: 'feature/test',
+          targetBranch: 'main',
+        },
+      });
 
-    if (parsed.type !== TaskPayloadKind.GithubPrReview) {
-      throw new Error('Expected GithubPrReview task');
+      if (parsed.type !== TaskPayloadKind.GithubPrReview) {
+        throw new Error('Expected GithubPrReview task');
+      }
+
+      expect(parsed.payload.sourceControlProvider).toBe(scenario.provider);
+      expect(parsed.payload.targetBranch).toBe('main');
     }
-
-    expect(parsed.payload.sourceControlProvider).toBe('ado');
-    expect(parsed.payload.targetBranch).toBe('main');
   });
 
   it('parses GithubPrReviewFollowUp payloads without any inner bootstrap mode', () => {
@@ -723,58 +666,24 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.description).toBe('Investigate this flow');
   });
 
-  it('parses shared reasoningEffort overrides on task payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      userId: 'user-1',
-      type: TaskPayloadKind.StandardTask,
-      payload: {
-        repo: 'owner/repo',
-        description: 'Investigate this flow',
-        reasoningEffort: 'medium',
-      },
-    });
+  it('preserves supported reasoningEffort overrides on task payloads', () => {
+    for (const reasoningEffort of ['medium', 'xhigh', 'max'] as const) {
+      const parsed = taskSpecSchema.parse({
+        userId: 'user-1',
+        type: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Investigate this flow',
+          reasoningEffort,
+        },
+      });
 
-    if (parsed.type !== TaskPayloadKind.StandardTask) {
-      throw new Error('Expected StandardTask payload');
+      if (parsed.type !== TaskPayloadKind.StandardTask) {
+        throw new Error('Expected StandardTask payload');
+      }
+
+      expect(parsed.payload.reasoningEffort).toBe(reasoningEffort);
     }
-
-    expect(parsed.payload.reasoningEffort).toBe('medium');
-  });
-
-  it('parses xhigh reasoningEffort overrides on task payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      userId: 'user-1',
-      type: TaskPayloadKind.StandardTask,
-      payload: {
-        repo: 'owner/repo',
-        description: 'Investigate this flow',
-        reasoningEffort: 'xhigh',
-      },
-    });
-
-    if (parsed.type !== TaskPayloadKind.StandardTask) {
-      throw new Error('Expected StandardTask payload');
-    }
-
-    expect(parsed.payload.reasoningEffort).toBe('xhigh');
-  });
-
-  it('parses max reasoningEffort overrides on task payloads', () => {
-    const parsed = taskSpecSchema.parse({
-      userId: 'user-1',
-      type: TaskPayloadKind.StandardTask,
-      payload: {
-        repo: 'owner/repo',
-        description: 'Investigate this flow',
-        reasoningEffort: 'max',
-      },
-    });
-
-    if (parsed.type !== TaskPayloadKind.StandardTask) {
-      throw new Error('Expected StandardTask payload');
-    }
-
-    expect(parsed.payload.reasoningEffort).toBe('max');
   });
 
   it('parses OpenCode harness model overrides on task payloads', () => {
@@ -1285,7 +1194,7 @@ describe('taskSpecSchema', () => {
     expect(parsed.success).toBe(false);
   });
 
-  it('resolves a repository workspace from a single repo payload', () => {
+  it('resolves repository, set, no-repository, and environment workspaces', () => {
     expect(
       resolveTaskWorkspace({
         repo: 'owner/repo',
@@ -1298,9 +1207,6 @@ describe('taskSpecSchema', () => {
       branch: 'main',
       sha: 'abc1234',
     });
-  });
-
-  it('resolves a repository_set workspace from a scoped all-repositories payload', () => {
     expect(
       resolveTaskWorkspace({
         repo: '__all_repositories__',
@@ -1310,18 +1216,12 @@ describe('taskSpecSchema', () => {
       type: 'repository_set',
       repositories: ['acme/api', 'acme/web'],
     });
-  });
-
-  it('resolves an explicit no-repositories workspace without widening its scope', () => {
     expect(
       resolveTaskWorkspace({
         repo: NO_REPOSITORIES,
         selectedRepositories: ['acme/api'],
       }),
     ).toEqual({ type: 'no_repositories' });
-  });
-
-  it('keeps an explicit environment authoritative over the no-repositories sentinel', () => {
     expect(
       resolveTaskWorkspace({
         repo: NO_REPOSITORIES,
@@ -1332,9 +1232,6 @@ describe('taskSpecSchema', () => {
       environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
       sourceRepo: NO_REPOSITORIES,
     });
-  });
-
-  it('resolves an environment workspace while preserving source pin context', () => {
     expect(
       resolveTaskWorkspace({
         repo: 'acme/api',
@@ -1353,94 +1250,64 @@ describe('taskSpecSchema', () => {
 });
 
 describe('isActivelyRunningTask', () => {
-  it('returns false for undefined/null status', () => {
+  it('classifies active, booting, waiting, and exited task states', () => {
     expect(isActivelyRunningTask(undefined, null)).toBe(false);
     expect(isActivelyRunningTask(null, null)).toBe(false);
-  });
 
-  it('returns true for booting statuses regardless of taskPhase', () => {
-    const bootingStatuses = [...bootingRunStatuses];
-
-    for (const status of bootingStatuses) {
+    for (const status of [...bootingRunStatuses]) {
       expect(isActivelyRunningTask(status, null)).toBe(true);
       expect(isActivelyRunningTask(status, 'idle')).toBe(true);
       expect(isActivelyRunningTask(status, 'running')).toBe(true);
     }
-  });
 
-  it('returns true for Running status with taskPhase "running"', () => {
     expect(isActivelyRunningTask(RunStatus.Running, 'running')).toBe(true);
-  });
-
-  it('returns true for Running status with null taskPhase (backwards compat)', () => {
     expect(isActivelyRunningTask(RunStatus.Running, null)).toBe(true);
     expect(isActivelyRunningTask(RunStatus.Running, undefined)).toBe(true);
-  });
-
-  it('returns false for Running status with idle/waiting phases', () => {
-    expect(isActivelyRunningTask(RunStatus.Running, 'idle')).toBe(false);
-    expect(isActivelyRunningTask(RunStatus.Running, 'waiting_for_prompt')).toBe(
-      false,
-    );
-    expect(isActivelyRunningTask(RunStatus.Running, 'stopped')).toBe(false);
-    expect(isActivelyRunningTask(RunStatus.Running, 'shutting_down')).toBe(
-      false,
-    );
-  });
-
-  it('returns false for Idle status', () => {
-    expect(isActivelyRunningTask(RunStatus.Idle, null)).toBe(false);
-    expect(isActivelyRunningTask(RunStatus.Idle, 'running')).toBe(false);
-  });
-
-  it('returns false for exited statuses', () => {
-    expect(isActivelyRunningTask(RunStatus.Completed, null)).toBe(false);
-    expect(isActivelyRunningTask(RunStatus.Failed, null)).toBe(false);
-    expect(isActivelyRunningTask(RunStatus.Canceled, null)).toBe(false);
+    for (const taskPhase of [
+      'idle',
+      'waiting_for_prompt',
+      'stopped',
+      'shutting_down',
+    ]) {
+      expect(isActivelyRunningTask(RunStatus.Running, taskPhase)).toBe(false);
+    }
+    for (const [status, taskPhase] of [
+      [RunStatus.Idle, null],
+      [RunStatus.Idle, 'running'],
+      [RunStatus.Completed, null],
+      [RunStatus.Failed, null],
+      [RunStatus.Canceled, null],
+    ] as const) {
+      expect(isActivelyRunningTask(status, taskPhase)).toBe(false);
+    }
   });
 });
 
 describe('isTaskExecutingTurn', () => {
-  it('returns false for undefined/null status', () => {
+  it('classifies executing, waiting, booting, and exited task states', () => {
     expect(isTaskExecutingTurn(undefined, 'running')).toBe(false);
     expect(isTaskExecutingTurn(null, 'running')).toBe(false);
-  });
-
-  it('returns true for booting statuses regardless of taskPhase', () => {
     for (const status of [...bootingRunStatuses]) {
       expect(isTaskExecutingTurn(status, null)).toBe(true);
       expect(isTaskExecutingTurn(status, 'waiting_for_prompt')).toBe(true);
       expect(isTaskExecutingTurn(status, 'running')).toBe(true);
     }
-  });
 
-  it('returns true while a turn is executing regardless of Running/Idle status', () => {
     expect(isTaskExecutingTurn(RunStatus.Running, 'running')).toBe(true);
     // Follow-up turns on a live sandbox run with Idle status.
     expect(isTaskExecutingTurn(RunStatus.Idle, 'running')).toBe(true);
-  });
-
-  it('returns true for Running status with no phase info yet', () => {
     expect(isTaskExecutingTurn(RunStatus.Running, null)).toBe(true);
     expect(isTaskExecutingTurn(RunStatus.Running, undefined)).toBe(true);
-  });
-
-  it('returns false while the task waits between turns', () => {
-    expect(isTaskExecutingTurn(RunStatus.Idle, 'waiting_for_prompt')).toBe(
-      false,
-    );
-    expect(isTaskExecutingTurn(RunStatus.Running, 'waiting_for_prompt')).toBe(
-      false,
-    );
-    expect(isTaskExecutingTurn(RunStatus.Idle, null)).toBe(false);
-    expect(isTaskExecutingTurn(RunStatus.Idle, 'waiting_for_user_input')).toBe(
-      false,
-    );
-  });
-
-  it('returns false for exited statuses even with a stale running phase', () => {
-    expect(isTaskExecutingTurn(RunStatus.Completed, 'running')).toBe(false);
-    expect(isTaskExecutingTurn(RunStatus.Failed, 'running')).toBe(false);
-    expect(isTaskExecutingTurn(RunStatus.Canceled, 'running')).toBe(false);
+    for (const [status, taskPhase] of [
+      [RunStatus.Idle, 'waiting_for_prompt'],
+      [RunStatus.Running, 'waiting_for_prompt'],
+      [RunStatus.Idle, null],
+      [RunStatus.Idle, 'waiting_for_user_input'],
+      [RunStatus.Completed, 'running'],
+      [RunStatus.Failed, 'running'],
+      [RunStatus.Canceled, 'running'],
+    ] as const) {
+      expect(isTaskExecutingTurn(status, taskPhase)).toBe(false);
+    }
   });
 });

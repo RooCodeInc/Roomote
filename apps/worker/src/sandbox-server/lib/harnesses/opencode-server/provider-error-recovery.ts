@@ -3,6 +3,7 @@ import {
   asRecord,
   asString,
   buildInferenceProviderRecoveryPrompt,
+  isInferenceCreditsExhaustedError,
   resolveInferenceProviderRetryDelayMs,
 } from '@roomote/types';
 
@@ -164,9 +165,14 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
  * before it emits a terminal session.error. Providers occasionally mark
  * billing or account failures as retryable, so the harness must be able to
  * override that decision before OpenCode enters an unbounded backoff loop.
+ * An account out of credits or quota is one of them: ChatGPT and OpenAI send
+ * it as a retryable 429, and the retry status carries only its message.
  */
 export function isOpenCodeTerminalProviderError(error: unknown): boolean {
-  return isExplicitlyTerminal(collectProviderErrorValues(error));
+  return (
+    isInferenceCreditsExhaustedError(error) ||
+    isExplicitlyTerminal(collectProviderErrorValues(error))
+  );
 }
 
 /**
@@ -174,11 +180,15 @@ export function isOpenCodeTerminalProviderError(error: unknown): boolean {
  * invalidate one model turn, not the OpenCode session or Roomote task. Keep a
  * bounded retry budget with enough backoff for transient overloads to clear,
  * while explicit auth/configuration failures fail immediately instead of
- * burning requests that cannot succeed.
+ * burning requests that cannot succeed, as does an account out of credits.
  */
 export function getOpenCodeProviderErrorRecovery(
   error: unknown,
 ): OpenCodeProviderErrorRecovery | null {
+  if (isInferenceCreditsExhaustedError(error)) {
+    return null;
+  }
+
   const values = collectProviderErrorValues(error);
 
   if (hasErrorName(values, POLICY_ERROR_NAMES)) {

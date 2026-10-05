@@ -154,7 +154,10 @@ const serverSchema = {
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
-  // Operator policy for the curated Settings > Integrations catalog. Enabled
+  // Operator-only settings surface for internal nightly experiments. Off by
+  // default and enforced by the web server for both page and API access.
+  R_NIGHTLY_EXPERIMENTS_ENABLED: optInBoolean(),
+  // Operator policy for the curated Integrations page catalog. Enabled
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.
   R_CURATED_INTEGRATIONS_DISABLED: optInBoolean(),
@@ -173,6 +176,10 @@ const serverSchema = {
   // private networks; a CIDR list rather than a boolean so opening one
   // internal host does not re-expose every adjacent service.
   R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS: z.string().min(1).optional(),
+  // Comma-separated CIDR ranges the session completion webhook may connect to
+  // in addition to public addresses. Keep this separate from custom-MCP
+  // egress so operators can grant the webhook only the receiver it needs.
+  R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS: z.string().min(1).optional(),
   // ElevenLabs credentials for the narration TTS endpoint. The key stays on
   // the control plane; task sandboxes reach TTS only through /api/tts with
   // their run-scoped token (see apps/api/src/handlers/tts). Unset means the
@@ -640,6 +647,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
   'R_TRIAL_OPENROUTER_API_KEY',
+  'R_NIGHTLY_EXPERIMENTS_ENABLED',
   // Cloud clears managed-email variables with empty strings on disable;
   // an empty enum flag must fall back to its default, not fail boot.
   'R_EMAIL_CHANNEL_ENABLED',
@@ -672,6 +680,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_INSTANCE_ID',
   'R_STATUSPAGE_INCIDENTS_URL',
   'R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS',
+  'R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS',
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
   'R_VOICE_OPENAI_API_KEY',
@@ -810,7 +819,10 @@ export const AUTH_KEYPAIR_ENV_KEYS = [
 export type AuthKeypairEnvKey = (typeof AUTH_KEYPAIR_ENV_KEYS)[number];
 
 /** Parses an opt-in boolean env flag: `true` or `1`, case-insensitive. */
-export function isEnvFlagEnabled(value: string | undefined): boolean {
+export function isEnvFlagEnabled(value: string | boolean | undefined): boolean {
+  if (value === true) return true;
+  if (typeof value !== 'string') return false;
+
   const normalized = value?.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
 }

@@ -31,6 +31,7 @@ import type {
   RunKind,
   RunStatus,
   TaskPayload,
+  SessionStatusJudgmentOutcome,
   RequestedWorkKind,
   RequestedWorkKindSource,
   ComputeProvider,
@@ -38,6 +39,7 @@ import type {
   DeploymentAccessPolicy,
   DeploymentComputeConfig,
   DeploymentModelConfig,
+  ModelFallbackConfig,
   CodingHarness,
   RunEventDetails,
   RunEventSource,
@@ -79,6 +81,7 @@ import type {
   CredentialEgressPhase,
   CredentialEgressRevocationKind,
   TaskModelSettings,
+  UserTaskModelMapping,
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
   UserRole,
@@ -87,6 +90,7 @@ import type {
   FastAgentParent,
   FastAgentSurface,
   ReasoningEffort,
+  SessionManualStatus,
   SessionStatus,
   SessionPrivacy,
   SessionWakeupReportPolicy,
@@ -94,6 +98,10 @@ import type {
   SessionWakeupStatus,
   AutomationResultPriority,
   AutomationResultVisibility,
+  CustomAutomationLaunchCriteriaAnswers,
+  CustomAutomationLaunchCriteriaOutcomes,
+  CustomAutomationLaunchCriteriaSnapshot,
+  CustomAutomationRunWhen,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -180,6 +188,32 @@ export const userPersonalizations = pgTable('user_personalizations', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+/** Private, per-user saved mappings for the task model roles. */
+export const userTaskModelMappingPresets = pgTable(
+  'user_task_model_mapping_presets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    nameKey: text('name_key').notNull(),
+    roles: jsonb('roles').$type<UserTaskModelMapping>().notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('user_task_model_mapping_presets_owner_name_unique_idx').on(
+      table.userId,
+      table.nameKey,
+    ),
+    index('user_task_model_mapping_presets_owner_created_idx').on(
+      table.userId,
+      table.createdAt,
+    ),
+  ],
+);
+
 export const instanceSkills = pgTable(
   'instance_skills',
   {
@@ -244,6 +278,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   runtimeModelConfig: jsonb(
     'runtime_model_config',
   ).$type<DeploymentModelConfig>(),
+  modelFallbackConfig: jsonb(
+    'model_fallback_config',
+  ).$type<ModelFallbackConfig>(),
   runtimeComputeConfig: jsonb(
     'runtime_compute_config',
   ).$type<DeploymentComputeConfig>(),
@@ -254,6 +291,11 @@ export const deploymentSettings = pgTable('deployment_settings', {
   // key) so deployments enabled before this toggle existed stay enabled
   // without a backfill.
   brainEnabled: boolean('brain_enabled'),
+  sessionDoneWebhookEnabled: boolean('session_done_webhook_enabled')
+    .notNull()
+    .default(false),
+  sessionDoneWebhookUrl: text('session_done_webhook_url'),
+  sessionDoneWebhookSecret: encryptedText('session_done_webhook_secret'),
   // Signed Roomote license key (RMLK1.<payload>.<signature>) raising the
   // deployment's seat limit above the free tier; null for unlicensed
   // deployments. Verified at read time, never trusted as stored.
@@ -1715,6 +1757,20 @@ export const taskRuns = pgTable(
       .using('btree', table.vendor, table.createdAt.desc())
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure')`,
+      ),
+    // Finished runs whose sandbox sleep check has not yet examined (see
+    // destroySandboxesOfFinishedRuns). Keyed on the settlement time the sweep
+    // ranges over, one index per branch of its OR, so it reads only the
+    // lookback window instead of all unclaimed run history.
+    index('task_runs_sleep_check_finished_completed_idx')
+      .using('btree', table.completedAt)
+      .where(
+        sql`${table.status} IN ('failed', 'canceled', 'completed') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure') AND ${table.completedAt} IS NOT NULL`,
+      ),
+    index('task_runs_sleep_check_finished_canceled_idx')
+      .using('btree', table.canceledAt)
+      .where(
+        sql`${table.status} IN ('failed', 'canceled', 'completed') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure') AND ${table.completedAt} IS NULL AND ${table.canceledAt} IS NOT NULL`,
       ),
     index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
     index('task_runs_source_run_id_idx').on(table.sourceRunId),
@@ -3795,6 +3851,19 @@ export const fastAgentMessages = pgTable(
       table.ts,
       table.turnSeq,
     ),
+    index('fast_agent_messages_visible_user_order_idx').on(
+      table.conversationId,
+      table.ts.desc(),
+    ).where(sql`
+        ${table.role} = 'user'
+        AND (
+          ${table.metadata} ->> 'visibleInTranscript' = 'true'
+          OR (
+            ${table.metadata} ->> 'visibleInTranscript' IS NULL
+            AND ${table.eventType} <> 'roomote_runtime.user_prompt'
+          )
+        )
+      `),
   ],
 );
 
@@ -4330,6 +4399,8 @@ export const automations = pgTable('automations', {
   key: text('key').primaryKey().$type<BackgroundAutomationKey>(),
   enabled: boolean('enabled').notNull().default(false),
   internal: boolean('internal').notNull().default(false),
+  /** Encrypted opaque bearer token for an optional built-in webhook trigger. */
+  webhookSecret: encryptedText('webhook_secret'),
   schedule: jsonb('schedule')
     .notNull()
     .default({})
@@ -4361,7 +4432,7 @@ export const automationsRelations = relations(automations, ({ many }) => ({
 
 export type SessionOwnerKind = 'user' | 'automation' | 'system';
 export type SessionSourceSurface = TaskSurface | FastAgentSurface;
-export type { SessionPrivacy, SessionStatus };
+export type { SessionManualStatus, SessionPrivacy, SessionStatus };
 export type SessionTaskOrigin =
   | 'direct_launch'
   | 'fast_delegation'
@@ -4373,6 +4444,15 @@ export type SessionBackfillPhase =
   | 'fast_tasks'
   | 'tasks'
   | 'participants';
+export type SessionStatusJudgmentSourceKind = 'fast_turn' | 'task_terminal';
+export type SessionStatusJudgmentState =
+  | 'awaiting_settlement'
+  | 'pending'
+  | 'processing'
+  | 'applied'
+  | 'ignored'
+  | 'failed'
+  | 'stale';
 
 /**
  * sessions
@@ -4417,6 +4497,24 @@ export const sessions = pgTable(
       .$type<TaskVisibility>(),
     activityAt: bigint('activity_at', { mode: 'number' }).notNull(),
     cachedStatus: text('cached_status').$type<SessionStatus>(),
+    // Optional user-selected status. When present, runtime reconciliation
+    // preserves it while cached_status remains the deterministic lifecycle
+    // status. 'done' is intentionally valid here but not in cached_status.
+    manualStatus: text('manual_status').$type<SessionManualStatus>(),
+    manualStatusSetAt: timestamp('manual_status_set_at'),
+    /**
+     * When Auto tool approvals stopped for this session because a call could
+     * not be assessed. From then on its default tools ask a person.
+     */
+    autoToolApprovalsSuspendedAt: timestamp('auto_tool_approvals_suspended_at'),
+    /**
+     * Whether the session owner turned Auto tool approvals on for this
+     * session. Off until they do: Auto is a per-session choice.
+     */
+    autoToolApprovalsEnabled: boolean('auto_tool_approvals_enabled')
+      .notNull()
+      .default(false),
+    inactivityDueAt: timestamp('inactivity_due_at'),
     // Fast-conversation responding lease: while this is in the future, status
     // recomputation treats the conversation as actively responding. TTL-based
     // so a crashed turn self-heals instead of pinning the session 'active'.
@@ -4431,6 +4529,11 @@ export const sessions = pgTable(
       table.activityAt.desc(),
       table.id.desc(),
     ),
+    index('sessions_inactivity_due_idx')
+      .on(table.visibility, table.inactivityDueAt, table.id)
+      .where(
+        sql`${table.inactivityDueAt} IS NOT NULL AND ${table.manualStatus} IS NULL`,
+      ),
     index('sessions_owner_user_id_idx').on(table.ownerUserId),
     uniqueIndex('sessions_fast_conversation_id_unique')
       .on(table.fastConversationId)
@@ -4469,6 +4572,10 @@ export const sessions = pgTable(
     check(
       'sessions_cached_status_check',
       sql`${table.cachedStatus} IS NULL OR ${table.cachedStatus} in ('active', 'needs_input', 'blocked', 'ready')`,
+    ),
+    check(
+      'sessions_manual_status_check',
+      sql`${table.manualStatus} IS NULL OR ${table.manualStatus} in ('active', 'needs_input', 'blocked', 'ready', 'done')`,
     ),
   ],
 );
@@ -4581,7 +4688,7 @@ export const serviceCredentialAudit = pgTable('service_credential_audit', {
 /**
  * integration_tool_policies
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`) durable
+ * Integration tool approvals: durable
  * approval policy for code-mode integration tool calls in Sessions. One row
  * per (integration, tool); deployment-scoped and admin-configured. Absence of
  * a row is the default `allow`, which preserves the pre-experiment behavior.
@@ -4617,7 +4724,7 @@ export const integrationToolPolicies = pgTable(
 /**
  * integration_tool_user_policies
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`) personal
+ * Integration tool approvals: personal
  * per-tool approval modes. Same modes as `integration_tool_policies`, scoped
  * to one user's own Sessions, and only ever tightening: the stricter of the
  * deployment and personal mode applies. `allow` is stored as no row. Rows
@@ -4652,7 +4759,7 @@ export const integrationToolUserPolicies = pgTable(
 /**
  * integration_tool_approval_requests
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`) pending
+ * Integration tool approvals: pending
  * and decided approval requests for code-mode integration tool calls gated by
  * an `ask` policy. One row is both the pending request and its redacted audit
  * outcome: arguments are stored only as a redacted display summary; the
@@ -4765,7 +4872,7 @@ export const integrationToolAutoEvaluations = pgTable(
 /**
  * integration_tool_session_overrides
  *
- * Experiment-gated (`integration_tool_approvals_experiment_enabled`)
+ * Integration tool approvals:
  * requester-owned, session-scoped overrides of a tool's approval mode. `allow`
  * records "don't ask again this session" for a tool the deployment gates with
  * `ask`; `ask` gates a default-allow tool for this session only. A deployment
@@ -4901,6 +5008,131 @@ export const sessionGoals = pgTable(
     check(
       'session_goals_blocker_candidate_count_check',
       sql`${table.blockerCandidateCount} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Durable status-judgment requests and their bounded, transcript-free results.
+ * Rows are both the recovery outbox and the ordered history used by the
+ * experimental board. They never replace deterministic Session lifecycle.
+ */
+export const sessionStatusJudgments = pgTable(
+  'session_status_judgments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    sourceEventId: text('source_event_id').notNull(),
+    generation: integer('generation').notNull(),
+    sourceKind: text('source_kind')
+      .notNull()
+      .$type<SessionStatusJudgmentSourceKind>(),
+    state: text('state')
+      .notNull()
+      .default('pending')
+      .$type<SessionStatusJudgmentState>(),
+    outcome: text('outcome').$type<SessionStatusJudgmentOutcome>(),
+    confidence: real('confidence'),
+    probabilities: jsonb('probabilities').$type<Partial<
+      Record<SessionStatusJudgmentOutcome, number>
+    > | null>(),
+    model: text('model'),
+    attempts: integer('attempts').notNull().default(0),
+    claimedAt: timestamp('claimed_at'),
+    settledAt: timestamp('settled_at'),
+    judgedAt: timestamp('judged_at'),
+    errorCode: text('error_code'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_status_judgments_session_event_unique').on(
+      table.sessionId,
+      table.sourceEventId,
+    ),
+    uniqueIndex('session_status_judgments_session_generation_unique').on(
+      table.sessionId,
+      table.generation,
+    ),
+    index('session_status_judgments_pending_idx').on(
+      table.state,
+      table.createdAt,
+    ),
+    index('session_status_judgments_session_generation_idx').on(
+      table.sessionId,
+      table.generation.desc(),
+    ),
+    check(
+      'session_status_judgments_source_kind_check',
+      sql`${table.sourceKind} in ('fast_turn', 'task_terminal')`,
+    ),
+    check(
+      'session_status_judgments_state_check',
+      sql`${table.state} in ('awaiting_settlement', 'pending', 'processing', 'applied', 'ignored', 'failed', 'stale')`,
+    ),
+    check(
+      'session_status_judgments_outcome_check',
+      sql`${table.outcome} IS NULL OR ${table.outcome} in ('open', 'done', 'blocked', 'needs_input', 'unclear')`,
+    ),
+    check(
+      'session_status_judgments_confidence_check',
+      sql`${table.confidence} IS NULL OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`,
+    ),
+    check(
+      'session_status_judgments_attempts_check',
+      sql`${table.attempts} >= 0`,
+    ),
+  ],
+);
+
+export type SessionDoneWebhookDeliveryStatus =
+  | 'pending'
+  | 'delivered'
+  | 'failed'
+  | 'skipped';
+
+/** Durable at-least-once delivery outbox for decision-model completion events. */
+export const sessionDoneWebhookDeliveries = pgTable(
+  'session_done_webhook_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    judgmentId: uuid('judgment_id')
+      .notNull()
+      .references(() => sessionStatusJudgments.id, { onDelete: 'cascade' }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<SessionDoneWebhookDeliveryStatus>(),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at').notNull().defaultNow(),
+    lastError: text('last_error'),
+    deliveredAt: timestamp('delivered_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_done_webhook_deliveries_judgment_unique').on(
+      table.judgmentId,
+    ),
+    index('session_done_webhook_deliveries_due_idx').on(
+      table.status,
+      table.nextAttemptAt,
+      table.leaseExpiresAt,
+    ),
+    check(
+      'session_done_webhook_deliveries_status_check',
+      sql`${table.status} in ('pending', 'delivered', 'failed', 'skipped')`,
+    ),
+    check(
+      'session_done_webhook_deliveries_attempts_check',
+      sql`${table.attempts} >= 0`,
     ),
   ],
 );
@@ -5105,8 +5337,34 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   tasks: many(sessionTasks),
   participants: many(sessionParticipants),
   pins: many(sessionPins),
+  statusJudgments: many(sessionStatusJudgments),
+  doneWebhookDeliveries: many(sessionDoneWebhookDeliveries),
   usageEvents: many(llmUsageEvents),
 }));
+
+export const sessionStatusJudgmentsRelations = relations(
+  sessionStatusJudgments,
+  ({ one }) => ({
+    session: one(sessions, {
+      fields: [sessionStatusJudgments.sessionId],
+      references: [sessions.id],
+    }),
+  }),
+);
+
+export const sessionDoneWebhookDeliveriesRelations = relations(
+  sessionDoneWebhookDeliveries,
+  ({ one }) => ({
+    session: one(sessions, {
+      fields: [sessionDoneWebhookDeliveries.sessionId],
+      references: [sessions.id],
+    }),
+    judgment: one(sessionStatusJudgments, {
+      fields: [sessionDoneWebhookDeliveries.judgmentId],
+      references: [sessionStatusJudgments.id],
+    }),
+  }),
+);
 
 export const sessionTasksRelations = relations(sessionTasks, ({ one }) => ({
   session: one(sessions, {
@@ -5158,6 +5416,10 @@ export const customAutomations = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     prompt: text('prompt').notNull(),
+    /** Encrypted opaque bearer token for the optional custom webhook trigger. */
+    webhookSecret: encryptedText('webhook_secret'),
+    launchCriteria: text('launch_criteria'),
+    runWhen: jsonb('run_when').$type<CustomAutomationRunWhen | null>(),
     resultPriority: text('result_priority')
       .notNull()
       .default('normal')
@@ -5240,6 +5502,15 @@ export const automationResults = pgTable(
       text('result_visibility').$type<AutomationResultVisibility>(),
     automationName: text('automation_name').notNull(),
     content: text('content').notNull(),
+    launchCriteriaSnapshot: jsonb(
+      'launch_criteria_snapshot',
+    ).$type<CustomAutomationLaunchCriteriaSnapshot | null>(),
+    launchCriteriaAnswers: jsonb(
+      'launch_criteria_answers',
+    ).$type<CustomAutomationLaunchCriteriaAnswers | null>(),
+    launchCriteriaOutcome: jsonb(
+      'launch_criteria_outcome',
+    ).$type<CustomAutomationLaunchCriteriaOutcomes | null>(),
     resultKind: text('result_kind')
       .notNull()
       .default('outcome')

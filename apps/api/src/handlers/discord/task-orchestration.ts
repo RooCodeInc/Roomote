@@ -77,6 +77,8 @@ export async function startNewDiscordTask(input: {
   launchOwnerUserId?: string;
   /** Attribution override; takes precedence over the default user initiator. */
   initiator?: TaskInitiator;
+  /** Explicit visibility from the task-launch origin, independent of initiator. */
+  visibleInTranscript?: boolean;
   queuedMessage: QueuedCommunicationMessage;
   metadata: DiscordEventCommunicationMetadata;
   channel: DiscordChannelContext;
@@ -245,6 +247,9 @@ export async function startNewDiscordTask(input: {
       provider: input.provider,
       launchOwnerUserId: input.launchOwnerUserId,
       ...(input.initiator ? { initiator: input.initiator } : {}),
+      ...(input.visibleInTranscript !== undefined
+        ? { visibleInTranscript: input.visibleInTranscript }
+        : {}),
       ...(agentPromptText ? { agentPromptText } : {}),
       queuedMessage: {
         ...input.queuedMessage,

@@ -2,6 +2,7 @@ import {
   act,
   createEvent,
   fireEvent,
+  cleanup,
   render,
   screen,
   within,
@@ -41,19 +42,28 @@ vi.mock('@/hooks/useSessionIntegrationApprovals', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
-  useIntegrationToolApprovalsExperiment: () => ({
-    enabled: false,
-    isLoading: false,
-    isUpdating: false,
-    setEnabled: vi.fn(),
-  }),
-}));
-
 vi.mock('@/hooks/useSessionIntegrationToolApprovals', () => ({
   useSessionIntegrationToolApprovals: () => ({
     data: { pending: [] },
   }),
+}));
+
+const autoToolApprovals = vi.hoisted(() => ({
+  state: undefined as
+    | { available: boolean; enabled: boolean; suspended: boolean }
+    | undefined,
+  setEnabled: vi.fn(),
+  sessionIds: [] as string[],
+}));
+vi.mock('@/hooks/useSessionAutoToolApprovals', () => ({
+  useSessionAutoToolApprovals: (sessionId: string) => {
+    autoToolApprovals.sessionIds.push(sessionId);
+    return {
+      state: autoToolApprovals.state,
+      isSaving: false,
+      setEnabled: autoToolApprovals.setEnabled,
+    };
+  },
 }));
 
 vi.mock('./CapabilityOfferCard', () => ({
@@ -64,6 +74,7 @@ vi.mock('./CapabilityOfferCard', () => ({
 
 const {
   replyMutate,
+  deleteQueuedMessageMutate,
   startGoalMutate,
   reviewActionMutate,
   updateModelSelectionMutate,
@@ -72,6 +83,7 @@ const {
   openTasksPanel,
   narrationState,
   composerSuggestionState,
+  slackReferencesState,
   voiceStatusQuery,
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
@@ -79,8 +91,10 @@ const {
   liveVoiceState,
   authenticatedUserState,
   invalidateQueries,
+  fetchOlderMessages,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
+  deleteQueuedMessageMutate: vi.fn(),
   startGoalMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
   updateModelSelectionMutate: vi.fn(),
@@ -90,6 +104,14 @@ const {
   narrationState: { enabled: false },
   composerSuggestionState: {
     data: undefined as { suggestion: string; messageCount: number } | undefined,
+  },
+  slackReferencesState: {
+    data: undefined as
+      | {
+          users: Record<string, { name: string; profileUrl: string | null }>;
+          channels: Record<string, { name: string; url: string | null }>;
+        }
+      | undefined,
   },
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
@@ -107,6 +129,7 @@ const {
     },
   },
   invalidateQueries: vi.fn(),
+  fetchOlderMessages: vi.fn(),
   liveVoiceState: {
     active: false,
     status: 'idle' as
@@ -195,9 +218,11 @@ vi.mock('@/trpc/client', () => ({
         queryKey: (input: unknown) => ['fastSessions.tasks', input],
       },
       reply: { mutate: replyMutate },
+      deleteQueuedMessage: { mutate: deleteQueuedMessageMutate },
       startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
+      olderMessages: { query: fetchOlderMessages },
     },
     voice: {
       status: { query: voiceStatusQuery },
@@ -247,7 +272,12 @@ vi.mock('@/trpc/client', () => ({
 // these tests exercise the transcript, not suggestions.
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: () => ({ data: composerSuggestionState.data }),
+  useQuery: (options: { queryKey?: readonly unknown[] }) => ({
+    data:
+      options.queryKey?.[0] === 'slack.resolveUsers'
+        ? slackReferencesState.data
+        : composerSuggestionState.data,
+  }),
   useQueryClient: () => ({ invalidateQueries }),
 }));
 
@@ -427,6 +457,7 @@ beforeEach(() => {
   window.location.hash = '';
   FakeEventSource.instances = [];
   replyMutate.mockReset();
+  deleteQueuedMessageMutate.mockReset();
   startGoalMutate.mockReset();
   startGoalMutate.mockResolvedValue({ success: true, goal: {} });
   reviewActionMutate.mockReset();
@@ -436,10 +467,12 @@ beforeEach(() => {
   );
   narrationState.enabled = false;
   composerSuggestionState.data = undefined;
+  slackReferencesState.data = undefined;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
   invalidateQueries.mockReset();
   invalidateQueries.mockResolvedValue(undefined);
+  fetchOlderMessages.mockReset();
   voiceStatusQuery.mockReset();
   voiceStatusQuery.mockResolvedValue({ enabled: false });
   recordVoiceTurnMutate.mockReset();
@@ -472,6 +505,48 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  it('renders resolved Slack references in assistant output', async () => {
+    cleanup();
+    slackReferencesState.data = {
+      users: {
+        U123: {
+          name: 'Maya',
+          profileUrl: 'https://acme.slack.com/team/U123',
+        },
+      },
+      channels: {
+        C456: {
+          name: 'ops',
+          url: 'https://acme.slack.com/archives/C456',
+        },
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="fast-session"
+        initialMessages={[
+          textMessage({
+            id: 'assistant-slack-references',
+            role: 'assistant',
+            text: 'Post in <#C456> and ask <@U123>.',
+            ts: 1,
+          }),
+        ]}
+      />,
+    );
+
+    expect(await screen.findByRole('link', { name: '#ops' })).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/archives/C456',
+    );
+    expect(await screen.findByRole('link', { name: '@Maya' })).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/team/U123',
+    );
+    cleanup();
+  });
+
   /**
    * A completed `prepare_integration_key` call at `ts` that created
    * `pendingRef`, persisted as the tool returns it or under a result wrapper.
@@ -521,6 +596,45 @@ describe('FastSessionTranscript', () => {
     nativeSessionId: 'opencode-1',
     nativeMessageId: null,
     createdAt: new Date(ts),
+  });
+
+  it('offers the tool approvals mode in the composer to the session owner only', () => {
+    autoToolApprovals.state = {
+      available: true,
+      enabled: false,
+      suspended: false,
+    };
+    autoToolApprovals.sessionIds.length = 0;
+    autoToolApprovals.setEnabled.mockClear();
+    const { unmount } = render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const chip = screen.getByRole('button', { name: /^Tool approvals/ });
+    expect(chip).toHaveTextContent('Run');
+    // Approvals are keyed on the unified session, not the Fast conversation.
+    expect(autoToolApprovals.sessionIds).toContain('canonical-session');
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByRole('option', { name: /^Auto/ }));
+    expect(autoToolApprovals.setEnabled).toHaveBeenCalledWith(true);
+    unmount();
+
+    // Someone else's session: nothing to choose.
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(
+      screen.queryByRole('button', { name: /^Tool approvals/ }),
+    ).not.toBeInTheDocument();
+    autoToolApprovals.state = undefined;
   });
 
   it('shows a pending-key card for the owner and opens the key dialog from it', async () => {
@@ -809,6 +923,7 @@ describe('FastSessionTranscript', () => {
     userName = null,
     userEmail = null,
     userImageUrl = null,
+    turnSource,
   }: {
     id: string;
     role: 'user' | 'assistant';
@@ -821,6 +936,7 @@ describe('FastSessionTranscript', () => {
     userName?: string | null;
     userEmail?: string | null;
     userImageUrl?: string | null;
+    turnSource?: 'human' | 'platform_event';
   }) => ({
     id,
     eventId: `${id}:event`,
@@ -837,6 +953,7 @@ describe('FastSessionTranscript', () => {
       visibleInTranscript: visible,
       ...(inputKind ? { inputKind } : {}),
       ...(userId ? { userId } : {}),
+      ...(turnSource ? { turnSource } : {}),
     },
     payload: {},
     source: 'web',
@@ -846,6 +963,134 @@ describe('FastSessionTranscript', () => {
     userEmail,
     userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  it('records synthetic long-transcript render and event-loop timing', async () => {
+    const datasetMessages = 1_200;
+    const initialMessages = Array.from(
+      { length: datasetMessages },
+      (_, index) =>
+        textMessage({
+          id: `synthetic-${index}`,
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          text: `${index} ${'synthetic transcript paragraph '.repeat(16)}`,
+          ts: index + 1,
+        }),
+    );
+    const renderWindow = initialMessages.slice(-50);
+    const payloadBytes = new TextEncoder().encode(
+      JSON.stringify(renderWindow),
+    ).byteLength;
+    const startedAt = performance.now();
+    // In jsdom this timer can only run after synchronous React render returns;
+    // it is a main-thread proxy, not browser paint or animation evidence.
+    const nextEventLoopTurn = new Promise<number>((resolve) => {
+      setTimeout(() => resolve(performance.now() - startedAt), 0);
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="synthetic-long-transcript"
+        initialMessages={renderWindow}
+        initialMessagesCursor={{
+          createdAt: '2026-01-01 00:00:00.123456+00',
+          ts: 1_000,
+          turnSeq: 1,
+          id: '00000000-0000-4000-8000-000000000050',
+        }}
+      />,
+    );
+    const renderMs = performance.now() - startedAt;
+    const eventLoopDelayMs = await nextEventLoopTurn;
+
+    console.info(
+      '[synthetic-long-transcript-page]',
+      JSON.stringify({
+        datasetMessages,
+        initialMessages: renderWindow.length,
+        payloadBytes,
+        renderMs: Number(renderMs.toFixed(2)),
+        eventLoopDelayMs: Number(eventLoopDelayMs.toFixed(2)),
+      }),
+    );
+
+    expect(initialMessages).toHaveLength(datasetMessages);
+    expect(renderWindow).toHaveLength(50);
+  });
+
+  it('loads older messages near the top, preserves their order, and offers retry after failure', async () => {
+    const initialStreamCursor = 1_780_000_000_000.125;
+    const cursor = {
+      createdAt: '2026-01-01 00:00:00.123456+00',
+      ts: 2,
+      turnSeq: 1,
+      id: '00000000-0000-4000-8000-000000000002',
+    };
+    const olderMessages = [
+      textMessage({
+        id: 'older-user',
+        role: 'user',
+        text: 'An older user request',
+        ts: 1,
+      }),
+      textMessage({
+        id: 'older-assistant',
+        role: 'assistant',
+        text: 'An older assistant reply',
+        ts: 2,
+      }),
+    ];
+    fetchOlderMessages
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce({ messages: olderMessages, nextCursor: null });
+
+    const { container } = render(
+      <FastSessionTranscript
+        sessionId="synthetic-long-transcript"
+        initialMessagesCursor={cursor}
+        initialStreamCursor={initialStreamCursor}
+        initialMessages={[
+          textMessage({
+            id: 'current-user',
+            role: 'user',
+            text: 'Current user request',
+            ts: 3,
+          }),
+          textMessage({
+            id: 'current-assistant',
+            role: 'assistant',
+            text: 'Current assistant reply',
+            ts: 4,
+          }),
+        ]}
+      />,
+    );
+    expect(FakeEventSource.instances[0]?.url).toBe(
+      `/api/sessions/synthetic-long-transcript/stream?since=${initialStreamCursor}`,
+    );
+    const scrollElement = screen.getByRole('log')
+      .firstElementChild as HTMLElement;
+    scrollElement.scrollTop = 0;
+    fireEvent.scroll(scrollElement);
+
+    const retryButton = await screen.findByRole('button', {
+      name: 'Retry loading older messages',
+    });
+    expect(fetchOlderMessages).toHaveBeenCalledWith({
+      sessionId: 'synthetic-long-transcript',
+      cursor,
+    });
+
+    fireEvent.click(retryButton);
+    await screen.findByText('An older assistant reply');
+    const transcriptText = container.textContent ?? '';
+    expect(transcriptText.indexOf('An older user request')).toBeLessThan(
+      transcriptText.indexOf('An older assistant reply'),
+    );
+    expect(transcriptText.indexOf('An older assistant reply')).toBeLessThan(
+      transcriptText.indexOf('Current user request'),
+    );
+    expect(fetchOlderMessages).toHaveBeenCalledTimes(2);
   });
 
   it('shows automatic memory saves and expands their distilled facts', () => {
@@ -871,13 +1116,15 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    const summary = screen.getByText('Saved to memory');
-    expect(summary).toBeInTheDocument();
-    expect(summary.closest('details')).not.toHaveAttribute('open');
-    fireEvent.click(summary);
-    expect(summary.closest('details')).toHaveAttribute('open');
+    const toolHeader = screen.getByRole('button', {
+      name: 'Saved to memory Completed',
+    });
+    expect(toolHeader).toBeInTheDocument();
+    expect(toolHeader).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toolHeader);
+    expect(toolHeader).toHaveAttribute('aria-expanded', 'true');
     expect(
-      screen.getByText('Staging deploys use the release branch.'),
+      screen.getByText(/Staging deploys use the release branch\./),
     ).toBeInTheDocument();
   });
 
@@ -911,7 +1158,9 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(screen.getByText('Saved to memory')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Saved to memory Completed' }),
+    ).toBeInTheDocument();
   });
 
   it('restores each Session draft and scroll position without focusing after a direct switch', () => {
@@ -3148,8 +3397,11 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     await waitFor(() => expect(replyMutate).toHaveBeenCalled());
-    expect(screen.getByText('Queued follow-up')).toBeInTheDocument();
+    const queue = screen.getByRole('list', { name: 'Queued messages' });
+    expect(within(queue).getByText('Queued follow-up')).toBeInTheDocument();
     expect(screen.getByRole('log')).not.toHaveTextContent('Queued follow-up');
+    // The queue belongs to the composer card, above the message input.
+    expect(queue.parentElement).toContainElement(input);
 
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
@@ -3176,6 +3428,139 @@ describe('FastSessionTranscript', () => {
     expect(
       within(screen.getByRole('log')).getAllByText('Queued follow-up'),
     ).toHaveLength(1);
+  });
+
+  it('retires a locally queued follow-up once its steered prompt persists with the client id', async () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: { primaryEmailAddress: null, imageUrl: '' },
+    };
+    replyMutate.mockResolvedValue({
+      success: true,
+      admission: 'queued',
+      clientMessageId: 'ignored',
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Steer this in' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    const { clientMessageId } = replyMutate.mock.calls[0]![0] as {
+      clientMessageId: string;
+    };
+    const queue = screen.getByRole('list', { name: 'Queued messages' });
+    expect(within(queue).getByText('Steer this in')).toBeInTheDocument();
+
+    // Native steering delivers it mid-turn: the queue row settles and the
+    // persisted prompt carries the client id the composer sent.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', { queuedMessages: [] });
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'steered-user-1',
+              role: 'user',
+              text: 'Steer this in',
+              ts: 3,
+            }),
+            eventId: `${clientMessageId}:user`,
+            turnId: clientMessageId,
+            metadata: {
+              visibleInTranscript: true,
+              turnSource: 'human',
+              userId: 'current-user',
+              clientMessageId,
+            },
+          },
+        ],
+      });
+    });
+
+    expect(
+      screen.queryByRole('list', { name: 'Queued messages' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('log')).getAllByText('Steer this in'),
+    ).toHaveLength(1);
+  });
+
+  it('deletes the sender’s queued follow-up from the composer card and keeps it gone', async () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: { primaryEmailAddress: null, imageUrl: '' },
+    };
+    replyMutate.mockResolvedValue({
+      success: true,
+      admission: 'queued',
+      clientMessageId: 'ignored',
+    });
+    const deletion = Promise.withResolvers<{ outcome: 'withdrawn' }>();
+    deleteQueuedMessageMutate.mockReturnValue(deletion.promise);
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Never mind this' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    const { clientMessageId } = replyMutate.mock.calls[0]![0] as {
+      clientMessageId: string;
+    };
+    const serverRow = {
+      id: 'parent-event-1',
+      clientMessageId,
+      userId: 'current-user',
+      text: 'Never mind this',
+      timestamp: 2,
+    };
+    // The server's row replaces the optimistic entry under the same client id.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', {
+        queuedMessages: [serverRow],
+      });
+    });
+
+    const queue = screen.getByRole('list', { name: 'Queued messages' });
+    fireEvent.click(
+      within(queue).getByRole('button', { name: 'Delete queued message' }),
+    );
+    expect(deleteQueuedMessageMutate).toHaveBeenCalledExactlyOnceWith({
+      sessionId: 'session-1',
+      clientMessageId,
+    });
+    expect(
+      within(queue).getByRole('button', { name: 'Deleting queued message' }),
+    ).toBeDisabled();
+
+    await act(async () => deletion.resolve({ outcome: 'withdrawn' }));
+    expect(
+      screen.queryByRole('list', { name: 'Queued messages' }),
+    ).not.toBeInTheDocument();
+
+    // A snapshot polled before the withdrawal cannot bring it back.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('queue', {
+        queuedMessages: [serverRow],
+      });
+    });
+    expect(screen.queryByText('Never mind this')).not.toBeInTheDocument();
   });
 
   it('hydrates a pending queue item after reload and reconciles it by client id', () => {
@@ -3387,6 +3772,66 @@ describe('FastSessionTranscript', () => {
       ).not.toBeInTheDocument();
     },
   );
+
+  it('recalls only visible persisted human prompts in transcript order', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First user prompt',
+            ts: 1,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Assistant reply',
+            ts: 2,
+          }),
+          textMessage({
+            id: 'platform-1',
+            role: 'user',
+            text: 'Platform event',
+            ts: 3,
+            turnSource: 'platform_event',
+          }),
+          textMessage({
+            id: 'user-2',
+            role: 'user',
+            text: '  Latest user prompt\n',
+            ts: 4,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'hidden-user',
+            role: 'user',
+            text: 'Hidden prompt',
+            ts: 5,
+            visible: false,
+            turnSource: 'human',
+          }),
+          textMessage({
+            id: 'blank-user',
+            role: 'user',
+            text: ' \n ',
+            ts: 6,
+            turnSource: 'human',
+          }),
+        ]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveValue('  Latest user prompt\n');
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveValue('First user prompt');
+  });
 
   it('shows a later suggestion hint on the focused composer after a successful send', async () => {
     composerSuggestionState.data = {

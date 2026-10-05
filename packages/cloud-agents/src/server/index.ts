@@ -37,14 +37,11 @@ export * from './workflows/githubPrReviewComment';
 export * from './linked-task-relay';
 export * from './llm-task-title';
 export { distillTaskRunTurnMemory } from './task-run-memory-distillation';
-export {
-  DIFF_RISK_HINTS_MAX_DIFF_CHARS,
-  screenDiffRiskHints,
-} from './diff-risk-hints';
 export * from './user-personalization';
 export * from './mcp-self-setup';
 export * from './mcp-tool-client';
 export * from './non-task-provider-usage';
+export * from './judge-file';
 export {
   getAvailableEnvironments,
   type RoutableEnvironment,

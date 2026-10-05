@@ -379,7 +379,7 @@ function resolveReceiptLanguage(
     ) {
       return {
         verb: 'Checked',
-        object: `${remoteMcp}, needs setup in Settings`,
+        object: `${remoteMcp}, needs manual setup`,
       };
     }
     return { verb: 'Checked', object: remoteMcp };
@@ -474,6 +474,15 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Adding', 'Added', 'Failed to Add'),
       object: 'chat reaction',
+    };
+  if (toolName === 'memory_saved')
+    return {
+      verb: byPhase(
+        'Saving to memory',
+        'Saved to memory',
+        'Failed to Save to memory',
+      ),
+      object: '',
     };
   if (
     toolName === 'save_memory' ||

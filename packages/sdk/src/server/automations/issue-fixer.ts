@@ -10,7 +10,7 @@ import {
  * second prompt beside the webhook handlers.
  */
 export async function issueFixerJob(
-  _opts: AutomationRunOpts = {},
+  _opts: AutomationRunOpts,
 ): Promise<AutomationJobResult> {
   const result = emptyJobResult();
   result.skippedReason =

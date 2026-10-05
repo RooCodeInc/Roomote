@@ -1,3 +1,13 @@
+vi.mock('../judgement-proxy', async (original) => ({
+  ...(await original<typeof import('../judgement-proxy')>()),
+  setupJudgement: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../jevgrep', async (original) => ({
+  ...(await original<typeof import('../jevgrep')>()),
+  setupJevgrep: vi.fn().mockResolvedValue(false),
+}));
+
 import { EventEmitter } from 'node:events';
 
 const {
@@ -66,7 +76,7 @@ const {
   taskRunsUpdateRuntimeStateMock: vi.fn().mockResolvedValue({ updated: true }),
   taskRunsUpdateMock: vi.fn().mockResolvedValue(undefined),
   createHarnessMock: vi.fn().mockResolvedValue({
-    harness: {},
+    harness: { on: vi.fn(), isConnected: false },
     getSubprocess: vi.fn(() => ({})),
     unsubscribe: vi.fn().mockResolvedValue(undefined),
     flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),
@@ -79,9 +89,11 @@ const {
     taskFinishedAt: undefined,
     taskAbortedAt: undefined,
   })),
-  createServerMock: vi.fn(() => ({
-    close: vi.fn().mockResolvedValue(undefined),
-  })),
+  createServerMock: vi.fn(
+    (_options: { userEnv: () => Record<string, string> }) => ({
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+  ),
   drainSlackMessagesMock: vi
     .fn()
     .mockResolvedValue({ resumed: false, reason: 'no_pending_messages' }),
@@ -107,10 +119,21 @@ const {
   installZeroCliMock: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('node:fs', () => ({
-  existsSync: existsSyncMock,
-  mkdirSync: mkdirSyncMock,
-  writeFileSync: writeFileSyncMock,
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+
+  return {
+    ...actual,
+    existsSync: existsSyncMock,
+    mkdirSync: mkdirSyncMock,
+    writeFileSync: writeFileSyncMock,
+  };
+});
+
+vi.mock('../../commands/utils/scrub-sandbox-secrets', () => ({
+  scrubSandboxSecretsBeforeSnapshot: vi
+    .fn()
+    .mockResolvedValue({ failedSteps: [] }),
 }));
 
 vi.mock('../../mcp/roomote-mcp-server/chat-reply-satisfaction', () => ({
@@ -170,12 +193,6 @@ vi.mock('@roomote/cloud-agents', () => ({
   resolveRoomoteReleaseVersion: vi.fn(() => '0.40.2'),
 }));
 
-vi.mock('@roomote/communication/messages', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@roomote/communication/messages')>()),
-  peekTaskFollowUps: peekTaskFollowUpsMock,
-  removeTaskFollowUp: removeTaskFollowUpMock,
-}));
-
 vi.mock('@roomote/sdk/client', () => ({
   instanceSkills: { listForRuntime: listInstanceSkillsMock },
   sdk: {
@@ -183,7 +200,9 @@ vi.mock('@roomote/sdk/client', () => ({
       activateSlackReplyTarget: taskRunsActivateSlackReplyTargetMock,
       clearActiveSlackReplyTarget: taskRunsClearActiveSlackReplyTargetMock,
       done: taskRunsDoneMock,
+      peekTaskFollowUps: peekTaskFollowUpsMock,
       recordEvent: taskRunsRecordEventMock,
+      removeTaskFollowUp: removeTaskFollowUpMock,
       stampMilestone: taskRunsStampMilestoneMock,
       setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
       syncActingUserId: taskRunsSyncActingUserIdMock,
@@ -309,6 +328,7 @@ import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import { resolveWorkerReleaseMetadata } from '../../monitoring/worker-release-metadata';
 import type { HarnessManagerCallbacks } from '../../sandbox-server/lib/harness-manager';
 import { getDefaultKeepaliveMs } from '../completion';
+import { setupJevgrep } from '../jevgrep';
 import { runTask } from '../run-task';
 import type { EnvironmentSetupSettledOutcome } from '../types';
 
@@ -374,7 +394,7 @@ describe('runTask', () => {
     removeTaskFollowUpMock.mockReset().mockResolvedValue(undefined);
 
     createHarnessMock.mockResolvedValue({
-      harness: {},
+      harness: { on: vi.fn(), isConnected: false },
       getSubprocess: vi.fn(() => ({})),
       unsubscribe: vi.fn().mockResolvedValue(undefined),
       flushPendingCompletionEvents: flushPendingCompletionEventsMock,
@@ -653,6 +673,10 @@ describe('runTask', () => {
   });
 
   it('always enables the terminal runtime env and sandbox server', async () => {
+    vi.mocked(setupJevgrep).mockImplementationOnce(async ({ runtimeEnv }) => {
+      runtimeEnv.R_JEVGREP_GATEWAY_URL = 'https://api.example.test/jevgrep';
+      return true;
+    });
     await runTask({
       taskRun: {
         id: 110,
@@ -700,6 +724,14 @@ describe('runTask', () => {
         allowTerminal: true,
       }),
     );
+    const terminalEnv = createServerMock.mock.calls.at(-1)?.[0].userEnv();
+    expect(terminalEnv).toEqual(
+      expect.objectContaining({
+        R_JEVGREP_GATEWAY_URL: 'https://api.example.test/jevgrep',
+      }),
+    );
+    expect(terminalEnv?.PATH).toContain('/.roomote/jevgrep/bin:');
+    expect(terminalEnv).not.toHaveProperty('ROOMOTE_CLOUD_TOKEN');
   });
 
   it('keeps the task terminal enabled while clearing only reserved reply context env vars', async () => {
@@ -2009,6 +2041,8 @@ describe('runTask', () => {
     const requestReconnect = vi.fn().mockResolvedValue(undefined);
     createHarnessMock.mockResolvedValueOnce({
       harness: {
+        on: vi.fn(),
+        isConnected: false,
         requestReconnect,
       },
       getSubprocess: vi.fn(() => ({})),
@@ -2195,6 +2229,8 @@ describe('runTask', () => {
     const onStart = vi.fn().mockResolvedValue(undefined);
     createHarnessMock.mockResolvedValueOnce({
       harness: {
+        on: vi.fn(),
+        isConnected: false,
         requestReconnect: vi.fn().mockResolvedValue(undefined),
       },
       getSubprocess: vi.fn(() => ({})),
@@ -2594,6 +2630,8 @@ describe('runTask', () => {
     createHarnessMock.mockImplementationOnce(async () => {
       return {
         harness: {
+          on: vi.fn(),
+          isConnected: false,
           requestReconnect,
         },
         getSubprocess: vi.fn(() => ({})),
@@ -3306,10 +3344,10 @@ describe('runTask', () => {
       clientMessageId: 'client-empty-session',
     });
     expect(harnessManager?.sendFollowUpPrompt).not.toHaveBeenCalled();
-    expect(removeTaskFollowUpMock).toHaveBeenCalledWith(
-      152,
-      'raw-empty-session',
-    );
+    expect(removeTaskFollowUpMock).toHaveBeenCalledWith({
+      runId: 152,
+      raw: 'raw-empty-session',
+    });
   });
 
   it('preserves startup steer semantics across an actor transition', async () => {
@@ -3354,10 +3392,10 @@ describe('runTask', () => {
     expect(getMcpServerConfigsMock.mock.calls.length).toBeGreaterThan(
       mcpRefreshCallsBefore,
     );
-    expect(removeTaskFollowUpMock).toHaveBeenCalledWith(
-      153,
-      'raw-startup-steer',
-    );
+    expect(removeTaskFollowUpMock).toHaveBeenCalledWith({
+      runId: 153,
+      raw: 'raw-startup-steer',
+    });
   });
 
   it('retries only the removal when it fails after the runtime accepted the prompt', async () => {
@@ -3389,10 +3427,10 @@ describe('runTask', () => {
 
     expect(harnessManager.sendFollowUpPrompt).toHaveBeenCalledTimes(1);
     expect(removeTaskFollowUpMock).toHaveBeenCalledTimes(2);
-    expect(removeTaskFollowUpMock).toHaveBeenLastCalledWith(
-      155,
-      'raw-accepted',
-    );
+    expect(removeTaskFollowUpMock).toHaveBeenLastCalledWith({
+      runId: 155,
+      raw: 'raw-accepted',
+    });
   });
 
   it('leaves a queued follow-up in place when the runtime rejects it', async () => {
@@ -3505,6 +3543,8 @@ describe('runTask', () => {
 
     createHarnessMock.mockResolvedValueOnce({
       harness: {
+        on: vi.fn(),
+        isConnected: false,
         dispose: harnessDispose,
       },
       getSubprocess: vi.fn(() => currentSubprocess),
@@ -4530,7 +4570,7 @@ describe('runTask', () => {
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
-        excludeSkillNames: ['doctor', 'zero'],
+        excludeSkillNames: ['doctor', 'zero', 'jevgrep', 'judgement'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(

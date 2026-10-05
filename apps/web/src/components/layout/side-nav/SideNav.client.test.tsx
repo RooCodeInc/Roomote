@@ -61,6 +61,9 @@ vi.mock('@tanstack/react-query', () => ({
     if (queryOptions?.queryKind === 'sessionsList') {
       return { data: { sessions: state.sessions, nextCursor: null } };
     }
+    if (queryOptions?.queryKind === 'resultsPendingCount') {
+      return { data: 2 };
+    }
 
     return { data: state.tasks };
   },
@@ -97,10 +100,10 @@ vi.mock('@/components/system', () => ({
   ListChevronsUpDown: () => <svg aria-hidden="true" />,
   MessageCircleQuestionMark: () => <svg aria-hidden="true" />,
   MessageSquarePlus: () => <svg aria-hidden="true" />,
+  MessagesSquare: () => <svg aria-hidden="true" />,
   PanelLeftClose: () => <svg aria-hidden="true" />,
   PanelLeftOpen: () => <svg aria-hidden="true" />,
   Plus: () => <svg aria-hidden="true" />,
-  Rows4: () => <svg aria-hidden="true" />,
   NotepadText: () => <svg aria-hidden="true" />,
   Search: () => <svg aria-hidden="true" />,
   Settings: () => <svg aria-hidden="true" />,
@@ -108,8 +111,14 @@ vi.mock('@/components/system', () => ({
 }));
 
 vi.mock('@/components/layout', () => ({
-  RoomoteWordmark: ({ 'aria-label': ariaLabel }: { 'aria-label'?: string }) => (
-    <div role="img" aria-label={ariaLabel}>
+  RoomoteWordmark: ({
+    'aria-label': ariaLabel,
+    className,
+  }: {
+    'aria-label'?: string;
+    className?: string;
+  }) => (
+    <div role="img" aria-label={ariaLabel} className={className}>
       wordmark
     </div>
   ),
@@ -155,10 +164,6 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
 }));
 
-vi.mock('@/hooks/useResultsPage', () => ({
-  useResultsPage: () => ({ enabled: false, isLoading: false }),
-}));
-
 vi.mock('@/hooks/tasks', () => ({
   useLiveTaskStatus: (taskId: string | null) => useLiveTaskStatusMock(taskId),
   useTaskPins: () => ({
@@ -177,7 +182,9 @@ vi.mock('@/trpc/client', () => ({
       search: { queryOptions: queryOptionsMock },
     },
     results: {
-      pendingCount: { queryOptions: () => ({ queryKey: ['results'] }) },
+      pendingCount: {
+        queryOptions: () => ({ queryKind: 'resultsPendingCount' }),
+      },
       unreadCount: { queryOptions: () => ({ queryKey: ['results'] }) },
     },
   }),
@@ -193,6 +200,7 @@ vi.mock('./SideNavItem', () => ({
     disabled,
     description,
     'aria-label': ariaLabel,
+    badgeCount,
   }: {
     href?: string;
     onClick?: () => void;
@@ -202,6 +210,7 @@ vi.mock('./SideNavItem', () => ({
     disabled?: boolean;
     description?: ReactNode;
     'aria-label'?: string;
+    badgeCount?: number;
   }) =>
     href ? (
       <a
@@ -212,6 +221,7 @@ vi.mock('./SideNavItem', () => ({
         data-disabled={String(disabled ?? false)}
         data-description={typeof description === 'string' ? description : ''}
         data-tooltip={typeof tooltip === 'string' ? tooltip : ''}
+        data-badge-count={badgeCount ?? 0}
       />
     ) : (
       <button
@@ -275,6 +285,14 @@ vi.mock('./SideNavSessionItem', () => ({
 
 import { getSessionIdFromPathname } from './RecentSessions';
 import { SideNav, getTaskIdFromPathname } from './SideNav';
+
+function getNavGroupLabels() {
+  const navGroups = screen.getByTestId('nav-/').parentElement?.parentElement;
+
+  return Array.from(navGroups?.children ?? [], (group) =>
+    Array.from(group.children, (item) => item.getAttribute('aria-label')),
+  );
+}
 
 describe('SideNav recent sessions', () => {
   beforeEach(() => {
@@ -530,25 +548,15 @@ describe('SideNav recent sessions', () => {
     );
   });
 
-  it('keeps the new session action above Home', () => {
+  it('groups Home before the new session action and Analytics between Settings and Search for admins', () => {
     render(<SideNav />);
 
-    const newSessionItem = screen.getByTestId('nav-action-New Session');
-    const homeItem = screen.getByTestId('nav-/');
-    expect(newSessionItem.compareDocumentPosition(homeItem)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-  });
-
-  it('keeps analytics visible and Sessions before automations for admins', () => {
-    render(<SideNav />);
-
-    expect(screen.getByTestId('nav-/analytics')).toBeInTheDocument();
-    const automations = screen.getByTestId('nav-/automations');
-    const sessions = screen.getByTestId('nav-/sessions');
-    expect(automations.compareDocumentPosition(sessions)).toBe(
-      Node.DOCUMENT_POSITION_PRECEDING,
-    );
+    expect(getNavGroupLabels()).toEqual([
+      ['Home', 'New Session', 'Sessions'],
+      ['Automations', 'Results', 'Integrations', 'Settings'],
+      ['Analytics'],
+      ['Search', 'Expand sidebar'],
+    ]);
   });
 
   it('preserves pinned-task actions and live status', () => {
@@ -592,58 +600,40 @@ describe('SideNav recent sessions', () => {
     );
   });
 
-  it('shows settings and automations to members but keeps analytics admin-only', () => {
+  it('shows Results to members without an empty analytics group', () => {
     state.user.isAdmin = false;
 
     render(<SideNav />);
 
-    expect(screen.getByTestId('nav-/settings')).toBeInTheDocument();
-    expect(screen.getByTestId('nav-/automations')).toBeInTheDocument();
-    expect(screen.queryByTestId('nav-/analytics')).not.toBeInTheDocument();
+    expect(getNavGroupLabels()).toEqual([
+      ['Home', 'New Session', 'Sessions'],
+      ['Automations', 'Results', 'Integrations', 'Settings'],
+      ['Search', 'Expand sidebar'],
+    ]);
   });
 
-  it('disables inaccessible destinations during setup while keeping Settings enabled', () => {
-    render(<SideNav setupIncomplete />);
+  it('keeps dashboard destinations enabled', () => {
+    render(<SideNav />);
 
-    expect(screen.getByTestId('nav-/')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    expect(screen.getByTestId('nav-/automations')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    expect(screen.getByTestId('nav-/analytics')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    for (const href of ['/', '/automations', '/analytics']) {
+    for (const href of ['/', '/automations', '/results', '/analytics']) {
       expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
-        'data-tooltip',
-        'Available when setup is completed.',
-      );
-      expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
-        'data-description',
-        '',
+        'data-disabled',
+        'false',
       );
     }
-    expect(screen.getByTestId('nav-/sessions')).toHaveAttribute(
-      'data-disabled',
-      'false',
-    );
-    expect(screen.getByTestId('nav-/settings')).toHaveAttribute(
-      'data-disabled',
-      'false',
+    expect(screen.getByTestId('nav-/results')).toHaveAttribute(
+      'data-badge-count',
+      '2',
     );
   });
 
-  it('removes the expanded wordmark Home link during setup', () => {
+  it('keeps the expanded wordmark linked to Home', () => {
     state.isSideNavExpanded = true;
 
-    render(<SideNav setupIncomplete />);
+    render(<SideNav />);
 
     expect(
       screen.getByRole('img', { name: 'Roomote' }).closest('a'),
-    ).toBeNull();
+    ).toHaveAttribute('href', '/');
   });
 });

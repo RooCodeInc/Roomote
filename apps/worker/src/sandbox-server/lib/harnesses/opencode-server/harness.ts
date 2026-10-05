@@ -10,15 +10,24 @@ import {
   asRecord,
   asString,
   buildAcpRequestUserInputRequestId,
+  formatInferenceCreditsExhaustedMessage,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
   INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS,
   INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS,
+  isInferenceCreditsExhaustedError,
   normalizeAcpReasoningText,
   parseAcpFlattenedMcpToolName,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
+  resolveInferenceProviderDisplayName,
   TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY,
   TaskEventName,
+  classifyModelFallbackTrigger,
+  type ModelFallbackTrigger,
+  type ReasoningEffort,
+  type TaskModelRole,
 } from '@roomote/types';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import type {
@@ -124,6 +133,21 @@ interface OpenCodeServerHarnessOptions {
   commandEnv?: Record<string, string>;
   initialSessionId?: string;
   model?: string;
+  activeModelId?: string;
+  fallbackModel?: string;
+  fallbackReasoningEffort?: ReasoningEffort;
+  fallbackRole?: TaskModelRole;
+  agentFallbacks?: Partial<
+    Record<
+      string,
+      {
+        role: TaskModelRole;
+        activeModelId: string;
+        fallbackModel: string;
+        fallbackReasoningEffort?: ReasoningEffort;
+      }
+    >
+  >;
   eventStreamReadyTimeoutMs?: number;
   executeToolProgressInitialDelayMs?: number;
   executeToolProgressIntervalMs?: number;
@@ -1617,6 +1641,15 @@ export class OpenCodeServerHarness
   private readonly normalizedWorkspacePath: string;
   private readonly logger: OpenCodeServerHarnessOptions['logger'];
   private readonly model: OpenCodeModelSelection | undefined;
+  private readonly activeModelId: string | undefined;
+  private readonly fallbackModel: string | undefined;
+  private readonly fallbackReasoningEffort: ReasoningEffort | undefined;
+  private readonly fallbackRole: TaskModelRole | undefined;
+  private fallbackRequested = false;
+  private readonly agentFallbacks: NonNullable<
+    OpenCodeServerHarnessOptions['agentFallbacks']
+  >;
+  private readonly agentFallbackRolesRequested = new Set<TaskModelRole>();
   private readonly beforeQueuedPrompt:
     | OpenCodeServerHarnessOptions['beforeQueuedPrompt']
     | undefined;
@@ -1661,6 +1694,10 @@ export class OpenCodeServerHarness
   private readonly emittedTodoPlanKeys = new Set<string>();
   private readonly submittedUserMessageIds = new Set<string>();
   private readonly messageRoleById = new Map<string, OpenCodeMessageRole>();
+  // Provider behind each session's latest model request, used to name it in
+  // user-facing errors. The configured model is usually not known here: it
+  // comes from the generated OpenCode config unless a launch override set it.
+  private readonly assistantProviderIdBySession = new Map<string, string>();
   private readonly pendingUserInputRequests = new Map<
     string,
     HarnessPendingUserInputRequest
@@ -1787,6 +1824,11 @@ export class OpenCodeServerHarness
     this.model = options.model
       ? resolveOpenCodeModelSelection(options.model)
       : undefined;
+    this.activeModelId = options.activeModelId;
+    this.fallbackModel = options.fallbackModel;
+    this.fallbackReasoningEffort = options.fallbackReasoningEffort;
+    this.fallbackRole = options.fallbackRole;
+    this.agentFallbacks = options.agentFallbacks ?? {};
     this.commandEnv = options.commandEnv
       ? { ...options.commandEnv }
       : undefined;
@@ -3987,7 +4029,36 @@ export class OpenCodeServerHarness
       // child session going idle or erroring is its
       // terminal signal — handled per launch kind by
       // handleChildSessionTerminal — and must never finish the parent turn.
-      if (payload.type === 'session.idle' || payload.type === 'session.error') {
+      if (payload.type === 'session.error') {
+        const error = asRecord(payload.properties)?.error;
+        if (
+          await this.requestChildModelFallback(
+            sessionId,
+            relationship,
+            error,
+            0,
+          )
+        ) {
+          return;
+        }
+        this.handleChildSessionTerminal(sessionId);
+        return;
+      }
+      if (payload.type === 'session.status') {
+        const status = asRecord(asRecord(payload.properties)?.status);
+        if (
+          asString(status?.type) === 'retry' &&
+          (await this.requestChildModelFallback(
+            sessionId,
+            relationship,
+            status,
+            asFiniteNumber(status?.attempt) ?? 0,
+          ))
+        ) {
+          return;
+        }
+      }
+      if (payload.type === 'session.idle') {
         this.handleChildSessionTerminal(sessionId);
         return;
       }
@@ -4054,6 +4125,18 @@ export class OpenCodeServerHarness
       const exhaustedRetryBudget =
         retryAttempt !== undefined &&
         retryAttempt >= MAX_OPENCODE_INTERNAL_RETRY_ATTEMPTS;
+      const fallbackTrigger = this.resolveFallbackTrigger(
+        status,
+        Math.max(
+          this.providerRateLimitRetryCount,
+          this.providerErrorRecoveryCounts.provider_error,
+        ),
+      );
+
+      if (sessionId && fallbackTrigger) {
+        await this.requestModelFallback(sessionId, status, fallbackTrigger);
+        return;
+      }
 
       if (sessionId && (isTerminalProviderError || exhaustedRetryBudget)) {
         await this.terminateOpenCodeProviderRetry(
@@ -4136,6 +4219,108 @@ export class OpenCodeServerHarness
 
       await this.finishCurrentTurn('session_status');
     }
+  }
+
+  private resolveFallbackTrigger(
+    error: unknown,
+    retriesUsed: number,
+  ): ModelFallbackTrigger | null {
+    if (
+      this.fallbackRequested ||
+      !this.fallbackModel ||
+      !this.fallbackRole ||
+      !this.activeModelId ||
+      this.fallbackModel === this.activeModelId
+    ) {
+      return null;
+    }
+
+    return classifyModelFallbackTrigger(error, { retriesUsed });
+  }
+
+  private async requestModelFallback(
+    sessionId: string,
+    error: unknown,
+    trigger: ModelFallbackTrigger,
+  ): Promise<void> {
+    if (
+      this.fallbackRequested ||
+      !this.fallbackModel ||
+      !this.fallbackRole ||
+      !this.activeModelId
+    ) {
+      return;
+    }
+    this.fallbackRequested = true;
+    this.suppressAssistantOutputUntilNextPrompt = true;
+    this.inFlight = false;
+    this.finalizedAssistantTurn = null;
+    this.ignoreNextProviderRecoverySessionIdle = true;
+    this.armReplayAbortErrorSuppression();
+    try {
+      await this.client.abort({
+        sessionId,
+        signal: this.eventAbortController.signal,
+      });
+    } catch (abortError) {
+      this.logger.warn(
+        `Failed to abort OpenCode before model fallback sessionId=${sessionId}: ${abortError instanceof Error ? abortError.message : String(abortError)}`,
+      );
+    }
+    this.emit('modelFallbackRequested', {
+      role: this.fallbackRole,
+      fromModelId: this.activeModelId,
+      toModelId: this.fallbackModel,
+      toReasoningEffort: this.fallbackReasoningEffort ?? null,
+      errorSummary: summarizeOpenCodeProviderError(error),
+      trigger,
+      sessionId,
+    });
+  }
+
+  private async requestChildModelFallback(
+    childSessionId: string,
+    relationship: OpenCodeChildSessionRelationship,
+    error: unknown,
+    retriesUsed: number,
+  ): Promise<boolean> {
+    const agentType = relationship.agentType;
+    const fallback = agentType ? this.agentFallbacks[agentType] : undefined;
+    if (!fallback || this.agentFallbackRolesRequested.has(fallback.role)) {
+      return false;
+    }
+    const trigger = classifyModelFallbackTrigger(error, { retriesUsed });
+    if (!trigger) return false;
+
+    this.agentFallbackRolesRequested.add(fallback.role);
+    this.suppressAssistantOutputUntilNextPrompt = true;
+    this.inFlight = false;
+    this.finalizedAssistantTurn = null;
+    this.ignoreNextProviderRecoverySessionIdle = true;
+    this.armReplayAbortErrorSuppression();
+    await Promise.allSettled([
+      this.client.abort({
+        sessionId: childSessionId,
+        signal: this.eventAbortController.signal,
+      }),
+      this.sessionId
+        ? this.client.abort({
+            sessionId: this.sessionId,
+            signal: this.eventAbortController.signal,
+          })
+        : Promise.resolve(),
+    ]);
+    this.emit('modelFallbackRequested', {
+      role: fallback.role,
+      fromModelId: fallback.activeModelId,
+      toModelId: fallback.fallbackModel,
+      toReasoningEffort: fallback.fallbackReasoningEffort ?? null,
+      errorSummary: summarizeOpenCodeProviderError(error),
+      trigger,
+      sessionId: this.sessionId,
+      agentType: relationship.agentType ?? undefined,
+    });
+    return true;
   }
 
   private async terminateOpenCodeProviderRetry(
@@ -4258,6 +4443,16 @@ export class OpenCodeServerHarness
       return;
     }
 
+    const retriesUsed = Math.max(
+      this.providerRateLimitRetryCount,
+      this.providerErrorRecoveryCounts.provider_error,
+    );
+    const fallbackTrigger = this.resolveFallbackTrigger(error, retriesUsed);
+    if (sessionId && fallbackTrigger) {
+      await this.requestModelFallback(sessionId, error, fallbackTrigger);
+      return;
+    }
+
     const isProviderRateLimit =
       !!sessionId && isOpenCodeProviderRateLimitError(error);
 
@@ -4279,7 +4474,11 @@ export class OpenCodeServerHarness
     }
 
     if (sessionId) {
-      const errorText = formatOpenCodeSessionErrorText(error);
+      const errorText = isInferenceCreditsExhaustedError(error)
+        ? formatInferenceCreditsExhaustedMessage(
+            this.resolveProviderDisplayName(sessionId),
+          )
+        : formatOpenCodeSessionErrorText(error);
 
       this.logger.error(
         `OpenCode session error sessionId=${sessionId}: ${JSON.stringify(error ?? {})}`,
@@ -4326,6 +4525,24 @@ export class OpenCodeServerHarness
 
     await this.cleanupVisualAttachmentDirectories();
     this.inFlight = false;
+  }
+
+  /**
+   * Display name of the provider behind a session's failing request. The
+   * gateway markers say whether `openai/` and `xai/` models run on a
+   * connected ChatGPT or Grok subscription rather than an API key.
+   */
+  private resolveProviderDisplayName(sessionId: string): string | undefined {
+    return resolveInferenceProviderDisplayName(
+      this.assistantProviderIdBySession.get(sessionId) ??
+        this.model?.providerID,
+      {
+        chatgptConnected:
+          this.commandEnv?.[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1',
+        xaiSubscriptionConnected:
+          this.commandEnv?.[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME] === '1',
+      },
+    );
   }
 
   private async failPendingContextOverflow(): Promise<boolean> {
@@ -5225,6 +5442,15 @@ export class OpenCodeServerHarness
 
     if (typeof info.parentID === 'string' && info.parentID) {
       this.assistantParentById.set(info.id, info.parentID);
+    }
+
+    if (
+      typeof info.sessionID === 'string' &&
+      info.sessionID &&
+      typeof info.providerID === 'string' &&
+      info.providerID
+    ) {
+      this.assistantProviderIdBySession.set(info.sessionID, info.providerID);
     }
 
     this.stallWatchdogs.noteProgress();

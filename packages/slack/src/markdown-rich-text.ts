@@ -1,3 +1,5 @@
+import { formatReactionEmojiForDisplay } from '@roomote/communication/reaction-emoji';
+
 /**
  * Markdown → Slack `rich_text` conversion for surfaces that take a
  * rich_text entity instead of a `markdown` block (task and automation cards).
@@ -46,10 +48,207 @@ type SlackRichTextConversionOptions = {
   angleBracketLinkDestinations?: boolean;
 };
 
-// Every repetition is bounded so a pathological message (for example a
-// long run of "[" or "<http://|") cannot make matching superlinear.
+// Rich-text text elements do not apply Slack's `:name:` markdown parsing.
+const SLACK_EMOJI_SHORTCODE_PATTERN = /:[a-z0-9_+-]+(?:::[a-z0-9_+-]+)*:/giu;
+
+function normalizeKnownSlackEmojiShortcodes(text: string): string {
+  return text.replace(SLACK_EMOJI_SHORTCODE_PATTERN, (shortcode) => {
+    const display = formatReactionEmojiForDisplay(shortcode);
+    return display.startsWith(':') ? shortcode : display;
+  });
+}
+
+const MAX_INLINE_LINK_LABEL_LENGTH = 500;
+const MAX_INLINE_LINK_URL_LENGTH = 2_000;
+
+// Markdown links are scanned separately because link labels can contain
+// balanced or escaped square brackets. Every repetition here is bounded so a
+// pathological message (for example a long run of "<http://|") cannot make
+// matching superlinear.
 const INLINE_PATTERN =
-  /(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}?\*\*)|(~~[^~\n]{1,500}?~~)|(\[[^\]\n]{1,500}\]\((?:(?:https?:\/\/)(?:[^()<>\s]|\([^()<>\s]{0,200}\)){1,2000}|<(?:https?:\/\/)(?:[^()<>\s]|\([^()<>\s]{0,200}\)){1,2000}>)\))|(<(?:https?:\/\/)[^>\s|]{1,2000}(?:\|[^>\n]{1,500})?>)|(\b(?:https?:\/\/)[^\s<>)]{1,2000})|((?<![\w*])\*(?!\s)[^*\n]{1,500}?(?<!\s)\*(?![\w*]))|((?<![\w_])_(?!\s)[^_\n]{1,500}?(?<!\s)_(?![\w_]))/g;
+  /(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}?\*\*)|(~~[^~\n]{1,500}?~~)|(<(?:https?:\/\/)[^>\s|]{1,2000}(?:\|[^>\n]{1,500})?>)|(\b(?:https?:\/\/)[^\s<>)]{1,2000})|((?<![\w*])\*(?!\s)[^*\n]{1,500}?(?<!\s)\*(?![\w*]))|((?<![\w_])_(?!\s)[^_\n]{1,500}?(?<!\s)_(?![\w_]))/g;
+
+type MarkdownLinkMatch = {
+  index: number;
+  end: number;
+  raw: string;
+  label: string;
+  url: string;
+  angleBracketed: boolean;
+};
+
+type MarkdownLinkDestination = {
+  end: number;
+  url: string;
+  angleBracketed: boolean;
+};
+
+function isHttpMarkdownUrl(value: string): boolean {
+  return value.startsWith('https://') || value.startsWith('http://');
+}
+
+function decodeMarkdownLinkUrl(value: string): string {
+  return value.replaceAll('&amp;', '&');
+}
+
+function isValidMarkdownLinkUrl(value: string): boolean {
+  if (
+    value.length === 0 ||
+    value.length > MAX_INLINE_LINK_URL_LENGTH ||
+    !isHttpMarkdownUrl(value)
+  ) {
+    return false;
+  }
+
+  let parentheses = 0;
+  for (const character of value) {
+    if (
+      character.trim().length === 0 ||
+      character === '<' ||
+      character === '>'
+    ) {
+      return false;
+    }
+    if (character === '(') {
+      parentheses += 1;
+    } else if (character === ')') {
+      if (parentheses === 0) return false;
+      parentheses -= 1;
+    }
+  }
+
+  return parentheses === 0;
+}
+
+function parseMarkdownLinkDestination(
+  text: string,
+  start: number,
+): MarkdownLinkDestination | null {
+  if (text.startsWith('<', start)) {
+    const close = text.indexOf('>', start + 1);
+    if (close === -1 || close - start - 1 > MAX_INLINE_LINK_URL_LENGTH) {
+      return null;
+    }
+    const url = decodeMarkdownLinkUrl(text.slice(start + 1, close));
+    if (text[close + 1] !== ')' || !isValidMarkdownLinkUrl(url)) {
+      return null;
+    }
+    return { end: close + 2, url, angleBracketed: true };
+  }
+
+  if (text.startsWith('&lt;', start)) {
+    const close = text.indexOf('&gt;', start + 4);
+    if (close === -1 || close - start - 4 > MAX_INLINE_LINK_URL_LENGTH) {
+      return null;
+    }
+    const url = decodeMarkdownLinkUrl(text.slice(start + 4, close));
+    if (text[close + 4] !== ')' || !isValidMarkdownLinkUrl(url)) {
+      return null;
+    }
+    return { end: close + 5, url, angleBracketed: true };
+  }
+
+  let cursor = start;
+  let parentheses = 0;
+  while (cursor < text.length && cursor - start < MAX_INLINE_LINK_URL_LENGTH) {
+    const character = text[cursor] ?? '';
+    if (character === ')' && parentheses === 0) break;
+    if (
+      character.trim().length === 0 ||
+      character === '<' ||
+      character === '>'
+    ) {
+      return null;
+    }
+    if (character === '(') {
+      parentheses += 1;
+    } else if (character === ')') {
+      parentheses -= 1;
+    }
+    cursor += 1;
+  }
+
+  if (text[cursor] !== ')' || parentheses !== 0) return null;
+  const url = decodeMarkdownLinkUrl(text.slice(start, cursor));
+  return isValidMarkdownLinkUrl(url)
+    ? { end: cursor + 1, url, angleBracketed: false }
+    : null;
+}
+
+function unescapeMarkdownLinkLabel(label: string): string {
+  return label.replace(/\\([\\[\]])/g, '$1');
+}
+
+function parseMarkdownLinkAt(
+  text: string,
+  index: number,
+): MarkdownLinkMatch | null {
+  if (text[index] !== '[') return null;
+
+  const labelStart = index + 1;
+  let cursor = labelStart;
+  let bracketDepth = 1;
+  let escaped = false;
+
+  while (
+    cursor < text.length &&
+    cursor - labelStart <= MAX_INLINE_LINK_LABEL_LENGTH
+  ) {
+    const character = text[cursor] ?? '';
+    if (character === '\n') return null;
+    if (escaped) {
+      escaped = false;
+      cursor += 1;
+      continue;
+    }
+    if (character === '\\') {
+      escaped = true;
+      cursor += 1;
+      continue;
+    }
+    if (character === '[') {
+      bracketDepth += 1;
+    } else if (character === ']') {
+      bracketDepth -= 1;
+      if (bracketDepth === 0) break;
+    }
+    cursor += 1;
+  }
+
+  if (
+    bracketDepth !== 0 ||
+    cursor === labelStart ||
+    cursor - labelStart > MAX_INLINE_LINK_LABEL_LENGTH ||
+    text[cursor + 1] !== '('
+  ) {
+    return null;
+  }
+
+  const destination = parseMarkdownLinkDestination(text, cursor + 2);
+  if (!destination) return null;
+
+  return {
+    index,
+    end: destination.end,
+    raw: text.slice(index, destination.end),
+    label: unescapeMarkdownLinkLabel(text.slice(labelStart, cursor)),
+    url: destination.url,
+    angleBracketed: destination.angleBracketed,
+  };
+}
+
+function findNextMarkdownLink(
+  text: string,
+  start: number,
+): MarkdownLinkMatch | null {
+  let index = text.indexOf('[', start);
+  while (index !== -1) {
+    const link = parseMarkdownLinkAt(text, index);
+    if (link) return link;
+    index = text.indexOf('[', index + 1);
+  }
+  return null;
+}
 
 // Sentence punctuation that ends a bare URL belongs to the prose, not the
 // link: "see https://a.io/docs." must not link to "docs.".
@@ -89,9 +288,16 @@ export function convertMarkdownInlineToRichText(
 ): SlackRichTextInlineElement[] {
   const elements: SlackRichTextInlineElement[] = [];
   let last = 0;
+  let searchIndex = 0;
+  let nextMarkdownLink = findNextMarkdownLink(text, searchIndex);
+  const inlineMatches = Array.from(text.matchAll(INLINE_PATTERN));
+  let inlineMatchIndex = 0;
+  let nextInlineMatch = inlineMatches[inlineMatchIndex];
 
   const pushText = (value: string) => {
-    if (!value) {
+    const normalizedValue = normalizeKnownSlackEmojiShortcodes(value);
+
+    if (!normalizedValue) {
       return;
     }
     // Adjacent plain text (for example the punctuation trimmed off a bare
@@ -101,22 +307,61 @@ export function convertMarkdownInlineToRichText(
       previous?.type === 'text' &&
       JSON.stringify(previous.style ?? {}) === JSON.stringify(style)
     ) {
-      previous.text += value;
+      previous.text += normalizedValue;
       return;
     }
-    elements.push(withStyle({ type: 'text', text: value }, style));
+    elements.push(withStyle({ type: 'text', text: normalizedValue }, style));
   };
 
-  for (const match of text.matchAll(INLINE_PATTERN)) {
+  while (nextInlineMatch || nextMarkdownLink) {
+    if (nextInlineMatch && (nextInlineMatch.index ?? 0) < searchIndex) {
+      inlineMatchIndex += 1;
+      nextInlineMatch = inlineMatches[inlineMatchIndex];
+      continue;
+    }
+    if (nextMarkdownLink && nextMarkdownLink.index < searchIndex) {
+      nextMarkdownLink = findNextMarkdownLink(text, searchIndex);
+    }
+
+    const nextInlineIndex = nextInlineMatch?.index ?? Number.POSITIVE_INFINITY;
+    if (nextMarkdownLink && nextMarkdownLink.index < nextInlineIndex) {
+      pushText(text.slice(last, nextMarkdownLink.index));
+      last = nextMarkdownLink.end;
+      searchIndex = last;
+      if (
+        nextMarkdownLink.angleBracketed &&
+        !options.angleBracketLinkDestinations
+      ) {
+        pushText(nextMarkdownLink.raw);
+      } else {
+        elements.push(
+          withStyle(
+            {
+              type: 'link',
+              url: nextMarkdownLink.url,
+              text: normalizeKnownSlackEmojiShortcodes(nextMarkdownLink.label),
+            },
+            style,
+          ),
+        );
+      }
+      nextMarkdownLink = findNextMarkdownLink(text, searchIndex);
+      continue;
+    }
+
+    if (!nextInlineMatch) break;
+    const match = nextInlineMatch;
     const index = match.index ?? 0;
     pushText(text.slice(last, index));
     last = index + match[0].length;
+    searchIndex = last;
+    inlineMatchIndex += 1;
+    nextInlineMatch = inlineMatches[inlineMatchIndex];
     const [
       ,
       code,
       bold,
       strike,
-      markdownLink,
       slackLink,
       bareUrl,
       italicStar,
@@ -152,27 +397,17 @@ export function convertMarkdownInlineToRichText(
           options,
         ),
       );
-    } else if (markdownLink) {
-      // Greedy to the final ")" so balanced parentheses in the URL survive.
-      const parsed = markdownLink.match(/^\[([^\]]+)\]\((.+)\)$/);
-      if (parsed) {
-        const destination = parsed[2]!;
-        const hasAngleBrackets =
-          destination.startsWith('<') && destination.endsWith('>');
-        if (hasAngleBrackets && !options.angleBracketLinkDestinations) {
-          pushText(markdownLink);
-        } else {
-          const url = hasAngleBrackets ? destination.slice(1, -1) : destination;
-          elements.push(
-            withStyle({ type: 'link', url, text: parsed[1]! }, style),
-          );
-        }
-      }
     } else if (slackLink) {
       const [url, label] = slackLink.slice(1, -1).split('|', 2);
       elements.push(
         withStyle(
-          { type: 'link', url: url!, ...(label ? { text: label } : {}) },
+          {
+            type: 'link',
+            url: url!,
+            ...(label
+              ? { text: normalizeKnownSlackEmojiShortcodes(label) }
+              : {}),
+          },
           style,
         ),
       );

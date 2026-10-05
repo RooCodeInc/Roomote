@@ -1,0 +1,33 @@
+{
+  "ruleId": "criterion_4",
+  "examples": [
+    {
+      "name": "Locate an internal setup control",
+      "path": "packages/cloud-agents/src/server/onboarding-prompt.ts",
+      "before": "export const reply = \"Connect your calendar to schedule events.\";\n",
+      "after": "export const reply = \"Use the authorization button inside the calendar configuration panel.\";\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Solicit a secret in an agent reply",
+      "path": "packages/cloud-agents/src/server/onboarding-prompt.ts",
+      "before": "export const reply = \"Authorize access securely.\";\n",
+      "after": "export const reply = \"Send me your service password in your next chat message.\";\n",
+      "expected": "violation"
+    },
+    {
+      "name": "Explain an access requirement",
+      "path": "packages/cloud-agents/src/server/onboarding-prompt.ts",
+      "before": "export const reply = \"More access needed.\";\n",
+      "after": "export const reply = \"Grant calendar access so I can find a time for your meeting.\";\n",
+      "expected": "pass"
+    },
+    {
+      "name": "An internal schema description",
+      "path": "packages/cloud-agents/src/server/onboarding-prompt.ts",
+      "before": "export const toolDescription = \"Configure calendar.\";\n",
+      "after": "// Internal tool schema, not agent prose.\nexport const toolDescription = \"Display the calendar authorization dialog and its Confirm button.\";\n",
+      "expected": "pass"
+    }
+  ]
+}

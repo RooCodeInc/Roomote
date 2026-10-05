@@ -48,7 +48,7 @@ type TriageConfig = {
       channelId: string;
     };
     runtime: Record<string, unknown>;
-    manualTrigger: boolean;
+    trigger: 'scheduled' | 'manual' | 'webhook';
   }) => Promise<
     | { kind: 'scan'; payloads: Record<string, unknown>[] }
     | { kind: 'skip'; reason: string }
@@ -66,7 +66,7 @@ function buildScanTaskParams(provider: 'slack' | 'discord' = 'slack') {
     channelId,
     destination: { provider, channelId },
     runtime: {},
-    manualTrigger: false,
+    trigger: 'scheduled' as const,
   };
 }
 

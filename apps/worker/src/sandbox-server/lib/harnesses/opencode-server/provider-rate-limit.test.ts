@@ -71,6 +71,31 @@ describe('isOpenCodeProviderRateLimitError', () => {
       }),
     ).toBe(false);
   });
+
+  it.each([
+    ['ChatGPT usage_limit_reached', { type: 'usage_limit_reached' }],
+    ['OpenAI insufficient_quota', { code: 'insufficient_quota' }],
+    [
+      'the Anthropic monthly spend cap',
+      {
+        type: 'rate_limit_error',
+        details: { error_code: 'enforced_spend_limit_reached' },
+      },
+    ],
+  ])('does not back off on a 429 for %s', (_label, body) => {
+    // Waiting does not refill an exhausted account.
+    expect(
+      isOpenCodeProviderRateLimitError({
+        name: 'APIError',
+        data: {
+          message: 'Too Many Requests',
+          statusCode: 429,
+          isRetryable: true,
+          responseBody: JSON.stringify({ error: body }),
+        },
+      }),
+    ).toBe(false);
+  });
 });
 
 describe('resolveOpenCodeRateLimitRetryDelayMs', () => {

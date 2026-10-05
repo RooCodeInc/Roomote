@@ -1,38 +1,49 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { SessionNavigationStateProvider } from '@/hooks/useSessionNavigationState';
 
 import { RecentSessions } from './RecentSessions';
 
-const { listInput, listOptions, pathnameState, sessionsState } = vi.hoisted(
-  () => ({
-    listInput: { value: null as unknown },
-    listOptions: { value: null as unknown },
-    pathnameState: { value: '/sessions/session-b' },
-    sessionsState: {
-      value: [
-        {
-          id: 'session-a',
-          title: 'First session',
-          cachedStatus: 'needs_input',
-          unread: false,
-        },
-        {
-          id: 'session-b',
-          title: 'Current session',
-          cachedStatus: 'active',
-          unread: false,
-        },
-        {
-          id: 'session-c',
-          title: 'Unread result',
-          cachedStatus: 'ready',
-          unread: true,
-        },
-      ],
-    },
-  }),
-);
+const {
+  listInput,
+  listOptions,
+  pathnameState,
+  sessionsDataAvailable,
+  sessionsError,
+  sessionsFetching,
+  sessionsRefetch,
+  sessionsState,
+} = vi.hoisted(() => ({
+  listInput: { value: null as unknown },
+  listOptions: { value: null as unknown },
+  pathnameState: { value: '/sessions/session-b' },
+  sessionsDataAvailable: { value: true },
+  sessionsError: { value: false },
+  sessionsFetching: { value: false },
+  sessionsRefetch: vi.fn(),
+  sessionsState: {
+    value: [
+      {
+        id: 'session-a',
+        title: 'First session',
+        cachedStatus: 'needs_input',
+        unread: false,
+      },
+      {
+        id: 'session-b',
+        title: 'Current session',
+        cachedStatus: 'active',
+        unread: false,
+      },
+      {
+        id: 'session-c',
+        title: 'Unread result',
+        cachedStatus: 'ready',
+        unread: true,
+      },
+    ],
+  },
+}));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathnameState.value,
@@ -41,8 +52,12 @@ vi.mock('next/navigation', () => ({
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
   useQuery: () => ({
-    data: { sessions: sessionsState.value },
-    refetch: vi.fn(),
+    data: sessionsDataAvailable.value
+      ? { sessions: sessionsState.value }
+      : undefined,
+    isError: sessionsError.value,
+    isFetching: sessionsFetching.value,
+    refetch: sessionsRefetch,
   }),
 }));
 
@@ -63,6 +78,30 @@ vi.mock('@/trpc/client', () => ({
 describe('RecentSessions', () => {
   beforeEach(() => {
     pathnameState.value = '/sessions/session-b';
+    sessionsDataAvailable.value = true;
+    sessionsError.value = false;
+    sessionsFetching.value = false;
+    sessionsRefetch.mockClear();
+    sessionsState.value = [
+      {
+        id: 'session-a',
+        title: 'First session',
+        cachedStatus: 'needs_input',
+        unread: false,
+      },
+      {
+        id: 'session-b',
+        title: 'Current session',
+        cachedStatus: 'active',
+        unread: false,
+      },
+      {
+        id: 'session-c',
+        title: 'Unread result',
+        cachedStatus: 'ready',
+        unread: true,
+      },
+    ];
   });
 
   it('keeps server order, active state, and useful attention cues', () => {
@@ -105,6 +144,58 @@ describe('RecentSessions', () => {
     expect(screen.getByText('Current session')).toBeVisible();
     expect(
       screen.queryByRole('link', { current: 'page' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows a retry action when recent sessions fail to load', () => {
+    sessionsDataAvailable.value = false;
+    sessionsError.value = true;
+    sessionsRefetch.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <SessionNavigationStateProvider>
+        <RecentSessions enabled />
+      </SessionNavigationStateProvider>,
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Recent sessions' }),
+    ).toBeVisible();
+    expect(screen.getByText('Unable to load recent sessions.')).toBeVisible();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(sessionsRefetch).toHaveBeenCalledOnce();
+    expect(screen.getByText('Unable to load recent sessions.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Retrying...' })).toBeDisabled();
+  });
+
+  it('keeps cached recent sessions visible during a refetch failure', () => {
+    sessionsError.value = true;
+
+    render(
+      <SessionNavigationStateProvider>
+        <RecentSessions enabled />
+      </SessionNavigationStateProvider>,
+    );
+
+    expect(screen.getAllByRole('link')).toHaveLength(3);
+    expect(
+      screen.queryByText('Unable to load recent sessions.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('stays hidden after a successful empty response', () => {
+    sessionsState.value = [];
+
+    render(
+      <SessionNavigationStateProvider>
+        <RecentSessions enabled />
+      </SessionNavigationStateProvider>,
+    );
+
+    expect(
+      screen.queryByRole('heading', { name: 'Recent sessions' }),
     ).not.toBeInTheDocument();
   });
 });

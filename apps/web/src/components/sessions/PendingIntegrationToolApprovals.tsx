@@ -33,8 +33,23 @@ function integrationDisplayName(integrationId: string): string {
   return integrationNames.get(integrationId) ?? formatIdentifier(integrationId);
 }
 
+/**
+ * The calls of a batch card: several calls to one tool that ran together.
+ * The server records them as a list, which a single call's arguments (always
+ * an object) never are.
+ */
+function parallelCalls(argsSummary: unknown): unknown[] | null {
+  return Array.isArray(argsSummary) && argsSummary.length > 1
+    ? argsSummary
+    : null;
+}
+
 function approvalPrompt(item: IntegrationToolApprovalMetadata): string {
   const name = integrationDisplayName(item.integrationId) || 'this integration';
+  const batch = parallelCalls(item.argsSummary);
+  if (batch) {
+    return `Let ${name} run these ${batch.length} calls?`;
+  }
   const normalizedToolName = item.toolName.toLowerCase();
   const argumentKeys =
     item.argsSummary &&
@@ -81,6 +96,12 @@ function describeAutoEvaluation(
 }
 
 function summarizeArgs(argsSummary: unknown): string | null {
+  const batch = parallelCalls(argsSummary);
+  if (batch) {
+    return batch
+      .map((call) => JSON.stringify(call ?? {}, null, 2) ?? '{}')
+      .join('\n\n');
+  }
   if (
     argsSummary === null ||
     argsSummary === undefined ||
@@ -94,7 +115,7 @@ function summarizeArgs(argsSummary: unknown): string | null {
 }
 
 /**
- * The experiment-gated (`integrationToolApprovals`) card asking the Session
+ * The card asking the Session
  * requester to allow one gated integration tool call or reject it. Allowing
  * resumes that exact paused call once through OpenCode's native permission
  * reply. "Allow for this session" also records a requester-owned

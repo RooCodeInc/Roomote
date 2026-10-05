@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getModelFallbackNoticeFromMessageData,
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
   TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY,
   getProviderRetryNoticeFromMessageData,
@@ -8,6 +9,23 @@ import {
   parseProviderRetryNotice,
   parseTerminalProviderError,
 } from '../provider-retry-notice';
+
+it('parses a model fallback notice', () => {
+  expect(
+    getModelFallbackNoticeFromMessageData({
+      modelFallbackNotice: {
+        role: 'coding',
+        trigger: 'immediate',
+        fromProvider: 'openai',
+        fromModelId: 'openai/a',
+        errorSummary: 'Out of credits',
+        toProvider: 'anthropic',
+        toModelId: 'anthropic/b',
+        toReasoningEffort: 'high',
+      },
+    }),
+  ).toMatchObject({ role: 'coding', toReasoningEffort: 'high' });
+});
 
 describe('parseProviderRetryNotice', () => {
   it('accepts a complete provider retry notice payload', () => {

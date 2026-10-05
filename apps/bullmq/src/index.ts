@@ -59,6 +59,9 @@ import { startBullMqLivenessWatchdog } from './liveness-watchdog';
 import { startSessionWakeupQueue } from './session-wakeup-queue';
 import { startHomeComposerRecommendationsQueue } from './home-composer-recommendations-queue';
 import { startAutomationResultPreparationQueue } from './automation-result-preparation-queue';
+import { startTaskActivityDigestQueue } from './task-activity-digest-queue';
+import { startBuiltInAutomationWebhooksQueue } from './built-in-automation-webhooks-queue';
+import { startSessionDoneWebhookDeliveryQueue } from './session-done-webhook-delivery-queue';
 import { installBullMqGracefulShutdown } from './graceful-shutdown';
 
 // Deployments roll every service at once while migrations run only ahead
@@ -125,8 +128,16 @@ const discordGatewaySupervisor = startDiscordGatewaySupervisor(
 const { queue: discordGatewayEventsQueue, worker: discordGatewayEventsWorker } =
   startDiscordGatewayEventsQueue();
 
+const {
+  queue: sessionDoneWebhookDeliveryQueue,
+  enqueueNow: enqueueSessionDoneWebhookDelivery,
+  close: closeSessionDoneWebhookDeliveryQueue,
+} = await startSessionDoneWebhookDeliveryQueue();
 const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
-  await startScheduler();
+  await startScheduler({
+    onSessionDoneApplied: ({ judgmentId }) =>
+      enqueueSessionDoneWebhookDelivery(judgmentId),
+  });
 const {
   sandboxOidcRefreshQueue,
   sandboxOidcRefreshWorker,
@@ -242,12 +253,21 @@ const {
   worker: automationResultPreparationWorker,
   queueEvents: automationResultPreparationQueueEvents,
 } = await startAutomationResultPreparationQueue();
+const { queue: taskActivityDigestQueue, worker: taskActivityDigestWorker } =
+  startTaskActivityDigestQueue();
+const {
+  queue: builtInAutomationWebhooksQueue,
+  worker: builtInAutomationWebhooksWorker,
+} = startBuiltInAutomationWebhooksQueue();
 
 const serverAdapter = new HonoAdapter(serveStatic);
 
 createBullBoard({
   queues: [
     new BullMQAdapter(schedulerQueue, { readOnlyMode: false }),
+    new BullMQAdapter(sessionDoneWebhookDeliveryQueue, {
+      readOnlyMode: false,
+    }),
     new BullMQAdapter(sandboxOidcRefreshQueue, { readOnlyMode: false }),
     new BullMQAdapter(snapshotQueue, { readOnlyMode: false }),
     new BullMQAdapter(dockerValidationQueue, { readOnlyMode: false }),
@@ -290,6 +310,10 @@ createBullBoard({
     new BullMQAdapter(automationResultPreparationQueue, {
       readOnlyMode: false,
     }),
+    new BullMQAdapter(taskActivityDigestQueue, { readOnlyMode: false }),
+    new BullMQAdapter(builtInAutomationWebhooksQueue, {
+      readOnlyMode: false,
+    }),
   ],
   serverAdapter,
 });
@@ -326,6 +350,8 @@ app.get('/admin/health', async (c) => {
     const health = await readBullMqQueueHealth(redisStatus, async () => ({
       scheduler: await schedulerQueue.getJobCounts(),
       sandboxOidcRefresh: await sandboxOidcRefreshQueue.getJobCounts(),
+      sessionDoneWebhookDelivery:
+        await sessionDoneWebhookDeliveryQueue.getJobCounts(),
     }));
 
     if (health.queueCounts === null) {
@@ -362,6 +388,15 @@ app.get('/admin/health', async (c) => {
               delayed: health.queueCounts.sandboxOidcRefresh.delayed,
               repeat: health.queueCounts.sandboxOidcRefresh.repeat,
             },
+            sessionDoneWebhookDelivery: {
+              waiting: health.queueCounts.sessionDoneWebhookDelivery.waiting,
+              active: health.queueCounts.sessionDoneWebhookDelivery.active,
+              completed:
+                health.queueCounts.sessionDoneWebhookDelivery.completed,
+              failed: health.queueCounts.sessionDoneWebhookDelivery.failed,
+              delayed: health.queueCounts.sessionDoneWebhookDelivery.delayed,
+              repeat: health.queueCounts.sessionDoneWebhookDelivery.repeat,
+            },
           },
         },
       },
@@ -387,6 +422,10 @@ app.get('/admin/stats', async (c) => {
       await sandboxOidcRefreshQueue.getJobCounts();
     const sandboxOidcRefreshJobSchedulers =
       await sandboxOidcRefreshQueue.getJobSchedulers();
+    const sessionDoneWebhookDeliveryJobCounts =
+      await sessionDoneWebhookDeliveryQueue.getJobCounts();
+    const sessionDoneWebhookDeliveryJobSchedulers =
+      await sessionDoneWebhookDeliveryQueue.getJobSchedulers();
 
     return c.json({
       timestamp: new Date().toISOString(),
@@ -406,6 +445,16 @@ app.get('/admin/stats', async (c) => {
             pattern: job.pattern,
             next: job.next ? new Date(job.next).toISOString() : null,
           })),
+        },
+        sessionDoneWebhookDelivery: {
+          ...sessionDoneWebhookDeliveryJobCounts,
+          repeatableJobs: sessionDoneWebhookDeliveryJobSchedulers.map(
+            (job) => ({
+              key: job.key,
+              pattern: job.pattern,
+              next: job.next ? new Date(job.next).toISOString() : null,
+            }),
+          ),
         },
       },
     });
@@ -448,6 +497,7 @@ installBullMqGracefulShutdown({
     await schedulerWorker.close();
     await schedulerQueueEvents.close();
     await schedulerQueue.close();
+    await closeSessionDoneWebhookDeliveryQueue();
     await sandboxOidcRefreshWorker.close();
     await sandboxOidcRefreshQueueEvents.close();
     await sandboxOidcRefreshQueue.close();
@@ -509,6 +559,10 @@ installBullMqGracefulShutdown({
     await automationResultPreparationWorker.close();
     await automationResultPreparationQueueEvents.close();
     await automationResultPreparationQueue.close();
+    await taskActivityDigestWorker.close();
+    await taskActivityDigestQueue.close();
+    await builtInAutomationWebhooksWorker.close();
+    await builtInAutomationWebhooksQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
   },

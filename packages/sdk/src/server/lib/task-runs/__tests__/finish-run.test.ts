@@ -46,6 +46,7 @@ const mockMarkEnvironmentVerificationFailedIfCurrent = vi
 const mockGetCustomAutomationById = vi.fn();
 const mockRefreshAutomationRootFooter = vi.fn().mockResolvedValue(true);
 const mockResolveAutomationResultSubtitle = vi.fn();
+const mockRecordSilentAutomationResultForRun = vi.fn().mockResolvedValue(null);
 const mockRetryFailedTaskStart = vi.fn();
 const mockDistillTaskRunTurnMemory = vi.fn();
 const mockRefreshTaskTitleOnCompletion = vi.fn().mockResolvedValue(undefined);
@@ -127,7 +128,12 @@ function makeTxSelectChain() {
 }
 
 const mockDbSelect = vi.fn().mockImplementation(() => makeSelectChain());
-const mockDbUpdateWhere = vi.fn().mockResolvedValue(undefined);
+const mockDbUpdateReturning = vi.fn().mockResolvedValue([{ id: 'task-1' }]);
+const mockDbUpdateWhere = vi.fn().mockImplementation(() =>
+  Object.assign(Promise.resolve(undefined), {
+    returning: (...args: unknown[]) => mockDbUpdateReturning(...args),
+  }),
+);
 const mockDbUpdateSet = vi.fn().mockReturnValue({
   where: (...args: unknown[]) => mockDbUpdateWhere(...args),
 });
@@ -184,6 +190,8 @@ vi.mock('@roomote/db/server', async () => {
       mockResolveDefaultComputeProvider(...args),
     resolveDiscordRuntimeCredentials: (...args: unknown[]) =>
       mockResolveDiscordRuntimeCredentials(...args),
+    recordSilentAutomationResultForRun: (...args: unknown[]) =>
+      mockRecordSilentAutomationResultForRun(...args),
     updatePendingEnvironmentSnapshot: (...args: unknown[]) =>
       mockUpdatePendingEnvironmentSnapshot(...args),
     markEnvironmentVerificationFailedIfCurrent: (...args: unknown[]) =>
@@ -226,6 +234,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     ),
   parseReviewSummaryMarkerSha: (body: string) =>
     body.match(/roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1],
+  parseReviewSummaryResultMetadata: () => ({ format: 'legacy' }),
   getMarkedSection: ({
     content,
     startMarker,
@@ -543,6 +552,21 @@ describe('finishRun', () => {
     });
 
     expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
+  });
+
+  it('records a silent outcome only after a selected automation completes', async () => {
+    mockFindFirstRun.mockResolvedValue(
+      makeRun(
+        {},
+        { initiatorKind: 'automation', initiatorAutomation: 'codeql_triage' },
+      ),
+    );
+    await finishRun({ id: 1, status: RunStatus.Completed });
+    expect(mockRecordSilentAutomationResultForRun).toHaveBeenCalledWith(1);
+
+    mockRecordSilentAutomationResultForRun.mockClear();
+    await finishRun({ id: 1, status: RunStatus.Failed });
+    expect(mockRecordSilentAutomationResultForRun).not.toHaveBeenCalled();
   });
 
   it('runs the final title repair when a task is canceled', async () => {

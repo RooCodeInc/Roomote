@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 
 import {
   type AnnouncerFrequency,
@@ -39,6 +39,7 @@ import {
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { automations, deploymentSettings } from '../schema';
+import { decryptText } from './encryption';
 import type {
   Automation,
   BackgroundAgentSettings,
@@ -203,8 +204,9 @@ function getAutomationFrequency<T extends string>(
 function getProviderUsageLimitFrequency(
   automation: Automation | undefined,
 ): ProviderUsageLimitFrequency {
-  return automation?.enabled === false
-    ? 'off'
+  if (automation?.enabled === false) return 'off';
+  return getScheduleMode(automation) === 'on_demand'
+    ? 'on_demand'
     : DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY;
 }
 
@@ -621,6 +623,84 @@ export async function getAutomationByKey(
   return automation ?? null;
 }
 
+export async function getBackgroundAutomationWebhookState(
+  key: TriggerableBackgroundAutomationKey,
+  client: DatabaseOrTransaction = db,
+): Promise<{ enabled: boolean; token: string | null } | null> {
+  const automation = await client.query.automations.findFirst({
+    where: eq(automations.key, key),
+    columns: { enabled: true, webhookSecret: true },
+  });
+
+  return automation
+    ? {
+        enabled: automation.enabled,
+        token: automation.webhookSecret
+          ? decryptText(automation.webhookSecret)
+          : null,
+      }
+    : null;
+}
+
+/** Stores a new encrypted webhook token or revokes the current one. */
+export async function setBackgroundAutomationWebhookToken(
+  key: TriggerableBackgroundAutomationKey,
+  token: string | null,
+  client: DatabaseOrTransaction = db,
+): Promise<boolean> {
+  const updated = await client
+    .update(automations)
+    .set({ webhookSecret: token, updatedAt: new Date() })
+    .where(eq(automations.key, key))
+    .returning({ key: automations.key });
+  return updated.length > 0;
+}
+
+/** Ensures one encrypted webhook token exists despite concurrent enable calls. */
+export async function ensureBackgroundAutomationWebhookToken(
+  key: TriggerableBackgroundAutomationKey,
+  token: string,
+  client: DatabaseOrTransaction = db,
+): Promise<string | null> {
+  const inserted = await client
+    .update(automations)
+    .set({ webhookSecret: token, updatedAt: new Date() })
+    .where(
+      and(
+        eq(automations.key, key),
+        eq(automations.enabled, true),
+        isNull(automations.webhookSecret),
+      ),
+    )
+    .returning({ webhookSecret: automations.webhookSecret });
+  if (inserted[0]?.webhookSecret) {
+    return decryptText(inserted[0].webhookSecret);
+  }
+
+  const current = await getBackgroundAutomationWebhookState(key, client);
+  return current?.enabled ? current.token : null;
+}
+
+/** Atomically rotates an enabled built-in automation's active webhook token. */
+export async function rotateBackgroundAutomationWebhookToken(
+  key: TriggerableBackgroundAutomationKey,
+  token: string,
+  client: DatabaseOrTransaction = db,
+): Promise<string | null> {
+  const [rotated] = await client
+    .update(automations)
+    .set({ webhookSecret: token, updatedAt: new Date() })
+    .where(
+      and(
+        eq(automations.key, key),
+        eq(automations.enabled, true),
+        isNotNull(automations.webhookSecret),
+      ),
+    )
+    .returning({ webhookSecret: automations.webhookSecret });
+  return rotated?.webhookSecret ? decryptText(rotated.webhookSecret) : null;
+}
+
 export type UpsertAutomationInput = {
   key: BackgroundAutomationKey;
   enabled: boolean;
@@ -723,6 +803,10 @@ async function upsertAutomationValues(
     enabled: input.enabled,
     schedule,
     updatedAt: now,
+    // Disabling a built-in automation revokes its public trigger URL, matching
+    // custom automation behavior and preventing stale credentials from waking
+    // disabled runners.
+    ...(!input.enabled ? { webhookSecret: null } : {}),
   };
 
   if (input.settings !== undefined) {

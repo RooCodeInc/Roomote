@@ -35,6 +35,8 @@ export type AuthorizedUser = {
    * `managedAccess`, so test fixtures and older payloads read as "no Brain".
    */
   brainConfigured?: boolean;
+  /** Internal settings entry point is enabled by the server deployment env. */
+  nightlyExperimentsEnabled?: boolean;
   /** When this user accepted optional Cloud cookies, serialized as epoch ms. */
   cookieConsentedAt: number | null;
   managedAccess?: ManagedDeploymentAccess;

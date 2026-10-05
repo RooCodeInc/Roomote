@@ -17,6 +17,7 @@ import {
   isInferenceGatewayCoveredEnvVar,
   isSettingsOnlyProviderEnvVar,
   normalizeDeploymentModelConfig,
+  normalizeModelFallbackConfig,
   normalizeOptionalReasoningEffort,
   normalizeTaskModelSettings,
   parseModelProviderEnvKeys,
@@ -115,6 +116,7 @@ async function loadPersistedRuntimeModelConfig(
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
     columns: {
       runtimeModelConfig: true,
+      modelFallbackConfig: true,
       taskModelSettings: true,
     },
   });
@@ -122,6 +124,9 @@ async function loadPersistedRuntimeModelConfig(
   return {
     runtimeModelConfig: normalizeDeploymentModelConfig(
       deployment?.runtimeModelConfig,
+    ),
+    modelFallbackConfig: normalizeModelFallbackConfig(
+      deployment?.modelFallbackConfig,
     ),
     catalogModels: getTaskModelCatalog(deployment?.taskModelSettings),
     enabledCatalogModels: getEnabledTaskModels(deployment?.taskModelSettings),
@@ -137,13 +142,26 @@ export async function getDeploymentTaskModelOptions(
 ): Promise<{
   models: TaskModelOption[];
   defaultModelId: string;
+  /**
+   * The model an unoverridden PR review runs on: `R_CODE_REVIEW_MODEL`, then
+   * the persisted code-review role model, then the task default.
+   */
+  codeReviewModelId: string;
   codingModelRoutingRules: CodingModelRoutingRule[];
 }> {
-  const { enabledCatalogModels, defaultModelId, codingModelRoutingRules } =
-    await loadPersistedRuntimeModelConfig(executor);
+  const {
+    runtimeModelConfig,
+    enabledCatalogModels,
+    defaultModelId,
+    codingModelRoutingRules,
+  } = await loadPersistedRuntimeModelConfig(executor);
   return {
     models: enabledCatalogModels,
     defaultModelId,
+    codeReviewModelId:
+      normalizeConfiguredValue(process.env.R_CODE_REVIEW_MODEL) ??
+      runtimeModelConfig.roomoteCodeReviewModel ??
+      defaultModelId,
     codingModelRoutingRules: codingModelRoutingRules ?? [],
   };
 }
@@ -421,7 +439,13 @@ async function resolveModelRuntimeEnv(
   const executor = options.executor ?? db;
   const [
     persistedEnvVars,
-    { runtimeModelConfig, catalogModels, enabledCatalogModels, defaultModelId },
+    {
+      runtimeModelConfig,
+      modelFallbackConfig,
+      catalogModels,
+      enabledCatalogModels,
+      defaultModelId,
+    },
   ] = await Promise.all([
     resolveEffectiveDeploymentEnvVars({
       deploymentEnvVars: options.deploymentEnvVars,
@@ -500,6 +524,35 @@ async function resolveModelRuntimeEnv(
       ];
     }),
   ) as Record<TaskModelRole, string | undefined>;
+  const enabledCatalogModelIds = new Set(
+    enabledCatalogModels.map((model) => model.id),
+  );
+  const resolvedFallbacks = Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => {
+      const fallback = modelFallbackConfig.enabled
+        ? modelFallbackConfig.roles[role]
+        : undefined;
+      const modelId = fallback?.modelId;
+      if (!modelId || !enabledCatalogModelIds.has(modelId)) {
+        return [role, undefined];
+      }
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [
+        role,
+        {
+          modelId,
+          reasoningEffort:
+            fallback.reasoningEffort ??
+            (modelSupportsReasoning(modelId)
+              ? descriptor.defaultReasoningEffort
+              : undefined),
+        },
+      ];
+    }),
+  ) as Record<
+    TaskModelRole,
+    { modelId: string; reasoningEffort?: string } | undefined
+  >;
   const configuredRoomoteModelEnvKeys =
     normalizeConfiguredValue(runtimeEnv.R_MODEL_ENV_KEYS) ??
     normalizeConfiguredValue(persistedEnvVars.R_MODEL_ENV_KEYS);
@@ -508,6 +561,10 @@ async function resolveModelRuntimeEnv(
       (role) =>
         !inferenceGateway || TASK_MODEL_ROLE_DESCRIPTORS[role].includeInSandbox,
     ).map((role) => resolvedModels[role]),
+    ...TASK_MODEL_ROLES.filter(
+      (role) =>
+        !inferenceGateway || TASK_MODEL_ROLE_DESCRIPTORS[role].includeInSandbox,
+    ).map((role) => resolvedFallbacks[role]?.modelId),
   ];
   const providerKeyNames = resolveProviderKeyNames({
     runtimeRoomoteModelEnvKeys: configuredRoomoteModelEnvKeys,
@@ -709,6 +766,19 @@ async function resolveModelRuntimeEnv(
           : []),
         ...(resolvedReasoningEfforts[role]
           ? [[descriptor.reasoningEnvVar, resolvedReasoningEfforts[role]]]
+          : []),
+        ...(resolvedFallbacks[role]
+          ? [
+              [descriptor.fallbackModelEnvVar, resolvedFallbacks[role].modelId],
+              ...(resolvedFallbacks[role].reasoningEffort
+                ? [
+                    [
+                      descriptor.fallbackReasoningEnvVar,
+                      resolvedFallbacks[role].reasoningEffort,
+                    ],
+                  ]
+                : []),
+            ]
           : []),
       ];
     }),
