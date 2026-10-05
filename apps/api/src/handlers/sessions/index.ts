@@ -591,6 +591,13 @@ async function getSessionUpdates(c: SessionContext): Promise<Response> {
 
 export const sessionsRouter = new Hono<{ Variables: Variables }>();
 sessionsRouter.get('/', searchSessions);
+sessionsRouter.use(
+  '/',
+  bodyLimit({
+    maxSize: ROOMOTE_MESSAGE_REQUEST_MAX_BYTES,
+    onError: (c) => c.json({ error: 'Message payload is too large' }, 413),
+  }),
+);
 sessionsRouter.post('/', startSession);
 sessionsRouter.get('/:sessionId/summary', getSessionSummary);
 sessionsRouter.get('/:sessionId/messages', getSessionMessages);

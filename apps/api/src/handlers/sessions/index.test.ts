@@ -45,6 +45,7 @@ import {
 
 import type { Variables } from '../../types';
 import { mcpAuthMiddleware } from '../mcp/middleware';
+import { ROOMOTE_MESSAGE_REQUEST_MAX_BYTES } from '../tasks/messageAttachments';
 import { findAccessibleSession, sessionsRouter } from '.';
 
 const createdSessionIds: string[] = [];
@@ -160,6 +161,26 @@ describe('MCP session routes', () => {
         attachmentTexts: [expect.stringContaining('failure.log')],
       }),
     );
+  });
+
+  it('rejects oversized initial Session requests before route handling', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+
+    const response = await createApp(user.id).request('/sessions', {
+      method: 'POST',
+      headers: {
+        'content-length': String(ROOMOTE_MESSAGE_REQUEST_MAX_BYTES + 1),
+        'content-type': 'application/json',
+      },
+      body: '{}',
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Message payload is too large',
+    });
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
   });
 
   it('starts as the durable owner of a bot-triggered task with no acting user', async () => {
