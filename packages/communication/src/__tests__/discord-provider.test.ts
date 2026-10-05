@@ -284,6 +284,24 @@ describe('DiscordCommunicationProvider', () => {
     },
   );
 
+  it('does not prepend an empty fence to prose after an exact-limit fenced block', async () => {
+    const channelId = '400000000000000001';
+    const fencedBlock = `\`\`\`text\n${'x'.repeat(1_988)}\n\`\`\``;
+    const text = `${fencedBlock}\nAfter`;
+    expect(fencedBlock).toHaveLength(2_000);
+    expect(chunkDiscordMessage(text)).toEqual([fencedBlock, 'After']);
+
+    let nonce = 123456789012345678n;
+    const { server, provider } = createHarness({
+      nonceFactory: () => String(nonce++),
+    });
+    await provider.postMessage({ channelId, text });
+
+    expect(
+      (server.state.messages[channelId] ?? []).map(({ content }) => content),
+    ).toEqual([fencedBlock, 'After']);
+  });
+
   it('splits a fenced line when it is too long for a fresh message', async () => {
     let nonce = 123456789012345678n;
     const { server, provider } = createHarness({

@@ -318,6 +318,7 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
     marker: string;
     openingStart: number;
     bodyStart: number;
+    continued: boolean;
   };
   let open: Fence | null = null;
   const lines = text.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
@@ -343,6 +344,7 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
     if (open) {
       open.openingStart = 0;
       open.bodyStart = current.length;
+      open.continued = true;
     }
   };
 
@@ -367,6 +369,7 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
             marker: openingMatch[1]!,
             openingStart: 0,
             bodyStart: 0,
+            continued: false,
           }
         : null;
     const nextOpen: Fence | null = closing ? null : (opening ?? open);
@@ -404,6 +407,11 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
         flush();
       }
       if (current.length + line.length + suffixLength > limit) flush();
+      if (closing && open?.continued && current.length === open.bodyStart) {
+        current = '';
+        open = null;
+        continue;
+      }
       current += line;
       open = nextOpen;
       if (opening && open) {
