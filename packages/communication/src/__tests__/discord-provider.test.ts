@@ -1357,6 +1357,39 @@ describe('chunkDiscordMessage', () => {
     },
   );
 
+  it.each(['\n', '\r\n'])(
+    'keeps leading blank lines with the first fenced row after prose (%j)',
+    (newline) => {
+      for (const blankCount of [1, 2]) {
+        const firstRow = `| r0 | ${'x'.repeat((newline === '\r\n' ? 34 : 37) - (blankCount - 1) * newline.length)} |`;
+        const blankLines = newline.repeat(blankCount);
+        const text = `Summary${newline}${newline}\`\`\`text${newline}${blankLines}${firstRow}${newline}\`\`\``;
+        const chunks = chunkDiscordMessage(text, 60);
+        expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+        expect(chunks[0]).not.toContain('```');
+        expect(chunks[1]).toContain(
+          `\`\`\`text${newline}${blankLines}${firstRow}`,
+        );
+        expect(
+          chunks.every(
+            (chunk) => (chunk.match(/^```/gm)?.length ?? 0) % 2 === 0,
+          ),
+        ).toBe(true);
+      }
+    },
+  );
+
+  it('moves an indented blank line with the first fenced row after prose', () => {
+    const firstRow = `| r0 | ${'x'.repeat(35)} |`;
+    const chunks = chunkDiscordMessage(
+      `Summary\n\n\`\`\`text\n  \n${firstRow}\n\`\`\``,
+      60,
+    );
+    expect(chunks[0]).not.toContain('```');
+    expect(chunks[1]).toContain(`\`\`\`text\n  \n${firstRow}`);
+    expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+  });
+
   it('prefers newline boundaries without losing text', () => {
     expect(chunkDiscordMessage('first line\nsecond line', 12)).toEqual([
       'first line',
