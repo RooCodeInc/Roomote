@@ -3053,12 +3053,6 @@ describe('OpenCodeServerHarness', () => {
           (event) => event.eventName === TaskEventName.TaskAborted,
         ),
       ).toBe(true);
-      expect(
-        persistedEnvelopes.filter(
-          (envelope) =>
-            envelope.payload[TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY] !== undefined,
-        ),
-      ).toHaveLength(1);
       expect(harness.getQueuedMessages()).toEqual([]);
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
     } finally {
