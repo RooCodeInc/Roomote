@@ -558,6 +558,131 @@ describe('spawnModalWorker', () => {
     expect(retainedOutput).not.toContain('\0');
   });
 
+  it('retains the classified reason for a Roomote-backed worker exit', async () => {
+    const onWorkerExit = vi.fn().mockResolvedValue({
+      disposition: 'ignore',
+      classification: 'routine',
+      shutdownReason: 'sleep_requested',
+    });
+
+    await spawnModalWorker(
+      mockTaskRun({
+        vendor: 'roomote',
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        vendor: 'roomote',
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+        onWorkerExit,
+      },
+    );
+
+    const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
+      onExit?: (event: { exitCode: number }) => Promise<void>;
+    };
+    await runCommandInput.onExit?.({ exitCode: 137 });
+
+    const retainedOutput = mockSql.mock.calls
+      .map((call) => call[2])
+      .filter((value): value is string => typeof value === 'string')
+      .join('');
+    expect(retainedOutput).toContain(
+      '[command] worker exited with code 137; routine shutdown: sleep_requested\n',
+    );
+    expect(retainedOutput).not.toContain(
+      '[command] worker exited with code 137\n',
+    );
+  });
+
+  it('does not describe unavailable lifecycle state as a routine shutdown', async () => {
+    const onWorkerExit = vi.fn().mockResolvedValue({
+      disposition: 'ignore',
+      classification: 'routine',
+      shutdownReason: 'state_unavailable',
+    });
+
+    await spawnModalWorker(
+      mockTaskRun({
+        vendor: 'roomote',
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        vendor: 'roomote',
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+        onWorkerExit,
+      },
+    );
+
+    const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
+      onExit?: (event: { exitCode: number }) => Promise<void>;
+    };
+    await runCommandInput.onExit?.({ exitCode: 137 });
+
+    const retainedOutput = mockSql.mock.calls
+      .map((call) => call[2])
+      .filter((value): value is string => typeof value === 'string')
+      .join('');
+    expect(retainedOutput).toContain(
+      '[command] worker exited with code 137; lifecycle state unavailable\n',
+    );
+    expect(retainedOutput).not.toContain('routine shutdown: state_unavailable');
+  });
+
+  it('retains an exit line when lifecycle classification fails', async () => {
+    const onWorkerExit = vi
+      .fn()
+      .mockRejectedValue(new Error('state lookup unavailable'));
+
+    await spawnModalWorker(
+      mockTaskRun({
+        vendor: 'roomote',
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        vendor: 'roomote',
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+        onWorkerExit,
+      },
+    );
+
+    const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
+      onExit?: (event: { exitCode: number }) => Promise<void>;
+    };
+    await expect(runCommandInput.onExit?.({ exitCode: 137 })).rejects.toThrow(
+      'state lookup unavailable',
+    );
+
+    const retainedOutput = mockSql.mock.calls
+      .map((call) => call[2])
+      .filter((value): value is string => typeof value === 'string')
+      .join('');
+    expect(retainedOutput).toContain(
+      '[command] worker exited with code 137; lifecycle classification failed\n',
+    );
+    expect(retainedOutput).not.toContain('state lookup unavailable');
+  });
+
   it('retains Roomote sandbox provisioning failures before command startup', async () => {
     mockCreateModalMachine.mockRejectedValueOnce(
       new Error('capacity unavailable'),
@@ -744,7 +869,11 @@ describe('spawnModalWorker', () => {
   });
 
   it('restarts when an immediate detached exit is claimed as the first bootstrap failure', async () => {
-    const onWorkerExit = vi.fn().mockResolvedValue('restart');
+    const onWorkerExit = vi.fn().mockResolvedValue({
+      disposition: 'restart',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'bootstrap_restart_pending',
+    });
     const onWorkerRestart = vi.fn();
     mockRunCommand.mockResolvedValue({
       exitCode: 1,
@@ -755,11 +884,13 @@ describe('spawnModalWorker', () => {
     await expect(
       spawnModalWorker(
         mockTaskRun({
+          vendor: 'roomote',
           payloadKind: TaskPayloadKind.StandardTask,
           payload: { repo: 'test/repo', environmentId: 'env_1' },
         }),
         'auth_token',
         {
+          vendor: 'roomote',
           deploymentSlug: 'roomote',
           modalTokenId: 'token-id',
           modalTokenSecret: 'token-secret',
@@ -783,10 +914,24 @@ describe('spawnModalWorker', () => {
       }),
     );
     expect(onWorkerRestart).toHaveBeenCalledOnce();
+
+    const retainedOutput = mockSql.mock.calls
+      .map((call) => call[2])
+      .filter((value): value is string => typeof value === 'string')
+      .join('');
+    expect(
+      retainedOutput.match(
+        /\[command\] worker exited with code 1; bootstrap restart scheduled\n/g,
+      ),
+    ).toHaveLength(1);
   });
 
   it('passes probe diagnostics to the exit classifier when a silent immediate exit is finalized as failed', async () => {
-    const onWorkerExit = vi.fn().mockResolvedValue('failed');
+    const onWorkerExit = vi.fn().mockResolvedValue({
+      disposition: 'failed',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'failed',
+    });
     mockRunCommand
       // Detached launch: dies instantly with no output.
       .mockResolvedValueOnce({ exitCode: 1, commandId: undefined })
@@ -826,7 +971,11 @@ describe('spawnModalWorker', () => {
   });
 
   it('cleans up when a later detached exit is claimed as a bootstrap failure', async () => {
-    const onWorkerExit = vi.fn().mockResolvedValue('restart');
+    const onWorkerExit = vi.fn().mockResolvedValue({
+      disposition: 'restart',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'bootstrap_restart_pending',
+    });
     const onWorkerRestart = vi.fn();
 
     await spawnModalWorker(
@@ -864,8 +1013,13 @@ describe('spawnModalWorker', () => {
   });
 
   it('waits for exit classification before unwinding an aborted admission', async () => {
-    let resolveClassification!: (value: 'restart') => void;
-    const classification = new Promise<'restart'>((resolve) => {
+    const restartResult = {
+      disposition: 'restart',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'bootstrap_restart_pending',
+    } as const;
+    let resolveClassification!: (value: typeof restartResult) => void;
+    const classification = new Promise<typeof restartResult>((resolve) => {
       resolveClassification = resolve;
     });
     const onWorkerExit = vi.fn().mockReturnValue(classification);
@@ -917,7 +1071,7 @@ describe('spawnModalWorker', () => {
     await vi.waitFor(() => {
       expect(onWorkerExit).toHaveBeenCalledWith({ exitCode: 1 });
     });
-    resolveClassification('restart');
+    resolveClassification(restartResult);
 
     await expect(spawnPromise).resolves.toEqual({
       machineId: 'modal-machine-123',
@@ -930,7 +1084,11 @@ describe('spawnModalWorker', () => {
   });
 
   it('restarts after a claimed exit even when sandbox cleanup fails', async () => {
-    const onWorkerExit = vi.fn().mockResolvedValue('restart');
+    const onWorkerExit = vi.fn().mockResolvedValue({
+      disposition: 'restart',
+      classification: 'bootstrap_failure',
+      shutdownReason: 'bootstrap_restart_pending',
+    });
     const onWorkerRestart = vi.fn();
     mockCleanupModalInstance.mockRejectedValueOnce(
       new Error('cleanup unavailable'),
@@ -965,15 +1123,21 @@ describe('spawnModalWorker', () => {
   });
 
   it('leaves the sandbox alone when a detached exit belongs to an advanced run', async () => {
-    const onWorkerExit = vi.fn().mockResolvedValue('ignore');
+    const onWorkerExit = vi.fn().mockResolvedValue({
+      disposition: 'ignore',
+      classification: 'active_failure',
+      shutdownReason: null,
+    });
 
     await spawnModalWorker(
       mockTaskRun({
+        vendor: 'roomote',
         payloadKind: TaskPayloadKind.StandardTask,
         payload: { repo: 'test/repo', environmentId: 'env_1' },
       }),
       'auth_token',
       {
+        vendor: 'roomote',
         deploymentSlug: 'roomote',
         modalTokenId: 'token-id',
         modalTokenSecret: 'token-secret',
@@ -987,10 +1151,18 @@ describe('spawnModalWorker', () => {
     const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
       onExit?: (event: { exitCode: number }) => Promise<void>;
     };
-    await runCommandInput.onExit?.({ exitCode: 0 });
+    await runCommandInput.onExit?.({ exitCode: 137 });
 
-    expect(onWorkerExit).toHaveBeenCalledWith({ exitCode: 0 });
+    expect(onWorkerExit).toHaveBeenCalledWith({ exitCode: 137 });
     expect(mockCleanupModalInstance).not.toHaveBeenCalled();
+
+    const retainedOutput = mockSql.mock.calls
+      .map((call) => call[2])
+      .filter((value): value is string => typeof value === 'string')
+      .join('');
+    expect(retainedOutput).toContain(
+      '[command] worker exited with code 137; active run had no shutdown marker\n',
+    );
   });
 
   it('does not resolve or persist a bypass when no exposed surface needs one', async () => {
