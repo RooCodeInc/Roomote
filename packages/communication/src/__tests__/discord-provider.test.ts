@@ -1429,6 +1429,17 @@ describe('chunkDiscordMessage', () => {
     expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
   });
 
+  it('never adds leading code blank lines to near-limit prose', () => {
+    const prose = `${'p'.repeat(58)}\n`;
+    const chunks = chunkDiscordMessage(
+      `${prose}\`\`\`text\n\n\n| r0 | x |\n\`\`\``,
+      60,
+    );
+    expect(chunks[0]).toBe(prose);
+    expect(chunks[1]).toContain('```text\n\n\n| r0 | x |');
+    expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
+  });
+
   it('prefers newline boundaries without losing text', () => {
     expect(chunkDiscordMessage('first line\nsecond line', 12)).toEqual([
       'first line',
