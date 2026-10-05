@@ -2164,7 +2164,11 @@ export function generateOpenCodeConfig({
   return {
     configContent: `${JSON.stringify(config, null, 2)}\n`,
     openCodeConfigDir,
-    model: promptModel,
+    model:
+      promptModel ??
+      (typeof operatorConfig.model === 'string'
+        ? operatorConfig.model
+        : undefined),
   };
 }
 

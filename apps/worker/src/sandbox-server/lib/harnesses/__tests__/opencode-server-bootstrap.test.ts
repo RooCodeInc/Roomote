@@ -1389,7 +1389,9 @@ describe('opencode-server bootstrap', () => {
     // Roles use the catalog base models so OpenCode's model lookup succeeds
     // and catalog cost/limit metadata stays intact; routing variants become
     // per-model request options merged with the reasoning options.
-    expect(model).toBeUndefined();
+    // The harness sends the normalized deployment model on every build prompt
+    // instead of relying on restored OpenCode session state to recover it.
+    expect(model).toBe('openrouter/z-ai/glm-5.2');
     expect(baseConfig.model).toBe('openrouter/z-ai/glm-5.2');
     expect(baseConfig.small_model).toBe('openrouter/openai/gpt-5.4-mini');
     expect(baseConfig.provider?.openrouter?.models).toEqual({
