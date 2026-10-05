@@ -327,7 +327,7 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
     current = open ? `${open.opening}\n` : '';
   };
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const value = line.endsWith('\n')
       ? line.slice(0, -1).replace(/\r$/u, '')
       : line;
@@ -359,6 +359,18 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
     }
 
     if (opening || closing) {
+      const nextLine = lines[index + 1];
+      if (
+        opening &&
+        current &&
+        nextLine &&
+        line.length + nextLine.length + suffixLength <= limit &&
+        current.length + line.length + nextLine.length + suffixLength > limit
+      ) {
+        // Keep the first code line with its opener when preceding prose
+        // would otherwise leave room for only an empty fenced message.
+        flush();
+      }
       if (current.length + line.length + suffixLength > limit) flush();
       current += line;
       open = nextOpen;
