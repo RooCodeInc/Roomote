@@ -3833,7 +3833,8 @@ describe('OpenCodeServerHarness', () => {
             ) &&
             String(envelope.payload.text ?? '').includes('Retrying in 5s') &&
             asRecord(envelope.payload.providerRetryNotice)?.kind ===
-              'provider_error',
+              'provider_error' &&
+            asRecord(envelope.payload.providerRetryNotice)?.maxAttempts === 6,
         ),
       ).toBe(true);
 
@@ -6803,7 +6804,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('preserves a registered saved model when resuming a session', async () => {
+  it('preserves a registered saved model when no usable override was applied', async () => {
     const client = new FakeOpenCodeServerClient();
     client.session.mockResolvedValueOnce({
       id: 'ses_prior',
@@ -6907,104 +6908,131 @@ describe('OpenCodeServerHarness', () => {
     },
   );
 
-  it('retries ProviderModelNotFoundError once with the deployment default', async () => {
-    vi.useFakeTimers();
-    const client = new FakeOpenCodeServerClient();
-    client.session.mockResolvedValueOnce({
-      id: 'ses_prior',
-      model: { providerID: 'saved-provider', id: 'saved-model' },
-    });
-    client.providers.mockResolvedValueOnce({
-      all: [{ id: 'saved-provider', models: { 'saved-model': {} } }],
-      connected: ['saved-provider'],
-      default: { 'saved-provider': 'saved-model' },
-    });
-    const { harness } = createHarness(client, {
-      initialSessionId: 'ses_prior',
-      model: 'default-provider/default-model',
-      preserveSavedSessionModel: true,
-      providerErrorBaseDelayMs: 1_000,
-      providerErrorMaxDelayMs: 1_000,
-    });
-
-    try {
-      await connectHarness(harness, client);
-      harness.sendCommand({
-        commandName: TaskCommandName.SendMessage,
-        data: { text: 'Continue.', visibleInTranscript: true },
+  it.each([
+    ['plain message', 'Model not found: saved-provider/saved-model'],
+    [
+      'typed message prefix',
+      'ProviderModelNotFoundError: Model not found: saved-provider/saved-model',
+    ],
+  ])(
+    'retries the OpenCode 1.18.30 %s once with the deployment default',
+    async (_label, errorMessage) => {
+      vi.useFakeTimers();
+      const client = new FakeOpenCodeServerClient();
+      const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+      client.session.mockResolvedValueOnce({
+        id: 'ses_prior',
+        model: { providerID: 'saved-provider', id: 'saved-model' },
       });
-      await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      client.providers.mockResolvedValueOnce({
+        all: [{ id: 'saved-provider', models: { 'saved-model': {} } }],
+        connected: ['saved-provider'],
+        default: { 'saved-provider': 'saved-model' },
       });
+      const { harness } = createHarness(client, {
+        initialSessionId: 'ses_prior',
+        model: 'default-provider/default-model',
+        preserveSavedSessionModel: true,
+        providerErrorBaseDelayMs: 1_000,
+        providerErrorMaxDelayMs: 1_000,
+      });
+      harness.subscribeRuntimePersistedEnvelope((envelope) =>
+        persistedEnvelopes.push(envelope),
+      );
 
-      await client.emit({
-        type: 'session.error',
-        properties: {
-          sessionID: 'ses_prior',
-          error: {
-            name: 'ProviderModelNotFoundError',
-            data: { message: 'Model is not registered' },
+      try {
+        await connectHarness(harness, client);
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: { text: 'Continue.', visibleInTranscript: true },
+        });
+        await vi.waitFor(() => {
+          expect(client.promptAsync).toHaveBeenCalledTimes(1);
+        });
+
+        await client.emit({
+          type: 'session.error',
+          properties: {
+            sessionID: 'ses_prior',
+            error: {
+              name: 'UnknownError',
+              data: {
+                message: errorMessage,
+                stack: `ProviderModelNotFoundError: ${errorMessage}\n    at Provider.getModel`,
+              },
+            },
           },
-        },
-      });
-      await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_prior' },
-      });
-      await vi.advanceTimersByTimeAsync(1_000);
+        });
+        expect(
+          persistedEnvelopes.some((envelope) => {
+            const notice = asRecord(envelope.payload.providerRetryNotice);
+            return (
+              notice?.kind === 'provider_error' && notice.maxAttempts === 1
+            );
+          }),
+        ).toBe(true);
+        await client.emit({
+          type: 'session.idle',
+          properties: { sessionID: 'ses_prior' },
+        });
+        await vi.advanceTimersByTimeAsync(1_000);
 
-      await vi.waitFor(() => {
+        await vi.waitFor(() => {
+          expect(client.promptAsync).toHaveBeenCalledTimes(2);
+        });
+        expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+          request: {
+            model: {
+              providerID: 'saved-provider',
+              modelID: 'saved-model',
+            },
+          },
+        });
+        expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+          request: {
+            model: {
+              providerID: 'default-provider',
+              modelID: 'default-model',
+            },
+          },
+        });
+        const firstMessageId = (
+          client.promptAsync.mock.calls[0]?.[0] as {
+            request: { messageID: string };
+          }
+        ).request.messageID;
+        const retryMessageId = (
+          client.promptAsync.mock.calls[1]?.[0] as {
+            request: { messageID: string };
+          }
+        ).request.messageID;
+        expect(retryMessageId).not.toBe(firstMessageId);
+
+        await client.emit({
+          type: 'session.error',
+          properties: {
+            sessionID: 'ses_prior',
+            error: {
+              name: 'UnknownError',
+              data: {
+                message: errorMessage,
+                stack: `ProviderModelNotFoundError: ${errorMessage}\n    at Provider.getModel`,
+              },
+            },
+          },
+        });
+        await client.emit({
+          type: 'session.idle',
+          properties: { sessionID: 'ses_prior' },
+        });
+        await vi.advanceTimersByTimeAsync(1_000);
         expect(client.promptAsync).toHaveBeenCalledTimes(2);
-      });
-      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
-        request: {
-          model: {
-            providerID: 'saved-provider',
-            modelID: 'saved-model',
-          },
-        },
-      });
-      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
-        request: {
-          model: {
-            providerID: 'default-provider',
-            modelID: 'default-model',
-          },
-        },
-      });
-      const firstMessageId = (
-        client.promptAsync.mock.calls[0]?.[0] as {
-          request: { messageID: string };
-        }
-      ).request.messageID;
-      const retryMessageId = (
-        client.promptAsync.mock.calls[1]?.[0] as {
-          request: { messageID: string };
-        }
-      ).request.messageID;
-      expect(retryMessageId).not.toBe(firstMessageId);
-
-      await client.emit({
-        type: 'session.error',
-        properties: {
-          sessionID: 'ses_prior',
-          error: {
-            name: 'ProviderModelNotFoundError',
-            data: { message: 'Default model is not registered' },
-          },
-        },
-      });
-      await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_prior' },
-      });
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(client.promptAsync).toHaveBeenCalledTimes(2);
-    } finally {
-      harness.dispose();
-      vi.useRealTimers();
-    }
-  });
+      } finally {
+        harness.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('orders the first resumed prompt after the restored session history', async () => {
     const client = new FakeOpenCodeServerClient();

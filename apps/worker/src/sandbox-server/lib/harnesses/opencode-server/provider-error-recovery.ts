@@ -38,6 +38,11 @@ const TERMINAL_ERROR_NAMES = new Set([
 const PROVIDER_MODEL_NOT_FOUND_ERROR_NAMES = new Set([
   'providermodelnotfounderror',
 ]);
+// OpenCode 1.18.30 wraps model lookup failures as UnknownError and puts the
+// original typed error only in data.message. Match that wire shape narrowly;
+// stack text and mid-message mentions are not classification signals.
+const PROVIDER_MODEL_NOT_FOUND_MESSAGE =
+  /^(?:ProviderModelNotFoundError: )?Model not found: \S/u;
 const POLICY_ERROR_NAMES = new Set(['contentfiltererror']);
 const CONNECTION_RESET_MESSAGE = 'connection reset by server';
 
@@ -147,9 +152,20 @@ export function isOpenCodeContextOverflowError(error: unknown): boolean {
 }
 
 export function isOpenCodeProviderModelNotFoundError(error: unknown): boolean {
-  return hasErrorName(
-    collectProviderErrorValues(error),
-    PROVIDER_MODEL_NOT_FOUND_ERROR_NAMES,
+  const values = collectProviderErrorValues(error);
+
+  if (hasErrorName(values, PROVIDER_MODEL_NOT_FOUND_ERROR_NAMES)) {
+    return true;
+  }
+
+  const record = asRecord(error);
+  const data = asRecord(record?.data);
+  const message = asString(data?.message);
+
+  return (
+    normalizeIdentifier(record?.name) === 'unknownerror' &&
+    message !== undefined &&
+    PROVIDER_MODEL_NOT_FOUND_MESSAGE.test(message)
   );
 }
 
@@ -188,6 +204,7 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
 export function isOpenCodeTerminalProviderError(error: unknown): boolean {
   return (
     isInferenceCreditsExhaustedError(error) ||
+    isOpenCodeProviderModelNotFoundError(error) ||
     isExplicitlyTerminal(collectProviderErrorValues(error))
   );
 }
@@ -202,7 +219,10 @@ export function isOpenCodeTerminalProviderError(error: unknown): boolean {
 export function getOpenCodeProviderErrorRecovery(
   error: unknown,
 ): OpenCodeProviderErrorRecovery | null {
-  if (isInferenceCreditsExhaustedError(error)) {
+  if (
+    isInferenceCreditsExhaustedError(error) ||
+    isOpenCodeProviderModelNotFoundError(error)
+  ) {
     return null;
   }
 

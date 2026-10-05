@@ -467,6 +467,7 @@ describe('generateOpenCodeConfig provider support', () => {
     };
 
     expect(result.model).toBe('bedrock-mantle-openai/openai.gpt-5.6-luna');
+    expect(result.modelOverrideApplied).toBe(true);
     expect(
       config.provider['bedrock-mantle-openai']?.models?.['openai.gpt-5.6-luna'],
     ).toBeDefined();
@@ -513,6 +514,7 @@ describe('generateOpenCodeConfig provider support', () => {
     });
 
     expect(result.model).toBe('openrouter/openai/gpt-5.6-terra');
+    expect(result.modelOverrideApplied).toBe(false);
     expect(result.configContent).not.toContain('mistral/');
     expect(runtimeEnv.MISTRAL_API_KEY).toBeUndefined();
   });
@@ -527,6 +529,7 @@ describe('generateOpenCodeConfig provider support', () => {
     });
 
     expect(result.model).toBe('openrouter/openai/gpt-5.6-terra');
+    expect(result.modelOverrideApplied).toBe(false);
   });
 
   it('leaves a model override without reasoning options when no per-task effort is set', () => {

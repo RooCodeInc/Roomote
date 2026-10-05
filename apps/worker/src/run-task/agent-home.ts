@@ -670,6 +670,7 @@ interface GenerateOpenCodeConfigResult {
   configContent: string;
   openCodeConfigDir: string;
   model?: string;
+  modelOverrideApplied: boolean;
 }
 
 export interface OpenCodeRemoteMcpServerConfig {
@@ -2164,6 +2165,7 @@ export function generateOpenCodeConfig({
   return {
     configContent: `${JSON.stringify(config, null, 2)}\n`,
     openCodeConfigDir,
+    modelOverrideApplied: configuredModel !== undefined,
     model:
       promptModel ??
       (typeof operatorConfig.model === 'string'

@@ -12,16 +12,60 @@ import {
 } from './provider-error-recovery';
 
 describe('getOpenCodeProviderErrorRecovery', () => {
-  it('treats ProviderModelNotFoundError as terminal without calling it context overflow', () => {
+  it.each([
+    'Model not found: saved-provider/saved-model',
+    'ProviderModelNotFoundError: Model not found: saved-provider/saved-model',
+  ])(
+    'treats the OpenCode 1.18.30 UnknownError message as terminal: %s',
+    (message) => {
+      const error = {
+        name: 'UnknownError',
+        data: {
+          message,
+          stack: `ProviderModelNotFoundError: ${message}\n    at Provider.getModel`,
+        },
+      };
+
+      expect(isOpenCodeProviderModelNotFoundError(error)).toBe(true);
+      expect(isOpenCodeContextOverflowError(error)).toBe(false);
+      expect(isOpenCodeTerminalProviderError(error)).toBe(true);
+      expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
+    },
+  );
+
+  it.each([
+    {
+      name: 'UnknownError',
+      data: {
+        message: 'Request failed after Model not found: provider/model',
+      },
+    },
+    {
+      name: 'UnknownError',
+      data: {
+        message: 'Upstream connection closed unexpectedly.',
+        stack: 'ProviderModelNotFoundError: Model not found: provider/model',
+      },
+    },
+  ])(
+    'keeps non-prefix model-not-found text on the ordinary retry path',
+    (error) => {
+      expect(isOpenCodeProviderModelNotFoundError(error)).toBe(false);
+      expect(isOpenCodeTerminalProviderError(error)).toBe(false);
+      expect(getOpenCodeProviderErrorRecovery(error)).toMatchObject({
+        kind: 'provider_error',
+        maxRetries: 6,
+      });
+    },
+  );
+
+  it('keeps a generic UnknownError 404 on its existing terminal path', () => {
     const error = {
       name: 'UnknownError',
-      data: JSON.stringify({
-        cause: { name: 'ProviderModelNotFoundError' },
-      }),
+      data: { message: 'Route not found', statusCode: 404 },
     };
 
-    expect(isOpenCodeProviderModelNotFoundError(error)).toBe(true);
-    expect(isOpenCodeContextOverflowError(error)).toBe(false);
+    expect(isOpenCodeProviderModelNotFoundError(error)).toBe(false);
     expect(isOpenCodeTerminalProviderError(error)).toBe(true);
     expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
   });

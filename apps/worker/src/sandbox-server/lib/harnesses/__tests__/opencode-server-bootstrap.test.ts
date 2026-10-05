@@ -1364,7 +1364,11 @@ describe('opencode-server bootstrap', () => {
 
     const homeDir = createTempHome();
 
-    const { commandEnv: runtimeEnv, model } = await prepareOpenCodeCommandEnv({
+    const {
+      commandEnv: runtimeEnv,
+      model,
+      modelOverrideApplied,
+    } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         HOME: homeDir,
         R_MODEL: 'openrouter/z-ai/glm-5.2:nitro',
@@ -1392,6 +1396,7 @@ describe('opencode-server bootstrap', () => {
     // The harness sends the normalized deployment model on every build prompt
     // instead of relying on restored OpenCode session state to recover it.
     expect(model).toBe('openrouter/z-ai/glm-5.2');
+    expect(modelOverrideApplied).toBe(false);
     expect(baseConfig.model).toBe('openrouter/z-ai/glm-5.2');
     expect(baseConfig.small_model).toBe('openrouter/openai/gpt-5.4-mini');
     expect(baseConfig.provider?.openrouter?.models).toEqual({
@@ -1416,7 +1421,11 @@ describe('opencode-server bootstrap', () => {
 
     const homeDir = createTempHome();
 
-    const { commandEnv: runtimeEnv, model } = await prepareOpenCodeCommandEnv({
+    const {
+      commandEnv: runtimeEnv,
+      model,
+      modelOverrideApplied,
+    } = await prepareOpenCodeCommandEnv({
       runtimeEnv: createDirectHarnessRuntimeEnv(homeDir),
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -1432,6 +1441,7 @@ describe('opencode-server bootstrap', () => {
     // The harness prompts with the base model while the per-model options in
     // the shared provider config carry the variant's routing preference.
     expect(model).toBe('openrouter/z-ai/glm-5.2');
+    expect(modelOverrideApplied).toBe(true);
     expect(config.model).toBe('openrouter/z-ai/glm-5.2');
     expect(config.provider?.openrouter?.models).toEqual({
       'z-ai/glm-5.2': { options: { provider: { sort: 'throughput' } } },
@@ -1444,6 +1454,26 @@ describe('opencode-server bootstrap', () => {
     expect(baseConfig.provider?.openrouter?.models).toEqual({
       'z-ai/glm-5.2': { options: { provider: { sort: 'throughput' } } },
     });
+  });
+
+  it('reports a disabled task override as not applied', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+    const homeDir = createTempHome();
+
+    const { model, modelOverrideApplied } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        HOME: homeDir,
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        MISTRAL_API_KEY: 'mistral-key',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+      model: 'mistral/mistral-large-latest',
+    });
+
+    expect(model).toBe('openrouter/openai/gpt-5.6-terra');
+    expect(modelOverrideApplied).toBe(false);
   });
 
   it('lets a variant task model override win over a conflicting deployment variant', async () => {
