@@ -323,10 +323,14 @@ function TaskModelRoleEditor({
     ? [
         {
           id: SAME_AS_CODING_MODEL_VALUE,
-          displayName: 'Same as coding model',
-          // "Same as coding" resolves to the effective coding model, so its
-          // supported reasoning efforts constrain the picker as well.
-          metadata: codingModelMetadata ?? null,
+          displayName:
+            config.role === 'audioVideo'
+              ? 'Helper for audio, vision for video'
+              : 'Same as coding model',
+          // Inherited model roles use the coding model's capabilities. The
+          // unset media role routes audio and video independently.
+          metadata:
+            config.role === 'audioVideo' ? null : (codingModelMetadata ?? null),
         },
         ...models,
       ]
@@ -335,7 +339,9 @@ function TaskModelRoleEditor({
   const mediaInputTypes =
     config.role === 'vision' || config.role === 'audioVideo'
       ? selectValue === SAME_AS_CODING_MODEL_VALUE
-        ? codingModelMetadata?.inputTypes
+        ? config.role === 'vision'
+          ? codingModelMetadata?.inputTypes
+          : undefined
         : selectedModel?.metadata?.inputTypes
       : null;
   const requestedMediaInputs =

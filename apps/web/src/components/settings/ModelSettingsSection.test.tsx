@@ -591,20 +591,23 @@ describe('ModelSettingsSection', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('warns for an unsupported inherited media model and accepts a supported one', async () => {
+  it('describes unset media routing and accepts a supported explicit model', async () => {
     settingsData.current = buildSettingsData();
     renderModelSettingsSection();
 
     expect(
-      screen.getByText(
-        "GPT 5.4 doesn't support audio or video. Choose a model that does.",
-      ),
-    ).toBeInTheDocument();
+      screen.queryByText(/doesn't support audio or video/u),
+    ).not.toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', {
         name: 'Audio and video model and reasoning',
       }),
     );
+    expect(
+      await screen.findByRole('option', {
+        name: 'Helper for audio, vision for video',
+      }),
+    ).toBeInTheDocument();
     fireEvent.click(
       await screen.findByRole('option', { name: 'Gemini 3.8 Flash' }),
     );
