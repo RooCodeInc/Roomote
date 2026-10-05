@@ -316,6 +316,7 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
   type Fence = { opening: string; marker: string };
   let open: Fence | null = null;
   const lines = text.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
+  let skippedOpeningBlankLines = 0;
 
   const flush = () => {
     if (!current) return;
@@ -328,6 +329,10 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
   };
 
   for (const [index, line] of lines.entries()) {
+    if (skippedOpeningBlankLines > 0) {
+      skippedOpeningBlankLines -= 1;
+      continue;
+    }
     const value = line.endsWith('\n')
       ? line.slice(0, -1).replace(/\r$/u, '')
       : line;
@@ -359,17 +364,31 @@ function chunkDiscordFencedMessage(text: string, limit: number): string[] {
     }
 
     if (opening || closing) {
-      const nextLine = lines[index + 1];
+      const leadingBlankLines: string[] = [];
+      let openingAndFirstContentLength = line.length;
+      for (const followingLine of lines.slice(index + 1)) {
+        const followingValue = followingLine.endsWith('\n')
+          ? followingLine.slice(0, -1).replace(/\r$/u, '')
+          : followingLine;
+        if (!followingValue.trim()) {
+          leadingBlankLines.push(followingLine);
+          continue;
+        }
+        openingAndFirstContentLength += followingLine.length;
+        break;
+      }
       if (
         opening &&
         current &&
-        nextLine &&
-        line.length + nextLine.length + suffixLength <= limit &&
-        current.length + line.length + nextLine.length + suffixLength > limit
+        openingAndFirstContentLength > line.length &&
+        openingAndFirstContentLength + suffixLength <= limit &&
+        current.length + openingAndFirstContentLength + suffixLength > limit
       ) {
-        // Keep the first code line with its opener when preceding prose
-        // would otherwise leave room for only an empty fenced message.
+        // Keep the first code line with the opener, moving leading blank lines
+        // before it when preceding prose would create an empty fenced chunk.
+        current += leadingBlankLines.join('');
         flush();
+        skippedOpeningBlankLines = leadingBlankLines.length;
       }
       if (current.length + line.length + suffixLength > limit) flush();
       current += line;

@@ -179,7 +179,7 @@ describe('DiscordCommunicationProvider', () => {
     try {
       await provider.postMessage({
         channelId: '400000000000000001',
-        text: `${prose}\`\`\`text\n${row}\n\`\`\``,
+        text: `${prose}\`\`\`text\n\n${row}\n\`\`\``,
       });
 
       const stateResponse = await fetch(
@@ -190,7 +190,7 @@ describe('DiscordCommunicationProvider', () => {
       };
       const messages = state.messages['400000000000000001'] ?? [];
       expect(messages).toHaveLength(2);
-      expect(messages[0]?.content).toBe(prose);
+      expect(messages[0]?.content).toBe(`${prose}\n`);
       expect(messages[1]?.content).toContain(row);
       expect(messages[1]?.content.match(/^```/gm)?.length ?? 0).toBe(2);
       expect(messages.every((message) => message.content.length <= 2_000)).toBe(
@@ -1384,10 +1384,11 @@ describe('chunkDiscordMessage', () => {
     'keeps the first fenced row with its opener after prose (%j)',
     (newline) => {
       const firstRow = `| r0 | ${'x'.repeat(newline === '\r\n' ? 36 : 38)} |`;
-      const text = `Summary${newline}${newline}\`\`\`text${newline}${firstRow}${newline}\`\`\``;
+      const text = `Summary${newline}${newline}\`\`\`text${newline}${newline}${firstRow}${newline}\`\`\``;
       const chunks = chunkDiscordMessage(text, 60);
       expect(chunks.every((chunk) => chunk.length <= 60)).toBe(true);
       expect(chunks[0]).not.toContain('```');
+      expect(chunks[0]?.endsWith(`${newline}${newline}${newline}`)).toBe(true);
       expect(chunks[1]).toContain(`\`\`\`text${newline}${firstRow}`);
       expect(
         chunks.every((chunk) => (chunk.match(/^```/gm)?.length ?? 0) % 2 === 0),
