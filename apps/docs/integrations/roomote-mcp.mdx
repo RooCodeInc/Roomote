@@ -19,6 +19,12 @@ work to tasks. You can keep working locally and return to the same session for
 the result. When work must start directly in a known compute environment, your
 client can still use the explicit environment-targeted task launch action.
 
+When your MCP client can supply files, the start action accepts up to 20
+attachments with the initial message. Screenshots reach Roomote as image input;
+supported logs, source files, spreadsheets, PDFs, and other documents are
+extracted as bounded text context. See [File attachments](/file-attachments) for
+supported formats, size limits, and error behavior.
+
 ### Check on and steer existing work
 
 Search finds Sessions by default. Once you find one, provide its Session ID to
@@ -27,6 +33,10 @@ you need one concrete coding task instead, use task search and pass its task ID;
 the task ID takes precedence if both identifiers are supplied. Compute logs,
 cancellation, environment-targeted launch, and task model controls remain
 task-specific operations.
+
+The same follow-up action can attach files to a session or a concrete task. This
+is useful when the next instruction depends on a screenshot, a failing log, a
+diff, or another document that was not part of the initial request.
 
 For extended coordination, clients can use `get_updates` instead of re-reading
 the full transcript. Each response contains only new user-visible
@@ -115,12 +125,15 @@ reading content.
 - “Push what I’m working on to a remote branch, then start a Roomote task from
   that branch to take over.”
 - “Start a Roomote session to investigate this bug.”
+- “Start a Roomote session with this screenshot and log, then diagnose the
+  failure.”
 - “Find my active sessions related to OAuth and summarize their progress.”
 - “Find the coding task for this pull request and show its compute logs.”
 - “Show me the messages and compute logs from the task that failed this
   morning.”
 - “Tell the running task to add a regression test before it opens the PR.”
 - “Read the latest messages from this session and send a follow-up.”
+- “Send this diff to the existing task and ask it to review the regression.”
 - “Use this Slack message as context and explain what the team decided.”
 - “Read this public documentation page and summarize its authentication
   requirements.”
