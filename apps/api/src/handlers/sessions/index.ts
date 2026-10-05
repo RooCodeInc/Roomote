@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import {
   and,
   db,
@@ -50,7 +51,10 @@ import {
   sendMessageToFastSessionForUser,
 } from '../tasks/fastSessionCommunication';
 import { getSessionRelayUpdates } from '../tasks/getRelayUpdates';
-import { prepareMessageAttachments } from '../tasks/messageAttachments';
+import {
+  prepareMessageAttachments,
+  ROOMOTE_MESSAGE_REQUEST_MAX_BYTES,
+} from '../tasks/messageAttachments';
 
 type SessionContext = Context<{
   Variables: Variables & { mcpAuth: McpAuth };
@@ -143,6 +147,18 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
   const message = body.message?.trim();
   if (!message) return c.json({ error: 'message is required' }, 400);
 
+  let session;
+  try {
+    session = await findAccessibleSession(sessionId, c.get('mcpAuth'));
+  } catch (error) {
+    logHandlerError('sendSessionMessage', error);
+    return c.json({ error: 'Failed to send session message' }, 500);
+  }
+  if (!session) return c.json({ error: 'Session not found' }, 404);
+  if (!session.fastConversationId) {
+    return c.json({ error: 'Session has no conversation to continue' }, 409);
+  }
+
   let prepared;
   try {
     prepared = await prepareMessageAttachments({
@@ -157,11 +173,6 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
   }
 
   try {
-    const session = await findAccessibleSession(sessionId, c.get('mcpAuth'));
-    if (!session) return c.json({ error: 'Session not found' }, 404);
-    if (!session.fastConversationId) {
-      return c.json({ error: 'Session has no conversation to continue' }, 409);
-    }
     const result = await sendMessageToFastSessionForUser({
       sessionId: session.fastConversationId,
       userId,
@@ -580,8 +591,22 @@ async function getSessionUpdates(c: SessionContext): Promise<Response> {
 
 export const sessionsRouter = new Hono<{ Variables: Variables }>();
 sessionsRouter.get('/', searchSessions);
+sessionsRouter.use(
+  '/',
+  bodyLimit({
+    maxSize: ROOMOTE_MESSAGE_REQUEST_MAX_BYTES,
+    onError: (c) => c.json({ error: 'Message payload is too large' }, 413),
+  }),
+);
 sessionsRouter.post('/', startSession);
 sessionsRouter.get('/:sessionId/summary', getSessionSummary);
 sessionsRouter.get('/:sessionId/messages', getSessionMessages);
 sessionsRouter.get('/:sessionId/updates', getSessionUpdates);
+sessionsRouter.use(
+  '/:sessionId/send_message',
+  bodyLimit({
+    maxSize: ROOMOTE_MESSAGE_REQUEST_MAX_BYTES,
+    onError: (c) => c.json({ error: 'Message payload is too large' }, 413),
+  }),
+);
 sessionsRouter.post('/:sessionId/send_message', sendSessionMessage);

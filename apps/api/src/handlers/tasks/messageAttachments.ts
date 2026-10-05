@@ -5,12 +5,15 @@ import {
   isRoomoteTextExtractableAttachment,
   ROOMOTE_FILE_ATTACHMENT_MAX_BYTES,
   ROOMOTE_IMAGE_ATTACHMENT_MAX_BYTES,
+  ROOMOTE_MESSAGE_ATTACHMENTS_MAX_BYTES,
 } from '@roomote/cloud-agents';
 import {
   appendAttachmentTextsToPromptText,
   extractPromptTextAttachments,
 } from '@roomote/cloud-agents/server';
-import type { RoomoteMessageAttachment } from '@roomote/types';
+import { roomoteMessageAttachmentsSchema } from '@roomote/types';
+
+export const ROOMOTE_MESSAGE_REQUEST_MAX_BYTES = 24 * 1024 * 1024;
 
 function getBase64Value(charCode: number): number {
   if (charCode >= 65 && charCode <= 90) return charCode - 65;
@@ -59,15 +62,21 @@ function isAttachmentBudgetWarning(warning: string): boolean {
 
 export async function prepareMessageAttachments(input: {
   message: string;
-  attachments?: RoomoteMessageAttachment[];
+  attachments?: unknown;
 }): Promise<{
   message: string;
   images?: string[];
   attachmentTexts?: string[];
 }> {
-  if (!input.attachments?.length) {
+  if (input.attachments === undefined) {
     return { message: input.message };
   }
+
+  const parsed = roomoteMessageAttachmentsSchema.safeParse(input.attachments);
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? 'Invalid attachments');
+  }
+  if (parsed.data.length === 0) return { message: input.message };
 
   const images: string[] = [];
   const textAttachments: Array<{
@@ -75,8 +84,9 @@ export async function prepareMessageAttachments(input: {
     mimeType: string;
     bytes: Buffer;
   }> = [];
+  let totalDecodedBytes = 0;
 
-  for (const attachment of input.attachments) {
+  for (const attachment of parsed.data) {
     const mimeType = attachment.mimeType.trim().toLowerCase();
     const isImage = isRoomotePromptImageMimeType(mimeType);
     const isTextExtractable = isRoomoteTextExtractableAttachment({
@@ -98,6 +108,12 @@ export async function prepareMessageAttachments(input: {
     if (decodedByteLength > maxBytes) {
       throw new Error(
         `${attachment.filename}: file exceeds the ${formatMebibytes(maxBytes)} attachment limit`,
+      );
+    }
+    totalDecodedBytes += decodedByteLength;
+    if (totalDecodedBytes > ROOMOTE_MESSAGE_ATTACHMENTS_MAX_BYTES) {
+      throw new Error(
+        `attachments exceed the ${formatMebibytes(ROOMOTE_MESSAGE_ATTACHMENTS_MAX_BYTES)} total limit`,
       );
     }
 
