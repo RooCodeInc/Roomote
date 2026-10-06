@@ -101,8 +101,27 @@ export function chunkTelegramMarkdown(
   const chunks: string[] = [];
   let remaining = markdown;
   let openFence: MarkdownCodeFence | null = null;
+  let startsAtLineBoundary = true;
 
   while (remaining) {
+    // The preceding chunk already supplied its own closing fence. If the
+    // original closes here too, consume that delimiter instead of reopening
+    // an empty code block before the following prose.
+    if (openFence && (startsAtLineBoundary || /^\r?\n/u.test(remaining))) {
+      const closingLine = /^(?:\r?\n)?([^\n]*)(?:\n|$)/u.exec(remaining);
+      if (
+        closingLine &&
+        isMarkdownCodeFenceClosing(
+          closingLine[1]!.replace(/\r$/u, ''),
+          openFence,
+        )
+      ) {
+        remaining = remaining.slice(closingLine[0].length);
+        openFence = null;
+        startsAtLineBoundary = true;
+        continue;
+      }
+    }
     const prefix = openFence ? `${openFence.openingLine}\n` : '';
     let rawLimit = maxLength - prefix.length;
     let rawChunk = '';
@@ -127,6 +146,7 @@ export function chunkTelegramMarkdown(
     chunks.push(renderedChunk);
     remaining = remaining.slice(rawChunk.length);
     openFence = nextOpenFence;
+    startsAtLineBoundary = rawChunk.endsWith('\n');
   }
 
   return chunks;
