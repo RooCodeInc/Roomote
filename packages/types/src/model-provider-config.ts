@@ -330,6 +330,20 @@ export const TASK_MODEL_ROLES = Object.freeze(
   Object.keys(TASK_MODEL_ROLE_DESCRIPTORS) as TaskModelRole[],
 );
 
+type SandboxTaskModelRole = {
+  [Role in TaskModelRole]: (typeof TASK_MODEL_ROLE_DESCRIPTORS)[Role]['includeInSandbox'] extends true
+    ? Role
+    : never;
+}[TaskModelRole];
+
+/** Roles whose model and reasoning configuration is delivered to task workers. */
+export const SANDBOX_TASK_MODEL_ROLES = Object.freeze(
+  TASK_MODEL_ROLES.filter(
+    (role): role is SandboxTaskModelRole =>
+      TASK_MODEL_ROLE_DESCRIPTORS[role].includeInSandbox,
+  ),
+);
+
 /**
  * A provider's recommended default models for the non-coding roles. The
  * coding role's recommendation is always the provider's
