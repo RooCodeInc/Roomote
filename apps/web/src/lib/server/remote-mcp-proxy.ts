@@ -48,12 +48,14 @@ export function sanitizeProxiedResponseHeaders(headers: Headers): Headers {
 
 export async function proxyRemoteMcpRequest(
   request: NextRequest,
-  endpoint: 'mcp' | 'metadata',
+  endpoint: 'mcp' | 'metadata' | 'artifact-download',
 ) {
   const env = await bootstrapWebRuntimeEnv();
   const targetUrl =
-    endpoint === 'mcp'
-      ? new URL(getRoomoteMcpResourceUrl(env.TRPC_URL))
+    endpoint !== 'metadata'
+      ? new URL(
+          `${getRoomoteMcpResourceUrl(env.TRPC_URL)}${endpoint === 'artifact-download' ? '/task-outputs/download' : ''}`,
+        )
       : new URL(getRoomoteMcpProtectedResourceMetadataUrl(env.TRPC_URL));
   targetUrl.search = request.nextUrl.search;
 

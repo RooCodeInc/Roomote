@@ -10,6 +10,7 @@ import {
   resolveRoomoteCommunicationTarget,
   roomoteManagementFieldSchemas,
   shouldSearchTasks,
+  taskOutputFieldSchemas,
 } from '@roomote/types';
 
 import { environmentsRouter } from '../environments';
@@ -23,6 +24,7 @@ import {
 } from './in-process-api';
 import type { McpAuth } from './middleware';
 import { toMcpToolResult } from './proxy-utils';
+import { taskOutputsRouter } from './task-outputs';
 
 function invokeMemberApi(
   auth: McpAuth,
@@ -35,6 +37,7 @@ function invokeMemberApi(
       app.route('/tasks', tasksRouter);
       app.route('/sessions', sessionsRouter);
       app.route('/environments', environmentsRouter);
+      app.route('/task-outputs', taskOutputsRouter);
     },
     path,
     init,
@@ -46,6 +49,10 @@ const manageTasksInputSchema = {
     .enum(ROOMOTE_MEMBER_MANAGEMENT_ACTIONS)
     .describe(ROOMOTE_MEMBER_MANAGEMENT_ACTION_DESCRIPTION),
   ...roomoteManagementFieldSchemas,
+  ...taskOutputFieldSchemas,
+  limit: roomoteManagementFieldSchemas.limit.describe(
+    'Positive result limit: 1–100 for search/get_updates; 1–100 (default 50) for get_command_receipts; 1–1000 for get_messages.',
+  ),
 } satisfies Record<string, z.ZodTypeAny>;
 
 export function registerRoomoteMemberTools(
@@ -67,6 +74,37 @@ export function registerRoomoteMemberTools(
     },
     async (params) => {
       switch (params.action) {
+        case 'list_artifacts':
+        case 'get_artifact_download_url':
+        case 'get_command_receipts': {
+          const input =
+            params.action === 'list_artifacts'
+              ? {
+                  action: params.action,
+                  taskId: params.taskId,
+                  artifactType: params.artifactType,
+                }
+              : params.action === 'get_artifact_download_url'
+                ? {
+                    action: params.action,
+                    taskId: params.taskId,
+                    path: params.path,
+                    version: params.version,
+                  }
+                : {
+                    action: params.action,
+                    taskId: params.taskId,
+                    limit: params.limit,
+                    cursor: params.cursor,
+                  };
+          return resultFromApi(
+            await invokeMemberApi(auth, '/task-outputs/read', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(input),
+            }),
+          );
+        }
         case 'start': {
           if (!params.message?.trim()) {
             return toolError({

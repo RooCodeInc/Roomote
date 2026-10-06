@@ -23,6 +23,7 @@ import {
 } from '@roomote/auth';
 
 import type { Variables } from './types';
+import { downloadMemberTaskArtifact } from './handlers/mcp/task-outputs';
 import { redactCustomAutomationWebhookPath } from './sensitive-path';
 import { resolveApiCorsOrigin } from './cors';
 import { createSingleLineWarnLogger } from './logging';
@@ -276,6 +277,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
   app.route('/mcp', publicRoomoteMcp);
+  app.get('/mcp/task-outputs/download', downloadMemberTaskArtifact);
   app.route('/', mcpOAuthMetadata);
   app.route('/api/task-runs', taskRunsRouter);
   app.route('/api/artifacts', artifactsRouter);
