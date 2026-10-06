@@ -283,9 +283,12 @@ Admins can enable or disable models from the task model list. The default model
 must stay enabled, because Roomote uses it when a task does not request a
 specific model.
 
-Model settings affect new task starts. Running tasks and resumed snapshots keep
-the model that was selected when they started, except when a configured fallback
-switches a running task or session after a provider failure.
+Model settings affect new task starts. Running tasks keep the model that was
+selected when they started. Resumed snapshots also preserve their saved model
+while its provider remains connected and the model remains available. If that
+saved model is no longer usable, Roomote continues with the deployment default;
+an explicit model override for the resumed task takes precedence. A configured
+fallback can still switch a running task or session after a provider failure.
 
 ## Model roles
 
