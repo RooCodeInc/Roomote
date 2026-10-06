@@ -39,6 +39,7 @@ import {
   X,
 } from '@/components/system';
 import {
+  SkillListLoadError,
   SkillListRow,
   type SkillListFilter,
 } from '@/components/settings/SkillList';
@@ -279,6 +280,7 @@ export function CustomSkills({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
+  const [retryingAfterError, setRetryingAfterError] = useState(false);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [hasInteractedWithSearch, setHasInteractedWithSearch] = useState(false);
   const [editorState, setEditorState] =
@@ -607,7 +609,25 @@ export function CustomSkills({
     });
   };
 
-  if (listQuery.isPending) {
+  const hasLoadError = listQuery.isError || retryingAfterError;
+  const loadError =
+    hasLoadError && filter !== 'shared' ? (
+      <SkillListLoadError
+        message={
+          listQuery.data
+            ? 'Could not refresh environment-specific skills.'
+            : 'Failed to load environment-specific skills.'
+        }
+        retryLabel="Retry environment-specific skills"
+        isRetrying={listQuery.isFetching}
+        onRetry={() => {
+          setRetryingAfterError(true);
+          void listQuery.refetch().finally(() => setRetryingAfterError(false));
+        }}
+      />
+    ) : null;
+
+  if (listQuery.isPending && !retryingAfterError) {
     return filter === 'shared' ? null : (
       <div data-testid="environment-skills-skeleton">
         {Array.from({ length: 2 }).map((_, index) => (
@@ -623,16 +643,11 @@ export function CustomSkills({
     );
   }
 
-  if (listQuery.isError) {
-    return filter === 'shared' ? null : (
-      <p className="px-4 py-6 text-sm text-destructive">
-        Failed to load environment-specific skills.
-      </p>
-    );
-  }
+  if (!listQuery.data) return loadError;
 
   return (
     <>
+      {loadError}
       <Dialog
         open={editorState !== null}
         onOpenChange={(open) => {
