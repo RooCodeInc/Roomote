@@ -198,6 +198,8 @@ it('retries shared skills through real query transitions without losing the reco
     release = resolve;
   });
   fireEvent.click(retry);
+  expect(retry).toBeDisabled();
+  expect(retry).toHaveAttribute('aria-busy', 'true');
   await waitFor(() => expect(retry).toBeDisabled());
   expect(screen.getByRole('button', { name: 'Retry shared skills' })).toBe(
     retry,

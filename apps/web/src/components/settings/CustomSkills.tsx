@@ -619,7 +619,7 @@ export function CustomSkills({
             : 'Failed to load environment-specific skills.'
         }
         retryLabel="Retry environment-specific skills"
-        isRetrying={listQuery.isFetching}
+        isRetrying={listQuery.isFetching || retryingAfterError}
         onRetry={() => {
           setRetryingAfterError(true);
           void listQuery.refetch().finally(() => setRetryingAfterError(false));

@@ -449,6 +449,8 @@ describe('CustomSkills settings', () => {
       release = resolve;
     });
     fireEvent.click(retry);
+    expect(retry).toBeDisabled();
+    expect(retry).toHaveAttribute('aria-busy', 'true');
     await waitFor(() => expect(retry).toBeDisabled());
     expect(
       screen.getByRole('button', { name: 'Retry environment-specific skills' }),

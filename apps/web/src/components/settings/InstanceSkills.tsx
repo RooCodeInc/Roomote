@@ -258,7 +258,7 @@ export function InstanceSkills({
               : 'Failed to load shared skills.'
           }
           retryLabel="Retry shared skills"
-          isRetrying={list.isFetching}
+          isRetrying={list.isFetching || retryingAfterError}
           onRetry={retryList}
         />
       ) : null}
