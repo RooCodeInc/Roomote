@@ -17,7 +17,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  ErrorState,
   Form,
   FormControl,
   FormField,
@@ -31,6 +30,7 @@ import {
   Trash2,
 } from '@/components/system';
 import {
+  SkillListLoadError,
   SkillListRow,
   type SkillListFilter,
 } from '@/components/settings/SkillList';
@@ -211,6 +211,12 @@ export function InstanceSkills({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const list = useQuery(trpc.instanceSkills.list.queryOptions());
+  const [retryingAfterError, setRetryingAfterError] = useState(false);
+  const hasLoadError = list.isError || retryingAfterError;
+  const retryList = () => {
+    setRetryingAfterError(true);
+    void list.refetch().finally(() => setRetryingAfterError(false));
+  };
   const [editor, setEditor] = useState<{ skill: Skill | null } | null>(null);
   const [viewing, setViewing] = useState<Skill | null>(null);
   const [deleting, setDeleting] = useState<Skill | null>(null);
@@ -244,7 +250,19 @@ export function InstanceSkills({
 
   return (
     <>
-      {list.isPending ? (
+      {hasLoadError && filter !== 'environment' ? (
+        <SkillListLoadError
+          message={
+            list.data
+              ? 'Could not refresh shared skills.'
+              : 'Failed to load shared skills.'
+          }
+          retryLabel="Retry shared skills"
+          isRetrying={list.isFetching || retryingAfterError}
+          onRetry={retryList}
+        />
+      ) : null}
+      {list.isPending && !retryingAfterError ? (
         filter !== 'environment' ? (
           <div data-testid="shared-skills-skeleton">
             {Array.from({ length: 2 }).map((_, index) => (
@@ -258,16 +276,7 @@ export function InstanceSkills({
             ))}
           </div>
         ) : null
-      ) : list.isError ? (
-        filter !== 'environment' ? (
-          <div className="px-4 py-6">
-            <ErrorState
-              title="Failed to load skills"
-              description={list.error.message}
-            />
-          </div>
-        ) : null
-      ) : visibleSkills.length === 0 ? (
+      ) : !list.data ? null : visibleSkills.length === 0 ? (
         filter === 'shared' ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">
             {normalizedSearch

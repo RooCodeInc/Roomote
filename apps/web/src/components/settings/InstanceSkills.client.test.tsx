@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -37,6 +38,8 @@ const { state, createMock, updateMock, deleteMock, saveManualMock } =
       ],
       createResult: null as Promise<{ success: true }> | null,
       environmentError: false,
+      skillsError: false,
+      listGate: null as Promise<void> | null,
       isAdmin: false,
     },
     createMock: vi.fn(
@@ -56,7 +59,11 @@ vi.mock('@/trpc/client', () => ({
       list: {
         queryOptions: () => ({
           queryKey: ['instanceSkills', 'list'],
-          queryFn: async () => state.skills,
+          queryFn: async () => {
+            if (state.skillsError) throw new Error('Skill query failed');
+            await state.listGate;
+            return state.skills;
+          },
         }),
       },
       create: {
@@ -164,14 +171,69 @@ function renderSkills() {
       <SkillsSettingsPage />
     </QueryClientProvider>,
   );
-  return { invalidate };
+  return { invalidate, client };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   state.createResult = null;
   state.environmentError = false;
+  state.skillsError = false;
+  state.listGate = null;
   state.isAdmin = false;
+});
+
+it('retries shared skills through real query transitions without losing the recovery control', async () => {
+  state.skillsError = true;
+  renderSkills();
+  const retry = await screen.findByRole('button', {
+    name: 'Retry shared skills',
+  });
+  fireEvent.click(retry);
+  await waitFor(() => expect(retry).toBeEnabled());
+
+  state.skillsError = false;
+  let release!: () => void;
+  state.listGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  fireEvent.click(retry);
+  expect(retry).toBeDisabled();
+  expect(retry).toHaveAttribute('aria-busy', 'true');
+  await waitFor(() => expect(retry).toBeDisabled());
+  expect(screen.getByRole('button', { name: 'Retry shared skills' })).toBe(
+    retry,
+  );
+  await act(async () => release());
+  expect(await screen.findByText('my-skill')).toBeVisible();
+  expect(
+    screen.queryByRole('button', { name: 'Retry shared skills' }),
+  ).not.toBeInTheDocument();
+});
+
+it('retains shared rows and an unsaved editor during a failed background refresh', async () => {
+  const { client } = renderSkills();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit my-skill' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Content' }), {
+    target: { value: '# Unsaved shared draft' },
+  });
+  state.skillsError = true;
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ['instanceSkills', 'list'] });
+  });
+  await screen.findByText('Could not refresh shared skills.');
+  expect(screen.getByRole('textbox', { name: 'Content' })).toHaveValue(
+    '# Unsaved shared draft',
+  );
+  expect(screen.getByText('my-skill')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  state.skillsError = false;
+  fireEvent.click(screen.getByRole('button', { name: 'Retry shared skills' }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('button', { name: 'Retry shared skills' }),
+    ).not.toBeInTheDocument(),
+  );
 });
 
 it('makes Skills navigation and creation available to members without environment selection', async () => {

@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 
 import {
+  Button,
   Input,
   Label,
   RadioGroup,
@@ -11,6 +12,35 @@ import {
 } from '@/components/system';
 
 export type SkillListFilter = 'all' | 'shared' | 'environment';
+
+export function SkillListLoadError({
+  message,
+  retryLabel,
+  isRetrying,
+  onRetry,
+}: {
+  message: string;
+  retryLabel: string;
+  isRetrying: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-3">
+      <p className="text-sm text-destructive">{message}</p>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        aria-label={retryLabel}
+        aria-busy={isRetrying}
+        disabled={isRetrying}
+        onClick={onRetry}
+      >
+        {isRetrying ? 'Retrying...' : 'Retry'}
+      </Button>
+    </div>
+  );
+}
 
 export function SkillListToolbar({
   filter,
