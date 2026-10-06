@@ -106,7 +106,9 @@ function rejectionResponse(
   rejection: RoutePolicyRejection,
 ): Response {
   if (
-    (rule.name === 'roomote-mcp' || rule.name === 'roomote-public-mcp') &&
+    (rule.name === 'roomote-mcp' ||
+      rule.name === 'roomote-public-mcp' ||
+      rule.name === 'roomote-member-artifact-download') &&
     rejection.status === 401
   ) {
     c.header(

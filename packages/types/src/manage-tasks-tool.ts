@@ -9,6 +9,7 @@ import type {
   TaskState,
 } from './task-runs';
 import { roomoteTaskInspectionFieldSchemas } from './task-inspection-tool';
+import { TASK_OUTPUT_READ_ACTIONS } from './task-outputs-tool';
 
 export const ROOMOTE_SESSION_DEFAULT_ACTIONS = [
   'start',
@@ -30,6 +31,7 @@ export const ROOMOTE_TASK_COMPATIBILITY_ACTIONS = [
 export const ROOMOTE_MEMBER_MANAGEMENT_ACTIONS = [
   ...ROOMOTE_SESSION_DEFAULT_ACTIONS,
   ...ROOMOTE_TASK_COMPATIBILITY_ACTIONS,
+  ...TASK_OUTPUT_READ_ACTIONS,
 ] as const;
 
 export const ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION =
@@ -176,6 +178,7 @@ export const ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION =
 
 export const ROOMOTE_MEMBER_MANAGEMENT_TOOL_DESCRIPTION =
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION +
+  ' For a visible task, use list_artifacts with taskId to list the latest uploaded version of each artifact path (optional artifactType). Use get_artifact_download_url with taskId, exact path and optional version to obtain a download URL; fetch it with the same Authorization Bearer credential used for this public MCP connection. Download access is checked on every fetch. Use get_command_receipts with taskId, optional limit (1–100, default 50) and returned nextCursor to read stored shell-tool results oldest first, including run/tool identifiers, command, nullable exitCode, status and bounded output with truncation metadata. These are stored tool receipts, not a complete OS command audit; unuploaded workspace files are not artifacts.' +
   ' Use list_environments immediately before launch. Use launch only for an explicit request to start a coding task.';
 
 export interface RoomoteSessionChildTask {
