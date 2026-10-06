@@ -414,6 +414,47 @@ describe('MockTelegramServer', () => {
     expect(richMarkdown).toContain('<footer>Open in Roomote</footer>');
   });
 
+  it('delivers exact-limit code followed by prose without an empty continuation', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+    const footerText = 'Open in Roomote';
+    const footerSuffix = '\n\n<footer>Open in Roomote</footer>';
+    const bodyLimit = TELEGRAM_MAX_RICH_MESSAGE_LENGTH - footerSuffix.length;
+    const block = `\`\`\`ts\n${'x'.repeat(bodyLimit - 10)}\n\`\`\``;
+    const posted = await providerFor(baseUrl).postMessage({
+      channelId: '111000111',
+      threadId: '77',
+      text: `${block}\nExplanation.`,
+      textFormat: 'markdown',
+      footerText,
+      buttons: [[{ text: 'Open', url: 'https://roomote.test' }]],
+    });
+    const state = await fetch(`${baseUrl}/mock/state`).then((response) =>
+      response.json(),
+    );
+    const messages = state.messages.filter(
+      (message: { from: { is_bot?: boolean } }) => message.from.is_bot,
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0].rich_message.markdown).toBe(block);
+    expect(messages[1].rich_message.markdown).toBe(
+      `Explanation.${footerSuffix}`,
+    );
+    expect(
+      messages.every(
+        (message: { message_thread_id: number }) =>
+          message.message_thread_id === 77,
+      ),
+    ).toBe(true);
+    expect(messages[0].reply_markup).toBeUndefined();
+    expect(messages[1].reply_markup.inline_keyboard).toEqual([
+      [{ text: 'Open', url: 'https://roomote.test' }],
+    ]);
+    expect(posted.messageId).toBe(String(messages[0].message_id));
+    expect(posted.lastTextMessageId).toBe(String(messages[1].message_id));
+  });
+
   it('rejects rich messages above the documented rich-message limit', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
