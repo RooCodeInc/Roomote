@@ -16,6 +16,7 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
+import { TASK_MODEL_ROLES, TASK_MODEL_ROLE_DESCRIPTORS } from '@roomote/types';
 import {
   HTTP_INTEGRATIONS_INSTRUCTIONS,
   NATIVE_ROOMOTE_TOOL_SELECTION_INSTRUCTIONS,
@@ -220,6 +221,89 @@ describe('generateOpenCodeConfig provider support', () => {
     tempDirs.push(homeDir);
     return homeDir;
   }
+
+  it('registers and consumes every sandbox role from the shared descriptors', () => {
+    const runtimeEnv: Record<string, string> = {
+      OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+      OPENAI_COMPATIBLE_API_KEY: 'compat-key',
+    };
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      runtimeEnv[descriptor.modelEnvVar] = `openai-compatible/${role}`;
+      runtimeEnv[descriptor.reasoningEnvVar] = 'high';
+    }
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent);
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      if (descriptor.includeInSandbox) {
+        expect(config.provider['openai-compatible'].models).toHaveProperty(
+          role,
+        );
+        expect(runtimeEnv).not.toHaveProperty(descriptor.modelEnvVar);
+        expect(runtimeEnv).not.toHaveProperty(descriptor.reasoningEnvVar);
+      } else {
+        expect(config.provider['openai-compatible'].models).not.toHaveProperty(
+          role,
+        );
+      }
+    }
+    expect(result.model).toBe('openai-compatible/coding');
+  });
+
+  it.each([false, true])(
+    'keeps shared-model variant and reasoning precedence with task override %s',
+    (override) => {
+      const runtimeEnv: Record<string, string> = {};
+      for (const role of TASK_MODEL_ROLES) {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        if (!descriptor.includeInSandbox) continue;
+        runtimeEnv[descriptor.modelEnvVar] = 'openrouter/z-ai/glm-5.2:free';
+        runtimeEnv[descriptor.reasoningEnvVar] = 'low';
+      }
+      runtimeEnv.R_MODEL = override
+        ? 'openrouter/z-ai/glm-5.2:free'
+        : 'openrouter/z-ai/glm-5.2:nitro';
+      runtimeEnv.R_MODEL_REASONING_EFFORT = 'medium';
+      const result = generateOpenCodeConfig({
+        homeDir: createHomeDir(),
+        runtimeEnv,
+        ...(override
+          ? {
+              model: 'openrouter/z-ai/glm-5.2:nitro',
+              reasoningEffortOverride: 'high' as const,
+            }
+          : {}),
+      });
+      const config = JSON.parse(result.configContent);
+      expect(
+        config.provider.openrouter.models['z-ai/glm-5.2'].options,
+      ).toMatchObject({
+        provider: { sort: 'throughput' },
+        reasoning: { effort: override ? 'high' : 'medium' },
+      });
+    },
+  );
+
+  it.each(
+    TASK_MODEL_ROLES.filter(
+      (role) => TASK_MODEL_ROLE_DESCRIPTORS[role].includeInSandbox,
+    ),
+  )('validates the descriptor-owned model env for %s', (role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    expect(() =>
+      generateOpenCodeConfig({
+        homeDir: createHomeDir(),
+        runtimeEnv: {
+          R_MODEL: 'openai/gpt-5',
+          [descriptor.modelEnvVar]: 'invalid-model',
+        },
+      }),
+    ).toThrow(`${descriptor.modelEnvVar} must use provider/model format`);
+  });
 
   it.each([
     'openai/gpt-5',

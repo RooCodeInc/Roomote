@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { TASK_MODEL_ROLES, TASK_MODEL_ROLE_DESCRIPTORS } from '@roomote/types';
 
 import {
   buildOpenCodeCliEnv,
@@ -18,14 +19,33 @@ import {
 import { writeOpenCodePluginSeedFixture } from './helpers/opencode-plugin-seed-fixture';
 
 describe('buildOpenCodeCliEnv', () => {
+  it.each([undefined, '{}'])(
+    'keeps the helper runtime role subset explicit with config content %s',
+    (configContent) => {
+      const extraEnv: Record<string, string | undefined> = {
+        OPENCODE_CONFIG_CONTENT: configContent,
+      };
+      for (const role of TASK_MODEL_ROLES) {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        extraEnv[descriptor.modelEnvVar] = `bedrock-mantle/openai.${role}`;
+        extraEnv[descriptor.reasoningEnvVar] = 'high';
+      }
+      const env = buildOpenCodeCliEnv(extraEnv, { preserveReasoning: true });
+      const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
+      const models = config.provider['bedrock-mantle-openai'].models;
+      expect(Object.keys(models).sort()).toEqual(
+        ['audioVideo', 'coding', 'helper', 'vision']
+          .map((role) => `openai.${role}`)
+          .sort(),
+      );
+    },
+  );
   const managedKeys = [
     'OPENCODE_CONFIG_CONTENT',
-    'R_MODEL',
-    'R_SMALL_MODEL',
-    'R_VISION_MODEL',
-    'R_MODEL_REASONING_EFFORT',
-    'R_SMALL_MODEL_REASONING_EFFORT',
-    'R_VISION_MODEL_REASONING_EFFORT',
+    ...TASK_MODEL_ROLES.flatMap((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [descriptor.modelEnvVar, descriptor.reasoningEnvVar];
+    }),
     'R_CHATGPT_FAST_MODE',
     'LITELLM_BASE_URL',
     'LITELLM_API_KEY',
@@ -255,33 +275,49 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('keeps coding reasoning when Fast roles share a model', () => {
-    const env = buildOpenCodeCliEnv(
-      {
-        R_MODEL: 'openrouter/z-ai/glm-5.2',
-        R_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
-        R_VISION_MODEL: 'openrouter/z-ai/glm-5.2',
-        R_MODEL_REASONING_EFFORT: 'high',
-        R_SMALL_MODEL_REASONING_EFFORT: 'low',
-        R_VISION_MODEL_REASONING_EFFORT: 'medium',
-      },
-      { preserveReasoning: true },
-    );
+  it.each([undefined, '{}'])(
+    'keeps coding reasoning when Fast roles share a model with config %s',
+    (configContent) => {
+      const env = buildOpenCodeCliEnv(
+        {
+          OPENCODE_CONFIG_CONTENT: configContent,
+          R_MODEL: 'openrouter/z-ai/glm-5.2',
+          R_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
+          R_VISION_MODEL: 'openrouter/z-ai/glm-5.2',
+          R_AUDIO_VIDEO_MODEL: 'openrouter/z-ai/glm-5.2',
+          R_MODEL_REASONING_EFFORT: 'high',
+          R_SMALL_MODEL_REASONING_EFFORT: 'low',
+          R_VISION_MODEL_REASONING_EFFORT: 'medium',
+          R_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'low',
+        },
+        { preserveReasoning: true },
+      );
 
-    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
-      model: 'openrouter/z-ai/glm-5.2',
-      small_model: 'openrouter/z-ai/glm-5.2',
-      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
-      provider: {
-        openrouter: {
-          models: {
-            'z-ai/glm-5.2': {
-              options: { reasoning: { effort: 'high' } },
+      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toMatchObject({
+        permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+        provider: {
+          openrouter: {
+            models: {
+              'z-ai/glm-5.2': {
+                options: { reasoning: { effort: 'high' } },
+              },
             },
           },
         },
-      },
-    });
+      });
+    },
+  );
+
+  it('filters disabled models for every supported helper runtime role', () => {
+    const extraEnv = Object.fromEntries(
+      (['coding', 'helper', 'vision', 'audioVideo'] as const).map((role) => [
+        TASK_MODEL_ROLE_DESCRIPTORS[role].modelEnvVar,
+        'mistral/mistral-large-latest',
+      ]),
+    );
+    const env = buildOpenCodeCliEnv(extraEnv);
+    for (const key of Object.keys(extraEnv))
+      expect(env).not.toHaveProperty(key);
   });
 
   it('exposes only prompt-only advisor and judge subagents to sessions', () => {
