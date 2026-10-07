@@ -1,13 +1,8 @@
-import { beforeAll, afterAll, describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { describe, it, expect } from 'vitest';
 import { redactToolData } from './redact-secrets';
 import { secretRedactor } from '@roomote/types';
+import * as previous from './__fixtures__/diagnostic-redactor-518f4f30';
 
-const previousRef = '518f4f3074d5c69c9eb790e317352434cc5c60b8';
 const parts = ['fixture-segment-a', 'fixture-segment-b', 'fixture-segment-c'];
 const fixtureValue = parts.join(' ');
 const cases = [
@@ -86,23 +81,6 @@ const cases = [
     probes: ['fixture-private-sensitive'],
   },
 ];
-
-let tempDir: string;
-let previous: { redactToolData: typeof redactToolData };
-beforeAll(async () => {
-  tempDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'roomote-diagnostic-differential-'),
-  );
-  const snapshotPath = path.join(tempDir, 'immutable-redactor.ts');
-  const source = execFileSync(
-    'git',
-    ['show', `${previousRef}:packages/communication/src/redact-secrets.ts`],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-  );
-  fs.writeFileSync(snapshotPath, source);
-  previous = await import(/* @vite-ignore */ pathToFileURL(snapshotPath).href);
-});
-afterAll(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
 describe('diagnostic acceptance differential against immutable518f4f30', () => {
   it.each(cases)('does not narrow masking: $label', ({ input, probes }) => {
