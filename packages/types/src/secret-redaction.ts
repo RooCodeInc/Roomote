@@ -98,7 +98,10 @@ export function createSecretRedactor() {
       policy: SecretKeyPolicy = 'diagnostic',
     ): boolean {
       const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (normalized === 'tokencount') return false;
+      // Count metadata is not a free-text exemption: diagnostic assignments
+      // retain legacy masking even when their label normalizes to tokenCount.
+      if (normalized === 'tokencount' && policy !== 'diagnostic-text')
+        return false;
       return keyRules.some((rule) => {
         if (policy === 'diagnostic-text')
           return rule.diagnostic !== false && normalized.includes(rule.name);

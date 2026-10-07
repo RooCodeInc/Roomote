@@ -2,6 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { redactToolData } from './redact-secrets';
 import { secretRedactor } from '@roomote/types';
 import * as previous from './__fixtures__/diagnostic-redactor-518f4f30';
+import {
+  diagnosticProbes,
+  generatedDiagnosticTextCases,
+  generatedRelatedExceptionCases,
+} from './__fixtures__/diagnostic-generated-cases';
 
 const parts = ['fixture-segment-a', 'fixture-segment-b', 'fixture-segment-c'];
 const fixtureValue = parts.join(' ');
@@ -83,6 +88,60 @@ const cases = [
 ];
 
 describe('diagnostic acceptance differential against immutable518f4f30', () => {
+  it('retains masking across generated label/separator/quoting/line-ending combinations', () => {
+    const generated = generatedDiagnosticTextCases();
+    const failures: Record<string, number> = {};
+    for (const { label, input } of generated) {
+      const oldOutput = previous.redactToolData(input);
+      const currentOutput = redactToolData(input);
+      if (
+        diagnosticProbes.some(
+          (probe) =>
+            !oldOutput.includes(probe) && currentOutput.includes(probe),
+        )
+      )
+        failures[label] = (failures[label] ?? 0) + 1;
+      expect(currentOutput.includes('status: online')).toBe(true);
+    }
+    expect(generated.length).toBe(4320);
+    // Only labels and counts appear on failure, never fixture values/output.
+    expect(failures).toEqual({});
+  });
+  it('matches legacy handling of generated nearby exceptions and structured metadata', () => {
+    const generated = generatedRelatedExceptionCases();
+    const failures: Record<string, number> = {};
+    for (const { category, input, secretValues } of generated) {
+      if (
+        JSON.stringify(redactToolData(input, secretValues)) !==
+        JSON.stringify(previous.redactToolData(input, secretValues))
+      )
+        failures[category] = (failures[category] ?? 0) + 1;
+    }
+    expect(generated.length).toBe(301);
+    expect(failures).toEqual({});
+  });
+  it('masks tokenCount diagnostic text while preserving numeric structure and other policies', () => {
+    const input = `diag tokenCount: ${fixtureValue}\nstatus: online`;
+    expect(parts.some((part) => redactToolData(input).includes(part))).toBe(
+      false,
+    );
+    expect(redactToolData({ tokenCount: 42 }).tokenCount).toBe(42);
+    expect(
+      JSON.parse(redactToolData(JSON.stringify({ tokenCount: 42 }))).tokenCount,
+    ).toBe(42);
+    for (const policy of [
+      'diagnostic',
+      'integration',
+      'webhook',
+      'environment',
+    ] as const)
+      expect(secretRedactor.isSensitiveKey('tokenCount', policy)).toBe(false);
+    for (const policy of ['log', 'published', 'brain'] as const)
+      expect(
+        secretRedactor.maskText(input, { policy, namedAssignments: true }) ===
+          input,
+      ).toBe(true);
+  });
   it.each(cases)('does not narrow masking: $label', ({ input, probes }) => {
     const oldOutput = previous.redactToolData(input);
     const currentOutput = redactToolData(input);

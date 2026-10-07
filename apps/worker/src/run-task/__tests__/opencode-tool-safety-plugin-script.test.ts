@@ -5,6 +5,11 @@ import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 import { OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT } from '../opencode-tool-safety-plugin-script';
+import {
+  diagnosticProbes,
+  generatedDiagnosticTextCases,
+} from '../../../../../packages/communication/src/__fixtures__/diagnostic-generated-cases';
+import { redactToolData as previousRedactToolData } from '../../../../../packages/communication/src/__fixtures__/diagnostic-redactor-518f4f30';
 
 interface ToolHookInput {
   tool: string;
@@ -170,7 +175,7 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
     const diagnosticPath = path.join(tempDir, 'synthetic-diagnostic.txt');
     fs.writeFileSync(
       diagnosticPath,
-      `password: ${parts.join(' ')}\nstatus: online\n`,
+      `password: ${parts.join(' ')}\ndiag tokenCount: ${parts.join(' ')}\nstatus: online\n`,
     );
     const shellOutput = {
       output: execFileSync(
@@ -188,6 +193,24 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
     await hooks['tool.execute.after']({ tool: 'bash' }, output);
     expect(output.output.includes(value)).toBe(false);
     expect(JSON.parse(output.output).tokenCount).toBe(42);
+    const failures: Record<string, number> = {};
+    const generated = generatedDiagnosticTextCases();
+    for (const { label, input } of generated) {
+      const diagnostic = { output: input, metadata: { tokenCount: 42 } };
+      await hooks['tool.execute.after']({ tool: 'bash' }, diagnostic);
+      const oldOutput = previousRedactToolData(input);
+      if (
+        diagnosticProbes.some(
+          (probe) =>
+            !oldOutput.includes(probe) && diagnostic.output.includes(probe),
+        )
+      )
+        failures[label] = (failures[label] ?? 0) + 1;
+      expect(diagnostic.output.includes('status: online')).toBe(true);
+      expect(diagnostic.metadata.tokenCount).toBe(42);
+    }
+    expect(generated.length).toBe(4320);
+    expect(failures).toEqual({});
   }, 30_000);
 
   it('instantiates the shared credential inventory in the standalone plugin', async () => {
