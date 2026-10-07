@@ -139,24 +139,35 @@ export function redactToolData<T>(
         // Truncated/line-numbered output still needs text-level redaction.
       }
     }
-    return text
-      .replace(/\b(?:Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]+/gi, '[redacted]')
-      .replace(
-        /\b(?:sk-|rk-|gh[pousr]_|github_pat_|xox[a-z]-)[A-Za-z0-9_-]{8,}/g,
-        '[redacted]',
-      )
-      .replace(
-        /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
-        '[redacted]',
-      )
-      .replace(
-        /(["']?[\w.-]*(?:authorization|cookie|credential|password|passwd|secret|token|private[_-]?key|api[_-]?key|access[_-]?key|database[_-]?url|connection[_-]?string)[\w.-]*["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\r\n,;}]+)/gi,
-        '$1[redacted]',
-      )
-      .replace(
-        /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
-        '[redacted]',
-      );
+    return (
+      text
+        // Environment-file names need not look like credentials. Keep names,
+        // but mask assignment values, including quoted multiline values.
+        .replace(
+          /^([\t ]*(?:export[\t ]+)?[A-Za-z_][\w.-]*[\t ]*=[\t ]*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\r\n]*)/gm,
+          '$1[redacted]',
+        )
+        .replace(
+          /\b(?:Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]+/gi,
+          '[redacted]',
+        )
+        .replace(
+          /\b(?:sk-|rk-|gh[pousr]_|github_pat_|xox[a-z]-)[A-Za-z0-9_-]{8,}/g,
+          '[redacted]',
+        )
+        .replace(
+          /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+          '[redacted]',
+        )
+        .replace(
+          /(["']?[\w.-]*(?:authorization|cookie|credential|password|passwd|secret|token|private[_-]?key|api[_-]?key|access[_-]?key|database[_-]?url|connection[_-]?string)[\w.-]*["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\r\n,;}]+)/gi,
+          '$1[redacted]',
+        )
+        .replace(
+          /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
+          '[redacted]',
+        )
+    );
   };
   const walk = (item: unknown, environment = false, pm2 = false): unknown => {
     if (environment && (item === null || typeof item !== 'object'))

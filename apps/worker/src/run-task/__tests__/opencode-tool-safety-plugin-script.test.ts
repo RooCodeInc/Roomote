@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -150,6 +151,31 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
     expect(JSON.stringify(output).includes(sentinel)).toBe(false);
     expect(output.output.includes('request-1')).toBe(true);
     expect(output.output.includes('123')).toBe(true);
+  });
+
+  it('sanitizes actual shell output from a synthetic environment file with arbitrary names', async () => {
+    const hooks = await loadHooks();
+    const sentinel = 'synthetic environment fixture value';
+    fs.writeFileSync(
+      path.join(tempDir, '.env'),
+      `CUSTOM_SETTING=${sentinel}\nexport another_setting="${sentinel}\ncontinued fixture"\n`,
+      'utf8',
+    );
+    const command = 'cat .env';
+    await hooks['tool.execute.before']({ tool: 'bash' }, { args: { command } });
+    const output = {
+      output: execFileSync('bash', ['-c', command], {
+        cwd: tempDir,
+        encoding: 'utf8',
+        env: { PATH: '/usr/bin:/bin' },
+      }),
+      metadata: { exitCode: 0 },
+    };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    expect(output.output.includes(sentinel)).toBe(false);
+    expect(output.output.includes('continued fixture')).toBe(false);
+    expect(output.output.includes('CUSTOM_SETTING=')).toBe(true);
+    expect(output.metadata.exitCode).toBe(0);
   });
 
   it.each(['pm2 jlist', 'printenv'])(

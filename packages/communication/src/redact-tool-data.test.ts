@@ -28,6 +28,14 @@ describe('tool diagnostic redaction', () => {
       redactToolData(`diagnostic: ${sentinel}`, [sentinel]).includes(sentinel),
     ).toBe(false);
   });
+  it('redacts arbitrary environment assignments including quoted multiline values', () => {
+    const text = `CUSTOM_SETTING=${sentinel}\nexport lower_case='${sentinel}\ncontinued fixture'\nstatus: online`;
+    const output = redactToolData(text);
+    expect(output.includes(sentinel)).toBe(false);
+    expect(output.includes('continued fixture')).toBe(false);
+    expect(output.includes('CUSTOM_SETTING=')).toBe(true);
+    expect(output.includes('status: online')).toBe(true);
+  });
   it('preserves safe metadata and does not mutate its input', () => {
     const input = {
       name: 'api',
