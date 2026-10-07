@@ -2,6 +2,45 @@ import { describe, it, expect } from 'vitest';
 import { redactToolData } from './redact-secrets';
 
 describe('tool diagnostic redaction', () => {
+  const credentialCases = [
+    { name: 'GitLab', make: () => ({ value: `glpat-${'G1h2'.repeat(6)}` }) },
+    {
+      name: 'Stripe',
+      make: () => ({ value: `sk_${'live'}_${'S3t4'.repeat(6)}` }),
+    },
+    { name: 'AWS', make: () => ({ value: `AKIA${'A1B2'.repeat(4)}` }) },
+    { name: 'Google', make: () => ({ value: `AIza${'C1d2E'.repeat(7)}` }) },
+    {
+      name: 'percent-encoded GitHub',
+      make: () => ({
+        value: [...`ghp_${'F5g6'.repeat(9)}`]
+          .map((char) => `%${char.charCodeAt(0).toString(16)}`)
+          .join(''),
+      }),
+    },
+    {
+      name: 'truncated private-key block',
+      make: () => ({
+        value: `-----BEGIN RSA PRIVATE KEY-----\n${'synthetic-private-material'.repeat(3)}`,
+        probe: 'synthetic-private-material',
+      }),
+    },
+  ];
+  it.each(credentialCases)(
+    'masks the shared credential inventory: $name',
+    ({ make }) => {
+      const fixture: { value: string; probe?: string } = make();
+      const output = redactToolData({
+        output: `diagnostic before ${fixture.value} after`,
+        tokenCount: 42,
+      });
+      expect(output.output.includes(fixture.probe ?? fixture.value)).toBe(
+        false,
+      );
+      expect(output.tokenCount).toBe(42);
+      expect(output.output.includes('diagnostic before')).toBe(true);
+    },
+  );
   const sentinel = 'synthetic diagnostic value';
   it.each([
     ['quoted JSON', JSON.stringify({ password: sentinel, pid: 123 })],
@@ -82,5 +121,17 @@ describe('tool diagnostic redaction', () => {
     expect(output.tokenCount).toBe(42);
     expect(output.headers['X-Request-Id']).toBe('req-1');
     expect(input.env.CUSTOM_SETTING === sentinel).toBe(true);
+  });
+  it('does not apply integration preview bounds or shorten unrecognized tool content', () => {
+    const text = 'n'.repeat(20_000);
+    const input = {
+      tokenCount: 42,
+      output: text,
+      items: Array.from({ length: 80 }, (_, id) => ({ id })),
+    };
+    const output = redactToolData(input);
+    expect(output.output === text).toBe(true);
+    expect(output.items.length).toBe(80);
+    expect(output.tokenCount).toBe(42);
   });
 });

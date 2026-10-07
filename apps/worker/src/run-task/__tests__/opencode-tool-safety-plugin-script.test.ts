@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 import { OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT } from '../opencode-tool-safety-plugin-script';
 
@@ -133,6 +133,58 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
         { args: { filePath: '/tmp/site-icon.ico' } },
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it('keeps the standalone factory working in a minified keepNames bundle', async () => {
+    const sourcePath = fileURLToPath(
+      new URL('../opencode-tool-safety-plugin-script.ts', import.meta.url),
+    );
+    const outputDir = path.join(tempDir, 'bundle');
+    const configPath = path.join(tempDir, 'build.config.mjs');
+    fs.writeFileSync(
+      configPath,
+      `export default { entry: [${JSON.stringify(sourcePath)}], outDir: ${JSON.stringify(outputDir)}, format: ['esm'], splitting: false, minify: true, keepNames: true, noExternal: [/.*/], banner: { js: "import { createRequire } from 'node:module';const require = createRequire(import.meta.url);" } };`,
+    );
+    execFileSync('pnpm', ['exec', 'tsup', '--config', configPath], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env: { PATH: process.env.PATH, HOME: tempDir },
+      stdio: 'pipe',
+    });
+    const built = await import(
+      /* @vite-ignore */ pathToFileURL(
+        path.join(outputDir, 'opencode-tool-safety-plugin-script.js'),
+      ).href
+    );
+    const pluginPath = path.join(tempDir, 'built-plugin.mjs');
+    fs.writeFileSync(pluginPath, built.OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT);
+    const plugin = await import(
+      /* @vite-ignore */ pathToFileURL(pluginPath).href
+    );
+    const hooks = await plugin.RoomoteOpenCodeToolSafety();
+    const value = `glpat-${'G1h2'.repeat(6)}`;
+    const output = { output: JSON.stringify({ value, tokenCount: 42 }) };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    expect(output.output.includes(value)).toBe(false);
+    expect(JSON.parse(output.output).tokenCount).toBe(42);
+  }, 30_000);
+
+  it('instantiates the shared credential inventory in the standalone plugin', async () => {
+    const hooks = await loadHooks();
+    const values = [
+      `glpat-${'G1h2'.repeat(6)}`,
+      `sk_${'live'}_${'S3t4'.repeat(6)}`,
+      `AKIA${'A1B2'.repeat(4)}`,
+      `AIza${'C1d2E'.repeat(7)}`,
+      [...`ghp_${'F5g6'.repeat(9)}`]
+        .map((char) => `%${char.charCodeAt(0).toString(16)}`)
+        .join(''),
+      '-----BEGIN RSA PRIVATE KEY-----\nsynthetic-private-material',
+    ];
+    const output = { output: JSON.stringify({ values, tokenCount: 42 }) };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    const probes = [...values.slice(0, 5), 'synthetic-private-material'];
+    expect(probes.some((probe) => output.output.includes(probe))).toBe(false);
+    expect(JSON.parse(output.output).tokenCount).toBe(42);
   });
 
   it('removes diagnostic environment values and authorization before returning tool output', async () => {
