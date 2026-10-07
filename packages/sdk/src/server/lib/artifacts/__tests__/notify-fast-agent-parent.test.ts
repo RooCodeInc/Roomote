@@ -15,6 +15,7 @@ import { TaskPayloadKind } from '@roomote/types';
 import { createTaskArtifactRecord } from '../create-record';
 import { notifyFastAgentParentOnArtifact } from '../notify-fast-agent-parent';
 import { buildFastAgentDeliveryClaimPredicate } from '../../task-runs/fast-agent-delivery-claim';
+import { claimArtifactNotificationDelivery } from '../artifact-notification-claim';
 
 vi.mock('../../../../../../../apps/api/src/handlers/artifacts/auth', () => ({
   resolveArtifactRouteAuth: () => ({ ok: true, auth: {} }),
@@ -23,6 +24,7 @@ vi.mock('../../../../../../../apps/api/src/handlers/artifacts/auth', () => ({
 
 const mocks = vi.hoisted(() => ({
   wake: vi.fn(),
+  wakeAt: vi.fn(),
   deliver: vi.fn(),
   normalize: vi.fn(),
 }));
@@ -40,6 +42,7 @@ vi.mock('../../fast-agent-parent-event-queue', async (importOriginal) => {
     ...actual,
     normalizeFastAgentParentEvent: mocks.normalize,
     wakeFastAgentParentEventNow: mocks.wake,
+    wakeFastAgentParentEventAt: mocks.wakeAt,
   };
 });
 
@@ -88,6 +91,7 @@ async function fixture(parentExists = true) {
 
 beforeEach(() => {
   mocks.wake.mockReset().mockResolvedValue(undefined);
+  mocks.wakeAt.mockReset().mockResolvedValue(undefined);
   mocks.deliver
     .mockReset()
     .mockRejectedValue(new Error('synthetic parent unavailable'));
@@ -127,6 +131,14 @@ it('rolls publication back if durable notification admission fails', async () =>
     where: eq(taskArtifacts.id, artifact.id),
   });
   expect(row?.uploaded).toBe(false);
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, artifact.runId!),
+  });
+  expect(
+    (run?.result as Record<string, unknown> | null)?.[
+      `fastAgentArtifact:${artifact.id}`
+    ] === 'queued',
+  ).toBe(false);
   expect(mocks.wake).not.toHaveBeenCalled();
 });
 
@@ -173,7 +185,7 @@ it('does not re-notify an artifact delivered by the previous inline path', async
   ).toHaveLength(0);
 });
 
-it('preserves a live legacy lease without admitting a second artifact notification', async () => {
+it('holds a durable recovery event behind a live legacy lease without delivering twice', async () => {
   const { artifact, sessionId } = await fixture();
   const key = `fastAgentArtifact:${artifact.id}`;
   const marker = `delivering:${Date.now()}`;
@@ -191,11 +203,15 @@ it('preserves a live legacy lease without admitting a second artifact notificati
       })
     )?.uploaded,
   ).toBe(true);
-  expect(
-    await db.query.fastAgentParentEvents.findMany({
-      where: eq(fastAgentParentEvents.conversationId, sessionId),
-    }),
-  ).toHaveLength(0);
+  const events = await db.query.fastAgentParentEvents.findMany({
+    where: eq(fastAgentParentEvents.conversationId, sessionId),
+  });
+  expect(events).toHaveLength(1);
+  expect(events[0]!.claimedUntil!.getTime() > Date.now()).toBe(true);
+  expect(mocks.wakeAt).toHaveBeenCalledWith(
+    expect.anything(),
+    events[0]!.claimedUntil,
+  );
   expect(mocks.wake).not.toHaveBeenCalled();
   expect(
     (
@@ -221,6 +237,54 @@ it('allows queue handoff only after the legacy lease expires', async () => {
       where: eq(fastAgentParentEvents.conversationId, sessionId),
     }),
   ).toHaveLength(1);
+});
+
+it('recovers the held handoff after a legacy owner stops without losing delivery backoff', async () => {
+  const { artifact, sessionId } = await fixture();
+  const key = `fastAgentArtifact:${artifact.id}`;
+  await db
+    .update(taskRuns)
+    .set({ result: { [key]: `delivering:${Date.now()}` } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  await notifyFastAgentParentOnArtifact(artifact);
+  const [event] = await db.query.fastAgentParentEvents.findMany({
+    where: eq(fastAgentParentEvents.conversationId, sessionId),
+  });
+  const retryAt = new Date(Date.now() + 60_000);
+  await db
+    .update(fastAgentParentEvents)
+    .set({ retryAt })
+    .where(eq(fastAgentParentEvents.id, event!.id));
+  await db
+    .update(taskRuns)
+    .set({ result: { [key]: `delivering:${Date.now() - 16 * 60_000}` } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  await expect(notifyFastAgentParentOnArtifact(artifact)).resolves.toBe(
+    'queued',
+  );
+  const rows = await db.query.fastAgentParentEvents.findMany({
+    where: eq(fastAgentParentEvents.conversationId, sessionId),
+  });
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ claimedUntil: null, retryAt });
+});
+
+it('suppresses held handoff delivery when the legacy owner has already completed it', async () => {
+  const { artifact } = await fixture();
+  const key = `fastAgentArtifact:${artifact.id}`;
+  await db
+    .update(taskRuns)
+    .set({ result: { [key]: `delivering:${Date.now()}` } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  await notifyFastAgentParentOnArtifact(artifact);
+  await db
+    .update(taskRuns)
+    .set({ result: { [key]: 'delivered' } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  const result = await db.transaction((tx) =>
+    claimArtifactNotificationDelivery(tx, artifact.runId!, artifact.id),
+  );
+  expect(result.status).toBe('already_delivered');
 });
 
 it('reserves queued delivery against an older inline handler claiming the same artifact', async () => {

@@ -3,7 +3,7 @@ import {
   and,
   db,
   eq,
-  sql,
+  isNull,
   fastAgentConversations,
   fastAgentParentEvents,
   taskArtifacts,
@@ -13,8 +13,9 @@ import { Env } from '@roomote/env';
 import {
   normalizeFastAgentParentEvent,
   wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventAt,
 } from '../fast-agent-parent-event-queue';
-import { buildFastAgentDeliveryClaimPredicate } from '../task-runs/fast-agent-delivery-claim';
+import { claimArtifactNotificationDelivery } from './artifact-notification-claim';
 
 export type FastArtifactNotificationResult =
   | 'not_applicable'
@@ -80,40 +81,14 @@ export async function notifyFastAgentParentOnArtifact(input: {
       columns: { id: true },
     });
     if (!conversation) return { notification: 'skipped' as const };
-    const deliveryKey = `fastAgentArtifact:${artifact.id}`;
-    // Share the previous handler's atomic lease predicate. A live inline owner
-    // keeps delivery responsibility; an absent/expired lease may hand off. The
-    // queued marker also prevents an old handler claiming after our admission.
-    const [claimed] = await tx
-      .update(taskRuns)
-      .set({
-        result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${deliveryKey}::text, 'queued'::text)`,
-      })
-      .where(
-        and(
-          eq(taskRuns.id, run.id),
-          buildFastAgentDeliveryClaimPredicate(deliveryKey),
-        ),
-      )
-      .returning({ id: taskRuns.id });
-    if (!claimed) {
-      const latest = await tx.query.taskRuns.findFirst({
-        where: eq(taskRuns.id, run.id),
-        columns: { result: true },
-      });
-      const currentMarker = (
-        latest?.result as Record<string, unknown> | null
-      )?.[deliveryKey];
-      if (currentMarker === 'queued')
-        return { notification: 'queued' as const };
-      return {
-        notification:
-          typeof currentMarker === 'string' &&
-          currentMarker.startsWith('delivering:')
-            ? ('in_progress' as const)
-            : ('already_delivered' as const),
-      };
-    }
+    const claim = await claimArtifactNotificationDelivery(
+      tx,
+      run.id,
+      artifact.id,
+    );
+    if (claim.status === 'already_delivered')
+      return { notification: claim.status };
+    const retryAt = claim.status === 'in_progress' ? claim.retryAt : undefined;
     const admission = normalizeFastAgentParentEvent({
       parent,
       event: {
@@ -140,10 +115,20 @@ export async function notifyFastAgentParentOnArtifact(input: {
         eventKey: admission.eventKey,
         parent: admission.parent,
         event: admission.event,
+        claimedUntil: retryAt ?? null,
       })
-      .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+      .onConflictDoUpdate({
+        target: fastAgentParentEvents.eventKey,
+        // Only alter the legacy hold; preserve any queue delivery backoff.
+        set: { claimedUntil: retryAt ?? null, updatedAt: new Date() },
+        setWhere: and(
+          isNull(fastAgentParentEvents.deliveredAt),
+          isNull(fastAgentParentEvents.discardedAt),
+        ),
+      });
     return {
-      notification: 'queued' as const,
+      notification: claim.status,
+      retryAt,
       wake: {
         conversationId: admission.parent.sessionId,
         eventKey: admission.eventKey,
@@ -153,7 +138,10 @@ export async function notifyFastAgentParentOnArtifact(input: {
   if ('wake' in result && result.wake) {
     // The durable event is authoritative. The existing recovery sweep recreates
     // a missed BullMQ wakeup and its delivery retry/backoff handles parent outages.
-    void wakeFastAgentParentEventNow(result.wake).catch(() => {
+    const wakeup = result.retryAt
+      ? wakeFastAgentParentEventAt(result.wake, result.retryAt)
+      : wakeFastAgentParentEventNow(result.wake);
+    void wakeup.catch(() => {
       console.warn(
         `[artifactPublication] Notification wakeup deferred for artifact ${input.id}.`,
       );
