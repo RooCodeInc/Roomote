@@ -11,6 +11,10 @@ interface ToolHookInput {
 }
 
 type ToolHooks = {
+  'tool.execute.after': (
+    input: ToolHookInput,
+    output: { output: string; metadata?: unknown },
+  ) => Promise<void>;
   'tool.execute.before': (
     input: ToolHookInput,
     output: { args?: unknown },
@@ -129,4 +133,32 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
       ),
     ).resolves.toBeUndefined();
   });
+
+  it('removes diagnostic environment values and authorization before returning tool output', async () => {
+    const hooks = await loadHooks();
+    const sentinel = 'synthetic diagnostic value';
+    const output = {
+      output: JSON.stringify({
+        name: 'api',
+        pid: 123,
+        env: { CUSTOM_SETTING: sentinel },
+        headers: { Authorization: sentinel, 'X-Request-Id': 'request-1' },
+      }),
+      metadata: { headers: { authorization: sentinel } },
+    };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    expect(JSON.stringify(output).includes(sentinel)).toBe(false);
+    expect(output.output.includes('request-1')).toBe(true);
+    expect(output.output.includes('123')).toBe(true);
+  });
+
+  it.each(['pm2 jlist', 'printenv'])(
+    'blocks value-dumping diagnostics: %s',
+    async (command) => {
+      const hooks = await loadHooks();
+      await expect(
+        hooks['tool.execute.before']({ tool: 'bash' }, { args: { command } }),
+      ).rejects.toThrow('metadata');
+    },
+  );
 });

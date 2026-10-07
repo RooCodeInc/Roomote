@@ -1,4 +1,8 @@
+import { redactToolData } from '@roomote/communication/redact-secrets';
+
 export const OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT = `import { realpath } from 'node:fs/promises';
+
+const redactToolData = ${redactToolData.toString()};
 
 const UNSUPPORTED_READ_IMAGE_EXTENSIONS = new Set(['.cur', '.ico']);
 
@@ -42,6 +46,16 @@ async function resolvesToUnsupportedImage(filePath) {
 
 export const RoomoteOpenCodeToolSafety = async () => ({
   'tool.execute.before': async (input, context) => {
+    const command = context?.args?.command ?? input?.args?.command;
+    if (input?.tool === 'bash' && typeof command === 'string' &&
+        /\\bpm2\\s+(?:jlist|prettylist|env)\\b|\\bprintenv\\b|(?:^|[;&|]\\s*)env\\s*(?:$|[;&|])/u.test(command)) {
+      throw new Error('Use allowlisted process metadata instead of environment-value diagnostics.');
+    }
+    const diagnosticPath = getReadPath(input, context);
+    if (input?.tool === 'read' && typeof diagnosticPath === 'string' &&
+        /(?:^|[\\\\/])(?:on-demand-mcp-servers\\.json|\\.env(?:\\.[^\\\\/]*)?)$/u.test(diagnosticPath)) {
+      throw new Error('Inspect configuration metadata without environment values or authorization headers.');
+    }
     if (input?.tool !== 'read') {
       return;
     }
@@ -56,6 +70,13 @@ export const RoomoteOpenCodeToolSafety = async () => ({
       'The read tool cannot safely attach ICO or CUR image files to the model conversation. ' +
         'Inspect metadata with a text-only command or convert the image to PNG in a temporary directory first.',
     );
+  },
+  'tool.execute.after': async (_input, output) => {
+    const secretValues = Object.entries(process.env)
+      .filter(([name]) => /(?:TOKEN|SECRET|PASSWORD|PASSWD|KEY|CREDENTIAL|DATABASE_URL)$/i.test(name))
+      .map(([, value]) => value).filter((value) => typeof value === 'string');
+    if (typeof output.output === 'string') output.output = redactToolData(output.output, secretValues);
+    if (output.metadata) output.metadata = redactToolData(output.metadata, secretValues);
   },
 });
 `;

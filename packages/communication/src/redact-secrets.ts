@@ -118,3 +118,61 @@ export function redactSecrets(text: string): string {
   }
   return redacted;
 }
+
+/** Worker-safe and self-contained so the same sanitizer can run in the tool hook. */
+export function redactToolData<T>(
+  value: T,
+  secretValues: readonly string[] = [],
+): T {
+  const sensitiveKey =
+    /(?:authorization|cookies?|credentials?|password|passwd|secret|token|private[_-]?key|api[_-]?key|access[_-]?key|database[_-]?url|connection[_-]?string)$/i;
+  const envKey =
+    /^(?:env|environment|environmentVariables|environment_variables)$/i;
+  const redactText = (text: string): string => {
+    for (const secret of secretValues) {
+      if (secret.length >= 8) text = text.split(secret).join('[redacted]');
+    }
+    if (/^\s*[[{]/u.test(text)) {
+      try {
+        return JSON.stringify(walk(JSON.parse(text)));
+      } catch {
+        // Truncated/line-numbered output still needs text-level redaction.
+      }
+    }
+    return text
+      .replace(/\b(?:Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]+/gi, '[redacted]')
+      .replace(
+        /\b(?:sk-|rk-|gh[pousr]_|github_pat_|xox[a-z]-)[A-Za-z0-9_-]{8,}/g,
+        '[redacted]',
+      )
+      .replace(
+        /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+        '[redacted]',
+      )
+      .replace(
+        /(["']?[\w.-]*(?:authorization|cookie|credential|password|passwd|secret|token|private[_-]?key|api[_-]?key|access[_-]?key|database[_-]?url|connection[_-]?string)[\w.-]*["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\r\n,;}]+)/gi,
+        '$1[redacted]',
+      )
+      .replace(
+        /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
+        '[redacted]',
+      );
+  };
+  const walk = (item: unknown, environment = false, pm2 = false): unknown => {
+    if (environment && (item === null || typeof item !== 'object'))
+      return '[redacted]';
+    if (typeof item === 'string') return redactText(item);
+    if (Array.isArray(item))
+      return item.map((entry) => walk(entry, environment));
+    if (!item || typeof item !== 'object') return item;
+    return Object.fromEntries(
+      Object.entries(item).map(([key, entry]) => [
+        key,
+        sensitiveKey.test(key) || (pm2 && /^[A-Z][A-Z0-9_]*$/u.test(key))
+          ? '[redacted]'
+          : walk(entry, environment || envKey.test(key), key === 'pm2_env'),
+      ]),
+    );
+  };
+  return walk(value) as T;
+}
