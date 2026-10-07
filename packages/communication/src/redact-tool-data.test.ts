@@ -49,6 +49,25 @@ describe('tool diagnostic redaction', () => {
       expect(output.includes('status: online')).toBe(true);
     },
   );
+  it('masks arbitrary PM2 environment entries while retaining approved process metadata', () => {
+    const input = {
+      pid: 123,
+      name: 'api',
+      pm2_env: {
+        custom_setting: sentinel,
+        MixedSetting: sentinel,
+        custom_object: { value: sentinel },
+        status: 'online',
+        restart_time: 3,
+      },
+    };
+    const output = redactToolData(input);
+    expect(JSON.stringify(output).includes(sentinel)).toBe(false);
+    expect(output.pid).toBe(123);
+    expect(output.pm2_env.status).toBe('online');
+    expect(output.pm2_env.restart_time).toBe(3);
+  });
+
   it('preserves safe metadata and does not mutate its input', () => {
     const input = {
       name: 'api',

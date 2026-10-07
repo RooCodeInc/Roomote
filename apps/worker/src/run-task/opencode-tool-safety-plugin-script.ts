@@ -48,7 +48,7 @@ export const RoomoteOpenCodeToolSafety = async () => ({
   'tool.execute.before': async (input, context) => {
     const command = context?.args?.command ?? input?.args?.command;
     if (input?.tool === 'bash' && typeof command === 'string' &&
-        /\\bpm2\\s+(?:jlist|prettylist|env)\\b|\\bprintenv\\b|(?:^|[;&|]\\s*)env\\s*(?:$|[;&|])/u.test(command)) {
+        /\\bpm2\\b[^\\r\\n;&|]*\\b(?:jlist|prettylist|env)\\b|\\bprintenv\\b|(?:^|[;&|]\\s*)env\\s*(?:$|[;&|])/u.test(command)) {
       throw new Error('Use allowlisted process metadata instead of environment-value diagnostics.');
     }
     const diagnosticPath = getReadPath(input, context);

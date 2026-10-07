@@ -192,7 +192,21 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
     expect(output.metadata.exitCode).toBe(0);
   });
 
-  it.each(['pm2 jlist', 'printenv'])(
+  it('redacts lowercase process environment entries from synthetic diagnostic JSON', async () => {
+    const hooks = await loadHooks();
+    const sentinel = 'synthetic environment fixture value';
+    const output = {
+      output: JSON.stringify({
+        pid: 123,
+        pm2_env: { custom_setting: sentinel, status: 'online' },
+      }),
+    };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    expect(output.output.includes(sentinel)).toBe(false);
+    expect(output.output.includes('online')).toBe(true);
+  });
+
+  it.each(['pm2 jlist', 'printenv', 'pm2 --silent jlist'])(
     'blocks value-dumping diagnostics: %s',
     async (command) => {
       const hooks = await loadHooks();

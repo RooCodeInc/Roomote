@@ -128,6 +128,33 @@ export function redactToolData<T>(
     /(?:authorization|cookies?|credentials?|password|passwd|secret|token|private[_-]?key|api[_-]?key|access[_-]?key|database[_-]?url|connection[_-]?string)$/i;
   const envKey =
     /^(?:env|environment|environmentVariables|environment_variables)$/i;
+  const pm2NumericMetadata = new Set([
+    'pm_id',
+    'restart_time',
+    'unstable_restarts',
+    'created_at',
+    'pm_uptime',
+    'exit_code',
+    'instances',
+  ]);
+  const pm2Statuses = new Set([
+    'online',
+    'stopped',
+    'stopping',
+    'errored',
+    'launching',
+    'waiting restart',
+    'one-launch-status',
+  ]);
+  const isPm2Metadata = (key: string, item: unknown): boolean => {
+    if (pm2NumericMetadata.has(key))
+      return typeof item === 'number' && Number.isFinite(item);
+    if (key === 'status')
+      return typeof item === 'string' && pm2Statuses.has(item);
+    return (
+      key === 'exec_mode' && (item === 'fork_mode' || item === 'cluster_mode')
+    );
+  };
   const redactText = (text: string): string => {
     for (const secret of secretValues) {
       if (secret.length >= 8) text = text.split(secret).join('[redacted]');
@@ -179,7 +206,8 @@ export function redactToolData<T>(
     return Object.fromEntries(
       Object.entries(item).map(([key, entry]) => [
         key,
-        sensitiveKey.test(key) || (pm2 && /^[A-Z][A-Z0-9_]*$/u.test(key))
+        sensitiveKey.test(key) ||
+        (pm2 && !envKey.test(key) && !isPm2Metadata(key, entry))
           ? '[redacted]'
           : walk(entry, environment || envKey.test(key), key === 'pm2_env'),
       ]),
