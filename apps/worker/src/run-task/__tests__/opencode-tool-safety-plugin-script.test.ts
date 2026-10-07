@@ -1,9 +1,16 @@
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 import { OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT } from '../opencode-tool-safety-plugin-script';
+import {
+  diagnosticProbes,
+  generatedDiagnosticTextCases,
+  generatedPm2ArrayCases,
+} from '../../../../../packages/communication/src/__fixtures__/diagnostic-generated-cases';
+import { redactToolData as previousRedactToolData } from '../../../../../packages/communication/src/__fixtures__/diagnostic-redactor-518f4f30';
 
 interface ToolHookInput {
   tool: string;
@@ -11,6 +18,10 @@ interface ToolHookInput {
 }
 
 type ToolHooks = {
+  'tool.execute.after': (
+    input: ToolHookInput,
+    output: { output: string; metadata?: unknown },
+  ) => Promise<void>;
   'tool.execute.before': (
     input: ToolHookInput,
     output: { args?: unknown },
@@ -129,4 +140,200 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
       ),
     ).resolves.toBeUndefined();
   });
+
+  it('keeps the standalone factory working in a minified keepNames bundle', async () => {
+    const sourcePath = fileURLToPath(
+      new URL('../opencode-tool-safety-plugin-script.ts', import.meta.url),
+    );
+    const outputDir = path.join(tempDir, 'bundle');
+    const configPath = path.join(tempDir, 'build.config.mjs');
+    fs.writeFileSync(
+      configPath,
+      `export default { entry: [${JSON.stringify(sourcePath)}], outDir: ${JSON.stringify(outputDir)}, format: ['esm'], splitting: false, minify: true, keepNames: true, noExternal: [/.*/], banner: { js: "import { createRequire } from 'node:module';const require = createRequire(import.meta.url);" } };`,
+    );
+    execFileSync('pnpm', ['exec', 'tsup', '--config', configPath], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env: { PATH: process.env.PATH, HOME: tempDir },
+      stdio: 'pipe',
+    });
+    const built = await import(
+      /* @vite-ignore */ pathToFileURL(
+        path.join(outputDir, 'opencode-tool-safety-plugin-script.js'),
+      ).href
+    );
+    const pluginPath = path.join(tempDir, 'built-plugin.mjs');
+    fs.writeFileSync(pluginPath, built.OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT);
+    const plugin = await import(
+      /* @vite-ignore */ pathToFileURL(pluginPath).href
+    );
+    const hooks = await plugin.RoomoteOpenCodeToolSafety();
+    const value = `glpat-${'G1h2'.repeat(6)}`;
+    const parts = [
+      'fixture-segment-a',
+      'fixture-segment-b',
+      'fixture-segment-c',
+    ];
+    const diagnosticPath = path.join(tempDir, 'synthetic-diagnostic.txt');
+    fs.writeFileSync(
+      diagnosticPath,
+      `password: ${parts.join(' ')}\ndiag tokenCount: ${parts.join(' ')}\nstatus: online\n`,
+    );
+    const shellOutput = {
+      output: execFileSync(
+        'bash',
+        ['-c', 'cat "$1"', 'synthetic-test', diagnosticPath],
+        { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } },
+      ),
+      metadata: { exitCode: 0 },
+    };
+    await hooks['tool.execute.after']({ tool: 'bash' }, shellOutput);
+    expect(parts.some((part) => shellOutput.output.includes(part))).toBe(false);
+    expect(shellOutput.output.includes('status: online')).toBe(true);
+    expect(shellOutput.metadata.exitCode).toBe(0);
+    const output = { output: JSON.stringify({ value, tokenCount: 42 }) };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    expect(output.output.includes(value)).toBe(false);
+    expect(JSON.parse(output.output).tokenCount).toBe(42);
+    const failures: Record<string, number> = {};
+    const generated = generatedDiagnosticTextCases();
+    for (const { label, input } of generated) {
+      const diagnostic = { output: input, metadata: { tokenCount: 42 } };
+      await hooks['tool.execute.after']({ tool: 'bash' }, diagnostic);
+      const oldOutput = previousRedactToolData(input);
+      if (
+        diagnosticProbes.some(
+          (probe) =>
+            !oldOutput.includes(probe) && diagnostic.output.includes(probe),
+        )
+      )
+        failures[label] = (failures[label] ?? 0) + 1;
+      expect(diagnostic.output.includes('status: online')).toBe(true);
+      expect(diagnostic.metadata.tokenCount).toBe(42);
+    }
+    expect(generated.length).toBe(4320);
+    expect(failures).toEqual({});
+    const pm2Cases = generatedPm2ArrayCases();
+    for (const { input, expectedPm2 } of pm2Cases) {
+      const diagnostic = {
+        output: JSON.stringify(input),
+        metadata: { pm2_env: input.pm2_env, tokenCount: 42 },
+      };
+      await hooks['tool.execute.after']({ tool: 'bash' }, diagnostic);
+      const parsed = JSON.parse(diagnostic.output);
+      expect(
+        JSON.stringify(parsed.pm2_env) === JSON.stringify(expectedPm2),
+      ).toBe(true);
+      expect(
+        JSON.stringify(diagnostic.metadata.pm2_env) ===
+          JSON.stringify(expectedPm2),
+      ).toBe(true);
+      expect(parsed.tokenCount).toBe(42);
+      expect(diagnostic.metadata.tokenCount).toBe(42);
+      expect(parsed.output === input.output).toBe(true);
+      expect(JSON.stringify(parsed.items) === JSON.stringify(input.items)).toBe(
+        true,
+      );
+    }
+    expect(pm2Cases.length).toBe(18);
+  }, 30_000);
+
+  it('instantiates the shared credential inventory in the standalone plugin', async () => {
+    const hooks = await loadHooks();
+    const values = [
+      `glpat-${'G1h2'.repeat(6)}`,
+      `sk_${'live'}_${'S3t4'.repeat(6)}`,
+      `AKIA${'A1B2'.repeat(4)}`,
+      `AIza${'C1d2E'.repeat(7)}`,
+      [...`ghp_${'F5g6'.repeat(9)}`]
+        .map((char) => `%${char.charCodeAt(0).toString(16)}`)
+        .join(''),
+      '-----BEGIN RSA PRIVATE KEY-----\nsynthetic-private-material',
+    ];
+    const output = { output: JSON.stringify({ values, tokenCount: 42 }) };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    const probes = [...values.slice(0, 5), 'synthetic-private-material'];
+    expect(probes.some((probe) => output.output.includes(probe))).toBe(false);
+    expect(JSON.parse(output.output).tokenCount).toBe(42);
+  });
+
+  it('removes diagnostic environment values and authorization before returning tool output', async () => {
+    const hooks = await loadHooks();
+    const sentinel = 'synthetic diagnostic value';
+    const output = {
+      output: JSON.stringify({
+        name: 'api',
+        pid: 123,
+        env: { CUSTOM_SETTING: sentinel },
+        headers: { Authorization: sentinel, 'X-Request-Id': 'request-1' },
+      }),
+      metadata: { headers: { authorization: sentinel } },
+    };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    expect(JSON.stringify(output).includes(sentinel)).toBe(false);
+    expect(output.output.includes('request-1')).toBe(true);
+    expect(output.output.includes('123')).toBe(true);
+  });
+
+  it('sanitizes actual shell output from a synthetic environment file with arbitrary names', async () => {
+    const hooks = await loadHooks();
+    const sentinel = 'synthetic environment fixture value';
+    fs.writeFileSync(
+      path.join(tempDir, '.env'),
+      `CUSTOM_SETTING=${sentinel}\nexport another_setting="${sentinel}\ncontinued fixture"\n`,
+      'utf8',
+    );
+    const command = 'cat .env';
+    await hooks['tool.execute.before']({ tool: 'bash' }, { args: { command } });
+    const output = {
+      output: execFileSync('bash', ['-c', command], {
+        cwd: tempDir,
+        encoding: 'utf8',
+        env: { PATH: '/usr/bin:/bin' },
+      }),
+      metadata: { exitCode: 0 },
+    };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    expect(output.output.includes(sentinel)).toBe(false);
+    expect(output.output.includes('continued fixture')).toBe(false);
+    expect(output.output.includes('CUSTOM_SETTING=')).toBe(true);
+    expect(output.metadata.exitCode).toBe(0);
+  });
+
+  it('sanitizes numbered diagnostic output from a synthetic environment fixture', async () => {
+    const hooks = await loadHooks();
+    const sentinel = 'synthetic environment fixture value';
+    const output = {
+      output: `     1\tCUSTOM_SETTING=${sentinel}\n     2\texport another_setting="${sentinel}\ncontinued fixture"\n`,
+      metadata: { exitCode: 0 },
+    };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    expect(output.output.includes(sentinel)).toBe(false);
+    expect(output.output.includes('continued fixture')).toBe(false);
+    expect(output.output.includes('CUSTOM_SETTING=')).toBe(true);
+    expect(output.metadata.exitCode).toBe(0);
+  });
+
+  it('redacts lowercase process environment entries from synthetic diagnostic JSON', async () => {
+    const hooks = await loadHooks();
+    const sentinel = 'synthetic environment fixture value';
+    const output = {
+      output: JSON.stringify({
+        pid: 123,
+        pm2_env: { custom_setting: sentinel, status: 'online' },
+      }),
+    };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    expect(output.output.includes(sentinel)).toBe(false);
+    expect(output.output.includes('online')).toBe(true);
+  });
+
+  it.each(['pm2 jlist', 'printenv', 'pm2 --silent jlist'])(
+    'blocks value-dumping diagnostics: %s',
+    async (command) => {
+      const hooks = await loadHooks();
+      await expect(
+        hooks['tool.execute.before']({ tool: 'bash' }, { args: { command } }),
+      ).rejects.toThrow('metadata');
+    },
+  );
 });

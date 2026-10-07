@@ -1,73 +1,14 @@
-const SECRET_KEY_PATTERN =
-  /secret|token|password|api[-_]?key|authorization|credential|private[-_]?key/i;
+import { secretRedactor } from './secret-redaction';
 const DEFAULT_MAX_STRING_LENGTH = 200;
 const MAX_DEPTH = 6;
 const MAX_COLLECTION_ITEMS = 50;
 const MASKED_VALUE = '[value omitted]';
 
-/**
- * Credentials recognizable by their published prefix alone. A value with no
- * such prefix cannot be told from any other long string here.
- */
-const SECRET_VALUE_PATTERNS = [
-  // OpenAI, OpenRouter, Anthropic
-  /\bsk-(?:or-)?[A-Za-z0-9_-]{12,}\b/,
-  // Stripe secret, restricted and organization keys, and webhook signing
-  // secrets
-  /\b[sr]k_(?:live|test|org)_(?:(?:live|test)_)?[A-Za-z0-9]{16,}\b/,
-  /\bwhsec_[A-Za-z0-9]{24,}\b/,
-  // GitHub
-  /\bgh[pousr]_[A-Za-z0-9]{16,}\b/,
-  /\bgithub_pat_[A-Za-z0-9_]{16,}\b/,
-  // GitLab
-  /\bglpat-[A-Za-z0-9_-]{20,}/,
-  // Slack
-  /\bxox[abeprs]-[A-Za-z0-9-]{12,}\b/,
-  /\bxapp-[A-Za-z0-9-]{12,}\b/,
-  // AWS access key ids
-  /\bAKIA[0-9A-Z]{16}\b/,
-  // Google API keys
-  /\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/,
-  // npm, SendGrid, Linear, Hugging Face
-  /\bnpm_[A-Za-z0-9]{36}\b/,
-  /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/,
-  /\blin_api_[A-Za-z0-9]{32,}\b/,
-  /\bhf_[A-Za-z0-9]{30,}\b/,
-  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
-];
-
-function hasSecretShapedString(value: string): boolean {
-  let candidate = value;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (SECRET_VALUE_PATTERNS.some((pattern) => pattern.test(candidate))) {
-      return true;
-    }
-    try {
-      const decoded = decodeURIComponent(candidate.replace(/\+/g, ' '));
-      if (decoded === candidate) return false;
-      candidate = decoded;
-    } catch {
-      return false;
-    }
-  }
-  return SECRET_VALUE_PATTERNS.some((pattern) => pattern.test(candidate));
-}
-
 const READ_CONTENT_MAX_LENGTH = 4_000;
-const PERCENT_ENCODED_RUN = /[^\s"'<>]*%[0-9A-Fa-f]{2}[^\s"'<>]*/g;
-const PRIVATE_KEY_BLOCK =
-  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
 
 /** Mask recognized credentials in free text, leaving the rest in place. */
 export function maskIntegrationToolText(text: string): string {
-  let masked = text.replace(PRIVATE_KEY_BLOCK, MASKED_VALUE);
-  for (const pattern of SECRET_VALUE_PATTERNS) {
-    masked = masked.replace(new RegExp(pattern.source, 'g'), MASKED_VALUE);
-  }
-  // Percent-encoded credentials only match once decoded; mask the whole run.
-  return masked.replace(PERCENT_ENCODED_RUN, (run) =>
-    hasSecretShapedString(run) ? MASKED_VALUE : run,
-  );
+  return secretRedactor.maskText(text, { placeholder: MASKED_VALUE });
 }
 
 /**
@@ -86,7 +27,7 @@ export function boundIntegrationToolReadContent(text: string): string {
 export function hasIntegrationToolSecret(value: unknown): boolean {
   const visited = new WeakSet<object>();
   const visit = (current: unknown): boolean => {
-    if (typeof current === 'string') return hasSecretShapedString(current);
+    if (typeof current === 'string') return secretRedactor.hasSecret(current);
     if (!current || typeof current !== 'object') return false;
     if (visited.has(current)) return false;
     visited.add(current);
@@ -105,7 +46,7 @@ function redactValue(
 ): unknown {
   if (depth > MAX_DEPTH) return '[truncated]';
   if (typeof value === 'string') {
-    if (hasSecretShapedString(value)) return MASKED_VALUE;
+    if (secretRedactor.hasSecret(value)) return MASKED_VALUE;
     return value.length > maxStringLength
       ? `${value.slice(0, maxStringLength)}…[truncated]`
       : value;
@@ -123,7 +64,7 @@ function redactValue(
       .slice(0, MAX_COLLECTION_ITEMS)
       .map(([key, item]) => [
         key,
-        SECRET_KEY_PATTERN.test(key)
+        secretRedactor.isSensitiveKey(key, 'integration')
           ? MASKED_VALUE
           : redactValue(item, depth + 1, maxStringLength, visited),
       ]),

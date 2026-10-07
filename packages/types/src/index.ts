@@ -124,5 +124,6 @@ export * from './workspace-routing';
 export * from './service-credentials';
 export * from './integration-tool-approvals';
 export * from './integration-tool-args';
+export * from './secret-redaction';
 export * from './credential-egress';
 export * from './public-url-fetch';
