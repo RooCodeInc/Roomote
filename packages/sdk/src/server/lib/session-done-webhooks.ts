@@ -210,7 +210,9 @@ export async function drainSessionDoneWebhookDeliveries(
         body,
         signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
       });
-      await response.body?.cancel();
+      // Delivery is acknowledged by the HTTP status. Discarding an unused
+      // body must not turn that acknowledgment into another delivery attempt.
+      await response.body?.cancel().catch(() => {});
 
       const attempts = claim.row.attempts + 1;
       if (response.status >= 200 && response.status < 300) {

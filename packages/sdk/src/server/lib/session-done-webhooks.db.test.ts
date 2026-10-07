@@ -1,4 +1,6 @@
 import { createHmac } from 'node:crypto';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 
 import {
   db,
@@ -37,6 +39,146 @@ afterEach(async () => {
 });
 
 describe('Session done webhook delivery', () => {
+  it.each([200, 400, 503])(
+    'preserves HTTP %s when the receiver drops its unused response body',
+    async (status) => {
+      let requests = 0;
+      let recovered = false;
+      const deliveryIds: string[] = [];
+      const server = createServer((request, response) => {
+        requests += 1;
+        deliveryIds.push(String(request.headers['x-roomote-delivery']));
+        request.resume();
+        request.on('end', () => {
+          if (recovered) {
+            response.writeHead(204);
+            response.end();
+            return;
+          }
+          response.writeHead(status, { 'content-length': '100' });
+          response.flushHeaders();
+          // A receiver can acknowledge the event and then lose its connection.
+          setTimeout(() => response.destroy(), 10);
+        });
+      });
+      server.listen(0, '127.0.0.1');
+      await once(server, 'listening');
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No port');
+      const url = `http://127.0.0.1:${address.port}/roomote`;
+      try {
+        await db
+          .insert(deploymentSettings)
+          .values({
+            id: 'default',
+            sessionDoneWebhookEnabled: true,
+            sessionDoneWebhookUrl: url,
+            sessionDoneWebhookSecret: 'test-secret',
+          })
+          .onConflictDoUpdate({
+            target: deploymentSettings.id,
+            set: {
+              sessionDoneWebhookEnabled: true,
+              sessionDoneWebhookUrl: url,
+              sessionDoneWebhookSecret: 'test-secret',
+            },
+          });
+        const session = await sessionFactory.create();
+        sessionIds.push(session.id);
+        const [judgment] = await db
+          .insert(sessionStatusJudgments)
+          .values({
+            sessionId: session.id,
+            sourceEventId: `body-disconnect-${status}`,
+            generation: 1,
+            sourceKind: 'fast_turn',
+            state: 'applied',
+            outcome: 'done',
+          })
+          .returning();
+        const [delivery] = await db
+          .insert(sessionDoneWebhookDeliveries)
+          .values({ sessionId: session.id, judgmentId: judgment!.id })
+          .returning();
+        const now = new Date('2030-10-04T12:35:00.000Z');
+        const fetch: typeof safeFetch = async (target, options) => {
+          const response = await safeFetch(target, options);
+          if (recovered) return response;
+          // Control ordering: let the real network disconnect reach the stream
+          // before the drain discards it. No status or stream is fabricated.
+          const reader = response.body!.getReader();
+          await expect(reader.closed).rejects.toThrow();
+          reader.releaseLock();
+          return response;
+        };
+        await drainSessionDoneWebhookDeliveries({
+          fetch,
+          now: () => now,
+          allowedPrivateCidrs: '127.0.0.1/32',
+        });
+        const stored = await db.query.sessionDoneWebhookDeliveries.findFirst({
+          where: eq(sessionDoneWebhookDeliveries.id, delivery!.id),
+        });
+        expect(stored).toMatchObject({
+          status:
+            status === 200
+              ? 'delivered'
+              : status === 400
+                ? 'failed'
+                : 'pending',
+          attempts: 1,
+          lastError:
+            status === 200 ? null : `Webhook endpoint returned HTTP ${status}.`,
+          leaseToken: null,
+          leaseExpiresAt: null,
+        });
+        expect(requests).toBe(1);
+        if (status === 503) {
+          expect(stored?.nextAttemptAt).toEqual(
+            new Date(now.getTime() + 60_000),
+          );
+        }
+        recovered = true;
+        await expect(
+          drainSessionDoneWebhookDeliveries({
+            fetch,
+            now: () => now,
+            allowedPrivateCidrs: '127.0.0.1/32',
+          }),
+        ).resolves.toEqual({ delivered: 0, failed: 0, skipped: 0 });
+        expect(requests).toBe(1);
+        await expect(
+          drainSessionDoneWebhookDeliveries({
+            fetch,
+            now: () => new Date(now.getTime() + 60_000),
+            allowedPrivateCidrs: '127.0.0.1/32',
+          }),
+        ).resolves.toEqual({
+          delivered: status === 503 ? 1 : 0,
+          failed: 0,
+          skipped: 0,
+        });
+        expect(deliveryIds).toEqual(
+          status === 503 ? [delivery!.id, delivery!.id] : [delivery!.id],
+        );
+        const final = await db.query.sessionDoneWebhookDeliveries.findFirst({
+          where: eq(sessionDoneWebhookDeliveries.id, delivery!.id),
+        });
+        expect(final).toMatchObject({
+          status: status === 400 ? 'failed' : 'delivered',
+          attempts: status === 503 ? 2 : 1,
+          leaseToken: null,
+          leaseExpiresAt: null,
+        });
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    },
+  );
+
   it('sends a signed metadata-only event and marks it delivered', async () => {
     const secret = 'a-test-signing-secret';
     await db
