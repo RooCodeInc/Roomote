@@ -245,7 +245,11 @@ function validateComposeShape(shape) {
     });
     const config = JSON.parse(output);
 
-    if (shape.name === 'installer-production' || shape.coolify) {
+    if (
+      shape.name === 'installer-production' ||
+      shape.name === 'self-host-production' ||
+      shape.coolify
+    ) {
       assert(
         config.services.bullmq?.environment
           ?.R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS ===
