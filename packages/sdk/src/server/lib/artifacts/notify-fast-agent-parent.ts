@@ -3,6 +3,7 @@ import {
   and,
   db,
   eq,
+  sql,
   fastAgentConversations,
   fastAgentParentEvents,
   taskArtifacts,
@@ -13,10 +14,12 @@ import {
   normalizeFastAgentParentEvent,
   wakeFastAgentParentEventNow,
 } from '../fast-agent-parent-event-queue';
+import { buildFastAgentDeliveryClaimPredicate } from '../task-runs/fast-agent-delivery-claim';
 
 export type FastArtifactNotificationResult =
   | 'not_applicable'
   | 'already_delivered'
+  | 'in_progress'
   | 'queued'
   | 'skipped';
 
@@ -77,6 +80,40 @@ export async function notifyFastAgentParentOnArtifact(input: {
       columns: { id: true },
     });
     if (!conversation) return { notification: 'skipped' as const };
+    const deliveryKey = `fastAgentArtifact:${artifact.id}`;
+    // Share the previous handler's atomic lease predicate. A live inline owner
+    // keeps delivery responsibility; an absent/expired lease may hand off. The
+    // queued marker also prevents an old handler claiming after our admission.
+    const [claimed] = await tx
+      .update(taskRuns)
+      .set({
+        result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${deliveryKey}::text, 'queued'::text)`,
+      })
+      .where(
+        and(
+          eq(taskRuns.id, run.id),
+          buildFastAgentDeliveryClaimPredicate(deliveryKey),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+    if (!claimed) {
+      const latest = await tx.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, run.id),
+        columns: { result: true },
+      });
+      const currentMarker = (
+        latest?.result as Record<string, unknown> | null
+      )?.[deliveryKey];
+      if (currentMarker === 'queued')
+        return { notification: 'queued' as const };
+      return {
+        notification:
+          typeof currentMarker === 'string' &&
+          currentMarker.startsWith('delivering:')
+            ? ('in_progress' as const)
+            : ('already_delivered' as const),
+      };
+    }
     const admission = normalizeFastAgentParentEvent({
       parent,
       event: {

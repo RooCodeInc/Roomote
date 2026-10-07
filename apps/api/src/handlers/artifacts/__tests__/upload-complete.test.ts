@@ -94,4 +94,13 @@ describe('markArtifactUploadComplete', () => {
       notification: 'queued',
     });
   });
+  it('keeps publication successful while a legacy handler owns notification delivery', async () => {
+    mocks.notifyParent.mockResolvedValueOnce('in_progress');
+    const response = await markArtifactUploadComplete(context());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      uploaded: true,
+      notification: 'in_progress',
+    });
+  });
 });
