@@ -28,11 +28,18 @@ const giteaActionWorkflowRunSchema = z
     event: z.string().optional(),
     run_number: z.number().optional(),
     head_sha: z.string().optional(),
+    commit_sha: z.string().optional(),
     head_branch: z.string().optional(),
     status: z.string().optional(),
     conclusion: z.string().nullable().optional(),
   })
-  .passthrough();
+  .passthrough()
+  .transform((run) => ({
+    ...run,
+    ...(!run.head_sha?.trim() && run.commit_sha !== undefined
+      ? { head_sha: run.commit_sha }
+      : {}),
+  }));
 
 const giteaActionWorkflowRunListSchema = z.object({
   workflow_runs: z.array(giteaActionWorkflowRunSchema),
@@ -63,10 +70,14 @@ const giteaActionWorkflowJobSchema = z
   })
   .passthrough();
 
-const giteaActionWorkflowJobListSchema = z.object({
-  jobs: z.array(giteaActionWorkflowJobSchema),
-  total_count: z.number().optional(),
-});
+const giteaActionWorkflowJobListSchema = z.union([
+  z.object({
+    jobs: z.array(giteaActionWorkflowJobSchema),
+    total_count: z.number().optional(),
+  }),
+  // Compatible Actions APIs also return the jobs directly without a wrapper.
+  z.array(giteaActionWorkflowJobSchema).transform((jobs) => ({ jobs })),
+]);
 
 export type GiteaActionWorkflowRun = z.infer<
   typeof giteaActionWorkflowRunSchema
