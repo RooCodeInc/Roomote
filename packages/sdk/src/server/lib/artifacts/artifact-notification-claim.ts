@@ -16,23 +16,32 @@ export async function claimArtifactNotificationDelivery(
   artifactId: string,
 ): Promise<ArtifactNotificationClaim> {
   const key = `fastAgentArtifact:${artifactId}`;
-  const [claimed] = await tx
-    .update(taskRuns)
-    .set({
-      result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${key}::text, 'queued'::text)`,
-    })
-    .where(
-      and(eq(taskRuns.id, runId), buildFastAgentDeliveryClaimPredicate(key)),
-    )
-    .returning({ id: taskRuns.id });
-  if (claimed) return { status: 'queued' };
-  const run = await tx.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, runId),
-    columns: { result: true },
-  });
-  const marker = (run?.result as Record<string, unknown> | null)?.[key];
-  if (marker === 'queued') return { status: 'queued' };
-  const retryAt = getDeliveryClaimExpiry(marker);
-  if (retryAt) return { status: 'in_progress', retryAt };
-  return { status: 'already_delivered' };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const [claimed] = await tx
+      .update(taskRuns)
+      .set({
+        result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${key}::text, 'queued'::text)`,
+      })
+      .where(
+        and(eq(taskRuns.id, runId), buildFastAgentDeliveryClaimPredicate(key)),
+      )
+      .returning({ id: taskRuns.id });
+    if (claimed) return { status: 'queued' };
+    const run = await tx.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, runId),
+      columns: { result: true },
+    });
+    if (!run) return { status: 'already_delivered' };
+    const marker = (run.result as Record<string, unknown> | null)?.[key];
+    // A legacy owner may release its marker between the declined claim and
+    // this read. Absence means unclaimed, never proof that delivery happened.
+    if (marker == null) continue;
+    if (marker === 'queued') return { status: 'queued' };
+    const retryAt = getDeliveryClaimExpiry(marker);
+    if (retryAt) return { status: 'in_progress', retryAt };
+    return { status: 'already_delivered' };
+  }
+  throw new Error(
+    'Artifact notification ownership changed; retry confirmation.',
+  );
 }
