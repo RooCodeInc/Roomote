@@ -121,6 +121,12 @@ reading content.
 Public `manage_tasks` supports these reads for a task you can access, including
 finished tasks. Pass the task ID rather than the parent session ID:
 
+These actions require the user-scoped credential for the public MCP connection;
+task run credentials cannot use them. Only tasks shown in user-facing task
+history are available, so archived and deleted tasks are rejected. Private tasks
+remain owner-only, and custom-automation task history is available only to the
+automation creator or an admin.
+
 ```json
 {"action":"list_artifacts","taskId":"abc123def4567"}
 ```
@@ -138,10 +144,9 @@ The response includes artifact metadata, `url`, `authentication: "bearer"` and
 `expiresAt: null`. Omit `version` for the latest uploaded version, or pass an exact
 version. Fetch the URL with `Authorization: Bearer` using the same credential as
 your public MCP connection. The URL alone grants no access: Roomote rechecks task
-visibility and privacy on every download. Private tasks remain owner-only, and
-downloads are not cached. The URL has no separate signed-link expiry, but the
-credential must still be valid. A client opening links without authorization
-headers cannot download these files.
+visibility and privacy on every download, and downloads are not cached. The URL
+has no separate signed-link expiry, but the credential must still be valid. A
+client opening links without authorization headers cannot download these files.
 
 ```json
 {"action":"get_command_receipts","taskId":"abc123def4567","limit":50}
