@@ -2018,6 +2018,59 @@ describe('ModelSettingsSection', () => {
     expect(createInput.roles.planning.reasoningEffort).toBe('low');
   });
 
+  it('shows the effective DeepSeek level without saving over the legacy medium default', async () => {
+    const modelId = 'openrouter/deepseek/deepseek-v4.1-flash';
+    const data = buildSettingsData({
+      codingReasoningEffort: 'medium',
+      orchestrationReasoningEffort: 'medium',
+    });
+    data.models[0]!.id = modelId;
+    data.models[0]!.displayName = 'DeepSeek V4.1 Flash';
+    const metadata = data.models[0]!.metadata as TaskModelMetadata;
+    metadata.supportsReasoning = true;
+    metadata.supportedReasoningEfforts = ['low', 'high', 'max'];
+    data.defaultModelId = modelId;
+    data.runtimeModels.codingModel.effectiveModelId = modelId;
+    data.runtimeModels.codingModel.persistedModelId = modelId;
+    settingsData.current = data;
+    renderModelSettingsSection();
+
+    const trigger = screen.getByRole('button', {
+      name: 'Coding model and reasoning',
+    });
+    expect(trigger).toHaveTextContent('High');
+    expect(trigger).not.toHaveTextContent('Medium');
+    expect(
+      screen.getByRole('button', { name: 'Orchestration model and reasoning' }),
+    ).toHaveTextContent('Same as coding modelHigh');
+    fireEvent.click(trigger);
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    expect(slider).toHaveAttribute('aria-valuenow', '1');
+    expect(slider).toHaveAttribute('aria-valuetext', 'High');
+    fireEvent.click(
+      screen.getByRole('option', { name: 'DeepSeek V4.1 Flash' }),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+    expect(data.runtimeModels.codingModel.reasoningEffort).toBe('medium');
+
+    fireEvent.keyDown(slider, { key: 'Home' });
+    await waitFor(() =>
+      expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({ codingModelReasoningEffort: 'low' }),
+      ),
+    );
+    fireEvent.keyDown(slider, { key: 'ArrowUp' });
+    await waitFor(() =>
+      expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ codingModelReasoningEffort: 'high' }),
+      ),
+    );
+    expect(trigger).toHaveTextContent('High');
+  });
+
   it('keeps an unavailable current model visible and requires a replacement', async () => {
     settingsData.current = buildSettingsData({
       helperPersistedModelId: 'openrouter/removed-model',

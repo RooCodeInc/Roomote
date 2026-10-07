@@ -1,6 +1,8 @@
 'use client';
 
 import {
+  createContext,
+  useContext,
   useEffect,
   forwardRef,
   useMemo,
@@ -20,8 +22,10 @@ import {
 import { usePathname } from 'next/navigation';
 import {
   getReasoningEffortLabel,
+  getTaskModelReasoningEfforts,
+  normalizeTaskModelReasoningAlias,
+  resolveTaskModelReasoningEffort,
   groupModelsByDisplayProvider,
-  REASONING_EFFORT_VALUES,
   type ReasoningEffort,
   type TaskModelMetadata,
 } from '@roomote/types';
@@ -50,6 +54,8 @@ import { cn } from '@/lib/utils';
 
 export type ModelReasoningPickerModel = {
   id: string;
+  /** Underlying model for an inherited/sentinel option. */
+  reasoningModelId?: string;
   displayName: string;
   isDefault?: boolean;
   metadata?: TaskModelMetadata | null;
@@ -104,27 +110,12 @@ const reasoningLabelVariants: Variants = {
   }),
 };
 
-function supportedEfforts(model: ModelReasoningPickerModel | undefined) {
-  if (model?.metadata?.supportsReasoning === false) return [];
-  return model?.metadata?.supportedReasoningEfforts ?? REASONING_EFFORT_VALUES;
-}
-
-function closestSupportedEffort(
-  effort: ReasoningEffort,
-  supported: readonly ReasoningEffort[],
-): ReasoningEffort | undefined {
-  const effortIndex = REASONING_EFFORT_VALUES.indexOf(effort);
-  return supported.reduce<ReasoningEffort | undefined>((closest, candidate) => {
-    if (!closest) return candidate;
-    const candidateDistance = Math.abs(
-      REASONING_EFFORT_VALUES.indexOf(candidate) - effortIndex,
-    );
-    const closestDistance = Math.abs(
-      REASONING_EFFORT_VALUES.indexOf(closest) - effortIndex,
-    );
-    return candidateDistance < closestDistance ? candidate : closest;
-  }, undefined);
-}
+// The trigger and slider share one resolved selection, including inherited
+// defaults, while callbacks continue to carry explicit user selections only.
+const PickerReasoningContext = createContext<{
+  efforts: readonly ReasoningEffort[];
+  effectiveEffort: ReasoningEffort | null;
+} | null>(null);
 
 function getPickerReasoningEffortLabel(effort: ReasoningEffort): string {
   return effort === 'xhigh' ? 'X-High' : getReasoningEffortLabel(effort);
@@ -183,17 +174,8 @@ function PickerContent({
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
   const [typeaheadQuery, setTypeaheadQuery] = useState('');
-  const effectiveModelId = model || defaultModelId || '';
-  const selectedModel = models.find(({ id }) => id === effectiveModelId);
-  const efforts = supportedReasoningEfforts ?? supportedEfforts(selectedModel);
+  const { efforts, effectiveEffort } = useContext(PickerReasoningContext)!;
   const reasoningUnavailable = efforts.length === 0;
-  const effectiveEffort =
-    (reasoningEffort
-      ? efforts.includes(reasoningEffort)
-        ? reasoningEffort
-        : closestSupportedEffort(reasoningEffort, efforts)
-      : efforts.find((effort) => effort === defaultReasoningEffort)) ??
-    efforts[Math.floor((efforts.length - 1) / 2)];
   const effortIndex = effectiveEffort ? efforts.indexOf(effectiveEffort) : 0;
   const reducedMotion = useReducedMotion() ?? false;
   const effortTransitionDirection: 1 | -1 =
@@ -348,6 +330,7 @@ function PickerContent({
   };
 
   const selectModel = (nextModel: string) => {
+    if (nextModel === model) return;
     if (disabled || reasoningDisabled) {
       applyModelSelection(nextModel, reasoningEffort);
       return;
@@ -356,8 +339,14 @@ function PickerContent({
     const nextModelOption = models.find(
       ({ id }) => id === effectiveNextModelId,
     );
+    const nextReasoningModelId =
+      nextModelOption?.reasoningModelId ?? effectiveNextModelId;
     const nextEfforts =
-      supportedReasoningEfforts ?? supportedEfforts(nextModelOption);
+      supportedReasoningEfforts ??
+      getTaskModelReasoningEfforts(
+        nextReasoningModelId,
+        nextModelOption?.metadata,
+      );
     if (nextEfforts.length === 0) {
       applyModelSelection(nextModel, null);
       return;
@@ -369,15 +358,26 @@ function PickerContent({
       }
       applyModelSelection(
         nextModel,
-        closestSupportedEffort(reasoningEffort, nextEfforts) ?? reasoningEffort,
+        resolveTaskModelReasoningEffort(
+          nextReasoningModelId,
+          reasoningEffort,
+          nextEfforts,
+        ) ?? reasoningEffort,
       );
       return;
     }
     applyModelSelection(
       nextModel,
-      (defaultReasoningEffort && nextEfforts.includes(defaultReasoningEffort)
-        ? defaultReasoningEffort
-        : nextEfforts[Math.floor((nextEfforts.length - 1) / 2)])!,
+      nextEfforts.find(
+        (effort) =>
+          effort ===
+          (defaultReasoningEffort
+            ? normalizeTaskModelReasoningAlias(
+                nextReasoningModelId,
+                defaultReasoningEffort,
+              )
+            : null),
+      ) ?? nextEfforts[Math.floor((nextEfforts.length - 1) / 2)]!,
     );
   };
 
@@ -666,58 +666,94 @@ export function ModelReasoningPicker({
   onOpenChange: (open: boolean) => void;
 }) {
   const isMobile = useIsMobile();
+  const effectiveModelId =
+    contentProps.model || contentProps.defaultModelId || '';
+  const selectedModel = contentProps.models.find(
+    ({ id }) => id === effectiveModelId,
+  );
+  const reasoningModelId = selectedModel?.reasoningModelId ?? effectiveModelId;
+  const efforts =
+    contentProps.supportedReasoningEfforts ??
+    getTaskModelReasoningEfforts(reasoningModelId, selectedModel?.metadata);
+  const defaultEffort = contentProps.defaultReasoningEffort
+    ? normalizeTaskModelReasoningAlias(
+        reasoningModelId,
+        contentProps.defaultReasoningEffort,
+      )
+    : null;
+  const effectiveEffort =
+    (contentProps.reasoningEffort
+      ? resolveTaskModelReasoningEffort(
+          reasoningModelId,
+          contentProps.reasoningEffort,
+          efforts,
+        )
+      : efforts.find((effort) => effort === defaultEffort)) ??
+    efforts[Math.floor((efforts.length - 1) / 2)] ??
+    null;
+  const selection = {
+    efforts,
+    effectiveEffort,
+  };
 
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={onOpenChange} direction="bottom">
-        <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-        <DrawerContent
-          overlayClassName="z-popover"
-          className="z-popover max-h-[80vh]"
-        >
-          <DrawerTitle className="sr-only">
-            Choose model and reasoning
-          </DrawerTitle>
-          <DrawerDescription className="sr-only">
-            Changes apply immediately. Swipe down or tap outside to dismiss.
-          </DrawerDescription>
-          <PickerContent
-            {...contentProps}
-            onClose={() => onOpenChange(false)}
-          />
-        </DrawerContent>
-      </Drawer>
+      <PickerReasoningContext value={selection}>
+        <Drawer open={open} onOpenChange={onOpenChange} direction="bottom">
+          <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+          <DrawerContent
+            overlayClassName="z-popover"
+            className="z-popover max-h-[80vh]"
+          >
+            <DrawerTitle className="sr-only">
+              Choose model and reasoning
+            </DrawerTitle>
+            <DrawerDescription className="sr-only">
+              Changes apply immediately. Swipe down or tap outside to dismiss.
+            </DrawerDescription>
+            <PickerContent
+              {...contentProps}
+              onClose={() => onOpenChange(false)}
+            />
+          </DrawerContent>
+        </Drawer>
+      </PickerReasoningContext>
     );
   }
 
   return (
-    <Popover modal open={open} onOpenChange={onOpenChange}>
-      <BasicTooltip content={tooltip}>
-        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      </BasicTooltip>
-      <PopoverContent
-        side="top"
-        align="start"
-        sideOffset={10}
-        className="relative w-[22rem] overflow-visible p-0 border rounded-2xl"
-      >
-        <PickerContent {...contentProps} onClose={() => onOpenChange(false)} />
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 16 9"
-          fill="none"
-          className="pointer-events-none absolute -bottom-[9px] left-5 h-[9px] w-4 overflow-visible"
+    <PickerReasoningContext value={selection}>
+      <Popover modal open={open} onOpenChange={onOpenChange}>
+        <BasicTooltip content={tooltip}>
+          <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        </BasicTooltip>
+        <PopoverContent
+          side="top"
+          align="start"
+          sideOffset={10}
+          className="relative w-[22rem] overflow-visible p-0 border rounded-2xl"
         >
-          <path d="M0 -1H16V0L8 8L0 0Z" className="fill-popover" />
-          <path
-            d="M0 0.5L8 8.5L16 0.5"
-            className="stroke-border"
-            strokeWidth="1"
-            strokeLinejoin="miter"
+          <PickerContent
+            {...contentProps}
+            onClose={() => onOpenChange(false)}
           />
-        </svg>
-      </PopoverContent>
-    </Popover>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 9"
+            fill="none"
+            className="pointer-events-none absolute -bottom-[9px] left-5 h-[9px] w-4 overflow-visible"
+          >
+            <path d="M0 -1H16V0L8 8L0 0Z" className="fill-popover" />
+            <path
+              d="M0 0.5L8 8.5L16 0.5"
+              className="stroke-border"
+              strokeWidth="1"
+              strokeLinejoin="miter"
+            />
+          </svg>
+        </PopoverContent>
+      </Popover>
+    </PickerReasoningContext>
   );
 }
 
@@ -744,6 +780,9 @@ export const ModelReasoningPickerTrigger = forwardRef<
   },
   ref,
 ) {
+  const selection = useContext(PickerReasoningContext);
+  reasoningEffort =
+    selection && reasoningEffort ? selection.effectiveEffort : reasoningEffort;
   const previousSelectionRef = useRef({ label, reasoningEffort });
   const [selectionFlash, setSelectionFlash] = useState(false);
 
