@@ -36,6 +36,19 @@ describe('tool diagnostic redaction', () => {
     expect(output.includes('CUSTOM_SETTING=')).toBe(true);
     expect(output.includes('status: online')).toBe(true);
   });
+  it.each(['    12\t', '12: ', '  12 | '])(
+    'redacts assignment values with a diagnostic line prefix',
+    (prefix) => {
+      const output = redactToolData(
+        `${prefix}CUSTOM_SETTING=${sentinel}\n${prefix}export lower_case="${sentinel}\ncontinued fixture"\nstatus: online`,
+      );
+      expect(output.includes(sentinel)).toBe(false);
+      expect(output.includes('continued fixture')).toBe(false);
+      expect(output.includes(prefix)).toBe(true);
+      expect(output.includes('CUSTOM_SETTING=')).toBe(true);
+      expect(output.includes('status: online')).toBe(true);
+    },
+  );
   it('preserves safe metadata and does not mutate its input', () => {
     const input = {
       name: 'api',

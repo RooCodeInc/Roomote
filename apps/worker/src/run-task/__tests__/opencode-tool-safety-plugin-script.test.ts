@@ -178,6 +178,20 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
     expect(output.metadata.exitCode).toBe(0);
   });
 
+  it('sanitizes numbered diagnostic output from a synthetic environment fixture', async () => {
+    const hooks = await loadHooks();
+    const sentinel = 'synthetic environment fixture value';
+    const output = {
+      output: `     1\tCUSTOM_SETTING=${sentinel}\n     2\texport another_setting="${sentinel}\ncontinued fixture"\n`,
+      metadata: { exitCode: 0 },
+    };
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+    expect(output.output.includes(sentinel)).toBe(false);
+    expect(output.output.includes('continued fixture')).toBe(false);
+    expect(output.output.includes('CUSTOM_SETTING=')).toBe(true);
+    expect(output.metadata.exitCode).toBe(0);
+  });
+
   it.each(['pm2 jlist', 'printenv'])(
     'blocks value-dumping diagnostics: %s',
     async (command) => {

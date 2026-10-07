@@ -142,9 +142,9 @@ export function redactToolData<T>(
     return (
       text
         // Environment-file names need not look like credentials. Keep names,
-        // but mask assignment values, including quoted multiline values.
+        // but mask values, including multiline quotes and diagnostic line prefixes.
         .replace(
-          /^([\t ]*(?:export[\t ]+)?[A-Za-z_][\w.-]*[\t ]*=[\t ]*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\r\n]*)/gm,
+          /^([\t ]*(?:\d+(?:[\t ]*[:|][\t ]*|[\t ]+))?(?:export[\t ]+)?[A-Za-z_][\w.-]*[\t ]*=[\t ]*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\r\n]*)/gm,
           '$1[redacted]',
         )
         .replace(
