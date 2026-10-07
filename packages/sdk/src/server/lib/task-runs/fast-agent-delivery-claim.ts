@@ -13,10 +13,6 @@ export function buildFastAgentDeliveringMarker(): string {
   return buildDeliveryClaimMarker();
 }
 
-export function isFastAgentDeliveringMarker(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith('delivering:');
-}
-
 /**
  * Claim predicate for a jsonb delivery key on task_runs.result: the key is
  * unclaimed, or holds a 'delivering:<epochMs>' lease older than the lease
