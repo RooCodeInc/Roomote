@@ -36,7 +36,7 @@ const giteaActionWorkflowRunSchema = z
   .passthrough()
   .transform((run) => ({
     ...run,
-    ...(run.head_sha === undefined && run.commit_sha !== undefined
+    ...(!run.head_sha?.trim() && run.commit_sha !== undefined
       ? { head_sha: run.commit_sha }
       : {}),
   }));

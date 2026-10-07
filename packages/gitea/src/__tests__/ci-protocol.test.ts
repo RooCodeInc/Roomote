@@ -6,9 +6,13 @@ import { describe, expect, it } from 'vitest';
 import { getGiteaActionRun, getGiteaActionRunFailureEvidence } from '../ci';
 
 describe('Actions response compatibility over HTTP', () => {
-  it.each(['nested', 'flat'])(
-    'reads bare %s job arrays and commit_sha without losing ordinary Gitea fields',
-    async (shape) => {
+  it.each(
+    ['nested', 'flat'].flatMap((shape) =>
+      [undefined, '', ' \t '].map((headSha) => ({ shape, headSha })),
+    ),
+  )(
+    'reads bare $shape job arrays with head_sha=$headSha without losing ordinary Gitea fields',
+    async ({ shape, headSha }) => {
       const paths: string[] = [];
       const server = createServer((request, response) => {
         const path = new URL(request.url!, 'http://localhost').pathname;
@@ -25,6 +29,7 @@ describe('Actions response compatibility over HTTP', () => {
               status: 'completed',
               conclusion: 'failure',
               commit_sha: 'forgejo-commit',
+              ...(headSha === undefined ? {} : { head_sha: headSha }),
             }),
           );
         } else if (path.endsWith('/actions/runs/100')) {
