@@ -162,6 +162,28 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
     );
     const hooks = await plugin.RoomoteOpenCodeToolSafety();
     const value = `glpat-${'G1h2'.repeat(6)}`;
+    const parts = [
+      'fixture-segment-a',
+      'fixture-segment-b',
+      'fixture-segment-c',
+    ];
+    const diagnosticPath = path.join(tempDir, 'synthetic-diagnostic.txt');
+    fs.writeFileSync(
+      diagnosticPath,
+      `password: ${parts.join(' ')}\nstatus: online\n`,
+    );
+    const shellOutput = {
+      output: execFileSync(
+        'bash',
+        ['-c', 'cat "$1"', 'synthetic-test', diagnosticPath],
+        { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } },
+      ),
+      metadata: { exitCode: 0 },
+    };
+    await hooks['tool.execute.after']({ tool: 'bash' }, shellOutput);
+    expect(parts.some((part) => shellOutput.output.includes(part))).toBe(false);
+    expect(shellOutput.output.includes('status: online')).toBe(true);
+    expect(shellOutput.metadata.exitCode).toBe(0);
     const output = { output: JSON.stringify({ value, tokenCount: 42 }) };
     await hooks['tool.execute.after']({ tool: 'bash' }, output);
     expect(output.output.includes(value)).toBe(false);

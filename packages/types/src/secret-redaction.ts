@@ -1,4 +1,9 @@
-type SecretKeyPolicy = 'diagnostic' | 'integration' | 'webhook' | 'environment';
+type SecretKeyPolicy =
+  | 'diagnostic'
+  | 'diagnostic-text'
+  | 'integration'
+  | 'webhook'
+  | 'environment';
 interface SecretTextOptions {
   placeholder?: string;
   policy?: 'published' | 'log' | 'diagnostic' | 'brain';
@@ -20,10 +25,22 @@ export function createSecretRedactor() {
       published: true,
     },
     { pattern: /\bwhsec_[A-Za-z0-9]{24,}\b/, published: true },
-    { pattern: /\bgh[pousr]_[A-Za-z0-9]{8,}/, published: true },
-    { pattern: /\bgithub_pat_[A-Za-z0-9_]{8,}/, published: true },
+    {
+      pattern: /\bgh[pousr]_[A-Za-z0-9]{8,}/,
+      diagnosticPattern: /\bgh[pousr]_[A-Za-z0-9_-]{8,}/,
+      published: true,
+    },
+    {
+      pattern: /\bgithub_pat_[A-Za-z0-9_]{8,}/,
+      diagnosticPattern: /\bgithub_pat_[A-Za-z0-9_-]{8,}/,
+      published: true,
+    },
     { pattern: /\bglpat-[A-Za-z0-9_-]{20,}/, published: true },
-    { pattern: /\bxox[a-z]-[A-Za-z0-9-]{8,}/, published: true },
+    {
+      pattern: /\bxox[a-z]-[A-Za-z0-9-]{8,}/,
+      diagnosticPattern: /\bxox[a-z]-[A-Za-z0-9_-]{8,}/,
+      published: true,
+    },
     { pattern: /\bxapp-[A-Za-z0-9-]{12,}\b/, published: true },
     { pattern: /\bAKIA[0-9A-Z]{16}\b/, published: true },
     { pattern: /\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/, published: true },
@@ -34,7 +51,12 @@ export function createSecretRedactor() {
     },
     { pattern: /\blin_api_[A-Za-z0-9]{32,}\b/, published: true },
     { pattern: /\bhf_[A-Za-z0-9]{30,}\b/, published: true },
-    { pattern: privateKeyBlock, published: true },
+    {
+      pattern: privateKeyBlock,
+      diagnosticPattern:
+        /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/,
+      published: true,
+    },
     {
       pattern: /\b(Bearer|Basic|Token)\s+([A-Za-z0-9._~+/=-]+)/i,
       published: false,
@@ -78,6 +100,8 @@ export function createSecretRedactor() {
       const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
       if (normalized === 'tokencount') return false;
       return keyRules.some((rule) => {
+        if (policy === 'diagnostic-text')
+          return rule.diagnostic !== false && normalized.includes(rule.name);
         if (policy === 'webhook')
           return (
             rule.webhook !== false &&
@@ -121,7 +145,11 @@ export function createSecretRedactor() {
       return /[A-Za-z0-9_.-]/.test(char);
     },
     // Linear key scan avoids backtracking over long non-secret assignment names.
-    maskNamedAssignments(text: string, placeholder: string): string {
+    maskNamedAssignments(
+      text: string,
+      placeholder: string,
+      policy: NonNullable<SecretTextOptions['policy']>,
+    ): string {
       let output = '',
         copyFrom = 0,
         index = 0;
@@ -135,13 +163,19 @@ export function createSecretRedactor() {
         const key = text.slice(start, index);
         if (
           (text[index] === '"' || text[index] === "'") &&
-          text[start - 1] === text[index]
+          (text[start - 1] === text[index] || policy === 'diagnostic')
         )
           index += 1;
         while (index < text.length && /\s/.test(text[index]!)) index += 1;
         if (text[index] !== ':' && text[index] !== '=') continue;
         index += 1;
-        if (!methods.isSensitiveKey(key)) continue;
+        if (
+          !methods.isSensitiveKey(
+            key,
+            policy === 'diagnostic' ? 'diagnostic-text' : 'diagnostic',
+          )
+        )
+          continue;
         while (index < text.length && /\s/.test(text[index]!)) index += 1;
         const valueStart = index,
           quote = text[index];
@@ -154,7 +188,10 @@ export function createSecretRedactor() {
             }
             if (text[index++] === quote) break;
           }
-        } else if (key.toLowerCase().endsWith('authorization')) {
+        } else if (
+          policy === 'diagnostic' ||
+          key.toLowerCase().endsWith('authorization')
+        ) {
           while (index < text.length && !/[\r\n]/.test(text[index]!))
             index += 1;
         } else {
@@ -197,7 +234,12 @@ export function createSecretRedactor() {
       const placeholder = options.placeholder ?? '[redacted]';
       let masked = text;
       for (const entry of patterns) {
-        const { pattern, opaque } = entry;
+        const { opaque } = entry;
+        // Retain legacy diagnostic acceptance without widening other consumers.
+        const pattern =
+          options.policy === 'diagnostic'
+            ? (entry.diagnosticPattern ?? entry.pattern)
+            : entry.pattern;
         if (!opaque)
           masked = masked.replace(
             new RegExp(pattern.source, `${pattern.flags}g`),
@@ -221,7 +263,11 @@ export function createSecretRedactor() {
           `$1${placeholder}`,
         );
       if (options.namedAssignments)
-        masked = methods.maskNamedAssignments(masked, placeholder);
+        masked = methods.maskNamedAssignments(
+          masked,
+          placeholder,
+          options.policy ?? 'published',
+        );
       if (options.hashShaped)
         for (const { pattern, opaque } of patterns) {
           if (opaque)

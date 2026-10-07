@@ -2,6 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { redactToolData } from './redact-secrets';
 
 describe('tool diagnostic redaction', () => {
+  it('masks the complete unquoted multiword credential value through EOL', () => {
+    const parts = [
+      'fixture-segment-a',
+      'fixture-segment-b',
+      'fixture-segment-c',
+    ];
+    const output = redactToolData({
+      output: `password: ${parts.join(' ')}\nstatus: online`,
+      tokenCount: 42,
+    });
+    expect(parts.some((part) => output.output.includes(part))).toBe(false);
+    expect(output.output.includes('status: online')).toBe(true);
+    expect(output.tokenCount).toBe(42);
+  });
   const credentialCases = [
     { name: 'GitLab', make: () => ({ value: `glpat-${'G1h2'.repeat(6)}` }) },
     {
