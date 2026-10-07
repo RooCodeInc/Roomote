@@ -190,9 +190,11 @@ describe('Capture visual proof skill', () => {
     expect(skillContent).toContain(
       'Finish the report (including no-op or blocked results)',
     );
-    expect(skillContent).toContain('this ends the proof deadline, not uploads');
     expect(skillContent).toContain(
-      'Without a judge, load the next workflow skill before continuing.',
+      'The runtime deadline ends at a judge or fresh workflow-skill invocation, not report text or uploads.',
+    );
+    expect(skillContent).toContain(
+      'Without a judge, invoke the next workflow with the Skill tool even if its instructions are already loaded.',
     );
     expect(skillContent).toContain(
       'Reload `capture-visual-proof` after judge-driven source changes.',
