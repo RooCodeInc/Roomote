@@ -6254,6 +6254,65 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ]);
   });
 
+  it.each([
+    { status: 'permission_denied' },
+    { status: 'unavailable' },
+    {
+      status: 'authorization_required',
+      authorizeUrl: 'https://roomote.example/authorize',
+    },
+    {
+      status: 'configuration_required',
+      settingsUrl: 'https://roomote.example/settings',
+    },
+    {
+      status: 'operator_configuration_required',
+      settingsUrl: 'https://roomote.example/settings',
+      requiredEnvironmentVariables: ['CLIENT_ID'],
+    },
+    { status: 'connected' },
+  ])(
+    'preserves $status integration semantics in code mode',
+    async (outcome) => {
+      mocks.getNativeRuntime.mockImplementation(async () => {
+        mocks.mcpCapabilityAvailable = true;
+        return {
+          directory: '/tmp/fast-native-tools',
+          mcpCapability: 'mcp-capability-1',
+          codeModeIntegrationsActive: true,
+          env: {},
+        };
+      });
+      mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+      const expected = { id: 'sentry', name: 'Sentry', ...outcome };
+      mocks.connectIntegration.mockResolvedValue(expected);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          const result = (await invokeTool(nativeToolNames.connectIntegration, {
+            integrationId: 'sentry',
+          })) as { success: boolean; note?: string };
+          expect(result).toMatchObject(expected);
+          expect(result.success).toBe(
+            !['permission_denied', 'unavailable'].includes(outcome.status),
+          );
+          if (outcome.status === 'connected')
+            expect(result.note).toContain('Connected.');
+          else expect(result).not.toHaveProperty('note');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Connection result checked.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      expect(mocks.clearIntegrationToolCache).toHaveBeenCalledTimes(
+        outcome.status === 'connected' ? 1 : 0,
+      );
+    },
+  );
+
   it('starts native integration setup against the canonical Session', async () => {
     mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
     mocks.listNativeIntegrations.mockResolvedValue([
