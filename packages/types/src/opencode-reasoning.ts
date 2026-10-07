@@ -1,4 +1,5 @@
 import { REASONING_EFFORT_VALUES, type ReasoningEffort } from './task-runs';
+import { normalizeTaskModelReasoningAlias } from './task-model-reasoning';
 
 /**
  * Maps a Roomote reasoning effort to the Anthropic extended-thinking token
@@ -293,6 +294,8 @@ export function buildOpenCodeModelReasoningOptions(
   if (!selection) {
     return null;
   }
+
+  reasoningEffort = normalizeTaskModelReasoningAlias(modelId, reasoningEffort);
 
   if (selection.providerID === 'amazon-bedrock') {
     return buildAmazonBedrockReasoningOptions(
