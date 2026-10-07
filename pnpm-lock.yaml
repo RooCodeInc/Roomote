@@ -52,7 +52,7 @@ overrides:
   flatted: ^3.4.2
   '@protobufjs/utf8': 1.1.1
   tsx: 4.20.4
-  vite-plugin-storybook-nextjs>image-size: npm:probe-image-size@7.3.0
+  vite-plugin-storybook-nextjs>image-size: npm:probe-image-size@7.4.0
   webpack: 5.104.1
   yaml-language-server>yaml: 2.8.3
   '@opentelemetry/propagator-jaeger': 2.9.0
@@ -70,7 +70,7 @@ overrides:
   moment: 2.31.0
   postcss: 8.5.23
   sharp: 0.35.4
-  hono: 4.13.5
+  hono: 4.13.7
   vitest: 4.1.11
   '@ai-sdk/provider-utils@4': 4.0.33
   toml: 4.2.0
@@ -151,10 +151,10 @@ importers:
         version: 3.1000.0
       '@hono/node-server':
         specifier: 2.0.10
-        version: 2.0.10(hono@4.13.5)
+        version: 2.0.10(hono@4.13.7)
       '@hono/trpc-server':
         specifier: ^0.4.2
-        version: 0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.13.5)
+        version: 0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.13.7)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
@@ -228,8 +228,8 @@ importers:
         specifier: 3.4.13
         version: 3.4.13
       hono:
-        specifier: 4.13.5
-        version: 4.13.5
+        specifier: 4.13.7
+        version: 4.13.7
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -272,13 +272,13 @@ importers:
         version: 6.16.4(@bull-board/ui@6.16.4)
       '@bull-board/hono':
         specifier: ^6.16.4
-        version: 6.16.4(hono@4.13.5)
+        version: 6.16.4(hono@4.13.7)
       '@bull-board/ui':
         specifier: ^6.16.4
         version: 6.16.4
       '@hono/node-server':
         specifier: 2.0.10
-        version: 2.0.10(hono@4.13.5)
+        version: 2.0.10(hono@4.13.7)
       '@roomote/cloud-agents':
         specifier: workspace:^
         version: link:../../packages/cloud-agents
@@ -325,8 +325,8 @@ importers:
         specifier: ^5.78.0
         version: 5.78.0
       hono:
-        specifier: 4.13.5
-        version: 4.13.5
+        specifier: 4.13.7
+        version: 4.13.7
       ioredis:
         specifier: 5.10.1
         version: 5.10.1
@@ -944,7 +944,7 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: 2.0.10
-        version: 2.0.10(hono@4.13.5)
+        version: 2.0.10(hono@4.13.7)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
@@ -991,8 +991,8 @@ importers:
         specifier: 9.6.1
         version: 9.6.1
       hono:
-        specifier: 4.13.5
-        version: 4.13.5
+        specifier: 4.13.7
+        version: 4.13.7
       http-proxy:
         specifier: ^1.18.1
         version: 1.18.1
@@ -2304,7 +2304,7 @@ packages:
   '@bull-board/hono@6.16.4':
     resolution: {integrity: sha512-lVR0WF06cU3eLDsKWtEYG2jE/ESi3q2dIaVzmcht0aIakAL/PykFZG3G+29lQFtPEp7LtD8DYMICUtwEgoSJ4Q==}
     peerDependencies:
-      hono: 4.13.5
+      hono: 4.13.7
 
   '@bull-board/ui@6.16.4':
     resolution: {integrity: sha512-5Yv+4g0rDvBBq2RxaUewSEwD8ywvqCX6lKlzPM5Aaf0+4cxGoENQRZNcBaAIKX4+fAzAbdVB4VGP4NUgtx5LVg==}
@@ -2849,14 +2849,14 @@ packages:
     resolution: {integrity: sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: 4.13.5
+      hono: 4.13.7
 
   '@hono/trpc-server@0.4.2':
     resolution: {integrity: sha512-3TDrc42CZLgcTFkXQba+y7JlRWRiyw1AqhLqztWyNS2IFT+3bHld0lxKdGBttCtGKHYx0505dM67RMazjhdZqw==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       '@trpc/server': ^10.10.0 || >11.0.0-rc
-      hono: 4.13.5
+      hono: 4.13.7
 
   '@hookform/resolvers@5.2.2':
     resolution: {integrity: sha512-A/IxlMLShx3KjV/HeTcTfaMxdwy690+L/ZADoeaTltLx+CVuzkeVIPuybK3jrRfw7YZnmdKsVVHAlEPIAEUNlA==}
@@ -8515,8 +8515,8 @@ packages:
     resolution: {integrity: sha512-eSmmWE5bZTK2Nou4g0AI3zZ9rswp7GRKoKXS1BLUkvPviOqs4YTN1djQIqrXy9k5gEtdLPy86JjRwsNM9tnDcA==}
     engines: {node: '>=0.10.0'}
 
-  hono@4.13.5:
-    resolution: {integrity: sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw==}
+  hono@4.13.7:
+    resolution: {integrity: sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ==}
     engines: {node: '>=16.9.0'}
 
   hotkeys-js@4.0.2:
@@ -10253,8 +10253,8 @@ packages:
     resolution: {integrity: sha512-4yf0QO/sllf/1zbZWYnvWw3NxCQwLXKzIj0G849LSufP15BXKM0rbD2Z3wVnkMfjdn/CB0Dpp444gYAACdsplg==}
     engines: {node: '>=18'}
 
-  probe-image-size@7.3.0:
-    resolution: {integrity: sha512-7CaDeBwiAbh6ohXsvLbAZhO7wzsZAmaevfxe39qvCwRh8LyaZfDlBGGLU1CCTgrTLtCOdwBBhjOrIHaIIimHfQ==}
+  probe-image-size@7.4.0:
+    resolution: {integrity: sha512-cdEprVtZxV+awMde9X+4jILBFYh4CARxVrQaMl4wY4YcPWbul9jntXrIW95NInBDyJwcVUP3U0T6yukN8rMBaQ==}
 
   process-nextick-args@2.0.1:
     resolution: {integrity: sha512-3ouUOpQhtgrbOa17J7+uxOTpITYWaGP7/AhoR3+A+/1e9skrzelGi/dXzEYyvbxubEF6Wn2ypscTKiKJFFn1ag==}
@@ -12878,12 +12878,12 @@ snapshots:
       '@bull-board/ui': 6.16.4
       redis-info: 3.1.0
 
-  '@bull-board/hono@6.16.4(hono@4.13.5)':
+  '@bull-board/hono@6.16.4(hono@4.13.7)':
     dependencies:
       '@bull-board/api': 6.16.4(@bull-board/ui@6.16.4)
       '@bull-board/ui': 6.16.4
       ejs: 3.1.10
-      hono: 4.13.5
+      hono: 4.13.7
 
   '@bull-board/ui@6.16.4':
     dependencies:
@@ -13565,14 +13565,14 @@ snapshots:
 
   '@hey-api/types@0.1.4': {}
 
-  '@hono/node-server@2.0.10(hono@4.13.5)':
+  '@hono/node-server@2.0.10(hono@4.13.7)':
     dependencies:
-      hono: 4.13.5
+      hono: 4.13.7
 
-  '@hono/trpc-server@0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.13.5)':
+  '@hono/trpc-server@0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.13.7)':
     dependencies:
       '@trpc/server': 11.15.0(typescript@5.9.3)
-      hono: 4.13.5
+      hono: 4.13.7
 
   '@hookform/resolvers@5.2.2(react-hook-form@7.60.0(react@19.2.4))':
     dependencies:
@@ -13879,7 +13879,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)':
     dependencies:
-      '@hono/node-server': 2.0.10(hono@4.13.5)
+      '@hono/node-server': 2.0.10(hono@4.13.7)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -13889,7 +13889,7 @@ snapshots:
       eventsource-parser: 3.0.6
       express: 5.2.1
       express-rate-limit: 8.5.2(express@5.2.1)
-      hono: 4.13.5
+      hono: 4.13.7
       jose: 6.2.3
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -19503,7 +19503,7 @@ snapshots:
     dependencies:
       parse-passwd: 1.0.0
 
-  hono@4.13.5: {}
+  hono@4.13.7: {}
 
   hotkeys-js@4.0.2: {}
 
@@ -21560,7 +21560,7 @@ snapshots:
     dependencies:
       parse-ms: 4.0.0
 
-  probe-image-size@7.3.0:
+  probe-image-size@7.4.0:
     dependencies:
       lodash.merge: 4.6.2
       needle: 2.9.1
@@ -23265,7 +23265,7 @@ snapshots:
   vite-plugin-storybook-nextjs@3.1.10(patch_hash=8fd881e8d006f7111cd4b98ae502e988740c08f78aa13282d99cecd3b5bf53cb)(next@16.3.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(storybook@10.2.10(@testing-library/dom@10.4.1)(bufferutil@4.1.0)(prettier@3.8.3)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(utf-8-validate@6.0.6))(typescript@5.9.3)(vite@7.3.5(@types/node@24.12.4)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.4)(yaml@2.9.0)):
     dependencies:
       '@next/env': 16.0.0
-      image-size: probe-image-size@7.3.0
+      image-size: probe-image-size@7.4.0
       magic-string: 0.30.21
       module-alias: 2.2.3
       next: 16.3.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
