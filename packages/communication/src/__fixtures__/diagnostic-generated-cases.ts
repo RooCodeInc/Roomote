@@ -146,3 +146,52 @@ export function generatedRelatedExceptionCases() {
   }
   return cases;
 }
+
+export function generatedPm2ArrayCases() {
+  const value = diagnosticProbes.join(' ');
+  const elements: [unknown, unknown][] = [
+    [
+      {
+        custom_setting: value,
+        MixedSetting: value,
+        status: 'online',
+        restart_time: 3,
+        pm_id: 0,
+        exec_mode: 'fork_mode',
+        env: { custom_setting: value },
+      },
+      {
+        custom_setting: '[redacted]',
+        MixedSetting: '[redacted]',
+        status: 'online',
+        restart_time: 3,
+        pm_id: 0,
+        exec_mode: 'fork_mode',
+        env: { custom_setting: '[redacted]' },
+      },
+    ],
+    [
+      { pm_id: value, status: value, exec_mode: value },
+      { pm_id: '[redacted]', status: '[redacted]', exec_mode: '[redacted]' },
+    ],
+    [value, '[redacted]'],
+    [42, '[redacted]'],
+    [null, '[redacted]'],
+    [JSON.stringify({ custom_setting: value }), '[redacted]'],
+  ];
+  return elements.flatMap(([input, expected]) =>
+    [
+      { array: [input], expected: [expected] },
+      { array: [[input]], expected: [[expected]] },
+      { array: [input, [input]], expected: [expected, [expected]] },
+    ].map(({ array, expected }) => ({
+      input: {
+        pm2_env: array,
+        tokenCount: 42,
+        output: 'n'.repeat(20_000),
+        items: Array.from({ length: 80 }, (_, id) => id),
+      },
+      expectedPm2: expected,
+    })),
+  );
+}

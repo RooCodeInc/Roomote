@@ -72,11 +72,14 @@ export function createDiagnosticRedactor(
           });
         },
         walk(item: unknown, environment = false, pm2 = false): unknown {
-          if (environment && (item === null || typeof item !== 'object'))
+          if (
+            (environment || pm2) &&
+            (item === null || typeof item !== 'object')
+          )
             return '[redacted]';
           if (typeof item === 'string') return traversal.redactText(item);
           if (Array.isArray(item))
-            return item.map((entry) => traversal.walk(entry, environment));
+            return item.map((entry) => traversal.walk(entry, environment, pm2));
           if (!item || typeof item !== 'object') return item;
           return Object.fromEntries(
             Object.entries(item).map(([key, entry]) => [

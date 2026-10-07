@@ -6,6 +6,7 @@ import {
   diagnosticProbes,
   generatedDiagnosticTextCases,
   generatedRelatedExceptionCases,
+  generatedPm2ArrayCases,
 } from './__fixtures__/diagnostic-generated-cases';
 
 const parts = ['fixture-segment-a', 'fixture-segment-b', 'fixture-segment-c'];
@@ -107,18 +108,47 @@ describe('diagnostic acceptance differential against immutable518f4f30', () => {
     // Only labels and counts appear on failure, never fixture values/output.
     expect(failures).toEqual({});
   });
-  it('matches legacy handling of generated nearby exceptions and structured metadata', () => {
+  it('preserves generated nearby contracts without inheriting the legacy PM2 array leak', () => {
     const generated = generatedRelatedExceptionCases();
     const failures: Record<string, number> = {};
     for (const { category, input, secretValues } of generated) {
+      const current = JSON.stringify(redactToolData(input, secretValues));
+      // These four inherited legacy cases must prove safety, not leak parity.
+      if (category === 'pm2-array') {
+        if (
+          diagnosticProbes.some((probe) => current.includes(probe)) ||
+          !current.includes('[redacted]')
+        )
+          failures[category] = (failures[category] ?? 0) + 1;
+        continue;
+      }
       if (
-        JSON.stringify(redactToolData(input, secretValues)) !==
-        JSON.stringify(previous.redactToolData(input, secretValues))
+        current !== JSON.stringify(previous.redactToolData(input, secretValues))
       )
         failures[category] = (failures[category] ?? 0) + 1;
     }
     expect(generated.length).toBe(301);
     expect(failures).toEqual({});
+  });
+  it('redacts array-shaped PM2 context while preserving only typed safe metadata', () => {
+    const generated = generatedPm2ArrayCases();
+    for (const { input, expectedPm2 } of generated) {
+      const before = JSON.stringify(input);
+      const output = redactToolData(input);
+      expect(
+        JSON.stringify(output.pm2_env) === JSON.stringify(expectedPm2),
+      ).toBe(true);
+      expect(
+        JSON.stringify(output.pm2_env).includes(diagnosticProbes[0]!),
+      ).toBe(false);
+      expect(output.tokenCount).toBe(42);
+      expect(output.output === input.output).toBe(true);
+      expect(JSON.stringify(output.items) === JSON.stringify(input.items)).toBe(
+        true,
+      );
+      expect(JSON.stringify(input) === before).toBe(true);
+    }
+    expect(generated.length).toBe(18);
   });
   it('masks tokenCount diagnostic text while preserving numeric structure and other policies', () => {
     const input = `diag tokenCount: ${fixtureValue}\nstatus: online`;

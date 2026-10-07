@@ -8,6 +8,7 @@ import { OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT } from '../opencode-tool-safety-plug
 import {
   diagnosticProbes,
   generatedDiagnosticTextCases,
+  generatedPm2ArrayCases,
 } from '../../../../../packages/communication/src/__fixtures__/diagnostic-generated-cases';
 import { redactToolData as previousRedactToolData } from '../../../../../packages/communication/src/__fixtures__/diagnostic-redactor-518f4f30';
 
@@ -211,6 +212,29 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
     }
     expect(generated.length).toBe(4320);
     expect(failures).toEqual({});
+    const pm2Cases = generatedPm2ArrayCases();
+    for (const { input, expectedPm2 } of pm2Cases) {
+      const diagnostic = {
+        output: JSON.stringify(input),
+        metadata: { pm2_env: input.pm2_env, tokenCount: 42 },
+      };
+      await hooks['tool.execute.after']({ tool: 'bash' }, diagnostic);
+      const parsed = JSON.parse(diagnostic.output);
+      expect(
+        JSON.stringify(parsed.pm2_env) === JSON.stringify(expectedPm2),
+      ).toBe(true);
+      expect(
+        JSON.stringify(diagnostic.metadata.pm2_env) ===
+          JSON.stringify(expectedPm2),
+      ).toBe(true);
+      expect(parsed.tokenCount).toBe(42);
+      expect(diagnostic.metadata.tokenCount).toBe(42);
+      expect(parsed.output === input.output).toBe(true);
+      expect(JSON.stringify(parsed.items) === JSON.stringify(input.items)).toBe(
+        true,
+      );
+    }
+    expect(pm2Cases.length).toBe(18);
   }, 30_000);
 
   it('instantiates the shared credential inventory in the standalone plugin', async () => {
