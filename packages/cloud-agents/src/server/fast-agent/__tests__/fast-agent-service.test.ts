@@ -67,6 +67,7 @@ const mocks = vi.hoisted(() => ({
   findActiveRetryNotice: vi.fn(),
   listRecentFastAgentHumanUserPromptTexts: vi.fn(async () => []),
   loadTurnAttempt: vi.fn(),
+  repliesBeforeHumanPrompt: vi.fn(),
   getUnifiedSession: vi.fn(),
   createSessionStatusJudgmentRequest: vi.fn(),
   settleSessionStatusJudgmentTurn: vi.fn(),
@@ -210,6 +211,7 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   listRecentFastAgentHumanUserPromptTexts:
     mocks.listRecentFastAgentHumanUserPromptTexts,
   loadFastAgentTurnAttemptSummary: mocks.loadTurnAttempt,
+  findFastAgentRepliesBeforeHumanPrompt: mocks.repliesBeforeHumanPrompt,
 }));
 
 vi.mock('../../available-environments', () => ({
@@ -691,6 +693,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
     mocks.renewRespondingLease.mockResolvedValue(true);
     mocks.findUnresolvedRequest.mockResolvedValue(null);
+    mocks.repliesBeforeHumanPrompt.mockResolvedValue(undefined);
     mocks.executeDb.mockResolvedValue([]);
     mocks.markDurableDelivered.mockResolvedValue(true);
     mocks.releaseDurableClaim.mockResolvedValue(true);
@@ -12391,6 +12394,118 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           }),
         }),
       );
+    },
+  );
+
+  it.each([
+    { resumedAfterInterruption: true },
+    { resumedAfterInferenceRetry: true },
+  ])(
+    'recovers replayed model consent at the original human boundary: %j',
+    async (resume) => {
+      const proposal = 'Should I run this on Claude Sonnet 5?';
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        openCodeSessionId: 'opencode-session-1',
+        compatibilityMessages: [
+          { role: 'assistant', content: proposal },
+          { role: 'user', content: 'Yes, use it.' },
+          { role: 'assistant', content: 'Should I use Opus instead?' },
+        ],
+      });
+      mocks.loadTurnAttempt.mockResolvedValue({
+        events: [],
+        next: {
+          assistantOrdinal: 1,
+          toolOrdinal: 0,
+          retryNoticeOrdinal: 0,
+          turnSeq: 2,
+        },
+        prompt: { ts: 300, turnSeq: 0 },
+      });
+      mocks.repliesBeforeHumanPrompt.mockResolvedValue(proposal);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Review pagination.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        ...resume,
+        question: 'Yes, use it.',
+        adapter: callbacks(),
+      });
+      expect(mocks.repliesBeforeHumanPrompt).toHaveBeenCalledWith({
+        conversationId: 'conversation-1',
+        beforeTs: 300,
+        currentEventId: '100.2:user',
+        modelProposalTurnId: '100.2',
+      });
+      expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({
+            modelRequestContext: [
+              { sender: 'assistant', text: proposal },
+              { sender: 'user', text: 'Yes, use it.' },
+            ],
+          }),
+        }),
+      );
+    },
+  );
+
+  it.each(['missing prompt', 'lookup error'] as const)(
+    'omits replayed proposal rather than trusting history on %s',
+    async (failure) => {
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        openCodeSessionId: 'opencode-session-1',
+        compatibilityMessages: [
+          { role: 'assistant', content: 'Should I use Opus instead?' },
+        ],
+      });
+      mocks.loadTurnAttempt.mockResolvedValue({
+        events: [],
+        next: {
+          assistantOrdinal: 1,
+          toolOrdinal: 0,
+          retryNoticeOrdinal: 0,
+          turnSeq: 2,
+        },
+        prompt: failure === 'missing prompt' ? null : { ts: 300, turnSeq: 0 },
+      });
+      if (failure === 'lookup error')
+        mocks.repliesBeforeHumanPrompt.mockRejectedValue(
+          new Error('lookup unavailable'),
+        );
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Review pagination.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        resumedAfterInterruption: true,
+        question: 'Yes, use it.',
+        adapter: callbacks(),
+      });
+      expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({
+            modelRequestContext: [{ sender: 'user', text: 'Yes, use it.' }],
+          }),
+        }),
+      );
+      if (failure === 'missing prompt')
+        expect(mocks.repliesBeforeHumanPrompt).not.toHaveBeenCalled();
     },
   );
 

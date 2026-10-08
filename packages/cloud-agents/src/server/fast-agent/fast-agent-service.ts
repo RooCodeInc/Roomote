@@ -3817,6 +3817,25 @@ export async function answerFastAgentQuestion({
       nextRetryNoticeOrdinal = previousAttempt.next.retryNoticeOrdinal;
       nextTurnSeq = previousAttempt.next.turnSeq;
     }
+    if (resumedAfterInterruption || resumedAfterInferenceRetry) {
+      // Compatibility history can already contain this attempt's unaccepted
+      // proposals. Recover consent at the original persisted human boundary.
+      modelRequestAssistantProposal =
+        !platformEvent && previousAttempt?.prompt
+          ? await findFastAgentRepliesBeforeHumanPrompt({
+              conversationId: session.id,
+              beforeTs: previousAttempt.prompt.ts,
+              currentEventId: `${turnId}:user`,
+              modelProposalTurnId: turnId,
+            }).catch((error) => {
+              degradedContextComponents.add('model_request_context');
+              console.warn(
+                `[Fast Agent] Prior model proposal unavailable: ${formatErrorForLog(error)}`,
+              );
+              return undefined;
+            })
+          : undefined;
+    }
     // A resumed execution of this same turn inherits the retry notice its
     // predecessor left active, so the eventual answer edits that notice in
     // place; only when no such notice exists (or this is a new turn) does a
