@@ -9,6 +9,7 @@ const { mockEnv } = vi.hoisted(() => ({
 vi.mock('@roomote/env', () => ({ Env: mockEnv }));
 
 import { buildBaseWorkerEnv } from '../base';
+import { TASK_MODEL_ROLES, TASK_MODEL_ROLE_DESCRIPTORS } from '@roomote/types';
 
 describe('buildBaseWorkerEnv', () => {
   const originalEnv = process.env;
@@ -20,18 +21,11 @@ describe('buildBaseWorkerEnv', () => {
     delete process.env.PREVIEW_PROXY_BASE_URL;
     delete process.env.JOB_AUTH_PRIVATE_KEY;
     delete process.env.JOB_AUTH_PUBLIC_KEY;
-    delete process.env.R_MODEL;
-    delete process.env.R_SMALL_MODEL;
-    delete process.env.R_VISION_MODEL;
-    delete process.env.R_CODE_REVIEW_MODEL;
-    delete process.env.R_EXPLORE_MODEL;
-    delete process.env.R_PLANNING_MODEL;
-    delete process.env.R_MODEL_REASONING_EFFORT;
-    delete process.env.R_SMALL_MODEL_REASONING_EFFORT;
-    delete process.env.R_VISION_MODEL_REASONING_EFFORT;
-    delete process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
-    delete process.env.R_EXPLORE_MODEL_REASONING_EFFORT;
-    delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      delete process.env[descriptor.modelEnvVar];
+      delete process.env[descriptor.reasoningEnvVar];
+    }
     delete process.env.R_MODEL_ENV_KEYS;
     delete process.env.SANDBOX_OPENROUTER_API_KEY;
     delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -40,6 +34,57 @@ describe('buildBaseWorkerEnv', () => {
 
   afterEach(() => {
     process.env = originalEnv;
+  });
+
+  it('forwards descriptor-owned sandbox roles and keeps task overrides ahead of operator defaults', () => {
+    const overrides: Record<string, string> = {};
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      process.env[descriptor.modelEnvVar] = ` openai/operator-${role} `;
+      process.env[descriptor.reasoningEnvVar] = ' low ';
+      if (descriptor.includeInSandbox) {
+        overrides[descriptor.modelEnvVar] = `openai/task-${role}`;
+        overrides[descriptor.reasoningEnvVar] = 'high';
+      }
+    }
+    const defaults = buildBaseWorkerEnv({ authToken: 'auth-token' });
+    const overridden = buildBaseWorkerEnv({
+      authToken: 'auth-token',
+      extraEnv: overrides,
+    });
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      if (descriptor.includeInSandbox) {
+        expect(defaults[descriptor.modelEnvVar]).toBe(
+          `openai/operator-${role}`,
+        );
+        expect(defaults[descriptor.reasoningEnvVar]).toBe('low');
+        expect(overridden[descriptor.modelEnvVar]).toBe(`openai/task-${role}`);
+        expect(overridden[descriptor.reasoningEnvVar]).toBe('high');
+      } else {
+        expect(defaults).not.toHaveProperty(descriptor.modelEnvVar);
+        expect(defaults).not.toHaveProperty(descriptor.reasoningEnvVar);
+      }
+    }
+  });
+
+  it('filters disabled models for every sandbox role in both operator and extra env', () => {
+    const disabled: Record<string, string> = {};
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      if (descriptor.includeInSandbox) {
+        disabled[descriptor.modelEnvVar] = 'mistral/mistral-large-latest';
+      }
+    }
+    Object.assign(process.env, disabled);
+    for (const env of [
+      buildBaseWorkerEnv({ authToken: 'auth-token' }),
+      buildBaseWorkerEnv({ authToken: 'auth-token', extraEnv: disabled }),
+    ]) {
+      for (const key of Object.keys(disabled)) {
+        expect(env).not.toHaveProperty(key);
+      }
+    }
   });
 
   it('keeps deployment identity separate from the explicit worker operational env', () => {
@@ -156,12 +201,14 @@ describe('buildBaseWorkerEnv', () => {
     process.env.R_MODEL = 'openrouter/openai/gpt-5.4';
     process.env.R_SMALL_MODEL = 'openrouter/openai/gpt-5.4-mini';
     process.env.R_VISION_MODEL = 'openrouter/openai/gpt-5.5';
+    process.env.R_AUDIO_VIDEO_MODEL = 'openrouter/google/gemini-3.8-flash';
     process.env.R_CODE_REVIEW_MODEL = 'openrouter/openai/gpt-5.5';
     process.env.R_EXPLORE_MODEL = 'openrouter/openai/gpt-5.4-mini';
     process.env.R_PLANNING_MODEL = 'openrouter/anthropic/claude-opus-4.7';
     process.env.R_MODEL_REASONING_EFFORT = 'high';
     process.env.R_SMALL_MODEL_REASONING_EFFORT = 'low';
     process.env.R_VISION_MODEL_REASONING_EFFORT = 'medium';
+    process.env.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT = 'low';
     process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT = 'high';
     process.env.R_EXPLORE_MODEL_REASONING_EFFORT = 'low';
     process.env.R_PLANNING_MODEL_REASONING_EFFORT = 'high';
@@ -177,12 +224,14 @@ describe('buildBaseWorkerEnv', () => {
     expect(env.R_MODEL).toBe('openrouter/openai/gpt-5.4');
     expect(env.R_SMALL_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
     expect(env.R_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
+    expect(env.R_AUDIO_VIDEO_MODEL).toBe('openrouter/google/gemini-3.8-flash');
     expect(env.R_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
     expect(env.R_EXPLORE_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
     expect(env.R_PLANNING_MODEL).toBe('openrouter/anthropic/claude-opus-4.7');
     expect(env.R_MODEL_REASONING_EFFORT).toBe('high');
     expect(env.R_SMALL_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_VISION_MODEL_REASONING_EFFORT).toBe('medium');
+    expect(env.R_AUDIO_VIDEO_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBe('high');
     expect(env.R_EXPLORE_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_PLANNING_MODEL_REASONING_EFFORT).toBe('high');

@@ -8,6 +8,7 @@ vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
 
 import { GET as GET_METADATA } from '../../.well-known/oauth-protected-resource/mcp/route';
 import { DELETE, GET, POST } from '../route';
+import { GET as GET_DOWNLOAD } from '../task-outputs/download/route';
 
 describe('public Roomote MCP proxy', () => {
   beforeEach(() => {
@@ -105,6 +106,36 @@ describe('public Roomote MCP proxy', () => {
     await expect(response.json()).resolves.toMatchObject({
       resource: 'https://roomote.example/mcp',
     });
+  });
+
+  it('streams artifact downloads with the existing bearer through a pathful API base', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('file bytes', {
+        headers: {
+          'cache-control': 'private, no-store',
+          'content-disposition': 'attachment',
+          'content-type': 'application/octet-stream',
+        },
+      }),
+    );
+    const response = await GET_DOWNLOAD(
+      new NextRequest(
+        'https://roomote.example/mcp/task-outputs/download?taskId=abc123def4567&artifactId=artifact',
+        {
+          headers: { authorization: 'Bearer same-mcp-credential' },
+        },
+      ),
+    );
+    const [target, init] = fetchMock.mock.calls[0]!;
+    expect(String(target)).toBe(
+      'https://api.internal.test/_roomote-api/mcp/task-outputs/download?taskId=abc123def4567&artifactId=artifact',
+    );
+    expect((init?.headers as Headers).get('authorization')).toBe(
+      'Bearer same-mcp-credential',
+    );
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('content-disposition')).toBe('attachment');
+    await expect(response.text()).resolves.toBe('file bytes');
   });
 
   it('streams DELETE responses and preserves MCP session headers', async () => {

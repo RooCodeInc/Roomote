@@ -2,6 +2,37 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.17.0 (2026-10-08)
+
+Roomote 1.17 adds dedicated audio and video model controls, authenticated task-output access through MCP, and Claude Haiku 5.5 recommendations while improving task recovery and delivery reliability.
+
+### Highlights
+
+- Choose a separate model for audio transcription and video descriptions, with capability warnings and task-level overrides.
+- Retrieve uploaded task files and command receipts through Roomote MCP using your existing authentication.
+- Use Claude Haiku 5.5 through supported providers, with updated helper and explore recommendations.
+- Resume work more reliably and avoid duplicate artifact uploads and unnecessary completion-webhook retries.
+
+### Minor changes
+
+- Audio transcription and video descriptions now have a separate Audio and video model setting, with capability warnings and task-level overrides. The role inherits the coding model when unset, independently of the images-only Vision model.
+- Claude Haiku 5.5 is now recommended through supported direct and gateway providers, with adaptive-thinking support and updated Anthropic and Amazon Bedrock helper and explore recommendations. Saved Haiku 4.5 selections remain usable, and GitHub Copilot retains its verified Haiku 4.5 recommendation.
+- Roomote MCP clients can now list uploaded task artifacts, download exact file versions with their existing authentication, and read paginated command receipts with bounded output, including from finished tasks. Downloads retain task visibility and private-owner access rules.
+
+### Patch changes
+
+- App services now reap orphaned processes even when a hosting platform's start command runs the entrypoint directly as PID 1, preventing process exhaustion that could eventually stop new tasks from starting.
+- Successful artifact and plan publication no longer reports failure when notification to the parent session is delayed. Durable, deduplicated notifications prevent unnecessary upload retries and duplicate artifact versions.
+- CI failure triage now retains commit identity and failed-job log evidence when compatible Actions APIs return alternate commit fields or bare job arrays. Thanks to @MrGeorgen for reporting [#1777](https://github.com/RooCodeInc/Roomote/issues/1777).
+- Completion webhooks now retain the receiver's HTTP acknowledgment when response-body cleanup fails, avoiding unnecessary retries after acceptance or terminal refusals. Supported production Compose and Coolify deployments also pass the configured private-receiver CIDR allowlist to the delivery service.
+- DeepSeek V4.1 Flash reasoning labels now stay consistent between settings and chat, showing Low, High, or Max and mapping saved Medium or X-High values to High without changing inherited defaults just by viewing the picker.
+- Diagnostic secrets are now sanitized before tool output reaches model context, live transcripts, or stored task messages, with consistent masking across diagnostic and integration consumers.
+- Integration setup now preserves denied, unavailable, and pending authorization results instead of incorrectly reporting Connected and refreshing tools before a connection succeeds.
+- Resumed tasks now preserve usable saved models and recover through the deployment default when a saved model is missing or its provider is disconnected, instead of failing before work can continue.
+- Sessions now distinguish active filters from default or unrelated URL parameters when showing empty results, and offer Clear filters to restore results without changing the selected list or board view.
+- Skills settings now offer Retry after a failed list request, while failed background refreshes preserve already-loaded skills and unsaved editor drafts.
+- Long Telegram replies no longer insert an empty code block before trailing prose when a fenced code block fills a message chunk.
+
 ## 1.16.0 (2026-10-05)
 
 Roomote 1.16 expands session control and connected workflows with MCP file attachments, completion webhooks, outbound email controls, and more reliable reviews and runtime safeguards.

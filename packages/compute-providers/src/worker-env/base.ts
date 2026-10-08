@@ -4,6 +4,8 @@ import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  SANDBOX_TASK_MODEL_ROLES,
+  TASK_MODEL_ROLE_DESCRIPTORS,
   isTaskModelIdDisabled,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
@@ -39,14 +41,11 @@ function isBlockedWorkerEnvKey(key: string): boolean {
     /PASSWORD$/i.test(key)
   );
 }
-const MODEL_ROLE_ENV_VAR_NAMES = new Set<string>([
-  'R_MODEL',
-  'R_SMALL_MODEL',
-  'R_VISION_MODEL',
-  'R_CODE_REVIEW_MODEL',
-  'R_EXPLORE_MODEL',
-  'R_PLANNING_MODEL',
-]);
+const MODEL_ROLE_ENV_VAR_NAMES = new Set<string>(
+  SANDBOX_TASK_MODEL_ROLES.map(
+    (role) => TASK_MODEL_ROLE_DESCRIPTORS[role].modelEnvVar,
+  ),
+);
 
 function filterWorkerExtraEnv(
   extraEnv: Record<string, string> | undefined,
@@ -81,14 +80,8 @@ function buildOperatorModelProviderEnv(): Record<string, string> {
     }
   }
 
-  for (const key of [
-    'R_MODEL_REASONING_EFFORT',
-    'R_SMALL_MODEL_REASONING_EFFORT',
-    'R_VISION_MODEL_REASONING_EFFORT',
-    'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
-    'R_EXPLORE_MODEL_REASONING_EFFORT',
-    'R_PLANNING_MODEL_REASONING_EFFORT',
-  ] as const) {
+  for (const role of SANDBOX_TASK_MODEL_ROLES) {
+    const key = TASK_MODEL_ROLE_DESCRIPTORS[role].reasoningEnvVar;
     const value = process.env[key]?.trim();
 
     if (value) {

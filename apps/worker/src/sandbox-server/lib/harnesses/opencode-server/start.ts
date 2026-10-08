@@ -187,16 +187,17 @@ export async function startOpenCodeServerHarness({
         logger: log,
       })
     : undefined;
-  const { commandEnv, model } = await prepareOpenCodeCommandEnv({
-    runtimeEnv,
-    workspacePath,
-    mcpServers,
-    toolApprovalPermission: toolApprovals?.permission,
-    model: modelOverride,
-    reasoningEffortOverride,
-    developerInstructionsContent,
-    logger,
-  });
+  const { commandEnv, model, modelOverrideApplied } =
+    await prepareOpenCodeCommandEnv({
+      runtimeEnv,
+      workspacePath,
+      mcpServers,
+      toolApprovalPermission: toolApprovals?.permission,
+      model: modelOverride,
+      reasoningEffortOverride,
+      developerInstructionsContent,
+      logger,
+    });
   const resolved = resolveOpenCodeCommand(
     [
       'serve',
@@ -358,6 +359,7 @@ export async function startOpenCodeServerHarness({
       commandEnv,
       initialSessionId,
       model,
+      preserveSavedSessionModel: !modelOverrideApplied,
       fallbackModel,
       fallbackReasoningEffort,
       fallbackRole,

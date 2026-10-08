@@ -140,6 +140,7 @@ type TaskModelSettingsResult = {
     id: string;
     displayName: string;
     family: string;
+    metadata: TaskModelMetadata | null;
   }>;
   codingModelRoutingRules: CodingModelRoutingRule[];
   modelFallbacks: ModelFallbackConfig;
@@ -322,11 +323,14 @@ export async function getTaskModelSettingsCommand(
       settingsDefaultModelId: settings.defaultModelId,
       persisted: persistedRuntimeModelConfig,
     }),
-    helperModelOptions: catalog.map(({ id, displayName, family }) => ({
-      id,
-      displayName,
-      family,
-    })),
+    helperModelOptions: catalog.map(
+      ({ id, displayName, family, metadata }) => ({
+        id,
+        displayName,
+        family,
+        metadata: metadata ?? null,
+      }),
+    ),
     codingModelRoutingRules: settings.codingModelRoutingRules ?? [],
     modelFallbacks,
   };
@@ -1367,6 +1371,7 @@ export async function updateTaskModelSettingsCommand(
     orchestrationModelId?: string | null;
     helperModelId: string | null;
     visionModelId: string | null;
+    audioVideoModelId?: string | null;
     codeReviewModelId: string | null;
     exploreModelId?: string | null;
     planningModelId: string | null;
@@ -1374,6 +1379,7 @@ export async function updateTaskModelSettingsCommand(
     orchestrationModelReasoningEffort?: ReasoningEffort | null;
     helperModelReasoningEffort: ReasoningEffort | null;
     visionModelReasoningEffort: ReasoningEffort | null;
+    audioVideoModelReasoningEffort?: ReasoningEffort | null;
     codeReviewModelReasoningEffort: ReasoningEffort | null;
     exploreModelReasoningEffort?: ReasoningEffort | null;
     planningModelReasoningEffort: ReasoningEffort | null;
@@ -1393,6 +1399,7 @@ export async function updateTaskModelSettingsCommand(
         orchestrationModelId?: string;
         helperModelId?: string;
         visionModelId?: string;
+        audioVideoModelId?: string;
         codeReviewModelId?: string;
         exploreModelId?: string;
         planningModelId?: string;
@@ -1409,6 +1416,7 @@ export async function updateTaskModelSettingsCommand(
     orchestrationModelId?: string;
     helperModelId?: string;
     visionModelId?: string;
+    audioVideoModelId?: string;
     codeReviewModelId?: string;
     exploreModelId?: string;
     planningModelId?: string;

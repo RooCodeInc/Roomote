@@ -143,6 +143,37 @@ describe('chunkTelegramMarkdown', () => {
     }
   });
 
+  it.each([
+    ['```ts', '```', '```'],
+    ['~~~~ts', '~~~~', '~~~~'],
+    ['  ````ts', '  ````', '````'],
+    ['```ts', '`````', '```'],
+  ])(
+    'omits an empty continuation before trailing prose for %s',
+    (opening, closing, syntheticClosing) => {
+      const limit = 100;
+      const body = 'x'.repeat(
+        limit - opening.length - syntheticClosing.length - 2,
+      );
+      const chunks = chunkTelegramMarkdown(
+        `${opening}\n${body}\n${closing}\nExplanation.`,
+        limit,
+      );
+
+      expect(chunks).toEqual([
+        `${opening}\n${body}\n${syntheticClosing}`,
+        'Explanation.',
+      ]);
+    },
+  );
+
+  it('does not emit a continuation for a closing fence and trailing newline alone', () => {
+    const body = 'x'.repeat(90);
+    expect(chunkTelegramMarkdown(`\`\`\`ts\n${body}\n\`\`\`\n`, 100)).toEqual([
+      `\`\`\`ts\n${body}\n\`\`\``,
+    ]);
+  });
+
   it('preserves a trailing newline without emitting an empty chunk', () => {
     const line = 'x'.repeat(3_499);
     const markdown = `${line}\n${line}\n`;

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TaskRunDetail } from '@/lib/server/task-runs';
@@ -105,5 +105,39 @@ describe('TaskModelSwitcher', () => {
     expect(
       screen.getByRole('button', { name: 'Models for this task' }),
     ).toHaveTextContent('High');
+  });
+
+  it('labels the unchanged vision role in the task switcher', () => {
+    launchModelsData.current = {
+      defaultModelId: 'openai/gpt-6-astra',
+      defaultReasoningEffort: 'low',
+      models: [{ id: 'openai/gpt-6-astra', displayName: 'GPT-6 Astra' }],
+    };
+    render(<TaskModelSwitcher taskRun={taskRun} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Models for this task' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'All roles' }));
+
+    expect(screen.getByText('Vision')).toBeInTheDocument();
+    expect(screen.getByLabelText('Vision model')).toBeInTheDocument();
+  });
+
+  it('exposes an audio and video model override for the task', () => {
+    launchModelsData.current = {
+      defaultModelId: 'openai/gpt-6-astra',
+      defaultReasoningEffort: 'low',
+      models: [{ id: 'openai/gpt-6-astra', displayName: 'GPT-6 Astra' }],
+    };
+    render(<TaskModelSwitcher taskRun={taskRun} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Models for this task' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'All roles' }));
+
+    expect(screen.getByText('Audio and video')).toBeInTheDocument();
+    expect(screen.getByLabelText('Audio and video model')).toBeInTheDocument();
   });
 });

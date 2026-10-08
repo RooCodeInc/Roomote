@@ -1,3 +1,4 @@
+import { redactToolData } from '@roomote/communication/redact-secrets';
 import {
   ACP_LOGICAL_EVENT_ID_KEY,
   ACP_ENVELOPE_EVENT_TYPES,
@@ -485,6 +486,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     payload?: Record<string, unknown>;
     metadata?: Record<string, unknown>;
   }): void {
+    options = redactToolData(options);
     this.output(
       this.withLogicalEventId(
         {
@@ -531,6 +533,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     payload: Record<string, unknown>;
     metadata?: Record<string, unknown>;
   }): void {
+    options = redactToolData(options);
     this.persist(
       this.withLogicalEventId(
         {

@@ -30,7 +30,19 @@ export type OpenCodeProviderErrorRecovery = {
 // OpenCode's own typed error names, not provider vocabulary. These are the
 // only non-HTTP signals: they never carry a status because they are raised
 // client-side before or instead of an HTTP response.
-const TERMINAL_ERROR_NAMES = new Set(['contextoverflowerror']);
+const CONTEXT_OVERFLOW_ERROR_NAMES = new Set(['contextoverflowerror']);
+const TERMINAL_ERROR_NAMES = new Set([
+  ...CONTEXT_OVERFLOW_ERROR_NAMES,
+  'providermodelnotfounderror',
+]);
+const PROVIDER_MODEL_NOT_FOUND_ERROR_NAMES = new Set([
+  'providermodelnotfounderror',
+]);
+// OpenCode 1.18.30 wraps model lookup failures as UnknownError and puts the
+// original typed error only in data.message. Match that wire shape narrowly;
+// stack text and mid-message mentions are not classification signals.
+const PROVIDER_MODEL_NOT_FOUND_MESSAGE =
+  /^(?:ProviderModelNotFoundError: )?Model not found: \S/u;
 const POLICY_ERROR_NAMES = new Set(['contentfiltererror']);
 const CONNECTION_RESET_MESSAGE = 'connection reset by server';
 
@@ -133,7 +145,28 @@ function hasErrorName(values: unknown[], names: Set<string>): boolean {
 }
 
 export function isOpenCodeContextOverflowError(error: unknown): boolean {
-  return hasErrorName(collectProviderErrorValues(error), TERMINAL_ERROR_NAMES);
+  return hasErrorName(
+    collectProviderErrorValues(error),
+    CONTEXT_OVERFLOW_ERROR_NAMES,
+  );
+}
+
+export function isOpenCodeProviderModelNotFoundError(error: unknown): boolean {
+  const values = collectProviderErrorValues(error);
+
+  if (hasErrorName(values, PROVIDER_MODEL_NOT_FOUND_ERROR_NAMES)) {
+    return true;
+  }
+
+  const record = asRecord(error);
+  const data = asRecord(record?.data);
+  const message = asString(data?.message);
+
+  return (
+    normalizeIdentifier(record?.name) === 'unknownerror' &&
+    message !== undefined &&
+    PROVIDER_MODEL_NOT_FOUND_MESSAGE.test(message)
+  );
 }
 
 export function isOpenCodeRetryableTransportError(error: unknown): boolean {
@@ -171,6 +204,7 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
 export function isOpenCodeTerminalProviderError(error: unknown): boolean {
   return (
     isInferenceCreditsExhaustedError(error) ||
+    isOpenCodeProviderModelNotFoundError(error) ||
     isExplicitlyTerminal(collectProviderErrorValues(error))
   );
 }
@@ -185,7 +219,10 @@ export function isOpenCodeTerminalProviderError(error: unknown): boolean {
 export function getOpenCodeProviderErrorRecovery(
   error: unknown,
 ): OpenCodeProviderErrorRecovery | null {
-  if (isInferenceCreditsExhaustedError(error)) {
+  if (
+    isInferenceCreditsExhaustedError(error) ||
+    isOpenCodeProviderModelNotFoundError(error)
+  ) {
     return null;
   }
 

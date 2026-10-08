@@ -8,7 +8,7 @@ Capture the smallest honest proof with `agent-browser`, visually inspect the exa
 </role>
 
 <handoff_context>
-<rule>When this skill is invoked by an active parent workflow such as `implement-changes` or `fix-pr`, its output is a proof result for that parent workflow, not the terminal completion of the user's repository-changing task. Finish the report (including no-op or blocked results) before the Task tool invokes `judge`: this ends the proof deadline, not uploads. Without a judge, load the next workflow skill before continuing. Reload `capture-visual-proof` after judge-driven source changes.</rule>
+<rule>When this skill is invoked by an active parent workflow such as `implement-changes` or `fix-pr`, its output is a proof result for that parent workflow, not the terminal completion of the user's repository-changing task. Finish the report (including no-op or blocked results) before the Task tool invokes `judge`. The runtime deadline ends at a judge or fresh workflow-skill invocation, not report text or uploads. Without a judge, invoke the next workflow with the Skill tool even if its instructions are already loaded. To resume the parent, invoke its skill again. No-op and blocked results need this handoff too. Reload `capture-visual-proof` after judge-driven source changes.</rule>
 <rule>Only treat this skill's proof report as the final task answer when the user explicitly invoked `capture-visual-proof` as a standalone proof task.</rule>
 </handoff_context>
 

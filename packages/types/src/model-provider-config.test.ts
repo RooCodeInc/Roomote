@@ -95,6 +95,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModel: null,
       roomoteSmallModel: 'anthropic/claude-sonnet-4',
       roomoteVisionModel: 'openai/gpt-5.5',
+      roomoteAudioVideoModel: null,
       roomoteCodeReviewModel: 'openai/gpt-5.5',
       roomoteExploreModel: 'openai/gpt-5.4-mini',
       roomotePlanningModel: null,
@@ -102,6 +103,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
+      roomoteAudioVideoModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: null,
@@ -174,6 +176,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
+      roomoteAudioVideoModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
@@ -181,6 +184,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
+      roomoteAudioVideoModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: null,
@@ -208,6 +212,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
+      roomoteAudioVideoModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
@@ -215,6 +220,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
+      roomoteAudioVideoModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: null,
@@ -251,6 +257,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
+      roomoteAudioVideoModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
@@ -258,6 +265,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
+      roomoteAudioVideoModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: null,
@@ -278,6 +286,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
+      roomoteAudioVideoModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: 'anthropic/claude-opus-4.7',
@@ -285,6 +294,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
+      roomoteAudioVideoModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: 'xhigh',
@@ -306,6 +316,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
+      roomoteAudioVideoModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
@@ -313,6 +324,7 @@ describe('normalizeDeploymentModelConfig', () => {
       roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
+      roomoteAudioVideoModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: 'xhigh',
       roomoteExploreModelReasoningEffort: 'high',
       roomotePlanningModelReasoningEffort: null,
@@ -563,6 +575,47 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       });
       expect(providersByModel).toEqual(expected);
     }
+  });
+
+  it('recommends Claude Haiku 5.5 only through verified provider routes', () => {
+    const routes = SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'Claude Haiku 5.5',
+      );
+      return model ? [[provider.id, model.id]] : [];
+    });
+
+    expect(routes).toEqual([
+      ['roomote', 'roomote/anthropic/claude-haiku-5.5'],
+      ['openrouter', 'openrouter/anthropic/claude-haiku-5.5'],
+      ['vercel', 'vercel/anthropic/claude-haiku-5.5'],
+      ['requesty', 'requesty/anthropic/claude-haiku-5-5'],
+      ['azure', 'azure/claude-haiku-5-5'],
+      ['azure-cognitive-services', 'azure-cognitive-services/claude-haiku-5-5'],
+      ['anthropic', 'anthropic/claude-haiku-5-5'],
+      ['opencode', 'opencode/claude-haiku-5-5'],
+      ['opencode-go', 'opencode-go/claude-haiku-5-5'],
+      ['amazon-bedrock', 'bedrock-mantle/anthropic.claude-haiku-5-5'],
+    ]);
+    expect(
+      getSetupModelProvider('github-copilot').suggestedTaskModels,
+    ).toContainEqual({
+      id: 'github-copilot/claude-haiku-4.5',
+      displayName: 'Claude Haiku 4.5',
+      family: 'Haiku',
+    });
+  });
+
+  it('uses Haiku 5.5 for Bedrock recommended helper and explore roles', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('amazon-bedrock'),
+        'default',
+      ),
+    ).toMatchObject({
+      roomoteSmallModel: 'bedrock-mantle/anthropic.claude-haiku-5-5',
+      roomoteExploreModel: 'bedrock-mantle/anthropic.claude-haiku-5-5',
+    });
   });
 
   it('recommends Claude Sonnet 5.5 from every supported provider route', () => {
@@ -1149,7 +1202,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ).toEqual([
       'requesty/claude-fable-5.1',
       'requesty/claude-fable-5',
-      'requesty/claude-haiku-4-5',
+      'requesty/anthropic/claude-haiku-5-5',
       'requesty/anthropic/claude-opus-5-5',
       'requesty/anthropic/claude-sonnet-5-5',
       'requesty/gpt-5.6-sol@eu',
@@ -1412,15 +1465,17 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     ).toEqual({
       roomoteModel: 'anthropic/claude-sonnet-5-5',
       roomoteOrchestrationModel: null,
-      roomoteSmallModel: 'anthropic/claude-haiku-4-5',
+      roomoteSmallModel: 'anthropic/claude-haiku-5-5',
       roomoteVisionModel: null,
+      roomoteAudioVideoModel: null,
       roomoteCodeReviewModel: 'anthropic/claude-sonnet-5-5',
-      roomoteExploreModel: 'anthropic/claude-haiku-4-5',
+      roomoteExploreModel: 'anthropic/claude-haiku-5-5',
       roomotePlanningModel: 'anthropic/claude-opus-5-5',
       roomoteModelReasoningEffort: null,
       roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
+      roomoteAudioVideoModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: 'medium',
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: null,
@@ -1521,6 +1576,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: 'moonshotai/kimi-k3',
+      roomoteAudioVideoModel: null,
       roomoteCodeReviewModel: 'moonshotai/kimi-k3',
       roomoteExploreModel: null,
       roomotePlanningModel: 'moonshotai/kimi-k3',
@@ -1528,6 +1584,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
+      roomoteAudioVideoModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: null,
@@ -1544,6 +1601,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteOrchestrationModel: null,
       roomoteSmallModel: 'kimi-for-coding/kimi-for-coding',
       roomoteVisionModel: 'kimi-for-coding/k3',
+      roomoteAudioVideoModel: null,
       roomoteCodeReviewModel: 'kimi-for-coding/k3',
       roomoteExploreModel: 'kimi-for-coding/kimi-for-coding',
       roomotePlanningModel: 'kimi-for-coding/k3',
@@ -1551,6 +1609,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
+      roomoteAudioVideoModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: null,

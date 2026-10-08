@@ -111,6 +111,79 @@ describe('Sessions list', () => {
     );
   });
 
+  it('offers to clear filters when no sessions match', async () => {
+    sessionStatusState.current = [];
+
+    render(
+      await SessionsPage({
+        searchParams: Promise.resolve({ q: 'no-match' }),
+      }),
+    );
+
+    expect(screen.getByText('No sessions match your filters.')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Clear filters' })).toHaveAttribute(
+      'href',
+      '/sessions',
+    );
+  });
+
+  it('preserves the board view when clearing filters', async () => {
+    sessionStatusState.current = [];
+
+    render(
+      await SessionsPage({
+        searchParams: Promise.resolve({ q: 'no-match', view: 'board' }),
+      }),
+    );
+
+    expect(screen.getByRole('link', { name: 'Clear filters' })).toHaveAttribute(
+      'href',
+      '/sessions?view=board',
+    );
+  });
+
+  it.each([
+    ['no parameters', {}],
+    ['the default scope', { scope: 'all' }],
+    ['the default status', { status: 'all' }],
+    ['the default archive state', { archive: 'non-archived' }],
+    ['a pagination cursor', { before: 'older-cursor' }],
+    ['an unknown parameter', { q: undefined, unexpected: 'value' }],
+    ['a whitespace-only search', { q: '   ' }],
+    ['the board view', { view: 'board' }],
+  ])('shows the unfiltered empty state with %s', async (_, searchParams) => {
+    sessionStatusState.current = [];
+
+    render(await SessionsPage({ searchParams: Promise.resolve(searchParams) }));
+
+    expect(screen.getByText('No sessions found.')).toBeVisible();
+    expect(
+      screen.queryByRole('link', { name: 'Clear filters' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['scope', { scope: 'tasks' }],
+    ['status', { status: 'active' }],
+    ['archive state', { archive: 'archived' }],
+    ['time period', { period: '7' }],
+    ['owner', { user: 'user-2' }],
+    ['repository', { repository: 'example/repo' }],
+    ['pull request', { pullRequest: 'example/repo#1' }],
+    ['source', { source: 'slack' }],
+    ['model', { model: 'example/model' }],
+  ])('offers to clear a genuine %s filter', async (_, searchParams) => {
+    sessionStatusState.current = [];
+
+    render(await SessionsPage({ searchParams: Promise.resolve(searchParams) }));
+
+    expect(screen.getByText('No sessions match your filters.')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Clear filters' })).toHaveAttribute(
+      'href',
+      '/sessions',
+    );
+  });
+
   it('exposes the board from a direct URL without a deployment flag', async () => {
     const { container } = render(
       await SessionsPage({

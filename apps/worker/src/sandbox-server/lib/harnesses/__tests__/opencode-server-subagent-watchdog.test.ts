@@ -936,6 +936,77 @@ describe('OpenCode visual proof deadline', () => {
     vi.useRealTimers();
   });
 
+  it.each([false, true])(
+    'settles a no-judge report only with a fresh previously-loaded delivery skill call (handoff=%s)',
+    async (handoff) => {
+      const { client, harness } = createHarness(undefined, {
+        visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+      });
+      try {
+        await connectHarness(harness, client);
+        vi.useFakeTimers();
+        await armSpawn(client, harness);
+        const delivery = createSkillToolPart('create-pr');
+        for (const part of [
+          delivery,
+          createSkillToolPart('capture-visual-proof'),
+        ]) {
+          await client.emit({
+            type: 'message.part.updated',
+            properties: { part },
+          });
+        }
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              ...createSkillToolPart('report'),
+              tool: 'roomote_report_to_parent_session',
+              state: {
+                status: 'completed',
+                input: {
+                  purpose: 'progress',
+                  message: 'Proof is not applicable.',
+                },
+                output: 'Report relayed',
+              },
+            },
+          },
+        });
+        // Replaying the prior skill event is not a new invocation/handoff.
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: delivery },
+        });
+        if (handoff) {
+          await client.emit({
+            type: 'message.part.updated',
+            properties: {
+              part: {
+                ...delivery,
+                id: 'delivery_again',
+                callID: 'delivery_again',
+              },
+            },
+          });
+        }
+        await vi.advanceTimersByTimeAsync(VISUAL_PROOF_TIMEOUT_MS - 1);
+        expect(client.abort).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        if (handoff) {
+          expect(client.abort).not.toHaveBeenCalled();
+          expect(client.promptAsync).toHaveBeenCalledTimes(1);
+        } else {
+          expect(client.abort).toHaveBeenCalledWith(
+            expect.objectContaining({ sessionId: 'ses_1' }),
+          );
+        }
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
   it.each(['pending', 'running', 'completed', 'error'])(
     'ends proof at a %s judge handoff without waiting for turn completion',
     async (status) => {

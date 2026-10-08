@@ -6,6 +6,8 @@ import {
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  SANDBOX_TASK_MODEL_ROLES,
+  TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
   parseModelProviderEnvKeys,
@@ -196,23 +198,19 @@ export async function fetchEnvVars(
  * task env delivered at dequeue/resume. Applied only to worker-bound env.
  * Remove once pre-rename snapshots have aged out (see the matching
  * ROOMOTE_APP_URL alias in @roomote/compute-providers worker-env).
+ * Mirror all sandbox roles to preserve the existing env contract; aliases for
+ * newer roles (such as audio/video) are simply ignored by pre-rename workers.
  */
-const LEGACY_MODEL_RUNTIME_ENV_ALIASES: Record<string, string> = {
-  R_MODEL: 'ROOMOTE_MODEL',
-  R_SMALL_MODEL: 'ROOMOTE_SMALL_MODEL',
-  R_VISION_MODEL: 'ROOMOTE_VISION_MODEL',
-  R_CODE_REVIEW_MODEL: 'ROOMOTE_CODE_REVIEW_MODEL',
-  R_EXPLORE_MODEL: 'ROOMOTE_EXPLORE_MODEL',
-  R_PLANNING_MODEL: 'ROOMOTE_PLANNING_MODEL',
-  R_MODEL_REASONING_EFFORT: 'ROOMOTE_MODEL_REASONING_EFFORT',
-  R_SMALL_MODEL_REASONING_EFFORT: 'ROOMOTE_SMALL_MODEL_REASONING_EFFORT',
-  R_VISION_MODEL_REASONING_EFFORT: 'ROOMOTE_VISION_MODEL_REASONING_EFFORT',
-  R_CODE_REVIEW_MODEL_REASONING_EFFORT:
-    'ROOMOTE_CODE_REVIEW_MODEL_REASONING_EFFORT',
-  R_EXPLORE_MODEL_REASONING_EFFORT: 'ROOMOTE_EXPLORE_MODEL_REASONING_EFFORT',
-  R_PLANNING_MODEL_REASONING_EFFORT: 'ROOMOTE_PLANNING_MODEL_REASONING_EFFORT',
-  R_MODEL_ENV_KEYS: 'ROOMOTE_MODEL_ENV_KEYS',
-};
+const LEGACY_MODEL_RUNTIME_ENV_ALIASES: Record<string, string> =
+  Object.fromEntries(
+    [
+      ...SANDBOX_TASK_MODEL_ROLES.flatMap((role) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        return [descriptor.modelEnvVar, descriptor.reasoningEnvVar];
+      }),
+      'R_MODEL_ENV_KEYS',
+    ].map((key) => [key, key.replace(/^R_/, 'ROOMOTE_')]),
+  );
 
 const MODEL_RUNTIME_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   ...Object.keys(LEGACY_MODEL_RUNTIME_ENV_ALIASES),

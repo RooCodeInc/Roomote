@@ -239,7 +239,7 @@ export function mergeOpenAiCompatibleProviderConfig(
   visionModel?: string,
   modelContextWindows: Readonly<Record<string, number>> = {},
   modelCosts: Readonly<Record<string, TaskModelCost>> = {},
-  options: { assumeImageSupport?: boolean } = {},
+  options: { assumeImageSupport?: boolean; audioVideoModel?: string } = {},
 ): Record<string, unknown> {
   let merged = providerConfig;
   const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
@@ -300,6 +300,9 @@ export function mergeOpenAiCompatibleProviderConfig(
           ...Object.fromEntries(
             modelIdsForProvider.map((modelId) => {
               const qualifiedModelId = `${providerId}/${modelId}`;
+              const isVisionModel = visionModel === qualifiedModelId;
+              const isAudioVideoModel =
+                options.audioVideoModel === qualifiedModelId;
               const existingModel = asRecord(existingModels[modelId]);
               const contextWindow = modelContextWindows[qualifiedModelId];
               // Without cost data OpenCode reports zero spend for these
@@ -321,18 +324,28 @@ export function mergeOpenAiCompatibleProviderConfig(
                       )
                     : undefined;
 
+              const inputModalities = new Set(['text']);
+              if (options.assumeImageSupport) {
+                inputModalities.add('image');
+              } else if (isVisionModel) {
+                inputModalities.add('image');
+                inputModalities.add('video');
+              }
+              if (isAudioVideoModel) {
+                inputModalities.add('audio');
+                inputModalities.add('video');
+              }
               return [
                 modelId,
                 {
                   name: modelId,
                   ...(options.assumeImageSupport ||
-                  visionModel === qualifiedModelId
+                  isVisionModel ||
+                  isAudioVideoModel
                     ? {
                         attachment: true,
                         modalities: {
-                          input: options.assumeImageSupport
-                            ? ['text', 'image']
-                            : ['text', 'image', 'video'],
+                          input: [...inputModalities],
                           output: ['text'],
                         },
                       }

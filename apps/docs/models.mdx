@@ -141,6 +141,16 @@ connected provider exposes its verified route. New connections can discover it
 through supported direct and gateway providers, while existing Claude Sonnet 5
 selections remain usable until you choose to switch.
 
+**Claude Haiku 5.5** is recommended through Roomote inference, OpenRouter,
+Vercel AI Gateway, Requesty, Azure OpenAI, Azure AI Foundry, Anthropic,
+OpenCode Zen, OpenCode Go, and Amazon Bedrock. Enable it in **Available Models**,
+then assign it to a role or select it for a session or task. The Anthropic helper
+and explore recommendations and Amazon Bedrock's **Recommended** mapping preset
+now use Haiku 5.5, which supports adaptive thinking. Existing saved Haiku 4.5
+selections stay unchanged; GitHub Copilot retains its verified Haiku 4.5
+recommendation. Model access still depends on the connected provider account,
+region, or plan.
+
 **GPT-6 Astra** is also recommended through [Vercel AI Gateway](/providers/inference/vercel-ai-gateway),
 [GitHub Copilot](/providers/inference/github-copilot), and
 [OpenCode Zen](/providers/inference/opencode). Connect the provider, enable Astra
@@ -161,6 +171,12 @@ previously used GPT-6 Sol now use GPT-6.1 Sol.
 matching route and no longer recommends the older V4 Flash 0731 model. Existing
 defaults do not change automatically; enable V4.1 Flash and assign it to a role
 when you want to use it.
+
+V4.1 Flash has three distinct reasoning levels: **Low**, **High**, and **Max**.
+Its provider maps a saved **Medium** or **X-High** request to **High**. The model
+picker shows that effective level consistently in settings and chat. Viewing
+the picker leaves saved defaults and inherited session settings intact;
+choosing a different stop saves that level as an explicit selection.
 
 ### Recommended default models
 
@@ -283,9 +299,13 @@ Admins can enable or disable models from the task model list. The default model
 must stay enabled, because Roomote uses it when a task does not request a
 specific model.
 
-Model settings affect new task starts. Running tasks and resumed snapshots keep
-the model that was selected when they started, except when a configured fallback
-switches a running task or session after a provider failure.
+Model settings affect new task starts. Running tasks keep their selected model
+unless you change it or a configured fallback switches it after a provider
+failure. Resumed tasks also keep a saved model when it is still registered and
+its provider is connected, unless a usable task override applies. If the saved
+model is missing or its provider is disconnected, Roomote resumes with the
+deployment default instead. If a preserved saved model is reported as unavailable
+when work resumes, Roomote retries once with the deployment default.
 
 ## Model roles
 
@@ -298,7 +318,8 @@ where you want more speed, quality, or cost control.
 | Default coding model | Normal Roomote tasks: code changes, debugging, tests, repo investigation, and follow-ups | Strong tool use, coding quality, long-context reliability, and good instruction following |
 | Orchestration model  | Session answers and coordination of delegated task launches                              | Low latency, conversational quality, and reliable tool routing                             |
 | Helper model         | Lightweight routing, titles, summaries, and quick internal decisions                     | Low latency, low cost, and enough accuracy for short judgments                            |
-| Vision model         | Visual inspection, screenshots, UI review, and image-heavy work                          | Image understanding, layout reasoning, and concise visual feedback                        |
+| Vision model         | Image inspection                                                                           | Image input support                                                                         |
+| Audio and video model | Audio transcription and video descriptions                                                | Audio/sound and video input support                                                         |
 | Code review model    | Initial PR or MR review tasks and review-sync work                                       | Careful reasoning, bug finding, security awareness, and willingness to cite evidence      |
 | Explore model        | Repository search and focused codebase exploration                                      | Fast tool use, low latency, and reliable source-grounded investigation                    |
 | Advisor model        | Planning turns and advisor consultations inside longer coding tasks                      | Deliberate reasoning, decomposition, and ability to keep constraints in mind              |
@@ -307,6 +328,19 @@ You do not need a separate model for every role. Set a specialized role to
 **Same as coding model** to inherit the default. Many teams start with one
 strong default model, then split out a faster orchestration or helper model, or
 a stronger review model, after they can see real usage.
+
+The **Vision model** handles image attachments when the active model cannot
+inspect them. The separate **Audio and video model** handles audio transcription
+and video descriptions. Each can be configured independently in **Settings >
+Models**. Roomote warns when catalog metadata shows that the selected media model
+does not support audio or video. The audio and video model defaults to **Same as
+coding model**, inheriting the coding model when no separate model is selected.
+
+The task model switcher also includes an Audio and video role override for
+media processing owned by that task. Changes apply from the task's next message.
+Automatic chat-attachment transcription from Slack, Discord, Telegram, and
+Microsoft Teams uses the deployment audio and video model instead of a per-task
+override.
 
 ## Fallback models
 
@@ -475,7 +509,7 @@ outcome, not everywhere by default.
 A practical starting point:
 
 - use **Medium** for the default coding model
-- use **Low** for orchestration, helper, vision, and explore work unless you see quality issues
+- use **Low** for orchestration, helper, media, and explore work unless you see quality issues
 - use **High** for code review and advisor work when you want more careful
   analysis
 - reserve **Extra high** or **Max** for models and workflows where the added
@@ -490,7 +524,7 @@ Deployment settings define the defaults, but each task can override them from
 the web task view. The model chip in the message composer shows the task's
 current coding model and reasoning level; open it to switch the coding model,
 or expand **All roles** to override the planning, code review, explore,
-helper, or vision role for that task only.
+helper, or media role for that task only.
 
 Changes apply from the next message: a turn that is already running finishes
 on the old settings, and the next turn (including its sub-agents) uses the new
@@ -565,11 +599,10 @@ For helper work, prioritize:
 - low cost
 - acceptable accuracy on short routing and summarization prompts
 
-For vision work, prioritize:
+For media work, prioritize:
 
-- support for image inputs
-- layout and screenshot understanding
-- clear descriptions of what changed or what looks wrong
+- support for the image, audio, and video inputs you use
+- layout and screenshot understanding, accurate transcription, and clear video descriptions
 
 For code review, prioritize:
 
@@ -615,8 +648,13 @@ deployment. It helps admins compare models without relying on stale defaults.
   the model is enabled in **Settings > Models**.
 - **Tasks are expensive or slow.** Move helper work to a cheaper model, lower
   reasoning where quality allows, or choose a faster default model.
-- **A vision task cannot inspect images.** Use a model with image input support
-  for the vision role.
+- **An image attachment cannot be read.** Check the selected **Vision model**
+  in **Settings > Models** for image input support.
+- **An audio or video attachment is not processed.** Choose a model that supports
+  the required input under **Settings > Models > Audio and video model**. If the
+  role is **Same as coding model**, check that the coding model supports the
+  attachment, or select a capable audio and video model explicitly. The Vision
+  model handles images separately.
 - **A model works from one provider but not another.** Check provider-specific
   credentials, rate limits, model availability, and model ID prefix.
 - **A task switched to a fallback model.** Check the failed provider's credits,

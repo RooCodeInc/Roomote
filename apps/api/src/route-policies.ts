@@ -361,6 +361,11 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   // Router-facing MCP endpoints share token parsing. The public member route
   // rejects run tokens in its handler; the legacy route remains run-capable.
   {
+    name: 'roomote-member-artifact-download',
+    match: { type: 'exact', path: '/mcp/task-outputs/download' },
+    policy: 'roomote-mcp',
+  },
+  {
     name: 'roomote-public-mcp',
     match: { type: 'exact', path: '/mcp' },
     policy: 'roomote-mcp',

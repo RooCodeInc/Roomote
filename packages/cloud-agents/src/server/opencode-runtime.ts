@@ -22,6 +22,8 @@ import {
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
   SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  type TaskModelRole,
   stripOpenCodeModelReasoningOptions,
   toBedrockMantleRuntimeModelId,
   type OpenRouterVariantModelAlias,
@@ -61,6 +63,15 @@ const OPENCODE_SDK_SERVER_HOSTNAME = '127.0.0.1';
 const OPENCODE_SDK_SERVER_READY_POLL_INTERVAL_MS = 100;
 const OPENCODE_SDK_SERVER_READY_FETCH_TIMEOUT_MS = 1_000;
 
+// This helper runtime supports coding, helper and media models, not harness
+// subagent roles. Order also preserves reasoning and variant alias precedence.
+const NON_TASK_OPENCODE_MODEL_ROLES = [
+  'coding',
+  'helper',
+  'vision',
+  'audioVideo',
+] as const satisfies readonly TaskModelRole[];
+
 function buildModelBackedOpenCodeConfigContent(
   env: NodeJS.ProcessEnv = process.env,
   options: NonTaskOpenCodeRuntimeOptions = {},
@@ -79,35 +90,43 @@ function buildModelBackedOpenCodeConfigContent(
   // rewrite (and the provider registrations below) a Bedrock helper model
   // fails with ProviderModelNotFoundError before any request is made.
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
-  const model = collectOpenRouterVariantModelAlias(
-    variantAliases,
-    toBedrockMantleRuntimeModelId(rawModel),
-  );
-  const rawSmallModel = env.R_SMALL_MODEL?.trim();
-  const smallModel =
-    rawSmallModel && !isTaskModelIdDisabled(rawSmallModel)
-      ? collectOpenRouterVariantModelAlias(
-          variantAliases,
-          toBedrockMantleRuntimeModelId(rawSmallModel),
-        )
-      : undefined;
-  const rawVisionModel = env.R_VISION_MODEL?.trim();
-  const visionModel =
-    rawVisionModel && !isTaskModelIdDisabled(rawVisionModel)
-      ? collectOpenRouterVariantModelAlias(
-          variantAliases,
-          toBedrockMantleRuntimeModelId(rawVisionModel),
-        )
-      : undefined;
-  const modelReasoningEffort = normalizeOptionalReasoningEffort(
-    env.R_MODEL_REASONING_EFFORT?.trim(),
-  );
-  const smallModelReasoningEffort = normalizeOptionalReasoningEffort(
-    env.R_SMALL_MODEL_REASONING_EFFORT?.trim(),
-  );
-  const visionModelReasoningEffort = normalizeOptionalReasoningEffort(
-    env.R_VISION_MODEL_REASONING_EFFORT?.trim(),
-  );
+  const roleConfig = Object.fromEntries(
+    NON_TASK_OPENCODE_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      const rawRoleModel = env[descriptor.modelEnvVar]?.trim();
+      return [
+        role,
+        {
+          model:
+            rawRoleModel && !isTaskModelIdDisabled(rawRoleModel)
+              ? collectOpenRouterVariantModelAlias(
+                  variantAliases,
+                  toBedrockMantleRuntimeModelId(rawRoleModel),
+                )
+              : undefined,
+          reasoningEffort: normalizeOptionalReasoningEffort(
+            env[descriptor.reasoningEnvVar]?.trim(),
+          ),
+        },
+      ];
+    }),
+  ) as Record<
+    (typeof NON_TASK_OPENCODE_MODEL_ROLES)[number],
+    {
+      model: string | undefined;
+      reasoningEffort: ReasoningEffort | null;
+    }
+  >;
+  const {
+    coding: { reasoningEffort: modelReasoningEffort },
+    helper: { model: smallModel, reasoningEffort: smallModelReasoningEffort },
+    vision: { model: visionModel, reasoningEffort: visionModelReasoningEffort },
+    audioVideo: {
+      model: audioVideoModel,
+      reasoningEffort: audioVideoModelReasoningEffort,
+    },
+  } = roleConfig;
+  const model = roleConfig.coding.model!;
 
   // Reasoning levels are configured per default-model role, so they are only
   // applied to the exact model each role was configured with. The coding
@@ -143,6 +162,20 @@ function buildModelBackedOpenCodeConfigContent(
     );
   }
 
+  if (
+    audioVideoModel &&
+    audioVideoModelReasoningEffort &&
+    audioVideoModel !== model &&
+    audioVideoModel !== smallModel &&
+    audioVideoModel !== visionModel
+  ) {
+    providerReasoningConfig = mergeOpenCodeModelReasoningOptions(
+      providerReasoningConfig,
+      audioVideoModel,
+      audioVideoModelReasoningEffort,
+    );
+  }
+
   if (options.reasoningOverride) {
     const overrideModel = collectOpenRouterVariantModelAlias(
       variantAliases,
@@ -156,15 +189,16 @@ function buildModelBackedOpenCodeConfigContent(
     );
   }
 
+  const configuredModelIds = NON_TASK_OPENCODE_MODEL_ROLES.map(
+    (role) => roleConfig[role].model,
+  );
   const providerModelConfig =
     env[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1'
-      ? mergeOpenCodeChatGptFastModeOptions(providerReasoningConfig, [
-          model,
-          smallModel,
-          visionModel,
-        ])
+      ? mergeOpenCodeChatGptFastModeOptions(
+          providerReasoningConfig,
+          configuredModelIds,
+        )
       : providerReasoningConfig;
-  const configuredModelIds = [model, smallModel, visionModel];
   // Same Bedrock provider registrations the task worker applies: OpenCode's
   // catalog knows neither Mantle endpoint, and the native provider does not
   // read the deployment's bearer token on its own.
@@ -192,7 +226,10 @@ function buildModelBackedOpenCodeConfigContent(
           visionModel,
           {},
           {},
-          { assumeImageSupport: options.promptOnlySubagents },
+          {
+            assumeImageSupport: options.promptOnlySubagents,
+            audioVideoModel,
+          },
         ),
         env,
         configuredModelIds,
@@ -421,8 +458,8 @@ function mergeBedrockRegistrationsIntoConfigContent(
   configContent: string,
   env: NodeJS.ProcessEnv,
 ): string {
-  const roleModelIds = (
-    [env.R_MODEL, env.R_SMALL_MODEL, env.R_VISION_MODEL] as const
+  const roleModelIds = NON_TASK_OPENCODE_MODEL_ROLES.map(
+    (role) => env[TASK_MODEL_ROLE_DESCRIPTORS[role].modelEnvVar],
   )
     .map((modelId) => modelId?.trim())
     .filter(
@@ -489,11 +526,13 @@ function mergeReasoningIntoConfigContent(
   env: NodeJS.ProcessEnv,
   reasoningOverride?: { model: string; effort: ReasoningEffort },
 ): string {
-  const roleModels = [
-    [env.R_MODEL?.trim(), env.R_MODEL_REASONING_EFFORT?.trim()],
-    [env.R_SMALL_MODEL?.trim(), env.R_SMALL_MODEL_REASONING_EFFORT?.trim()],
-    [env.R_VISION_MODEL?.trim(), env.R_VISION_MODEL_REASONING_EFFORT?.trim()],
-  ] as const;
+  const roleModels = NON_TASK_OPENCODE_MODEL_ROLES.map((role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    return [
+      env[descriptor.modelEnvVar]?.trim(),
+      env[descriptor.reasoningEnvVar]?.trim(),
+    ] as const;
+  });
   if (
     !reasoningOverride &&
     !roleModels.some(
@@ -591,11 +630,8 @@ export function buildOpenCodeCliEnv(
     }
   }
 
-  for (const modelEnvVarName of [
-    'R_MODEL',
-    'R_SMALL_MODEL',
-    'R_VISION_MODEL',
-  ] as const) {
+  for (const role of NON_TASK_OPENCODE_MODEL_ROLES) {
+    const modelEnvVarName = TASK_MODEL_ROLE_DESCRIPTORS[role].modelEnvVar;
     const modelId = env[modelEnvVarName]?.trim();
 
     if (modelId && isTaskModelIdDisabled(modelId)) {

@@ -16,6 +16,7 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
+import { TASK_MODEL_ROLES, TASK_MODEL_ROLE_DESCRIPTORS } from '@roomote/types';
 import {
   HTTP_INTEGRATIONS_INSTRUCTIONS,
   NATIVE_ROOMOTE_TOOL_SELECTION_INSTRUCTIONS,
@@ -220,6 +221,89 @@ describe('generateOpenCodeConfig provider support', () => {
     tempDirs.push(homeDir);
     return homeDir;
   }
+
+  it('registers and consumes every sandbox role from the shared descriptors', () => {
+    const runtimeEnv: Record<string, string> = {
+      OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+      OPENAI_COMPATIBLE_API_KEY: 'compat-key',
+    };
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      runtimeEnv[descriptor.modelEnvVar] = `openai-compatible/${role}`;
+      runtimeEnv[descriptor.reasoningEnvVar] = 'high';
+    }
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent);
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      if (descriptor.includeInSandbox) {
+        expect(config.provider['openai-compatible'].models).toHaveProperty(
+          role,
+        );
+        expect(runtimeEnv).not.toHaveProperty(descriptor.modelEnvVar);
+        expect(runtimeEnv).not.toHaveProperty(descriptor.reasoningEnvVar);
+      } else {
+        expect(config.provider['openai-compatible'].models).not.toHaveProperty(
+          role,
+        );
+      }
+    }
+    expect(result.model).toBe('openai-compatible/coding');
+  });
+
+  it.each([false, true])(
+    'keeps shared-model variant and reasoning precedence with task override %s',
+    (override) => {
+      const runtimeEnv: Record<string, string> = {};
+      for (const role of TASK_MODEL_ROLES) {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        if (!descriptor.includeInSandbox) continue;
+        runtimeEnv[descriptor.modelEnvVar] = 'openrouter/z-ai/glm-5.2:free';
+        runtimeEnv[descriptor.reasoningEnvVar] = 'low';
+      }
+      runtimeEnv.R_MODEL = override
+        ? 'openrouter/z-ai/glm-5.2:free'
+        : 'openrouter/z-ai/glm-5.2:nitro';
+      runtimeEnv.R_MODEL_REASONING_EFFORT = 'medium';
+      const result = generateOpenCodeConfig({
+        homeDir: createHomeDir(),
+        runtimeEnv,
+        ...(override
+          ? {
+              model: 'openrouter/z-ai/glm-5.2:nitro',
+              reasoningEffortOverride: 'high' as const,
+            }
+          : {}),
+      });
+      const config = JSON.parse(result.configContent);
+      expect(
+        config.provider.openrouter.models['z-ai/glm-5.2'].options,
+      ).toMatchObject({
+        provider: { sort: 'throughput' },
+        reasoning: { effort: override ? 'high' : 'medium' },
+      });
+    },
+  );
+
+  it.each(
+    TASK_MODEL_ROLES.filter(
+      (role) => TASK_MODEL_ROLE_DESCRIPTORS[role].includeInSandbox,
+    ),
+  )('validates the descriptor-owned model env for %s', (role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    expect(() =>
+      generateOpenCodeConfig({
+        homeDir: createHomeDir(),
+        runtimeEnv: {
+          R_MODEL: 'openai/gpt-5',
+          [descriptor.modelEnvVar]: 'invalid-model',
+        },
+      }),
+    ).toThrow(`${descriptor.modelEnvVar} must use provider/model format`);
+  });
 
   it.each([
     'openai/gpt-5',
@@ -467,6 +551,7 @@ describe('generateOpenCodeConfig provider support', () => {
     };
 
     expect(result.model).toBe('bedrock-mantle-openai/openai.gpt-5.6-luna');
+    expect(result.modelOverrideApplied).toBe(true);
     expect(
       config.provider['bedrock-mantle-openai']?.models?.['openai.gpt-5.6-luna'],
     ).toBeDefined();
@@ -512,9 +597,23 @@ describe('generateOpenCodeConfig provider support', () => {
       model: 'mistral/mistral-large-latest',
     });
 
-    expect(result.model).toBeUndefined();
+    expect(result.model).toBe('openrouter/openai/gpt-5.6-terra');
+    expect(result.modelOverrideApplied).toBe(false);
     expect(result.configContent).not.toContain('mistral/');
     expect(runtimeEnv.MISTRAL_API_KEY).toBeUndefined();
+  });
+
+  it('returns the configured coding model when no launch-time override exists', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+
+    expect(result.model).toBe('openrouter/openai/gpt-5.6-terra');
+    expect(result.modelOverrideApplied).toBe(false);
   });
 
   it('leaves a model override without reasoning options when no per-task effort is set', () => {
@@ -1366,6 +1465,35 @@ describe('generateOpenCodeConfig provider support', () => {
     });
     expect(models?.['text-model']).not.toHaveProperty('attachment');
     expect(models?.['text-model']).not.toHaveProperty('modalities');
+  });
+
+  it('registers the configured Audio and video model with its media modalities', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/text-model',
+        R_VISION_MODEL: 'openai-compatible/vision-model',
+        R_AUDIO_VIDEO_MODEL: 'openai-compatible/media-model',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_COMPATIBLE_API_KEY: 'compat-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, Record<string, unknown>> }
+      >;
+    };
+    const models = config.provider['openai-compatible']?.models;
+
+    expect(models?.['vision-model']).toMatchObject({
+      modalities: { input: ['text', 'image', 'video'] },
+    });
+    expect(models?.['media-model']).toMatchObject({
+      attachment: true,
+      modalities: { input: ['text', 'audio', 'video'] },
+    });
+    expect(models?.['text-model']).not.toHaveProperty('attachment');
   });
 
   it('falls back to the OpenAI-compatible coding model when no vision model is configured', () => {

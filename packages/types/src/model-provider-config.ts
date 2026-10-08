@@ -226,6 +226,24 @@ export const TASK_MODEL_ROLE_DESCRIPTORS = {
     fallbackReasoningEnvVar: 'R_VISION_MODEL_FALLBACK_REASONING_EFFORT',
     fallbackRuntime: ['subagent'],
   },
+  audioVideo: {
+    modelConfigKey: 'roomoteAudioVideoModel',
+    reasoningConfigKey: 'roomoteAudioVideoModelReasoningEffort',
+    modelEnvVar: 'R_AUDIO_VIDEO_MODEL',
+    reasoningEnvVar: 'R_AUDIO_VIDEO_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'low',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'configured',
+    runtimeStatusKey: 'audioVideoModel',
+    settingsModelInputKey: 'audioVideoModelId',
+    settingsReasoningInputKey: 'audioVideoModelReasoningEffort',
+    settingsModelInputOptional: true,
+    invalidModelMessage: 'Choose a valid audio and video model.',
+    includeInSandbox: true,
+    fallbackModelEnvVar: 'R_AUDIO_VIDEO_MODEL_FALLBACK',
+    fallbackReasoningEnvVar: 'R_AUDIO_VIDEO_MODEL_FALLBACK_REASONING_EFFORT',
+    fallbackRuntime: ['control-plane'],
+  },
   codeReview: {
     modelConfigKey: 'roomoteCodeReviewModel',
     reasoningConfigKey: 'roomoteCodeReviewModelReasoningEffort',
@@ -290,6 +308,7 @@ export const TASK_MODEL_ROLE_DISPLAY_NAMES = {
   orchestration: 'orchestration',
   helper: 'helper',
   vision: 'vision',
+  audioVideo: 'audio and video',
   codeReview: 'code review',
   explore: 'explore',
   // `planning` remains the persisted/configuration key for the Advisor role.
@@ -309,6 +328,20 @@ export type UserTaskModelMapping = Record<
 
 export const TASK_MODEL_ROLES = Object.freeze(
   Object.keys(TASK_MODEL_ROLE_DESCRIPTORS) as TaskModelRole[],
+);
+
+type SandboxTaskModelRole = {
+  [Role in TaskModelRole]: (typeof TASK_MODEL_ROLE_DESCRIPTORS)[Role]['includeInSandbox'] extends true
+    ? Role
+    : never;
+}[TaskModelRole];
+
+/** Roles whose model and reasoning configuration is delivered to task workers. */
+export const SANDBOX_TASK_MODEL_ROLES = Object.freeze(
+  TASK_MODEL_ROLES.filter(
+    (role): role is SandboxTaskModelRole =>
+      TASK_MODEL_ROLE_DESCRIPTORS[role].includeInSandbox,
+  ),
 );
 
 /**
@@ -739,7 +772,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5-1': 'vercel/anthropic/claude-fable-5.1',
       'claude-fable-5': 'vercel/anthropic/claude-fable-5',
-      'claude-haiku-4-5': 'vercel/anthropic/claude-haiku-4.5',
+      'claude-haiku-5-5': 'vercel/anthropic/claude-haiku-5.5',
       'claude-opus-5-5': 'vercel/anthropic/claude-opus-5.5',
       'claude-sonnet-5-5': 'vercel/anthropic/claude-sonnet-5.5',
       'gpt-6-astra': 'vercel/openai/gpt-6-astra',
@@ -782,7 +815,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5-1': 'requesty/claude-fable-5.1',
       'claude-fable-5': 'requesty/claude-fable-5',
-      'claude-haiku-4-5': 'requesty/claude-haiku-4-5',
+      'claude-haiku-5-5': 'requesty/anthropic/claude-haiku-5-5',
       'claude-opus-5-5': 'requesty/anthropic/claude-opus-5-5',
       'claude-sonnet-5-5': 'requesty/anthropic/claude-sonnet-5-5',
       'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
@@ -907,6 +940,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-luna': 'azure/gpt-5.6-luna',
       'gpt-6-luna': 'azure/gpt-6-luna',
       'claude-opus-5-5': 'azure/claude-opus-5-5',
+      'claude-haiku-5-5': 'azure/claude-haiku-5-5',
       'claude-sonnet-5-5': 'azure/claude-sonnet-5-5',
     }),
     recommendedPresets: buildDefaultAndRecommendedModelPresets({
@@ -948,6 +982,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-luna': 'azure-cognitive-services/gpt-5.6-luna',
       'gpt-6-luna': 'azure-cognitive-services/gpt-6-luna',
       'claude-opus-5-5': 'azure-cognitive-services/claude-opus-5-5',
+      'claude-haiku-5-5': 'azure-cognitive-services/claude-haiku-5-5',
       'claude-sonnet-5-5': 'azure-cognitive-services/claude-sonnet-5-5',
     }),
     recommendedPresets: buildDefaultAndRecommendedModelPresets({
@@ -970,14 +1005,14 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5-1': 'anthropic/claude-fable-5-1',
       'claude-fable-5': 'anthropic/claude-fable-5',
-      'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
+      'claude-haiku-5-5': 'anthropic/claude-haiku-5-5',
       'claude-opus-5-5': 'anthropic/claude-opus-5-5',
       'claude-sonnet-5-5': 'anthropic/claude-sonnet-5-5',
     }),
     recommendedRoleModels: {
-      helper: 'anthropic/claude-haiku-4-5',
+      helper: 'anthropic/claude-haiku-5-5',
       codeReview: 'anthropic/claude-sonnet-5-5',
-      explore: 'anthropic/claude-haiku-4-5',
+      explore: 'anthropic/claude-haiku-5-5',
       planning: 'anthropic/claude-opus-5-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -1050,7 +1085,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5-1': 'opencode/claude-fable-5-1',
       'claude-fable-5': 'opencode/claude-fable-5',
-      'claude-haiku-4-5': 'opencode/claude-haiku-4-5',
+      'claude-haiku-5-5': 'opencode/claude-haiku-5-5',
       'claude-opus-5-5': 'opencode/claude-opus-5-5',
       'claude-sonnet-5-5': 'opencode/claude-sonnet-5-5',
       'gpt-6-astra': 'opencode/gpt-6-astra',
@@ -1095,6 +1130,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // Go serves a broader catalog; only models in Roomote's central curated
     // recommendation list are suggested here.
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-haiku-5-5': 'opencode-go/claude-haiku-5-5',
       'deepseek-v4-1-flash': 'opencode-go/deepseek-v4.1-flash',
       'deepseek-v4-pro-0813': 'opencode-go/deepseek-v4-pro',
       'glm-5-3-flash': 'opencode-go/glm-5.3-flash',
@@ -1146,7 +1182,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5-1': 'bedrock-mantle/anthropic.claude-fable-5-1',
       'claude-fable-5': 'bedrock-mantle/anthropic.claude-fable-5',
-      'claude-haiku-4-5': 'bedrock-mantle/anthropic.claude-haiku-4-5',
+      'claude-haiku-5-5': 'bedrock-mantle/anthropic.claude-haiku-5-5',
       'claude-opus-5-5': 'bedrock-mantle/anthropic.claude-opus-5-5',
       'claude-sonnet-5-5': 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       'gpt-5-6-sol': 'bedrock-mantle/openai.gpt-5.6-sol',
@@ -1161,9 +1197,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       recommendedCodingModelId:
         'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
       recommendedRoleModels: {
-        helper: 'bedrock-mantle/anthropic.claude-haiku-4-5',
+        helper: 'bedrock-mantle/anthropic.claude-haiku-5-5',
         codeReview: 'bedrock-mantle/global.anthropic.claude-sonnet-5-5',
-        explore: 'bedrock-mantle/anthropic.claude-haiku-4-5',
+        explore: 'bedrock-mantle/anthropic.claude-haiku-5-5',
         planning: 'bedrock-mantle/anthropic.claude-opus-5-5',
       },
       recommendedRoleReasoningEfforts: { codeReview: 'medium' },

@@ -88,6 +88,33 @@ describe('buildOpenCodeModelReasoningOptions', () => {
     });
   });
 
+  it.each(['low', 'medium', 'high', 'xhigh', 'max'] as const)(
+    'uses adaptive thinking for Haiku 5.5 with %s effort',
+    (effort) => {
+      for (const modelId of [
+        'anthropic/claude-haiku-5-5',
+        'bedrock-mantle/anthropic.claude-haiku-5-5',
+      ]) {
+        expect(buildOpenCodeModelReasoningOptions(modelId, effort)).toEqual({
+          thinking: { type: 'adaptive', display: 'summarized' },
+          effort,
+        });
+      }
+      expect(
+        buildOpenCodeModelReasoningOptions(
+          'amazon-bedrock/global.anthropic.claude-haiku-5-5',
+          effort,
+        ),
+      ).toEqual({
+        reasoningConfig: {
+          type: 'adaptive',
+          display: 'summarized',
+          maxReasoningEffort: effort,
+        },
+      });
+    },
+  );
+
   it('clamps xhigh to high for the Anthropic 4.6 family', () => {
     expect(
       buildOpenCodeModelReasoningOptions('anthropic/claude-opus-4-6', 'xhigh'),

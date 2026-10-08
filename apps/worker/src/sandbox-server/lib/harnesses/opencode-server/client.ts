@@ -4,6 +4,7 @@ import type {
   OpenCodeGlobalEvent,
   OpenCodePromptPart,
   OpenCodePromptRequest,
+  OpenCodeProviderRegistry,
   OpenCodeQuestionRequest,
   OpenCodeSession,
   OpenCodeSessionMessage,
@@ -254,6 +255,26 @@ export class OpenCodeServerClient {
       signal: options?.signal,
       timeoutMs: this.sessionCreateTimeoutMs,
       label: 'createSession',
+    });
+  }
+
+  async session(options: {
+    sessionId: string;
+    signal?: AbortSignal;
+  }): Promise<OpenCodeSession> {
+    return await this.request(
+      `/session/${encodeURIComponent(options.sessionId)}`,
+      {
+        signal: options.signal,
+        label: 'session',
+      },
+    );
+  }
+
+  async providers(signal?: AbortSignal): Promise<OpenCodeProviderRegistry> {
+    return await this.request('/provider', {
+      signal,
+      label: 'providers',
     });
   }
 

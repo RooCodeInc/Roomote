@@ -85,6 +85,16 @@ that model in charge and has the configured vision model (or, failing that,
 the helper or coding model) describe the image on request, the same way a
 coding task delegates visual inspection to a hidden subagent.
 
+Audio transcription and video descriptions can use the separate **Audio and
+video model** control in **Settings > Models**. It defaults to **Same as coding
+model**. The selected or inherited audio and video model is authoritative for
+both inputs. Fast sessions receive the files directly when their session model
+is that model; otherwise, the audio and video model processes them separately.
+
+Automatic audio transcription for Slack, Discord, Telegram, and Microsoft Teams
+uses the deployment audio and video model. A per-task Audio and video override
+does not change which model transcribes those incoming chat attachments.
+
 That means you can ask things like:
 
 - "Compare this export to the expected format and tell me what is broken."

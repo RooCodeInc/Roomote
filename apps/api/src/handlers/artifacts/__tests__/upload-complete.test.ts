@@ -56,10 +56,10 @@ describe('markArtifactUploadComplete', () => {
       version: 1,
       uploaded: false,
     });
-    mocks.notifyParent.mockResolvedValue('delivered');
+    mocks.notifyParent.mockResolvedValue('queued');
   });
 
-  it('notifies the Fast parent immediately after upload publication', async () => {
+  it('durably admits the Fast parent notification as part of upload publication', async () => {
     const response = await markArtifactUploadComplete(context());
 
     expect(response.status).toBe(200);
@@ -75,19 +75,32 @@ describe('markArtifactUploadComplete', () => {
 
   it('replays publication through the idempotent notifier', async () => {
     mocks.notifyParent
-      .mockResolvedValueOnce('delivered')
-      .mockResolvedValueOnce('already_delivered');
+      .mockResolvedValueOnce('queued')
+      .mockResolvedValueOnce('queued');
 
     expect((await markArtifactUploadComplete(context())).status).toBe(200);
     expect((await markArtifactUploadComplete(context())).status).toBe(200);
     expect(mocks.notifyParent).toHaveBeenCalledTimes(2);
   });
 
-  it('returns a retryable failure when parent notification fails', async () => {
-    mocks.notifyParent.mockResolvedValueOnce('failed');
+  it('acknowledges publication separately from queued parent delivery', async () => {
+    mocks.notifyParent.mockResolvedValueOnce('queued');
 
     const response = await markArtifactUploadComplete(context());
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      uploaded: true,
+      notification: 'queued',
+    });
+  });
+  it('keeps publication successful while a legacy handler owns notification delivery', async () => {
+    mocks.notifyParent.mockResolvedValueOnce('in_progress');
+    const response = await markArtifactUploadComplete(context());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      uploaded: true,
+      notification: 'in_progress',
+    });
   });
 });

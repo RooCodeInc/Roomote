@@ -1,4 +1,10 @@
-import { NO_REPOSITORIES, RunStatus, TaskPayloadKind } from '@roomote/types';
+import {
+  NO_REPOSITORIES,
+  RunStatus,
+  TaskPayloadKind,
+  TASK_MODEL_ROLES,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+} from '@roomote/types';
 import type { TaskRun } from '@roomote/db/server';
 
 const {
@@ -1413,6 +1419,30 @@ describe('redactControlPlaneEnvVars', () => {
 });
 
 describe('fetchResolvedRuntimeEnvVars', () => {
+  it('replaces stale canonical and legacy sandbox role values only from the resolved env', async () => {
+    const stale: Record<string, string> = {};
+    const resolved: Record<string, string> = {};
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      if (!descriptor.includeInSandbox) continue;
+      for (const key of [descriptor.modelEnvVar, descriptor.reasoningEnvVar]) {
+        stale[key] = 'stale';
+        stale[key.replace(/^R_/, 'ROOMOTE_')] = 'stale';
+      }
+      resolved[descriptor.modelEnvVar] = `openai/${role}`;
+      resolved[descriptor.reasoningEnvVar] = 'high';
+    }
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce(resolved);
+    const env = await fetchResolvedRuntimeEnvVars(stale);
+    for (const [key, value] of Object.entries(resolved)) {
+      expect(env[key]).toBe(value);
+      expect(env[key.replace(/^R_/, 'ROOMOTE_')]).toBe(value);
+    }
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    const empty = await fetchResolvedRuntimeEnvVars(stale);
+    for (const key of Object.keys(stale)) expect(empty).not.toHaveProperty(key);
+    expect(env).not.toHaveProperty('ROOMOTE_ORCHESTRATION_MODEL');
+  });
   it('withholds the sandbox OpenRouter key from ordinary tasks', async () => {
     mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
 
@@ -1443,7 +1473,9 @@ describe('fetchResolvedRuntimeEnvVars', () => {
   it('mirrors resolved model env to legacy ROOMOTE_* aliases for pre-rename snapshot workers', async () => {
     mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
+      R_AUDIO_VIDEO_MODEL: 'google/gemini-audio-video',
       R_MODEL_REASONING_EFFORT: 'high',
+      R_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'medium',
       R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
       ANTHROPIC_API_KEY: 'sk-ant',
     });
@@ -1455,8 +1487,12 @@ describe('fetchResolvedRuntimeEnvVars', () => {
     expect(envVars).toMatchObject({
       R_MODEL: 'anthropic/claude-test',
       ROOMOTE_MODEL: 'anthropic/claude-test',
+      R_AUDIO_VIDEO_MODEL: 'google/gemini-audio-video',
+      ROOMOTE_AUDIO_VIDEO_MODEL: 'google/gemini-audio-video',
       R_MODEL_REASONING_EFFORT: 'high',
       ROOMOTE_MODEL_REASONING_EFFORT: 'high',
+      R_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'medium',
+      ROOMOTE_AUDIO_VIDEO_MODEL_REASONING_EFFORT: 'medium',
       R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
       ROOMOTE_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
       MY_APP_CONFIG: 'value',

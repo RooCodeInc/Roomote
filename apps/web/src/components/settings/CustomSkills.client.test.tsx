@@ -6,7 +6,13 @@ import type {
   SVGProps,
   TextareaHTMLAttributes,
 } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 type InstalledSkill = {
@@ -40,6 +46,8 @@ const {
   buildManualSkillId: (skillName: string, variant = '1234567890ab') =>
     `manual@${skillName}#${variant}`,
   state: {
+    listError: false,
+    listGate: null as Promise<void> | null,
     listData: {
       organizationName: 'Test Org',
       environments: [
@@ -222,7 +230,12 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['customSkills', 'list'],
         queryOptions: () => ({
           queryKey: ['customSkills', 'list'],
-          queryFn: async () => state.listData,
+          queryFn: async () => {
+            if (state.listError)
+              throw new Error('Environment skill query failed');
+            await state.listGate;
+            return state.listData;
+          },
         }),
       },
       search: {
@@ -351,7 +364,7 @@ function renderCustomSkills({
     },
   });
 
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <CustomSkills
         filter={filter}
@@ -360,10 +373,13 @@ function renderCustomSkills({
       />
     </QueryClientProvider>,
   );
+  return { ...rendered, queryClient };
 }
 
 describe('CustomSkills settings', () => {
   beforeEach(() => {
+    state.listError = false;
+    state.listGate = null;
     vi.useRealTimers();
     setAvailabilityMock.mockClear();
     saveManualMock.mockClear();
@@ -419,6 +435,82 @@ describe('CustomSkills settings', () => {
         },
       ],
     };
+  });
+
+  it('recovers environment skills using Retry after a failed initial query', async () => {
+    state.listError = true;
+    renderCustomSkills();
+    const retry = await screen.findByRole('button', {
+      name: 'Retry environment-specific skills',
+    });
+    state.listError = false;
+    let release!: () => void;
+    state.listGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fireEvent.click(retry);
+    expect(retry).toBeDisabled();
+    expect(retry).toHaveAttribute('aria-busy', 'true');
+    await waitFor(() => expect(retry).toBeDisabled());
+    expect(
+      screen.getByRole('button', { name: 'Retry environment-specific skills' }),
+    ).toBe(retry);
+    await act(async () => release());
+    expect(await screen.findByText('Only in Alpha')).toBeVisible();
+    expect(
+      screen.queryByRole('button', {
+        name: 'Retry environment-specific skills',
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('retains cached environment rows and an unsaved editor through background failure and recovery', async () => {
+    state.listData.installed = [
+      {
+        kind: 'manual',
+        source: 'manual',
+        name: 'my-manual-skill',
+        skillId: 'manual@my-manual-skill#1234567890ab',
+        isAllSelection: false,
+        installsLabel: null,
+        url: null,
+        description: 'Manual skill',
+        content: '# Original content',
+        environments: [{ id: 'env-1', name: 'Alpha' }],
+      },
+    ];
+    const { queryClient } = renderCustomSkills();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit my-manual-skill' }),
+    );
+    fireEvent.change(screen.getByLabelText('Manual skill description'), {
+      target: { value: 'Unsaved environment draft' },
+    });
+    state.listError = true;
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['customSkills', 'list'],
+      });
+    });
+    await screen.findByText('Could not refresh environment-specific skills.');
+    expect(screen.getByLabelText('Manual skill description')).toHaveValue(
+      'Unsaved environment draft',
+    );
+    expect(screen.getByText('Only in Alpha')).toBeVisible();
+    state.listError = false;
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry environment-specific skills' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', {
+          name: 'Retry environment-specific skills',
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText('Manual skill description')).toHaveValue(
+      'Unsaved environment draft',
+    );
   });
 
   afterEach(() => {

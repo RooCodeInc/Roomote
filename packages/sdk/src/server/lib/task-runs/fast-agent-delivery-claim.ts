@@ -5,16 +5,22 @@ import { type SQL, sql, taskRuns } from '@roomote/db/server';
  * delivery's claim can be stolen by a retry instead of stranding the event. */
 const DELIVERY_LEASE_MS = 15 * 60 * 1000;
 
+export function getDeliveryClaimExpiry(marker: unknown): Date | null {
+  if (typeof marker !== 'string' || !/^delivering:\d+$/.test(marker))
+    return null;
+  // The SQL claim predicate uses a strict less-than comparison.
+  const expiry = new Date(
+    Number(marker.slice('delivering:'.length)) + DELIVERY_LEASE_MS + 1,
+  );
+  return Number.isFinite(expiry.getTime()) ? expiry : null;
+}
+
 export function buildDeliveryClaimMarker(): string {
   return `delivering:${Date.now()}`;
 }
 
 export function buildFastAgentDeliveringMarker(): string {
   return buildDeliveryClaimMarker();
-}
-
-export function isFastAgentDeliveringMarker(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith('delivering:');
 }
 
 /**

@@ -116,6 +116,51 @@ unsupported, or oversized artifacts should be opened through their artifact link
 or downloaded instead. Roomote checks access to the owning task or Session before
 reading content.
 
+### Read task files and command receipts
+
+Public `manage_tasks` supports these reads for a task you can access, including
+finished tasks. Pass the task ID rather than the parent session ID:
+
+```json
+{"action":"list_artifacts","taskId":"abc123def4567"}
+```
+
+This returns `artifacts` with IDs, task/run IDs, paths, versions, types, sizes and
+creation times. It lists the latest successfully uploaded version of each path.
+Add `artifactType` (`general`, `plan`, or `visual-proof`) to filter the list.
+Files left in a sandbox but never uploaded are not included.
+
+```json
+{"action":"get_artifact_download_url","taskId":"abc123def4567","path":"tmp/screenshot.png"}
+```
+
+The response includes artifact metadata, `url`, `authentication: "bearer"` and
+`expiresAt: null`. Omit `version` for the latest uploaded version, or pass an exact
+version. Fetch the URL with `Authorization: Bearer` using the same credential as
+your public MCP connection. The URL alone grants no access: Roomote rechecks task
+visibility and privacy on every download. Private tasks remain owner-only, and
+downloads are not cached. The URL has no separate signed-link expiry, but the
+credential must still be valid. A client opening links without authorization
+headers cannot download these files.
+
+```json
+{"action":"get_command_receipts","taskId":"abc123def4567","limit":50}
+```
+
+This returns `receipts` oldest first, with message/run/tool-call identifiers,
+session/turn identifiers where recorded, timestamps, `command`, nullable
+`exitCode`, `status` and `output`. Use the returned `nextCursor` with the same
+task ID to read the next page. `limit` defaults to 50 and accepts 1–100.
+Output retains up to 20,000 characters of source text, plus a truncation marker
+when needed. `outputTruncation` is `null` for untruncated output, or gives
+`originalChars`, `keptChars` and `strategy: "head_tail"`.
+
+These are stored shell-tool results, not a complete operating-system command
+audit. Commands run inside scripts or background processes are not separate
+receipts; a missing exit code stays `null`. A command interrupted before a result
+was recorded may have no receipt. Compute logs remain available separately with
+`get_compute_logs` and are not a command history.
+
 ## Things to try
 
 - “Push what I’m working on to a remote branch, then start a Roomote task from

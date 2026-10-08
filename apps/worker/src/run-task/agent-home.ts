@@ -64,6 +64,7 @@ import {
   parseTaskModelContextWindows,
   parseTaskModelCosts,
   TASK_MODEL_ROLE_DESCRIPTORS,
+  SANDBOX_TASK_MODEL_ROLES,
   TASK_MODEL_ROLES,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
@@ -670,6 +671,7 @@ interface GenerateOpenCodeConfigResult {
   configContent: string;
   openCodeConfigDir: string;
   model?: string;
+  modelOverrideApplied: boolean;
 }
 
 export interface OpenCodeRemoteMcpServerConfig {
@@ -1487,77 +1489,44 @@ function resolveModelBackedOpenCodeConfig(
     return null;
   }
 
-  const rawSmallModel = runtimeEnv.R_SMALL_MODEL?.trim()
-    ? applyImplicitLiteLlmModelPrefix(
-        runtimeEnv.R_SMALL_MODEL.trim(),
-        isLiteLlmConfigured,
-      )
-    : undefined;
-  const rawVisionModel = runtimeEnv.R_VISION_MODEL?.trim()
-    ? applyImplicitLiteLlmModelPrefix(
-        runtimeEnv.R_VISION_MODEL.trim(),
-        isLiteLlmConfigured,
-      )
-    : undefined;
-  const rawCodeReviewModel = runtimeEnv.R_CODE_REVIEW_MODEL?.trim()
-    ? applyImplicitLiteLlmModelPrefix(
-        runtimeEnv.R_CODE_REVIEW_MODEL.trim(),
-        isLiteLlmConfigured,
-      )
-    : undefined;
-  const rawExploreModel = runtimeEnv.R_EXPLORE_MODEL?.trim()
-    ? applyImplicitLiteLlmModelPrefix(
-        runtimeEnv.R_EXPLORE_MODEL.trim(),
-        isLiteLlmConfigured,
-      )
-    : undefined;
-  const rawPlanningModel = runtimeEnv.R_PLANNING_MODEL?.trim()
-    ? applyImplicitLiteLlmModelPrefix(
-        runtimeEnv.R_PLANNING_MODEL.trim(),
-        isLiteLlmConfigured,
-      )
-    : undefined;
-  const modelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.R_MODEL_REASONING_EFFORT?.trim(),
-  );
-  const smallModelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.R_SMALL_MODEL_REASONING_EFFORT?.trim(),
-  );
-  const visionModelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.R_VISION_MODEL_REASONING_EFFORT?.trim(),
-  );
-  const codeReviewModelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT?.trim(),
-  );
-  const exploreModelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT?.trim(),
-  );
-  const planningModelReasoningEffort = normalizeOptionalReasoningEffort(
-    runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT?.trim(),
-  );
+  const roleConfig = Object.fromEntries(
+    SANDBOX_TASK_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      const configuredModel = runtimeEnv[descriptor.modelEnvVar]?.trim();
+      const model = configuredModel
+        ? applyImplicitLiteLlmModelPrefix(configuredModel, isLiteLlmConfigured)
+        : undefined;
+      if (model) {
+        validateRoomoteModelEnv(descriptor.modelEnvVar, model);
+      }
+      return [
+        role,
+        {
+          model,
+          reasoningEffort: normalizeOptionalReasoningEffort(
+            runtimeEnv[descriptor.reasoningEnvVar]?.trim(),
+          ),
+        },
+      ];
+    }),
+  ) as Record<
+    (typeof SANDBOX_TASK_MODEL_ROLES)[number],
+    {
+      model: string | undefined;
+      reasoningEffort: ReasoningEffort | null;
+    }
+  >;
+  const {
+    coding: { reasoningEffort: modelReasoningEffort },
+    helper: { reasoningEffort: smallModelReasoningEffort },
+    vision: { reasoningEffort: visionModelReasoningEffort },
+    audioVideo: { reasoningEffort: audioVideoModelReasoningEffort },
+    codeReview: { reasoningEffort: codeReviewModelReasoningEffort },
+    explore: { reasoningEffort: exploreModelReasoningEffort },
+    planning: { reasoningEffort: planningModelReasoningEffort },
+  } = roleConfig;
   const chatGptFastMode =
     runtimeEnv[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1';
-  validateRoomoteModelEnv('R_MODEL', rawModel);
-
-  if (rawSmallModel) {
-    validateRoomoteModelEnv('R_SMALL_MODEL', rawSmallModel);
-  }
-
-  if (rawVisionModel) {
-    validateRoomoteModelEnv('R_VISION_MODEL', rawVisionModel);
-  }
-
-  if (rawCodeReviewModel) {
-    validateRoomoteModelEnv('R_CODE_REVIEW_MODEL', rawCodeReviewModel);
-  }
-
-  if (rawExploreModel) {
-    validateRoomoteModelEnv('R_EXPLORE_MODEL', rawExploreModel);
-  }
-
-  if (rawPlanningModel) {
-    validateRoomoteModelEnv('R_PLANNING_MODEL', rawPlanningModel);
-  }
 
   // OpenRouter variant models (`:nitro`, `:free`, ...) are rewritten to their
   // catalog base model for every role and mapped back to the variant through
@@ -1574,54 +1543,27 @@ function resolveModelBackedOpenCodeConfig(
         ),
       )
     : undefined;
-  const model = collectOpenRouterVariantModelAlias(
-    variantAliases,
-    toBedrockMantleRuntimeModelId(rawModel),
-  );
-  const smallModel = rawSmallModel
-    ? collectOpenRouterVariantModelAlias(
+  for (const role of SANDBOX_TASK_MODEL_ROLES) {
+    const config = roleConfig[role];
+    if (config.model) {
+      config.model = collectOpenRouterVariantModelAlias(
         variantAliases,
-        toBedrockMantleRuntimeModelId(rawSmallModel),
-      )
-    : undefined;
-  const visionModel = rawVisionModel
-    ? collectOpenRouterVariantModelAlias(
-        variantAliases,
-        toBedrockMantleRuntimeModelId(rawVisionModel),
-      )
-    : undefined;
-  const codeReviewModel = rawCodeReviewModel
-    ? collectOpenRouterVariantModelAlias(
-        variantAliases,
-        toBedrockMantleRuntimeModelId(rawCodeReviewModel),
-      )
-    : undefined;
-  const exploreModel = rawExploreModel
-    ? collectOpenRouterVariantModelAlias(
-        variantAliases,
-        toBedrockMantleRuntimeModelId(rawExploreModel),
-      )
-    : undefined;
-  const planningModel = rawPlanningModel
-    ? collectOpenRouterVariantModelAlias(
-        variantAliases,
-        toBedrockMantleRuntimeModelId(rawPlanningModel),
-      )
-    : undefined;
+        toBedrockMantleRuntimeModelId(config.model),
+      );
+    }
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    delete runtimeEnv[descriptor.modelEnvVar];
+    delete runtimeEnv[descriptor.reasoningEnvVar];
+  }
+  const model = roleConfig.coding.model!;
+  const smallModel = roleConfig.helper.model;
+  const visionModel = roleConfig.vision.model;
+  const audioVideoModel = roleConfig.audioVideo.model;
+  const codeReviewModel = roleConfig.codeReview.model;
+  const exploreModel = roleConfig.explore.model;
+  const planningModel = roleConfig.planning.model;
   const effectiveCodingModel = normalizedModelOverride ?? model;
 
-  delete runtimeEnv.R_MODEL;
-  delete runtimeEnv.R_SMALL_MODEL;
-  delete runtimeEnv.R_VISION_MODEL;
-  delete runtimeEnv.R_CODE_REVIEW_MODEL;
-  delete runtimeEnv.R_EXPLORE_MODEL;
-  delete runtimeEnv.R_PLANNING_MODEL;
-  delete runtimeEnv.R_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.R_SMALL_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.R_VISION_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT;
-  delete runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_MODEL_ENV_KEYS;
   delete runtimeEnv[CHATGPT_FAST_MODE_ENV_VAR_NAME];
 
@@ -1730,7 +1672,7 @@ function resolveModelBackedOpenCodeConfig(
   // Reasoning levels are configured per default-model role, so a level is only
   // applied when the model in play is the one the role was configured with.
   // Role precedence for a shared model: effective coding model first, then the
-  // persisted coding model, then a distinct helper model. The vision level is
+  // persisted coding model, then distinct helper/media models. The vision level is
   // scoped to the visual subagent via agent-level options above. A per-task
   // reasoning effort (stamped at launch for model overrides, or set
   // explicitly via the public API) wins over the role-configured levels.
@@ -1772,14 +1714,24 @@ function resolveModelBackedOpenCodeConfig(
     );
   }
 
+  if (
+    audioVideoModel &&
+    audioVideoModelReasoningEffort &&
+    audioVideoModel !== model &&
+    audioVideoModel !== effectiveCodingModel &&
+    audioVideoModel !== smallModel &&
+    audioVideoModel !== visionModel
+  ) {
+    providerReasoningConfig = mergeOpenCodeModelReasoningOptions(
+      providerReasoningConfig,
+      audioVideoModel,
+      audioVideoModelReasoningEffort,
+    );
+  }
+
   const configuredModelIds = [
     effectiveCodingModel,
-    model,
-    smallModel,
-    visionModel,
-    codeReviewModel,
-    exploreModel,
-    planningModel,
+    ...SANDBOX_TASK_MODEL_ROLES.map((role) => roleConfig[role].model),
   ];
   const openAiCompatibleModelIds = [
     ...configuredModelIds,
@@ -1817,6 +1769,7 @@ function resolveModelBackedOpenCodeConfig(
               visionModel ?? effectiveCodingModel,
               modelContextWindows,
               modelCosts,
+              { audioVideoModel },
             ),
             runtimeEnv,
             configuredModelIds,
@@ -2164,7 +2117,12 @@ export function generateOpenCodeConfig({
   return {
     configContent: `${JSON.stringify(config, null, 2)}\n`,
     openCodeConfigDir,
-    model: promptModel,
+    modelOverrideApplied: configuredModel !== undefined,
+    model:
+      promptModel ??
+      (typeof operatorConfig.model === 'string'
+        ? operatorConfig.model
+        : undefined),
   };
 }
 

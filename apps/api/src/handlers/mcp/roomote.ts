@@ -54,6 +54,7 @@ import { requireCommunicationLookupTaskRun } from './communication-lookup-run-co
 import type { McpAuth } from './middleware';
 import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
+import { resolveRoomoteMemberAuth } from './roomote-member-auth';
 import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
 import { registerRoomoteCustomSkillsTool } from './roomote-custom-skills-tool';
 import { registerRoomoteArtifactTool } from './roomote-artifacts-tool';
@@ -103,6 +104,10 @@ async function resolveRoomoteMcpAuth(
   authContext: Variables['authContext'],
   options: { allowLegacyAudience: boolean },
 ): Promise<McpAuthContext> {
+  if (!options.allowLegacyAudience) {
+    const member = resolveRoomoteMemberAuth(authContext);
+    return { userId: member.userId, tokenType: 'auth' };
+  }
   if (!authContext) {
     throw new McpProxyError(
       401,

@@ -30,6 +30,27 @@ function createEmitter() {
 }
 
 describe('OpenCodeRuntimeEventEmitter', () => {
+  it('sanitizes live and persisted tool diagnostics', () => {
+    const { emitter, runtimeOutput, runtimePersistedEnvelope } =
+      createEmitter();
+    const sentinel = 'synthetic diagnostic value';
+    const options = {
+      sessionId: 'session-1',
+      toolCallId: 'call-1',
+      status: 'completed',
+      output: JSON.stringify({ env: { CUSTOM_SETTING: sentinel }, pid: 123 }),
+      payload: { headers: { authorization: sentinel } },
+    };
+    emitter.toolUpdate({ ...options, toolName: 'bash' });
+    emitter.toolResult(options);
+    expect(JSON.stringify(runtimeOutput.mock.calls).includes(sentinel)).toBe(
+      false,
+    );
+    expect(
+      JSON.stringify(runtimePersistedEnvelope.mock.calls).includes(sentinel),
+    ).toBe(false);
+    expect(JSON.stringify(runtimeOutput.mock.calls).includes('123')).toBe(true);
+  });
   it('keeps live assistant thought chunks visible in the transcript', () => {
     const { emitter, runtimeOutput } = createEmitter();
 

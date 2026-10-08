@@ -361,6 +361,7 @@ services:
     environment:
       <<: *roomote-shared-env
       PORT: 3002
+      R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS: ${R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS:-}
       DOCKER_HOST: tcp://docker-proxy:2375
       DOCKER_WORKER_RELEASE_PATH: /roomote/releases/worker-current.tar.gz
     healthcheck:
