@@ -6,7 +6,7 @@
   "dependencies": {
     "dompurify": "3.4.13",
     "jsdom": "26.1.0",
-    "snowflake-sdk": "2.4.3",
+    "snowflake-sdk": "3.3.0",
     "zod": "3.25.76"
   },
   "pnpm": {

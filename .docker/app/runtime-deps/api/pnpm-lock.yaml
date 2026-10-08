@@ -20,8 +20,8 @@ importers:
         specifier: 26.1.0
         version: 26.1.0
       snowflake-sdk:
-        specifier: 2.4.3
-        version: 2.4.3(asn1.js@5.4.1)
+        specifier: 3.3.0
+        version: 3.3.0(asn1.js@5.4.1)
       zod:
         specifier: 3.25.76
         version: 3.25.76
@@ -774,9 +774,9 @@ packages:
   simple-lru-cache@0.0.2:
     resolution: {integrity: sha512-uEv/AFO0ADI7d99OHDmh1QfYzQk/izT1vCmu/riQfh7qjBVUUgRT87E5s5h7CxWCA/+YoZerykpEthzVrW3LIw==}
 
-  snowflake-sdk@2.4.3:
-    resolution: {integrity: sha512-R9f4CL34RcgAL/8o1iOfbfUk1Dc58eHTKFt9IqVUqnnBdiyu583m81nh7c4tTiB3/TeJGIi1BTRJONV+K5tfxQ==}
-    engines: {node: '>=18'}
+  snowflake-sdk@3.3.0:
+    resolution: {integrity: sha512-WJV5BZpYzNuReafTJuHLO5sjYFnrRvqB1T1/xW64UpRDo0GAgLbfKIVZP+S5iBQ0ick8nY9Cqbka2uowQC+JMA==}
+    engines: {node: '>=20'}
     peerDependencies:
       asn1.js: ^5.4.1
 
@@ -1860,7 +1860,7 @@ snapshots:
 
   simple-lru-cache@0.0.2: {}
 
-  snowflake-sdk@2.4.3(asn1.js@5.4.1):
+  snowflake-sdk@3.3.0(asn1.js@5.4.1):
     dependencies:
       '@aws-crypto/sha256-js': 5.2.0
       '@aws-sdk/client-s3': 3.1051.0
