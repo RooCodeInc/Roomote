@@ -17,8 +17,8 @@ import {
 } from './fast-agent-model-authorization';
 
 /**
- * A named or capability request needs this decision-model confidence even
- * when the agent supplies a hint. Eligibility is checked separately.
+ * A named model needs this decision-model confidence. A capability request
+ * resolves identity through its eligible agent hint, as before.
  */
 const REQUESTED_MODEL_MIN_CONFIDENCE = 0.6;
 /**
@@ -281,9 +281,7 @@ function selectRequestedModel(params: {
   }
   // A hint can resolve a genuine capability request, never manufacture consent
   // from an uncertain named-model/no-request answer.
-  return params.capabilityAuthorized &&
-    answer.choice === CAPABILITY_REQUEST &&
-    answer.confidence >= REQUESTED_MODEL_MIN_CONFIDENCE
+  return params.capabilityAuthorized && answer.choice === CAPABILITY_REQUEST
     ? requestableModels.find((model) => model.id === params.claimedModel)
     : undefined;
 }

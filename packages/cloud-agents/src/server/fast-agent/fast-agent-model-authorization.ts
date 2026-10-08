@@ -323,7 +323,7 @@ export function compileModelAuthorization(input: {
         evidence.length = 0;
         evidence.push({ kind: 'directive', text: clause, modelIds: ids });
         changed = true;
-      } else if (capabilityRequest.test(clause)) {
+      } else if (directive.test(clause) && capabilityRequest.test(clause)) {
         candidateIds = [];
         capability = true;
         forceDefault = false;

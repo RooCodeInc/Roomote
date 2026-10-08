@@ -733,4 +733,16 @@ describe('resolveFastAgentLaunchModel', () => {
       }),
     ).resolves.toMatchObject({ model: gpt.id, source: 'user_request' });
   });
+  it('does not apply named-model confidence to a genuine hinted capability request', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.87 },
+      requestedModel: choice('capability_request', 0.26),
+    });
+    await expect(
+      resolve({
+        claimedModel: opus.id,
+        userMessages: ['Use a faster model for this work.'],
+      }),
+    ).resolves.toMatchObject({ model: opus.id, source: 'user_request' });
+  });
 });
