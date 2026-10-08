@@ -68,3 +68,43 @@ test('successful deploys record the installed release after readiness', () => {
     );
   }
 });
+
+test('the app entrypoint re-execs under an init when it runs as PID 1', (t) => {
+  const entrypoint = resolve(
+    import.meta.dirname,
+    '..',
+    '..',
+    '.docker',
+    'app',
+    'entrypoint.sh',
+  );
+  const probe = spawnSync(
+    'unshare',
+    ['--user', '--map-root-user', '--pid', '--fork', 'true'],
+    { encoding: 'utf8' },
+  );
+  if (probe.error || probe.status !== 0) {
+    t.skip('unprivileged PID namespaces are unavailable here');
+    return;
+  }
+
+  const fakeInit = resolve(import.meta.dirname, 'fake-init.sh');
+  const asPid1 = spawnSync(
+    'unshare',
+    ['--user', '--map-root-user', '--pid', '--fork', 'sh', entrypoint, 'api'],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, ROOMOTE_INIT_BIN: fakeInit },
+    },
+  );
+  assert.equal(asPid1.status, 0, asPid1.stderr);
+  assert.equal(asPid1.stdout.trim(), `init: -- ${entrypoint} api`);
+
+  // Not PID 1 (already under an init): no re-exec, so the fake init is
+  // never reached and the script proceeds to its own dispatch.
+  const notPid1 = spawnSync('sh', [entrypoint, 'no-such-service'], {
+    encoding: 'utf8',
+    env: { ...process.env, ROOMOTE_INIT_BIN: fakeInit },
+  });
+  assert.doesNotMatch(notPid1.stdout, /^init:/);
+});

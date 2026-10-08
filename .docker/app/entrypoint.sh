@@ -5,6 +5,18 @@
 #   docker run ghcr.io/roocodeinc/roomote-app:<version> api
 set -eu
 
+# Run under an init that reaps orphans. The image ENTRYPOINT already wraps
+# this script in tini, but a platform start command (Railway's, for one)
+# replaces the ENTRYPOINT outright, leaving this script and then the Node
+# process it execs as PID 1. Node only reaps children it spawned itself, so
+# processes orphaned by its children (git under the OpenCode servers, for
+# one) stay zombies until the container hits its process limit and every
+# fork fails with EAGAIN.
+roomote_init="${ROOMOTE_INIT_BIN:-/usr/bin/tini}"
+if [ "$$" = 1 ] && [ -x "$roomote_init" ]; then
+  exec "$roomote_init" -- "$0" "$@"
+fi
+
 service="${1:-}"
 if [ "$#" -gt 0 ]; then
   shift
