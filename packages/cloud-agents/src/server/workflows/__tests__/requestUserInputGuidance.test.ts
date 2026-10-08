@@ -244,7 +244,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/123) or mention @',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> [View the session](https://example.com/task/123) or mention @',
     );
     expect(harnessInstructions).toContain(
       'for follow-up asks.` at the top of the PR body file before creating or refreshing the pull request',
@@ -253,13 +253,13 @@ describe('request_user_input guidance in workflow prompts', () => {
       'This is the initial attribution, not an exact-output requirement: the source-control tool owns the final canonical attribution and follow-up URL.',
     );
     expect(harnessInstructions).toContain(
-      'It uses a verified visible parent Session URL for delegated tasks, otherwise the task URL, and preserves the original opener identity on GitHub updates when `prAttribution` is omitted.',
+      'It resolves the persisted originating session for delegated, direct, and automation work, and preserves the original opener identity on GitHub updates when `prAttribution` is omitted.',
     );
     expect(harnessInstructions).toContain(
       '`prAttribution` selects an eligible credited person, not a URL override.',
     );
     expect(harnessInstructions).toContain(
-      'Do not retry or edit the PR to force the initial task URL when the tool returns a canonical Session URL.',
+      'Do not retry or edit the PR to override the canonical session URL returned by the tool.',
     );
     expect(harnessInstructions).toContain(
       'must use the conflict resolver label `custom:conflict-label` instead of assuming a hardcoded default',
@@ -534,7 +534,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/123) or mention @',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> [View the session](https://example.com/task/123) or mention @',
     );
     expect(harnessInstructions).toContain(
       'for follow-up asks.` at the top of the PR body file before creating or refreshing the pull request',
@@ -554,7 +554,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/123) or mention @',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> [View the session](https://example.com/task/123) or mention @',
     );
     expect(harnessInstructions).toContain(
       'for follow-up asks.` at the top of the PR body file before creating or refreshing the pull request',

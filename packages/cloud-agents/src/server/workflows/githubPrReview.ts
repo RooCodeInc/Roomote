@@ -65,7 +65,7 @@ function buildGitLabMergeRequestReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       review_scope:
         'Review only the GitLab merge request changes. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the diff with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -141,7 +141,7 @@ function buildGiteaPullRequestReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       review_scope:
         'Review only the Gitea pull request changes. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the diff with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -217,7 +217,7 @@ function buildBitbucketPullRequestReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       review_scope:
         'Review only the Bitbucket pull request changes. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the diff with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -293,7 +293,7 @@ function buildAdoPullRequestReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       review_scope:
         'Review only the Azure DevOps pull request changes. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the diff with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -519,7 +519,7 @@ export async function githubPrReview({
       comment_header_starting: '',
       comment_header_completed: '',
       task_link_follow: followLink,
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       linked_implementation_task_handoff_enabled: relayReviewResultsToTask,
       linked_implementation_task_id: linkedTaskId,
       pull_request_details: getPrDetails({ fullName, pr }),

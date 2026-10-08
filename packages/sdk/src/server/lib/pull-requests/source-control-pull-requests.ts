@@ -2,6 +2,7 @@ import { createGitHubToken } from '@roomote/auth';
 import {
   DEFAULT_ROOMOTE_COMMIT_AUTHOR,
   getPrBodyAttributionLine,
+  getTaskSessionUrl,
   type ResolvedTaskCommitAuthor,
   resolveLaunchTaskCommitAuthor,
   resolveRunCommitAuthor,
@@ -15,7 +16,6 @@ import {
   db,
   eq,
   getDeploymentGitHubRoomoteMentionEnabled,
-  getSessionForTask,
   getTaskHumanOwnerUserIds,
   isNotNull,
   resolveTelegramRuntimeCredentials,
@@ -419,9 +419,14 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const canonicalAttribution = displayName
     ? { ...bodyAttribution, displayName }
     : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
-  const taskUrl =
-    (await buildPrAttributionFastSessionUrl(taskRun)) ??
-    buildPrAttributionTaskUrl(taskRun);
+  const taskUrl = await getTaskSessionUrl({
+    taskId: taskRun.taskId,
+    fastConversationId:
+      typeof payloadRecord.fastAgentSessionId === 'string'
+        ? payloadRecord.fastAgentSessionId
+        : undefined,
+    utm: { source: 'github-comment', campaign: taskRun.payloadKind },
+  });
   const attributionLine = getPrBodyAttributionLine({
     attribution: canonicalAttribution,
     taskUrl,
@@ -830,39 +835,6 @@ async function createOrUpdateGitHubPullRequest({
     draft: Boolean(pullRequest.draft),
     warnings: [],
   };
-}
-
-function buildPrAttributionTaskUrl(taskRun: TaskRun): string {
-  const url = new URL(`/task/${taskRun.taskId}`, Env.R_APP_URL);
-  url.searchParams.set('utm_source', 'github-comment');
-  url.searchParams.set('utm_medium', 'link');
-  url.searchParams.set('utm_campaign', taskRun.payloadKind);
-  return url.toString();
-}
-
-async function buildPrAttributionFastSessionUrl(
-  taskRun: TaskRun,
-): Promise<string | undefined> {
-  const fastAgentSessionId = getPayloadRecord(
-    taskRun.payload,
-  ).fastAgentSessionId;
-  if (typeof fastAgentSessionId !== 'string') {
-    return undefined;
-  }
-
-  const session = await getSessionForTask(db, taskRun.taskId);
-  if (
-    session?.visibility !== 'visible' ||
-    session.fastConversationId !== fastAgentSessionId
-  ) {
-    return undefined;
-  }
-
-  const url = new URL(`/sessions/${session.id}`, Env.R_APP_URL);
-  url.searchParams.set('utm_source', 'github-comment');
-  url.searchParams.set('utm_medium', 'link');
-  url.searchParams.set('utm_campaign', taskRun.payloadKind);
-  return url.toString();
 }
 
 function prependCanonicalPrAttribution(body: string, line: string): string {
