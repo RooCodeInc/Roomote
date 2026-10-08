@@ -68,6 +68,7 @@ const mocks = vi.hoisted(() => ({
   listRecentFastAgentHumanUserPromptTexts: vi.fn(async () => []),
   loadTurnAttempt: vi.fn(),
   getUnifiedSession: vi.fn(),
+  clearManualStatusAfterNewerUserMessage: vi.fn(),
   createSessionStatusJudgmentRequest: vi.fn(),
   settleSessionStatusJudgmentTurn: vi.fn(),
   prepareServiceCredential: vi.fn(),
@@ -279,6 +280,8 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   getSessionForFastConversation: mocks.getUnifiedSession,
+  clearManualStatusAfterNewerUserMessage:
+    mocks.clearManualStatusAfterNewerUserMessage,
   createSessionStatusJudgmentRequest: mocks.createSessionStatusJudgmentRequest,
   settleSessionStatusJudgmentTurn: mocks.settleSessionStatusJudgmentTurn,
   getSessionForTask: mocks.getSessionForTask,
@@ -593,6 +596,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
     mocks.getUnifiedSession.mockResolvedValue(null);
+    mocks.clearManualStatusAfterNewerUserMessage.mockResolvedValue(undefined);
     mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getActiveRecipeVerificationTaskId.mockResolvedValue(null);
     mocks.withEnvironmentVerificationRetryLock.mockImplementation(
@@ -878,6 +882,36 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         sourceEventId: '100.2',
         visible: true,
       },
+    );
+    expect(mocks.clearManualStatusAfterNewerUserMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      'unified-session-1',
+    );
+    expect(
+      mocks.clearManualStatusAfterNewerUserMessage.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.touchSessionActivity.mock.invocationCallOrder[0]!);
+    expect(
+      mocks.clearManualStatusAfterNewerUserMessage.mock.invocationCallOrder[0],
+    ).toBeGreaterThan(mocks.upsertMessage.mock.invocationCallOrder[0]!);
+  });
+
+  it('continues the turn when the unified Session lookup fails during status release', async () => {
+    mocks.getUnifiedSession.mockRejectedValueOnce(
+      new Error('transient session lookup failure'),
+    );
+    mocks.getUnifiedSession.mockResolvedValueOnce({
+      id: 'unified-session-1',
+    });
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter: callbacks() }),
+    ).resolves.toBe('It coordinates incoming requests.');
+    expect(mocks.clearManualStatusAfterNewerUserMessage).not.toHaveBeenCalled();
+    expect(mocks.touchSessionActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      'unified-session-1',
+      expect.any(Number),
+      { respondingUntil: expect.any(Date) },
     );
   });
 
