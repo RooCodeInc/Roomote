@@ -533,6 +533,11 @@ or model for a delegated task; they do not override a model or environment the
 user explicitly requested. Rules that point to a deleted environment are ignored
 until an admin updates or removes them.
 
+If routing rules or their environment targets fail to load, use **Retry** in
+**Routing Rules** before making changes. Previously loaded rules and an open edit
+stay visible during recovery; saving and deleting are unavailable until the reads
+succeed.
+
 ## MCP servers
 
 `mcpServers` adds environment-specific [MCP servers](/integrations) that are

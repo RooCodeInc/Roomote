@@ -33,12 +33,27 @@ export function EnvironmentRoutingOverview() {
   const [rules, setRules] = useState<WorkspaceRoutingSettings['rules']>([]);
   const [draftRule, setDraftRule] = useState(EMPTY_RULE);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [retryingAfterError, setRetryingAfterError] = useState(false);
+  const hasLoadError =
+    settings.isError || environments.isError || retryingAfterError;
+  const isRetrying =
+    retryingAfterError ||
+    (hasLoadError && (settings.isFetching || environments.isFetching));
+  const writesDisabled = updateSettings.isPending || hasLoadError;
+
+  const retryReads = () => {
+    setRetryingAfterError(true);
+    void Promise.all([
+      ...(settings.isError ? [settings.refetch()] : []),
+      ...(environments.isError ? [environments.refetch()] : []),
+    ]).finally(() => setRetryingAfterError(false));
+  };
 
   useEffect(() => {
     setRules(settings.data?.rules ?? []);
   }, [settings.data]);
 
-  if (environments.isPending || settings.isPending) {
+  if ((environments.isPending || settings.isPending) && !retryingAfterError) {
     return (
       <Section icon={GitBranch} title="Routing Rules">
         <Skeleton className="h-24 w-full" />
@@ -61,135 +76,158 @@ export function EnvironmentRoutingOverview() {
         overrides them.
       </p>
 
-      <div>
-        <div className="grid gap-3 py-4 sm:grid-cols-[1fr_16rem_auto]">
-          <Input
-            value={draftRule.description}
-            placeholder="Description..."
-            aria-label="Rule description"
-            onChange={(event) =>
-              setDraftRule((current) => ({
-                ...current,
-                description: event.target.value.slice(0, 500),
-              }))
-            }
-          />
-          <TargetSelect
-            value={draftRule.target}
-            environments={environments.data ?? []}
-            onChange={(target) =>
-              setDraftRule((current) => ({ ...current, target }))
-            }
-          />
-          <div className="flex gap-2">
-            {editingIndex !== null && (
+      {hasLoadError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-2">
+          <p className="text-sm text-destructive">
+            Couldn't load routing rules. Retry before making changes.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-label="Retry routing rules"
+            aria-busy={isRetrying}
+            disabled={isRetrying}
+            onClick={retryReads}
+          >
+            {isRetrying ? 'Retrying...' : 'Retry'}
+          </Button>
+        </div>
+      ) : null}
+
+      {settings.data !== undefined && environments.data !== undefined ? (
+        <div>
+          <div className="grid gap-3 py-4 sm:grid-cols-[1fr_16rem_auto]">
+            <Input
+              value={draftRule.description}
+              placeholder="Description..."
+              aria-label="Rule description"
+              onChange={(event) =>
+                setDraftRule((current) => ({
+                  ...current,
+                  description: event.target.value.slice(0, 500),
+                }))
+              }
+            />
+            <TargetSelect
+              value={draftRule.target}
+              environments={environments.data ?? []}
+              onChange={(target) =>
+                setDraftRule((current) => ({ ...current, target }))
+              }
+            />
+            <div className="flex gap-2">
+              {editingIndex !== null && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={updateSettings.isPending}
+                  onClick={() => {
+                    setDraftRule(EMPTY_RULE);
+                    setEditingIndex(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              )}
               <Button
                 type="button"
-                variant="outline"
                 size="sm"
-                disabled={updateSettings.isPending}
-                onClick={() => {
-                  setDraftRule(EMPTY_RULE);
-                  setEditingIndex(null);
+                disabled={
+                  writesDisabled ||
+                  !draftRule.description.trim() ||
+                  !draftRule.target
+                }
+                onClick={async () => {
+                  try {
+                    const normalizedRule = {
+                      ...draftRule,
+                      description: draftRule.description.trim(),
+                    };
+                    const nextRules =
+                      editingIndex === null
+                        ? [...rules, normalizedRule]
+                        : rules.map((rule, index) =>
+                            index === editingIndex ? normalizedRule : rule,
+                          );
+                    await saveRules(nextRules);
+                    setDraftRule(EMPTY_RULE);
+                    setEditingIndex(null);
+                  } catch {
+                    toast.error(
+                      editingIndex === null
+                        ? 'Failed to add routing rule'
+                        : 'Failed to update routing rule',
+                    );
+                  }
                 }}
               >
-                Cancel
+                {editingIndex === null ? 'Add Rule' : 'Save Rule'}
               </Button>
-            )}
-            <Button
-              type="button"
-              size="sm"
-              disabled={
-                updateSettings.isPending ||
-                !draftRule.description.trim() ||
-                !draftRule.target
-              }
-              onClick={async () => {
-                try {
-                  const normalizedRule = {
-                    ...draftRule,
-                    description: draftRule.description.trim(),
-                  };
-                  const nextRules =
-                    editingIndex === null
-                      ? [...rules, normalizedRule]
-                      : rules.map((rule, index) =>
-                          index === editingIndex ? normalizedRule : rule,
-                        );
-                  await saveRules(nextRules);
-                  setDraftRule(EMPTY_RULE);
-                  setEditingIndex(null);
-                } catch {
-                  toast.error(
-                    editingIndex === null
-                      ? 'Failed to add routing rule'
-                      : 'Failed to update routing rule',
-                  );
-                }
-              }}
-            >
-              {editingIndex === null ? 'Add Rule' : 'Save Rule'}
-            </Button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-[1fr_16rem_4rem] gap-3 py-2 text-xs font-medium text-muted-foreground max-sm:hidden">
-          <span>Description</span>
-          <span>Target</span>
-          <span />
-        </div>
-
-        {rules.length === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">
-            No routing rules configured.
-          </p>
-        ) : (
-          rules.map((rule, index) => (
-            <div
-              key={`${rule.description}-${rule.target}-${index}`}
-              className="grid gap-3 py-4 sm:grid-cols-[1fr_16rem_4rem] sm:items-center"
-            >
-              <span className="text-sm">{rule.description}</span>
-              <span className="text-sm text-muted-foreground">
-                {rule.target === ALL_REPOSITORIES
-                  ? 'All repositories'
-                  : environments.data?.find(
-                      (environment) => environment.id === rule.target,
-                    )?.name || rule.target}
-              </span>
-              <div className="flex justify-end gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Edit ${rule.description}`}
-                  onClick={() => {
-                    setDraftRule(rule);
-                    setEditingIndex(index);
-                  }}
-                >
-                  <Pencil />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Delete ${rule.description}`}
-                  onClick={async () => {
-                    try {
-                      await saveRules(rules.filter((_, i) => i !== index));
-                    } catch {
-                      toast.error('Failed to delete routing rule');
-                    }
-                  }}
-                >
-                  <Trash2 />
-                </Button>
-              </div>
             </div>
-          ))
-        )}
-      </div>
+          </div>
+
+          <div className="grid grid-cols-[1fr_16rem_4rem] gap-3 py-2 text-xs font-medium text-muted-foreground max-sm:hidden">
+            <span>Description</span>
+            <span>Target</span>
+            <span />
+          </div>
+
+          {rules.length === 0 ? (
+            <p className="py-4 text-sm text-muted-foreground">
+              No routing rules configured.
+            </p>
+          ) : (
+            rules.map((rule, index) => (
+              <div
+                key={`${rule.description}-${rule.target}-${index}`}
+                className="grid gap-3 py-4 sm:grid-cols-[1fr_16rem_4rem] sm:items-center"
+              >
+                <span className="text-sm">{rule.description}</span>
+                <span className="text-sm text-muted-foreground">
+                  {rule.target === ALL_REPOSITORIES
+                    ? 'All repositories'
+                    : environments.data?.find(
+                        (environment) => environment.id === rule.target,
+                      )?.name || rule.target}
+                </span>
+                <div className="flex justify-end gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Edit ${rule.description}`}
+                    disabled={writesDisabled}
+                    onClick={() => {
+                      setDraftRule(rule);
+                      setEditingIndex(index);
+                    }}
+                  >
+                    <Pencil />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Delete ${rule.description}`}
+                    disabled={writesDisabled}
+                    onClick={async () => {
+                      try {
+                        await saveRules(rules.filter((_, i) => i !== index));
+                      } catch {
+                        toast.error('Failed to delete routing rule');
+                      }
+                    }}
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
     </Section>
   );
 }
