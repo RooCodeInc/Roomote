@@ -39,6 +39,7 @@ import {
   FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
 } from './fast-agent-conversation';
+import type { ModelRequestMessage } from './fast-agent-model-authorization';
 
 export type FastAgentConversationRecord = {
   id: string;
@@ -548,6 +549,85 @@ export async function listRecentFastAgentHumanUserPromptTexts(input: {
     }
   }
   return groups.map((group) => group.texts.join('\n\n'));
+}
+
+/** Model consent reads typed canonical events, never compatibility envelopes. */
+export async function listFastAgentModelRequestDialogue(input: {
+  conversationId: string;
+  beforeTs: number;
+  currentEventId: string;
+  currentTurnId: string;
+  requireAnchor?: boolean;
+}): Promise<ModelRequestMessage[]> {
+  const [anchor] = await db
+    .select({ createdAt: fastAgentMessages.createdAt })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        eq(fastAgentMessages.eventId, input.currentEventId),
+      ),
+    )
+    .limit(1);
+  if (input.requireAnchor && !anchor) return [];
+  const rows = await db
+    .select({
+      role: fastAgentMessages.role,
+      eventType: fastAgentMessages.eventType,
+      metadata: fastAgentMessages.metadata,
+      contentBlocks: fastAgentMessages.contentBlocks,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        lte(fastAgentMessages.ts, input.beforeTs),
+        ne(fastAgentMessages.eventId, input.currentEventId),
+        // Compare in Postgres without truncating timestamp precision to JS Date.
+        anchor
+          ? sql`${fastAgentMessages.createdAt} < (
+        select created_at from fast_agent_messages
+        where conversation_id = ${input.conversationId} and event_id = ${input.currentEventId}
+        limit 1
+      )`
+          : undefined,
+        sql`coalesce(${fastAgentMessages.metadata}->>'visibleInTranscript', 'true') <> 'false'`,
+        or(
+          eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.ToolResult),
+          eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+          and(
+            eq(
+              fastAgentMessages.eventType,
+              ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            ),
+            eq(fastAgentMessages.role, 'assistant'),
+            sql`${fastAgentMessages.turnId} is distinct from ${input.currentTurnId}`,
+            sql`coalesce(${fastAgentMessages.metadata}->>'inferenceRetryNotice', 'false') <> 'true'`,
+          ),
+        ),
+      ),
+    )
+    .orderBy(
+      desc(fastAgentMessages.ts),
+      desc(fastAgentMessages.createdAt),
+      desc(fastAgentMessages.turnSeq),
+    )
+    .limit(20);
+  return rows.reverse().map((row) => ({
+    role:
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult
+        ? 'tool'
+        : row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt
+          ? row.role === 'user' &&
+            row.metadata?.turnSource === 'human' &&
+            row.metadata?.inputKind !== FAST_AGENT_REACTION_INPUT_TYPE
+            ? 'user'
+            : 'untrusted'
+          : 'assistant',
+    text: row.contentBlocks
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n'),
+  }));
 }
 
 /**

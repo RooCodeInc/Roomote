@@ -213,6 +213,7 @@ import {
   findFastAgentRepliesBeforeHumanPrompt,
   findRecentFastAgentToolResults,
   listRecentFastAgentHumanUserPromptTexts,
+  listFastAgentModelRequestDialogue,
   claimFastAgentHumanFollowUpSteers,
   markFastAgentDurableTurnDelivered,
   markFastAgentInferenceRetryNoticeInterruption,
@@ -287,10 +288,8 @@ import {
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
-import {
-  resolveFastAgentLaunchModel,
-  selectAssistantModelProposal,
-} from './fast-agent-launch-model';
+import { resolveFastAgentLaunchModel } from './fast-agent-launch-model';
+import type { ModelRequestMessage } from './fast-agent-model-authorization';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -2220,7 +2219,7 @@ export async function answerFastAgentQuestion({
   // The most recent assistant message already in the conversation, so a
   // repeat of the same terminal failure does not post the same closeout again.
   let priorAssistantMessage: string | undefined;
-  let modelRequestAssistantProposal: string | undefined;
+  let modelAuthorizationDialogue: ModelRequestMessage[] = [];
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
   let lastResolvedInferenceModel: string | undefined;
   let currentInstructionVersion = 0;
@@ -2997,15 +2996,7 @@ export async function answerFastAgentQuestion({
         const previousInstructionVersion = currentInstructionVersion;
         const steerInstructionVersion = previousInstructionVersion + 1;
         currentInstructionVersion = steerInstructionVersion;
-        const steeredModelProposal =
-          batch.length === 1
-            ? selectAssistantModelProposal(
-                turnVisibleMessages.map((message) => ({
-                  role: message.role,
-                  text: extractModelMessageText(message).join('\n'),
-                })),
-              )
-            : undefined;
+        const steeredModelDialogue = [...modelAuthorizationDialogue];
         try {
           await nativeSteer({
             messageId: buildFastAgentNativeSteerMessageId(
@@ -3031,7 +3022,17 @@ export async function answerFastAgentQuestion({
         );
         // Freeze the proposal before accepting a new human instruction. Never
         // reinterpret assistant text emitted later in this turn as consent.
-        modelRequestAssistantProposal = steeredModelProposal;
+        const laterAssistantMessages = modelAuthorizationDialogue.slice(
+          steeredModelDialogue.length,
+        );
+        modelAuthorizationDialogue = [
+          ...steeredModelDialogue,
+          ...batch.map(({ followUp }) => ({
+            role: 'user' as const,
+            text: followUp.question,
+          })),
+          ...laterAssistantMessages,
+        ];
         for (const { row, followUp } of batch) {
           injectedHumanFollowUpIds.add(row.id);
           steeredHumanRequests.push(followUp.question);
@@ -3276,6 +3277,7 @@ export async function answerFastAgentQuestion({
             truncated: false,
           }
         : serializeFastAgentToolOutput(result);
+    if (output) modelAuthorizationDialogue.push({ role: 'tool', text: output });
     await persistCanonicalMessage(
       {
         ...event.canonicalEvent,
@@ -3691,28 +3693,6 @@ export async function answerFastAgentQuestion({
     priorAssistantMessage = priorAssistant
       ? extractModelMessageText(priorAssistant).join('\n')
       : undefined;
-    modelRequestAssistantProposal = platformEvent
-      ? undefined
-      : selectAssistantModelProposal(
-          session.compatibilityMessages.length > 0
-            ? session.compatibilityMessages.map((message) => ({
-                role: message.role,
-                text: extractModelMessageText(message).join('\n'),
-              }))
-            : threadContext
-                .filter(
-                  (message) =>
-                    currentMessageId &&
-                    Number(message.ts) < Number(currentMessageId),
-                )
-                .map((message) => ({
-                  role:
-                    slackRoomoteUserId && message.user === slackRoomoteUserId
-                      ? 'assistant'
-                      : 'user',
-                  text: message.text,
-                })),
-        );
     const [personalizationContext, availableSkills] = await Promise.all([
       platformEvent
         ? null
@@ -3816,25 +3796,6 @@ export async function answerFastAgentQuestion({
       nextToolOrdinal = previousAttempt.next.toolOrdinal;
       nextRetryNoticeOrdinal = previousAttempt.next.retryNoticeOrdinal;
       nextTurnSeq = previousAttempt.next.turnSeq;
-    }
-    if (resumedAfterInterruption || resumedAfterInferenceRetry) {
-      // Compatibility history can already contain this attempt's unaccepted
-      // proposals. Recover consent at the original persisted human boundary.
-      modelRequestAssistantProposal =
-        !platformEvent && previousAttempt?.prompt
-          ? await findFastAgentRepliesBeforeHumanPrompt({
-              conversationId: session.id,
-              beforeTs: previousAttempt.prompt.ts,
-              currentEventId: `${turnId}:user`,
-              modelProposalTurnId: turnId,
-            }).catch((error) => {
-              degradedContextComponents.add('model_request_context');
-              console.warn(
-                `[Fast Agent] Prior model proposal unavailable: ${formatErrorForLog(error)}`,
-              );
-              return undefined;
-            })
-          : undefined;
     }
     // A resumed execution of this same turn inherits the retry notice its
     // predecessor left active, so the eventual answer edits that notice in
@@ -3944,6 +3905,49 @@ export async function answerFastAgentQuestion({
     // place and time so the transcript still reads in order.
     const userPromptTs =
       previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now();
+    if (substantiveHumanInput) {
+      const replay = resumedAfterInterruption || resumedAfterInferenceRetry;
+      let historyAvailable = true;
+      if (!replay || previousAttempt?.prompt) {
+        modelAuthorizationDialogue = await listFastAgentModelRequestDialogue({
+          conversationId: session.id,
+          beforeTs: userPromptTs,
+          currentEventId: `${turnId}:user`,
+          currentTurnId: turnId,
+          requireAnchor: replay,
+        }).catch((error) => {
+          historyAvailable = false;
+          degradedContextComponents.add('model_request_context');
+          console.warn(
+            `[Fast Agent] Model request dialogue unavailable: ${formatErrorForLog(error)}`,
+          );
+          return [];
+        });
+      }
+      if (
+        !replay &&
+        historyAvailable &&
+        modelAuthorizationDialogue.length === 0
+      ) {
+        // Cold Slack history retains platform-verified identity. Never recover
+        // roles by interpreting text inside compatibility/model envelopes.
+        modelAuthorizationDialogue = threadContext
+          .filter(
+            (message) =>
+              currentMessageId && Number(message.ts) < Number(currentMessageId),
+          )
+          .map((message) => ({
+            role:
+              slackRoomoteUserId && message.user === slackRoomoteUserId
+                ? 'assistant'
+                : message.bot_id
+                  ? 'untrusted'
+                  : 'user',
+            text: message.text,
+          }));
+      }
+      modelAuthorizationDialogue.push({ role: 'user', text: question });
+    }
     const userEvent = previousAttempt?.prompt
       ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
       : allocateCanonicalEvent('user');
@@ -4026,27 +4030,10 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
-    const collectUserMessageTexts = (): string[] => {
-      const latestHumanRequest =
-        steeredHumanRequests.at(-1) ??
-        (substantiveHumanInput ? question : undefined);
-      const messages = [
-        ...new Set([
-          ...threadContext
-            .filter((message) => !message.bot_id)
-            .map((message) => message.text),
-          ...[...session.compatibilityMessages, ...turnVisibleMessages]
-            .filter((message) => message.role === 'user')
-            .flatMap(extractModelMessageText),
-        ]),
-      ];
-      return latestHumanRequest
-        ? [
-            ...messages.filter((message) => message !== latestHumanRequest),
-            latestHumanRequest,
-          ]
-        : messages;
-    };
+    const collectUserMessageTexts = (): string[] =>
+      modelAuthorizationDialogue
+        .filter((message) => message.role === 'user')
+        .map((message) => message.text);
     const {
       bootstrapMessages,
       turnMessages,
@@ -4216,6 +4203,10 @@ export async function answerFastAgentQuestion({
         turnVisibleMessages.push(
           buildAssistantTextMessage(replyWithImages.message),
         );
+        modelAuthorizationDialogue.push({
+          role: 'assistant',
+          text: replyWithImages.message,
+        });
         await persistAssistantReply({
           reply: replyWithImages,
           event:
@@ -5562,7 +5553,7 @@ export async function answerFastAgentQuestion({
               claimedReasoningEffort: args.reasoningEffort,
               work: args.prompt,
               userMessages: collectUserMessageTexts(),
-              assistantProposal: modelRequestAssistantProposal,
+              dialogue: modelAuthorizationDialogue,
               models: taskModelOptions.models,
               codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
               defaultModelId: taskModelOptions.defaultModelId,
@@ -5765,7 +5756,7 @@ export async function answerFastAgentQuestion({
               claimedReasoningEffort: args.reasoningEffort,
               work: `Review pull request ${repository}#${pullRequestNumber}`,
               userMessages: collectUserMessageTexts(),
-              assistantProposal: modelRequestAssistantProposal,
+              dialogue: modelAuthorizationDialogue,
               models: taskModelOptions.models,
               codingModelRoutingRules: [],
               // An unoverridden review runs on the code-review model, which
