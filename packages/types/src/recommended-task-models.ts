@@ -34,6 +34,8 @@ export const RECOMMENDED_TASK_MODELS = [
     family: 'Fable',
   },
   { id: 'claude-fable-5', displayName: 'Claude Fable 5', family: 'Fable' },
+  { id: 'claude-haiku-5-5', displayName: 'Claude Haiku 5.5', family: 'Haiku' },
+  // Retained for providers without a verified Haiku 5.5 route yet.
   { id: 'claude-haiku-4-5', displayName: 'Claude Haiku 4.5', family: 'Haiku' },
   { id: 'claude-opus-5-5', displayName: 'Claude Opus 5.5', family: 'Opus' },
   {
@@ -110,7 +112,7 @@ export function mapRecommendedTaskModels(
 export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
   'claude-fable-5-1': 'openrouter/anthropic/claude-fable-5.1',
   'claude-fable-5': 'openrouter/anthropic/claude-fable-5',
-  'claude-haiku-4-5': 'openrouter/anthropic/claude-haiku-4.5',
+  'claude-haiku-5-5': 'openrouter/anthropic/claude-haiku-5.5',
   'claude-opus-5-5': 'openrouter/anthropic/claude-opus-5.5',
   'claude-sonnet-5-5': 'openrouter/anthropic/claude-sonnet-5.5',
   'gpt-6-astra': 'openrouter/openai/gpt-6-astra',
