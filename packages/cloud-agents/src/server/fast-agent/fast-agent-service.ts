@@ -4009,7 +4009,7 @@ export async function answerFastAgentQuestion({
     diagnostics.recordInitialHumanTurn(
       substantiveHumanInput ? userMessageResult?.initialHumanTurn : false,
     );
-    if (modelAuthorizationDialogue.length)
+    if (modelAuthorizationDialogue.length && !savedModelDialogue)
       await persistFastAgentModelAuthorizationSnapshot(
         session.id,
         turnId,

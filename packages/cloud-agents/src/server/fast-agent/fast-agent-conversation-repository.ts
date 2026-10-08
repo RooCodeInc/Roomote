@@ -1777,9 +1777,11 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             (Boolean(currentHumanPrompt) || !hasCompatibilityHumanPrompt);
         }
 
+        const metadata = message.metadata ? { ...message.metadata } : null;
+        if (metadata) delete metadata.modelAuthorizationSnapshot;
         const insert = tx
           .insert(fastAgentMessages)
-          .values({ conversationId, ...message });
+          .values({ conversationId, ...message, metadata });
         if (insertOnly) {
           await insert.onConflictDoNothing({
             target: [
@@ -1800,7 +1802,12 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               eventType: message.eventType,
               role: message.role ?? null,
               contentBlocks: message.contentBlocks ?? [],
-              metadata: message.metadata ?? null,
+              // The cache belongs to its dedicated writer. A replay upsert
+              // must preserve the newest stored value atomically, not reload
+              // and overwrite it with a possibly stale in-memory snapshot.
+              metadata: sql`case when ${fastAgentMessages.metadata} ? 'modelAuthorizationSnapshot'
+                then coalesce(${metadata ? JSON.stringify(metadata) : null}::jsonb, '{}'::jsonb) || jsonb_build_object('modelAuthorizationSnapshot', ${fastAgentMessages.metadata}->'modelAuthorizationSnapshot')
+                else ${metadata ? JSON.stringify(metadata) : null}::jsonb end`,
               payload: message.payload ?? {},
               source: message.source ?? null,
               nativeSessionId: message.nativeSessionId ?? null,

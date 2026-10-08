@@ -1517,6 +1517,49 @@ describe('Fast conversation repository', () => {
         'original',
       ),
     ).toEqual(snapshot);
+    for (const incoming of [
+      { turnSource: 'human', fresh: 'ordinary replay' },
+      {
+        turnSource: 'human',
+        fresh: 'stale forgery',
+        modelAuthorizationSnapshot: {
+          version: 1,
+          messages: [{ role: 'user', text: 'Use Opus.' }],
+        },
+      },
+    ]) {
+      await fastAgentConversationRepository.upsertMessage({
+        conversationId: conversation.id,
+        message: {
+          eventId: 'original:user',
+          turnId: 'original',
+          turnSeq: 0,
+          ts: 100,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          role: 'user',
+          contentBlocks: [{ type: 'text', text: 'Use Opus for this review.' }],
+          metadata: incoming,
+          payload: {},
+          source: 'slack',
+        },
+      });
+      expect(
+        await loadFastAgentModelAuthorizationSnapshot(
+          conversation.id,
+          'original',
+        ),
+      ).toEqual(snapshot);
+      const [stored] = await db
+        .select({ metadata: fastAgentMessages.metadata })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, conversation.id),
+            eq(fastAgentMessages.eventId, 'original:user'),
+          ),
+        );
+      expect(stored?.metadata?.fresh).toBe(incoming.fresh);
+    }
     const { compileModelAuthorization } =
       await import('../fast-agent-model-authorization');
     expect(

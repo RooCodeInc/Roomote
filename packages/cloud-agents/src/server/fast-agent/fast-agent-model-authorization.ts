@@ -187,6 +187,8 @@ const modelRevocation =
   /^no\b|\b(?:do not|don't|not|never|stop)\s+(?:use|run|switch|choose|select)\b|\b(?:cancel|revoke)\b.{0,30}\b(?:model|choice)\b/i;
 const defaultRequest =
   /^(?:(?:actually|instead|please|yes)[,:]?\s+)*(?:keep|use|stay (?:with|on)|run on)\s+(?:the\s+)?(?:deployment\s+)?default(?:\s+model)?\b/i;
+const firstPersonDefaultRequest =
+  /^I(?:\s+(?:want|would like)|'d like)\s+(?:(?:this|it|this task|the work)\s+)?to\s+(?:use|keep|run\s+on|stay\s+(?:on|with))\s+(?:the\s+)?(?:deployment\s+)?default(?:\s+model)?\b/i;
 const capabilityRequest =
   /\b(?:use|run|switch|choose|select)\b.{0,45}\b(?:strongest|best|most capable|cheaper|less expensive|faster|quickest)\b.{0,25}\b(?:model|one)\b/i;
 const affirmative =
@@ -303,9 +305,7 @@ export function compileModelAuthorization(input: {
       }
       if (
         !clause.includes('?') &&
-        (defaultRequest.test(clause) ||
-          (firstPersonDirective.test(clause) &&
-            /\bdefault(?:\s+model)?\b/i.test(clause)))
+        (defaultRequest.test(clause) || firstPersonDefaultRequest.test(clause))
       ) {
         candidateIds = [];
         capability = false;
@@ -381,13 +381,33 @@ export function snapshotModelRequestDialogue(
   models: readonly TaskModelOption[],
 ): ModelRequestMessage[] {
   const aliases = catalogAliases(models);
-  return messages.slice(-20).map((message) => ({
-    role: message.role,
-    text:
-      message.role === 'tool'
-        ? modelsIn(message.text, aliases).join(' ')
-        : message.role === 'untrusted'
+  const result: ModelRequestMessage[] = [];
+  const toolIds = new Set<string>();
+  let lastVisible: ModelRequestMessage | undefined;
+  const flush = () => {
+    if (toolIds.size)
+      result.push({ role: 'tool', text: [...toolIds].sort().join(' ') });
+    if (lastVisible) result.push(lastVisible);
+    toolIds.clear();
+    lastVisible = undefined;
+  };
+  for (const message of messages) {
+    if (message.role === 'tool') {
+      for (const id of modelsIn(message.text, aliases)) toolIds.add(id);
+      continue;
+    }
+    const clean = {
+      role: message.role,
+      text:
+        message.role === 'untrusted'
           ? ''
           : cleanModelRequestProse(message.text, models),
-  }));
+    };
+    if (message.role === 'user') {
+      flush();
+      result.push(clean);
+    } else lastVisible = clean;
+  }
+  flush();
+  return result;
 }

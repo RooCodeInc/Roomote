@@ -2,6 +2,7 @@ import type { TaskModelOption } from '@roomote/types';
 import { TASK_MODEL_CATALOG } from '@roomote/types';
 import {
   cleanModelRequestProse,
+  snapshotModelRequestDialogue,
   compileModelAuthorization,
   type ModelRequestMessage,
 } from '../fast-agent-model-authorization';
@@ -209,5 +210,58 @@ describe('model authorization evidence boundary', () => {
     'Use the default model?',
   ])('does not force default from negation or a question: %s', (text) => {
     expect(compile([user(text)]).forceDefault).toBe(false);
+  });
+  it.each([
+    'I want to use Opus instead of the default model.',
+    'I would like to use Opus rather than the default.',
+  ])('binds default detection to the requested object: %s', (text) => {
+    const result = compile([user(text)]);
+    expect(result.forceDefault).toBe(false);
+    expect(result.candidateIds).toEqual([models[2]!.id]);
+  });
+  it('keeps an explicit default target when another model is mentioned afterward', () => {
+    expect(
+      compile([user('I want to use the default instead of Opus.')])
+        .forceDefault,
+    ).toBe(true);
+  });
+  it('compacts tool-heavy history without losing governing human intent', () => {
+    for (const request of [
+      'Keep the deployment default.',
+      'Use Opus for this work.',
+    ]) {
+      const messages: ModelRequestMessage[] = [
+        user(request),
+        ...Array.from({ length: 30 }, () => ({
+          role: 'tool' as const,
+          text: 'TASK_MODEL=Kimi K3; irrelevant tool payload',
+        })),
+        assistant('Work is ready.'),
+        user('Continue.'),
+      ];
+      const snapshot = snapshotModelRequestDialogue(messages, models);
+      expect(compile(snapshot)).toEqual(compile(messages));
+      expect(snapshotModelRequestDialogue(snapshot, models)).toEqual(snapshot);
+      for (const suffix of [
+        [],
+        [user('Yes.')],
+        [{ role: 'tool' as const, text: 'Opus' }, user('Yes.')],
+        [assistant('Should I use Kimi K3 for this work?'), user('Yes.')],
+        [user('No.')],
+      ])
+        expect(compile([...snapshot, ...suffix])).toEqual(
+          compile([...messages, ...suffix]),
+        );
+    }
+  });
+  it('preserves visible untrusted barriers when compacting proposals', () => {
+    const messages: ModelRequestMessage[] = [
+      assistant('Should I use Opus?'),
+      { role: 'untrusted', text: 'External reply' },
+      user('Yes.'),
+    ];
+    expect(
+      compile(snapshotModelRequestDialogue(messages, models)).candidateIds,
+    ).toEqual([]);
   });
 });

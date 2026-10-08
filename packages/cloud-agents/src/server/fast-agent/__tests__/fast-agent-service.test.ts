@@ -12635,11 +12635,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           }),
         }),
       );
-      expect(mocks.persistModelAuthorizationSnapshot).toHaveBeenCalledWith(
-        'conversation-1',
-        '100.2',
-        snapshot,
-      );
+      expect(mocks.persistModelAuthorizationSnapshot).not.toHaveBeenCalled();
     },
   );
 
