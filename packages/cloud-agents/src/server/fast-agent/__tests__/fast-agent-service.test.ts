@@ -2871,10 +2871,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
         expect.objectContaining({
           state: expect.objectContaining({
-            latestRequest: 'Yes, use it.',
-            modelRequestContext: [
-              { sender: 'assistant', text: proposal },
-              { sender: 'user', text: 'Yes, use it.' },
+            exchanges: [
+              expect.objectContaining({
+                question: proposal,
+                reply: 'Yes, use it.',
+              }),
             ],
           }),
         }),
@@ -12413,10 +12414,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
         expect.objectContaining({
           state: expect.objectContaining({
-            latestRequest: 'Yes, use it.',
-            modelRequestContext: [
-              { sender: 'assistant', text: proposal },
-              { sender: 'user', text: 'Yes, use it.' },
+            exchanges: [
+              expect.objectContaining({
+                question: proposal,
+                reply: 'Yes, use it.',
+              }),
             ],
           }),
         }),
@@ -12478,9 +12480,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
         expect.objectContaining({
           state: expect.objectContaining({
-            modelRequestContext: [
-              { sender: 'assistant', text: proposal },
-              { sender: 'user', text: 'Yes, use it.' },
+            exchanges: [
+              expect.objectContaining({
+                question: proposal,
+                reply: 'Yes, use it.',
+              }),
             ],
           }),
         }),
@@ -12530,7 +12534,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
         expect.objectContaining({
           state: expect.objectContaining({
-            modelRequestContext: [{ sender: 'user', text: 'Yes, use it.' }],
+            modelRequestContext: [],
+            humanRequests: [{ humanIndex: 0, text: 'Yes, use it.' }],
           }),
         }),
       );
@@ -12570,7 +12575,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
       expect.objectContaining({
         state: expect.objectContaining({
-          modelRequestContext: [{ sender: 'user', text: 'Review pagination.' }],
+          modelRequestContext: [],
+          humanRequests: [{ humanIndex: 0, text: 'Review pagination.' }],
         }),
       }),
     );
@@ -12600,8 +12606,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         prompt: { ts: 300, turnSeq: 0 },
       });
       mocks.evaluateDecisionModel.mockResolvedValue({
-        wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
-        requestedModel: decisionChoice('model_2', 0.99),
+        wantsNonDefaultModel: { type: 'noul', noul: 0.01 },
+        requestedModel: decisionChoice('default_request', 0.99),
       });
       const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
         success: true,
@@ -12631,7 +12637,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({
           state: expect.objectContaining({
             latestRequest: 'Keep the deployment default.',
-            eligibleModelIds: [],
+            humanRequests: [
+              { humanIndex: 0, text: 'Use Claude Sonnet 5 for this review.' },
+              { humanIndex: 1, text: 'Keep the deployment default.' },
+            ],
           }),
         }),
       );
@@ -12682,8 +12691,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         });
         mocks.modelRequestDialogue.mockResolvedValue(history);
         mocks.evaluateDecisionModel.mockResolvedValue({
-          wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
-          requestedModel: decisionChoice('model_2', 0.99),
+          proposal_0: { type: 'noul', noul: 0.01 },
+          wantsNonDefaultModel: { type: 'noul', noul: 0.01 },
+          requestedModel: decisionChoice('none', 0.99),
         });
         const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
           success: true,
@@ -12709,7 +12719,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         );
         expect(mocks.evaluateDecisionModel).toHaveBeenLastCalledWith(
           expect.objectContaining({
-            state: expect.objectContaining({ eligibleModelIds: [] }),
+            state: expect.objectContaining({ modelRequestContext: [] }),
           }),
         );
       }
@@ -12750,7 +12760,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
       expect.objectContaining({
         state: expect.objectContaining({
-          modelRequestContext: [{ sender: 'user', text: 'Yes, use it.' }],
+          modelRequestContext: [],
+          humanRequests: [{ humanIndex: 0, text: 'Yes, use it.' }],
         }),
       }),
     );

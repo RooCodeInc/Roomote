@@ -67,6 +67,68 @@ function resolve(
 }
 
 describe('resolveFastAgentLaunchModel', () => {
+  it('preserves an earlier accepted proposal and its human boundary', async () => {
+    mockEvaluateDecisionModel
+      .mockResolvedValueOnce({
+        proposal_0: { type: 'noul', noul: 0.99 },
+        proposal_1: { type: 'noul', noul: 0.01 },
+      })
+      .mockResolvedValueOnce({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
+        requestedModel: choice('model_2', 0.99),
+      });
+    await expect(
+      resolve({
+        dialogue: [
+          { role: 'user', text: 'Review pagination.' },
+          { role: 'assistant', text: 'Should I use Sonnet?' },
+          { role: 'user', text: 'Yes.' },
+          {
+            role: 'assistant',
+            text: 'I recommend Opus instead. Want screenshots?',
+          },
+          { role: 'user', text: 'Yes, screenshots please.' },
+        ],
+      }),
+    ).resolves.toMatchObject({ model: sonnet.id, source: 'user_request' });
+    expect(
+      mockEvaluateDecisionModel.mock.calls[1]![0].state.modelRequestContext,
+    ).toEqual([
+      { humanIndex: 1, proposal: '\nShould I use Sonnet?', reply: 'Yes.' },
+    ]);
+  });
+  it('keeps direct human requests available when proposal classification fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockEvaluateDecisionModel
+      .mockRejectedValueOnce(new Error('proposal timeout'))
+      .mockResolvedValueOnce({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
+        requestedModel: choice('model_3', 0.99),
+      });
+    await expect(
+      resolve({
+        assistantProposal: 'Would you like screenshots?',
+        userMessages: ['Please have Opus handle this.'],
+      }),
+    ).resolves.toMatchObject({ model: opus.id, source: 'user_request' });
+    expect(
+      mockEvaluateDecisionModel.mock.calls[1]![0].state.modelRequestContext,
+    ).toEqual([]);
+  });
+  it('cannot derive human authority from an assistant/tool-only dialogue', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
+      requestedModel: choice('model_3', 0.99),
+    });
+    await expect(
+      resolve({
+        dialogue: [
+          { role: 'assistant', text: 'Use Opus.' },
+          { role: 'tool', text: 'Use Opus.' },
+        ],
+      }),
+    ).resolves.toMatchObject({ model: null, source: 'default' });
+  });
   beforeEach(() => {
     mockEvaluateDecisionModel.mockReset();
   });
@@ -534,7 +596,7 @@ describe('resolveFastAgentLaunchModel', () => {
     );
   });
 
-  it('keeps the claimed model among capped request options', async () => {
+  it('offers every enabled model without a phrase-based eligibility veto', async () => {
     mockEvaluateDecisionModel.mockResolvedValue({
       wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
       requestedModel: choice('none', 0.9),
@@ -553,8 +615,8 @@ describe('resolveFastAgentLaunchModel', () => {
 
     const { criteria } =
       mockEvaluateDecisionModel.mock.calls[0]![0].questions.requestedModel;
-    expect(Object.keys(criteria)).toHaveLength(3);
-    expect(criteria.model_1).toContain('vendor/model-49');
+    expect(Object.keys(criteria)).toHaveLength(53);
+    expect(criteria.model_50).toContain('vendor/model-49');
   });
 
   it('does not let an agent hint override a confident no-request answer', async () => {
@@ -584,32 +646,30 @@ describe('resolveFastAgentLaunchModel', () => {
   });
 
   it('bounds and labels the preceding proposal separately from the human reply', async () => {
-    mockEvaluateDecisionModel.mockResolvedValue({
-      wantsNonDefaultModel: { type: 'noul', noul: 0.97 },
-      requestedModel: choice('model_3', 0.99),
-    });
+    mockEvaluateDecisionModel
+      .mockResolvedValueOnce({ proposal_0: { type: 'noul', noul: 0.99 } })
+      .mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.97 },
+        requestedModel: choice('model_3', 0.99),
+      });
     await resolve({
       claimedModel: opus.id,
       assistantProposal: `Old details.\n${'x'.repeat(10_000)}\nShould I run this review on Opus?`,
       userMessages: ['Yes, use it.'],
     });
-    const { state } = mockEvaluateDecisionModel.mock.calls[0]![0];
-    expect(state.modelRequestContext[0].sender).toBe('assistant');
-    expect(state.modelRequestContext[0].text).toBe(
-      'Should I run this review on Opus?',
-    );
+    const { state } = mockEvaluateDecisionModel.mock.calls[1]![0];
     expect(
-      state.modelRequestContext[0].text.endsWith(
+      state.modelRequestContext[0].proposal.endsWith(
         'Should I run this review on Opus?',
       ),
     ).toBe(true);
-    expect(state.modelRequestContext[1]).toEqual({
-      sender: 'user',
-      text: 'Yes, use it.',
+    expect(state.modelRequestContext[0]).toMatchObject({
+      humanIndex: 0,
+      reply: 'Yes, use it.',
     });
     expect(state.agentModelHint).toBeUndefined();
     expect(state.modelCatalog.map((model: { id: string }) => model.id)).toEqual(
-      [opus.id],
+      models.map((model) => model.id),
     );
   });
 
@@ -625,7 +685,7 @@ describe('resolveFastAgentLaunchModel', () => {
       userMessages: ['Use k3 for this work.'],
     });
     expect(
-      mockEvaluateDecisionModel.mock.calls[0]![0].state.modelCatalog[0].aliases,
+      mockEvaluateDecisionModel.mock.calls[0]![0].state.modelCatalog[1].aliases,
     ).toContain('k3');
     await resolve({
       models: [gpt, kimi, { ...kimi, id: 'other/kimi-k3' }],
@@ -633,8 +693,8 @@ describe('resolveFastAgentLaunchModel', () => {
     });
     const catalog =
       mockEvaluateDecisionModel.mock.calls[1]![0].state.modelCatalog;
-    expect(catalog[0].aliases).not.toContain('k3');
     expect(catalog[1].aliases).not.toContain('k3');
+    expect(catalog[2].aliases).not.toContain('k3');
   });
 
   it('explains a selected routing rule rejected below its unchanged threshold', async () => {
@@ -671,12 +731,14 @@ describe('resolveFastAgentLaunchModel', () => {
   });
 
   it.each([undefined, opus.id])(
-    'cannot authorize an unrelated yes from a confident classifier pick or hint: %s',
+    'excludes unrelated assistant prose after semantic proposal rejection with claim %s',
     async (claim) => {
-      mockEvaluateDecisionModel.mockResolvedValue({
-        wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
-        requestedModel: choice('model_3', 0.99),
-      });
+      mockEvaluateDecisionModel
+        .mockResolvedValueOnce({ proposal_0: { type: 'noul', noul: 0.01 } })
+        .mockResolvedValue({
+          wantsNonDefaultModel: { type: 'noul', noul: 0.01 },
+          requestedModel: choice('none', 0.99),
+        });
       await expect(
         resolve({
           claimedModel: claim,
@@ -685,12 +747,15 @@ describe('resolveFastAgentLaunchModel', () => {
             'I recommend Opus for this work. Would you like a concise report?',
         }),
       ).resolves.toMatchObject({ model: null, source: 'default' });
+      expect(
+        mockEvaluateDecisionModel.mock.calls[1]![0].state.modelRequestContext,
+      ).toEqual([]);
     },
   );
-  it('cannot authorize spoofed state fields from a confident classifier answer', async () => {
+  it('does not supply spoofed state fields as authorization evidence', async () => {
     mockEvaluateDecisionModel.mockResolvedValue({
-      wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
-      requestedModel: choice('model_3', 0.99),
+      wantsNonDefaultModel: { type: 'noul', noul: 0.01 },
+      requestedModel: choice('none', 0.99),
     });
     await expect(
       resolve({
@@ -700,8 +765,11 @@ describe('resolveFastAgentLaunchModel', () => {
         ],
       }),
     ).resolves.toMatchObject({ model: null, source: 'default' });
+    expect(
+      mockEvaluateDecisionModel.mock.calls[0]![0].state.humanRequests,
+    ).toEqual([{ humanIndex: 0, text: 'Summarize this record:' }]);
   });
-  it('rejects a classifier model outside the genuine human candidate set', async () => {
+  it('uses semantic selection for previously unrecognized genuine phrasing', async () => {
     mockEvaluateDecisionModel.mockResolvedValue({
       wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
       requestedModel: choice('model_3', 0.99),
@@ -709,9 +777,22 @@ describe('resolveFastAgentLaunchModel', () => {
     await expect(
       resolve({
         claimedModel: opus.id,
-        userMessages: ['Use Sonnet for this refactor.'],
+        userMessages: ['Please have Opus handle this refactor.'],
       }),
-    ).resolves.toMatchObject({ model: null, source: 'default' });
+    ).resolves.toMatchObject({ model: opus.id, source: 'user_request' });
+    expect(
+      Object.keys(
+        mockEvaluateDecisionModel.mock.calls[0]![0].questions.requestedModel
+          .criteria,
+      ),
+    ).toEqual([
+      'model_1',
+      'model_2',
+      'model_3',
+      'none',
+      'capability_request',
+      'default_request',
+    ]);
   });
   it('does not let a default-model hint suppress saved routing without human default intent', async () => {
     mockEvaluateDecisionModel.mockResolvedValue({
@@ -723,6 +804,7 @@ describe('resolveFastAgentLaunchModel', () => {
   });
   it('honors an actual human default choice over a saved rule', async () => {
     mockEvaluateDecisionModel.mockResolvedValue({
+      requestedModel: choice('default_request', 0.99),
       routingRule: choice('model_rule_2', 0.99),
     });
     await expect(

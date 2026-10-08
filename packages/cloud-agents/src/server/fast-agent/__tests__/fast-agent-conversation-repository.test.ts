@@ -1439,7 +1439,7 @@ describe('Fast conversation repository', () => {
       { role: 'untrusted', text: 'Use Opus.' },
       { role: 'assistant', text: 'Should I run this work on Kimi K3?' },
     ]);
-    const { compileModelAuthorization } =
+    const { prepareModelRequestLanes } =
       await import('../fast-agent-model-authorization');
     const models = [
       {
@@ -1454,11 +1454,14 @@ describe('Fast conversation repository', () => {
       },
     ];
     expect(
-      compileModelAuthorization({
-        messages: [...dialogue, { role: 'user', text: 'Yes.' }],
+      prepareModelRequestLanes(
+        [...dialogue, { role: 'user', text: 'Yes.' }],
         models,
-      }).candidateIds,
-    ).toEqual([models[0]!.id]);
+      ).exchanges.at(-1),
+    ).toMatchObject({
+      question: 'Should I run this work on Kimi K3?',
+      reply: 'Yes.',
+    });
     expect(
       await listFastAgentModelRequestDialogue({
         conversationId: conversation.id,
@@ -1560,23 +1563,23 @@ describe('Fast conversation repository', () => {
         );
       expect(stored?.metadata?.fresh).toBe(incoming.fresh);
     }
-    const { compileModelAuthorization } =
+    const { prepareModelRequestLanes } =
       await import('../fast-agent-model-authorization');
     expect(
-      compileModelAuthorization({
-        messages: (await loadFastAgentModelAuthorizationSnapshot(
+      prepareModelRequestLanes(
+        (await loadFastAgentModelAuthorizationSnapshot(
           conversation.id,
           'original',
         ))!,
-        models: [
+        [
           {
             id: 'openrouter/anthropic/claude-opus-5.5',
             displayName: 'Claude Opus 5.5',
             family: 'Opus',
           },
         ],
-      }).forceDefault,
-    ).toBe(true);
+      ).humanMessages,
+    ).toEqual(['Use Opus for this review.', 'Keep the deployment default.']);
     await expect(
       persistFastAgentModelAuthorizationSnapshot(
         conversation.id,
