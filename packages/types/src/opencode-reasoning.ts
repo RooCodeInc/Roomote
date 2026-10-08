@@ -18,7 +18,7 @@ const ANTHROPIC_THINKING_BUDGET_TOKENS: Record<ReasoningEffort, number> = {
 /**
  * How an Anthropic model expects reasoning to be configured:
  *
- * - `adaptive` — Opus 4.7+, Sonnet 5+, and Fable/Mythos reject
+ * - `adaptive` — Opus 4.7+, Sonnet 5+, Haiku 5.5+, and Fable/Mythos reject
  *   `thinking.type: "enabled"` with a 400 and take
  *   `thinking.type: "adaptive"` plus an `effort` (including `xhigh`). These
  *   models also default thinking display to "omitted" (empty thinking
@@ -38,7 +38,7 @@ type AnthropicThinkingMode = 'adaptive' | 'adaptive-no-xhigh' | 'budget';
  */
 function parseAnthropicModelVersion(
   modelID: string,
-  family: 'opus' | 'sonnet',
+  family: 'opus' | 'sonnet' | 'haiku',
 ): { major: number; minor: number } | null {
   const pattern = new RegExp(
     `${family}-(\\d+)(?:[.-](\\d+))?(?:[.@-]|$)|claude-(\\d+)(?:[.-](\\d+))?-${family}(?:[.@-]|$)`,
@@ -85,6 +85,12 @@ function resolveAnthropicThinkingMode(modelID: string): AnthropicThinkingMode {
     return sonnet.major === 4 && sonnet.minor === 6
       ? 'adaptive-no-xhigh'
       : 'budget';
+  }
+
+  const haiku = parseAnthropicModelVersion(id, 'haiku');
+
+  if (haiku && (haiku.major > 5 || (haiku.major === 5 && haiku.minor >= 5))) {
+    return 'adaptive';
   }
 
   return 'budget';
