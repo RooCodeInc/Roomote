@@ -252,8 +252,15 @@ Self-hosted deployments can allow only the private receiver ranges they need:
 R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS=127.0.0.1/32
 ```
 
-Set the variable on the BullMQ service and restart it. This example permits a
-receiver on the same host when BullMQ runs directly on that host. In a
+Set the variable in the BullMQ service's environment. For the supported production
+Compose deployments, add it to the environment file used by Compose; for Coolify,
+set it in the deployment's environment variables. The supplied production
+definitions forward it to the delivery service. Recreate the affected containers
+or redeploy after changing it so they receive the new environment; restarting an
+existing container alone does not update its environment.
+
+This example permits a receiver on the same host when BullMQ runs directly on
+that host. In a
 container, `127.0.0.1` points to the BullMQ container itself; use a receiver
 hostname reachable from that container and allow its exact resolved CIDR
 instead. Multiple ranges are comma-separated.

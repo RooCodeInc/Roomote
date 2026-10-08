@@ -141,6 +141,16 @@ connected provider exposes its verified route. New connections can discover it
 through supported direct and gateway providers, while existing Claude Sonnet 5
 selections remain usable until you choose to switch.
 
+**Claude Haiku 5.5** is recommended through Roomote inference, OpenRouter,
+Vercel AI Gateway, Requesty, Azure OpenAI, Azure AI Foundry, Anthropic,
+OpenCode Zen, OpenCode Go, and Amazon Bedrock. Enable it in **Available Models**,
+then assign it to a role or select it for a session or task. The Anthropic helper
+and explore recommendations and Amazon Bedrock's **Recommended** mapping preset
+now use Haiku 5.5, which supports adaptive thinking. Existing saved Haiku 4.5
+selections stay unchanged; GitHub Copilot retains its verified Haiku 4.5
+recommendation. Model access still depends on the connected provider account,
+region, or plan.
+
 **GPT-6 Astra** is also recommended through [Vercel AI Gateway](/providers/inference/vercel-ai-gateway),
 [GitHub Copilot](/providers/inference/github-copilot), and
 [OpenCode Zen](/providers/inference/opencode). Connect the provider, enable Astra
@@ -289,9 +299,13 @@ Admins can enable or disable models from the task model list. The default model
 must stay enabled, because Roomote uses it when a task does not request a
 specific model.
 
-Model settings affect new task starts. Running tasks and resumed snapshots keep
-the model that was selected when they started, except when a configured fallback
-switches a running task or session after a provider failure.
+Model settings affect new task starts. Running tasks keep their selected model
+unless you change it or a configured fallback switches it after a provider
+failure. Resumed tasks also keep a saved model when it is still registered and
+its provider is connected, unless a usable task override applies. If the saved
+model is missing or its provider is disconnected, Roomote resumes with the
+deployment default instead. If a preserved saved model is reported as unavailable
+when work resumes, Roomote retries once with the deployment default.
 
 ## Model roles
 
@@ -636,9 +650,11 @@ deployment. It helps admins compare models without relying on stale defaults.
   reasoning where quality allows, or choose a faster default model.
 - **An image attachment cannot be read.** Check the selected **Vision model**
   in **Settings > Models** for image input support.
-- **An audio or video attachment is not processed.** Turn on **Also use for
-  audio and video** under **Vision model** in **Settings > Models**, then choose
-  a model that supports the required input.
+- **An audio or video attachment is not processed.** Choose a model that supports
+  the required input under **Settings > Models > Audio and video model**. If the
+  role is **Same as coding model**, check that the coding model supports the
+  attachment, or select a capable audio and video model explicitly. The Vision
+  model handles images separately.
 - **A model works from one provider but not another.** Check provider-specific
   credentials, rate limits, model availability, and model ID prefix.
 - **A task switched to a fallback model.** Check the failed provider's credits,
