@@ -815,6 +815,20 @@ describe('resolveFastAgentLaunchModel', () => {
       }),
     ).resolves.toMatchObject({ model: gpt.id, source: 'user_request' });
   });
+  it('honors a named deployment-default choice without non-default intent', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.01 },
+      requestedModel: choice('model_1', 0.99),
+      routingRule: choice('model_rule_2', 0.99),
+    });
+    await expect(
+      resolve({
+        claimedModel: opus.id,
+        codingModelRoutingRules: rules,
+        userMessages: ['Use GPT 5.6 for this scheduler refactor.'],
+      }),
+    ).resolves.toMatchObject({ model: gpt.id, source: 'user_request' });
+  });
   it('does not apply named-model confidence to a genuine hinted capability request', async () => {
     mockEvaluateDecisionModel.mockResolvedValue({
       wantsNonDefaultModel: { type: 'noul', noul: 0.87 },

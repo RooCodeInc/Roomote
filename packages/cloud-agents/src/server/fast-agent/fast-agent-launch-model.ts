@@ -224,6 +224,19 @@ function describeModelNote(params: {
  * model interprets only canonical human evidence and scoped proposals. A capability
  * request may use an agent hint to resolve which enabled model to run.
  */
+function selectNamedModel(
+  answer: TypeSafeAnswers<{ q: TypeSafeChoiceQuestion }>['q'] | undefined,
+  models: readonly TaskModelOption[],
+): TaskModelOption | undefined {
+  if (
+    !answer ||
+    answer.confidence < REQUESTED_MODEL_MIN_CONFIDENCE ||
+    !answer.choice.startsWith('model_')
+  )
+    return undefined;
+  return models[Number(answer.choice.slice('model_'.length)) - 1];
+}
+
 function selectRequestedModel(params: {
   wantsNonDefaultProbability: number;
   answer: TypeSafeAnswers<{ q: TypeSafeChoiceQuestion }>['q'] | undefined;
@@ -237,13 +250,8 @@ function selectRequestedModel(params: {
   ) {
     return undefined;
   }
-  const choiceIndex = answer.choice.startsWith('model_')
-    ? Number(answer.choice.slice('model_'.length)) - 1
-    : -1;
-  if (answer.confidence >= REQUESTED_MODEL_MIN_CONFIDENCE && choiceIndex >= 0) {
-    const model = requestableModels[choiceIndex];
-    return model;
-  }
+  const named = selectNamedModel(answer, requestableModels);
+  if (named) return named;
   // A confident rejection cannot be turned into consent by an agent hint.
   // Capability-only requests have their own answer so they can still use it.
   if (
@@ -451,12 +459,17 @@ export async function resolveFastAgentLaunchModel(params: {
       })
     : undefined;
   const requestAnswer = answers?.requestedModel;
+  const namedChoice =
+    requestAnswer?.type === 'choice'
+      ? selectNamedModel(requestAnswer, requestableModels)
+      : undefined;
   const humanChoseDefault =
     hasHumanProse &&
     requestAnswer?.type === 'choice' &&
     requestAnswer.confidence >= REQUESTED_MODEL_MIN_CONFIDENCE &&
     (requestAnswer.choice === 'default_request' ||
-      requestedModel?.id === params.defaultModelId);
+      (params.defaultModelId !== undefined &&
+        namedChoice?.id === params.defaultModelId));
   const ruleAnswer =
     answers?.routingRule?.type === 'choice' ? answers.routingRule : undefined;
   const ruleIndex = ruleAnswer?.choice.startsWith('model_rule_')
