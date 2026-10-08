@@ -2768,6 +2768,99 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('preserves the accepted model proposal across a queued confirmation and later assistant text', async () => {
+    vi.useFakeTimers();
+    let finishGeneration: ((value: string) => void) | undefined;
+    let answer: Promise<string> | undefined;
+    try {
+      const proposal = 'Should I run this review on Claude Sonnet 5?';
+      const row = {
+        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'Yes, use it.',
+        },
+      };
+      let pendingRows: (typeof row)[] = [];
+      mocks.getPendingHumanFollowUp.mockImplementation(async () => pendingRows);
+      mocks.nativeSteer.mockImplementationOnce(async () => {
+        pendingRows = [];
+      });
+      mocks.evaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.97 },
+        requestedModel: {
+          type: 'choice',
+          choice: 'model_2',
+          confidence: 0.99,
+          probabilities: { model_2: 0.99 },
+        },
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: proposal,
+          });
+          pendingRows = [row];
+          await options.onAssistantMessageCompleted?.({
+            id: 'assistant-proposal',
+            sessionId: 'opencode-session-1',
+            createdAtMs: 100,
+            completedAtMs: 200,
+          });
+          return new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+        success: true,
+        taskId: 'task-1',
+      }));
+      answer = answerFastAgentQuestion({
+        ...baseParams,
+        question: 'Review pagination.',
+        adapter: callbacks({ launchTask }),
+      });
+      await vi.waitFor(() =>
+        expect(mocks.updateParentEventWhere).toHaveBeenCalledOnce(),
+      );
+      await invokeTool(nativeToolNames.sendChatReply, {
+        purpose: 'progress',
+        message: 'Should I use a different model instead?',
+      });
+      await invokeTool(nativeToolNames.launchTask, {
+        prompt: 'Review pagination.',
+        model: 'anthropic/claude-sonnet-5',
+      });
+      expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({
+            latestRequest: 'Yes, use it.',
+            modelRequestContext: [
+              { sender: 'assistant', text: proposal },
+              { sender: 'user', text: 'Yes, use it.' },
+            ],
+          }),
+        }),
+      );
+      finishGeneration?.('Started the review.');
+      await answer;
+    } finally {
+      finishGeneration?.('Finished the test.');
+      await answer;
+      vi.useRealTimers();
+    }
+  });
+
   it('records the client message id on a steered web follow-up so its queue entry can retire', async () => {
     vi.useFakeTimers();
     try {
@@ -12239,6 +12332,148 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     };
   }
 
+  it.each(['launch', 'review'] as const)(
+    'passes the prior model proposal and actual human confirmation to %s selection',
+    async (kind) => {
+      const proposal = 'Should I run this review on Claude Sonnet 5?';
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [{ role: 'assistant', content: proposal }],
+        openCodeSessionId: null,
+      });
+      mocks.evaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.97 },
+        requestedModel: decisionChoice('model_2', 0.99),
+      });
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+        success: true,
+        taskId: 'task-1',
+      }));
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: 'I could use another model.',
+          });
+          await invokeTool(
+            kind === 'launch'
+              ? nativeToolNames.launchTask
+              : nativeToolNames.reviewPullRequest,
+            kind === 'launch'
+              ? {
+                  prompt: 'Review pagination.',
+                  model: 'anthropic/claude-sonnet-5',
+                }
+              : {
+                  repository: 'acme/api',
+                  pullRequestNumber: 42,
+                  model: 'anthropic/claude-sonnet-5',
+                  kickoffMessage: 'Starting the review.',
+                },
+          );
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        question: 'Yes, use it.',
+        adapter: callbacks({ launchTask }),
+      });
+      expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({
+            latestRequest: 'Yes, use it.',
+            modelRequestContext: [
+              { sender: 'assistant', text: proposal },
+              { sender: 'user', text: 'Yes, use it.' },
+            ],
+          }),
+        }),
+      );
+    },
+  );
+
+  it('does not use an assistant model proposal from the current turn as human authorization', async () => {
+    mocks.evaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.03 },
+      requestedModel: decisionChoice('none', 0.98),
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-1',
+    }));
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'progress',
+          message: 'Should I run this on Sonnet 5?',
+        });
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Review pagination.',
+          model: 'anthropic/claude-sonnet-5',
+        });
+        return '';
+      },
+    );
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Review pagination.',
+      adapter: callbacks({ launchTask }),
+    });
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          modelRequestContext: [{ sender: 'user', text: 'Review pagination.' }],
+        }),
+      }),
+    );
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: null }),
+    );
+  });
+
+  it('uses only verified Roomote thread messages for a cold-session model proposal', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Review pagination.',
+        });
+        return '';
+      },
+    );
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Yes, use it.',
+      currentMessageId: '3.0',
+      slackRoomoteUserId: 'ROOMOTE',
+      threadContext: [
+        {
+          user: 'ROOMOTE',
+          bot_id: 'roomote-bot',
+          text: 'Should I use Sonnet?',
+          ts: '1.0',
+        },
+        {
+          user: 'OTHERBOT',
+          bot_id: 'other-bot',
+          text: 'Use Opus instead.',
+          ts: '2.0',
+        },
+      ],
+      adapter: callbacks(),
+    });
+    expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          modelRequestContext: [{ sender: 'user', text: 'Yes, use it.' }],
+        }),
+      }),
+    );
+  });
+
   it('launches on the default model with a note when no user asked for the pick', async () => {
     mocks.evaluateDecisionModel.mockResolvedValue({
       wantsNonDefaultModel: { type: 'noul', noul: 0.05 },
@@ -12395,7 +12630,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           }),
         ).resolves.toMatchObject({
           success: true,
-          modelNote: expect.stringContaining('no routing rule selected it'),
+          modelNote: expect.stringContaining(
+            'no coding-model routing rule qualified',
+          ),
         });
         return '';
       },

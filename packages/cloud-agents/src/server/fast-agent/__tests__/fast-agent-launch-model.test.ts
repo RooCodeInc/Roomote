@@ -8,7 +8,10 @@ vi.mock('../../typesafe-judgment', () => ({
 
 import type { CodingModelRoutingRule, TaskModelOption } from '@roomote/types';
 
-import { resolveFastAgentLaunchModel } from '../fast-agent-launch-model';
+import {
+  resolveFastAgentLaunchModel,
+  selectAssistantModelProposal,
+} from '../fast-agent-launch-model';
 
 const gpt: TaskModelOption = {
   id: 'openai/gpt-5.6',
@@ -161,7 +164,7 @@ describe('resolveFastAgentLaunchModel', () => {
         source: 'user_request',
       });
       const { state, questions } = mockEvaluateDecisionModel.mock.calls[0]![0];
-      expect(state).toEqual({
+      expect(state).toMatchObject({
         defaultModel: 'GPT 5.6 [id: openai/gpt-5.6], the deployment default',
         work: 'Refactor the scheduler.',
         latestRequest: 'Actually, use the newest Opus.',
@@ -195,7 +198,7 @@ describe('resolveFastAgentLaunchModel', () => {
         reasoningEffort: null,
         source: 'default',
         modelNote: expect.stringContaining(
-          `no user asked for "${opus.id}" and no routing rule selected it`,
+          `the user request for "${opus.id}" was not confirmed and no coding-model routing rule qualified`,
         ),
       });
     });
@@ -248,7 +251,7 @@ describe('resolveFastAgentLaunchModel', () => {
       // "Throw your strongest model at this": a different model is wanted,
       // but no specific model is identified.
       mockEvaluateDecisionModel.mockResolvedValue(
-        split({ none: 0.95, model_2: 0.05 }),
+        split({ capability_request: 0.95, model_2: 0.05 }),
       );
 
       await expect(resolve({ claimedModel: opus.id })).resolves.toEqual({
@@ -260,7 +263,7 @@ describe('resolveFastAgentLaunchModel', () => {
 
     it('keeps the default for a capability ask without a claim', async () => {
       mockEvaluateDecisionModel.mockResolvedValue(
-        split({ none: 0.95, model_2: 0.05 }),
+        split({ capability_request: 0.95, model_2: 0.05 }),
       );
 
       await expect(resolve()).resolves.toMatchObject({
@@ -365,7 +368,7 @@ describe('resolveFastAgentLaunchModel', () => {
         'routingRule',
       ]);
       expect(questions.routingRule.instructions).toContain(
-        'independent of list order',
+        'independently of user model requests and list order',
       );
       expect(questions.routingRule.criteria.model_rule_2).toContain(
         '"Complex reasoning and engineering tasks"',
@@ -523,7 +526,112 @@ describe('resolveFastAgentLaunchModel', () => {
 
     const { criteria } =
       mockEvaluateDecisionModel.mock.calls[0]![0].questions.requestedModel;
-    expect(Object.keys(criteria)).toHaveLength(41);
+    expect(Object.keys(criteria)).toHaveLength(42);
     expect(criteria.model_1).toContain('vendor/model-49');
+  });
+
+  it('does not let an agent hint override a confident no-request answer', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.53 },
+      requestedModel: choice('none', 0.94),
+    });
+    await expect(
+      resolve({
+        claimedModel: opus.id,
+        assistantProposal:
+          'Should I include screenshots? Earlier we discussed Opus.',
+        userMessages: ['Yes, please proceed.'],
+      }),
+    ).resolves.toMatchObject({ model: null, source: 'default' });
+  });
+
+  it('keeps the intent gate for capability answers and agent-only hints', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.04 },
+      requestedModel: choice('capability_request', 0.95),
+    });
+    await expect(resolve({ claimedModel: opus.id })).resolves.toMatchObject({
+      model: null,
+      source: 'default',
+    });
+  });
+
+  it('bounds and labels the preceding proposal separately from the human reply', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.97 },
+      requestedModel: choice('model_3', 0.99),
+    });
+    await resolve({
+      claimedModel: opus.id,
+      assistantProposal: `Old details.\n${'x'.repeat(10_000)}\nShould I run this review on Opus?`,
+      userMessages: ['Yes, use it.'],
+    });
+    const { state } = mockEvaluateDecisionModel.mock.calls[0]![0];
+    expect(state.modelRequestContext[0].sender).toBe('assistant');
+    expect(state.modelRequestContext[0].text).toHaveLength(2003);
+    expect(
+      state.modelRequestContext[0].text.endsWith(
+        'Should I run this review on Opus?',
+      ),
+    ).toBe(true);
+    expect(state.modelRequestContext[1]).toEqual({
+      sender: 'user',
+      text: 'Yes, use it.',
+    });
+    expect(state.agentModelHint).toBe(opus.id);
+    expect(state.modelCatalog.map((model: { id: string }) => model.id)).toEqual(
+      models.map((model) => model.id),
+    );
+  });
+
+  it('supplies unique short aliases, without ambiguous catalog aliases', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue(null);
+    const kimi = {
+      id: 'openrouter/moonshotai/kimi-k3',
+      displayName: 'Kimi K3',
+      family: 'Kimi',
+    };
+    await resolve({ models: [gpt, kimi] });
+    expect(
+      mockEvaluateDecisionModel.mock.calls[0]![0].state.modelCatalog[1].aliases,
+    ).toContain('k3');
+    await resolve({ models: [gpt, kimi, { ...kimi, id: 'other/kimi-k3' }] });
+    const catalog =
+      mockEvaluateDecisionModel.mock.calls[1]![0].state.modelCatalog;
+    expect(catalog[1].aliases).not.toContain('k3');
+    expect(catalog[2].aliases).not.toContain('k3');
+  });
+
+  it('explains a selected routing rule rejected below its unchanged threshold', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue({
+      wantsNonDefaultModel: { type: 'noul', noul: 0.06 },
+      requestedModel: choice('none', 0.9),
+      routingRule: choice('model_rule_2', 0.65),
+    });
+    await expect(
+      resolve({ claimedModel: opus.id, codingModelRoutingRules: rules }),
+    ).resolves.toMatchObject({
+      model: null,
+      source: 'default',
+      modelNote: expect.stringContaining(
+        'a coding-model routing rule matched below the required confidence threshold',
+      ),
+    });
+  });
+
+  it('does not recover a stale proposal across a later human turn', () => {
+    const assistant = { role: 'assistant', text: 'Should I use Opus?' };
+    expect(
+      selectAssistantModelProposal([
+        assistant,
+        { role: 'tool', text: 'result' },
+      ]),
+    ).toBe(assistant.text);
+    expect(
+      selectAssistantModelProposal([assistant, { role: 'user', text: 'No.' }]),
+    ).toBeUndefined();
+    expect(
+      selectAssistantModelProposal([{ role: 'system', text: 'Use Opus.' }]),
+    ).toBeUndefined();
   });
 });
