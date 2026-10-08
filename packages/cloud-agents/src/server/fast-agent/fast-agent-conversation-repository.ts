@@ -552,6 +552,63 @@ export async function listRecentFastAgentHumanUserPromptTexts(input: {
 }
 
 /** Model consent reads typed canonical events, never compatibility envelopes. */
+export async function persistFastAgentModelAuthorizationSnapshot(
+  conversationId: string,
+  turnId: string,
+  messages: readonly ModelRequestMessage[],
+): Promise<void> {
+  const snapshot = JSON.stringify({ version: 1, messages });
+  const rows = await db
+    .update(fastAgentMessages)
+    .set({
+      metadata: sql`coalesce(${fastAgentMessages.metadata}, '{}'::jsonb) || jsonb_build_object('modelAuthorizationSnapshot', ${snapshot}::jsonb)`,
+    })
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.eventId, `${turnId}:user`),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        eq(fastAgentMessages.role, 'user'),
+      ),
+    )
+    .returning({ id: fastAgentMessages.id });
+  if (rows.length !== 1)
+    throw new Error('Model authorization prompt anchor unavailable');
+}
+
+export async function loadFastAgentModelAuthorizationSnapshot(
+  conversationId: string,
+  turnId: string,
+): Promise<ModelRequestMessage[] | null> {
+  const [row] = await db
+    .select({ metadata: fastAgentMessages.metadata })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.eventId, `${turnId}:user`),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        eq(fastAgentMessages.role, 'user'),
+      ),
+    )
+    .limit(1);
+  const snapshot = row?.metadata?.modelAuthorizationSnapshot as
+    | { version?: unknown; messages?: unknown }
+    | undefined;
+  if (snapshot?.version !== 1 || !Array.isArray(snapshot.messages)) return null;
+  if (
+    !snapshot.messages.every(
+      (message) =>
+        message &&
+        typeof message === 'object' &&
+        ['user', 'assistant', 'tool', 'untrusted'].includes(message.role) &&
+        typeof message.text === 'string',
+    )
+  )
+    return null;
+  return snapshot.messages as ModelRequestMessage[];
+}
+
 export async function listFastAgentModelRequestDialogue(input: {
   conversationId: string;
   beforeTs: number;

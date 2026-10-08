@@ -69,6 +69,8 @@ const mocks = vi.hoisted(() => ({
   loadTurnAttempt: vi.fn(),
   repliesBeforeHumanPrompt: vi.fn(),
   modelRequestDialogue: vi.fn(),
+  loadModelAuthorizationSnapshot: vi.fn(),
+  persistModelAuthorizationSnapshot: vi.fn(),
   getUnifiedSession: vi.fn(),
   createSessionStatusJudgmentRequest: vi.fn(),
   settleSessionStatusJudgmentTurn: vi.fn(),
@@ -214,6 +216,9 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   loadFastAgentTurnAttemptSummary: mocks.loadTurnAttempt,
   findFastAgentRepliesBeforeHumanPrompt: mocks.repliesBeforeHumanPrompt,
   listFastAgentModelRequestDialogue: mocks.modelRequestDialogue,
+  loadFastAgentModelAuthorizationSnapshot: mocks.loadModelAuthorizationSnapshot,
+  persistFastAgentModelAuthorizationSnapshot:
+    mocks.persistModelAuthorizationSnapshot,
 }));
 
 vi.mock('../../available-environments', () => ({
@@ -697,6 +702,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.findUnresolvedRequest.mockResolvedValue(null);
     mocks.repliesBeforeHumanPrompt.mockResolvedValue(undefined);
     mocks.modelRequestDialogue.mockResolvedValue([]);
+    mocks.loadModelAuthorizationSnapshot.mockResolvedValue(null);
+    mocks.persistModelAuthorizationSnapshot.mockResolvedValue(undefined);
     mocks.executeDb.mockResolvedValue([]);
     mocks.markDurableDelivered.mockResolvedValue(true);
     mocks.releaseDurableClaim.mockResolvedValue(true);
@@ -2839,6 +2846,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await vi.waitFor(() =>
         expect(mocks.updateParentEventWhere).toHaveBeenCalledOnce(),
       );
+      expect(
+        mocks.persistModelAuthorizationSnapshot.mock.calls.some(
+          ([, , messages]) =>
+            messages.at(-1)?.role === 'user' &&
+            messages.at(-1)?.text === 'Yes, use it.' &&
+            messages.some(
+              (message: { role: string; text: string }) =>
+                message.role === 'assistant' && message.text === proposal,
+            ),
+        ),
+      ).toBe(true);
+      expect(
+        mocks.persistModelAuthorizationSnapshot.mock.invocationCallOrder.at(-1),
+      ).toBeLessThan(mocks.updateParentEventWhere.mock.invocationCallOrder[0]!);
       await invokeTool(nativeToolNames.sendChatReply, {
         purpose: 'progress',
         message: 'Should I use a different model instead?',
@@ -12557,6 +12578,70 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({ model: null }),
     );
   });
+  it.each([
+    { resumedAfterInterruption: true },
+    { resumedAfterInferenceRetry: true },
+  ])(
+    'restores received steer revocation instead of appending the old request: %j',
+    async (resume) => {
+      const snapshot = [
+        { role: 'user', text: 'Use Claude Sonnet 5 for this review.' },
+        { role: 'user', text: 'Keep the deployment default.' },
+      ];
+      mocks.loadModelAuthorizationSnapshot.mockResolvedValue(snapshot);
+      mocks.loadTurnAttempt.mockResolvedValue({
+        events: [],
+        next: {
+          assistantOrdinal: 1,
+          toolOrdinal: 0,
+          retryNoticeOrdinal: 0,
+          turnSeq: 2,
+        },
+        prompt: { ts: 300, turnSeq: 0 },
+      });
+      mocks.evaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
+        requestedModel: decisionChoice('model_2', 0.99),
+      });
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+        success: true,
+        taskId: 'resumed-default',
+      }));
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Review pagination.',
+            model: 'anthropic/claude-sonnet-5',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        ...resume,
+        question: 'Use Claude Sonnet 5 for this review.',
+        adapter: callbacks({ launchTask }),
+      });
+      expect(mocks.modelRequestDialogue).not.toHaveBeenCalled();
+      expect(launchTask).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'openai/gpt-5.6' }),
+      );
+      expect(mocks.evaluateDecisionModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({
+            latestRequest: 'Keep the deployment default.',
+            eligibleModelIds: [],
+          }),
+        }),
+      );
+      expect(mocks.persistModelAuthorizationSnapshot).toHaveBeenCalledWith(
+        'conversation-1',
+        '100.2',
+        snapshot,
+      );
+    },
+  );
 
   it.each([
     {

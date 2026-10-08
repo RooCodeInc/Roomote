@@ -196,4 +196,18 @@ describe('model authorization evidence boundary', () => {
       ),
     ).not.toContain('k3');
   });
+  it.each([
+    'I want to use Opus for this.',
+    'I would like this to run on Opus.',
+    'I would like to use Opus for this work.',
+  ])('keeps a clear first-person request eligible: %s', (text) => {
+    expect(compile([user(text)]).candidateIds).toEqual([models[2]!.id]);
+  });
+  it.each([
+    'Do not use the default model.',
+    'Do we use the default model?',
+    'Use the default model?',
+  ])('does not force default from negation or a question: %s', (text) => {
+    expect(compile([user(text)]).forceDefault).toBe(false);
+  });
 });

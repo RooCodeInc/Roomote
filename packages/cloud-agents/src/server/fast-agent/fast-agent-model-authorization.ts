@@ -166,7 +166,7 @@ function modelsIn(text: string, aliases: readonly ModelAlias[]): string[] {
 }
 
 function namedDirective(text: string, aliases: readonly ModelAlias[]): boolean {
-  if (directive.test(text)) return true;
+  if (directive.test(text) || firstPersonDirective.test(text)) return true;
   return aliases.some((alias) => {
     const match = aliasPattern(alias.text).exec(text);
     if (!match) return false;
@@ -181,10 +181,12 @@ function namedDirective(text: string, aliases: readonly ModelAlias[]): boolean {
 
 const directive =
   /^(?:(?:actually|instead|please|yes)[,:]?\s+)*(?:(?:can|could|would|will) you\s+)?(?:use|run|execute|launch|delegate|switch|choose|select|prefer|want|go with)\b|^(?:engine|model)\s*[:=]|^(?:this|the|that|it)\b.{0,30}\b(?:goes|send|hand)\s+(?:this\s+|it\s+)?to\b|^on\s+|^(?:yes[,\s]+)?(?:it|this(?: task| work)?)['\s]*(?:s|is)\s+supposed\s+to\s+(?:run|use|execute)\b/i;
+const firstPersonDirective =
+  /^I\s+(?:want|would like)\s+(?:(?:this|it|this task|the work)\s+)?to\s+(?:use|run|execute|delegate|launch|switch|choose|select)\b|^I'd like\s+(?:(?:this|it|this task|the work)\s+)?to\s+(?:use|run|execute|delegate|launch|switch|choose|select)\b|^I\s+(?:want|prefer)\s+(?:this\s+)?(?:on|using)\b/i;
 const modelRevocation =
   /^no\b|\b(?:do not|don't|not|never|stop)\s+(?:use|run|switch|choose|select)\b|\b(?:cancel|revoke)\b.{0,30}\b(?:model|choice)\b/i;
 const defaultRequest =
-  /\b(?:keep|use|stay (?:with|on)|run on)\s+(?:the\s+)?(?:deployment\s+)?default(?:\s+model)?\b/i;
+  /^(?:(?:actually|instead|please|yes)[,:]?\s+)*(?:keep|use|stay (?:with|on)|run on)\s+(?:the\s+)?(?:deployment\s+)?default(?:\s+model)?\b/i;
 const capabilityRequest =
   /\b(?:use|run|switch|choose|select)\b.{0,45}\b(?:strongest|best|most capable|cheaper|less expensive|faster|quickest)\b.{0,25}\b(?:model|one)\b/i;
 const affirmative =
@@ -290,19 +292,24 @@ export function compileModelAuthorization(input: {
     for (const clause of clean
       .split(/(?<=[.!?;])\s+|\n+|,\s*/)
       .filter(Boolean)) {
-      if (defaultRequest.test(clause)) {
+      if (modelRevocation.test(clause)) {
         candidateIds = [];
         capability = false;
-        forceDefault = true;
+        forceDefault = false;
         proposal = undefined;
         evidence.length = 0;
         changed = true;
         continue;
       }
-      if (modelRevocation.test(clause)) {
+      if (
+        !clause.includes('?') &&
+        (defaultRequest.test(clause) ||
+          (firstPersonDirective.test(clause) &&
+            /\bdefault(?:\s+model)?\b/i.test(clause)))
+      ) {
         candidateIds = [];
         capability = false;
-        forceDefault = false;
+        forceDefault = true;
         proposal = undefined;
         evidence.length = 0;
         changed = true;
@@ -323,7 +330,10 @@ export function compileModelAuthorization(input: {
         evidence.length = 0;
         evidence.push({ kind: 'directive', text: clause, modelIds: ids });
         changed = true;
-      } else if (directive.test(clause) && capabilityRequest.test(clause)) {
+      } else if (
+        (directive.test(clause) || firstPersonDirective.test(clause)) &&
+        capabilityRequest.test(clause)
+      ) {
         candidateIds = [];
         capability = true;
         forceDefault = false;
@@ -363,4 +373,21 @@ export function compileModelAuthorization(input: {
     evidence,
     userMessages,
   };
+}
+
+/** Durable consent cache excludes raw tool/private payloads and pasted data. */
+export function snapshotModelRequestDialogue(
+  messages: readonly ModelRequestMessage[],
+  models: readonly TaskModelOption[],
+): ModelRequestMessage[] {
+  const aliases = catalogAliases(models);
+  return messages.slice(-20).map((message) => ({
+    role: message.role,
+    text:
+      message.role === 'tool'
+        ? modelsIn(message.text, aliases).join(' ')
+        : message.role === 'untrusted'
+          ? ''
+          : cleanModelRequestProse(message.text, models),
+  }));
 }

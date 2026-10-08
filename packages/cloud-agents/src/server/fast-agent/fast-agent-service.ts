@@ -49,6 +49,7 @@ import {
   isMemoryMcpServer,
   truncateAcpOutputText,
   type ReasoningEffort,
+  type TaskModelOption,
   type RunStatus,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
@@ -214,6 +215,8 @@ import {
   findRecentFastAgentToolResults,
   listRecentFastAgentHumanUserPromptTexts,
   listFastAgentModelRequestDialogue,
+  persistFastAgentModelAuthorizationSnapshot,
+  loadFastAgentModelAuthorizationSnapshot,
   claimFastAgentHumanFollowUpSteers,
   markFastAgentDurableTurnDelivered,
   markFastAgentInferenceRetryNoticeInterruption,
@@ -289,7 +292,10 @@ import {
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
 import { resolveFastAgentLaunchModel } from './fast-agent-launch-model';
-import type { ModelRequestMessage } from './fast-agent-model-authorization';
+import {
+  snapshotModelRequestDialogue,
+  type ModelRequestMessage,
+} from './fast-agent-model-authorization';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -2220,6 +2226,7 @@ export async function answerFastAgentQuestion({
   // repeat of the same terminal failure does not post the same closeout again.
   let priorAssistantMessage: string | undefined;
   let modelAuthorizationDialogue: ModelRequestMessage[] = [];
+  let modelAuthorizationModels: readonly TaskModelOption[] = [];
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
   let lastResolvedInferenceModel: string | undefined;
   let currentInstructionVersion = 0;
@@ -2996,8 +3003,24 @@ export async function answerFastAgentQuestion({
         const previousInstructionVersion = currentInstructionVersion;
         const steerInstructionVersion = previousInstructionVersion + 1;
         currentInstructionVersion = steerInstructionVersion;
-        const steeredModelDialogue = [...modelAuthorizationDialogue];
+        modelAuthorizationDialogue = [
+          ...modelAuthorizationDialogue,
+          ...batch.map(({ followUp }) => ({
+            role: 'user' as const,
+            text: followUp.question,
+          })),
+        ];
         try {
+          // Persist received human intent before delivery/acknowledgment. A
+          // crash or failed steer must never resurrect a revoked model choice.
+          await persistFastAgentModelAuthorizationSnapshot(
+            canonicalConversationId!,
+            turnId,
+            snapshotModelRequestDialogue(
+              modelAuthorizationDialogue,
+              modelAuthorizationModels,
+            ),
+          );
           await nativeSteer({
             messageId: buildFastAgentNativeSteerMessageId(
               firstRow.id,
@@ -3020,19 +3043,6 @@ export async function answerFastAgentQuestion({
         console.info(
           `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
         );
-        // Freeze the proposal before accepting a new human instruction. Never
-        // reinterpret assistant text emitted later in this turn as consent.
-        const laterAssistantMessages = modelAuthorizationDialogue.slice(
-          steeredModelDialogue.length,
-        );
-        modelAuthorizationDialogue = [
-          ...steeredModelDialogue,
-          ...batch.map(({ followUp }) => ({
-            role: 'user' as const,
-            text: followUp.question,
-          })),
-          ...laterAssistantMessages,
-        ];
         for (const { row, followUp } of batch) {
           injectedHumanFollowUpIds.add(row.id);
           steeredHumanRequests.push(followUp.question);
@@ -3690,6 +3700,7 @@ export async function answerFastAgentQuestion({
     const priorAssistant = session.compatibilityMessages
       .filter((message) => message.role === 'assistant')
       .at(-1);
+    modelAuthorizationModels = taskModelOptions.models;
     priorAssistantMessage = priorAssistant
       ? extractModelMessageText(priorAssistant).join('\n')
       : undefined;
@@ -3905,8 +3916,15 @@ export async function answerFastAgentQuestion({
     // place and time so the transcript still reads in order.
     const userPromptTs =
       previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now();
-    if (substantiveHumanInput) {
-      const replay = resumedAfterInterruption || resumedAfterInferenceRetry;
+    const replay = resumedAfterInterruption || resumedAfterInferenceRetry;
+    const savedModelDialogue = replay
+      ? await loadFastAgentModelAuthorizationSnapshot(session.id, turnId)
+      : null;
+    if (savedModelDialogue)
+      modelAuthorizationDialogue = savedModelDialogue.map((message) => ({
+        ...message,
+      }));
+    if (substantiveHumanInput && !savedModelDialogue) {
       let historyAvailable = true;
       if (!replay || previousAttempt?.prompt) {
         modelAuthorizationDialogue = await listFastAgentModelRequestDialogue({
@@ -3991,6 +4009,15 @@ export async function answerFastAgentQuestion({
     diagnostics.recordInitialHumanTurn(
       substantiveHumanInput ? userMessageResult?.initialHumanTurn : false,
     );
+    if (modelAuthorizationDialogue.length)
+      await persistFastAgentModelAuthorizationSnapshot(
+        session.id,
+        turnId,
+        snapshotModelRequestDialogue(
+          modelAuthorizationDialogue,
+          modelAuthorizationModels,
+        ),
+      );
     if (
       substantiveHumanInput ||
       (platformEvent && platformEventKind === 'automation')

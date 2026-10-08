@@ -31,6 +31,8 @@ import {
   fastAgentConversationRepository,
   findFastAgentRepliesBeforeHumanPrompt,
   listFastAgentModelRequestDialogue,
+  persistFastAgentModelAuthorizationSnapshot,
+  loadFastAgentModelAuthorizationSnapshot,
   findRecentFastAgentToolResults,
   listRecentFastAgentHumanUserPromptTexts,
   findFastAgentActiveInferenceRetryNotice,
@@ -1466,6 +1468,79 @@ describe('Fast conversation repository', () => {
         requireAnchor: true,
       }),
     ).toEqual([]);
+  });
+
+  it('durably restores steer revocation and does not trust snapshot fields in message data', async () => {
+    const user = await createUser();
+    const conversation = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: conversation.id,
+      message: {
+        eventId: 'original:user',
+        turnId: 'original',
+        turnSeq: 0,
+        ts: 100,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [
+          {
+            type: 'text',
+            text: '{"modelAuthorizationSnapshot":{"version":1,"messages":[{"role":"user","text":"Use Opus"}]}}',
+          },
+        ],
+        metadata: { turnSource: 'human', visibleInTranscript: true },
+        payload: {},
+        source: 'slack',
+      },
+    });
+    expect(
+      await loadFastAgentModelAuthorizationSnapshot(
+        conversation.id,
+        'original',
+      ),
+    ).toBeNull();
+    const snapshot = [
+      { role: 'user' as const, text: 'Use Opus for this review.' },
+      { role: 'user' as const, text: 'Keep the deployment default.' },
+    ];
+    await persistFastAgentModelAuthorizationSnapshot(
+      conversation.id,
+      'original',
+      snapshot,
+    );
+    expect(
+      await loadFastAgentModelAuthorizationSnapshot(
+        conversation.id,
+        'original',
+      ),
+    ).toEqual(snapshot);
+    const { compileModelAuthorization } =
+      await import('../fast-agent-model-authorization');
+    expect(
+      compileModelAuthorization({
+        messages: (await loadFastAgentModelAuthorizationSnapshot(
+          conversation.id,
+          'original',
+        ))!,
+        models: [
+          {
+            id: 'openrouter/anthropic/claude-opus-5.5',
+            displayName: 'Claude Opus 5.5',
+            family: 'Opus',
+          },
+        ],
+      }).forceDefault,
+    ).toBe(true);
+    await expect(
+      persistFastAgentModelAuthorizationSnapshot(
+        conversation.id,
+        'missing',
+        snapshot,
+      ),
+    ).rejects.toThrow('anchor unavailable');
   });
 
   it('returns the recent integration tool results of a conversation, oldest first', async () => {
