@@ -69,12 +69,12 @@ function createApp(auth: McpAuth) {
   return app;
 }
 
-function postModelSelection(app: Hono<never>, taskId: string) {
+function postModelSelection(app: Hono<never>, taskId: string, role = 'coding') {
   return app.request(`/tasks/${taskId}/model_selection`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      role: 'coding',
+      role,
       model: null,
       reasoningEffort: null,
     }),
@@ -82,6 +82,37 @@ function postModelSelection(app: Hono<never>, taskId: string) {
 }
 
 describe('updateTaskModelSelection', () => {
+  it.each(['audioVideo', 'unknown-role'])(
+    'validates and forwards model role %s',
+    async (role) => {
+      const app = createApp({
+        userId: 'user-1',
+        authContext: { userId: 'user-1' } as never,
+      });
+
+      const response = await postModelSelection(
+        app as never,
+        'target-task',
+        role,
+      );
+
+      if (role === 'audioVideo') {
+        expect(response.status).toBe(200);
+        expect(
+          mockApplyTaskModelSelectionToRun,
+        ).toHaveBeenCalledExactlyOnceWith({
+          runId: 42,
+          role,
+          model: null,
+          reasoningEffort: null,
+        });
+      } else {
+        expect(response.status).toBe(400);
+        expect(mockApplyTaskModelSelectionToRun).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   beforeEach(() => {
     mockApplyTaskModelSelectionToRun.mockReset();
     mockApplyTaskModelSelectionToRun.mockResolvedValue({

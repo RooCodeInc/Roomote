@@ -32,6 +32,7 @@ import {
   ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
   ROOMOTE_TASK_RUNTIME_MANAGEMENT_ACTIONS,
   TASK_MEMORY_LIMITS,
+  TASK_MODEL_OVERRIDE_ROLES,
   getRoomoteSearchStatusError,
   resolveRoomoteCommunicationTarget,
   roomoteManagementFieldSchemas,
@@ -691,10 +692,10 @@ const manageTasksInputSchema = {
   message: roomoteManagementFieldSchemas.message,
   attachments: roomoteManagementFieldSchemas.attachments,
   role: z
-    .enum(['coding', 'helper', 'vision', 'codeReview', 'explore', 'planning'])
+    .enum(['coding', ...TASK_MODEL_OVERRIDE_ROLES])
     .optional()
     .describe(
-      'Model role to change (required for update_models). "coding" is the main agent; the others cover sub-agent roles.',
+      'Model role to change (required for update_models). "coding" is the main agent; "audioVideo" handles audio transcription and video descriptions; the others cover sub-agent roles.',
     ),
   model: z
     .string()
