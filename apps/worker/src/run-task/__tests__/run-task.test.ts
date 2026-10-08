@@ -166,6 +166,7 @@ function withRoomoteSystemPrompt(instructions?: string): string {
 }
 
 vi.mock('@roomote/auth/client', () => ({
+  validateSandboxControlToken: vi.fn(),
   validateToken: vi.fn(),
 }));
 

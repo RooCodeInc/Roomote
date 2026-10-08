@@ -45,7 +45,7 @@ export function resolvePlatformApiTimeoutMs(): number {
 export async function fetchWithTimeout(
   url: string,
   options: RequestInit,
-  context: { label: string; timeoutMs?: number },
+  context: { label: string; timeoutMs?: number; timeoutMessage?: string },
 ): Promise<Response> {
   const timeoutMs = context.timeoutMs ?? resolvePlatformApiTimeoutMs();
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -58,7 +58,8 @@ export async function fetchWithTimeout(
   } catch (error) {
     if (timeoutSignal.aborted) {
       throw new Error(
-        `${context.label}: no response from the Roomote API within ${timeoutMs}ms; the request was aborted and is safe to retry.`,
+        context.timeoutMessage ??
+          `${context.label}: no response from the Roomote API within ${timeoutMs}ms; the request was aborted and is safe to retry.`,
       );
     }
 

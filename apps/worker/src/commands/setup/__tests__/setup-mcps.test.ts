@@ -1229,6 +1229,7 @@ describe('resolveBuiltInMcpServers', () => {
       R_APP_URL: 'https://api.test.com',
       ROOMOTE_WORKSPACE_PATH: '/workspace',
       ROOMOTE_TASK_ID: 'task-123',
+      AGENT_BROWSER_SESSION: 'task-123',
       ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-bypass-roomote-auth',
       ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
       ROOMOTE_TASK_TYPE: 'standard',
@@ -1253,6 +1254,7 @@ describe('resolveBuiltInMcpServers', () => {
     expect(roomoteEnv.R_APP_URL).toBe('https://api.test.com');
     expect(roomoteEnv.ROOMOTE_WORKSPACE_PATH).toBe('/workspace');
     expect(roomoteEnv.ROOMOTE_TASK_ID).toBe('task-123');
+    expect(roomoteEnv.AGENT_BROWSER_SESSION).toBe('task-123');
     expect(roomoteEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME).toBe(
       'x-bypass-roomote-auth',
     );

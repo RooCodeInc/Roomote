@@ -57,6 +57,7 @@ import {
   credentialEgressProxyHostAlias,
   inference,
   tts,
+  critique,
   mcp,
   mcpRouting,
   mcpOAuthMetadata,
@@ -274,6 +275,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/internal/credential-egress', credentialEgress);
   app.route('/api/credential-egress', credentialEgressProxy);
   app.route('/api/tts', tts);
+  app.route('/api/critique', critique);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
   app.route('/mcp', publicRoomoteMcp);

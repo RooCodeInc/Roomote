@@ -1,4 +1,4 @@
-import { createRunToken } from '@roomote/auth';
+import { createRunToken, createSandboxControlToken } from '@roomote/auth';
 import { httpBatchLink } from '@trpc/client';
 import superjson from 'superjson';
 import {
@@ -27,6 +27,7 @@ interface WithSandboxServerRpcClientOptions<TResult> {
   fetch?: SandboxServerRpcFetch;
   timeoutMs?: number;
   runTokenTimeoutMs?: number;
+  authMode?: 'run' | 'sandbox-control';
 }
 
 export async function withSandboxServerRpcClient<TResult>({
@@ -37,12 +38,12 @@ export async function withSandboxServerRpcClient<TResult>({
   fetch: sandboxFetch,
   timeoutMs = SANDBOX_SERVER_RPC_TIMEOUT_MS,
   runTokenTimeoutMs = SANDBOX_SERVER_RUN_TOKEN_TIMEOUT_MS,
+  authMode = 'run',
 }: WithSandboxServerRpcClientOptions<TResult>): Promise<TResult> {
-  const runToken = await createRunToken({
-    runId,
-    userId,
-    timeoutMs: runTokenTimeoutMs,
-  });
+  const runToken =
+    authMode === 'sandbox-control'
+      ? await createSandboxControlToken({ runId, timeoutMs: runTokenTimeoutMs })
+      : await createRunToken({ runId, userId, timeoutMs: runTokenTimeoutMs });
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);

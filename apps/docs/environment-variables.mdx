@@ -398,6 +398,8 @@ manifest changes.
 | `R_JUDGMENT_UPSTREAM_API_KEY`  | Optional          | Bearer credential for `R_JUDGMENT_UPSTREAM_URL`. Leave unset for a private-network upstream without auth. The credential stays on the control plane. |
 | `R_JUDGMENT_SHADOW`            | Optional          | `on` compares each Jev judgment with the Roomote-run upstream and logs per-question agreement for calibration. Select Jev as the judgment route to collect comparison data. |
 | `R_JUDGMENT_CAPTURE`           | Optional          | `on` writes every answered [judgment](/models#judgment-model) decision, with its state scrubbed of credential shapes and structured personal data, to the deployment's artifact bucket under `judgment-capture/`, for building a training set. Keeps decision text, so only for deployments you own. |
+| `CRITIQUE_BASE_URL`             | Optional          | Base URL for the optional Critique visual-quality service. When both Critique variables are set, frontend coding tasks can submit the current authenticated browser viewport and a sanitized rendered-DOM snapshot for advisory review. |
+| `CRITIQUE_API_TOKEN`            | Optional          | Bearer credential for `CRITIQUE_BASE_URL`. Keep it in deployment secret storage. It stays on the API control plane and is never injected into task sandboxes. |
 
 During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
 the Teams bot by default. Use **Show advanced config** after the Directory

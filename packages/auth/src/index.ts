@@ -72,6 +72,11 @@ export {
 } from './sandbox-oidc';
 
 export { configureAuthClientEnv } from './client-runtime';
+export {
+  createSandboxControlToken,
+  validateSandboxControlToken,
+  type SandboxControlTokenContext,
+} from './sandbox-control-token';
 
 export {
   assertEs256KeyPem,

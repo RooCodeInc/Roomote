@@ -131,6 +131,29 @@ describe('Env', () => {
     }
   });
 
+  it('validates optional Critique control-plane configuration', () => {
+    const configured = createRoomoteEnv({
+      ...productionCoreEnv,
+      CRITIQUE_BASE_URL: 'https://critique.example.com',
+      CRITIQUE_API_TOKEN: 'secret-token',
+    });
+    expect(configured.CRITIQUE_BASE_URL).toBe('https://critique.example.com');
+    expect(configured.CRITIQUE_API_TOKEN).toBe('secret-token');
+    expect(
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        CRITIQUE_BASE_URL: '',
+        CRITIQUE_API_TOKEN: '',
+      }).CRITIQUE_BASE_URL,
+    ).toBeUndefined();
+    expect(() =>
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        CRITIQUE_BASE_URL: 'not-a-url',
+      }),
+    ).toThrow();
+  });
+
   it('accepts optional additional GitHub App slugs, including an empty value', () => {
     expect(
       createRoomoteEnv(productionCoreEnv).R_GITHUB_ADDITIONAL_APP_SLUGS,

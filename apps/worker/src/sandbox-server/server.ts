@@ -10,6 +10,7 @@ import type {
   CodingHarness,
   RunTokenContext,
 } from '@roomote/types';
+import type { SandboxControlTokenContext } from '@roomote/auth/client';
 
 import type { HarnessLogger } from '../logging';
 import type { WorkerEnv } from '../env';
@@ -34,11 +35,11 @@ function getBearerToken(request: Request): string | undefined {
 }
 
 function authorizeSandboxToken(
-  auth: AuthTokenContext | RunTokenContext,
+  auth: AuthTokenContext | RunTokenContext | SandboxControlTokenContext,
   options: {
     runId?: number;
   },
-): AuthTokenContext | RunTokenContext {
+): AuthTokenContext | RunTokenContext | SandboxControlTokenContext {
   const { runId } = options;
 
   if ('runId' in auth && runId !== undefined && auth.runId !== runId) {
@@ -51,13 +52,19 @@ function authorizeSandboxToken(
 async function assertValidToken(
   token: string | undefined,
   validateToken:
-    | ((token: string) => Promise<AuthTokenContext | RunTokenContext>)
+    | ((
+        token: string,
+      ) => Promise<
+        AuthTokenContext | RunTokenContext | SandboxControlTokenContext
+      >)
     | undefined,
   logPrefix: string,
   options: {
     runId?: number;
   },
-): Promise<AuthTokenContext | RunTokenContext | null> {
+): Promise<
+  AuthTokenContext | RunTokenContext | SandboxControlTokenContext | null
+> {
   if (!validateToken) {
     return null;
   }
@@ -93,6 +100,7 @@ export function createServer({
   harness,
   harnessManager,
   validateToken,
+  validateSandboxControlToken,
   userEnv,
   workerEnv,
   allowTerminal = false,
@@ -155,8 +163,17 @@ export function createServer({
    * For WebSocket: reads `connectionParams.token`.
    */
   validateToken: (token: string) => Promise<AuthTokenContext | RunTokenContext>;
+  validateSandboxControlToken?: (
+    token: string,
+  ) => Promise<SandboxControlTokenContext>;
 }) {
-  const baseContext = (auth: AuthTokenContext | RunTokenContext | null) => ({
+  const baseContext = (
+    auth:
+      | AuthTokenContext
+      | RunTokenContext
+      | SandboxControlTokenContext
+      | null,
+  ) => ({
     workingDirectory,
     harnessLogger,
     harness,
@@ -207,7 +224,14 @@ export function createServer({
       createContext: async () => {
         const auth = await assertValidToken(
           getBearerToken(c.req.raw),
-          validateToken,
+          async (token) => {
+            try {
+              return await validateToken(token);
+            } catch (error) {
+              if (!validateSandboxControlToken) throw error;
+              return validateSandboxControlToken(token);
+            }
+          },
           '[SandboxServer]',
           { runId },
         );

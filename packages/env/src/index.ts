@@ -186,6 +186,10 @@ const serverSchema = {
   // feature is off and the endpoint 404s.
   R_ELEVENLABS_API_KEY: z.string().min(1).optional(),
   R_ELEVENLABS_VOICE_ID: z.string().min(1).optional(),
+  // Optional paid visual review. The token stays on the control plane; task
+  // sandboxes send bounded captures through the authenticated API proxy.
+  CRITIQUE_BASE_URL: z.string().url().optional(),
+  CRITIQUE_API_TOKEN: z.string().min(1).optional(),
   // OpenAI key for the live voice conversation feature (realtime
   // transcription + spoken replies in the web app). Falls back to the
   // deployment's general OPENAI_API_KEY when unset. The key stays on the
@@ -685,6 +689,8 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS',
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
+  'CRITIQUE_BASE_URL',
+  'CRITIQUE_API_TOKEN',
   'R_VOICE_OPENAI_API_KEY',
   'R_TYPESAFE_API_KEY',
   'R_JUDGMENT_MODEL',

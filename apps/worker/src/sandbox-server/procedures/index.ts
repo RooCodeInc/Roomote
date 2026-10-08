@@ -18,6 +18,7 @@ export { scrubSnapshotSecrets } from './scrubSnapshotSecrets';
 export { restoreScrubbedCredentials } from './restoreScrubbedCredentials';
 export { prepareRepository } from './prepareRepository';
 export { listRepositories } from './listRepositories';
+export { critiqueCapture } from './critiqueCapture';
 
 // Queries
 export { getRuntimeState } from './getRuntimeState';
