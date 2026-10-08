@@ -78,8 +78,8 @@ export function EnvironmentRoutingOverview() {
 
       {hasLoadError ? (
         <div role="alert" className="flex flex-wrap items-center gap-2">
-          <p className="text-sm text-destructive">
-            Couldn&apos;t load routing rules. Retry before making changes.
+          <p className="text-sm">
+            Couldn&apos;t load routing rules. Retry before saving changes.
           </p>
           <Button
             type="button"
