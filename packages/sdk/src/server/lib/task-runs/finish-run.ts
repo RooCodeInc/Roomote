@@ -59,6 +59,7 @@ import {
   distillTaskRunTurnMemory,
   finalizeGithubPrReviewComment,
   getTaskUrl,
+  getTaskSessionUrl,
   releaseTaskRun,
   retryFailedTaskStart,
   suggestSlackQuestionChannels,
@@ -1000,7 +1001,7 @@ async function cleanupGithubPrReviewArtifacts(
                 : 'canceled';
           const terminalStatus = buildTerminalReviewStatus({
             outcome,
-            taskUrl: getTaskUrl({
+            taskUrl: await getTaskSessionUrl({
               taskId: run.taskId,
               utm: {
                 source: 'github-comment',

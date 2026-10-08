@@ -439,6 +439,12 @@ interface McpProxyConfig {
   guardUpstreamEgress?: { allowedPrivateCidrs?: string };
   /** Reject request bodies larger than this many bytes (413). */
   maxRequestBodyBytes?: number;
+  /** Server-owned request normalization, after authorization and tool approval. */
+  transformRequest?: (input: {
+    auth: McpAuthContext;
+    request: unknown;
+    headers: Headers;
+  }) => Promise<unknown>;
 }
 
 export class McpProxyError extends Error {
@@ -1219,6 +1225,16 @@ export function createMcpProxy(config: McpProxyConfig) {
         }
       }
 
+      if (config.transformRequest && parsedBody !== undefined) {
+        upstreamBody = JSON.stringify(
+          await config.transformRequest({
+            auth,
+            request: parsedBody,
+            headers: c.req.raw.headers,
+          }),
+        );
+      }
+
       const proxyHeaders = buildProxyRequestHeaders(
         credentials.authHeader,
         c.req.raw.headers,
@@ -1530,6 +1546,14 @@ export function createMcpProxy(config: McpProxyConfig) {
         },
       );
     } catch (error) {
+      if (error instanceof McpProxyError) {
+        return jsonRpcErrorResponse(
+          error.httpStatus,
+          -32000,
+          error.message,
+          getJsonRpcRequestId(parsedBody),
+        );
+      }
       const classification = classifyProxyFailure(error, proxySignal);
       const logDetails = {
         requestId,

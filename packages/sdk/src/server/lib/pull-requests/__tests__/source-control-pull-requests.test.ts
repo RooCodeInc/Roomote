@@ -78,6 +78,16 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   },
   getPrBodyAttributionLine: (...args: unknown[]) =>
     mockGetPrBodyAttributionLine(...args),
+  getTaskSessionUrl: async ({
+    taskId,
+    utm,
+  }: {
+    taskId: string;
+    utm: { campaign: string };
+  }) => {
+    const session = await mockGetSessionForTask({}, taskId);
+    return `https://example.com/sessions/${session?.id ?? 'task-session'}?utm_source=github-comment&utm_medium=link&utm_campaign=${utm.campaign}`;
+  },
   resolveLaunchTaskCommitAuthor: (...args: unknown[]) =>
     mockResolveLaunchTaskCommitAuthor(...args),
   resolveRunCommitAuthor: (...args: unknown[]) =>
@@ -1809,7 +1819,7 @@ describe('optional targetBranch', () => {
         expect.objectContaining({
           ...expectedMetadata,
           taskUrl:
-            'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+            'https://example.com/sessions/task-session?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
         }),
       );
       expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
@@ -1964,7 +1974,7 @@ Done.`,
       expect.objectContaining({
         taskSurface: 'web',
         taskUrl:
-          'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+          'https://example.com/sessions/task-session?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       }),
     );
   });
@@ -1986,27 +1996,26 @@ Done.`,
       queriesSession: true,
     },
     {
-      label: 'keeps the task link for a direct coding task',
+      label: 'uses the canonical session for a direct coding task',
       payload: { repo: 'acme/web' },
       linkedSession: null,
       expectedTaskUrl:
-        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
-      queriesSession: false,
+        'https://example.com/sessions/task-session?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+      queriesSession: true,
     },
     {
-      label: 'falls back to the task link when the session is absent',
+      label: 'uses the repaired canonical session when the session is absent',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
       },
       linkedSession: null,
       expectedTaskUrl:
-        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+        'https://example.com/sessions/task-session?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       queriesSession: true,
     },
     {
-      label:
-        'falls back to the task link when the session association does not match',
+      label: 'uses persisted linkage instead of a stale payload conversation',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -2017,11 +2026,11 @@ Done.`,
         fastConversationId: '33333333-3333-4333-8333-333333333333',
       },
       expectedTaskUrl:
-        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+        'https://example.com/sessions/22222222-2222-4222-8222-222222222222?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       queriesSession: true,
     },
     {
-      label: 'falls back to the task link when the session is hidden',
+      label: 'links hidden automation sessions which support direct access',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -2032,7 +2041,7 @@ Done.`,
         fastConversationId: '11111111-1111-4111-8111-111111111111',
       },
       expectedTaskUrl:
-        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+        'https://example.com/sessions/22222222-2222-4222-8222-222222222222?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       queriesSession: true,
     },
   ])('$label', async (testCase) => {
@@ -2143,7 +2152,8 @@ Done.`,
         },
       });
 
-      const expectedUrl = `https://example.com/${delegated ? 'sessions/current-session' : 'task/task-123'}?utm_source=github-comment&utm_medium=link&utm_campaign=standard`;
+      const expectedUrl =
+        'https://example.com/sessions/current-session?utm_source=github-comment&utm_medium=link&utm_campaign=standard';
       expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
         expect.objectContaining({
           body: `${attributionBody(`Opened on behalf of ${prAttribution ? '@current' : '@original'}.`, `[View the task](${expectedUrl})`)}\n\n## Changes\n\nKeep this body.`,

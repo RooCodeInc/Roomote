@@ -4,6 +4,9 @@ import { configureAuthClientEnv } from '@roomote/auth/client';
 import {
   db,
   eq,
+  ensureSessionForFastConversation,
+  fastAgentConversations,
+  sessions,
   githubInstallationFactory,
   githubInstallations,
   inArray,
@@ -17,6 +20,7 @@ import {
   users,
 } from '@roomote/db/server';
 import { getAllowedRouterMcpToolNames } from '@roomote/cloud-agents/router-mcp-policy';
+import { INTEGRATION_TOOL_FAST_CONVERSATION_HEADER } from '@roomote/types';
 import type { Variables } from '../../../types';
 
 const mocks = vi.hoisted(() => ({
@@ -230,6 +234,57 @@ describe('GitHub MCP proxy', () => {
     );
   }
 
+  it('normalizes native PR creation at the authorized proxy boundary', async () => {
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: actor.id,
+        surface: 'web',
+        workspaceId: actor.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await ensureSessionForFastConversation(
+      db,
+      conversation!.id,
+    );
+    try {
+      const response = await post(
+        {
+          jsonrpc: '2.0',
+          id: 7,
+          method: 'tools/call',
+          params: {
+            name: 'create_pull_request',
+            arguments: {
+              owner,
+              repo: 'example',
+              title: 'Change',
+              head: 'feature',
+              base: 'main',
+              body: '## Changes\n\nDone.',
+            },
+          },
+        },
+        app(),
+        { [INTEGRATION_TOOL_FAST_CONVERSATION_HEADER]: conversation!.id },
+      );
+      expect(response.status).toBe(200);
+      const init = mocks.upstream.mock.calls[0]![1] as RequestInit;
+      const body = JSON.parse(init.body as string).params.arguments
+        .body as string;
+      expect(body).toContain(`[View the session](`);
+      expect(body).toContain(`/sessions/${session.id}?`);
+      expect(body).toContain('## Changes\n\nDone.');
+      expectMintedFor({ installation, repository });
+    } finally {
+      await db.delete(sessions).where(eq(sessions.id, session.id));
+      await db
+        .delete(fastAgentConversations)
+        .where(eq(fastAgentConversations.id, conversation!.id));
+    }
+  });
+
   it.each(['closed', 'open'])(
     'forwards only the requested %s state using the target repository installation',
     async (state) => {
@@ -406,13 +461,7 @@ describe('GitHub MCP proxy', () => {
     },
   );
 
-  it.each([
-    'create_pull_request',
-    'issue_write',
-    'delete_file',
-    'actions_run_trigger',
-    'push_files',
-  ])(
+  it.each(['issue_write', 'delete_file', 'actions_run_trigger', 'push_files'])(
     'lets a member call %s like a coding task could through gh',
     async (name) => {
       expect((await call(name, args)).status).toBe(200);

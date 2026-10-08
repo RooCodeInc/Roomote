@@ -178,6 +178,17 @@ export function formatPrBodyAttribution(
   return `> ${PR_BODY_ATTRIBUTION_INLINE_PREFIX}${PR_BODY_ATTRIBUTION_START_MARKER}${provenance}${PR_BODY_ATTRIBUTION_END_MARKER} ${instruction}`;
 }
 
+/** Replace leading Roomote provenance blocks while keeping the authored body. */
+export function prependPrBodyAttribution(body: string, line: string): string {
+  let content = body.trimStart();
+  while (content) {
+    const markers = findPrBodyAttributionMarkers(content);
+    if (!markers || content.slice(0, markers.lineStart).trim()) break;
+    content = content.slice(markers.lineEnd).trimStart();
+  }
+  return content ? `${line}\n\n${content}` : line;
+}
+
 export function findPrBodyAttributionLine(body: string): string | null {
   const markers = findPrBodyAttributionMarkers(body);
   return markers ? `> ${body.slice(markers.start, markers.end)}` : null;

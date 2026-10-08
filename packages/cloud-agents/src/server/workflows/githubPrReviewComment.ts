@@ -566,7 +566,7 @@ export function buildTerminalReviewStatus({
 }): string {
   const link = buildGithubCommentActionLink({
     href: taskUrl,
-    label: 'See task',
+    label: 'See session',
   });
 
   return `${TERMINAL_REVIEW_STATUS_MESSAGES[outcome]} ${link}`;

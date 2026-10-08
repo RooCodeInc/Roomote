@@ -109,7 +109,7 @@ export async function githubPrReviewFollowUp({
     comment_header_starting: '',
     comment_header_completed: '',
     task_link_follow: `[Follow](${taskRunUrl})`,
-    task_link_see: `[See task](${taskRunUrl})`,
+    task_link_see: `[See session](${taskRunUrl})`,
     pull_request_details: getPrDetails({ fullName, pr }),
     ...(commentId ? { triggering_comment_id: commentId } : {}),
     triggering_comment: getTriggeringComment(triggeringComment),
