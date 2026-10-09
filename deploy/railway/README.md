@@ -524,7 +524,7 @@ Those redeploys can be automated from any CI system against Railway's public
 GraphQL API using a **project token** (scoped to a single environment).
 Resolve the environment from the token itself
 (`query { projectToken { environmentId } }`), find the services whose image
-starts with `ghcr.io/<owner>/roomote-app`, then for each issue
+starts with `ghcr.io/<owner>/roomote-app`, then, for each service, issue
 `serviceInstanceUpdate` pointing at an immutable tag (e.g.
 `develop-<short-sha>` or `v1.2.3`) followed by `serviceInstanceDeploy`. Both
 mutations are idempotent, so a retried or partially failed run is safe to
