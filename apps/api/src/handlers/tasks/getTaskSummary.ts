@@ -30,6 +30,7 @@ import {
 } from './helpers';
 import { logHandlerError } from '../utils';
 import { listArtifactsByTask } from '../artifacts/service';
+import { configuredTaskModels } from '../configured-models';
 
 function buildArtifactViewUrl(input: {
   taskId: string;
@@ -169,6 +170,9 @@ export async function getTaskSummary(
       harness: task.harness,
       createdAt: task.timestamp,
       taskRunStatus: latestRun?.status ?? null,
+      configuredModels: latestRun
+        ? configuredTaskModels(latestRun.payload)
+        : null,
       taskPhase: latestRun?.taskPhase ?? null,
       taskRunError:
         latestRun?.error ??

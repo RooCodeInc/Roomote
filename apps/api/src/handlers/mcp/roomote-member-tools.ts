@@ -128,6 +128,8 @@ export function registerRoomoteMemberTools(
               body: JSON.stringify({
                 message: params.message,
                 attachments: params.attachments,
+                model: params.model,
+                reasoningEffort: params.reasoningEffort,
               }),
             }),
           );

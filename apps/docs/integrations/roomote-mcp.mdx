@@ -24,6 +24,52 @@ it starts a session or sends a follow-up. A message accepts up to 20 attachments
 and 16 MiB of decoded attachment data in total. See [File attachments](/file-attachments)
 for supported formats, processing behavior, and request limits.
 
+### Choose a model when starting
+
+To choose the session's configured model, call `manage_tasks` with
+`action: "start"`, `message`, and an exact `model` ID from `list_models`.
+Optionally include `reasoningEffort` only when the listed metadata publishes
+that value in `supportedReasoningEfforts`. The native
+`POST /api/mcp/sessions` accepts the same fields with a Roomote user auth token:
+
+```json
+{
+  "message": "Inspect the current work",
+  "model": "openai/gpt-5.6-luna",
+  "reasoningEffort": "high"
+}
+```
+
+The response remains `{ "sessionId": "...", "fastConversationId": "...",
+"queued": true }`. Unknown, disabled or non-exact IDs, unsupported efforts,
+and efforts whose supported values are unknown are refused with HTTP 400;
+the selection is never replaced with a different choice. Effort requires an
+explicit model. Omit both fields to inherit defaults. These session choices
+do not automatically select models for delegated tasks.
+
+Session summaries expose `configuredModel`; task summaries and a session's
+child task `latestRun` expose `configuredModels`, keyed by `coding` and any
+stored non-coding role overrides. For example:
+
+```json
+{
+  "configuredModel": {
+    "model": "openai/gpt-5.6-luna",
+    "reasoningEffort": "high",
+    "modelSource": "explicit",
+    "reasoningEffortSource": "explicit"
+  }
+}
+```
+
+This example illustrates the summary's additional field. `explicit` means a
+stored choice/override, not an attribution to a particular user. `default`
+with a null value means no stored override and inheritance from configuration;
+it does not resolve or snapshot the inherited default. Sources are independent
+for model and effort. A task without a latest run has `configuredModels: null`.
+These fields describe current configuration only, not the model actually used
+after resolution, routing or provider fallback, and do not prove execution.
+
 ### Check on and steer existing work
 
 Search finds Sessions by default. Once you find one, provide its Session ID to
