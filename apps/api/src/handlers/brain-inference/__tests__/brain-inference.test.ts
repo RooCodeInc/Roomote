@@ -297,6 +297,200 @@ describe('local inference upstreams', () => {
 });
 
 describe('helper-model synthesis', () => {
+  it('preserves Responses instructions, developer/assistant context and string input', async () => {
+    mockGenerateTrackedNonTaskText.mockResolvedValue('answer');
+    const response = await post('/v1/responses', {
+      token: GATEWAY_TOKEN,
+      body: {
+        model: BRAIN_HELPER_MODEL_ID,
+        instructions: 'Be concise.',
+        input: [
+          { role: 'developer', content: 'Use retained evidence.' },
+          {
+            role: 'assistant',
+            type: 'message',
+            content: [{ type: 'output_text', text: 'Previous answer.' }],
+          },
+          { role: 'user', content: 'Continue.' },
+        ],
+        text: { format: { type: 'json_object' } },
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(mockGenerateTrackedNonTaskText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system:
+          'Be concise.\n\nUse retained evidence.\n\nRespond with only valid JSON. No prose, no code fences.',
+        prompt: 'Assistant: Previous answer.\n\nContinue.',
+        surface: 'brain_synthesis',
+        modelRole: 'small',
+      }),
+    );
+    const direct = await post('/v1/responses', {
+      token: GATEWAY_TOKEN,
+      body: { model: BRAIN_HELPER_MODEL_ID, input: 'Plain text.' },
+    });
+    expect(direct.status).toBe(200);
+    expect(mockGenerateTrackedNonTaskText).toHaveBeenLastCalledWith(
+      expect.objectContaining({ prompt: 'Plain text.' }),
+    );
+  });
+
+  it.each([
+    {
+      input: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_image', image_url: 'https://example.invalid/image' },
+          ],
+        },
+      ],
+    },
+    { input: [{ type: 'function_call', name: 'lookup', arguments: '{}' }] },
+    { input: 'hello', tools: [{ type: 'function', name: 'lookup' }] },
+    { input: 'hello', previous_response_id: 'resp_previous' },
+  ])(
+    'refuses unsupported Responses input without pretending it was processed: %j',
+    async (body) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const response = await post('/v1/responses', {
+        token: GATEWAY_TOKEN,
+        body: { model: BRAIN_HELPER_MODEL_ID, ...body },
+      });
+      expect(response.status).toBe(400);
+      expect(mockGenerateTrackedNonTaskText).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects streaming Responses helper requests', async () => {
+    const response = await post('/v1/responses', {
+      token: GATEWAY_TOKEN,
+      body: { model: BRAIN_HELPER_MODEL_ID, input: 'hello', stream: true },
+    });
+    expect(response.status).toBe(400);
+    expect(mockGenerateTrackedNonTaskText).not.toHaveBeenCalled();
+  });
+
+  it('keeps native Responses operator overrides on the original provider request', async () => {
+    mockEnv.R_BRAIN_MODEL = 'openai/gpt-5.4';
+    const fetchMock = vi.fn(async () => Response.json({ output: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const body = {
+      model: BRAIN_HELPER_MODEL_ID,
+      input: 'hello',
+      instructions: 'Be concise.',
+      max_output_tokens: 32,
+      text: { format: { type: 'json_object' } },
+    };
+    const response = await post('/v1/responses', {
+      token: GATEWAY_TOKEN,
+      body,
+    });
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/responses',
+      expect.objectContaining({
+        body: JSON.stringify({ ...body, model: 'openai/gpt-5.4' }),
+      }),
+    );
+    expect(mockGenerateTrackedNonTaskText).not.toHaveBeenCalled();
+  });
+
+  it('serves non-sentinel Responses through the helper when no Brain provider exists', async () => {
+    mockResolveBrainInferenceProvider.mockResolvedValue(null);
+    mockGenerateTrackedNonTaskText.mockResolvedValue('fallback answer');
+    const response = await post('/v1/responses', {
+      token: GATEWAY_TOKEN,
+      body: { model: 'gpt-5.4', input: 'hello' },
+    });
+    expect(response.status).toBe(200);
+    expect(mockGenerateTrackedNonTaskText).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: 'hello', modelRole: 'small' }),
+    );
+  });
+
+  it('reports helper Responses failure without leaking upstream details', async () => {
+    mockGenerateTrackedNonTaskText.mockRejectedValue(
+      new Error('private fixture diagnostic'),
+    );
+    const response = await post('/v1/responses', {
+      token: GATEWAY_TOKEN,
+      body: { model: BRAIN_HELPER_MODEL_ID, input: 'hello' },
+    });
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      error: 'Brain helper-model synthesis failed',
+    });
+  });
+
+  it('answers native Responses sentinel requests without forwarding a provider model', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response('{"error":{"message":"invalid model"}}', { status: 400 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    mockGenerateTrackedNonTaskText.mockResolvedValue(
+      '{"queries":["related query"]}',
+    );
+    const response = await post('/v1/responses', {
+      token: GATEWAY_TOKEN,
+      body: {
+        model: BRAIN_HELPER_MODEL_ID,
+        instructions: 'Expand the query.',
+        input: [
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: 'retained draft intent' }],
+          },
+        ],
+        max_output_tokens: 128,
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'response',
+            schema: {
+              type: 'object',
+              properties: {
+                queries: { type: 'array', items: { type: 'string' } },
+              },
+              required: ['queries'],
+            },
+          },
+        },
+      },
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toMatchObject({
+      object: 'response',
+      status: 'completed',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'output_text', text: '{"queries":["related query"]}' },
+          ],
+        },
+      ],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockGenerateTrackedNonTaskText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelRole: 'small',
+        prompt: 'retained draft intent',
+        maxOutputTokens: 128,
+        system: expect.stringContaining('Expand the query.'),
+      }),
+    );
+    expect(mockGenerateTrackedNonTaskText.mock.calls[0]?.[0].system).toContain(
+      '"queries"',
+    );
+  });
+
   it('answers the sentinel with the deployment helper model, never a provider', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
