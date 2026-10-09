@@ -55,6 +55,7 @@ import type { McpAuth } from './middleware';
 import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
 import { resolveRoomoteMemberAuth } from './roomote-member-auth';
+import { listMemberModels } from './models';
 import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
 import { registerRoomoteCustomSkillsTool } from './roomote-custom-skills-tool';
 import { registerRoomoteArtifactTool } from './roomote-artifacts-tool';
@@ -568,6 +569,8 @@ function createRoomoteMcpRouter(options: {
   allowLegacyAudience: boolean;
 }) {
   const router = new Hono<{ Variables: Variables }>();
+
+  if (options.memberTools) router.get('/models', listMemberModels);
 
   router.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
     const transport = createRoomoteTransport();

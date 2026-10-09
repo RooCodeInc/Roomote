@@ -69,6 +69,51 @@ new instruction must take effect immediately, ask your MCP client to steer the
 running task; steering interrupts the active turn instead of adding the message
 to the task queue.
 
+### Discover available models
+
+Use `manage_tasks` with `action: "list_models"` to discover the deployment's
+enabled models available to your signed-in account. All active members share
+this deployment catalog. Disabled models are excluded; discovery does not
+contact inference providers or guarantee current provider quota or capacity.
+
+For HTTP clients, `GET /mcp/models` accepts the same OAuth bearer access token
+as `/mcp` (the `/mcp` resource and `mcp:roomote` scope). It also accepts Roomote's
+existing user auth tokens. Run tokens are not accepted.
+
+- `limit`: integer from 1 to 100, default 50
+- `query`: case-insensitive substring of exact ID, display name or family;
+  trimmed, at most 200 characters
+- `cursor`: opaque `nextCursor` from the previous response; keep the same query
+
+```json
+{
+  "models": [
+    {
+      "id": "openai/gpt-5.6-luna",
+      "displayName": "GPT 5.6 Luna",
+      "family": "GPT",
+      "metadata": null,
+      "isDefault": true
+    }
+  ],
+  "defaultModelId": "openai/gpt-5.6-luna",
+  "nextCursor": null
+}
+```
+
+This is an illustrative response. IDs are returned unchanged from the enabled
+catalog. `metadata` preserves existing model metadata, including
+`supportsReasoning` and `supportedReasoningEfforts` when known. Missing metadata
+means unknown, not unsupported; discovery does not infer thinking levels.
+`defaultModelId` is the configured task default even if it is absent from the
+filtered page. `isDefault` marks a matching entry. These are task-catalog
+defaults, not a promise about the model an individual session or run uses.
+
+Results are ordered by exact ID. Follow `nextCursor` until it is `null`;
+each page is bounded even for large catalogs. Pages reflect current settings,
+not a frozen snapshot: restarting enumeration is appropriate if settings change.
+Invalid limits, queries or cursors return HTTP 400. Responses are not cached.
+
 ### Bring in Roomote and chat context
 
 Ask what your Roomote deployment can do or which integrations are connected.
