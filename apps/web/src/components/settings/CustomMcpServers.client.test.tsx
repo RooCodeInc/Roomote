@@ -38,7 +38,9 @@ const {
   toastSuccessMock,
   toastErrorMock,
   approvals,
+  toolsRequestMock,
 } = vi.hoisted(() => ({
+  toolsRequestMock: vi.fn(),
   approvals: {
     experimentEnabled: false,
     modeOverride: null as string | null,
@@ -134,7 +136,7 @@ vi.mock('@/trpc/client', () => ({
           options: Record<string, unknown> = {},
         ) => ({
           queryKey: ['customMcpServers', 'listTools', input.id],
-          queryFn: async () => ({ tools: state.tools }),
+          queryFn: () => toolsRequestMock(input.id),
           ...options,
         }),
       },
@@ -255,11 +257,14 @@ function renderHarness() {
     defaultOptions: { queries: { retry: false } },
   });
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <Harness />
-    </QueryClientProvider>,
-  );
+  return {
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <Harness />
+      </QueryClientProvider>,
+    ),
+    queryClient,
+  };
 }
 
 describe('useCustomMcpServers', () => {
@@ -270,6 +275,8 @@ describe('useCustomMcpServers', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    toolsRequestMock.mockReset();
+    toolsRequestMock.mockImplementation(async () => ({ tools: state.tools }));
     state.availability = { enabled: true };
     state.servers = [];
   });
@@ -354,6 +361,155 @@ describe('useCustomMcpServers', () => {
       screen.getByRole('heading', {
         name: 'Manage tools for internal-tools',
       }),
+    ).toBeInTheDocument();
+  });
+
+  it('retries a failed catalog in place, keeps the error during retry, and prevents duplicate requests', async () => {
+    state.servers = [buildServer()];
+    toolsRequestMock.mockRejectedValueOnce(new Error('Catalog unavailable'));
+    renderHarness();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Manage internal-tools tools',
+      }),
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Catalog unavailable',
+    );
+    expect(
+      screen.queryByRole('group', { name: 'Approval mode for search' }),
+    ).toBeNull();
+
+    let failRetry!: (error: Error) => void;
+    toolsRequestMock.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          failRetry = reject;
+        }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry loading tools' }),
+    );
+    await waitFor(() => expect(toolsRequestMock).toHaveBeenCalledTimes(2));
+    const retry = screen.getByRole('button', { name: 'Retry loading tools' });
+    expect(retry).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Catalog unavailable');
+    fireEvent.click(retry);
+    expect(toolsRequestMock).toHaveBeenCalledTimes(2);
+    failRetry(new Error('Still unavailable'));
+    await waitFor(() => expect(retry).toBeEnabled());
+    expect(screen.getByRole('alert')).toHaveTextContent('Still unavailable');
+
+    toolsRequestMock.mockResolvedValueOnce({
+      tools: [{ name: 'search', description: null, enabled: true }],
+    });
+    fireEvent.click(retry);
+    expect(
+      await screen.findByRole('group', { name: 'Approval mode for search' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(
+      screen.getByRole('heading', { name: 'Manage tools for internal-tools' }),
+    ).toBeInTheDocument();
+  });
+
+  it('recovers a failed refresh without showing stale tool controls as current', async () => {
+    state.servers = [buildServer()];
+    toolsRequestMock.mockResolvedValueOnce({
+      tools: [{ name: 'old_tool', description: null, enabled: true }],
+    });
+    const { queryClient } = renderHarness();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Manage internal-tools tools',
+      }),
+    );
+    expect(
+      await screen.findByRole('group', { name: 'Approval mode for old_tool' }),
+    ).toBeInTheDocument();
+    toolsRequestMock.mockRejectedValueOnce(new Error('Refresh unavailable'));
+    await queryClient.invalidateQueries({
+      queryKey: ['customMcpServers', 'listTools'],
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Refresh unavailable',
+    );
+    expect(
+      screen.queryByRole('group', { name: 'Approval mode for old_tool' }),
+    ).toBeNull();
+    toolsRequestMock.mockResolvedValueOnce({
+      tools: [{ name: 'new_tool', description: null, enabled: true }],
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry loading tools' }),
+    );
+    expect(
+      await screen.findByRole('group', { name: 'Approval mode for new_tool' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('group', { name: 'Approval mode for old_tool' }),
+    ).toBeNull();
+  });
+
+  it('keeps a pending retry and its late response scoped to the selected server', async () => {
+    const first = buildServer();
+    const second = buildServer({
+      id: '00000000-0000-4000-8000-000000000302',
+      name: 'second-tools',
+    });
+    state.servers = [first, second];
+    toolsRequestMock.mockRejectedValueOnce(
+      new Error('First catalog unavailable'),
+    );
+    const { queryClient } = renderHarness();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Manage internal-tools tools',
+      }),
+    );
+    const retry = await screen.findByRole('button', {
+      name: 'Retry loading tools',
+    });
+    let finishFirst!: (result: { tools: typeof state.tools }) => void;
+    toolsRequestMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFirst = resolve;
+        }),
+    );
+    fireEvent.click(retry);
+    await waitFor(() => expect(retry).toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    toolsRequestMock.mockResolvedValueOnce({
+      tools: [{ name: 'second_tool', description: null, enabled: true }],
+    });
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Manage second-tools tools' }),
+    );
+    expect(
+      await screen.findByRole('group', {
+        name: 'Approval mode for second_tool',
+      }),
+    ).toBeInTheDocument();
+    finishFirst({
+      tools: [{ name: 'first_tool', description: null, enabled: true }],
+    });
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData(['customMcpServers', 'listTools', first.id]),
+      ).toEqual({
+        tools: [{ name: 'first_tool', description: null, enabled: true }],
+      }),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(
+      screen.getByRole('group', { name: 'Approval mode for second_tool' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('group', { name: 'Approval mode for first_tool' }),
+    ).toBeNull();
+    expect(
+      screen.getByRole('heading', { name: 'Manage tools for second-tools' }),
     ).toBeInTheDocument();
   });
 
