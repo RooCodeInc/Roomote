@@ -756,6 +756,10 @@ function CustomToolManagementDialog({
 }) {
   const trpc = useTRPC();
   const { isAdmin } = useAuthorizedUser();
+  const [retryError, setRetryError] = useState<{
+    serverId: string;
+    message: string;
+  } | null>(null);
   // A custom server mounts under its name. Shared servers take the
   // deployment-wide, admin-managed approval policies; a personal server takes
   // its owner's personal policies, which apply to their own Sessions only.
@@ -765,10 +769,26 @@ function CustomToolManagementDialog({
       { enabled: open && Boolean(server), retry: false },
     ),
   );
+  const activeRetryError =
+    retryError && retryError.serverId === server?.id ? retryError : null;
+  const errorMessage =
+    toolsQuery.error instanceof Error
+      ? toolsQuery.error.message
+      : 'Failed to load tools.';
+  const retryTools = async () => {
+    if (!server || toolsQuery.isFetching) return;
+    const error = { serverId: server.id, message: errorMessage };
+    setRetryError(error);
+    try {
+      await toolsQuery.refetch();
+    } finally {
+      setRetryError((current) => (current === error ? null : current));
+    }
+  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="2xl">
-        <DialogHeader>
+        <DialogHeader className="pr-6">
           <DialogTitle>
             Manage tools for {server?.name ?? 'integration'}
           </DialogTitle>
@@ -777,18 +797,28 @@ function CustomToolManagementDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {toolsQuery.isPending ? (
+        {toolsQuery.isPending && !activeRetryError ? (
           <div className="space-y-2">
             {Array.from({ length: 4 }).map((_, index) => (
               <Skeleton key={index} className="h-6 w-full" />
             ))}
           </div>
-        ) : toolsQuery.isError ? (
-          <p className="text-sm text-destructive">
-            {toolsQuery.error instanceof Error
-              ? toolsQuery.error.message
-              : 'Failed to load tools.'}
-          </p>
+        ) : toolsQuery.isError || activeRetryError ? (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p role="alert" className="text-sm text-foreground">
+              {activeRetryError?.message ?? errorMessage}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="self-start"
+              aria-label="Retry loading tools"
+              disabled={toolsQuery.isFetching}
+              onClick={() => void retryTools()}
+            >
+              {toolsQuery.isFetching ? 'Retrying…' : 'Retry'}
+            </Button>
+          </div>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
             <IntegrationToolApprovalList
