@@ -114,6 +114,38 @@ it('retains default Enter routing to Roomote in a shared session', async () => {
   expect(mocks.send).not.toHaveBeenCalled();
 });
 
+it.each([false, true])(
+  'sends attachments to Roomote with Enter when the people control is visible (peer left: %s)',
+  async (departed) => {
+    mocks.viewers = [{ id: 'self' }, { id: 'peer' }];
+    const view = mount();
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'Please inspect this image' } });
+    fireEvent.change(view.container.querySelector('input[type="file"]')!, {
+      target: {
+        files: [new File(['image'], 'callback.png', { type: 'image/png' })],
+      },
+    });
+    if (departed) {
+      mocks.viewers = [{ id: 'self' }];
+      view.refresh();
+    }
+    expect(
+      screen.getByRole('button', { name: 'Send to people' }),
+    ).toBeDisabled();
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await waitFor(() =>
+      expect(view.onSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: 'Please inspect this image',
+          files: [expect.objectContaining({ filename: 'callback.png' })],
+        }),
+      ),
+    );
+    expect(mocks.send).not.toHaveBeenCalled();
+  },
+);
+
 it('retains the draft and request UUID on failed peer sends', async () => {
   mocks.viewers = [{ id: 'self' }, { id: 'peer' }];
   mocks.send.mockRejectedValueOnce(new Error('Offline'));

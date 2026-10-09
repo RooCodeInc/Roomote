@@ -231,6 +231,7 @@ function SessionSubmit({
 
   return (
     <PromptInputSubmit
+      data-prompt-input-primary-submit
       status={showStopButton ? 'streaming' : undefined}
       onStop={showStopButton ? onStop : undefined}
       disabled={
