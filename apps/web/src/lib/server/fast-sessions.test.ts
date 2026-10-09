@@ -1366,6 +1366,8 @@ describe('Session queries', () => {
           taskId: delegatedTask.id,
           title: 'Delegated task',
           inferenceCostMicroUsd: 750_000,
+          inferenceTotalTokens: 0,
+          peakContextTokens: 0,
           artifacts: [
             expect.objectContaining({
               path: 'reports/result.md',
@@ -1383,6 +1385,8 @@ describe('Session queries', () => {
           taskId: zeroCostTask.id,
           title: 'Zero cost task',
           inferenceCostMicroUsd: 0,
+          inferenceTotalTokens: 0,
+          peakContextTokens: 0,
           artifacts: [],
           previews: [],
           latestRun: {
@@ -1395,6 +1399,8 @@ describe('Session queries', () => {
           taskId: failedStartTask.id,
           title: 'Failed start task',
           inferenceCostMicroUsd: 0,
+          inferenceTotalTokens: 0,
+          peakContextTokens: 0,
           artifacts: [],
           previews: [],
           latestRun: {

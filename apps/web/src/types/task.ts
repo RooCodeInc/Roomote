@@ -115,6 +115,8 @@ export type TaskWithAssociations = Task & {
 export type TaskInferenceUsageSummary = {
   eventCount: number;
   costMicroUsd: number;
+  totalTokens?: number;
+  peakContextTokens?: number;
 };
 
 export interface TaskMessageEnvelope {

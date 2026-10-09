@@ -141,6 +141,8 @@ export default async function SessionDetailPage({
       model: session?.model ?? defaultModelId,
       reasoningEffort: session?.reasoningEffort ?? defaultReasoningEffort,
       inferenceCostMicroUsd: unifiedSession.inferenceCostMicroUsd,
+      inferenceTotalTokens: unifiedSession.inferenceTotalTokens,
+      peakContextTokens: unifiedSession.peakContextTokens,
       inferenceCostBreakdown: {
         directInferenceCostMicroUsd: unifiedSession.directInferenceCostMicroUsd,
         tasks: unifiedSession.tasks.map((task) => ({
@@ -271,6 +273,8 @@ export default async function SessionDetailPage({
     model: session.model ?? defaultModelId,
     reasoningEffort: session.reasoningEffort ?? defaultReasoningEffort,
     inferenceCostMicroUsd,
+    inferenceTotalTokens: session.inferenceTotalTokens,
+    peakContextTokens: session.peakContextTokens,
     inferenceCostBreakdown: {
       directInferenceCostMicroUsd,
       tasks: fastTasks,

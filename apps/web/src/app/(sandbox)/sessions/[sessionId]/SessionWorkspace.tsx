@@ -27,6 +27,7 @@ import {
 
 import {
   formatInferenceCost,
+  formatTokens,
   getUserDisplayName,
   humanizeFilename,
 } from '@/lib';
@@ -141,6 +142,8 @@ type SessionTaskSummary = {
   repositoryName: string | null;
   latestOutput: string | null;
   inferenceCostMicroUsd: number;
+  inferenceTotalTokens?: number;
+  peakContextTokens?: number;
   canAccessDetails?: boolean;
   latestRun: {
     id: number;
@@ -194,6 +197,8 @@ export type SessionInfo = {
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
   inferenceCostMicroUsd: number;
+  inferenceTotalTokens?: number;
+  peakContextTokens?: number;
   inferenceCostBreakdown: {
     directInferenceCostMicroUsd: number;
     tasks: Array<
@@ -783,6 +788,8 @@ function SessionInfoPanel({
     .filter(Boolean)
     .join(' • ');
   const inferenceCostLabel = formatInferenceCost(session.inferenceCostMicroUsd);
+  const inferenceTotalTokens = session.inferenceTotalTokens ?? 0;
+  const peakContextTokens = session.peakContextTokens ?? 0;
   const surfaceLabel = getSessionSurfaceLabel(session.surface);
   const surfaceBrandIcon = getSessionSurfaceBrandIcon(session.surface);
 
@@ -839,6 +846,12 @@ function SessionInfoPanel({
                 />
               </PopoverContent>
             </Popover>
+          </SandboxInfoRow>
+          <SandboxInfoRow label="Token Usage">
+            <span className="truncate">
+              {formatTokens(inferenceTotalTokens)} total ·{' '}
+              {formatTokens(peakContextTokens)} peak context
+            </span>
           </SandboxInfoRow>
           <SandboxInfoRow label="Started At">
             <span className="inline-flex items-center gap-1.5">
