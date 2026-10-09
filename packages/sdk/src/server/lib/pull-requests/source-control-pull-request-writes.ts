@@ -34,6 +34,7 @@ import {
   formatResponseBody,
   getPayloadRecord,
   isDraftTitle,
+  isGitLabDraft,
   resolveRepositoryRow,
   resolveSourceControlHostForRepositoryFromPayload,
   resolveSourceControlProviderForRepositoryFromPayload,
@@ -42,6 +43,10 @@ import {
   type RepositoryRow,
 } from './source-control-pull-request-shared';
 import { markRoomotePullRequestReadyAfterCleanReview } from './mark-roomote-pull-request-ready';
+import {
+  acquirePullRequestDraftTransitionLock,
+  setPullRequestAutoReadyBlocked,
+} from './pull-request-draft-intent';
 import { getTerminalReviewSummaryResult } from '../task-runs/github-pr-review-check';
 import { enqueuePrReviewNotification } from '../task-runs/pr-review-notification';
 
@@ -108,7 +113,7 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
   title: optionalTrimmedNonEmptyStringSchema,
   /** Required for reply, create_comment, and update_comment; optional for review. */
   body: z.string().optional(),
-  /** Optional draft state for update_pull_request. */
+  /** Explicit draft state for update_pull_request; true holds automatic clean-review promotion until a successful false update. */
   draft: z.boolean().optional(),
   /** Pull request identity updates deliberately exclude delivery metadata. */
   labels: z.never().optional(),
@@ -371,58 +376,88 @@ export async function writeSourceControlPullRequestForTaskRun({
     });
   }
 
-  let result: SourceControlPullRequestWriteResult;
-  switch (provider) {
-    case 'github':
-      try {
-        result = await writeGitHubPullRequest({ input, repository, provider });
-      } catch (error) {
-        throw toGitHubWriteError(input, error);
-      }
-      break;
-    case 'gitlab':
-      result = await writeGitLabMergeRequest({
-        input,
-        repository,
-        provider,
-        fetchImpl,
-      });
-      break;
-    case 'gitea':
-      result = await writeGiteaPullRequest({
-        input,
-        repository,
-        provider,
-        fetchImpl,
-      });
-      break;
-    case 'bitbucket':
-      result = await writeBitbucketPullRequest({
-        input,
-        repository,
-        provider,
-        fetchImpl,
-      });
-      break;
-    case 'ado':
-      result = await writeAdoPullRequest({
-        input,
-        repository,
-        provider,
-        fetchImpl,
-      });
-      break;
-  }
+  const explicitDraft =
+    input.action === 'update_pull_request' ? input.draft : undefined;
+  const releaseDraftLock =
+    explicitDraft === undefined
+      ? undefined
+      : await acquirePullRequestDraftTransitionLock(repository, input.prNumber);
+  try {
+    releaseDraftLock?.signal.throwIfAborted();
+    if (explicitDraft === true) {
+      // Preserve intent even if an already-draft update is a provider no-op or
+      // the provider fails. A later successful explicit ready request releases it.
+      await setPullRequestAutoReadyBlocked(repository, input.prNumber, true);
+    }
+    releaseDraftLock?.signal.throwIfAborted();
+    let result: SourceControlPullRequestWriteResult;
+    switch (provider) {
+      case 'github':
+        try {
+          result = await writeGitHubPullRequest({
+            input,
+            repository,
+            provider,
+            draftTransitionSignal: releaseDraftLock?.signal,
+          });
+        } catch (error) {
+          throw toGitHubWriteError(input, error);
+        }
+        break;
+      case 'gitlab':
+        result = await writeGitLabMergeRequest({
+          input,
+          repository,
+          provider,
+          fetchImpl,
+          draftTransitionSignal: releaseDraftLock?.signal,
+        });
+        break;
+      case 'gitea':
+        result = await writeGiteaPullRequest({
+          input,
+          repository,
+          provider,
+          fetchImpl,
+          draftTransitionSignal: releaseDraftLock?.signal,
+        });
+        break;
+      case 'bitbucket':
+        result = await writeBitbucketPullRequest({
+          input,
+          repository,
+          provider,
+          fetchImpl,
+          draftTransitionSignal: releaseDraftLock?.signal,
+        });
+        break;
+      case 'ado':
+        result = await writeAdoPullRequest({
+          input,
+          repository,
+          provider,
+          fetchImpl,
+          draftTransitionSignal: releaseDraftLock?.signal,
+        });
+        break;
+    }
 
-  await maybeMarkPullRequestReadyAfterReviewSummary({
-    taskRun,
-    input,
-    result,
-    provider,
-    host: payloadHost,
-    fetchImpl,
-  });
-  return result;
+    if (explicitDraft === false && result.applied) {
+      releaseDraftLock?.signal.throwIfAborted();
+      await setPullRequestAutoReadyBlocked(repository, input.prNumber, false);
+    }
+    await maybeMarkPullRequestReadyAfterReviewSummary({
+      taskRun,
+      input,
+      result,
+      provider,
+      host: payloadHost,
+      fetchImpl,
+    });
+    return result;
+  } finally {
+    await releaseDraftLock?.();
+  }
 }
 
 async function maybeMarkPullRequestReadyAfterReviewSummary({
@@ -595,6 +630,17 @@ function requirePullRequestUpdate(
     throw new SourceControlWriteError(
       400,
       'update_pull_request requires at least one of targetBranch, title, body, or draft.',
+    );
+  }
+}
+
+function assertDraftStateConfirmed(
+  input: SourceControlPullRequestWriteInput,
+  draft: boolean | undefined,
+) {
+  if (input.draft !== undefined && draft !== input.draft) {
+    throw new Error(
+      `Provider did not confirm draft=${input.draft} for ${input.repositoryFullName}#${input.prNumber}.`,
     );
   }
 }
@@ -881,10 +927,12 @@ async function writeGitHubPullRequest({
   input,
   repository,
   provider,
+  draftTransitionSignal,
 }: {
   input: SourceControlPullRequestWriteInput;
   repository: RepositoryRow;
   provider: 'github';
+  draftTransitionSignal?: AbortSignal;
 }): Promise<SourceControlPullRequestWriteResult> {
   const { octokit, owner, repo } = await createGitHubWriteClient(
     repository,
@@ -949,6 +997,7 @@ async function writeGitHubPullRequest({
       }
 
       if (input.draft !== undefined && input.draft !== current.draft) {
+        draftTransitionSignal?.throwIfAborted();
         const response = await octokit.graphql(
           input.draft
             ? `mutation ConvertPullRequestToDraft($pullRequestId: ID!) {
@@ -1275,11 +1324,13 @@ async function writeGitLabMergeRequest({
   repository,
   provider,
   fetchImpl,
+  draftTransitionSignal,
 }: {
   input: SourceControlPullRequestWriteInput;
   repository: RepositoryRow;
   provider: 'gitlab';
   fetchImpl: FetchImpl;
+  draftTransitionSignal?: AbortSignal;
 }): Promise<SourceControlPullRequestWriteResult> {
   const { projectId, token, apiBaseUrl } = await resolveGitLabProviderContext(
     repository,
@@ -1334,7 +1385,8 @@ async function writeGitLabMergeRequest({
         );
       }
 
-      await requestJson({
+      draftTransitionSignal?.throwIfAborted();
+      const updated = await requestJson({
         fetchImpl,
         method: 'PUT',
         url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
@@ -1348,6 +1400,7 @@ async function writeGitLabMergeRequest({
         },
         schema: gitLabMergeRequestSchema,
       });
+      assertDraftStateConfirmed(input, isGitLabDraft(updated));
 
       return buildWriteResult({ input, provider, repository });
     }
@@ -1791,11 +1844,13 @@ async function writeGiteaPullRequest({
   repository,
   provider,
   fetchImpl,
+  draftTransitionSignal,
 }: {
   input: SourceControlPullRequestWriteInput;
   repository: RepositoryRow;
   provider: 'gitea';
   fetchImpl: FetchImpl;
+  draftTransitionSignal?: AbortSignal;
 }): Promise<SourceControlPullRequestWriteResult> {
   const { apiBaseUrl, owner, repo, token } = await resolveGiteaProviderContext(
     repository,
@@ -1890,7 +1945,8 @@ async function writeGiteaPullRequest({
         );
       }
 
-      await requestJson({
+      draftTransitionSignal?.throwIfAborted();
+      const updated = await requestJson({
         fetchImpl,
         method: 'PATCH',
         url,
@@ -1904,6 +1960,10 @@ async function writeGiteaPullRequest({
         },
         schema: giteaPullRequestSchema,
       });
+      assertDraftStateConfirmed(
+        input,
+        Boolean(updated.draft) || isDraftTitle(updated.title),
+      );
 
       return buildWriteResult({ input, provider, repository });
     }
@@ -2095,11 +2155,13 @@ async function writeBitbucketPullRequest({
   repository,
   provider,
   fetchImpl,
+  draftTransitionSignal,
 }: {
   input: SourceControlPullRequestWriteInput;
   repository: RepositoryRow;
   provider: 'bitbucket';
   fetchImpl: FetchImpl;
+  draftTransitionSignal?: AbortSignal;
 }): Promise<SourceControlPullRequestWriteResult> {
   const { apiBaseUrl, authHeader, workspace, repo } =
     await resolveBitbucketProviderContext(repository, 'write');
@@ -2180,7 +2242,8 @@ async function writeBitbucketPullRequest({
         }
       }
 
-      await requestJson({
+      draftTransitionSignal?.throwIfAborted();
+      const updated = await requestJson({
         fetchImpl,
         method: 'PUT',
         url,
@@ -2197,6 +2260,7 @@ async function writeBitbucketPullRequest({
         },
         schema: bitbucketPullRequestSchema,
       });
+      assertDraftStateConfirmed(input, updated.draft);
 
       return buildWriteResult({ input, provider, repository });
     }
@@ -2457,11 +2521,13 @@ async function writeAdoPullRequest({
   repository,
   provider,
   fetchImpl,
+  draftTransitionSignal,
 }: {
   input: SourceControlPullRequestWriteInput;
   repository: RepositoryRow;
   provider: 'ado';
   fetchImpl: FetchImpl;
+  draftTransitionSignal?: AbortSignal;
 }): Promise<SourceControlPullRequestWriteResult> {
   const { organizationApiBaseUrl, repositoryPullRequestsPath, token } =
     await resolveAdoProviderContext(repository, 'write');
@@ -2535,7 +2601,8 @@ async function writeAdoPullRequest({
         }
       }
 
-      await requestJson({
+      draftTransitionSignal?.throwIfAborted();
+      const updated = await requestJson({
         fetchImpl,
         method: 'PATCH',
         url,
@@ -2550,6 +2617,7 @@ async function writeAdoPullRequest({
         },
         schema: adoPullRequestSchema,
       });
+      assertDraftStateConfirmed(input, updated.isDraft);
 
       return buildWriteResult({ input, provider, repository });
     }

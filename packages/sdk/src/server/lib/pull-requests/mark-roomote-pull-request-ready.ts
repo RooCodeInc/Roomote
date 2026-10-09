@@ -38,7 +38,10 @@ import {
   type RepositoryRow,
 } from './source-control-pull-request-shared';
 import { updateTaskPrStatus } from './update-task-pr-status';
-import { acquireGithubPrReviewLifecycleLock } from '../task-runs/github-pr-review-check';
+import {
+  acquirePullRequestDraftTransitionLock,
+  isPullRequestAutoReadyBlocked,
+} from './pull-request-draft-intent';
 
 const ADO_API_VERSION = '7.1';
 
@@ -54,6 +57,7 @@ export type MarkRoomotePullRequestReadyResult =
   | 'disabled'
   | 'unsupported'
   | 'not_roomote_created'
+  | 'draft_requested'
   | 'review_not_clean'
   | 'pull_request_not_open'
   | 'head_changed';
@@ -63,6 +67,7 @@ type TransitionInput = {
   prNumber: number;
   reviewHeadSha: string;
   fetchImpl: FetchImpl;
+  signal: AbortSignal;
 };
 
 /**
@@ -116,22 +121,22 @@ export async function markRoomotePullRequestReadyAfterCleanReview(input: {
     return 'not_roomote_created';
   }
 
-  const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
-    `${input.sourceControlProvider}:${repository.host ?? ''}:${input.repository}`,
+  const releaseLifecycleLock = await acquirePullRequestDraftTransitionLock(
+    repository,
     input.prNumber,
   );
-  if (!releaseLifecycleLock) {
-    throw new Error(
-      `Timed out serializing ready transition for ${input.repository}#${input.prNumber}`,
-    );
-  }
 
   try {
+    releaseLifecycleLock.signal.throwIfAborted();
+    if (await isPullRequestAutoReadyBlocked(repository, input.prNumber)) {
+      return 'draft_requested';
+    }
     const transitionInput = {
       repository,
       prNumber: input.prNumber,
       reviewHeadSha: input.reviewHeadSha,
       fetchImpl: input.fetchImpl ?? fetch,
+      signal: releaseLifecycleLock.signal,
     };
     const result = await markProviderPullRequestReady(
       input.sourceControlProvider,
@@ -196,6 +201,7 @@ async function markGitHubPullRequestReady(
   if (pullRequest.head.sha !== input.reviewHeadSha) return 'head_changed';
   if (!pullRequest.draft) return 'already_ready';
 
+  input.signal.throwIfAborted();
   let result: MarkRoomotePullRequestReadyResult = 'marked_ready';
   let mutationResult:
     | {
@@ -282,6 +288,7 @@ async function markGitLabMergeRequestReady(
   const readyTitle = removeDraftTitlePrefix(current.title);
   if (readyTitle === current.title) return 'unsupported';
 
+  input.signal.throwIfAborted();
   const updated = await requestJson({
     fetchImpl: input.fetchImpl,
     method: 'PUT',
@@ -338,6 +345,7 @@ async function markGiteaPullRequestReady(
   if (!hasDraftTitle) return 'unsupported';
   const readyTitle = removeDraftTitlePrefix(current.title ?? '');
 
+  input.signal.throwIfAborted();
   const updated = await requestJson({
     fetchImpl: input.fetchImpl,
     method: 'PATCH',
@@ -391,6 +399,7 @@ async function markBitbucketPullRequestReady(
   if (typeof current.draft !== 'boolean') return 'unsupported';
   if (!current.draft) return 'already_ready';
 
+  input.signal.throwIfAborted();
   const updated = await requestJson({
     fetchImpl: input.fetchImpl,
     method: 'PUT',
@@ -448,6 +457,7 @@ async function markAdoPullRequestReady(
   if (typeof current.isDraft !== 'boolean') return 'unsupported';
   if (!current.isDraft) return 'already_ready';
 
+  input.signal.throwIfAborted();
   const updated = await requestJson({
     fetchImpl: input.fetchImpl,
     method: 'PATCH',
