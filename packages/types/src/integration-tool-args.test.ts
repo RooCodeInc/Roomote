@@ -124,6 +124,11 @@ describe('integration tool argument secret handling', () => {
       openRouterKey,
     );
   });
+  it('keeps non-secret token-count metadata under shared key classification', () => {
+    expect(redactIntegrationToolArgs({ tokenCount: 42 })).toEqual({
+      tokenCount: 42,
+    });
+  });
 });
 
 describe('boundIntegrationToolReadContent', () => {

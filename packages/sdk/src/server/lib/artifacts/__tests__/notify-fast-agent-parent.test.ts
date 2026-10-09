@@ -1,245 +1,421 @@
-const mocks = vi.hoisted(() => {
-  class FastAgentParentEventDeliveryError extends Error {
-    readonly replyPosted: boolean;
-    readonly permanent: boolean;
+import { randomUUID } from 'node:crypto';
+import {
+  db,
+  and,
+  eq,
+  sql,
+  taskFactory,
+  userFactory,
+  taskRuns,
+  taskArtifacts,
+  fastAgentConversations,
+  fastAgentParentEvents,
+} from '@roomote/db/server';
+import { TaskPayloadKind } from '@roomote/types';
+import { createTaskArtifactRecord } from '../create-record';
+import { notifyFastAgentParentOnArtifact } from '../notify-fast-agent-parent';
+import { buildFastAgentDeliveryClaimPredicate } from '../../task-runs/fast-agent-delivery-claim';
+import { claimArtifactNotificationDelivery } from '../artifact-notification-claim';
 
-    constructor(
-      message: string,
-      options: { replyPosted: boolean; permanent?: boolean },
-    ) {
-      super(message);
-      this.replyPosted = options.replyPosted;
-      this.permanent = options.permanent ?? false;
-    }
-  }
+vi.mock('../../../../../../../apps/api/src/handlers/artifacts/auth', () => ({
+  resolveArtifactRouteAuth: () => ({ ok: true, auth: {} }),
+  verifyArtifactRouteTaskBinding: async () => ({ ok: true }),
+}));
 
+const mocks = vi.hoisted(() => ({
+  wake: vi.fn(),
+  wakeAt: vi.fn(),
+  deliver: vi.fn(),
+  normalize: vi.fn(),
+}));
+vi.mock('../../fast-agent-parent-event', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../fast-agent-parent-event')>()),
+  deliverFastAgentParentEvent: mocks.deliver,
+}));
+vi.mock('../../fast-agent-parent-event-queue', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('../../fast-agent-parent-event-queue')
+    >();
+  mocks.normalize.mockImplementation(actual.normalizeFastAgentParentEvent);
   return {
-    findRun: vi.fn(),
-    claimReturning: vi.fn(),
-    updateSet: vi.fn(),
-    recordLifecycle: vi.fn(),
-    deliverParentEvent: vi.fn(),
-    FastAgentParentEventDeliveryError,
+    ...actual,
+    normalizeFastAgentParentEvent: mocks.normalize,
+    wakeFastAgentParentEventNow: mocks.wake,
+    wakeFastAgentParentEventAt: mocks.wakeAt,
   };
 });
 
-vi.mock('@roomote/db/server', () => ({
-  db: {
-    query: { taskRuns: { findFirst: mocks.findRun } },
-    update: vi.fn(() => ({
-      set: vi.fn((values: unknown) => {
-        mocks.updateSet(values);
-        return {
-          where: vi.fn(() => ({ returning: mocks.claimReturning })),
-        };
-      }),
-    })),
-  },
-  and: vi.fn((...args: unknown[]) => args),
-  eq: vi.fn((...args: unknown[]) => args),
-  recordTaskRunLifecycleEvent: mocks.recordLifecycle,
-  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
-    strings: [...strings],
-    values,
-  })),
-  taskRuns: {
-    id: 'task_runs.id',
-    taskId: 'task_runs.task_id',
-    result: 'task_runs.result',
-  },
-}));
-
-vi.mock('@roomote/env', () => ({
-  Env: { R_APP_URL: 'https://roomote.example' },
-}));
-
-vi.mock('../../fast-agent-parent-event', () => ({
-  deliverFastAgentParentEvent: mocks.deliverParentEvent,
-  FastAgentParentEventDeliveryError: mocks.FastAgentParentEventDeliveryError,
-}));
-
-import { notifyFastAgentParentOnArtifact } from '../notify-fast-agent-parent';
-
-const fastParent = {
-  sessionId: '11111111-1111-4111-8111-111111111111',
-  conversation: {
-    surface: 'slack' as const,
-    workspaceId: 'T123',
-    conversationId: '100.001',
-    replyTarget: { channelId: 'C123', threadId: '100.001' },
-  },
-};
-
-function artifact(
-  overrides: Partial<
-    Parameters<typeof notifyFastAgentParentOnArtifact>[0]
-  > = {},
-) {
+async function fixture(parentExists = true) {
+  const user = await userFactory.create();
+  const task = await taskFactory.create();
+  const sessionId = randomUUID();
+  if (parentExists)
+    await db.insert(fastAgentConversations).values({
+      id: sessionId,
+      userId: user.id,
+      surface: 'web',
+      workspaceId: 'test-workspace',
+      conversationId: sessionId,
+    });
+  const parent = {
+    sessionId,
+    conversation: {
+      surface: 'web' as const,
+      workspaceId: 'test-workspace',
+      conversationId: sessionId,
+      replyTarget: { sessionId },
+    },
+  };
+  const [run] = await db
+    .insert(taskRuns)
+    .values({
+      taskId: task.id,
+      payloadKind: TaskPayloadKind.GithubPrReviewSync,
+      payload: { repo: 'owner/repo', fastAgentParent: parent },
+    })
+    .returning();
+  const artifact = await createTaskArtifactRecord({
+    taskId: task.id,
+    runId: run!.id,
+    path: 'plans/test.md',
+    artifactType: 'plan',
+    contentType: 'text/markdown',
+    size: 10,
+  });
   return {
-    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-    taskId: 'child-task',
-    runId: 200,
-    path: 'proof/result.png',
-    version: 1,
-    contentType: 'image/png',
-    uploaded: true,
-    ...overrides,
+    artifact: { ...artifact!, taskId: task.id, uploaded: true },
+    sessionId,
   };
 }
 
-describe('notifyFastAgentParentOnArtifact', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.findRun.mockResolvedValue({
-      id: 200,
-      taskId: 'child-task',
-      payload: { fastAgentParent: fastParent },
-      result: {},
+beforeEach(() => {
+  mocks.wake.mockReset().mockResolvedValue(undefined);
+  mocks.wakeAt.mockReset().mockResolvedValue(undefined);
+  mocks.deliver
+    .mockReset()
+    .mockRejectedValue(new Error('synthetic parent unavailable'));
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+afterEach(() => vi.restoreAllMocks());
+
+it('publishes once and durably admits one notification across concurrent confirmation retries', async () => {
+  const { artifact, sessionId } = await fixture();
+  const results = await Promise.all([
+    notifyFastAgentParentOnArtifact(artifact),
+    notifyFastAgentParentOnArtifact(artifact),
+  ]);
+  expect(results.every((result) => result === 'queued')).toBe(true);
+  const published = await db.query.taskArtifacts.findFirst({
+    where: eq(taskArtifacts.id, artifact.id),
+  });
+  expect(published?.uploaded).toBe(true);
+  const rows = await db.query.fastAgentParentEvents.findMany({
+    where: eq(fastAgentParentEvents.conversationId, sessionId),
+  });
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.event).toMatchObject({
+    type: 'artifact_published',
+    artifact: { id: artifact.id, version: 1 },
+  });
+  expect(mocks.deliver).not.toHaveBeenCalled();
+});
+
+it('rolls publication back if durable notification admission fails', async () => {
+  const { artifact } = await fixture();
+  mocks.normalize.mockImplementationOnce(() => {
+    throw new Error('synthetic admission failure');
+  });
+  await expect(notifyFastAgentParentOnArtifact(artifact)).rejects.toThrow();
+  const row = await db.query.taskArtifacts.findFirst({
+    where: eq(taskArtifacts.id, artifact.id),
+  });
+  expect(row?.uploaded).toBe(false);
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, artifact.runId!),
+  });
+  expect(
+    (run?.result as Record<string, unknown> | null)?.[
+      `fastAgentArtifact:${artifact.id}`
+    ] === 'queued',
+  ).toBe(false);
+  expect(mocks.wake).not.toHaveBeenCalled();
+});
+
+it('publishes without a notification when the parent has been removed', async () => {
+  const { artifact } = await fixture(false);
+  await expect(notifyFastAgentParentOnArtifact(artifact)).resolves.toBe(
+    'skipped',
+  );
+  expect(
+    (
+      await db.query.taskArtifacts.findFirst({
+        where: eq(taskArtifacts.id, artifact.id),
+      })
+    )?.uploaded,
+  ).toBe(true);
+});
+
+it('keeps publication successful when the queue wakeup fails; the event remains recoverable', async () => {
+  const { artifact, sessionId } = await fixture();
+  mocks.wake.mockRejectedValueOnce(new Error('synthetic queue unavailable'));
+  await expect(notifyFastAgentParentOnArtifact(artifact)).resolves.toBe(
+    'queued',
+  );
+  expect(
+    await db.query.fastAgentParentEvents.findMany({
+      where: eq(fastAgentParentEvents.conversationId, sessionId),
+    }),
+  ).toHaveLength(1);
+});
+
+it('does not re-notify an artifact delivered by the previous inline path', async () => {
+  const { artifact, sessionId } = await fixture();
+  await db
+    .update(taskRuns)
+    .set({ result: { [`fastAgentArtifact:${artifact.id}`]: 'delivered' } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  await expect(notifyFastAgentParentOnArtifact(artifact)).resolves.toBe(
+    'already_delivered',
+  );
+  expect(
+    await db.query.fastAgentParentEvents.findMany({
+      where: eq(fastAgentParentEvents.conversationId, sessionId),
+    }),
+  ).toHaveLength(0);
+});
+
+it('holds a durable recovery event behind a live legacy lease without delivering twice', async () => {
+  const { artifact, sessionId } = await fixture();
+  const key = `fastAgentArtifact:${artifact.id}`;
+  const marker = `delivering:${Date.now()}`;
+  await db
+    .update(taskRuns)
+    .set({ result: { [key]: marker } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  await expect(notifyFastAgentParentOnArtifact(artifact)).resolves.toBe(
+    'in_progress',
+  );
+  expect(
+    (
+      await db.query.taskArtifacts.findFirst({
+        where: eq(taskArtifacts.id, artifact.id),
+      })
+    )?.uploaded,
+  ).toBe(true);
+  const events = await db.query.fastAgentParentEvents.findMany({
+    where: eq(fastAgentParentEvents.conversationId, sessionId),
+  });
+  expect(events).toHaveLength(1);
+  expect(events[0]!.claimedUntil!.getTime() > Date.now()).toBe(true);
+  expect(mocks.wakeAt).toHaveBeenCalledWith(
+    expect.anything(),
+    events[0]!.claimedUntil,
+  );
+  expect(mocks.wake).not.toHaveBeenCalled();
+  expect(
+    (
+      await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, artifact.runId!),
+      })
+    )?.result,
+  ).toMatchObject({ [key]: marker });
+});
+
+it('allows queue handoff only after the legacy lease expires', async () => {
+  const { artifact, sessionId } = await fixture();
+  const key = `fastAgentArtifact:${artifact.id}`;
+  await db
+    .update(taskRuns)
+    .set({ result: { [key]: `delivering:${Date.now() - 16 * 60_000}` } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  await expect(notifyFastAgentParentOnArtifact(artifact)).resolves.toBe(
+    'queued',
+  );
+  expect(
+    await db.query.fastAgentParentEvents.findMany({
+      where: eq(fastAgentParentEvents.conversationId, sessionId),
+    }),
+  ).toHaveLength(1);
+});
+
+it('recovers the held handoff after a legacy owner stops without losing delivery backoff', async () => {
+  const { artifact, sessionId } = await fixture();
+  const key = `fastAgentArtifact:${artifact.id}`;
+  await db
+    .update(taskRuns)
+    .set({ result: { [key]: `delivering:${Date.now()}` } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  await notifyFastAgentParentOnArtifact(artifact);
+  const [event] = await db.query.fastAgentParentEvents.findMany({
+    where: eq(fastAgentParentEvents.conversationId, sessionId),
+  });
+  const retryAt = new Date(Date.now() + 60_000);
+  await db
+    .update(fastAgentParentEvents)
+    .set({ retryAt })
+    .where(eq(fastAgentParentEvents.id, event!.id));
+  await db
+    .update(taskRuns)
+    .set({ result: { [key]: `delivering:${Date.now() - 16 * 60_000}` } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  await expect(notifyFastAgentParentOnArtifact(artifact)).resolves.toBe(
+    'queued',
+  );
+  const rows = await db.query.fastAgentParentEvents.findMany({
+    where: eq(fastAgentParentEvents.conversationId, sessionId),
+  });
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ claimedUntil: null, retryAt });
+});
+
+it('suppresses held handoff delivery when the legacy owner has already completed it', async () => {
+  const { artifact } = await fixture();
+  const key = `fastAgentArtifact:${artifact.id}`;
+  await db
+    .update(taskRuns)
+    .set({ result: { [key]: `delivering:${Date.now()}` } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  await notifyFastAgentParentOnArtifact(artifact);
+  await db
+    .update(taskRuns)
+    .set({ result: { [key]: 'delivered' } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  const result = await db.transaction((tx) =>
+    claimArtifactNotificationDelivery(tx, artifact.runId!, artifact.id),
+  );
+  expect(result.status).toBe('already_delivered');
+});
+
+it('reserves queued delivery against an older inline handler claiming the same artifact', async () => {
+  const { artifact } = await fixture();
+  const key = `fastAgentArtifact:${artifact.id}`;
+  await notifyFastAgentParentOnArtifact(artifact);
+  const legacyClaim = await db
+    .update(taskRuns)
+    .set({
+      result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${key}::text, ${`delivering:${Date.now()}`}::text)`,
+    })
+    .where(
+      and(
+        eq(taskRuns.id, artifact.runId!),
+        buildFastAgentDeliveryClaimPredicate(key),
+      ),
+    )
+    .returning({ id: taskRuns.id });
+  expect(legacyClaim).toHaveLength(0);
+});
+
+it('publishes standalone artifacts without creating parent events', async () => {
+  const { artifact, sessionId } = await fixture();
+  await db
+    .update(taskRuns)
+    .set({ payload: { repo: 'owner/repo' } })
+    .where(eq(taskRuns.id, artifact.runId!));
+  await expect(notifyFastAgentParentOnArtifact(artifact)).resolves.toBe(
+    'not_applicable',
+  );
+  expect(
+    (
+      await db.query.taskArtifacts.findFirst({
+        where: eq(taskArtifacts.id, artifact.id),
+      })
+    )?.uploaded,
+  ).toBe(true);
+  expect(
+    await db.query.fastAgentParentEvents.findMany({
+      where: eq(fastAgentParentEvents.conversationId, sessionId),
+    }),
+  ).toHaveLength(0);
+});
+
+it('avoids a second creation after parent unavailability in the actual worker/API publication flow', async () => {
+  // Load the actual runtime callers without pulling another app into this
+  // package's TypeScript build root. Vitest still transforms their source.
+  const workerClientPath = new URL(
+    '../../../../../../../apps/worker/src/mcp/roomote-mcp-server/api-client.ts',
+    import.meta.url,
+  ).href;
+  const apiHandlerPath = new URL(
+    '../../../../../../../apps/api/src/handlers/artifacts/upload-complete.ts',
+    import.meta.url,
+  ).href;
+  const { uploadArtifact } = await import(workerClientPath);
+  const { markArtifactUploadComplete } = await import(apiHandlerPath);
+  const { artifact, sessionId } = await fixture();
+  let creates = 0;
+  let confirms = 0;
+  let currentArtifact = artifact;
+  const fetchMock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (url, options) => {
+      if (String(url).includes('upload_complete')) {
+        confirms++;
+        return markArtifactUploadComplete({
+          get: () => ({}),
+          req: {
+            param: () => currentArtifact.id,
+            query: () => artifact.taskId,
+          },
+          json: (body: unknown, status: number) =>
+            Response.json(body, { status }),
+        } as never);
+      }
+      if (options?.method === 'PUT')
+        return new Response(null, { headers: { etag: 'test-etag' } });
+      creates++;
+      if (creates > 1) {
+        const next = await createTaskArtifactRecord({
+          taskId: artifact.taskId!,
+          runId: artifact.runId,
+          path: artifact.path,
+          artifactType: 'plan',
+          contentType: artifact.contentType,
+          size: artifact.size,
+        });
+        currentArtifact = { ...next!, taskId: artifact.taskId, uploaded: true };
+      }
+      return Response.json({
+        id: currentArtifact.id,
+        version: currentArtifact.version,
+        uploadUrl: 'https://storage.example/upload',
+        viewUrl: 'https://example.test/view',
+        artifactType: 'plan',
+      });
     });
-    mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
-    mocks.deliverParentEvent.mockResolvedValue(undefined);
-    mocks.recordLifecycle.mockResolvedValue(undefined);
-  });
-
-  it('passes structured artifact metadata to the Fast orchestrator', async () => {
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'delivered',
-    );
-
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        parent: fastParent,
-        lockWaitMs: expect.any(Number),
-        event: expect.objectContaining({
-          type: 'artifact_published',
-          taskId: 'child-task',
-          runId: 200,
-          artifact: expect.objectContaining({
-            id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-            path: 'proof/result.png',
-            contentType: 'image/png',
-            viewUrl:
-              'https://roomote.example/task/child-task/artifacts/proof/result.png?v=1',
-          }),
-        }),
-      }),
-    );
-    expect(mocks.recordLifecycle).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        details: expect.objectContaining({
-          reason: 'fast_agent_parent_artifact_event',
-        }),
-      }),
-    );
-  });
-
-  it('deduplicates an event already claimed by another delivery', async () => {
-    mocks.claimReturning.mockResolvedValueOnce([]);
-
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'already_delivered',
-    );
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
-  });
-
-  it('releases a failed orchestrator delivery for retry', async () => {
-    mocks.deliverParentEvent.mockRejectedValueOnce(new Error('model offline'));
-
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'failed',
-    );
+  try {
+    const upload = () =>
+      uploadArtifact(
+        { token: 'synthetic-token', platformApiUrl: 'https://example.test' },
+        {
+          taskId: artifact.taskId!,
+          path: artifact.path,
+          artifactType: 'plan',
+          contentType: artifact.contentType,
+          content: Buffer.from('# Synthetic plan'),
+        },
+      );
+    let result;
+    try {
+      result = await upload();
+    } catch {
+      result = await upload().catch(() => undefined);
+    }
+    const versions = await db.query.taskArtifacts.findMany({
+      where: eq(taskArtifacts.taskId, artifact.taskId!),
+    });
+    expect({
+      creates,
+      confirms,
+      versions: versions.map((row) => row.version),
+    }).toEqual({ creates: 1, confirms: 1, versions: [1] });
+    expect(result?.artifactId).toBe(artifact.id);
     expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes(' - ') === true;
+      await db.query.fastAgentParentEvents.findMany({
+        where: eq(fastAgentParentEvents.conversationId, sessionId),
       }),
-    ).toBe(true);
-  });
-
-  it('reports an in-flight delivery as in_progress instead of delivered', async () => {
-    mocks.claimReturning.mockResolvedValueOnce([]);
-    mocks.findRun.mockResolvedValue({
-      id: 200,
-      taskId: 'child-task',
-      payload: { fastAgentParent: fastParent },
-      result: {
-        'fastAgentArtifact:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa': `delivering:${Date.now()}`,
-      },
-    });
-
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'in_progress',
-    );
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
-  });
-
-  it('keeps the claim when the failure happened after the Slack post', async () => {
-    mocks.deliverParentEvent.mockRejectedValueOnce(
-      new mocks.FastAgentParentEventDeliveryError('lifecycle write failed', {
-        replyPosted: true,
-      }),
-    );
-
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'delivered',
-    );
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes(' - ') === true;
-      }),
-    ).toBe(false);
-  });
-
-  it('settles the claim as skipped when no retry can ever succeed', async () => {
-    mocks.deliverParentEvent.mockRejectedValueOnce(
-      new mocks.FastAgentParentEventDeliveryError('parent session gone', {
-        replyPosted: false,
-        permanent: true,
-      }),
-    );
-
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'skipped',
-    );
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { values?: unknown[] } }).result;
-        return result?.values?.includes('skipped') === true;
-      }),
-    ).toBe(true);
-  });
-
-  it('uses inherited Fast parent metadata on resumed runs', async () => {
-    mocks.findRun.mockResolvedValueOnce({
-      id: 200,
-      taskId: 'child-task',
-      payload: {
-        sourceSnapshotId: 'snap-1',
-        communicationContextInherited: true,
-        fastAgentParent: fastParent,
-      },
-      result: {},
-    });
-
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'delivered',
-    );
-    expect(mocks.deliverParentEvent).toHaveBeenCalledOnce();
-  });
-
-  it('does nothing for standalone artifacts', async () => {
-    mocks.findRun.mockResolvedValueOnce({
-      id: 200,
-      taskId: 'child-task',
-      payload: {},
-      result: {},
-    });
-
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'not_applicable',
-    );
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
-  });
+    ).toHaveLength(1);
+  } finally {
+    fetchMock.mockRestore();
+  }
 });

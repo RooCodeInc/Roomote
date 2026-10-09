@@ -1,3 +1,4 @@
+import { redactToolData } from '@roomote/communication/redact-secrets';
 import {
   generateLlmTaskTitle,
   isFallbackTaskTitle,
@@ -773,7 +774,11 @@ export async function recordTaskMessageEnvelope(
   const { runId, taskId, userId, envelope } = input;
   const persistedUserId = getPersistedUserId(envelope, userId);
   const normalizedActivityAt = normalizeTaskActivityTimestamp(envelope.ts);
-  const privateSafeEnvelope = sanitizePrivatePersonalizationEnvelope(envelope);
+  const personalizedEnvelope = sanitizePrivatePersonalizationEnvelope(envelope);
+  const privateSafeEnvelope =
+    envelope.role === 'tool' || envelope.eventType.includes('tool')
+      ? redactToolData(personalizedEnvelope)
+      : personalizedEnvelope;
 
   const [persistedTaskMessage] = await db
     .insert(taskMessages)

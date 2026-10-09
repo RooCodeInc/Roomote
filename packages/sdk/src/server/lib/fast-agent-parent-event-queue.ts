@@ -46,6 +46,7 @@ import {
 } from './fast-agent-parent-event';
 import { sanitizeFastAgentParentEventJson } from './fast-agent-parent-event-json';
 import { retryFastAgentStartup } from './task-runs/fast-agent-startup-retry';
+import { claimArtifactNotificationDelivery } from './artifacts/artifact-notification-claim';
 
 export const FAST_AGENT_PARENT_EVENT_QUEUE_NAME = 'fast-agent-parent-events';
 const MAX_DIAGNOSTIC_DURATION_MS = 24 * 60 * 60 * 1_000;
@@ -666,6 +667,28 @@ export async function drainFastAgentParentEvents(
         await finalizeScheduledWakeup(row.event, 'failed', abandonError);
         await markDiscarded(row.id, abandonError);
         continue;
+      }
+
+      if (row.event.type === 'artifact_published') {
+        const event = row.event;
+        const claim = await db.transaction((tx) =>
+          claimArtifactNotificationDelivery(tx, event.runId, event.artifact.id),
+        );
+        if (claim.status === 'already_delivered') {
+          await markDelivered(row.id);
+          continue;
+        }
+        if (claim.status === 'in_progress') {
+          await db
+            .update(fastAgentParentEvents)
+            .set({ claimedUntil: claim.retryAt, updatedAt: new Date() })
+            .where(eq(fastAgentParentEvents.id, row.id));
+          await wakeFastAgentParentEventAt(
+            { conversationId: request.conversationId, eventKey: row.eventKey },
+            claim.retryAt,
+          ).catch(() => {});
+          return;
+        }
       }
 
       // Start the attempt only while the row is still pending: a follow-up

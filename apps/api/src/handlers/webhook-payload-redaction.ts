@@ -14,6 +14,8 @@
  * descriptions) are kept as-is because debugging depends on them.
  */
 
+import { secretRedactor } from '@roomote/types';
+
 const REDACTED_VALUE = '[REDACTED]';
 
 /**
@@ -21,29 +23,8 @@ const REDACTED_VALUE = '[REDACTED]';
  * lowercase alphanumerics so snake_case, camelCase, and kebab-case variants
  * all match (e.g. `client_secret`, `clientSecret`, `client-secret`).
  */
-const SENSITIVE_KEY_NAMES = new Set([
-  'secret',
-  'secrets',
-  'token',
-  'password',
-  'passwd',
-  'credential',
-  'credentials',
-  'authorization',
-  'apikey',
-  'privatekey',
-]);
-
-/** Normalized suffixes that mark a key as credential-bearing (`webhook_secret`, `access_token`, ...). */
-const SENSITIVE_KEY_SUFFIXES = ['secret', 'token', 'password', 'apikey'];
-
 export function isSensitiveWebhookPayloadKey(key: string): boolean {
-  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-  return (
-    SENSITIVE_KEY_NAMES.has(normalized) ||
-    SENSITIVE_KEY_SUFFIXES.some((suffix) => normalized.endsWith(suffix))
-  );
+  return secretRedactor.isSensitiveKey(key, 'webhook');
 }
 
 function redactValue(value: unknown): unknown {

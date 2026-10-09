@@ -99,7 +99,14 @@ describe('JUDGMENT_DECISION_CATALOG', () => {
     );
     expect(
       Object.keys(launch?.questions.requestedModel?.criteria ?? {}),
-    ).toEqual(['model_1', 'model_2', 'model_3', 'none']);
+    ).toEqual([
+      'model_1',
+      'model_2',
+      'model_3',
+      'none',
+      'capability_request',
+      'default_request',
+    ]);
     expect(Object.keys(launch?.questions.routingRule?.criteria ?? {})).toEqual([
       'model_rule_1',
       'model_rule_2',

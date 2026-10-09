@@ -1967,7 +1967,7 @@ describe('task model provider commands', () => {
       expect.arrayContaining([
         'anthropic/claude-sonnet-5-5',
         'anthropic/claude-opus-5-5',
-        'anthropic/claude-haiku-4-5',
+        'anthropic/claude-haiku-5-5',
       ]),
     );
     expect(
@@ -2061,7 +2061,7 @@ describe('task model provider commands', () => {
     mockFindDeploymentSettings.mockResolvedValue({
       taskModelSettings: null,
       runtimeModelConfig: {
-        roomoteSmallModel: 'openrouter/google/gemini-3.5-flash',
+        roomoteSmallModel: 'openrouter/anthropic/claude-haiku-4.5',
         roomoteCodeReviewModel: 'openrouter/anthropic/claude-opus-4.8',
         // Anthropic direct is not connected, so this dangling selection must
         // not resurrect a row the deployment cannot run.
@@ -2072,7 +2072,9 @@ describe('task model provider commands', () => {
     const result = await getTaskModelSettingsCommand(buildMockAuth());
     const modelById = new Map(result.models.map((model) => [model.id, model]));
 
-    expect(modelById.get('openrouter/google/gemini-3.5-flash')).toMatchObject({
+    expect(
+      modelById.get('openrouter/anthropic/claude-haiku-4.5'),
+    ).toMatchObject({
       enabled: true,
     });
     expect(modelById.get('openrouter/anthropic/claude-opus-4.8')).toMatchObject(
@@ -2083,7 +2085,7 @@ describe('task model provider commands', () => {
     // The role selectors keep rendering their current selection.
     expect(result.helperModelOptions.map((option) => option.id)).toEqual(
       expect.arrayContaining([
-        'openrouter/google/gemini-3.5-flash',
+        'openrouter/anthropic/claude-haiku-4.5',
         'openrouter/anthropic/claude-opus-4.8',
       ]),
     );
@@ -2248,14 +2250,14 @@ describe('task model provider commands', () => {
     ).toEqual([
       'anthropic/claude-fable-5',
       'anthropic/claude-fable-5-1',
-      'anthropic/claude-haiku-4-5',
+      'anthropic/claude-haiku-5-5',
       'anthropic/claude-opus-5-5',
       'anthropic/claude-sonnet-5-5',
     ]);
     expect([...seededSettings.allowedModelIds].sort()).toEqual([
       'anthropic/claude-fable-5',
       'anthropic/claude-fable-5-1',
-      'anthropic/claude-haiku-4-5',
+      'anthropic/claude-haiku-5-5',
       'anthropic/claude-opus-5-5',
       'anthropic/claude-sonnet-5-5',
     ]);

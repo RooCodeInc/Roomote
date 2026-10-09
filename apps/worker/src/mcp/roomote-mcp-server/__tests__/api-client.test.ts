@@ -406,6 +406,45 @@ describe('confirmUpload', () => {
 describe('uploadArtifact', () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it('confirmation transport retries reuse one record and upload', async () => {
+    let creates = 0;
+    let uploads = 0;
+    const confirmationUrls: string[] = [];
+    global.fetch = vi.fn(async (url, options) => {
+      if (String(url).includes('upload_complete')) {
+        confirmationUrls.push(String(url));
+        return confirmationUrls.length === 1
+          ? new Response(null, { status: 503 })
+          : new Response(null);
+      }
+      if (options?.method === 'PUT') {
+        uploads++;
+        return new Response(null, { headers: { etag: 'test-etag' } });
+      }
+      creates++;
+      return Response.json({
+        id: 'art-1',
+        version: 1,
+        uploadUrl: 'https://storage.example/upload',
+        viewUrl: 'https://example.test/view',
+        artifactType: 'plan',
+      });
+    });
+    await uploadArtifact(config, {
+      taskId: 'task-1',
+      path: 'plans/test.md',
+      artifactType: 'plan',
+      contentType: 'text/markdown',
+      content: Buffer.from('# Test'),
+    });
+    expect({
+      creates,
+      uploads,
+      confirmations: confirmationUrls.length,
+    }).toEqual({ creates: 1, uploads: 1, confirmations: 2 });
+    expect(new Set(confirmationUrls).size).toBe(1);
+  });
+
   it('should orchestrate all 3 steps', async () => {
     const fetchMock = vi
       .fn()

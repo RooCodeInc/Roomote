@@ -7,7 +7,11 @@ import {
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, taskRuns, tasks } from '@roomote/db/server';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
-import { REASONING_EFFORT_VALUES, isExitedRunStatus } from '@roomote/types';
+import {
+  REASONING_EFFORT_VALUES,
+  TASK_MODEL_OVERRIDE_ROLES,
+  isExitedRunStatus,
+} from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -17,14 +21,7 @@ import { findLatestTaskRun } from './helpers';
 import { logHandlerError } from '../utils';
 
 const updateModelSelectionBodySchema = z.object({
-  role: z.enum([
-    'coding',
-    'helper',
-    'vision',
-    'codeReview',
-    'explore',
-    'planning',
-  ]),
+  role: z.enum(['coding', ...TASK_MODEL_OVERRIDE_ROLES]),
   /** Desired model id, or null/omitted for the deployment default. */
   model: z.string().trim().min(1).nullish(),
   /** Desired reasoning level, or null/omitted for the deployment level. */

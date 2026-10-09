@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => {
       signal: new AbortController().signal,
     }),
     deliver: vi.fn(),
+    claimArtifact: vi.fn(),
     retryStartup: vi.fn(),
     recordAutomationOutcome: vi.fn(),
     recordWakeupOutcome: vi.fn(),
@@ -144,6 +145,9 @@ vi.mock('./fast-agent-parent-event', () => ({
 vi.mock('./task-runs/fast-agent-startup-retry', () => ({
   retryFastAgentStartup: mocks.retryStartup,
 }));
+vi.mock('./artifacts/artifact-notification-claim', () => ({
+  claimArtifactNotificationDelivery: mocks.claimArtifact,
+}));
 
 import {
   buildFastAgentParentEventKey,
@@ -221,6 +225,7 @@ function inferenceError(reason: string, terminal: boolean) {
 describe('Fast parent event durable queue', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.claimArtifact.mockResolvedValue({ status: 'queued' });
     mocks.insertValues.mockReturnValue({
       onConflictDoNothing: mocks.insertOnConflict,
     });
@@ -255,6 +260,44 @@ describe('Fast parent event durable queue', () => {
     mocks.deliver.mockResolvedValue('delivered');
     mocks.publishRefresh.mockResolvedValue(undefined);
   });
+
+  it.each(['in_progress', 'already_delivered'])(
+    'honors artifact notification ownership before delivery: %s',
+    async (status) => {
+      const artifactEvent = {
+        type: 'artifact_published' as const,
+        taskId: 'child-task',
+        runId: 42,
+        artifact: {
+          id: 'artifact-1',
+          path: 'plans/test.md',
+          version: 1,
+          contentType: 'text/markdown',
+          viewUrl: 'https://example.test/view',
+        },
+      };
+      const retryAt = new Date(Date.now() + 60_000);
+      mocks.claimArtifact.mockResolvedValue({ status, retryAt });
+      const row = pendingRow('artifact-event', artifactEvent);
+      mocks.findPending
+        .mockResolvedValueOnce(row)
+        .mockResolvedValueOnce(row)
+        .mockResolvedValue(undefined);
+      await drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: 'key-artifact-event',
+      });
+      expect(mocks.deliver).not.toHaveBeenCalled();
+      if (status === 'in_progress')
+        expect(mocks.updateSet).toHaveBeenCalledWith(
+          expect.objectContaining({ claimedUntil: retryAt }),
+        );
+      else
+        expect(mocks.updateSet).toHaveBeenCalledWith(
+          expect.objectContaining({ deliveredAt: expect.any(Date) }),
+        );
+    },
+  );
 
   it('persists before acknowledging and survives an immediate BullMQ failure', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

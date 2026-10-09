@@ -184,6 +184,7 @@ const composeEnv = {
   R_GITHUB_APP_SLUG: 'deployment-ci',
   R_DISCORD_BOT_TOKEN: 'deployment-ci-discord-bot-token',
   R_DISCORD_GATEWAY_SECRET: 'deployment-ci-discord-gateway-secret',
+  R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS: '127.0.0.1/32',
   PREVIEW_AUTH_PRIVATE_KEY: 'deployment-ci-preview-private-key',
   PREVIEW_AUTH_PUBLIC_KEY: 'deployment-ci-preview-public-key',
   PREVIEW_PROXY_SUBDOMAIN_SUFFIX: 'preview',
@@ -243,6 +244,19 @@ function validateComposeShape(shape) {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const config = JSON.parse(output);
+
+    if (
+      shape.name === 'installer-production' ||
+      shape.name === 'self-host-production' ||
+      shape.coolify
+    ) {
+      assert(
+        config.services.bullmq?.environment
+          ?.R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS ===
+          composeEnv.R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS,
+        `${shape.name}: BullMQ must receive the configured completion webhook CIDRs`,
+      );
+    }
 
     assert(
       config.services && Object.keys(config.services).length > 0,

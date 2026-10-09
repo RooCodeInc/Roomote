@@ -368,7 +368,7 @@
   --primary: oklch(0 0 0);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.94 0 0);
-  --secondary-foreground: oklch(0.675 0.2 120);
+  --secondary-foreground: oklch(0.4 0.13 120);
   --muted: oklch(0.95 0 0);
   --muted-foreground: oklch(0 0 0 / 0.65);
   --accent: var(--background);
@@ -910,7 +910,7 @@ html[data-status-banner-visible='true'] {
 [data-streamdown='strong'] {
 }
 [data-streamdown='link'] {
-  @apply text-secondary-foreground no-underline hover:underline;
+  @apply text-secondary-foreground underline underline-offset-4;
 }
 [data-streamdown='paragraph'] code,
 [data-streamdown='paragraph'] [data-streamdown='inline-code'],

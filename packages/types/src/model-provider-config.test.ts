@@ -577,6 +577,47 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
+  it('recommends Claude Haiku 5.5 only through verified provider routes', () => {
+    const routes = SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'Claude Haiku 5.5',
+      );
+      return model ? [[provider.id, model.id]] : [];
+    });
+
+    expect(routes).toEqual([
+      ['roomote', 'roomote/anthropic/claude-haiku-5.5'],
+      ['openrouter', 'openrouter/anthropic/claude-haiku-5.5'],
+      ['vercel', 'vercel/anthropic/claude-haiku-5.5'],
+      ['requesty', 'requesty/anthropic/claude-haiku-5-5'],
+      ['azure', 'azure/claude-haiku-5-5'],
+      ['azure-cognitive-services', 'azure-cognitive-services/claude-haiku-5-5'],
+      ['anthropic', 'anthropic/claude-haiku-5-5'],
+      ['opencode', 'opencode/claude-haiku-5-5'],
+      ['opencode-go', 'opencode-go/claude-haiku-5-5'],
+      ['amazon-bedrock', 'bedrock-mantle/anthropic.claude-haiku-5-5'],
+    ]);
+    expect(
+      getSetupModelProvider('github-copilot').suggestedTaskModels,
+    ).toContainEqual({
+      id: 'github-copilot/claude-haiku-4.5',
+      displayName: 'Claude Haiku 4.5',
+      family: 'Haiku',
+    });
+  });
+
+  it('uses Haiku 5.5 for Bedrock recommended helper and explore roles', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('amazon-bedrock'),
+        'default',
+      ),
+    ).toMatchObject({
+      roomoteSmallModel: 'bedrock-mantle/anthropic.claude-haiku-5-5',
+      roomoteExploreModel: 'bedrock-mantle/anthropic.claude-haiku-5-5',
+    });
+  });
+
   it('recommends Claude Sonnet 5.5 from every supported provider route', () => {
     const sonnet55ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
       (provider) => {
@@ -1161,7 +1202,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ).toEqual([
       'requesty/claude-fable-5.1',
       'requesty/claude-fable-5',
-      'requesty/claude-haiku-4-5',
+      'requesty/anthropic/claude-haiku-5-5',
       'requesty/anthropic/claude-opus-5-5',
       'requesty/anthropic/claude-sonnet-5-5',
       'requesty/gpt-5.6-sol@eu',
@@ -1424,11 +1465,11 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     ).toEqual({
       roomoteModel: 'anthropic/claude-sonnet-5-5',
       roomoteOrchestrationModel: null,
-      roomoteSmallModel: 'anthropic/claude-haiku-4-5',
+      roomoteSmallModel: 'anthropic/claude-haiku-5-5',
       roomoteVisionModel: null,
       roomoteAudioVideoModel: null,
       roomoteCodeReviewModel: 'anthropic/claude-sonnet-5-5',
-      roomoteExploreModel: 'anthropic/claude-haiku-4-5',
+      roomoteExploreModel: 'anthropic/claude-haiku-5-5',
       roomotePlanningModel: 'anthropic/claude-opus-5-5',
       roomoteModelReasoningEffort: null,
       roomoteOrchestrationModelReasoningEffort: null,

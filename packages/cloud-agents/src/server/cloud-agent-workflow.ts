@@ -58,7 +58,7 @@ import {
   resolveRunCommitAuthor,
 } from './commit-author';
 
-import { getTaskUrl } from './task-url';
+import { getTaskSessionUrl } from './task-url';
 
 type StandardTaskSurface = NonNullable<
   Parameters<typeof standardTask>[0]['taskSurface']
@@ -182,8 +182,13 @@ export async function generatePrompt({
   harnessInstructions?: string;
   artifacts: Record<string, unknown>;
 }> {
-  const taskRunUrl = getTaskUrl({
+  const taskRunUrl = await getTaskSessionUrl({
     taskId: taskRun.taskId,
+    fastConversationId:
+      'fastAgentSessionId' in taskSpec.payload &&
+      typeof taskSpec.payload.fastAgentSessionId === 'string'
+        ? taskSpec.payload.fastAgentSessionId
+        : undefined,
     utm: { campaign: taskRun.payloadKind, source: 'github-comment' },
   });
 

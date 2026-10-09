@@ -214,6 +214,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: vi.fn(),
   releaseTaskRun: vi.fn().mockResolvedValue(undefined),
   getTaskUrl: vi.fn().mockReturnValue('https://example.com/task'),
+  getTaskSessionUrl: vi
+    .fn()
+    .mockResolvedValue('https://example.com/sessions/review-session'),
   suggestSlackQuestionChannels: (...args: unknown[]) =>
     mockSuggestSlackQuestionChannels(...args),
   buildTerminalReviewStatus: (...args: unknown[]) =>
@@ -2746,6 +2749,11 @@ describe('finishRun', () => {
       });
 
       await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockBuildTerminalReviewStatus).toHaveBeenCalledWith({
+        outcome: 'completed',
+        taskUrl: 'https://example.com/sessions/review-session',
+      });
 
       expect(mockAcquireRedisLock).toHaveBeenCalledWith(
         'pr-review-synchronize:owner/repo:42',

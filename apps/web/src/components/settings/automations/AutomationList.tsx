@@ -114,7 +114,7 @@ export function AutomationListRow({
       </div>
       <div
         role="cell"
-        className="col-span-2 col-start-3 row-start-2 min-w-0 space-y-1 whitespace-normal text-sm text-muted-foreground/80 md:col-span-1 md:col-start-4 md:row-start-1"
+        className="col-span-2 col-start-3 row-start-2 min-w-0 space-y-1 whitespace-normal text-sm text-muted-foreground md:col-span-1 md:col-start-4 md:row-start-1"
       >
         {metadata ? (
           <div className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">

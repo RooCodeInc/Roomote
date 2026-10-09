@@ -36,6 +36,50 @@ import {
   ModelReasoningPickerTrigger,
   type ModelReasoningPickerModel,
 } from './ModelReasoningPicker';
+import { SessionModelSwitcher } from './SessionModelSwitcher';
+
+const deepSeekModel: ModelReasoningPickerModel = {
+  id: 'openrouter/deepseek/deepseek-v4.1-flash',
+  displayName: 'DeepSeek V4.1 Flash',
+  metadata: {
+    contextWindow: null,
+    inputTypes: null,
+    inputPricePerToken: null,
+    outputPricePerToken: null,
+    lastRefreshedAt: null,
+    supportsReasoning: true,
+    supportedReasoningEfforts: ['low', 'high', 'max'],
+  },
+};
+
+vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
+  useLaunchTaskModels: () => ({
+    data: {
+      defaultFastModelId: deepSeekModel.id,
+      defaultFastReasoningEffort: 'medium',
+      models: [deepSeekModel],
+    },
+  }),
+}));
+
+function SessionHarness({
+  initialEffort,
+}: {
+  initialEffort: ReasoningEffort | null;
+}) {
+  const [effort, setEffort] = useState(initialEffort);
+  return (
+    <>
+      <output data-testid="stored-effort">{effort ?? 'inherited'}</output>
+      <SessionModelSwitcher
+        model=""
+        onModelChange={vi.fn()}
+        reasoningEffort={effort}
+        onReasoningEffortChange={setEffort}
+      />
+    </>
+  );
+}
 
 const models: ModelReasoningPickerModel[] = [
   {
@@ -165,6 +209,47 @@ describe('ModelReasoningPicker', () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
     });
   });
+
+  it.each([null, 'medium'] as const)(
+    'keeps DeepSeek inherited/default-medium labels and slider stops consistent (%s)',
+    async (initialEffort) => {
+      render(<SessionHarness initialEffort={initialEffort} />);
+      const trigger = screen.getByRole('button', {
+        name: 'Model for this session',
+      });
+      expect(trigger).toHaveTextContent('High');
+      expect(trigger).not.toHaveTextContent('Medium');
+      fireEvent.click(trigger);
+      const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+      expect(slider).toHaveAttribute('aria-valuemax', '2');
+      expect(slider).toHaveAttribute('aria-valuenow', '1');
+      expect(slider).toHaveAttribute('aria-valuetext', 'High');
+      expect(screen.getByTestId('stored-effort')).toHaveTextContent(
+        initialEffort ?? 'inherited',
+      );
+
+      fireEvent.keyDown(slider, { key: 'Home' });
+      expect(slider).toHaveAttribute('aria-valuetext', 'Low');
+      expect(screen.getByTestId('stored-effort')).toHaveTextContent('low');
+      fireEvent.keyDown(slider, { key: 'ArrowUp' });
+      expect(slider).toHaveAttribute('aria-valuetext', 'High');
+      expect(screen.getByTestId('stored-effort')).toHaveTextContent('high');
+      fireEvent.keyDown(slider, { key: 'End' });
+      expect(slider).toHaveAttribute('aria-valuetext', 'Max');
+      fireEvent.wheel(slider, { deltaY: 40 });
+      expect(slider).toHaveAttribute('aria-valuetext', 'High');
+      expect(screen.getByTestId('stored-effort')).toHaveTextContent('high');
+      fireEvent.keyDown(document, { key: 'Escape' });
+      await waitFor(() =>
+        expect(trigger).toHaveAttribute('aria-expanded', 'false'),
+      );
+      expect(trigger).toHaveTextContent('High');
+      fireEvent.click(trigger);
+      expect(
+        screen.getByRole('slider', { name: 'Reasoning level' }),
+      ).toHaveAttribute('aria-valuetext', 'High');
+    },
+  );
 
   it.each([
     ['desktop popover', false],

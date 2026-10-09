@@ -263,6 +263,7 @@ x-roomote-controller-env: &roomote-controller-env
 
 x-roomote-bullmq-env: &roomote-bullmq-env
   <<: *roomote-inference-env
+  R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS: ${R_SESSION_DONE_WEBHOOK_ALLOWED_PRIVATE_CIDRS:-}
   DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
