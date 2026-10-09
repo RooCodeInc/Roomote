@@ -18,6 +18,8 @@ const {
   mockGetTerminalReviewSummaryResult,
   mockMarkPullRequestReady,
   mockEnqueuePrReviewNotification,
+  mockAcquireDraftLock,
+  mockSetAutoReadyBlocked,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetOctokit: vi.fn(),
@@ -33,6 +35,8 @@ const {
   mockGetTerminalReviewSummaryResult: vi.fn(),
   mockMarkPullRequestReady: vi.fn(),
   mockEnqueuePrReviewNotification: vi.fn(),
+  mockAcquireDraftLock: vi.fn(),
+  mockSetAutoReadyBlocked: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -113,6 +117,13 @@ vi.mock('../mark-roomote-pull-request-ready', () => ({
     mockMarkPullRequestReady(...args),
 }));
 
+vi.mock('../pull-request-draft-intent', () => ({
+  acquirePullRequestDraftTransitionLock: (...args: unknown[]) =>
+    mockAcquireDraftLock(...args),
+  setPullRequestAutoReadyBlocked: (...args: unknown[]) =>
+    mockSetAutoReadyBlocked(...args),
+}));
+
 vi.mock('../../task-runs/github-pr-review-check', () => ({
   getTerminalReviewSummaryResult: (...args: unknown[]) =>
     mockGetTerminalReviewSummaryResult(...args),
@@ -155,6 +166,11 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe('writeSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAcquireDraftLock.mockResolvedValue(
+      Object.assign(vi.fn().mockResolvedValue(undefined), {
+        signal: new AbortController().signal,
+      }),
+    );
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
     mockResolveGiteaToken.mockResolvedValue('gitea-token');
@@ -420,6 +436,99 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
       });
     },
   );
+
+  it.each([
+    {
+      provider: 'gitlab',
+      current: { iid: 55, title: 'Draft: Existing title' },
+    },
+    {
+      provider: 'gitea',
+      current: { number: 55, title: 'WIP: Existing title', draft: false },
+    },
+    { provider: 'bitbucket', current: { id: 55, draft: true } },
+    {
+      provider: 'ado',
+      current: { pullRequestId: 55, title: 'Existing title', isDraft: true },
+    },
+  ] as const)(
+    'does not release the $provider draft hold if the provider ignores the ready update',
+    async ({ provider, current }) => {
+      const fullName =
+        provider === 'ado' ? 'acme/Platform/backend' : 'acme/backend';
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: null,
+        externalRepoId: '101',
+        fullName,
+        htmlUrl: `https://example.com/${fullName}`,
+      });
+      const fetchImpl = vi
+        .fn()
+        .mockImplementation(async () => jsonResponse(current));
+      await expect(
+        writeSourceControlPullRequestForTaskRun({
+          taskRun: makeTaskRun({
+            repo: fullName,
+            sourceControlProvider: provider,
+          }),
+          input: {
+            action: 'update_pull_request',
+            repositoryFullName: fullName,
+            prNumber: 55,
+            draft: false,
+          },
+          fetchImpl,
+        }),
+      ).rejects.toThrow('did not confirm draft=false');
+      expect(mockSetAutoReadyBlocked).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not mutate draft state after losing lock ownership during the GitHub read', async () => {
+    const ownership = new AbortController();
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: ownership.signal,
+    });
+    mockAcquireDraftLock.mockResolvedValue(release);
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      fullName: 'acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const graphql = vi.fn();
+    mockGetOctokit.mockReturnValue({
+      graphql,
+      rest: {
+        pulls: {
+          get: async () => {
+            ownership.abort(new Error('controlled lock loss'));
+            return { data: { draft: false, node_id: 'PR_node' } };
+          },
+        },
+      },
+    });
+    await expect(
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'github',
+        }),
+        input: {
+          action: 'update_pull_request',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          draft: true,
+        },
+      }),
+    ).rejects.toThrow('controlled lock loss');
+    expect(graphql).not.toHaveBeenCalled();
+    expect(mockSetAutoReadyBlocked).toHaveBeenCalledWith(
+      expect.anything(),
+      55,
+      true,
+    );
+    expect(release).toHaveBeenCalledOnce();
+  });
 
   it('does not report a prefixed Gitea native draft as ready after a title-only transition', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({

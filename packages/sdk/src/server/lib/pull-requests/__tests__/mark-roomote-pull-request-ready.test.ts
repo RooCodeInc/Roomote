@@ -17,6 +17,7 @@ const {
   mockResolveAdoProviderContext,
   mockSupportsDraftTransition,
   mockUpdateTaskPrStatus,
+  mockIsAutoReadyBlocked,
 } = vi.hoisted(() => ({
   mockAcquireLifecycleLock: vi.fn(),
   mockCreateGitHubToken: vi.fn(),
@@ -34,6 +35,7 @@ const {
   mockResolveAdoProviderContext: vi.fn(),
   mockSupportsDraftTransition: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
+  mockIsAutoReadyBlocked: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -100,6 +102,12 @@ vi.mock('../../task-runs/github-pr-review-check', () => ({
 
 import { markRoomotePullRequestReadyAfterCleanReview } from '../mark-roomote-pull-request-ready';
 
+vi.mock('../pull-request-draft-intent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../pull-request-draft-intent')>()),
+  isPullRequestAutoReadyBlocked: (...args: unknown[]) =>
+    mockIsAutoReadyBlocked(...args),
+}));
+
 const REVIEW_HEAD_SHA = '1234567890abcdef1234567890abcdef12345678';
 const CLEAN_REVIEW = {
   outcome: 'clean',
@@ -153,6 +161,10 @@ function responseQueue(...bodies: unknown[]) {
 
 describe('markRoomotePullRequestReadyAfterCleanReview', () => {
   beforeEach(() => {
+    mockIsAutoReadyBlocked.mockReset().mockResolvedValue(false);
+    Object.assign(mockReleaseLifecycleLock, {
+      signal: new AbortController().signal,
+    });
     mockAcquireLifecycleLock
       .mockReset()
       .mockResolvedValue(mockReleaseLifecycleLock);
@@ -270,6 +282,18 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
     );
     expect(mockReleaseLifecycleLock).toHaveBeenCalledOnce();
   });
+
+  it.each(['github', 'gitlab', 'gitea', 'ado', 'bitbucket'] as const)(
+    'respects explicit draft intent before contacting %s',
+    async (provider) => {
+      mockIsAutoReadyBlocked.mockResolvedValue(true);
+      await expect(markReady(CLEAN_REVIEW, { provider })).resolves.toBe(
+        'draft_requested',
+      );
+      expect(mockGetOctokit).not.toHaveBeenCalled();
+      expect(mockReleaseLifecycleLock).toHaveBeenCalledOnce();
+    },
+  );
 
   it('converts the pull request back to draft when the mutation sees a newer head', async () => {
     mockGraphql
