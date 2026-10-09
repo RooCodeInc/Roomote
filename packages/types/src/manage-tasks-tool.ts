@@ -7,7 +7,10 @@ import type {
   SessionGoalStatus,
   TaskPhase,
   TaskState,
+  ReasoningEffort,
+  TaskModelOverrideRole,
 } from './task-runs';
+import { REASONING_EFFORT_VALUES } from './task-runs';
 import { roomoteTaskInspectionFieldSchemas } from './task-inspection-tool';
 import { TASK_OUTPUT_READ_ACTIONS } from './task-outputs-tool';
 
@@ -142,6 +145,20 @@ export const roomoteManagementFieldSchemas = {
     .string()
     .optional()
     .describe('Initial request for start, or follow-up text for send_message'),
+  model: z
+    .string()
+    .min(1)
+    .max(1024)
+    .optional()
+    .describe(
+      'For start: exact enabled model ID from list_models; no aliases or fallback.',
+    ),
+  reasoningEffort: z
+    .enum(REASONING_EFFORT_VALUES)
+    .optional()
+    .describe(
+      'For start: published supported effort for the explicitly selected model; requires model.',
+    ),
   attachments: roomoteMessageAttachmentsSchema
     .optional()
     .describe(
@@ -179,9 +196,17 @@ export const ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION =
 
 export const ROOMOTE_MEMBER_MANAGEMENT_TOOL_DESCRIPTION =
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION +
+  ' For start, model selects an exact enabled ID from list_models and reasoningEffort must be published as supported for that model. Invalid selections are refused. Summaries report configured choices/source only, not actual effective usage after defaults or fallback. ' +
   ' Use list_models to discover enabled deployment models available to your account, with exact IDs, display names, stored reasoning metadata and default designation. Supports query (case-insensitive ID/name/family substring, maximum 200 characters), limit (1–100, default 50), and cursor (returned nextCursor, with the same query). ' +
   ' For a visible task, use list_artifacts with taskId to list the latest uploaded version of each artifact path (optional artifactType). Use get_artifact_download_url with taskId, exact path and optional version to obtain a download URL; fetch it with the same Authorization Bearer credential used for this public MCP connection. Download access is checked on every fetch. Use get_command_receipts with taskId, optional limit (1–100, default 50) and returned nextCursor to read stored shell-tool results oldest first, including run/tool identifiers, command, nullable exitCode, status and bounded output with truncation metadata. These are stored tool receipts, not a complete OS command audit; unuploaded workspace files are not artifacts.' +
   ' Use list_environments immediately before launch. Use launch only for an explicit request to start a coding task.';
+
+export interface ConfiguredModelSelection {
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
+  modelSource: 'explicit' | 'default';
+  reasoningEffortSource: 'explicit' | 'default';
+}
 
 export interface RoomoteSessionChildTask {
   taskId: string;
@@ -195,6 +220,9 @@ export interface RoomoteSessionChildTask {
     status: string;
     taskPhase: TaskPhase | null;
     error: string | null;
+    configuredModels?: Partial<
+      Record<'coding' | TaskModelOverrideRole, ConfiguredModelSelection>
+    >;
   } | null;
 }
 
@@ -207,6 +235,7 @@ export interface RoomoteSessionSummary {
   activityAt: number;
   createdAt: string;
   fastConversationId: string | null;
+  configuredModel?: ConfiguredModelSelection;
   goal:
     | (Omit<SessionGoal, 'completedAt'> & { completedAt: string | null })
     | null;
