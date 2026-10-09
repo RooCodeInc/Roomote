@@ -2853,6 +2853,68 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('keeps a native web follow-up queued when required canonical persistence fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const queued = {
+        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+        createdAt: new Date(),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'web-write-failure',
+          currentMessageId: 'web-write-failure',
+          userId: 'user-1',
+          question: 'Use the discussion above.',
+          webFollowUp: true,
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([queued])
+        .mockResolvedValue([]);
+      mocks.upsertMessage.mockImplementation(async ({ message }) => {
+        if (message.eventId === 'web-write-failure:user')
+          throw new Error('Canonical transaction failed after retries');
+        return { initialHumanTurn: true };
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await vi.waitFor(() =>
+            expect(
+              mocks.nativeSteer.mock.calls.length +
+                mocks.releaseHumanFollowUpSteerClaims.mock.calls.length,
+            ).toBeGreaterThan(0),
+          );
+          options.onNativeSteerClosed?.();
+          return 'Original request finished.';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'user-1',
+          conversationId: 'web-session',
+        },
+        adapter: callbacks(),
+      });
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+      expect(mocks.readPeerDiscussion).not.toHaveBeenCalledWith(
+        'conversation-1',
+        'web-write-failure:user',
+      );
+      expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
+      expect(mocks.releaseHumanFollowUpSteerClaims).toHaveBeenCalledWith([
+        queued.id,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('defers a native follow-up batch when persisted peer context exceeds the transport bound', async () => {
     vi.useFakeTimers();
     try {

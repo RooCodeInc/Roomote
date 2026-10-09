@@ -2981,7 +2981,7 @@ export async function answerFastAgentQuestion({
               source: conversation.surface,
               nativeSessionId: activeOpenCodeSessionId,
             },
-            true,
+            false, // Required persistence: a failed write must not retire the queue row.
           );
           if (conversation.surface === 'web') {
             // Only this explicit follow-up introduces peer discussion into
