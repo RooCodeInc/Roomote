@@ -372,6 +372,11 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     errorFormat: 'json-rpc',
   },
   {
+    name: 'roomote-member-models',
+    match: { type: 'exact', path: '/mcp/models' },
+    policy: 'roomote-mcp',
+  },
+  {
     name: 'roomote-mcp',
     match: { type: 'exact', path: '/api/mcp-routing/roomote' },
     policy: 'roomote-mcp',

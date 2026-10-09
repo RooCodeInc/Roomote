@@ -16,6 +16,7 @@ import {
 import { environmentsRouter } from '../environments';
 import { tasksRouter } from '../tasks';
 import { sessionsRouter } from '../sessions';
+import { listMemberModels } from './models';
 import {
   invokeInProcessApi,
   toolError,
@@ -38,6 +39,7 @@ function invokeMemberApi(
       app.route('/sessions', sessionsRouter);
       app.route('/environments', environmentsRouter);
       app.route('/task-outputs', taskOutputsRouter);
+      app.get('/models', listMemberModels);
     },
     path,
     init,
@@ -51,7 +53,7 @@ const manageTasksInputSchema = {
   ...roomoteManagementFieldSchemas,
   ...taskOutputFieldSchemas,
   limit: roomoteManagementFieldSchemas.limit.describe(
-    'Positive result limit: 1–100 for search/get_updates; 1–100 (default 50) for get_command_receipts; 1–1000 for get_messages.',
+    'Positive result limit: 1–100 for search/get_updates; 1–100 (default 50) for list_models/get_command_receipts; 1–1000 for get_messages.',
   ),
 } satisfies Record<string, z.ZodTypeAny>;
 
@@ -74,6 +76,14 @@ export function registerRoomoteMemberTools(
     },
     async (params) => {
       switch (params.action) {
+        case 'list_models': {
+          const query = new URLSearchParams();
+          if (params.query !== undefined) query.set('query', params.query);
+          if (params.limit !== undefined)
+            query.set('limit', String(params.limit));
+          if (params.cursor !== undefined) query.set('cursor', params.cursor);
+          return resultFromApi(await invokeMemberApi(auth, `/models?${query}`));
+        }
         case 'list_artifacts':
         case 'get_artifact_download_url':
         case 'get_command_receipts': {

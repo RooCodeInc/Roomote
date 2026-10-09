@@ -9,6 +9,7 @@ vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
 import { GET as GET_METADATA } from '../../.well-known/oauth-protected-resource/mcp/route';
 import { DELETE, GET, POST } from '../route';
 import { GET as GET_DOWNLOAD } from '../task-outputs/download/route';
+import { GET as GET_MODELS } from '../models/route';
 
 describe('public Roomote MCP proxy', () => {
   beforeEach(() => {
@@ -107,6 +108,59 @@ describe('public Roomote MCP proxy', () => {
       resource: 'https://roomote.example/mcp',
     });
   });
+
+  it('forwards model discovery bearer and encoded pagination/filter query to a pathful API base', async () => {
+    const body = {
+      models: [],
+      defaultModelId: 'openai/example',
+      nextCursor: null,
+    };
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json(body, {
+        headers: { 'cache-control': 'no-store, private' },
+      }),
+    );
+    const query = '?limit=1&query=GPT%20%26%20Claude&cursor=opaque_cursor';
+    const response = await GET_MODELS(
+      new NextRequest(`https://roomote.example/mcp/models${query}`, {
+        headers: {
+          authorization: 'Bearer test-account',
+          host: 'untrusted.example',
+          'x-forwarded-host': 'untrusted.example',
+        },
+      }),
+    );
+    const [target, init] = fetchMock.mock.calls[0]!;
+    expect(String(target)).toBe(
+      `https://api.internal.test/_roomote-api/mcp/models${query}`,
+    );
+    expect(init).toMatchObject({
+      method: 'GET',
+      redirect: 'manual',
+      body: undefined,
+    });
+    const headers = init!.headers as Headers;
+    expect(headers.get('authorization')).toBe('Bearer test-account');
+    expect(headers.has('host')).toBe(false);
+    expect(headers.get('x-forwarded-host')).toBe('roomote.example');
+    expect(response.headers.get('content-type')).toContain('application/json');
+    expect(response.headers.get('cache-control')).toBe('no-store, private');
+    await expect(response.json()).resolves.toEqual(body);
+  });
+
+  it.each([400, 401, 403])(
+    'preserves model discovery HTTP %s and JSON errors',
+    async (status) => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        Response.json({ error: 'refused' }, { status }),
+      );
+      const response = await GET_MODELS(
+        new NextRequest('https://roomote.example/mcp/models?limit=0'),
+      );
+      expect(response.status).toBe(status);
+      await expect(response.json()).resolves.toEqual({ error: 'refused' });
+    },
+  );
 
   it('streams artifact downloads with the existing bearer through a pathful API base', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
