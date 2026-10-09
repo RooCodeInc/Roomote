@@ -10,6 +10,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type RefObject,
   type ReactNode,
 } from 'react';
 import { useStickToBottomContext } from 'use-stick-to-bottom';
@@ -60,6 +61,7 @@ import {
   AlertDescription,
   AlertTitle,
   Button,
+  MessageCircleQuestionMark,
 } from '@/components/system';
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
@@ -435,6 +437,58 @@ function RunningTasksMessage({
         </span>
       </MessageContent>
     </Message>
+  );
+}
+
+function PendingInputJump({
+  targetRef,
+}: {
+  targetRef: RefObject<HTMLDivElement | null>;
+}) {
+  const { scrollRef, stopScroll } = useStickToBottomContext();
+  const [isTargetVisible, setIsTargetVisible] = useState(false);
+
+  useEffect(() => {
+    const target = targetRef.current;
+    if (!target || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsTargetVisible(entry?.isIntersecting ?? false),
+      { root: scrollRef.current },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [scrollRef, targetRef]);
+
+  if (isTargetVisible) return null;
+
+  return (
+    <div className="pointer-events-none absolute bottom-4 left-4 z-40">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="pointer-events-auto gap-2 bg-card shadow-sm"
+        aria-label="Jump to unanswered question"
+        onClick={() => {
+          const target = targetRef.current;
+          if (!target) return;
+
+          stopScroll();
+          target.scrollIntoView({
+            behavior: window.matchMedia('(prefers-reduced-motion: reduce)')
+              .matches
+              ? 'auto'
+              : 'smooth',
+            block: 'center',
+          });
+          target.focus({ preventScroll: true });
+        }}
+      >
+        <MessageCircleQuestionMark className="size-4" />
+        Answer question
+      </Button>
+    </div>
   );
 }
 
@@ -1182,6 +1236,7 @@ export function FastSessionTranscript({
     () => findPendingSessionInputRequest(messages),
     [messages],
   );
+  const pendingInputTargetRef = useRef<HTMLDivElement>(null);
   const pendingInputRequestOrder = useMemo(() => {
     if (!pendingInputRequest) return null;
 
@@ -2308,7 +2363,13 @@ export function FastSessionTranscript({
               renderMessage={renderCapabilityOfferMessage}
             />
             {pendingInputRequest ? (
-              <div className="mt-3">
+              <div
+                key={pendingInputRequest.requestId}
+                ref={pendingInputTargetRef}
+                className="mt-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                aria-label="Unanswered question"
+                tabIndex={-1}
+              >
                 {pendingInputRequest.preset === 'setup_starter_tasks' ? (
                   <SetupStarterTasksCard
                     key={pendingInputRequest.requestId}
@@ -2382,6 +2443,12 @@ export function FastSessionTranscript({
             ) : null}
           </ConversationContent>
           <SessionScrollRestoration sessionId={sessionId} />
+          {pendingInputRequest ? (
+            <PendingInputJump
+              key={pendingInputRequest.requestId}
+              targetRef={pendingInputTargetRef}
+            />
+          ) : null}
           <ConversationScrollButton />
         </Conversation>
         {canReply && !pendingInputRequest?.preset ? (
