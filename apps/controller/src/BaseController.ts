@@ -280,6 +280,8 @@ export abstract class BaseController {
         }
 
         const id = await dequeueTaskRun();
+        // A popped id still has a durable Pending row for orphan recovery.
+        if (!this.isRunning) break;
 
         if (id) {
           const taskRun = await db.query.taskRuns.findFirst({
@@ -357,17 +359,28 @@ export abstract class BaseController {
       return;
     }
 
+    const shutdownDeadline = Date.now() + this.SHUTDOWN_TIMEOUT_MS;
     this.isRunning = false;
 
     console.log(
       '[BaseController] Waiting for current iteration to complete...',
     );
 
-    await this.waitForIterationComplete();
-    console.log('[BaseController] Current iteration completed');
+    if (await this.waitForIterationComplete(shutdownDeadline)) {
+      console.log('[BaseController] Current iteration completed');
+    } else {
+      console.warn(
+        '[BaseController] Shutdown deadline reached during current iteration',
+      );
+    }
 
-    await this.waitForInFlightSpawns();
-    console.log('[BaseController] All in-flight spawns completed');
+    if (await this.waitForInFlightSpawns(shutdownDeadline)) {
+      console.log('[BaseController] All in-flight spawns completed');
+    } else {
+      console.warn(
+        `[BaseController] Shutdown deadline reached with unfinished spawn run IDs: ${[...this.inFlightSpawns.keys()].join(', ')}`,
+      );
+    }
 
     for (const watcher of this.artifactWatchers) {
       watcher.close();
@@ -378,11 +391,13 @@ export abstract class BaseController {
     console.log('[BaseController] Teardown complete');
   }
 
-  private async waitForIterationComplete(): Promise<void> {
+  private async waitForIterationComplete(deadline: number): Promise<boolean> {
+    let iterationResolver!: () => void;
     const iterationPromise = new Promise<void>((resolve) => {
       // Set the resolver BEFORE checking isProcessingIteration to avoid race condition.
       // If we checked first and then set the resolver, the finally block could run
       // between the check and setting the resolver, causing the resolver to never be called.
+      iterationResolver = resolve;
       this.iterationCompleteResolver = resolve;
 
       // Now check if iteration is still processing. If not, resolve immediately.
@@ -391,16 +406,34 @@ export abstract class BaseController {
       }
     });
 
-    const timeoutPromise = new Promise<void>((resolve) => {
-      setTimeout(() => {
-        console.warn(
-          `[BaseController] Shutdown timeout (${this.SHUTDOWN_TIMEOUT_MS}ms) reached, proceeding with shutdown`,
-        );
-        resolve();
-      }, this.SHUTDOWN_TIMEOUT_MS);
-    });
+    try {
+      return await this.waitForShutdownWork(iterationPromise, deadline);
+    } finally {
+      if (this.iterationCompleteResolver === iterationResolver) {
+        this.iterationCompleteResolver = null;
+      }
+    }
+  }
 
-    await Promise.race([iterationPromise, timeoutPromise]);
+  private async waitForShutdownWork(
+    work: Promise<unknown>,
+    deadline: number,
+  ): Promise<boolean> {
+    if (Date.now() >= deadline) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work.then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(
+            () => resolve(false),
+            Math.max(0, deadline - Date.now()),
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   protected async setup(): Promise<void> {}
@@ -469,8 +502,9 @@ export abstract class BaseController {
     provider: ComputeProvider,
   ): Promise<void>;
 
-  protected async spawnWorker(taskRun: TaskRun): Promise<void> {
+  protected async spawnWorker(taskRun: TaskRun): Promise<boolean> {
     try {
+      if (!this.isRunning) return false;
       const dequeuedRun = await this.dequeueTaskRun(taskRun);
 
       if (!dequeuedRun) {
@@ -478,7 +512,15 @@ export abstract class BaseController {
           `[BaseController] Skipping spawn for task run #${taskRun.id} because it left the dequeueable state before dispatch`,
         );
 
-        return;
+        return false;
+      }
+
+      if (!this.isRunning) {
+        // The durable dequeue claim remains recoverable by the next controller.
+        console.log(
+          `[BaseController] Leaving run #${taskRun.id} dequeued during shutdown, without provider dispatch`,
+        );
+        return false;
       }
 
       const { authToken } = dequeuedRun;
@@ -488,6 +530,9 @@ export abstract class BaseController {
       );
       const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
+      if (!this.isRunning) {
+        return false;
+      }
       await this.spawnFreshWorker(
         taskRun,
         authToken,
@@ -495,12 +540,17 @@ export abstract class BaseController {
         sandboxTimeoutMs,
         provider,
       );
+      return true;
     } catch (error) {
       await this.handleSpawnTaskRunError(taskRun, error);
+      return false;
     }
   }
 
   private spawnWorkerInBackground(taskRun: TaskRun): boolean {
+    // A late Redis pop stays Pending; an orphan claim stays Dequeued. Both
+    // retain their existing database-recovery path after this controller stops.
+    if (!this.isRunning) return false;
     if (this.inFlightSpawns.has(taskRun.id)) {
       console.warn(
         `[BaseController] Task run #${taskRun.id} is already being spawned, skipping`,
@@ -524,12 +574,14 @@ export abstract class BaseController {
         `[BaseController] Worker spawn still in progress for task run #${taskRun.id} after ${Date.now() - spawnStartedAt}ms`,
       );
     }, this.LOG_INTERVAL_MS);
+    progressLogInterval.unref();
 
     const spawnPromise = this.spawnWorker(taskRun)
-      .then(() => {
-        console.log(
-          `[BaseController] ✅ Worker spawned successfully for task run #${taskRun.id} in ${Date.now() - spawnStartedAt}ms`,
-        );
+      .then((spawned) => {
+        if (spawned)
+          console.log(
+            `[BaseController] ✅ Worker spawned successfully for task run #${taskRun.id} in ${Date.now() - spawnStartedAt}ms`,
+          );
       })
       .catch((error) => {
         // Error is already handled in handleSpawnTaskRunError, just log here.
@@ -548,16 +600,19 @@ export abstract class BaseController {
   }
 
   /** Wait for all in-flight spawns to complete. Used during shutdown. */
-  private async waitForInFlightSpawns(): Promise<void> {
+  private async waitForInFlightSpawns(deadline: number): Promise<boolean> {
     if (this.inFlightSpawns.size === 0) {
-      return;
+      return true;
     }
 
     console.log(
       `[BaseController] Waiting for ${this.inFlightSpawns.size} in-flight spawns to complete...`,
     );
 
-    await Promise.allSettled(this.inFlightSpawns.values());
+    return this.waitForShutdownWork(
+      Promise.allSettled(this.inFlightSpawns.values()),
+      deadline,
+    );
   }
 
   protected async dequeueTaskRun(
