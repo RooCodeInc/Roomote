@@ -132,6 +132,97 @@ it('adds a shared integration without offering personal scope', async () => {
   expect(await screen.findByText('Stripe')).toBeInTheDocument();
 });
 
+it.each([false, true])(
+  'keeps a failed draft while clearing the key and allows a successful retry (personal: %s)',
+  async (personal) => {
+    let finishPost!: (response: Response) => void;
+    const saved = {
+      ...secret,
+      label: 'Recovery fixture',
+      origin: 'https://example.com',
+      visibility: personal ? 'owner' : 'deployment',
+    };
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ secrets: [] })))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishPost = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ secret: saved }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ secrets: [saved] })),
+      );
+    const Component = personal ? PersonalIntegrations : YourIntegrations;
+    render(<Component />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: personal ? 'Add personal integration' : 'Add integration',
+      }),
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Recovery fixture' },
+    });
+    fireEvent.change(screen.getByLabelText('Service origin'), {
+      target: { value: 'https://example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Scheme'), {
+      target: { value: 'Basic ' },
+    });
+    fireEvent.change(screen.getByLabelText(/Lifetime in hours/), {
+      target: { value: '24' },
+    });
+    fireEvent.click(screen.getByLabelText('POST'));
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'fixture-not-a-real-key' },
+    });
+    const save = screen.getByRole('button', { name: 'Save integration' });
+    fireEvent.click(save);
+    expect(save).toBeDisabled();
+    expect(screen.getByLabelText('API key')).toHaveValue('');
+    expect(screen.getByLabelText('Name')).toHaveValue('Recovery fixture');
+    expect(screen.getByLabelText('Service origin')).toHaveValue(
+      'https://example.com',
+    );
+    fireEvent.click(save);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    finishPost(new Response(null, { status: 500 }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not save the integration',
+    );
+    expect(save).toBeEnabled();
+    expect(screen.getByLabelText('Name')).toHaveValue('Recovery fixture');
+    expect(screen.getByLabelText('Service origin')).toHaveValue(
+      'https://example.com',
+    );
+    expect(screen.getByLabelText('Scheme')).toHaveValue('Basic ');
+    expect(screen.getByLabelText(/Lifetime in hours/)).toHaveValue(24);
+    expect(screen.getByLabelText('POST')).toBeChecked();
+    expect(screen.getByLabelText('API key')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'fixture-retry-key' },
+    });
+    fireEvent.click(save);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(JSON.parse(fetchMock.mock.calls[2]![1].body)).toMatchObject({
+      label: 'Recovery fixture',
+      origin: 'https://example.com',
+      headerPrefix: 'Basic ',
+      lifetimeHours: 24,
+      allowedMethods: ['GET', 'HEAD', 'POST'],
+      visibility: personal ? 'owner' : 'deployment',
+      secret: 'fixture-retry-key',
+    });
+    await waitFor(() =>
+      expect(screen.queryByLabelText('API key')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('Recovery fixture')).toBeInTheDocument();
+  },
+);
+
 it('keeps private integrations out of the shared list', async () => {
   fetchMock.mockResolvedValueOnce(
     new Response(

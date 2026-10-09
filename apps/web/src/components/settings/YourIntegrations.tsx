@@ -346,7 +346,9 @@ function AddIntegrationForm({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(parsed.data),
           });
-          formRef.current?.reset();
+          const keyInput =
+            formRef.current?.querySelector<HTMLInputElement>('[name="secret"]');
+          if (keyInput) keyInput.value = '';
           const response = await request;
           if (!response.ok) throw new Error('Unavailable');
           toast.success('Integration saved.');
@@ -475,7 +477,7 @@ function AddIntegrationForm({
           />
         </div>
         {error ? (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-sm text-foreground">
             {error}
           </p>
         ) : null}
