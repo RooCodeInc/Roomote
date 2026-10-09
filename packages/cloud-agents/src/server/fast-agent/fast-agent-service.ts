@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFastAgentPeerDiscussion } from './fast-agent-peer-discussion';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { addRemoteCustomMcpForFast } from '@roomote/sdk/server/add-remote-custom-mcp';
@@ -1760,6 +1761,7 @@ function buildFastAgentMessages({
   resumedAfterInferenceRetry = false,
   previousAttempt,
   voiceMode = false,
+  peerDiscussion,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -1781,6 +1783,7 @@ function buildFastAgentMessages({
   /** What an earlier attempt at this same turn already did, when resuming. */
   previousAttempt?: FastAgentTurnAttemptSummary | null;
   voiceMode?: boolean;
+  peerDiscussion?: string;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -1817,6 +1820,7 @@ function buildFastAgentMessages({
           )
         : normalizedQuestion;
   const currentUserMessageText = [
+    peerDiscussion,
     voiceMode ? '<voice_mode active="true" />' : undefined,
     explicitSkillInvocationContext,
     wrappedCurrentUserMessageText,
@@ -4061,6 +4065,10 @@ export async function answerFastAgentQuestion({
       modelAuthorizationDialogue
         .filter((message) => message.role === 'user')
         .map((message) => message.text);
+    const peerDiscussion =
+      conversation.surface === 'web' && turnSource === 'human'
+        ? await readFastAgentPeerDiscussion(session.id, userEvent.eventId)
+        : undefined;
     const {
       bootstrapMessages,
       turnMessages,
@@ -4071,6 +4079,7 @@ export async function answerFastAgentQuestion({
       currentMessageAgentContext,
       threadContext,
       compatibilityMessages: session.compatibilityMessages,
+      peerDiscussion,
       currentMessageTs: currentMessageId,
       currentMessageSender,
       surface: conversation.surface,

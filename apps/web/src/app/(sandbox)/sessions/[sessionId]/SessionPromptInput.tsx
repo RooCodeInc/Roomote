@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useSessionViewers } from '@/hooks/useSessionViewers';
+import { usePeopleSendAvailable } from '@/hooks/usePeopleSendAvailable';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -239,6 +241,30 @@ function SessionSubmit({
   );
 }
 
+function PeopleSubmit({ disabled }: { disabled: boolean }) {
+  const attachments = usePromptInputAttachments();
+  return (
+    <BasicTooltip
+      content={
+        attachments.files.length
+          ? 'Send attachments to Roomote'
+          : 'Discuss with people without triggering Roomote'
+      }
+    >
+      <PromptInputButton
+        type="submit"
+        name="audience"
+        value="people"
+        variant="outline"
+        size="sm"
+        disabled={disabled || attachments.files.length > 0}
+      >
+        Send to people
+      </PromptInputButton>
+    </BasicTooltip>
+  );
+}
+
 /** Session reply composer mirroring the task composer's structure: action
  * menu and model switcher on the left, voice and submit on the right. */
 export function SessionPromptInput({
@@ -263,6 +289,7 @@ export function SessionPromptInput({
   voice,
   onModelSelectionChange,
   toolApprovalsSessionId,
+  peopleSessionId,
 }: {
   sessionId: string;
   isBusy: boolean;
@@ -304,10 +331,23 @@ export function SessionPromptInput({
   /** The unified session, when the viewer owns it and may pick its tool
    * approvals mode. */
   toolApprovalsSessionId?: string;
+  /** Unified web session ID; omitted on other communication surfaces. */
+  peopleSessionId?: string;
 }) {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
   const { draft: prompt, setDraft: setPrompt } = useSessionDraft(sessionId);
+  const viewers = useSessionViewers(
+    peopleSessionId ?? '',
+    Boolean(peopleSessionId),
+  );
+  const peopleSendAvailable = usePeopleSendAvailable(
+    viewers.some((viewer) => viewer.id !== currentUserId),
+    prompt,
+  );
+  const [sendingToPeople, setSendingToPeople] = useState(false);
+  const peerAttempt = useRef<{ text: string; id: string } | null>(null);
+  const peerSending = useRef(false);
   const navigationState = useSessionNavigationState();
   const [shouldAutoFocus] = useState(
     () => !navigationState?.consumeSessionSwitch(sessionId),
@@ -370,7 +410,54 @@ export function SessionPromptInput({
     onNavigate: setPrompt,
   });
 
-  const handleSubmit = async (message: PromptInputMessage) => {
+  const handleSubmit = async (
+    message: PromptInputMessage,
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    if (
+      submitter instanceof HTMLButtonElement &&
+      submitter.name === 'audience' &&
+      submitter.value === 'people'
+    ) {
+      if (
+        !peopleSessionId ||
+        !peopleSendAvailable ||
+        peerSending.current ||
+        isBusy ||
+        !message.text.trim()
+      )
+        return false;
+      if (message.files.length) {
+        toast.error('Send attachments to Roomote.');
+        return false;
+      }
+      if (peerAttempt.current?.text !== message.text) {
+        peerAttempt.current = { text: message.text, id: crypto.randomUUID() };
+      }
+      peerSending.current = true;
+      setSendingToPeople(true);
+      try {
+        await trpcClient.fastSessions.sendToPeople.mutate({
+          sessionId,
+          clientMessageId: peerAttempt.current.id,
+          text: message.text,
+        });
+        peerAttempt.current = null;
+        consumeSuggestion();
+        setPrompt('');
+        return true;
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : 'Failed to send message',
+        );
+        return false;
+      } finally {
+        peerSending.current = false;
+        setSendingToPeople(false);
+      }
+    }
+    if (peerSending.current) return false;
     if (isBusy || isUpdatingModelSelection) {
       return false;
     }
@@ -495,7 +582,8 @@ export function SessionPromptInput({
     );
   };
 
-  const controlsDisabled = isBusy || isUpdatingModelSelection;
+  const controlsDisabled =
+    isBusy || isUpdatingModelSelection || sendingToPeople;
 
   return (
     <div className="mx-auto w-full max-w-4xl">
@@ -535,7 +623,7 @@ export function SessionPromptInput({
                 aria-describedby={
                   ghostSuggestion ? suggestionHintId : undefined
                 }
-                disabled={isBusy}
+                disabled={isBusy || sendingToPeople}
               />
               {ghostSuggestion && (
                 <>
@@ -605,6 +693,9 @@ export function SessionPromptInput({
                 onClick={voiceDictation.toggle}
                 disabled={isBusy}
               />
+              {peopleSessionId && peopleSendAvailable ? (
+                <PeopleSubmit disabled={controlsDisabled || !prompt.trim()} />
+              ) : null}
               <SessionSubmit
                 sending={controlsDisabled}
                 prompt={prompt}

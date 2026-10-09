@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os';
 
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
+  readPeerDiscussion: vi.fn(),
   publishReplyStream: vi.fn(),
   previewEnsureEnvironment: vi.fn(),
   createEnvironmentRecipeCandidate: vi.fn(),
@@ -192,6 +193,10 @@ vi.mock('../fast-agent-session', () => ({
   getOrCreateFastAgentSession: mocks.getSession,
   setFastAgentOpenCodeSession: mocks.setOpenCodeSession,
   upsertFastAgentMessage: mocks.upsertMessage,
+}));
+
+vi.mock('../fast-agent-peer-discussion', () => ({
+  readFastAgentPeerDiscussion: mocks.readPeerDiscussion,
 }));
 
 vi.mock('../fast-agent-conversation-repository', () => ({
@@ -587,6 +592,7 @@ afterEach(() => {
 
 describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
+    mocks.readPeerDiscussion.mockReset();
     vi.clearAllMocks();
     mocks.listNativeIntegrations.mockResolvedValue([]);
     mocks.refreshTitle.mockResolvedValue({
@@ -5462,7 +5468,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it.each([true, false])(
+    'includes the admitted peer snapshot in an explicit web request (warm: %s)',
+    async (warm) => {
+      const context =
+        '<peer_discussion>Prior discussion, not a request</peer_discussion>';
+      mocks.readPeerDiscussion.mockResolvedValue(context);
+      mocks.runSession.mockImplementationOnce(
+        ({ prompt, bootstrapPrompt, execute }) =>
+          execute(
+            warm ? { id: 'opencode-session-1' } : {},
+            warm
+              ? prompt
+              : typeof bootstrapPrompt === 'function'
+                ? bootstrapPrompt()
+                : bootstrapPrompt,
+            { path: warm ? 'warm' : 'cold_rebuild', validateSession: false },
+          ),
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface: 'web' },
+        adapter: callbacks(),
+      });
+      expect(mocks.readPeerDiscussion).toHaveBeenCalledTimes(1);
+      expect(mocks.generateText.mock.calls[0]?.[0].prompt).toContain(context);
+    },
+  );
+
   it('does not attribute automation platform events to a human sender', async () => {
+    // Platform events never pull human peer discussion into their turn.
+    expect(mocks.readPeerDiscussion).not.toHaveBeenCalled();
     await answerFastAgentQuestion({
       question:
         '<platform_event>{"type":"automation_triggered"}</platform_event>',

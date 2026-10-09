@@ -122,8 +122,23 @@ requirements, pagination limits, and the code-search deprecation.
 
 ## The session view
 
-A session header shows the other people currently viewing that session. Your
-own avatar is omitted from the viewer list.
+For web conversations, the compact avatar stack in the session header opens a
+participant list. **Viewing now** shows people currently viewing the session,
+with multiple tabs counted once. **Earlier contributors** shows people who have
+participated but are no longer viewing. Closed or inactive tabs disappear from
+current viewers after their short presence lease expires.
+
+When another person is viewing a web conversation, **Send to people** appears
+beside the usual **Send** control. Both use the same message field. **Send** and
+the existing keyboard shortcut continue to address Roomote. **Send to people**
+posts a text message labeled **People only**, visible live and on reload to
+people with session access. Attachments use the usual Send path to Roomote.
+
+People-only messages do not trigger Roomote, start tasks, or steer work already
+in progress. Later explicit requests can use the prior discussion as context,
+without treating it as instructions or permission to act. If another viewer
+leaves while you have a draft, the secondary button stays until you send or clear
+that draft. Earlier contributors alone do not make the button appear.
 
 Select the generated title in the header to rename the session. A title you set
 manually stays in the workspace and Sessions list instead of being replaced by

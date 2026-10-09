@@ -407,6 +407,11 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
             />
           ) : isUser ? (
             <CollapsibleContent renderToggle={UserMessageToggle}>
+              {msg.updateType === ACP_ENVELOPE_EVENT_TYPES.PeerMessage ? (
+                <span className="mb-1 block text-xs text-muted-foreground">
+                  People only
+                </span>
+              ) : null}
               <MessagePlainText
                 data-testid={
                   requestUserInputResponse
@@ -465,7 +470,9 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
       {shouldShowContentActions && (
         <MessageActions>
           <MessageCopyButton content={content} />
-          <MessageNewTaskButton content={content} />
+          {msg.updateType !== ACP_ENVELOPE_EVENT_TYPES.PeerMessage ? (
+            <MessageNewTaskButton content={content} />
+          ) : null}
           {!showPersistentTimestamp && (
             <MessageTimestamp
               ts={msg.ts}
