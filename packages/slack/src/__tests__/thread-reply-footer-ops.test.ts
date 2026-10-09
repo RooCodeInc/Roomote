@@ -80,6 +80,18 @@ describe('thread-reply-footer-ops', () => {
         elements: [
           {
             type: 'mrkdwn',
+            text: 'Reply anytime · <https://example.com|PR #1>, <https://example.com|PR #2>, <https://example.com|PR #3>, 26 more PRs · <https://app|Open in Roomote>',
+          },
+        ],
+      }),
+    ).toBe(true);
+
+    expect(
+      isSlackThreadReplyFooterBlock({
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
             text: 'Reply anytime · 0 tasks running · <https://app|Open in Roomote>',
           },
         ],
