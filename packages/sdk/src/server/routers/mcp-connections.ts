@@ -53,6 +53,7 @@ import {
 } from '@roomote/types';
 
 import {
+  activeRunProcedure,
   authenticatedProcedure,
   isRunToken,
   userOnlyProcedure,
@@ -384,7 +385,7 @@ export const mcpConnectionsRouter = router({
       }
     }),
 
-  getCustomStdioMcpServers: authenticatedProcedure.query(async ({ ctx }) => {
+  getCustomStdioMcpServers: activeRunProcedure.query(async ({ ctx }) => {
     if (!isRunToken(ctx.auth)) {
       throw new TRPCError({
         code: 'FORBIDDEN',

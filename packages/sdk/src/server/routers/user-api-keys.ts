@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db, userApiKeys, eq, and } from '@roomote/db/server';
 import { decryptText } from '@roomote/db/encryption';
 
-import { authenticatedProcedure, router } from '../trpc';
+import { activeRunProcedure, authenticatedProcedure, router } from '../trpc';
 import { resolveActorScopedUserContext } from '../lib/auth';
 
 export const userApiKeysRouter = router({
@@ -44,7 +44,7 @@ export const userApiKeysRouter = router({
    * let a run token reassign `task_runs.actingUserId`, so a compromised
    * sandbox cannot pivot this lookup to another user's key.
    */
-  getDecryptedKey: authenticatedProcedure
+  getDecryptedKey: activeRunProcedure
     .input(z.object({ provider: z.string() }))
     .query(async ({ ctx, input }) => {
       const { userId } = await resolveActorScopedUserContext(ctx.auth);

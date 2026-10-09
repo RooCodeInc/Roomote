@@ -266,6 +266,8 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     mockEnv.R_HTTP_INTEGRATIONS_ENABLED = false;
     mockIsBrainEnabled.mockResolvedValue(false);
     mockFindTaskRun.mockResolvedValue({
+      id: 42,
+      status: 'running',
       actingUserId: null,
     });
     mockFindEnablements.mockResolvedValue([]);
@@ -1474,5 +1476,15 @@ describe('getCustomStdioMcpServers', () => {
       args: ['-y', '@example/server'],
       env: { EXAMPLE_TOKEN: 'stdio-secret' },
     });
+  });
+
+  it('rejects terminal run tokens before loading stdio configs', async () => {
+    mockFindTaskRun.mockResolvedValueOnce({ id: 42, status: 'failed' });
+
+    await expect(
+      createJobCaller().getCustomStdioMcpServers(),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    expect(mockFindCustomServers).not.toHaveBeenCalled();
   });
 });
