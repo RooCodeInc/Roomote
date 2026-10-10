@@ -177,6 +177,60 @@ describe('session-linked review summary check completion', () => {
     );
   });
 
+  it.each(['completion', 'terminal rewrite'])(
+    'ignores retained deleted owners before limiting a canonical %s lookup',
+    async (eventKind) => {
+      // Several historical tasks can retain the reused canonical comment ID.
+      // Filtering after LIMIT 2 would still hide the current owner.
+      for (let i = 0; i < 3; i++) {
+        const { task } = await fixture(RunStatus.Completed);
+        await db
+          .update(tasks)
+          .set({ deletedAt: new Date() })
+          .where(eq(tasks.id, task.id));
+      }
+      const { task } = await fixture();
+      await queuePrReviewSummaryNotification(
+        payload(
+          body('reviewed'),
+          body(eventKind === 'completion' ? 'reviewing' : 'reviewed'),
+        ),
+      );
+      expect(mocks.updateCheck).toHaveBeenCalledWith(
+        expect.objectContaining({
+          check_run_id: checkId,
+          status: 'completed',
+          conclusion: 'success',
+        }),
+      );
+      if (eventKind === 'completion') {
+        expect(mocks.enqueue).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: expect.objectContaining({ reviewTaskId: task.id }),
+          }),
+        );
+      } else {
+        expect(mocks.enqueue).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it('does not resurrect a deleted task when it is the only retained owner', async () => {
+    const { task } = await fixture();
+    await db
+      .update(tasks)
+      .set({ deletedAt: new Date() })
+      .where(eq(tasks.id, task.id));
+    await queuePrReviewSummaryNotification(payload(body('reviewed')));
+    expect(mocks.getCheck).not.toHaveBeenCalled();
+    expect(mocks.updateCheck).not.toHaveBeenCalled();
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.not.objectContaining({ reviewTaskId: task.id }),
+      }),
+    );
+  });
+
   it('is idempotent when the check already matches the terminal rewrite', async () => {
     const { run } = await fixture(RunStatus.Completed);
     mocks.getCheck.mockResolvedValue({
