@@ -21,6 +21,7 @@ import {
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 import { SessionViewers } from '@/components/sessions/SessionViewers';
+import { SessionParticipants } from '@/components/sessions/SessionParticipants';
 import { ServiceCredentials } from '@/components/sessions/ServiceCredentials';
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 
@@ -177,6 +178,9 @@ export default async function SessionDetailPage({
                   initialMessagesCursor={session.messagesCursor}
                   initialStreamCursor={session.initialStreamCursor}
                   canReply
+                  peopleSessionId={
+                    session.surface === 'web' ? unifiedSession.id : undefined
+                  }
                   initialTitle={unifiedSession.title}
                   fallbackTitle={unifiedSession.title}
                   sessionModel={session.model}
@@ -202,7 +206,8 @@ export default async function SessionDetailPage({
                     <SessionHeaderPullRequests key="session-pull-requests" />
                   }
                   headerActions={
-                    <SessionViewers
+                    <SessionParticipants
+                      surface={session.surface}
                       key="session-viewers"
                       sessionId={unifiedSession.id}
                     />

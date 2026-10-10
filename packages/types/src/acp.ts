@@ -20,6 +20,8 @@ import { normalizeProviderUsageWorkflowPhase } from './provider-usage-workflow-p
 
 export const ACP_ENVELOPE_EVENT_TYPES = {
   UserPrompt: 'roomote_runtime.user_prompt',
+  /** Web peer discussion: transcript context, never an agent request. */
+  PeerMessage: 'roomote_runtime.peer_message',
   AssistantThought: 'roomote_runtime.assistant_thought',
   AssistantThoughtChunk: 'roomote_runtime.assistant_thought_chunk',
   AssistantMessage: 'roomote_runtime.assistant_message',
@@ -860,6 +862,7 @@ export function inferAcpMessageKind(
 ): AcpMessageKind {
   switch (eventType) {
     case ACP_ENVELOPE_EVENT_TYPES.UserPrompt:
+    case ACP_ENVELOPE_EVENT_TYPES.PeerMessage:
     case ACP_ENVELOPE_EVENT_TYPES.AssistantMessage:
     case ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk:
       return 'text';

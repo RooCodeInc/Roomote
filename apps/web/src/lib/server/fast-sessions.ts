@@ -112,7 +112,9 @@ const fastSessionMessageSelection = {
   role: fastAgentMessages.role,
   contentBlocks: fastAgentMessages.contentBlocks,
   metadata: fastAgentMessages.metadata,
-  payload: fastAgentMessages.payload,
+  payload: sql<
+    FastAgentMessage['payload']
+  >`${fastAgentMessages.payload} - 'peerDiscussionContext'`,
   source: fastAgentMessages.source,
   nativeSessionId: fastAgentMessages.nativeSessionId,
   nativeMessageId: fastAgentMessages.nativeMessageId,

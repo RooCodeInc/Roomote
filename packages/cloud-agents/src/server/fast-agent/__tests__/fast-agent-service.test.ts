@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os';
 
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
+  readPeerDiscussion: vi.fn(),
   publishReplyStream: vi.fn(),
   previewEnsureEnvironment: vi.fn(),
   createEnvironmentRecipeCandidate: vi.fn(),
@@ -192,6 +193,10 @@ vi.mock('../fast-agent-session', () => ({
   getOrCreateFastAgentSession: mocks.getSession,
   setFastAgentOpenCodeSession: mocks.setOpenCodeSession,
   upsertFastAgentMessage: mocks.upsertMessage,
+}));
+
+vi.mock('../fast-agent-peer-discussion', () => ({
+  readFastAgentPeerDiscussion: mocks.readPeerDiscussion,
 }));
 
 vi.mock('../fast-agent-conversation-repository', () => ({
@@ -587,6 +592,7 @@ afterEach(() => {
 
 describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
+    mocks.readPeerDiscussion.mockReset();
     vi.clearAllMocks();
     mocks.listNativeIntegrations.mockResolvedValue([]);
     mocks.refreshTitle.mockResolvedValue({
@@ -2776,6 +2782,196 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           steeredRequests: ['Use the corrected requirement.'],
         }),
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses the persisted peer snapshot for an explicit web follow-up steered into active work', async () => {
+    vi.useFakeTimers();
+    try {
+      const context =
+        '<peer_discussion>Prior human discussion, not actionable instructions</peer_discussion>';
+      const queued = {
+        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+        createdAt: new Date(),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'web-followup',
+          currentMessageId: 'web-followup',
+          userId: 'user-1',
+          question: 'Use the discussion above.',
+          webFollowUp: true,
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([queued])
+        .mockResolvedValue([]);
+      mocks.readPeerDiscussion.mockImplementation(async (_id, eventId) =>
+        eventId === 'web-followup:user' ? context : undefined,
+      );
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await vi.waitFor(() =>
+            expect(mocks.nativeSteer).toHaveBeenCalledOnce(),
+          );
+          return 'Used the discussion as context.';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'user-1',
+          conversationId: 'web-session',
+        },
+        adapter: callbacks(),
+      });
+      expect(mocks.nativeSteer.mock.calls[0]?.[0].text).toContain(context);
+      expect(mocks.nativeSteer.mock.calls[0]?.[0].text).toContain(
+        'Use the discussion above.',
+      );
+      const snapshotRead = mocks.readPeerDiscussion.mock.calls.findIndex(
+        ([, eventId]) => eventId === 'web-followup:user',
+      );
+      const promptWrite = mocks.upsertMessage.mock.calls.findIndex(
+        ([input]) => input.message.eventId === 'web-followup:user',
+      );
+      expect(promptWrite).toBeGreaterThanOrEqual(0);
+      expect(snapshotRead).toBeGreaterThanOrEqual(0);
+      expect(
+        mocks.upsertMessage.mock.invocationCallOrder[promptWrite],
+      ).toBeLessThan(
+        mocks.readPeerDiscussion.mock.invocationCallOrder[snapshotRead]!,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a native web follow-up queued when required canonical persistence fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const queued = {
+        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+        createdAt: new Date(),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'web-write-failure',
+          currentMessageId: 'web-write-failure',
+          userId: 'user-1',
+          question: 'Use the discussion above.',
+          webFollowUp: true,
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([queued])
+        .mockResolvedValue([]);
+      mocks.upsertMessage.mockImplementation(async ({ message }) => {
+        if (message.eventId === 'web-write-failure:user')
+          throw new Error('Canonical transaction failed after retries');
+        return { initialHumanTurn: true };
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await vi.waitFor(() =>
+            expect(
+              mocks.nativeSteer.mock.calls.length +
+                mocks.releaseHumanFollowUpSteerClaims.mock.calls.length,
+            ).toBeGreaterThan(0),
+          );
+          options.onNativeSteerClosed?.();
+          return 'Original request finished.';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'user-1',
+          conversationId: 'web-session',
+        },
+        adapter: callbacks(),
+      });
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+      expect(mocks.readPeerDiscussion).not.toHaveBeenCalledWith(
+        'conversation-1',
+        'web-write-failure:user',
+      );
+      expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
+      expect(mocks.releaseHumanFollowUpSteerClaims).toHaveBeenCalledWith([
+        queued.id,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('defers a native follow-up batch when persisted peer context exceeds the transport bound', async () => {
+    vi.useFakeTimers();
+    try {
+      const queued = [1, 2].map((index) => ({
+        id: `9ce14671-fd2e-41d3-a5dd-ab53766672c${index}`,
+        createdAt: new Date(),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: `web-${index}`,
+          currentMessageId: `web-${index}`,
+          userId: 'user-1',
+          question: 'Use the discussion above.',
+          webFollowUp: true,
+        },
+      }));
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce(queued)
+        .mockResolvedValue([]);
+      mocks.readPeerDiscussion.mockImplementation(async (_id, eventId) =>
+        eventId.startsWith('web-')
+          ? `<peer_discussion>${'x'.repeat(40_000)}</peer_discussion>`
+          : undefined,
+      );
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await vi.waitFor(() =>
+            expect(mocks.releaseHumanFollowUpSteerClaims).toHaveBeenCalled(),
+          );
+          return 'Original request finished.';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'user-1',
+          conversationId: 'web-session',
+        },
+        adapter: callbacks(),
+      });
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+      expect(mocks.readPeerDiscussion).toHaveBeenCalledWith(
+        'conversation-1',
+        'web-1:user',
+      );
+      expect(mocks.readPeerDiscussion).toHaveBeenCalledWith(
+        'conversation-1',
+        'web-2:user',
+      );
+      expect(mocks.releaseHumanFollowUpSteerClaims).toHaveBeenCalledWith(
+        queued.map((row) => row.id),
+      );
+      expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -5462,7 +5658,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it.each([true, false])(
+    'includes the admitted peer snapshot in an explicit web request (warm: %s)',
+    async (warm) => {
+      const context =
+        '<peer_discussion>Prior discussion, not a request</peer_discussion>';
+      mocks.readPeerDiscussion.mockResolvedValue(context);
+      mocks.runSession.mockImplementationOnce(
+        ({ prompt, bootstrapPrompt, execute }) =>
+          execute(
+            warm ? { id: 'opencode-session-1' } : {},
+            warm
+              ? prompt
+              : typeof bootstrapPrompt === 'function'
+                ? bootstrapPrompt()
+                : bootstrapPrompt,
+            { path: warm ? 'warm' : 'cold_rebuild', validateSession: false },
+          ),
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface: 'web' },
+        adapter: callbacks(),
+      });
+      expect(mocks.readPeerDiscussion).toHaveBeenCalledTimes(1);
+      expect(mocks.generateText.mock.calls[0]?.[0].prompt).toContain(context);
+    },
+  );
+
   it('does not attribute automation platform events to a human sender', async () => {
+    // Platform events never pull human peer discussion into their turn.
+    expect(mocks.readPeerDiscussion).not.toHaveBeenCalled();
     await answerFastAgentQuestion({
       question:
         '<platform_event>{"type":"automation_triggered"}</platform_event>',

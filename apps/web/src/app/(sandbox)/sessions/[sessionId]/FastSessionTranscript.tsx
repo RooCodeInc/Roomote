@@ -335,9 +335,16 @@ export function pendingResponseReducer(
     return { ...state, pendingAfter: null, optimisticRollback: null };
   }
   if (action.type === 'hydrate' || action.type === 'messages') {
+    const emptyHistory = action.messages.length === 0;
+    action = {
+      ...action,
+      messages: action.messages.filter(
+        (message) => message.eventType !== ACP_ENVELOPE_EVENT_TYPES.PeerMessage,
+      ),
+    };
     let pendingAfter =
       action.type === 'hydrate'
-        ? action.messages.length === 0
+        ? emptyHistory
           ? { id: '', ts: 0, turnSeq: -1 }
           : null
         : state.pendingAfter;
@@ -630,6 +637,7 @@ export function FastSessionTranscript({
   headerActions,
   canRenameTitle = false,
   titleSessionId = sessionId,
+  peopleSessionId,
   secretSessionId,
   sessionGoal,
   autoStartVoice = false,
@@ -652,6 +660,7 @@ export function FastSessionTranscript({
   headerActions?: ReactNode;
   canRenameTitle?: boolean;
   titleSessionId?: string;
+  peopleSessionId?: string;
   secretSessionId?: string;
   sessionGoal?: SessionGoal | null;
   /**
@@ -2170,6 +2179,7 @@ export function FastSessionTranscript({
     let latest: TranscriptMessage | null = null;
     let latestHumanMessage: TranscriptMessage | null = null;
     for (const message of messages) {
+      if (message.eventType === ACP_ENVELOPE_EVENT_TYPES.PeerMessage) continue;
       if (
         isIntegrationKeyRequest(message) &&
         (latest === null || compareTranscriptOrder(message, latest) > 0)
@@ -2387,6 +2397,7 @@ export function FastSessionTranscript({
         {canReply && !pendingInputRequest?.preset ? (
           <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
             <SessionPromptInput
+              peopleSessionId={peopleSessionId}
               sessionId={sessionId}
               isBusy={isSending}
               onSend={sendReply}

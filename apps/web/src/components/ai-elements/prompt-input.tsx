@@ -958,15 +958,18 @@ export const PromptInputTextarea = ({
       // Check if the submit button is disabled before submitting.
       const form = e.currentTarget.form;
 
-      const submitButton = form?.querySelector(
-        'button[type="submit"]',
-      ) as HTMLButtonElement | null;
+      const submitButton = (form?.querySelector(
+        'button[type="submit"][data-prompt-input-primary-submit]',
+      ) ??
+        form?.querySelector(
+          'button[type="submit"]',
+        )) as HTMLButtonElement | null;
 
       if (submitButton?.disabled) {
         return;
       }
 
-      form?.requestSubmit();
+      form?.requestSubmit(submitButton ?? undefined);
     }
 
     // Remove last attachment when Backspace is pressed and textarea is empty.
