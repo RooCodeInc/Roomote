@@ -163,6 +163,7 @@ async function processFastAgentReaction(params: {
       question,
       userId: actorUserId,
       conversation,
+      turnSource: 'platform_event',
       currentMessageId,
       senderExternalId: event.user,
       senderDisplayName: params.reactorDisplayName,
@@ -208,7 +209,6 @@ async function processFastAgentReaction(params: {
           channelId: event.item.channel,
           threadTs,
           messageId: event.item.ts,
-          visibleInTranscript: false,
         }),
         postReply: async ({
           message,

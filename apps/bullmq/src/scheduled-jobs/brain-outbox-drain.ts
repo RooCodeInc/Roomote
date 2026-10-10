@@ -374,7 +374,10 @@ export function resolveTaskMemoryRequest(
     return null;
   }
 
-  if (payload.visibleInTranscript === false) {
+  if (
+    payload.initialPromptSource === 'generated' ||
+    payload.visibleInTranscript === false
+  ) {
     return null;
   }
 

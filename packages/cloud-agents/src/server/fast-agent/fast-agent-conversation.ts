@@ -3,6 +3,7 @@ import type {
   FastAgentCapabilityOfferInput,
   FastAgentConversation,
   FastAgentReactionExternalInput as SharedFastAgentReactionExternalInput,
+  InitialTaskPromptSource,
   ReasoningEffort,
 } from '@roomote/types';
 
@@ -124,6 +125,8 @@ export type CreateFastAgentArtifact = (params: {
 
 export type LaunchFastAgentTask = (params: {
   prompt: string;
+  /** Authorship of the prompt being persisted on the launched task. */
+  initialPromptSource: InitialTaskPromptSource;
   images?: string[];
   environmentId: string | null;
   /** Exact environment for a fresh, server-authorized verification task. */

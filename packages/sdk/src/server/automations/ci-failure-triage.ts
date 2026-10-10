@@ -572,7 +572,7 @@ export async function ciFailureTriageJob(
                   triggeringRun,
                 }),
                 ...buildDestinationTaskPayloadFields(reportDestination),
-                visibleInTranscript: false,
+                initialPromptSource: 'generated',
               },
             },
             initiator: { kind: 'automation', key: 'ci_failure_triage' },

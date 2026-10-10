@@ -34,6 +34,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     } = params;
     return async (input: {
       prompt: string;
+      initialPromptSource: 'human' | 'generated';
       environmentId: string | null;
       parentSessionId: string;
       postKickoff: (task: {
@@ -53,6 +54,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
           liveTaskStream,
           rendersTaskLink,
           environmentId: input.environmentId,
+          initialPromptSource: input.initialPromptSource,
         });
       } catch (error) {
         await onQueueFailure?.({ id: 42, taskId: 'task-1' });
@@ -86,8 +88,8 @@ import { RunStatus } from '@roomote/types';
 
 import { createFastAgentSlackLiveTaskLauncher } from '../fast-agent-live-task-launcher';
 
-function createLauncher(visibleInTranscript?: boolean) {
-  return createFastAgentSlackLiveTaskLauncher({
+function createLauncher() {
+  const launch = createFastAgentSlackLiveTaskLauncher({
     slack: {
       postMessage: mocks.postMessage,
       postMessageDetailed: mocks.postMessageDetailed,
@@ -100,8 +102,11 @@ function createLauncher(visibleInTranscript?: boolean) {
     channelId: 'C123',
     threadTs: '100.001',
     messageId: '100.002',
-    ...(visibleInTranscript !== undefined ? { visibleInTranscript } : {}),
   });
+  return (
+    input: Omit<Parameters<typeof launch>[0], 'initialPromptSource'> &
+      Partial<Pick<Parameters<typeof launch>[0], 'initialPromptSource'>>,
+  ) => launch({ initialPromptSource: 'human', ...input });
 }
 
 describe('createFastAgentSlackLiveTaskLauncher', () => {
@@ -135,8 +140,8 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     unfurl_media: false,
   };
 
-  it('forwards explicit prompt visibility from the launch origin', async () => {
-    const launchTask = createLauncher(true);
+  it('forwards initial-prompt authorship from the launch boundary', async () => {
+    const launchTask = createLauncher();
 
     await launchTask({
       prompt: '$review-code Check this change',
@@ -146,7 +151,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     });
 
     expect(mocks.enqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({ visibleInTranscript: true }),
+      expect.objectContaining({ initialPromptSource: 'human' }),
     );
   });
 
@@ -212,6 +217,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       liveTaskStream: true,
       rendersTaskLink: true,
       environmentId: 'env-1',
+      initialPromptSource: 'human',
     });
   });
 

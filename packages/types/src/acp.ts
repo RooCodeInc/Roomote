@@ -2673,6 +2673,15 @@ export function restoreSnapshotResumeVisiblePromptFields(
   }
 
   if (
+    payload.initialPromptSource !== 'human' &&
+    payload.initialPromptSource !== 'generated' &&
+    (source.initialPromptSource === 'human' ||
+      source.initialPromptSource === 'generated')
+  ) {
+    payload.initialPromptSource = source.initialPromptSource;
+  }
+
+  if (
     typeof payload.visibleInTranscript !== 'boolean' &&
     typeof source.visibleInTranscript === 'boolean'
   ) {

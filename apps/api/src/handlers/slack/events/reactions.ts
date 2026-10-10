@@ -775,7 +775,7 @@ async function launchTaskSuggestionTaskFromReaction({
             slack,
             userId: activeUserMapping.userId,
             teamId,
-            visibleInTranscript: false,
+            turnSource: 'platform_event',
             errorLogPrefix: `Failed to start Fast suggestion response for work item ${workItemId}:`,
           });
           return fastStart.accepted
@@ -831,7 +831,6 @@ async function launchTaskSuggestionTaskFromReaction({
               channelId: announceChannelId,
               threadTs: launchThreadTs,
               messageId: announceMessageTs,
-              visibleInTranscript: false,
               initiator,
               repoForPayload:
                 launchTarget.kind === 'all_repositories'
@@ -840,6 +839,7 @@ async function launchTaskSuggestionTaskFromReaction({
             });
             return launchTask({
               prompt: suggestionTaskPrompt,
+              initialPromptSource: 'generated',
               environmentId: workspace.environmentId ?? null,
               model: null,
               parentSessionId: parent.sessionId,

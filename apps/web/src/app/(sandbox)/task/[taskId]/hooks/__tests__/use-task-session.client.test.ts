@@ -69,7 +69,8 @@ describe('getTaskRunVisiblePrompt', () => {
         buildTaskRun({
           repo: 'Roomote/example-app',
           description: '$review-code Check this change',
-          visibleInTranscript: true,
+          initialPromptSource: 'human',
+          visibleInTranscript: false,
         } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
       ),
     ).toEqual({
@@ -96,13 +97,14 @@ describe('getTaskRunVisiblePrompt', () => {
     });
   });
 
-  it('keeps explicitly hidden execution prompts hidden for human-created tasks', () => {
+  it('keeps generated execution prompts hidden regardless of legacy message visibility', () => {
     expect(
       getTaskRunVisiblePrompt(
         buildTaskRun({
           repo: 'Roomote/example-app',
           description: '$environment-setup Set up the environment',
-          visibleInTranscript: false,
+          initialPromptSource: 'generated',
+          visibleInTranscript: true,
         } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
       ),
     ).toMatchObject({ visibleInTranscript: false });

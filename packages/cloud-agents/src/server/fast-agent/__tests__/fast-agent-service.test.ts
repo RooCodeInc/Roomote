@@ -7746,6 +7746,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // between launching and recording returns the same task.
       expect(launchTask).toHaveBeenCalledWith(
         expect.objectContaining({
+          initialPromptSource: 'human',
           launchIdempotencyKey: expect.stringMatching(
             /^fast:[^:]+:[^:]+:[0-9a-f]{32}$/u,
           ),
@@ -11468,6 +11469,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       platformEventKind: 'automation',
       platformEventVisibility: 'required',
     });
+
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ initialPromptSource: 'generated' }),
+    );
 
     expect(adapter.postReply).toHaveBeenLastCalledWith({
       purpose: 'closeout',

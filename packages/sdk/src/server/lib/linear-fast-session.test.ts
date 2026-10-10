@@ -97,6 +97,7 @@ describe('createFastAgentLinearTaskLauncher', () => {
     });
     const input = {
       prompt: 'Fix the retry loop',
+      initialPromptSource: 'human' as const,
       environmentId: 'env-1',
       parentSessionId: 'fast-1',
       postKickoff: vi.fn(),
@@ -154,6 +155,7 @@ describe('createFastAgentLinearTaskLauncher', () => {
     });
     await launch({
       prompt: 'Research the proposal',
+      initialPromptSource: 'human',
       environmentId: NO_REPOSITORIES,
       parentSessionId: 'fast-1',
       postKickoff: vi.fn(),
@@ -182,6 +184,7 @@ describe('createFastAgentLinearTaskLauncher', () => {
 
     await launch({
       prompt: 'Fix the retry loop',
+      initialPromptSource: 'human',
       environmentId: null,
       parentSessionId: 'fast-1',
       postKickoff: vi.fn(),

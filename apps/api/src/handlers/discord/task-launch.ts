@@ -3,6 +3,7 @@ import {
   buildFastAgentChildTaskMetadata,
   TaskPayloadKind,
   type FastAgentParent,
+  type InitialTaskPromptSource,
   type QueuedCommunicationMessage,
   type TaskInitiator,
   type TaskSpec,
@@ -348,8 +349,7 @@ export async function launchDiscordTask(input: {
    * automation-owned launches for bot-authored messages.
    */
   initiator?: TaskInitiator;
-  /** Explicit visibility from the task-launch origin, independent of initiator. */
-  visibleInTranscript?: boolean;
+  initialPromptSource: InitialTaskPromptSource;
   /**
    * Agent-facing prompt override (e.g. auto-respond channel instructions
    * prepended to the message); the queued message text stays the
@@ -475,9 +475,7 @@ export async function launchDiscordTask(input: {
                 : {}),
             }
           : {}),
-        ...(input.visibleInTranscript !== undefined
-          ? { visibleInTranscript: input.visibleInTranscript }
-          : {}),
+        initialPromptSource: input.initialPromptSource,
       },
     };
 

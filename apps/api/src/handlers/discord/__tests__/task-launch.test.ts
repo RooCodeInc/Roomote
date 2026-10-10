@@ -73,7 +73,15 @@ vi.mock('@roomote/db/server', () => ({
 
 import { DiscordApiError } from '@roomote/communication/discord-provider';
 
-import { launchDiscordTask } from '../task-launch.js';
+import { launchDiscordTask as launchDiscordTaskImpl } from '../task-launch.js';
+
+type LaunchDiscordTaskInput = Parameters<typeof launchDiscordTaskImpl>[0];
+function launchDiscordTask(
+  input: Omit<LaunchDiscordTaskInput, 'initialPromptSource'> &
+    Partial<Pick<LaunchDiscordTaskInput, 'initialPromptSource'>>,
+) {
+  return launchDiscordTaskImpl({ initialPromptSource: 'human', ...input });
+}
 
 describe('launchDiscordTask', () => {
   beforeEach(() => {
@@ -124,7 +132,6 @@ describe('launchDiscordTask', () => {
         userId: 'user-1',
         ts: 'message-1',
       },
-      visibleInTranscript: true,
       metadata: {
         communicationProvider: 'discord',
         communicationGuildId: 'guild-1',
@@ -184,7 +191,7 @@ describe('launchDiscordTask', () => {
             communicationThreadId: 'thread-41',
             communicationMessageId: 'thread-message-1',
             communicationSourceEventId: 'message-1',
-            visibleInTranscript: true,
+            initialPromptSource: 'human',
             discordTaskThread: true,
           }),
         },

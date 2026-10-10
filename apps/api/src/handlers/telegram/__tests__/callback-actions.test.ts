@@ -290,7 +290,7 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     expect(launchTelegramTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         launchOwnerUserId: 'user-1',
-        visibleInTranscript: false,
+        initialPromptSource: 'generated',
         queuedMessage: expect.objectContaining({
           text: 'Fix the flaky test\n\nThe retry loop never terminates.',
           user: 'Matt',

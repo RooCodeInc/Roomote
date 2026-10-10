@@ -78,6 +78,7 @@ export async function processFastAgentMessage(params: {
   roomoteSlackUserId?: string;
   peerConversationsEnabled?: boolean;
   userInitiated?: boolean;
+  turnSource?: 'human' | 'platform_event';
   originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
@@ -333,6 +334,9 @@ export async function processFastAgentMessage(params: {
       type: 'human_follow_up' as const,
       eventId: event.ts,
       currentMessageId: event.ts,
+      ...(params.turnSource === 'platform_event'
+        ? { turnSource: 'platform_event' as const }
+        : {}),
       userId,
       question,
       ...(agentContext ? { agentContext } : {}),
@@ -436,6 +440,7 @@ export async function processFastAgentMessage(params: {
         ? { canonicalConversation: conversation }
         : {}),
       currentMessageId: event.ts,
+      ...(params.turnSource ? { turnSource: params.turnSource } : {}),
       signal: activeTurnLock.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
       // A redelivered event whose earlier inline attempt never settled

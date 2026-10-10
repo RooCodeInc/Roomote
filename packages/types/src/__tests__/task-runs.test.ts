@@ -310,6 +310,7 @@ describe('taskSpecSchema', () => {
       payload: {
         repo: ALL_REPOSITORIES,
         description: 'Delegated from a Fast automation',
+        initialPromptSource: 'generated',
         communicationContextInherited: true,
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
         fastAgentParent: {
@@ -331,6 +332,7 @@ describe('taskSpecSchema', () => {
       workspaceId: 'automation-1',
       conversationId: 'occurrence-1',
     });
+    expect(parsed.payload.initialPromptSource).toBe('generated');
   });
 
   it('preserves sourceControlProvider on StandardTask payloads', () => {

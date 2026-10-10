@@ -654,7 +654,7 @@ export async function processSlackChannelAutoStartTask(params: {
         slack,
         userId: launchIdentity.launchUserId,
         teamId,
-        visibleInTranscript: !isBotAuthored,
+        ...(isBotAuthored ? { turnSource: 'platform_event' as const } : {}),
         directedAtRoomote:
           !isBotAuthored ||
           mentionsSlackBot(event, slackInstallation.botUserId),
@@ -1025,7 +1025,7 @@ async function processAutomatedAppMentionTask(params: {
             ? { actor: { externalId: event.user } }
             : {}),
         },
-        visibleInTranscript: false,
+        turnSource: 'platform_event',
         resolveActiveTasks: () =>
           resolveFastAgentReplyTasks({
             slack,
@@ -1117,17 +1117,11 @@ export function startFastAgentResponse(params: {
    * turns pass their automation initiator so delegated work keeps automation
    * provenance instead of appearing installer-initiated. */
   delegatedTaskInitiator?: TaskInitiator;
-  /** Prompt visibility from the launch origin, not inferred from initiator. */
-  visibleInTranscript?: boolean;
+  turnSource?: 'human' | 'platform_event';
   originSessionId?: string;
   errorLogPrefix: string;
 }): Promise<FastAgentStartResult> {
-  const {
-    errorLogPrefix,
-    delegatedTaskInitiator,
-    visibleInTranscript,
-    ...fastAgentParams
-  } = params;
+  const { errorLogPrefix, delegatedTaskInitiator, ...fastAgentParams } = params;
   return startAcceptedFastAgentTurn({
     run: ({ onAccepted, onRejected }) =>
       processFastAgentMessage({
@@ -1143,7 +1137,6 @@ export function startFastAgentResponse(params: {
           ...(delegatedTaskInitiator
             ? { initiator: delegatedTaskInitiator }
             : {}),
-          ...(visibleInTranscript !== undefined ? { visibleInTranscript } : {}),
           ...(params.slackInstallation.teamDomain
             ? { teamDomain: params.slackInstallation.teamDomain }
             : {}),
@@ -1321,7 +1314,6 @@ async function handleSlackEntryEvent(params: {
       slack,
       userId: userMapping.userId,
       teamId,
-      visibleInTranscript: true,
       resolveActiveTasks: () =>
         resolveFastAgentReplyTasks({
           slack,

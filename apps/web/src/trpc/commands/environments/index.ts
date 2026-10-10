@@ -971,7 +971,7 @@ export async function startEnvironmentDefinitionTaskCommand(
           ? { environmentDefinitionId: input.environmentId }
           : {}),
         description: prompt,
-        visibleInTranscript: false,
+        initialPromptSource: 'generated',
         ...(modelSelection.harnessModelOverrides
           ? { harnessModelOverrides: modelSelection.harnessModelOverrides }
           : {}),
@@ -1139,7 +1139,7 @@ export async function retryEnvironmentVerificationCommand(
             environmentId: environment.id,
             verifiesEnvironmentId: environment.id,
             description: prompt,
-            visibleInTranscript: false,
+            initialPromptSource: 'generated',
           },
         },
         initiator: { kind: 'user', userId },

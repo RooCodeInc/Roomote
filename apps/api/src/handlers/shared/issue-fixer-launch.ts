@@ -102,7 +102,7 @@ export async function launchIssueFixerTriage({
             environmentId,
             selectedRepositories: [repositoryFullName],
             description,
-            visibleInTranscript: false,
+            initialPromptSource: 'generated',
             sourceControlProvider,
             ...(sourceControlHost ? { sourceControlHost } : {}),
           },

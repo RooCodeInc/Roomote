@@ -181,6 +181,7 @@ describe('createFastAgentSourceControlTaskLauncher', () => {
     });
     const input = {
       prompt: 'Address the review',
+      initialPromptSource: 'human' as const,
       environmentId: 'env-1',
       parentSessionId: 'fast-1',
       postKickoff: vi.fn(),
@@ -251,6 +252,7 @@ describe('createFastAgentSourceControlTaskLauncher', () => {
 
     await launch({
       prompt: 'Follow up on the merged change',
+      initialPromptSource: 'human',
       environmentId: null,
       parentSessionId: 'fast-1',
       postKickoff: vi.fn(),
@@ -296,6 +298,7 @@ describe('createFastAgentSourceControlTaskLauncher', () => {
     });
     await launch({
       prompt: 'Look into it',
+      initialPromptSource: 'human',
       environmentId: NO_REPOSITORIES,
       parentSessionId: 'fast-1',
       postKickoff: vi.fn(),
@@ -334,6 +337,7 @@ describe('createFastAgentSourceControlTaskLauncher', () => {
     await expect(
       launch({
         prompt: 'Address the review',
+        initialPromptSource: 'human',
         environmentId: 'env-1',
         parentSessionId: 'fast-1',
         postKickoff: vi.fn(),
@@ -368,6 +372,7 @@ describe('createFastAgentSourceControlTaskLauncher', () => {
 
     await launch({
       prompt: 'Fix the bug',
+      initialPromptSource: 'human',
       environmentId: null,
       parentSessionId: 'fast-1',
       postKickoff: vi.fn(),

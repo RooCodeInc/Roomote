@@ -32,7 +32,15 @@ vi.mock('../thread-delivery.js', () => ({
   releaseClaimedDiscordThreadMessages: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { startNewDiscordTask } from '../task-orchestration.js';
+import { startNewDiscordTask as startNewDiscordTaskImpl } from '../task-orchestration.js';
+
+type StartNewDiscordTaskInput = Parameters<typeof startNewDiscordTaskImpl>[0];
+function startNewDiscordTask(
+  input: Omit<StartNewDiscordTaskInput, 'initialPromptSource'> &
+    Partial<Pick<StartNewDiscordTaskInput, 'initialPromptSource'>>,
+) {
+  return startNewDiscordTaskImpl({ initialPromptSource: 'human', ...input });
+}
 
 const WORKSPACE = {
   environmentId: 'env-1',
@@ -66,7 +74,6 @@ describe('startNewDiscordTask', () => {
       applicationId: 'application-1',
       requesterDiscordUserId: 'discord-user-1',
       launchOwnerUserId: 'user-1',
-      visibleInTranscript: true,
       queuedMessage: {
         provider: 'discord',
         text: 'Fix checkout',
@@ -97,7 +104,7 @@ describe('startNewDiscordTask', () => {
     expect(mocks.launchTask).toHaveBeenCalledWith(
       expect.objectContaining({
         beforeEnqueueKickoff,
-        visibleInTranscript: true,
+        initialPromptSource: 'human',
       }),
     );
   });

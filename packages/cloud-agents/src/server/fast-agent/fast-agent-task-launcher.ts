@@ -60,6 +60,7 @@ export function createFastAgentTaskLauncher(
 ): LaunchFastAgentTask {
   return async ({
     prompt,
+    initialPromptSource,
     images,
     environmentId,
     verifiesEnvironmentId,
@@ -90,6 +91,7 @@ export function createFastAgentTaskLauncher(
       ...builtTask,
       payload: {
         ...builtTask.payload,
+        initialPromptSource,
         // Bound automation threads retain a logical identity distinct from
         // their provider reply target. Never reconstruct it from that target.
         ...buildFastAgentChildTaskMetadata({
@@ -188,8 +190,6 @@ export type FastAgentSlackTaskLauncherParams = {
   initiator?: TaskInitiator;
   /** Opt the child into the native Slack task card in the parent thread. */
   liveTaskStream?: boolean;
-  /** Explicit prompt-origin visibility from the launch surface; never inferred from the initiator. */
-  visibleInTranscript?: boolean;
   /** The custom automation this thread runs for; marks the child's settle as
    * that automation's report. */
   customAutomationId?: string;
@@ -227,9 +227,6 @@ export function createFastAgentSlackTaskLauncher(
           params.repoForPayload,
         ),
         description: prompt,
-        ...(params.visibleInTranscript !== undefined
-          ? { visibleInTranscript: params.visibleInTranscript }
-          : {}),
         ...(params.customAutomationId
           ? { customAutomationId: params.customAutomationId }
           : {}),

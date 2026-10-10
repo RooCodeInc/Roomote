@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-import { launchCodingHarnesses, REASONING_EFFORT_VALUES } from './task-runs';
+import {
+  launchCodingHarnesses,
+  REASONING_EFFORT_VALUES,
+  type InitialTaskPromptSource,
+} from './task-runs';
 import { computeProviders } from './compute-providers';
 import { ALL_REPOSITORIES, NO_REPOSITORIES } from './constants';
 import { gitBranchNameSchema } from './git-ref';
@@ -27,7 +31,7 @@ export type TaskLaunchWorkspacePayload = {
 export type TaskTypePromptAndWorkspacePayloadResult = {
   taskPrompt: string;
   workspacePayload: TaskLaunchWorkspacePayload;
-  visibleInTranscript?: boolean;
+  initialPromptSource: InitialTaskPromptSource;
 };
 
 export class TaskTypePromptAndWorkspacePayloadError extends Error {
@@ -50,7 +54,7 @@ export function buildTaskTypePromptAndWorkspacePayload({
   repositoryFullNames?: string[] | null | undefined;
   setupGuidance?: string | null | undefined;
 }): TaskTypePromptAndWorkspacePayloadResult {
-  const visibleInTranscript = type === 'standard' ? undefined : false;
+  const initialPromptSource = type === 'standard' ? 'human' : 'generated';
   const environmentDefinitionRepositories =
     repositoryFullNames && repositoryFullNames.length > 0
       ? repositoryFullNames
@@ -78,14 +82,14 @@ export function buildTaskTypePromptAndWorkspacePayload({
           .join('\n\n'),
       ),
       workspacePayload,
-      visibleInTranscript,
+      initialPromptSource,
     };
   }
 
   return {
     taskPrompt: prompt ?? '',
     workspacePayload,
-    visibleInTranscript,
+    initialPromptSource,
   };
 }
 
@@ -120,6 +124,7 @@ export const taskLaunchRequestSchema = z.object({
   repositoryFullNames: z.array(z.string().trim().min(1)).min(1).optional(),
   selectedRepositories: z.array(z.string().trim().min(1)).min(1).optional(),
   setupGuidance: z.string().optional(),
+  /** Deprecated compatibility inputs mapped to `initialPromptSource`. */
   visibleInTranscript: z.boolean().optional(),
   hidden: z.boolean().optional(),
   computeProvider: z.enum(computeProviders).optional(),

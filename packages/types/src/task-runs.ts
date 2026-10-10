@@ -963,6 +963,11 @@ const sharedTaskSchema = z.object({
   communicationContextSourceRunId: z.number().nullish(),
 });
 
+export const initialTaskPromptSourceSchema = z.enum(['human', 'generated']);
+export type InitialTaskPromptSource = z.infer<
+  typeof initialTaskPromptSourceSchema
+>;
+
 export const linkedWorkItemProviderSchema = z.enum([
   'github',
   'gitlab',
@@ -1042,9 +1047,14 @@ const sharedTaskPayloadSchema = z.object({
   githubPrNumber: z.number().optional(),
   githubPrSha: z.string().optional(),
 
+  /** Who authored the initial task prompt. This is the canonical visibility
+   * signal for the launch prompt synthesized from the task payload. */
+  initialPromptSource: initialTaskPromptSourceSchema.optional(),
+
   /**
-   * Whether the user-facing session prompt synthesized from this payload
-   * should appear in the transcript. Omitted defaults to visible.
+   * Deprecated compatibility field for task payloads written before
+   * `initialPromptSource`. Ordinary persisted messages still use transcript
+   * visibility metadata independently.
    */
   visibleInTranscript: z.boolean().optional(),
 

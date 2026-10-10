@@ -257,7 +257,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
             communicationProvider: 'teams',
             communicationChannelId: '19:teams-channel@thread.tacv2',
             communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
-            visibleInTranscript: false,
+            initialPromptSource: 'generated',
           },
         },
         initiator: { kind: 'automation', key: 'ci_failure_triage' },
