@@ -469,7 +469,7 @@ describe('getTaskRunVisiblePrompt', () => {
     });
   });
 
-  it('keeps legacy hidden bootstrap prompts out of the session transcript', () => {
+  it('keeps unflagged legacy command prompts visible in the session transcript', () => {
     const taskRun = createTaskRunDetail({
       payload: {
         repo: 'owner/repo',
@@ -478,7 +478,8 @@ describe('getTaskRunVisiblePrompt', () => {
     });
 
     expect(getTaskRunVisiblePrompt(taskRun)).toMatchObject({
-      visibleInTranscript: false,
+      text: '$environment-setup\n<request>Set up the app</request>',
+      visibleInTranscript: true,
     });
   });
 });
