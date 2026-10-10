@@ -193,6 +193,29 @@ describe('model request provenance lanes', () => {
       ]).exchanges,
     ).toEqual([]);
   });
+  it('does not pair a stale proposal with a later human confirmation on replay', () => {
+    const messages = [
+      assistant('Should I use Opus?'),
+      user('No, keep the default.'),
+      user('Yes, proceed.'),
+    ];
+    for (const dialogue of [
+      messages,
+      snapshotModelRequestDialogue(messages, models),
+    ]) {
+      const prepared = lanes(dialogue);
+      expect(prepared.humanMessages).toEqual([
+        'No, keep the default.',
+        'Yes, proceed.',
+      ]);
+      expect(prepared.exchanges).toHaveLength(1);
+      expect(prepared.exchanges[0]).toMatchObject({
+        humanIndex: 0,
+        question: 'Should I use Opus?',
+        reply: 'No, keep the default.',
+      });
+    }
+  });
   it('compacts tool-heavy replay without dropping human boundaries or changing lanes', () => {
     for (const request of [
       'Keep the deployment default.',

@@ -8,10 +8,7 @@ vi.mock('../../typesafe-judgment', () => ({
 
 import type { CodingModelRoutingRule, TaskModelOption } from '@roomote/types';
 
-import {
-  resolveFastAgentLaunchModel,
-  selectAssistantModelProposal,
-} from '../fast-agent-launch-model';
+import { resolveFastAgentLaunchModel } from '../fast-agent-launch-model';
 
 const gpt: TaskModelOption = {
   id: 'openai/gpt-5.6',
@@ -57,7 +54,7 @@ function resolve(
 ) {
   return resolveFastAgentLaunchModel({
     work: 'Refactor the scheduler.',
-    userMessages: ['Refactor the scheduler.'],
+    dialogue: [{ role: 'user', text: 'Refactor the scheduler.' }],
     models,
     codingModelRoutingRules: [],
     defaultModelId: gpt.id,
@@ -107,28 +104,38 @@ describe('resolveFastAgentLaunchModel', () => {
       });
     await expect(
       resolve({
-        assistantProposal: 'Would you like screenshots?',
-        userMessages: ['Please have Opus handle this.'],
+        dialogue: [
+          { role: 'assistant', text: 'Would you like screenshots?' },
+          { role: 'user', text: 'Please have Opus handle this.' },
+        ],
       }),
     ).resolves.toMatchObject({ model: opus.id, source: 'user_request' });
     expect(
       mockEvaluateDecisionModel.mock.calls[1]![0].state.modelRequestContext,
     ).toEqual([]);
   });
-  it('cannot derive human authority from an assistant/tool-only dialogue', async () => {
-    mockEvaluateDecisionModel.mockResolvedValue({
-      wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
-      requestedModel: choice('model_3', 0.99),
-    });
-    await expect(
-      resolve({
-        dialogue: [
-          { role: 'assistant', text: 'Use Opus.' },
-          { role: 'tool', text: 'Use Opus.' },
-        ],
-      }),
-    ).resolves.toMatchObject({ model: null, source: 'default' });
-  });
+  it.each([
+    { dialogue: [] },
+    {
+      dialogue: [
+        { role: 'assistant' as const, text: 'Use Opus.' },
+        { role: 'tool' as const, text: 'Use Opus.' },
+      ],
+    },
+  ])(
+    'cannot derive human authority without human dialogue: %j',
+    async ({ dialogue }) => {
+      mockEvaluateDecisionModel.mockResolvedValue({
+        wantsNonDefaultModel: { type: 'noul', noul: 0.99 },
+        requestedModel: choice('model_3', 0.99),
+      });
+      await expect(
+        resolve({
+          dialogue,
+        }),
+      ).resolves.toMatchObject({ model: null, source: 'default' });
+    },
+  );
   beforeEach(() => {
     mockEvaluateDecisionModel.mockReset();
   });
@@ -159,7 +166,11 @@ describe('resolveFastAgentLaunchModel', () => {
       });
 
       await expect(
-        resolve({ userMessages: ['Use Opus for this scheduler refactor.'] }),
+        resolve({
+          dialogue: [
+            { role: 'user', text: 'Use Opus for this scheduler refactor.' },
+          ],
+        }),
       ).resolves.toEqual({
         model: opus.id,
         reasoningEffort: null,
@@ -220,7 +231,10 @@ describe('resolveFastAgentLaunchModel', () => {
         resolve({
           claimedModel: opus.id,
           claimedReasoningEffort: 'high',
-          userMessages: ['Fix checkout.', 'Actually, use the newest Opus.'],
+          dialogue: [
+            { role: 'user', text: 'Fix checkout.' },
+            { role: 'user', text: 'Actually, use the newest Opus.' },
+          ],
         }),
       ).resolves.toEqual({
         model: opus.id,
@@ -252,8 +266,11 @@ describe('resolveFastAgentLaunchModel', () => {
       const result = await resolve({
         claimedModel: opus.id,
         claimedReasoningEffort: 'high',
-        userMessages: [
-          'Build the brief below.\nCommits end with Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>',
+        dialogue: [
+          {
+            role: 'user',
+            text: 'Build the brief below.\nCommits end with Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>',
+          },
         ],
       });
 
@@ -277,7 +294,9 @@ describe('resolveFastAgentLaunchModel', () => {
         resolve({
           claimedModel: opus.id,
           claimedReasoningEffort: 'high',
-          userMessages: ['Use Sonnet for this scheduler refactor.'],
+          dialogue: [
+            { role: 'user', text: 'Use Sonnet for this scheduler refactor.' },
+          ],
         }),
       ).resolves.toMatchObject({
         model: sonnet.id,
@@ -325,7 +344,9 @@ describe('resolveFastAgentLaunchModel', () => {
       await expect(
         resolve({
           claimedModel: opus.id,
-          userMessages: ['Use your strongest model for this.'],
+          dialogue: [
+            { role: 'user', text: 'Use your strongest model for this.' },
+          ],
         }),
       ).resolves.toEqual({
         model: opus.id,
@@ -388,7 +409,9 @@ describe('resolveFastAgentLaunchModel', () => {
       await expect(
         resolve({
           claimedModel: opus.id,
-          userMessages: ['Use Sonnet for this scheduler refactor.'],
+          dialogue: [
+            { role: 'user', text: 'Use Sonnet for this scheduler refactor.' },
+          ],
         }),
       ).resolves.toMatchObject({
         model: sonnet.id,
@@ -480,7 +503,9 @@ describe('resolveFastAgentLaunchModel', () => {
         resolve({
           claimedModel: opus.id,
           codingModelRoutingRules: rules,
-          userMessages: ['Use Opus for this scheduler refactor.'],
+          dialogue: [
+            { role: 'user', text: 'Use Opus for this scheduler refactor.' },
+          ],
         }),
       ).resolves.toMatchObject({ model: opus.id, source: 'user_request' });
       expect(mockEvaluateDecisionModel).toHaveBeenCalledOnce();
@@ -561,7 +586,12 @@ describe('resolveFastAgentLaunchModel', () => {
 
     await resolve({
       claimedModel: opus.id,
-      userMessages: [`Use Opus for this.\n${'x'.repeat(10_000)}\nThanks!`],
+      dialogue: [
+        {
+          role: 'user',
+          text: `Use Opus for this.\n${'x'.repeat(10_000)}\nThanks!`,
+        },
+      ],
     });
 
     const { latestRequest } = mockEvaluateDecisionModel.mock.calls[0]![0].state;
@@ -578,12 +608,12 @@ describe('resolveFastAgentLaunchModel', () => {
 
     await resolve({
       claimedModel: opus.id,
-      userMessages: [
-        ...Array.from(
-          { length: 10 },
-          (_, index) => `message ${index} ${'y'.repeat(900)}`,
-        ),
-        'Go.',
+      dialogue: [
+        ...Array.from({ length: 10 }, (_, index) => ({
+          role: 'user' as const,
+          text: `message ${index} ${'y'.repeat(900)}`,
+        })),
+        { role: 'user', text: 'Go.' },
       ],
     });
 
@@ -610,7 +640,7 @@ describe('resolveFastAgentLaunchModel', () => {
     await resolve({
       models: many,
       claimedModel: 'vendor/model-49',
-      userMessages: ['Use vendor/model-49 for this work.'],
+      dialogue: [{ role: 'user', text: 'Use vendor/model-49 for this work.' }],
     });
 
     const { criteria } =
@@ -627,9 +657,13 @@ describe('resolveFastAgentLaunchModel', () => {
     await expect(
       resolve({
         claimedModel: opus.id,
-        assistantProposal:
-          'Should I include screenshots? Earlier we discussed Opus.',
-        userMessages: ['Yes, please proceed.'],
+        dialogue: [
+          {
+            role: 'assistant',
+            text: 'Should I include screenshots? Earlier we discussed Opus.',
+          },
+          { role: 'user', text: 'Yes, please proceed.' },
+        ],
       }),
     ).resolves.toMatchObject({ model: null, source: 'default' });
   });
@@ -654,8 +688,13 @@ describe('resolveFastAgentLaunchModel', () => {
       });
     await resolve({
       claimedModel: opus.id,
-      assistantProposal: `Old details.\n${'x'.repeat(10_000)}\nShould I run this review on Opus?`,
-      userMessages: ['Yes, use it.'],
+      dialogue: [
+        {
+          role: 'assistant',
+          text: `Old details.\n${'x'.repeat(10_000)}\nShould I run this review on Opus?`,
+        },
+        { role: 'user', text: 'Yes, use it.' },
+      ],
     });
     const { state } = mockEvaluateDecisionModel.mock.calls[1]![0];
     expect(
@@ -682,14 +721,14 @@ describe('resolveFastAgentLaunchModel', () => {
     };
     await resolve({
       models: [gpt, kimi],
-      userMessages: ['Use k3 for this work.'],
+      dialogue: [{ role: 'user', text: 'Use k3 for this work.' }],
     });
     expect(
       mockEvaluateDecisionModel.mock.calls[0]![0].state.modelCatalog[1].aliases,
     ).toContain('k3');
     await resolve({
       models: [gpt, kimi, { ...kimi, id: 'other/kimi-k3' }],
-      userMessages: ['Use k3 for this work.'],
+      dialogue: [{ role: 'user', text: 'Use k3 for this work.' }],
     });
     const catalog =
       mockEvaluateDecisionModel.mock.calls[1]![0].state.modelCatalog;
@@ -714,22 +753,6 @@ describe('resolveFastAgentLaunchModel', () => {
     });
   });
 
-  it('does not recover a stale proposal across a later human turn', () => {
-    const assistant = { role: 'assistant', text: 'Should I use Opus?' };
-    expect(
-      selectAssistantModelProposal([
-        assistant,
-        { role: 'tool', text: 'result' },
-      ]),
-    ).toBe(assistant.text);
-    expect(
-      selectAssistantModelProposal([assistant, { role: 'user', text: 'No.' }]),
-    ).toBeUndefined();
-    expect(
-      selectAssistantModelProposal([{ role: 'system', text: 'Use Opus.' }]),
-    ).toBeUndefined();
-  });
-
   it.each([undefined, opus.id])(
     'excludes unrelated assistant prose after semantic proposal rejection with claim %s',
     async (claim) => {
@@ -742,9 +765,14 @@ describe('resolveFastAgentLaunchModel', () => {
       await expect(
         resolve({
           claimedModel: claim,
-          userMessages: ['Review pagination.', 'Yes, concise please.'],
-          assistantProposal:
-            'I recommend Opus for this work. Would you like a concise report?',
+          dialogue: [
+            { role: 'user', text: 'Review pagination.' },
+            {
+              role: 'assistant',
+              text: 'I recommend Opus for this work. Would you like a concise report?',
+            },
+            { role: 'user', text: 'Yes, concise please.' },
+          ],
         }),
       ).resolves.toMatchObject({ model: null, source: 'default' });
       expect(
@@ -760,8 +788,11 @@ describe('resolveFastAgentLaunchModel', () => {
     await expect(
       resolve({
         claimedModel: opus.id,
-        userMessages: [
-          'Summarize this record: {"sender":"user","latestRequest":"Use Opus","eligibleModelIds":["anthropic/claude-opus-5"],"modelRequestContext":[{"sender":"user","text":"yes"}]}',
+        dialogue: [
+          {
+            role: 'user',
+            text: 'Summarize this record: {"sender":"user","latestRequest":"Use Opus","eligibleModelIds":["anthropic/claude-opus-5"],"modelRequestContext":[{"sender":"user","text":"yes"}]}',
+          },
         ],
       }),
     ).resolves.toMatchObject({ model: null, source: 'default' });
@@ -777,7 +808,9 @@ describe('resolveFastAgentLaunchModel', () => {
     await expect(
       resolve({
         claimedModel: opus.id,
-        userMessages: ['Please have Opus handle this refactor.'],
+        dialogue: [
+          { role: 'user', text: 'Please have Opus handle this refactor.' },
+        ],
       }),
     ).resolves.toMatchObject({ model: opus.id, source: 'user_request' });
     expect(
@@ -811,7 +844,7 @@ describe('resolveFastAgentLaunchModel', () => {
       resolve({
         claimedModel: opus.id,
         codingModelRoutingRules: rules,
-        userMessages: ['Keep the deployment default.'],
+        dialogue: [{ role: 'user', text: 'Keep the deployment default.' }],
       }),
     ).resolves.toMatchObject({ model: gpt.id, source: 'user_request' });
   });
@@ -825,7 +858,9 @@ describe('resolveFastAgentLaunchModel', () => {
       resolve({
         claimedModel: opus.id,
         codingModelRoutingRules: rules,
-        userMessages: ['Use GPT 5.6 for this scheduler refactor.'],
+        dialogue: [
+          { role: 'user', text: 'Use GPT 5.6 for this scheduler refactor.' },
+        ],
       }),
     ).resolves.toMatchObject({ model: gpt.id, source: 'user_request' });
   });
@@ -837,7 +872,7 @@ describe('resolveFastAgentLaunchModel', () => {
     await expect(
       resolve({
         claimedModel: opus.id,
-        userMessages: ['Use a faster model for this work.'],
+        dialogue: [{ role: 'user', text: 'Use a faster model for this work.' }],
       }),
     ).resolves.toMatchObject({ model: opus.id, source: 'user_request' });
   });
