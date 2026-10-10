@@ -371,6 +371,26 @@ function getSelectedRepositories(
   ].sort((left, right) => left.localeCompare(right));
 }
 
+function getSelectedRepositoryCoverageInputs(
+  mergedPullRequests: MergedPullRequest[],
+) {
+  return [
+    ...new Map(
+      mergedPullRequests.map((pullRequest) => [
+        pullRequest.repositoryId,
+        {
+          repositoryId: pullRequest.repositoryId,
+          repositoryFullName: pullRequest.repositoryFullName,
+        },
+      ]),
+    ).values(),
+  ].sort(
+    (left, right) =>
+      left.repositoryFullName.localeCompare(right.repositoryFullName) ||
+      left.repositoryId.localeCompare(right.repositoryId),
+  );
+}
+
 function repositoryIdentityKey(
   provider: SourceControlProvider,
   repositoryFullName: string,
@@ -661,8 +681,9 @@ async function processDeployment(
       );
       // Follow-up tasks validate in a configured environment when one covers
       // the target repository, so the prompt advertises the mapping.
-      const repositoryCoverage =
-        await buildRepositoryCoverage(selectedRepositories);
+      const repositoryCoverage = await buildRepositoryCoverage(
+        getSelectedRepositoryCoverageInputs(partitionPullRequests),
+      );
 
       // Automation scans run as the deployment service principal; explicit
       // runs remain automation launches with their trigger kind preserved on

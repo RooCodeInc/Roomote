@@ -13,7 +13,7 @@ import {
   type ResolvedAutomationDestination,
 } from './destination';
 import {
-  getActiveGitHubRepositoryFullNames,
+  getActiveRepositoriesForProviders,
   hasActiveGitHubInstallation,
 } from './github-deployment-scope';
 import { createScheduledTriageJob } from './scheduled-triage-runner';
@@ -84,9 +84,15 @@ export const codeqlTriageJob = createScheduledTriageJob({
       return { kind: 'skip', reason: 'GitHub is not configured' };
     }
 
-    const selectedRepositories = await getActiveGitHubRepositoryFullNames();
-    const repositoryCoverage =
-      await buildRepositoryCoverage(selectedRepositories);
+    const activeRepositories = await getActiveRepositoriesForProviders([
+      'github',
+    ]);
+    const repositoryCoverage = await buildRepositoryCoverage(
+      activeRepositories.map((repository) => ({
+        repositoryId: repository.id,
+        repositoryFullName: repository.fullName,
+      })),
+    );
     // CodeQL follow-ups must run validation before opening PRs, so the scan
     // only targets repositories backed by a configured environment.
     const environmentBackedRepositories = getEnvironmentBackedCoverage(

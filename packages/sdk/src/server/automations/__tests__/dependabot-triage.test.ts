@@ -1,11 +1,11 @@
 const {
   mockHasActiveGitHubInstallation,
-  mockGetActiveGitHubRepositoryFullNames,
+  mockGetActiveRepositoriesForProviders,
   mockBuildRepositoryCoverage,
   mockLoadAutomationThreadFeedbackContext,
 } = vi.hoisted(() => ({
   mockHasActiveGitHubInstallation: vi.fn(),
-  mockGetActiveGitHubRepositoryFullNames: vi.fn(),
+  mockGetActiveRepositoriesForProviders: vi.fn(),
   mockBuildRepositoryCoverage: vi.fn(),
   mockLoadAutomationThreadFeedbackContext: vi.fn(),
 }));
@@ -17,7 +17,7 @@ vi.mock('../scheduled-triage-runner', () => ({
 
 vi.mock('../github-deployment-scope', () => ({
   hasActiveGitHubInstallation: mockHasActiveGitHubInstallation,
-  getActiveGitHubRepositoryFullNames: mockGetActiveGitHubRepositoryFullNames,
+  getActiveRepositoriesForProviders: mockGetActiveRepositoriesForProviders,
 }));
 
 vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
@@ -78,9 +78,9 @@ describe('dependabotTriageJob buildScanTask', () => {
   });
 
   it('scans all active GitHub repositories while keeping remediation environment-backed', async () => {
-    mockGetActiveGitHubRepositoryFullNames.mockResolvedValue([
-      'acme/api',
-      'acme/no-environment',
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      { id: 'repo-api', fullName: 'acme/api' },
+      { id: 'repo-no-environment', fullName: 'acme/no-environment' },
     ]);
     mockBuildRepositoryCoverage.mockResolvedValue([
       { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-1' },
@@ -109,10 +109,15 @@ describe('dependabotTriageJob buildScanTask', () => {
     });
     // GitHub-only scope comes from the GitHub-scoped repository query, so
     // non-GitHub repositories can never enter the scan payload.
-    expect(mockGetActiveGitHubRepositoryFullNames).toHaveBeenCalledTimes(1);
+    expect(mockGetActiveRepositoriesForProviders).toHaveBeenCalledWith([
+      'github',
+    ]);
     expect(mockBuildRepositoryCoverage).toHaveBeenCalledWith([
-      'acme/api',
-      'acme/no-environment',
+      { repositoryId: 'repo-api', repositoryFullName: 'acme/api' },
+      {
+        repositoryId: 'repo-no-environment',
+        repositoryFullName: 'acme/no-environment',
+      },
     ]);
     expect(payload.description).toContain(
       'count its current open Dependabot alerts',
@@ -159,8 +164,8 @@ describe('dependabotTriageJob buildScanTask', () => {
   });
 
   it('scans and reports repositories without environments without permitting remediation launches', async () => {
-    mockGetActiveGitHubRepositoryFullNames.mockResolvedValue([
-      'acme/no-environment',
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      { id: 'repo-no-environment', fullName: 'acme/no-environment' },
     ]);
     mockBuildRepositoryCoverage.mockResolvedValue([
       { repositoryFullName: 'acme/no-environment' },
@@ -183,7 +188,9 @@ describe('dependabotTriageJob buildScanTask', () => {
   });
 
   it('builds destination-generic closeout guidance for Discord', async () => {
-    mockGetActiveGitHubRepositoryFullNames.mockResolvedValue(['acme/api']);
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      { id: 'repo-api', fullName: 'acme/api' },
+    ]);
     mockBuildRepositoryCoverage.mockResolvedValue([
       { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-1' },
     ]);
@@ -205,7 +212,7 @@ describe('dependabotTriageJob buildScanTask', () => {
   });
 
   it('skips when there are no active GitHub repositories', async () => {
-    mockGetActiveGitHubRepositoryFullNames.mockResolvedValue([]);
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([]);
 
     const result = await config.buildScanTask(buildScanTaskParams());
 
@@ -226,6 +233,6 @@ describe('dependabotTriageJob buildScanTask', () => {
       kind: 'skip',
       reason: 'GitHub is not configured',
     });
-    expect(mockGetActiveGitHubRepositoryFullNames).not.toHaveBeenCalled();
+    expect(mockGetActiveRepositoriesForProviders).not.toHaveBeenCalled();
   });
 });

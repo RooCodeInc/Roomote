@@ -26,6 +26,7 @@ vi.mock('@roomote/db/server', () => ({
 import { partitionActiveRepositoriesByProvider } from '../github-deployment-scope';
 
 type Row = {
+  id: string;
   fullName: string;
   sourceControlProvider: string;
   host: string | null;
@@ -48,16 +49,19 @@ describe('partitionActiveRepositoriesByProvider', () => {
   it('returns one partition per (provider, host) in provider enum order', async () => {
     selectResolving([
       {
+        id: 'repo-ado',
         fullName: 'roomote/Test ADO/Test ADO',
         sourceControlProvider: 'ado',
         host: 'dev.azure.com',
       },
       {
+        id: 'repo-bitbucket',
         fullName: 'roomote/stoodio-bitbucket',
         sourceControlProvider: 'bitbucket',
         host: 'bitbucket.org',
       },
       {
+        id: 'repo-github',
         fullName: 'acme/api',
         sourceControlProvider: 'github',
         host: 'github.com',
@@ -65,9 +69,9 @@ describe('partitionActiveRepositoriesByProvider', () => {
     ]);
 
     const partitions = await partitionActiveRepositoriesByProvider([
-      'roomote/Test ADO/Test ADO',
-      'roomote/stoodio-bitbucket',
-      'acme/api',
+      'repo-ado',
+      'repo-bitbucket',
+      'repo-github',
     ]);
 
     // Provider enum order: github, gitlab, gitea, ado, bitbucket.
@@ -75,16 +79,19 @@ describe('partitionActiveRepositoriesByProvider', () => {
       {
         provider: 'github',
         host: 'github.com',
+        repositoryIds: ['repo-github'],
         repositoryFullNames: ['acme/api'],
       },
       {
         provider: 'ado',
         host: 'dev.azure.com',
+        repositoryIds: ['repo-ado'],
         repositoryFullNames: ['roomote/Test ADO/Test ADO'],
       },
       {
         provider: 'bitbucket',
         host: 'bitbucket.org',
+        repositoryIds: ['repo-bitbucket'],
         repositoryFullNames: ['roomote/stoodio-bitbucket'],
       },
     ]);
@@ -93,16 +100,19 @@ describe('partitionActiveRepositoriesByProvider', () => {
   it('splits same-provider repositories on different hosts into separate partitions', async () => {
     selectResolving([
       {
+        id: 'repo-acme-api',
         fullName: 'acme/api',
         sourceControlProvider: 'gitlab',
         host: 'gitlab.acme.dev',
       },
       {
+        id: 'repo-gitlab-api',
         fullName: 'acme/api',
         sourceControlProvider: 'gitlab',
         host: 'gitlab.com',
       },
       {
+        id: 'repo-gitlab-web',
         fullName: 'acme/web',
         sourceControlProvider: 'gitlab',
         host: 'gitlab.com',
@@ -110,19 +120,22 @@ describe('partitionActiveRepositoriesByProvider', () => {
     ]);
 
     const partitions = await partitionActiveRepositoriesByProvider([
-      'acme/api',
-      'acme/web',
+      'repo-acme-api',
+      'repo-gitlab-api',
+      'repo-gitlab-web',
     ]);
 
     expect(partitions).toEqual([
       {
         provider: 'gitlab',
         host: 'gitlab.acme.dev',
+        repositoryIds: ['repo-acme-api'],
         repositoryFullNames: ['acme/api'],
       },
       {
         provider: 'gitlab',
         host: 'gitlab.com',
+        repositoryIds: ['repo-gitlab-api', 'repo-gitlab-web'],
         repositoryFullNames: ['acme/api', 'acme/web'],
       },
     ]);
