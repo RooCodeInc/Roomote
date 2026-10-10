@@ -10,6 +10,14 @@ import {
 } from '@roomote/cloud-agents/server';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
+  and,
+  db,
+  eq,
+  isNull,
+  taskPullRequests,
+  tasks,
+} from '@roomote/db/server';
+import {
   completeGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification,
   markRoomotePullRequestReadyAfterCleanReview,
@@ -404,7 +412,7 @@ type PrReviewSummaryLifecycle =
   | { kind: 'completed'; notification: PrReviewSummaryNotification }
   | {
       kind: 'reconciled';
-      taskId: string;
+      taskId?: string;
       reviewHeadSha: string;
     };
 
@@ -510,7 +518,7 @@ function buildPrReviewSummaryLifecycle(
   // `changes` is only present on issue_comment.edited payloads.
   if ('changes' in eventPayload) {
     if (!previousInProgress) {
-      return markerSha && reviewTaskId
+      return markerSha
         ? {
             kind: 'reconciled',
             taskId: reviewTaskId,
@@ -618,10 +626,37 @@ export async function queuePrReviewSummaryNotification(
       return;
     }
 
+    let reviewTaskId =
+      lifecycle.kind === 'reconciled'
+        ? lifecycle.taskId
+        : lifecycle.notification.input.event.reviewTaskId;
+    if (!reviewTaskId) {
+      // Session links are presentation, not a unique review-task identity.
+      // Recover the owner only from this exact canonical comment's persisted
+      // PR linkage; a session can contain several unrelated tasks.
+      const linkages = await db
+        .select({ taskId: taskPullRequests.taskId })
+        .from(taskPullRequests)
+        .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
+        .where(
+          and(
+            isNull(tasks.deletedAt),
+            eq(taskPullRequests.sourceControlProvider, 'github'),
+            eq(taskPullRequests.repository, reference.repository),
+            eq(taskPullRequests.prNumber, reference.prNumber),
+            eq(taskPullRequests.githubReviewCommentId, eventPayload.comment.id),
+          ),
+        )
+        .limit(2);
+      if (linkages.length === 1) {
+        reviewTaskId = linkages[0]!.taskId;
+      }
+    }
+
     if (lifecycle.kind === 'reconciled') {
-      if (!eventPayload.installation?.id) {
+      if (!eventPayload.installation?.id || !reviewTaskId) {
         console.warn(
-          `[queuePrReviewSummaryNotification] Skipping check reconciliation for ${reference.repository}#${reference.prNumber}: summary is missing installation id`,
+          `[queuePrReviewSummaryNotification] Skipping check reconciliation for ${reference.repository}#${reference.prNumber}: summary is missing installation id or review task identity`,
         );
         return;
       }
@@ -630,7 +665,7 @@ export async function queuePrReviewSummaryNotification(
         installationId: eventPayload.installation.id,
         repository: reference.repository,
         prNumber: reference.prNumber,
-        taskId: lifecycle.taskId,
+        taskId: reviewTaskId,
         reviewHeadSha: lifecycle.reviewHeadSha,
         reviewSummaryBody: eventPayload.comment.body ?? '',
         allowCompletedCheckUpdate: true,
@@ -639,6 +674,9 @@ export async function queuePrReviewSummaryNotification(
     }
 
     const { event } = lifecycle.notification.input;
+    if (reviewTaskId) {
+      event.reviewTaskId = reviewTaskId;
+    }
     const notificationResult = await enqueuePrReviewNotification(
       lifecycle.notification.input,
     );
