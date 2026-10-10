@@ -37,7 +37,7 @@ export type ProviderPullRequestState = {
   url?: string | null;
 };
 
-export type PullRequestChanges = {
+type PullRequestChanges = {
   targetBranch?: string;
   title?: string;
   body?: string;
