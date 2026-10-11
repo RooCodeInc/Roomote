@@ -586,13 +586,12 @@ export async function reconcileGithubPrReviewCheckForRun(input: {
   });
 }
 
-async function isCurrentCanonicalSummaryOwner(input: {
-  taskId: string;
+/** Reads the unique live owner of an exact canonical GitHub review summary. */
+export async function findCanonicalGithubPrReviewSummaryOwner(input: {
   repository: string;
   prNumber: number;
   commentId: number;
-  checkRunId: number;
-}): Promise<boolean> {
+}): Promise<{ taskId: string; checkRunId: number | null } | null> {
   const owners = await db
     .select({
       taskId: taskPullRequests.taskId,
@@ -611,10 +610,19 @@ async function isCurrentCanonicalSummaryOwner(input: {
     )
     .limit(2);
 
+  return owners.length === 1 ? owners[0]! : null;
+}
+
+async function isCurrentCanonicalSummaryOwner(input: {
+  taskId: string;
+  repository: string;
+  prNumber: number;
+  commentId: number;
+  checkRunId: number;
+}): Promise<boolean> {
+  const owner = await findCanonicalGithubPrReviewSummaryOwner(input);
   return (
-    owners.length === 1 &&
-    owners[0]!.taskId === input.taskId &&
-    owners[0]!.checkRunId === input.checkRunId
+    owner?.taskId === input.taskId && owner.checkRunId === input.checkRunId
   );
 }
 

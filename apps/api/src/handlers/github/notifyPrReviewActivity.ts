@@ -10,16 +10,9 @@ import {
 } from '@roomote/cloud-agents/server';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
-  and,
-  db,
-  eq,
-  isNull,
-  taskPullRequests,
-  tasks,
-} from '@roomote/db/server';
-import {
   completeGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification,
+  findCanonicalGithubPrReviewSummaryOwner,
   markRoomotePullRequestReadyAfterCleanReview,
   startPrReviewNotificationCycle,
   type EnqueuePrReviewNotificationInput,
@@ -634,23 +627,12 @@ export async function queuePrReviewSummaryNotification(
       // Session links are presentation, not a unique review-task identity.
       // Recover the owner only from this exact canonical comment's persisted
       // PR linkage; a session can contain several unrelated tasks.
-      const linkages = await db
-        .select({ taskId: taskPullRequests.taskId })
-        .from(taskPullRequests)
-        .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
-        .where(
-          and(
-            isNull(tasks.deletedAt),
-            eq(taskPullRequests.sourceControlProvider, 'github'),
-            eq(taskPullRequests.repository, reference.repository),
-            eq(taskPullRequests.prNumber, reference.prNumber),
-            eq(taskPullRequests.githubReviewCommentId, eventPayload.comment.id),
-          ),
-        )
-        .limit(2);
-      if (linkages.length === 1) {
-        reviewTaskId = linkages[0]!.taskId;
-      }
+      const owner = await findCanonicalGithubPrReviewSummaryOwner({
+        repository: reference.repository,
+        prNumber: reference.prNumber,
+        commentId: eventPayload.comment.id,
+      });
+      reviewTaskId = owner?.taskId;
     }
 
     if (lifecycle.kind === 'reconciled') {

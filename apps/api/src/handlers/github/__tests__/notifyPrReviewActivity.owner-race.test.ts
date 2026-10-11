@@ -11,6 +11,11 @@ vi.mock('@roomote/sdk/server', async () => ({
       '@roomote/sdk/server',
     )
   ).completeGithubPrReviewCheckFromSummary,
+  findCanonicalGithubPrReviewSummaryOwner: (
+    await vi.importActual<typeof import('@roomote/sdk/server')>(
+      '@roomote/sdk/server',
+    )
+  ).findCanonicalGithubPrReviewSummaryOwner,
   enqueuePrReviewNotification: mocks.enqueue,
   markRoomotePullRequestReadyAfterCleanReview: vi
     .fn()
