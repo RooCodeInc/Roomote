@@ -33,6 +33,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   getFastAgentParentFromPayload,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  computeProviders,
 } from '@roomote/types';
 import {
   db,
@@ -90,6 +91,38 @@ const explicitWorkKind = {
 } as const;
 
 describe('resolveFreshTaskComputeProvider', () => {
+  it('does not evaluate a missing default for managed fresh work', async () => {
+    const fallback = vi
+      .fn()
+      .mockRejectedValue(
+        new Error('No configured sandbox provider is available.'),
+      );
+    expect(
+      await resolveFreshTaskComputeProvider(
+        undefined,
+        fallback,
+        undefined,
+        true,
+      ),
+    ).toBe('roomote');
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 'invalid'])(
+    'lazily resolves fallback for non-managed provider %s',
+    async (provider) => {
+      const fallback = vi.fn().mockResolvedValue('modal');
+      expect(
+        await resolveFreshTaskComputeProvider(
+          provider,
+          fallback,
+          undefined,
+          false,
+        ),
+      ).toBe('modal');
+      expect(fallback).toHaveBeenCalledOnce();
+    },
+  );
   it('forces fresh launches onto Roomote in cloud-managed deployments', () => {
     expect(
       resolveFreshTaskComputeProvider('modal', 'docker', undefined, true),
@@ -112,6 +145,169 @@ describe('resolveFreshTaskComputeProvider', () => {
       ),
     ).toBe('modal');
   });
+});
+
+async function withoutEligibleDefault<T>(
+  callback: () => Promise<T>,
+): Promise<T> {
+  const prior = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, 'default'),
+  });
+  await db
+    .insert(deploymentSettings)
+    .values({
+      id: 'default',
+      runtimeComputeConfig: {
+        defaultProvider: null,
+        excludedProviders: [...computeProviders],
+      },
+    })
+    .onConflictDoUpdate({
+      target: deploymentSettings.id,
+      set: {
+        runtimeComputeConfig: {
+          defaultProvider: null,
+          excludedProviders: [...computeProviders],
+        },
+      },
+    });
+  try {
+    return await callback();
+  } finally {
+    await db
+      .update(deploymentSettings)
+      .set({ runtimeComputeConfig: prior?.runtimeComputeConfig ?? null })
+      .where(eq(deploymentSettings.id, 'default'));
+  }
+}
+
+describe('pinned launch providers without an eligible default', () => {
+  it.each(['modal', undefined, 'invalid'] as const)(
+    'fresh enqueue honors valid provider and requires fallback for %s',
+    async (provider) => {
+      const userId = await createUser();
+      await withoutEligibleDefault(async () => {
+        const launch = launchFresh({
+          task: standardTaskInput({ computeProvider: provider as never }),
+          initiator: { kind: 'user', userId },
+          workflow: 'standard',
+          surface: 'web',
+          trigger: 'manual',
+        });
+        if (provider === 'modal')
+          expect(await launch).toMatchObject({ vendor: 'modal' });
+        else
+          await expect(launch).rejects.toThrow(
+            'No configured sandbox provider is available.',
+          );
+      });
+    },
+  );
+
+  it.each(['modal', null, 'invalid'] as const)(
+    'failed-start relaunch honors pinned provider or requires a default for %s',
+    async (vendor) => {
+      const userId = await createUser();
+      const run = await launchFresh({
+        task: standardTaskInput({ computeProvider: 'modal' }),
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      });
+      await db
+        .update(taskRuns)
+        .set({
+          status: RunStatus.Failed,
+          completedAt: new Date(),
+          vendor: vendor as never,
+        })
+        .where(eq(taskRuns.id, run.id));
+      await withoutEligibleDefault(async () => {
+        const relaunch = enqueueTaskRelaunch(
+          { sourceRunId: run.id, actingUserId: userId },
+          { enqueue: false },
+        );
+        if (vendor === 'modal')
+          expect(await relaunch).toMatchObject({
+            vendor: 'modal',
+            taskId: run.taskId,
+          });
+        else
+          await expect(relaunch).rejects.toThrow(
+            'No configured sandbox provider is available.',
+          );
+      });
+    },
+  );
+
+  it.each(['blaxel', undefined, 'invalid'] as const)(
+    'resume preserves pinned source vendor over requested %s without an eligible default',
+    async (computeProvider) => {
+      const userId = await createUser();
+      const run = await launchFresh({
+        task: standardTaskInput({ computeProvider: 'modal' }),
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      });
+      await withoutEligibleDefault(async () => {
+        const resumed = await enqueueTask(
+          {
+            task: {
+              type: TaskPayloadKind.SnapshotResume,
+              computeProvider,
+              payload: {
+                repo: 'acme/widgets',
+                sourceSnapshotId: 'provider-test-snapshot',
+                sourceRunId: run.id,
+              },
+            } as SnapshotResumeTask,
+            actingUserId: userId,
+          },
+          { enqueue: false },
+        );
+        expect(resumed.vendor).toBe('modal');
+      });
+    },
+  );
+
+  it.each([null, 'invalid', 'sandbox'] as const)(
+    'resume keeps legacy source normalization for %s without an eligible default',
+    async (vendor) => {
+      const userId = await createUser();
+      const run = await launchFresh({
+        task: standardTaskInput({ computeProvider: 'modal' }),
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      });
+      await db
+        .update(taskRuns)
+        .set({ vendor: vendor as never })
+        .where(eq(taskRuns.id, run.id));
+      await withoutEligibleDefault(async () => {
+        const resumed = await enqueueTask(
+          {
+            task: {
+              type: TaskPayloadKind.SnapshotResume,
+              computeProvider: 'modal',
+              payload: {
+                repo: 'acme/widgets',
+                sourceSnapshotId: 'legacy-source-handle',
+                sourceRunId: run.id,
+              },
+            } as SnapshotResumeTask,
+            actingUserId: userId,
+          },
+          { enqueue: false },
+        );
+        expect(resumed.vendor).toBe('docker');
+      });
+    },
+  );
 });
 
 describe('shouldCaptureTaskCreatedEvent', () => {

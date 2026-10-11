@@ -806,9 +806,9 @@ async function failPendingEnvironmentSnapshotForRun(
     return;
   }
 
-  const provider = resolveComputeProviderTarget(
+  const provider = await resolveComputeProviderTarget(
     run.vendor,
-    await resolveDefaultComputeProvider(),
+    resolveDefaultComputeProvider,
   );
 
   await updatePendingEnvironmentSnapshot(db, {

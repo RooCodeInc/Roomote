@@ -1099,6 +1099,24 @@ describe('finishRun', () => {
       );
     });
 
+    it.each([null, 'invalid'])(
+      'uses the default for missing/invalid snapshot vendor %s',
+      async (vendor) => {
+        mockFindFirstRun.mockResolvedValue(
+          makeSnapshotRun({ vendor: vendor as TaskRun['vendor'] }),
+        );
+        await finishRun({ id: 55, status: RunStatus.Canceled });
+        expect(mockResolveDefaultComputeProvider).toHaveBeenCalled();
+        expect(mockUpdatePendingEnvironmentSnapshot).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            provider: 'modal',
+            snapshotStatus: 'failed',
+          }),
+        );
+      },
+    );
+
     it('flips the pending row when a stop request normalizes the failure to canceled', async () => {
       mockFindFirstRun.mockResolvedValue(
         makeSnapshotRun({ cancelRequestedAt: new Date() }),

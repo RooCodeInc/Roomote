@@ -137,6 +137,16 @@ describe('retired snapshot rebuild job', () => {
     expect(result.errors).toBe(0);
   });
 
+  it('preserves the default-selection error before rebuilding', async () => {
+    mockResolveDefaultComputeProvider.mockRejectedValue(
+      new Error('No configured sandbox provider is available.'),
+    );
+    await expect(rebuildRetiredSnapshots(now)).rejects.toThrow(
+      'No configured sandbox provider is available.',
+    );
+    expect(mockLaunchMissingEnvironmentSnapshot).not.toHaveBeenCalled();
+  });
+
   it.each(['docker', 'blaxel'] as const)(
     'does not rebuild retired environment snapshots on %s',
     async (unsupportedProvider) => {

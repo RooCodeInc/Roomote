@@ -524,9 +524,9 @@ export abstract class BaseController {
       }
 
       const { authToken } = dequeuedRun;
-      const provider = resolveComputeProviderTarget(
+      const provider = await resolveComputeProviderTarget(
         taskRun.vendor,
-        await resolveDefaultComputeProvider(),
+        resolveDefaultComputeProvider,
       );
       const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
@@ -660,7 +660,10 @@ export abstract class BaseController {
     }
 
     let dequeueSkipped = false;
-    const fallbackComputeProvider = await resolveDefaultComputeProvider();
+    const computeProvider = await resolveComputeProviderTarget(
+      taskRun.vendor,
+      resolveDefaultComputeProvider,
+    );
 
     await db.transaction(async (tx) => {
       const updatedRuns = await tx
@@ -690,10 +693,7 @@ export abstract class BaseController {
         details: {
           stage: 'controller_dequeue',
           status: RunStatus.Dequeued,
-          provider: resolveComputeProviderTarget(
-            taskRun.vendor,
-            fallbackComputeProvider,
-          ),
+          provider: computeProvider,
           environmentId: taskRun.payload.environmentId ?? null,
           machineId: taskRun.machineId ?? null,
         },

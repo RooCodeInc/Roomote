@@ -21,6 +21,7 @@ const {
   mockRedisSet,
   mockUpdateWhere,
   mockSyncTaskStateFromRuns,
+  mockResolveDefaultComputeProvider,
 } = vi.hoisted(() => ({
   mockFinishRun: vi.fn().mockResolvedValue(undefined),
   mockCaptureControllerException: vi.fn(),
@@ -45,6 +46,7 @@ const {
     returning: vi.fn().mockResolvedValue([{}]),
   }),
   mockSyncTaskStateFromRuns: vi.fn().mockResolvedValue(undefined),
+  mockResolveDefaultComputeProvider: vi.fn().mockResolvedValue('docker'),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -87,7 +89,7 @@ vi.mock('@roomote/db/server', async () => {
       mockRecordTaskRunLifecycleEvent(...args),
     readManagedDeploymentAccess: (...args: unknown[]) =>
       mockReadManagedDeploymentAccess(...args),
-    resolveDefaultComputeProvider: vi.fn().mockResolvedValue('docker'),
+    resolveDefaultComputeProvider: mockResolveDefaultComputeProvider,
     syncTaskStateFromRuns: (...args: unknown[]) =>
       mockSyncTaskStateFromRuns(...args),
     updatePendingEnvironmentSnapshot: (...args: unknown[]) =>
@@ -133,6 +135,7 @@ import { DockerBootError } from '../compute-providers/docker-sandbox-security';
 
 // Create a concrete subclass for testing the abstract BaseController.
 class TestController extends BaseController {
+  public onSpawnProvider = vi.fn();
   constructor() {
     super('development');
   }
@@ -142,8 +145,18 @@ class TestController extends BaseController {
     _authToken: string,
     _deploymentSlug: string,
     _sandboxTimeoutMs: number,
+    provider?: import('@roomote/types').ComputeProvider,
   ): Promise<void> {
-    // no-op for testing
+    this.onSpawnProvider(provider);
+  }
+
+  public async testSpawnWorker(taskRun: TaskRun) {
+    this.isRunning = true;
+    try {
+      return await this.spawnWorker(taskRun);
+    } finally {
+      this.isRunning = false;
+    }
   }
 
   // Expose handleSpawnTaskRunError for direct testing.
@@ -418,6 +431,7 @@ function resetControllerMocks() {
   mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
   mockDbExecute.mockReset().mockResolvedValue([]);
   mockDbTransaction.mockReset();
+  mockResolveDefaultComputeProvider.mockReset().mockResolvedValue('docker');
   mockUpdateWhere.mockReset().mockReturnValue({
     returning: vi.fn().mockResolvedValue([{}]),
   });
@@ -716,6 +730,56 @@ describe('BaseController.dequeueTaskRun', () => {
       }),
     );
   });
+
+  it('dequeues and spawns a pinned vendor without an eligible default', async () => {
+    mockResolveDefaultComputeProvider.mockRejectedValue(
+      new Error('No configured sandbox provider is available.'),
+    );
+    const job = makeTaskRun({ status: RunStatus.Pending, vendor: 'modal' });
+
+    await controller.testSpawnWorker(job);
+
+    expect(controller.onSpawnProvider).toHaveBeenCalledWith('modal');
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        details: expect.objectContaining({ provider: 'modal' }),
+      }),
+    );
+    expect(mockResolveDefaultComputeProvider).not.toHaveBeenCalled();
+    expect(mockFinishRun).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'invalid'])(
+    'uses an eligible default for missing/invalid vendor %s at dequeue and spawn',
+    async (vendor) => {
+      const job = makeTaskRun({
+        status: RunStatus.Pending,
+        vendor: vendor as TaskRun['vendor'],
+      });
+      await controller.testSpawnWorker(job);
+      expect(controller.onSpawnProvider).toHaveBeenCalledWith('docker');
+      expect(mockResolveDefaultComputeProvider).toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, 'invalid'])(
+    'rejects dequeue with no eligible default and vendor %s',
+    async (vendor) => {
+      mockResolveDefaultComputeProvider.mockRejectedValue(
+        new Error('No configured sandbox provider is available.'),
+      );
+      await expect(
+        controller.testDequeueTaskRun(
+          makeTaskRun({
+            status: RunStatus.Pending,
+            vendor: vendor as TaskRun['vendor'],
+          }),
+        ),
+      ).rejects.toThrow('No configured sandbox provider is available.');
+      expect(mockDbTransaction).not.toHaveBeenCalled();
+    },
+  );
 
   it('fails pending jobs before token minting when deployment is read-only', async () => {
     const job = makeTaskRun({

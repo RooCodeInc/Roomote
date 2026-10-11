@@ -6,6 +6,7 @@ import {
   sleepCheckManagedComputeProviders,
   snapshotCapableComputeProviders,
   standbyResumeCapableComputeProviders,
+  resolveComputeProviderTarget,
 } from '../compute-providers/compute-provider';
 import { getWorkerComputeProviderLabel } from '../compute-providers/worker-context';
 import { resolveConfiguredComputeProviderResources } from '../compute-provider-usage';
@@ -67,4 +68,43 @@ describe('compute provider capabilities', () => {
       configuredMemoryMiB: null,
     });
   });
+});
+
+describe('lazy compute provider fallback', () => {
+  it.each(['modal', 'docker', 'blaxel', 'roomote'] as const)(
+    'keeps valid %s without evaluating fallback',
+    async (provider) => {
+      const fallback = vi
+        .fn()
+        .mockRejectedValue(
+          new Error('No configured sandbox provider is available.'),
+        );
+      expect(await resolveComputeProviderTarget(provider, fallback)).toBe(
+        provider,
+      );
+      expect(fallback).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, null, 'invalid', 'sandbox'])(
+    'evaluates fallback only for missing/invalid %s',
+    async (provider) => {
+      const fallback = vi.fn().mockResolvedValue('modal');
+      expect(await resolveComputeProviderTarget(provider, fallback)).toBe(
+        'modal',
+      );
+      expect(fallback).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([undefined, null, 'invalid'])(
+    'preserves a rejected real default for %s',
+    async (provider) => {
+      const error = new Error('No configured sandbox provider is available.');
+      const fallback = vi.fn().mockRejectedValue(error);
+      await expect(
+        resolveComputeProviderTarget(provider, fallback),
+      ).rejects.toBe(error);
+    },
+  );
 });
