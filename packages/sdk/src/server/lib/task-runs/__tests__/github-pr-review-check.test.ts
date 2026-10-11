@@ -16,6 +16,7 @@ const {
   mockAcquireRedisLock,
   mockRenewRedisLock,
   mockReleaseRedisLock,
+  mockCanonicalOwners,
 } = vi.hoisted(() => {
   const mockRenewRedisLock = vi.fn();
   return {
@@ -36,6 +37,7 @@ const {
     mockReleaseRedisLock: Object.assign(vi.fn(), {
       renewDetailed: mockRenewRedisLock,
     }),
+    mockCanonicalOwners: vi.fn(),
   };
 });
 
@@ -52,6 +54,11 @@ vi.mock('@roomote/db/server', async () => {
         taskRuns: { findFirst: mockFindFirstRun },
       },
       update: mockDbUpdate,
+      select: () => ({
+        from: () => ({
+          innerJoin: () => ({ where: () => ({ limit: mockCanonicalOwners }) }),
+        }),
+      }),
     },
   };
 });
@@ -121,6 +128,9 @@ describe('GitHub PR review check lifecycle', () => {
     });
     mockAcquireRedisLock.mockResolvedValue(mockReleaseRedisLock);
     mockRenewRedisLock.mockResolvedValue('renewed');
+    mockCanonicalOwners.mockResolvedValue([
+      { taskId: 'task-1', checkRunId: 20 },
+    ]);
   });
 
   it.each(['lost', 'error'] as const)(

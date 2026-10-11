@@ -6,6 +6,7 @@ import {
   isNull,
   taskPullRequests,
   taskRuns,
+  tasks,
   type TaskPullRequest,
 } from '@roomote/db/server';
 import {
@@ -585,6 +586,38 @@ export async function reconcileGithubPrReviewCheckForRun(input: {
   });
 }
 
+async function isCurrentCanonicalSummaryOwner(input: {
+  taskId: string;
+  repository: string;
+  prNumber: number;
+  commentId: number;
+  checkRunId: number;
+}): Promise<boolean> {
+  const owners = await db
+    .select({
+      taskId: taskPullRequests.taskId,
+      checkRunId: taskPullRequests.githubCheckRunId,
+    })
+    .from(taskPullRequests)
+    .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
+    .where(
+      and(
+        isNull(tasks.deletedAt),
+        eq(taskPullRequests.sourceControlProvider, 'github'),
+        eq(taskPullRequests.repository, input.repository),
+        eq(taskPullRequests.prNumber, input.prNumber),
+        eq(taskPullRequests.githubReviewCommentId, input.commentId),
+      ),
+    )
+    .limit(2);
+
+  return (
+    owners.length === 1 &&
+    owners[0]!.taskId === input.taskId &&
+    owners[0]!.checkRunId === input.checkRunId
+  );
+}
+
 export async function completeGithubPrReviewCheckFromSummary(input: {
   installationId: number;
   repository: string;
@@ -633,6 +666,17 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
     if (!linkage?.githubCheckRunId || !linkage.githubReviewCommentId) {
       return;
     }
+
+    const owner = {
+      taskId: input.taskId,
+      repository: input.repository,
+      prNumber: input.prNumber,
+      commentId: linkage.githubReviewCommentId,
+      checkRunId: linkage.githubCheckRunId,
+    };
+    // Handler-selected identities (including legacy task links) may have been
+    // retired/replaced while waiting for this lock. Re-read live ownership.
+    if (!(await isCurrentCanonicalSummaryOwner(owner))) return;
 
     const octokit = await getInstallationOctokit({
       installationId: input.installationId,
@@ -711,6 +755,11 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
       return;
     }
 
+    // GitHub reads above can also outlive deletion/replacement. Revalidate at
+    // the last local boundary before dispatch, but this is not atomic with
+    // deletion: deletion does not share this Redis lock and GitHub has no CAS.
+    if (!(await isCurrentCanonicalSummaryOwner(owner))) return;
+    signal.throwIfAborted();
     await completeCheckRunWithResult({
       octokit,
       repository,
