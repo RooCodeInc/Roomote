@@ -7,6 +7,7 @@ import {
   eq,
   inArray,
   isNull,
+  sql,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
@@ -394,6 +395,21 @@ export async function clearComputeConfigCommand(
         and(
           isNull(environmentVariables.userId),
           inArray(environmentVariables.name, providerEnvVarNames),
+        ),
+      );
+
+    // Update only the matching default atomically, preserving other compute
+    // settings and a default that was changed concurrently.
+    await tx
+      .update(deploymentSettings)
+      .set({
+        runtimeComputeConfig: sql`jsonb_set(${deploymentSettings.runtimeComputeConfig}, '{defaultProvider}', 'null'::jsonb)`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(deploymentSettings.id, 'default'),
+          sql`${deploymentSettings.runtimeComputeConfig}->>'defaultProvider' = ${input.provider}`,
         ),
       );
   });

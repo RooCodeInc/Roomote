@@ -4,6 +4,7 @@ import {
   activeRunStatuses,
   TaskPayloadKind,
   resolveComputeProviderTarget,
+  getComputeProviderCapabilities,
 } from '@roomote/types';
 import {
   db,
@@ -186,11 +187,9 @@ function buildSnapshotRefreshAttachment(
 
 async function findSnapshotRefreshCandidates(
   cutoff: Date,
+  targetProvider: ComputeProvider,
 ): Promise<SnapshotRefreshDiscoveryResult> {
   const now = new Date();
-  const targetProvider = resolveComputeProviderTarget(
-    await resolveDefaultComputeProvider(),
-  );
   const snapshotRows = await db.query.environmentSnapshots.findMany({
     where: and(
       eq(environmentSnapshots.provider, targetProvider),
@@ -469,9 +468,19 @@ export const refreshSnapshotsJob = async () => {
   });
 
   try {
+    const targetProvider = resolveComputeProviderTarget(
+      await resolveDefaultComputeProvider(),
+    );
+    if (!getComputeProviderCapabilities(targetProvider).supportsSnapshots) {
+      logRefreshSnapshots(
+        'Skipping environment snapshots for unsupported provider',
+        { targetProvider },
+      );
+      return;
+    }
     const cutoff = new Date(startedAt.getTime() - SNAPSHOT_REFRESH_INTERVAL_MS);
     const { candidates: refreshCandidates, discovery } =
-      await findSnapshotRefreshCandidates(cutoff);
+      await findSnapshotRefreshCandidates(cutoff, targetProvider);
 
     logRefreshSnapshots('Found environments due for snapshot maintenance', {
       cutoff: cutoff.toISOString(),

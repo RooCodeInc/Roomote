@@ -56,6 +56,7 @@ vi.mock('@roomote/db/server', () => ({
     values,
   })),
   isNull: vi.fn((field: unknown) => ({ op: 'isNull', field })),
+  sql: vi.fn(),
   resolveSavedWorkerImage: mockResolveSavedWorkerImage,
   purgeSavedDeploymentWorkerImage: vi.fn(async () => undefined),
 }));
@@ -552,7 +553,10 @@ describe('compute commands', () => {
       } = await import('@roomote/db/server');
 
       mockDbTransaction.mockImplementation(async (callback) => {
-        return callback({ delete: txDelete } as never);
+        return callback({
+          delete: txDelete,
+          update: () => ({ set: () => ({ where: vi.fn() }) }),
+        } as never);
       });
 
       await clearComputeConfigCommand(buildMockAuth(), { provider: 'modal' });
@@ -602,7 +606,10 @@ describe('compute commands', () => {
       const { inArray: txInArray } = await import('@roomote/db/server');
 
       mockDbTransaction.mockImplementation(async (callback) => {
-        return callback({ delete: txDelete } as never);
+        return callback({
+          delete: txDelete,
+          update: () => ({ set: () => ({ where: vi.fn() }) }),
+        } as never);
       });
 
       await clearComputeConfigCommand(buildMockAuth(), { provider: 'docker' });

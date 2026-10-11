@@ -155,6 +155,21 @@ describe('refreshSnapshotsJob launch pacing', () => {
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['docker', 'blaxel'])(
+    'does not reserve or enqueue environment snapshots on %s',
+    async (provider) => {
+      mockResolveDefaultComputeProvider.mockResolvedValue(provider);
+      mockEnvironmentsFindMany.mockResolvedValue([makeEnvironment('env-1')]);
+
+      await refreshSnapshotsJob();
+
+      expect(
+        mockClaimPendingEnvironmentSnapshotForAttachment,
+      ).not.toHaveBeenCalled();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+    },
+  );
+
   it('does not sleep after a launch when every remaining candidate is skipped', async () => {
     mockEnvironmentsFindMany.mockResolvedValue([
       makeEnvironment('env-1'),

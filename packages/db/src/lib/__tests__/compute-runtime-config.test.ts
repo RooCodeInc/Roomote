@@ -348,7 +348,7 @@ describe('resolveDefaultComputeProvider', () => {
     expect(provider).toBe('modal');
   });
 
-  it('skips catalog readiness scans for non-docker env defaults', async () => {
+  it('falls back from an unready non-docker env default', async () => {
     const executor = makeExecutor([]);
 
     const provider = await resolveDefaultComputeProvider({
@@ -358,10 +358,63 @@ describe('resolveDefaultComputeProvider', () => {
       executor,
     });
 
-    expect(provider).toBe('modal');
-    // listConfiguredComputeProviders is the only caller path that hits
-    // environment_variables selects for every catalog provider.
-    expect(executor.select).not.toHaveBeenCalled();
+    expect(provider).toBe('docker');
+  });
+
+  it.each(['persisted', 'environment'] as const)(
+    'falls back from an unready %s Blaxel default to a ready cloud provider',
+    async (source) => {
+      const provider = await resolveDefaultComputeProvider({
+        runtimeEnv: {
+          ...(source === 'environment'
+            ? { DEFAULT_COMPUTE_PROVIDER: 'blaxel' }
+            : {}),
+          MODAL_TOKEN_ID: 'modal-id',
+          MODAL_TOKEN_SECRET: 'modal-secret',
+          MODAL_BASE_IMAGE_REF: 'registry.example.com/image:tag',
+        },
+        executor: makeExecutor([], {
+          runtimeComputeConfig:
+            source === 'persisted' ? { defaultProvider: 'blaxel' } : null,
+        }),
+      });
+
+      expect(provider).toBe('modal');
+    },
+  );
+
+  it('keeps a ready saved default even when another cloud is configured', async () => {
+    const provider = await resolveDefaultComputeProvider({
+      runtimeEnv: {
+        MODAL_TOKEN_ID: 'modal-id',
+        MODAL_TOKEN_SECRET: 'modal-secret',
+        MODAL_BASE_IMAGE_REF: 'registry.example.com/image:tag',
+      },
+      executor: makeExecutor(
+        [
+          { name: 'BL_API_KEY', value: 'blaxel-key' },
+          { name: 'BL_WORKSPACE', value: 'roomote' },
+          { name: 'BLAXEL_IMAGE', value: 'sandbox/worker:version' },
+        ],
+        { runtimeComputeConfig: { defaultProvider: 'blaxel' } },
+      ),
+    });
+
+    expect(provider).toBe('blaxel');
+  });
+
+  it('rejects selection when all configured providers are excluded', async () => {
+    await expect(
+      resolveDefaultComputeProvider({
+        runtimeEnv: {},
+        executor: makeExecutor([], {
+          runtimeComputeConfig: {
+            defaultProvider: 'blaxel',
+            excludedProviders: ['docker'],
+          },
+        }),
+      }),
+    ).rejects.toThrow('No configured sandbox provider is available');
   });
 
   it('falls back to docker when only Local Docker is configured', async () => {
@@ -400,5 +453,20 @@ describe('resolveComputeProviderSelection', () => {
       availableComputeProviders: ['modal', 'docker'],
     });
     expect(executor.query.deploymentSettings.findFirst).toHaveBeenCalledOnce();
+  });
+
+  it('does not expose an unready saved default outside available providers', async () => {
+    const options = {
+      runtimeEnv: {},
+      executor: makeExecutor([], {
+        runtimeComputeConfig: { defaultProvider: 'blaxel' },
+      }),
+    };
+
+    expect(await resolveComputeProviderSelection(options)).toEqual({
+      defaultComputeProvider: 'docker',
+      availableComputeProviders: ['docker'],
+    });
+    expect(await resolveDefaultComputeProvider(options)).toBe('docker');
   });
 });
