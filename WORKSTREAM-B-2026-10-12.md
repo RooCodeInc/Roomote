@@ -17,15 +17,16 @@ This branch is an inspectable execution ledger, not a product-code change or mer
 - Recent snapshot setup evidence reports demo-seed refusal in development and dependent missing-session artifact seeding. Current source omits task identity in the snapshot setup environment, while ordinary task runtime supplies it.
 - Missing image-build backend is environment-specific; command-correlated diagnostics and snapshot receipt redesign require broader contracts. No admissions for those leads.
 
-## B1 — snapshot setup task identity (pre-admission)
+## B1 — snapshot setup task identity (admitted 05:11 UTC)
 
 1. **Capacity vs obligations:** no other B implementation admitted; one narrow increment can use the existing snapshot tests and actual disposable seed/database command path.
-2. **Baseline/claim/ownership/proof:** current source and runtime evidence establish missing sandbox identity; reproduce propagation on unchanged develop before admission. Claimed files: `apps/worker/src/commands/snapshot.ts` and its existing test. Preserve seed production refusal. No web implementation overlap; A informed.
+2. **Baseline/claim/ownership/proof:** current source and runtime evidence establish missing sandbox identity. On unchanged develop, the propagation regression fails with stale identity; actual snapshot caller through WorkspaceManager/CommandExecutor/pnpm refuses development seed and leaves users/sessions/task_runs at 0/0/0 in a newly migrated disposable PostgreSQL database. Claimed files: `apps/worker/src/commands/snapshot.ts` and its existing test. Preserve seed production refusal. No web implementation overlap; A informed.
 3. **Plan/regression boundary/owner/next action:** B owns adding trusted fetched task identity to snapshot setup, testing propagation and override precedence, and repeating real seed stimulus against a disposable PostgreSQL database. Do not redesign optional-command policy, provider snapshotting, or seed authorization. Next: establish red propagation check and actual seed refusal/empty persistence.
 
 ## Delivery and proof
 
-- No implementation head or PR yet. No tests or proof claimed complete.
+- Baseline propagation: one expected failing regression, three existing passes. Baseline actual-command proof: expected refusal and empty durable state verified. Infrastructure provisioning used actual createdb and the checked-in migration runner; initial relative migration-folder invocation failed, corrected package-relative `drizzle` succeeds.
+- No implementation head or PR yet. Head recovery, CI and automated review pending.
 - Required: identical baseline/head seed stimulus; actual durable demo rows and rerun idempotency; production refusal; focused worker tests, static gates, exact-head CI/review reconciliation.
 - Hosted snapshot creation/restore is not yet exercised. Any limit must remain explicit.
 
