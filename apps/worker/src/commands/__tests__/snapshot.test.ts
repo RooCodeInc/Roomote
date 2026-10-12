@@ -113,6 +113,35 @@ describe('snapshot', () => {
     expect(EXPLICIT_SNAPSHOT_TIMEOUT_MS).toBe(10 * 60 * 1_000);
   });
 
+  it.each([undefined, 'stale-task'])(
+    'passes the fetched snapshot task identity to setup commands and shell injection (configured identity: %s)',
+    async (configuredTaskId) => {
+      mockFetchSnapshotEnv.mockResolvedValue({
+        envVars: {
+          PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.run',
+          ...(configuredTaskId ? { ROOMOTE_TASK_ID: configuredTaskId } : {}),
+        },
+        gitHubToken: 'gh-token',
+        taskId: 'task-42',
+      });
+
+      await snapshot({ runId: 42, environmentId: 'env-1', sandboxId: 'sb-1' });
+
+      expect(mockInjectEnvVars).toHaveBeenCalledWith(
+        expect.objectContaining({ ROOMOTE_TASK_ID: 'task-42' }),
+        undefined,
+        expect.anything(),
+      );
+      expect(mockSetup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspace: expect.objectContaining({
+            envVars: expect.objectContaining({ ROOMOTE_TASK_ID: 'task-42' }),
+          }),
+        }),
+      );
+    },
+  );
+
   it('treats the failure cleanup status write as a best-effort no-op when it succeeds idempotently', async () => {
     const result = await snapshot({
       runId: 42,
