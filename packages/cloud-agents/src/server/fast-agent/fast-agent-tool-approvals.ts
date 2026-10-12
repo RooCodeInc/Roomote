@@ -316,7 +316,7 @@ function isOpenChildCall(entry: { status?: unknown }): boolean {
 }
 
 /**
- * The arguments of the call an ask paused, or every argument set it could be.
+ * The arguments of the call that an ask paused, or every argument set it could be.
  * A code-mode script can call the same tool more than once, and every ask it
  * raises carries the same outer call id. Only calls still running can be the
  * paused one: one such call, or several with identical arguments, identifies
