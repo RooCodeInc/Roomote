@@ -229,6 +229,10 @@
   },
   "redirects": [
     {
+      "source": "/use-chatgpt-subscription",
+      "destination": "/providers/inference/chatgpt"
+    },
+    {
       "source": "/anonymous-analytics",
       "destination": "/privacy"
     },
