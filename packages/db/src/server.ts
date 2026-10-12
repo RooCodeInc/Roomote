@@ -311,6 +311,7 @@ export {
 } from './schema';
 
 export * from './fixtures/factories/index';
+export * from './fixtures/without-eligible-compute-default';
 
 export type {
   SuggestionType,

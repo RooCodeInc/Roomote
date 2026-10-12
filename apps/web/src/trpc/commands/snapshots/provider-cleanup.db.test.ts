@@ -11,8 +11,10 @@ import {
   claimPendingEnvironmentSnapshotForAttachment,
   taskFactory,
   resolveDefaultComputeProvider,
+  withoutEligibleComputeDefault,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
-import { computeProviders, RunStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import { finishRun } from '@roomote/sdk/server';
 import type { UserAuthSuccess } from '@/types';
 import {
@@ -20,38 +22,82 @@ import {
   createEnvironmentSnapshotCommand,
 } from './index';
 
+const fixture = vi.hoisted(() => ({
+  executor: undefined as DatabaseOrTransaction | undefined,
+}));
+vi.mock('@roomote/db/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/db/server')>();
+  return {
+    ...actual,
+    // Only default resolution needs the singleton fixture. Snapshot helpers,
+    // factories and finishRun's other persistence keep their real DB ownership.
+    resolveDefaultComputeProvider: () => {
+      if (!fixture.executor) throw new Error('Missing compute-default fixture');
+      return actual.resolveDefaultComputeProvider({
+        executor: fixture.executor,
+      });
+    },
+  };
+});
+
+test('rolls back successful and failed no-default fixtures without exposing settings to other connections', async () => {
+  const actual =
+    await vi.importActual<typeof import('@roomote/db/server')>(
+      '@roomote/db/server',
+    );
+  const readSettings = () =>
+    db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+      columns: { runtimeComputeConfig: true },
+    });
+  const before = await readSettings();
+  const failure = new Error('Deliberately failing fixture callback');
+  await expect(
+    withoutEligibleComputeDefault(async (executor) => {
+      await expect(
+        actual.resolveDefaultComputeProvider({ executor }),
+      ).rejects.toThrow('No configured sandbox provider is available.');
+      expect(await readSettings()).toEqual(before);
+      throw failure;
+    }),
+  ).rejects.toBe(failure);
+  expect(await readSettings()).toEqual(before);
+  await expect(
+    withoutEligibleComputeDefault(async (executor) => {
+      await expect(
+        actual.resolveDefaultComputeProvider({ executor }),
+      ).rejects.toThrow('No configured sandbox provider is available.');
+      return 'fixture result';
+    }),
+  ).resolves.toBe('fixture result');
+  expect(await readSettings()).toEqual(before);
+});
+
+const it = test.extend<{ computeDefault: void }>({
+  computeDefault: [
+    // Vitest requires destructuring to discover fixture dependencies.
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
+      await withoutEligibleComputeDefault(async (executor) => {
+        fixture.executor = executor;
+        try {
+          await use();
+        } finally {
+          fixture.executor = undefined;
+        }
+      });
+    },
+    { auto: true },
+  ],
+});
+
 // Real Postgres, real default resolution, and real snapshot cleanup. The web
 // server test setup mocks Redis; this suite does not invoke hosted providers.
 describe('provider-pinned snapshot operations without an eligible default', () => {
   let environmentId: string;
   let taskId: string | undefined;
-  let priorConfig: typeof deploymentSettings.$inferSelect.runtimeComputeConfig;
 
   beforeEach(async () => {
-    priorConfig =
-      (
-        await db.query.deploymentSettings.findFirst({
-          where: eq(deploymentSettings.id, 'default'),
-        })
-      )?.runtimeComputeConfig ?? null;
-    await db
-      .insert(deploymentSettings)
-      .values({
-        id: 'default',
-        runtimeComputeConfig: {
-          defaultProvider: null,
-          excludedProviders: [...computeProviders],
-        },
-      })
-      .onConflictDoUpdate({
-        target: deploymentSettings.id,
-        set: {
-          runtimeComputeConfig: {
-            defaultProvider: null,
-            excludedProviders: [...computeProviders],
-          },
-        },
-      });
     const [environment] = await db
       .insert(environments)
       .values({
@@ -72,10 +118,6 @@ describe('provider-pinned snapshot operations without an eligible default', () =
       .delete(environmentSnapshots)
       .where(eq(environmentSnapshots.environmentId, environmentId));
     await db.delete(environments).where(eq(environments.id, environmentId));
-    await db
-      .update(deploymentSettings)
-      .set({ runtimeComputeConfig: priorConfig })
-      .where(eq(deploymentSettings.id, 'default'));
   });
 
   it('deletes a retained Modal snapshot without consulting an unused default', async () => {
