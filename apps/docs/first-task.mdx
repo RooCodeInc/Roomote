@@ -169,6 +169,7 @@ already know where it should run.
 | --- | --- |
 | The conversation fails before answering | Check the saved provider in **Settings > Models**, its credentials, and available credit or quota. |
 | Roomote cannot find or clone the repository | Check source-control authorization and repository permissions. On a self-hosted deployment, also check that the configured application URL is reachable for provider callbacks. |
+| **Settings > Models** says task model settings failed to load | Restore connectivity, then select **Retry** beside that error to reload your model mappings and available models in place. Saved defaults and credentials are unchanged. |
 | The task cannot start its sandbox | Check **Settings > Sandboxes**. For Docker, inspect host capacity and the error in the task logs. For a hosted provider, check its credentials and connectivity to your deployment. |
 | A setup command or project check fails | Open the task logs. Add missing tools, services, or setup guidance through an [environment](/environments), then retry with that environment. |
 

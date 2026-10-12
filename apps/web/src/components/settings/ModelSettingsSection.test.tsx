@@ -27,9 +27,15 @@ const refreshMutateAsyncMock = vi.hoisted(() => vi.fn());
 const createCustomPresetMutateAsyncMock = vi.hoisted(() => vi.fn());
 const deleteCustomPresetMutateAsyncMock = vi.hoisted(() => vi.fn());
 const invalidateQueriesMock = vi.hoisted(() => vi.fn());
+const settingsReadState = vi.hoisted(() => ({
+  failed: false,
+  fetching: false,
+  refetch: vi.fn(),
+}));
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (options: { queryKey?: unknown[] }) => {
+    const isSettings = options.queryKey?.[1] === 'get';
     const isProviderSetup =
       Array.isArray(options?.queryKey) &&
       options.queryKey[1] === 'providerSetup';
@@ -48,8 +54,12 @@ vi.mock('@tanstack/react-query', () => ({
 
     return {
       data,
-      isPending: data === null,
-      isError: isSuggestions && suggestionQueryError.current,
+      isPending: data === null && !(isSettings && settingsReadState.failed),
+      isError:
+        (isSettings && settingsReadState.failed) ||
+        (isSuggestions && suggestionQueryError.current),
+      isFetching: isSettings && settingsReadState.fetching,
+      refetch: settingsReadState.refetch,
     };
   },
   useMutation: (options?: { mutationKey?: unknown[] }) => {
@@ -503,6 +513,9 @@ describe('ModelSettingsSection', () => {
     createCustomPresetMutateAsyncMock.mockReset();
     deleteCustomPresetMutateAsyncMock.mockReset();
     invalidateQueriesMock.mockReset();
+    settingsReadState.failed = false;
+    settingsReadState.fetching = false;
+    settingsReadState.refetch.mockReset();
     settingsData.current = null;
     customPresetsData.current = [];
     providerSetupData.current = buildProviderSetupData();
@@ -549,6 +562,79 @@ describe('ModelSettingsSection', () => {
       />,
     );
   };
+
+  it('keeps a failed model-settings retry actionable, suppresses duplicates and restores mappings on a later retry', async () => {
+    settingsReadState.failed = true;
+    let finish!: () => void;
+    settingsReadState.refetch.mockImplementation(() => {
+      settingsReadState.failed = false;
+      settingsReadState.fetching = true;
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    renderModelSettingsSection();
+
+    const retry = screen.getByRole('button', {
+      name: 'Retry task model settings',
+    });
+    fireEvent.click(retry);
+    expect(settingsReadState.refetch).toHaveBeenCalledWith({
+      cancelRefetch: false,
+    });
+    expect(retry).toBeDisabled();
+    expect(retry).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Failed to load task model settings.',
+    );
+    expect(screen.queryByText('Loading models...')).not.toBeInTheDocument();
+    fireEvent.click(retry);
+    expect(settingsReadState.refetch).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      settingsReadState.failed = true;
+      settingsReadState.fetching = false;
+      finish();
+    });
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    expect(settingsReadState.refetch).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      settingsReadState.fetching = false;
+      settingsData.current = buildSettingsData();
+      finish();
+    });
+    expect(screen.getByText('Coding model')).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Retry task model settings' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('preserves cached model controls and the add-model draft during a failed background read', () => {
+    settingsData.current = buildSettingsData();
+    const providerSetup = buildProviderSetupData();
+    providerSetupData.current = providerSetup;
+    const view = renderModelSettingsSection();
+    fireEvent.change(screen.getByRole('textbox', { name: 'New model slug' }), {
+      target: { value: 'draft-model-slug' },
+    });
+    settingsReadState.failed = true;
+    view.rerender(
+      <ModelSettingsSection
+        connectedProviders={providerSetup.providerSetup.providers.filter(
+          (p) => p.runtimeApiKeySatisfied || p.savedApiKeySatisfied,
+        )}
+        providerSetupPending={false}
+      />,
+    );
+    expect(screen.getByText('Coding model')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'New model slug' })).toHaveValue(
+      'draft-model-slug',
+    );
+    expect(
+      screen.queryByText('Failed to load task model settings.'),
+    ).not.toBeInTheDocument();
+  });
 
   it('explains the Vision model and warns when it cannot inspect images', async () => {
     settingsData.current = buildSettingsData();
