@@ -60,6 +60,7 @@ For local command reproduction use a fresh disposable database, actual `createdb
 - Four actual subprocess cases pass at exact head: required exit 23 skips dependent marker and persists failed/pending command states plus exit/log; healthy setup completes; ordinary continuation and optional failure each complete with warnings and marker. 57 affected setup/status/command tests and normal full pre-push gates pass. Child processes terminate; per-test temporary workspaces are cleaned.
 - Browser proof not applicable, no images/judge. Proof exercises actual wrapper, manager, executor and filesystem persistence. Hosted snapshots and tenant task-run finalization remain outside this boundary.
 - Initial forwarding-only check exposed missing exit receipt because the executor throws before onResult; catch now records the receipt. Reverified affected paths. No unrelated checks altered.
+- 05:44 B2 is ready for human review: all hosted checks green including both image builds; exact-head automated summary clean (zero findings), no review threads; open/non-draft/mergeable. No remaining admitted implementation or repair obligation at this checkpoint.
 
 ## Additional intake evidence — 05:40 UTC
 
@@ -69,3 +70,10 @@ For local command reproduction use a fresh disposable database, actual `createdb
 - A1 #3460 is review/CI clean; A2 owns task-model settings recovery in web and one docs troubleshooting row. B remains independent.
 
 Next: reconcile B2 exact-head review/checks, repair actual findings, confirm readiness; continue materially distinct operator/runtime discovery until the exact cutoff. At cutoff stop intake and complete admitted obligations. Parent retains confirmed recurring reconciliation coverage.
+
+## Intake checkpoint — 05:51 UTC
+
+- Both B PRs remain at their proven ready heads; public sibling links and all proof limits are preserved.
+- Fresh analytics record inspection revalidated the remembered cancellation lead. Recent canceled records lack error codes/cancellation-reason/task correlation and span older releases; no current-develop regression established. Recent failed snapshot records are on older releases with already-fixed producer/default behavior. Older self-hosted address-pool failures are classified; current owned-network destroy path exists, with no present leak reproduction or authorized affected-instance evidence.
+- Bounded issue-tracker snapshot lookup returned no visible issues but an incomplete-page flag without continuation token; do not claim exhaustive absence.
+- Further evidence-led leads currently require unavailable original upgrade data, affected old-instance state, unavailable telemetry-query helper, or acknowledged handoff from active owners. No speculative third implementation admitted. Intake remains open; retain recurring reconciliation and recheck new events/current ownership at the next bounded interval. Completed PRs do not end the intake window.
