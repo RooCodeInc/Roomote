@@ -133,3 +133,13 @@ At cutoff stop all new discovery/admission/scope expansion, then finish B3/B4 th
 ## Runnable review continuation
 
 Use exact-head `gh pr checks 3464 --json name,state` / `gh pr checks 3465 --json name,state`, then read current summaries and review threads with pagination before readiness. If a finding appears, reproduce and repair it on that same owned branch, rerun changed/affected proof and gates, and reconcile the new head. If a review fails without findings, preserve the draft and exact error/receipts; do not fabricate a code repair or bypass protection. Retain confirmed recovery coverage until resolved. Refresh the final ledger and private occurrence artifact before yielding.
+
+## Unfinished external-gate handoff — 07:29:47 UTC
+
+- B1 #3459 at `7e2746c21c4f2e48f0379683dee22c18f1505e08` and B2 #3461 at `44b6fd804619990bd9504ed65f730e6fe287b922`: ready-for-review, original exact proofs/current heads preserved.
+- B3 #3464 at `4812056b4d32bfac31df6e029f730d90123d5828`: draft/MERGEABLE, Roomote code review IN_PROGRESS since06:45:32Z; zero annotations, no findings or failure text as of07:29:47Z.
+- B4 #3465 at `cddd12c271a0931e77d416a6e51087f070485710`: draft/MERGEABLE, Roomote code review IN_PROGRESS since07:10:18Z; zero annotations, no findings or failure text as of07:29:47Z.
+- Both code/CI rollups are success/expected skips; recently refreshed metadata can transiently rerun the normal judgement workflow. No code head changed. No review clean/failure conclusion inferred from elapsed time. Two bounded190s reconciliation watches returned no terminal all-check result; no further watch loops.
+- Exact gap and deterministic continuation now appear in both draft PR descriptions, with all four sibling links. Diagnostic follow-task sign-in remains unavailable; no credentials, rerun, approval, merge, deploy or bypass attempted. Implementations are not stranded in sandbox state.
+- Next confirmed parent reconciliation owns resumption: one exact-head/check/summary/thread snapshot; clean completed review + all gates → confirm/promote ready if not already promoted; real findings → repair same branch and affected-head proof; explicit review failure → preserve exact error and draft; still pending → retain ownership/coverage without synthetic work. No new scope after cutoff.
+- This handoff is unfinished workstream delivery, not overall shift/occurrence completion. Parent retains recurring recovery coverage and extension responsibility. Earlier intake-wait coverage gap remains disclosed above.
