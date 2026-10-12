@@ -47,18 +47,6 @@ const EARLIER_MESSAGE_MAX_CHARS = 1_000;
 const EARLIER_MESSAGES_MAX_CHARS = 4_000;
 const ASSISTANT_PROPOSAL_EDGE_CHARS = 1_000;
 
-/** Only the immediately preceding dialogue turn can supply a proposal. */
-export function selectAssistantModelProposal(
-  messages: readonly { role: string; text: string }[],
-): string | undefined {
-  const preceding = messages
-    .filter(
-      (message) => message.role === 'user' || message.role === 'assistant',
-    )
-    .at(-1);
-  return preceding?.role === 'assistant' ? preceding.text : undefined;
-}
-
 function buildModelResolutionHints(models: readonly TaskModelOption[]) {
   const candidates = models.map((model) => ({
     id: model.id,
@@ -285,12 +273,8 @@ export async function resolveFastAgentLaunchModel(params: {
   claimedReasoningEffort?: ReasoningEffort | null;
   /** The delegated work: the launch prompt or the review target. */
   work: string;
-  /** User-authored message texts from this Session, oldest first. */
-  userMessages: readonly string[];
-  /** Immediately preceding assistant dialogue, before this human request. */
-  assistantProposal?: string;
   /** Typed dialogue from canonical human/assistant events, not model wrappers. */
-  dialogue?: readonly ModelRequestMessage[];
+  dialogue: readonly ModelRequestMessage[];
   /** Models enabled for new tasks. */
   models: readonly TaskModelOption[];
   /** Coding-model routing rules; empty where they do not apply. */
@@ -304,18 +288,7 @@ export async function resolveFastAgentLaunchModel(params: {
   const claimsDefault =
     claimedModel !== undefined && claimedModel === params.defaultModelId;
   const modelsById = new Map(params.models.map((model) => [model.id, model]));
-  const dialogue: readonly ModelRequestMessage[] = params.dialogue ?? [
-    ...params.userMessages
-      .slice(0, -1)
-      .map((text) => ({ role: 'user' as const, text })),
-    ...(params.assistantProposal
-      ? [{ role: 'assistant' as const, text: params.assistantProposal }]
-      : []),
-    ...(params.userMessages.length
-      ? [{ role: 'user' as const, text: params.userMessages.at(-1)! }]
-      : []),
-  ];
-  const lanes = prepareModelRequestLanes(dialogue, params.models);
+  const lanes = prepareModelRequestLanes(params.dialogue, params.models);
   const rules = params.codingModelRoutingRules
     .filter((rule) => modelsById.has(rule.modelId))
     .slice(0, MAX_ROUTING_RULES);
