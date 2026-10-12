@@ -31,6 +31,7 @@ This branch is an inspectable execution ledger, not a product-code change or mer
 - Proof boundary: actual snapshot caller and real WorkspaceManager/CommandExecutor/CLI/DB/local object storage; SDK/provider completion, outer setup wrapper and shell injection mocked. Provider-hosted create/restore not exercised. Browser proof not applicable; no images or judge. No real customer messages.
 - 05:24 hosted CI and automated review in progress; head matches, mergeable. Human-review merge gate remains; no merge or approval authorized.
 - 05:27 automated review finished clean at the exact head (zero findings, no threads); service promoted the PR to non-draft. By 05:30 all checks except the ongoing worker-image build pass. B retains final CI reconciliation.
+- 05:35 final worker image check passes (9m24s). B1 is ready for human review: open/non-draft/mergeable, all checks green, exact-head review clean with no unresolved threads. Cross-linked with B2. No merge/approval/deploy performed. Disposable proof database dropped and absence confirmed; temporary probe removed.
 - Required: identical baseline/head seed stimulus; actual durable demo rows and rerun idempotency; production refusal; focused worker tests, static gates, exact-head CI/review reconciliation.
 - Hosted snapshot creation/restore is not yet exercised. Any limit must remain explicit.
 
@@ -51,3 +52,20 @@ For local command reproduction use a fresh disposable database, actual `createdb
 1. **Capacity vs obligations:** B1 is proven, clean-review and non-draft; only its worker-image CI remains passive. B2 is one independent flag-forwarding and truthful-error increment, using isolated subprocess/filesystem resources, no new DB/global state, and a 3-case exact-head proof.
 2. **Baseline/claim/ownership/proof:** current develop `50a58ed4` passes `false` from snapshot setup but the repository-command wrapper ignores it and always continues. A real required child process exits 23, its dependent child still creates a marker, and the wrapper resolves with optional warnings. Snapshot readiness can therefore proceed despite a required prerequisite failure. Ordinary/resume and per-command optional continuation already have passing controls. Files: `apps/worker/src/commands/setup/workspace/environment-commands.ts`, new adjacent `__tests__/environment-commands.test.ts`, and one existing `setup/__tests__/workspace.test.ts` expectation. A informed; no web/shared ownership overlap.
 3. **Bounded plan/regression boundary/owner/next action:** B forwards the existing policy, preserves ordinary-task and explicitly optional continuation, and ensures required-failure messaging does not claim continuation. Use actual child processes, dependent file existence and persisted `.roomote/setup-status.json`/logs. Preserve existing snapshot failure handling; no schema/provider/readiness-receipt redesign. Next: implement, prove skip/failure persistence, check affected setup/static suites and publish independently.
+
+### B2 delivery checkpoint — 05:40 UTC
+
+- [PR #3461](https://github.com/RooCodeInc/Roomote/pull/3461), branch `fix/required-snapshot-setup-27e7ankfza687`, exact head `44b6fd804619990bd9504ed65f730e6fe287b922`; pushed and draft pending CI/automated review. Cross-linked with #3459.
+- Existing policy now reaches the executor. Required errors propagate; their output/exit receipt is recorded before failed status finalization. No lower shared executor mutation. Ordinary/resume and optional-command behavior retained.
+- Four actual subprocess cases pass at exact head: required exit 23 skips dependent marker and persists failed/pending command states plus exit/log; healthy setup completes; ordinary continuation and optional failure each complete with warnings and marker. 57 affected setup/status/command tests and normal full pre-push gates pass. Child processes terminate; per-test temporary workspaces are cleaned.
+- Browser proof not applicable, no images/judge. Proof exercises actual wrapper, manager, executor and filesystem persistence. Hosted snapshots and tenant task-run finalization remain outside this boundary.
+- Initial forwarding-only check exposed missing exit receipt because the executor throws before onResult; catch now records the receipt. Reverified affected paths. No unrelated checks altered.
+
+## Additional intake evidence — 05:40 UTC
+
+- Current-develop CI/release/image-publish runs and installer health pass. No default-branch CI failure admitted.
+- Prior provider support investigation distinguishes expected inactive-repository retention from the reported raw count; no delete-migration proposed. Missing original model-upgrade stack/settings prevents a current reproduction.
+- Recent monitoring incident lookup empty. Telemetry source listing/field catalog works, but advertised query-help resources are unavailable through task tools; platform defect reported privately, bounded telemetry-query discovery degraded. Other source investigation continues.
+- A1 #3460 is review/CI clean; A2 owns task-model settings recovery in web and one docs troubleshooting row. B remains independent.
+
+Next: reconcile B2 exact-head review/checks, repair actual findings, confirm readiness; continue materially distinct operator/runtime discovery until the exact cutoff. At cutoff stop intake and complete admitted obligations. Parent retains confirmed recurring reconciliation coverage.
