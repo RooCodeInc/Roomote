@@ -83,7 +83,7 @@ export function findLatestTaskRun<
 >(taskId: string, columns?: T) {
   return db.query.taskRuns.findFirst({
     where: eq(taskRuns.taskId, taskId),
-    orderBy: desc(taskRuns.createdAt),
+    orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
     ...(columns && { columns }),
   });
 }
