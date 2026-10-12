@@ -371,6 +371,13 @@ such as OpenCode-generated session titles, are not observable to Roomote and
 cannot trigger fallback. This error fallback is separate from **Same as coding
 model**, which only makes a role inherit the coding model before a request starts.
 
+Audio transcription and video description calls also support a configured
+**Audio and video model** fallback. Choose a fallback that supports the input
+you use. This switch applies to the individual media request; later requests
+start with the configured or inherited audio and video model again. Selecting
+a model that lacks the required audio or video input support does not trigger
+provider-error fallback; choose a capable model in **Settings > Models**.
+
 ### Coding model routing rules
 
 Admins can add natural-language routing rules below **Coding model** in
