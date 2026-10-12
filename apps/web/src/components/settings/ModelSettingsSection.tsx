@@ -983,6 +983,14 @@ export function ModelSettingsSection({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(trpc.taskModels.get.queryOptions());
+  const [retryingSettings, setRetryingSettings] = useState(false);
+  const retrySettings = () => {
+    if (settingsQuery.isFetching || retryingSettings) return;
+    setRetryingSettings(true);
+    void settingsQuery
+      .refetch({ cancelRefetch: false })
+      .finally(() => setRetryingSettings(false));
+  };
   const customPresetsQuery = useQuery(
     trpc.taskModels.customPresets.list.queryOptions(),
   );
@@ -2320,7 +2328,7 @@ export function ModelSettingsSection({
 
   const isRefreshingMetadata = refreshMetadataMutation.isPending;
 
-  if (settingsQuery.isPending) {
+  if (settingsQuery.isPending && !retryingSettings) {
     return (
       <div className="space-y-6">
         <Section icon={Brain} title="Available Models">
@@ -2333,9 +2341,27 @@ export function ModelSettingsSection({
   if (!settingsData) {
     return (
       <Section icon={Brain} title="Task Models">
-        <p className="text-sm text-destructive">
-          Failed to load task model settings.
-        </p>
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-2"
+          role="alert"
+        >
+          <p className="text-sm text-foreground">
+            Failed to load task model settings.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={retrySettings}
+            disabled={settingsQuery.isFetching || retryingSettings}
+            aria-busy={settingsQuery.isFetching || retryingSettings}
+            aria-label="Retry task model settings"
+          >
+            {settingsQuery.isFetching || retryingSettings ? <Spinner /> : null}
+            {settingsQuery.isFetching || retryingSettings
+              ? 'Retrying…'
+              : 'Retry'}
+          </Button>
+        </div>
       </Section>
     );
   }
