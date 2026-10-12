@@ -16,6 +16,10 @@
       "import": "./src/sandbox-router.ts",
       "require": "./src/sandbox-router.ts"
     },
+    "./tool-approval-wait": {
+      "import": "./src/tool-approval-wait.ts",
+      "require": "./src/tool-approval-wait.ts"
+    },
     "./server": {
       "import": "./src/server/index.ts",
       "require": "./src/server/index.ts"
