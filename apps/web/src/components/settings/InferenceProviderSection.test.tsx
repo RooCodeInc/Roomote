@@ -415,11 +415,41 @@ describe('InferenceProviderSection', () => {
       <InferenceProviderSection
         providerSetup={providerSetup}
         providerSetupPending={providerSetupData.current === null}
+        providerSetupRetrying={false}
+        onRetryProviderSetup={vi.fn()}
         connectedProviders={connectedProviders}
         availableProviders={availableProviders}
       />,
     );
   };
+
+  it('offers a compact retry for unavailable provider settings and disables it while retrying', () => {
+    const retry = vi.fn();
+    const props = {
+      providerSetup: null,
+      providerSetupPending: false,
+      providerSetupRetrying: false,
+      connectedProviders: [],
+      availableProviders: [],
+      onRetryProviderSetup: retry,
+    };
+    const view = render(<InferenceProviderSection {...props} />);
+    const button = screen.getByRole('button', {
+      name: 'Retry inference provider settings',
+    });
+    fireEvent.click(button);
+    expect(retry).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <InferenceProviderSection {...props} providerSetupRetrying />,
+    );
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Failed to load inference provider settings.',
+    );
+    fireEvent.click(button);
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
 
   it('shows only connected providers plus an Add provider button', () => {
     providerSetupData.current = buildProviderSetup({
@@ -1338,6 +1368,8 @@ describe('InferenceProviderSection', () => {
       <InferenceProviderSection
         providerSetup={refreshedProviderSetup}
         providerSetupPending={false}
+        providerSetupRetrying={false}
+        onRetryProviderSetup={vi.fn()}
         connectedProviders={connectedProviders}
         availableProviders={availableProviders}
       />,

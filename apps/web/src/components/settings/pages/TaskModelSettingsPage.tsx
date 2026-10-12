@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { InferenceProviderSection } from '@/components/settings/InferenceProviderSection';
@@ -17,6 +17,14 @@ export function TaskModelSettingsPage() {
   const providerSetupQuery = useQuery(
     trpc.taskModels.providerSetup.queryOptions(),
   );
+  const [retryingProviderSetup, setRetryingProviderSetup] = useState(false);
+  const retryProviderSetup = () => {
+    if (providerSetupQuery.isFetching || retryingProviderSetup) return;
+    setRetryingProviderSetup(true);
+    void providerSetupQuery
+      .refetch({ cancelRefetch: false })
+      .finally(() => setRetryingProviderSetup(false));
+  };
   const providerSetup = providerSetupQuery.data?.providerSetup ?? null;
   const { connectedProviders, availableProviders } =
     splitInferenceProviders(providerSetup);
@@ -44,7 +52,13 @@ export function TaskModelSettingsPage() {
           trialInferenceActive={Boolean(
             providerSetupQuery.data?.trialInferenceActive,
           )}
-          providerSetupPending={providerSetupQuery.isPending}
+          providerSetupPending={
+            providerSetupQuery.isPending && !retryingProviderSetup
+          }
+          providerSetupRetrying={
+            providerSetupQuery.isFetching || retryingProviderSetup
+          }
+          onRetryProviderSetup={retryProviderSetup}
           connectedProviders={connectedProviders}
           availableProviders={availableProviders}
           onRecommendedModelsAdded={() =>
