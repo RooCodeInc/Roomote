@@ -252,8 +252,10 @@ create and manage their own [custom automations](/custom-automations)
 through a session; deployment admins can manage all custom automations, including
 those without a creator. Built-in automations and deployment settings remain
 admin-only. Roomote does not read other
-channels implicitly or inspect repository contents without delegating the work
-to a task. When the request spans every repository, Roomote can delegate it to the
+channels implicitly. Focused repository reads can use the connected
+source-control API tools directly; local checkout, command execution, and tests
+require a delegated task. See [source-control work in sessions](/fast-sessions#source-control-work-without-a-workspace).
+When the request spans every repository, Roomote can delegate it to the
 deployment's all-repositories environment.
 
 Eligible human discussion in an established Roomote Slack thread keeps reaching

@@ -41,8 +41,9 @@ the results.
    mentions, or configure [auto-response](/automation-configuration#channel-automations) once
    the channel's purpose is clear. Encourage questions such as where a behavior
    lives, how a flow works, or which tests cover a change.
-3. Have a leader ask Roomote to add an unmistakable custom emoji reaction to a
-   specific Slack message. This small, visible action shows that Roomote can help
+3. Have a leader mention Roomote and ask it to react to that incoming Slack
+   message. Session reactions target the current request, rather than an
+   arbitrary linked message. This small, visible action shows that Roomote can help
    with more than code without asking the team to configure another automation.
 4. Enable **Review Code**, then turn on **Review PRs not created by Roomote** so
    it includes pull requests opened by engineers. Keep automatic draft reviews
@@ -80,7 +81,7 @@ Keep the answer short and link to the relevant code.
 ```
 
 ```text
-Add the :eyes: reaction to the message linked below. Do not post a reply.
+@Roomote Add the :eyes: reaction to this message. Do not post a text reply.
 ```
 
 ## Variations

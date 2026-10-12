@@ -68,7 +68,7 @@ automatically at `<public-url>/api/webhooks/telegram` with the managed secret
 token and `allowed_updates` including `message`, `callback_query`, and
 `message_reaction`. Roomote uses newly added 👍 reactions on suggested-task
 messages to launch the selected task and user-attributed reactions on Roomote
-Roomote replies as conversation input. Roomote does not request
+replies as conversation input. Roomote does not request
 `message_reaction_count`: those aggregate updates do not identify the reacting
 user, so they cannot satisfy Roomote's account and conversation ownership
 checks.

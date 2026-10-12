@@ -63,13 +63,12 @@ request body over 24 MiB returns HTTP 413 with
 | Spreadsheets    | `.csv`, `.tsv`, `.xlsx`, `.xls`                                                                                                               |
 | Documents       | `.pdf`, `.docx`                                                                                                                               |
 | Presentations   | `.pptx`                                                                                                                                       |
+| Images          | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`                                                                                              |
 
 An attached `.r` script can also drive an environment recipe: Roomote detects
 the direct packages it uses and proposes an `r-bioconductor` environment, then
 resolves those packages from the official CRAN and Bioconductor repositories.
 See the [environment lifecycle](/environments#environment-lifecycle).
-
-| Images          | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`                                                                                              |
 
 ## How Roomote uses them
 

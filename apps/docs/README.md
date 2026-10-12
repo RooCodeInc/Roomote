@@ -9,8 +9,10 @@ and assets all live in this directory and do not depend on `@roomote/web`.
 
 - `docs.json` — the single source of truth for navigation, theme, branding, and
   the navbar CTA.
-- `*.mdx` — the documentation pages. Each page is referenced by its file name
-  (without extension) in the `docs.json` navigation. Add `icon` frontmatter
+- `*.mdx` — the documentation pages. Navigation entries use the file name
+  without its extension. Individual Cookbook recipes are discovered through
+  the generated index, and the agent installation contract is intentionally
+  hidden from navigation. Add `icon` frontmatter
   with a Lucide icon name to show an icon for the page in the sidebar.
 - `roomote.css` — Roomote brand styling (Monaspace Neon code font, lime CTA,
   rounded surfaces). Mintlify auto-loads CSS placed at the workspace root.
