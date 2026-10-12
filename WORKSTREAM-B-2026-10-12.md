@@ -104,3 +104,19 @@ Next: reconcile B2 exact-head review/checks, repair actual findings, confirm rea
 - Real container path is kernel-blocked after actual isolated Docker launch attempts. Controlled external provider path plus real Node/PG/separate controller is feasible and disclosed; no hosted-provider equivalence claimed.
 - First fixture attempt missed the environment creator FK; corrected using real userFactory. Independent helper initially loaded as CJS and hit import-only SDK exports; .mts fixed its loader. Those are probe defects, not product failures.
 - Successful baseline at 06:28:44 shows the incorrect in-flight classifier output plus eventual durable completed snapshot. Fixture processes and exact-ID rows are cleaned by the probe; checking the one pre-try setup-failure fixture separately before yielding.
+
+### B3 delivery checkpoint — 06:56 UTC
+
+- [PR #3464](https://github.com/RooCodeInc/Roomote/pull/3464), head `4812056b4d32bfac31df6e029f730d90123d5828`, branch `fix/explicit-snapshot-exit-intent-27e7ankfza687`; pushed/draft while automated review runs. Hosted code/CI all success or expected image skip, mergeable. Remains owned/unresolved pending review.
+- Guarded nullable request-time write uses normal Date encoding and same-source-machine/no-existing-image predicates; preserves prior intent. Initial raw-SQL Date/mocked-query sequencing approaches failed and were replaced, not shipped.
+- Exact-head 40 snapshot/persistence/proof checks pass plus 64 controller/compute-exit contracts. Separate-process observed routine/snapshot_requested on controlled real SIGKILL during snapshot; a second real SIGKILL without snapshot intent stays active_failure. Both original and changed-head snapshots persist/complete. Temp probe removed; durable probe/observer/baseline/head artifacts retained privately.
+- Initial pre-try fixture was investigated and deleted by exact ID after confirming no runs; later probe fixture rows/processes cleaned in finally. No live-provider/container parity or full worker executable claim.
+- Current task's actual compute-log read ends at setup/server readiness, while subsequent commands are present in transcript. Source exposes outer provider/retained worker output, not a per-agent-command stream; broad capability expansion not admitted.
+
+## B4 — latest-run cancellation tie-breaker (admitted 06:57 UTC)
+
+1. **Capacity vs obligations:** B1/B2 ready, B3 has passive automated review pending after green CI. B4 is one independent API query-ordering increment with a prepared real Postgres/HTTP-handler proof, no provider resources or shared global fixtures. Finish after cutoff if needed.
+2. **Baseline/claim/ownership/proof:** current API helper orders latest run only by createdAt. Two valid equal-time fixture runs (older completed, newer running) cause actual cancel handler to return 409 and leave running state unchanged. Same helper is used by follow-up message routing. No A overlap; notified A. Files `apps/api/src/handlers/tasks/helpers.ts` and focused handler/DB regression.
+3. **Bounded plan/regression boundary/owner/next action:** B preserves timestamp-primary chronology and adds descending run-ID tie-breaker. Test tied cancellation, normal chronological selection, repeated terminal cancellation, durable timestamps and untouched sibling; repeat at exact head, publish and reconcile CI/review. Auth/outbound boundaries controlled, real handler/SQL retained. Do not claim full worker child termination, alter visibility/ownership, or widen routing/UI.
+
+At cutoff stop all new discovery/admission/scope expansion, then finish B3/B4 through proof, review and repairs. No overall occurrence completion claimed; parent owns reconciliation.
