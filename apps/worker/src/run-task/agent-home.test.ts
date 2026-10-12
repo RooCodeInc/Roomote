@@ -636,6 +636,30 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(openrouter.models?.['z-ai/glm-5.2']).toBeUndefined();
   });
 
+  it.each([
+    ['anthropic', 'claude-haiku-5-5'],
+    ['bedrock-mantle', 'anthropic.claude-haiku-5-5'],
+  ])(
+    'configures Haiku 5.5 adaptive thinking for %s tasks',
+    (providerId, modelId) => {
+      const result = generateOpenCodeConfig({
+        homeDir: createHomeDir(),
+        runtimeEnv: {
+          R_MODEL: `${providerId}/${modelId}`,
+          R_MODEL_REASONING_EFFORT: 'medium',
+          ANTHROPIC_API_KEY: 'test-anthropic-key',
+          AWS_BEARER_TOKEN_BEDROCK: 'test-bedrock-key',
+        },
+      });
+      const config = JSON.parse(result.configContent);
+
+      expect(config.provider[providerId].models[modelId].options).toEqual({
+        thinking: { type: 'adaptive', display: 'summarized' },
+        effort: 'medium',
+      });
+    },
+  );
+
   it('routes Bedrock models through the Mantle Anthropic endpoint', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

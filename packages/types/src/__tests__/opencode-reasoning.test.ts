@@ -3,8 +3,42 @@ import {
   mergeOpenCodeModelReasoningOptions,
   stripOpenCodeModelReasoningOptions,
 } from '../opencode-reasoning';
+import { REASONING_EFFORT_VALUES } from '../task-runs';
 
 describe('buildOpenCodeModelReasoningOptions', () => {
+  describe.each([
+    'anthropic/claude-haiku-5-5',
+    'anthropic/claude-haiku-5.5',
+    'bedrock-mantle/anthropic.claude-haiku-5-5',
+    'bedrock-mantle/global.anthropic.claude-haiku-5-5',
+    'amazon-bedrock/anthropic.claude-haiku-5-5',
+    'github-copilot/claude-haiku-5.5',
+  ])('Haiku 5.5 reasoning on %s', (modelId) => {
+    it.each(REASONING_EFFORT_VALUES)(
+      'uses adaptive effort instead of a rejected thinking budget at %s',
+      (effort) => {
+        const options = modelId.startsWith('amazon-bedrock/')
+          ? {
+              reasoningConfig: {
+                type: 'adaptive',
+                maxReasoningEffort: effort,
+                display: 'summarized',
+              },
+            }
+          : modelId.startsWith('github-copilot/')
+            ? { reasoningEffort: effort }
+            : {
+                thinking: { type: 'adaptive', display: 'summarized' },
+                effort,
+              };
+
+        expect(buildOpenCodeModelReasoningOptions(modelId, effort)).toEqual(
+          options,
+        );
+      },
+    );
+  });
+
   it('uses the OpenRouter reasoning shape for openrouter models', () => {
     expect(
       buildOpenCodeModelReasoningOptions(
