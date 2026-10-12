@@ -87,8 +87,13 @@ export function EmailPasswordAuth({
             });
 
       if (result.error) {
+        const message =
+          typeof result.error.message === 'string' &&
+          result.error.message.trim().length > 0
+            ? result.error.message
+            : null;
         setErrorMessage(
-          result.error.message ||
+          message ||
             (mode === 'sign-up'
               ? 'Unable to create the account. Creating an account requires a valid invite link.'
               : 'Unable to sign in with that email and password.'),
