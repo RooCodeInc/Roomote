@@ -120,3 +120,16 @@ Next: reconcile B2 exact-head review/checks, repair actual findings, confirm rea
 3. **Bounded plan/regression boundary/owner/next action:** B preserves timestamp-primary chronology and adds descending run-ID tie-breaker. Test tied cancellation, normal chronological selection, repeated terminal cancellation, durable timestamps and untouched sibling; repeat at exact head, publish and reconcile CI/review. Auth/outbound boundaries controlled, real handler/SQL retained. Do not claim full worker child termination, alter visibility/ownership, or widen routing/UI.
 
 At cutoff stop all new discovery/admission/scope expansion, then finish B3/B4 through proof, review and repairs. No overall occurrence completion claimed; parent owns reconciliation.
+
+## Post-cutoff delivery checkpoint — 07:19 UTC
+
+- Cutoff observed passed at 07:00:28Z; no further discovery, candidates or scope expansion. B4 was admitted and recorded before cutoff; implementation/delivery completed afterward as required.
+- [PR #3465](https://github.com/RooCodeInc/Roomote/pull/3465), branch `fix/latest-run-timestamp-tie-27e7ankfza687`, head `cddd12c271a0931e77d416a6e51087f070485710`; pushed/draft pending automated review. One query-ordering line plus two focused real-DB HTTP-handler tests.
+- Stronger B4 baseline repeats using database-default creation timestamps in one real transaction (no manual timestamp injection), then identical exact-head cancel requests. Before:409 and newer run remains running. After:200 with durable cancellation times, completed sibling untouched, repeated409 without rewriting timestamps. Backdated higher-ID control preserves primary chronology. 55 cancel/send-message checks and API types/full pre-push gates pass.
+- B4 proof boundary is actual Hono request/handler and Postgres; auth/outbound contexts controlled. No worker-child termination, auth end-to-end or live-provider parity claim. Fixture rows cleaned in finally; no real messages. Browser proof not applicable.
+- B3/B4 hosted code/CI all success/expected skips. Automated review checks remain in progress; no findings/failure text yet. B3's follow-task diagnostic page requires sign-in; bounded read stopped there and isolated browser closed. No review bypass, synthetic commit, re-trigger or unverified infrastructure-cause claim.
+- B1/B2 remain non-draft at proven heads. All four PR bodies cross-link siblings. Only B3/B4 review reconciliation/any in-scope repair remains unresolved. Parent owns occurrence/wake extension while unfinished.
+
+## Runnable review continuation
+
+Use exact-head `gh pr checks 3464 --json name,state` / `gh pr checks 3465 --json name,state`, then read current summaries and review threads with pagination before readiness. If a finding appears, reproduce and repair it on that same owned branch, rerun changed/affected proof and gates, and reconcile the new head. If a review fails without findings, preserve the draft and exact error/receipts; do not fabricate a code repair or bypass protection. Retain confirmed recovery coverage until resolved. Refresh the final ledger and private occurrence artifact before yielding.
