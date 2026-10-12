@@ -21,15 +21,25 @@ This branch is an inspectable execution ledger, not a product-code change or mer
 
 1. **Capacity vs obligations:** no other B implementation admitted; one narrow increment can use the existing snapshot tests and actual disposable seed/database command path.
 2. **Baseline/claim/ownership/proof:** current source and runtime evidence establish missing sandbox identity. On unchanged develop, the propagation regression fails with stale identity; actual snapshot caller through WorkspaceManager/CommandExecutor/pnpm refuses development seed and leaves users/sessions/task_runs at 0/0/0 in a newly migrated disposable PostgreSQL database. Claimed files: `apps/worker/src/commands/snapshot.ts` and its existing test. Preserve seed production refusal. No web implementation overlap; A informed.
-3. **Plan/regression boundary/owner/next action:** B owns adding trusted fetched task identity to snapshot setup, testing propagation and override precedence, and repeating real seed stimulus against a disposable PostgreSQL database. Do not redesign optional-command policy, provider snapshotting, or seed authorization. Next: establish red propagation check and actual seed refusal/empty persistence.
+3. **Plan/regression boundary/owner/next action:** B owns adding trusted fetched task identity to snapshot setup, testing propagation and override precedence, and repeating real seed stimulus against a disposable PostgreSQL database. Do not redesign optional-command policy, provider snapshotting, or seed authorization. Next: reconcile exact-head hosted CI and automated review, repair genuine findings and deliver readiness.
 
 ## Delivery and proof
 
 - Baseline propagation: one expected failing regression, three existing passes. Baseline actual-command proof: expected refusal and empty durable state verified. Infrastructure provisioning used actual createdb and the checked-in migration runner; initial relative migration-folder invocation failed, corrected package-relative `drizzle` succeeds.
-- No implementation head or PR yet. Head recovery, CI and automated review pending.
+- Implementation: [PR #3459](https://github.com/RooCodeInc/Roomote/pull/3459), branch `fix/snapshot-setup-identity-27e7ankfza687`, exact head `7e2746c21c4f2e48f0379683dee22c18f1505e08`. One runtime env assignment plus two missing/stale-identity test cases. Pushed; draft pending CI/review, not completed.
+- 05:23 exact-head replay from fresh migrated PostgreSQL: both real seed commands succeed, yielding 1 user / 4 sessions / 4 runs / 2 uploaded session-owned artifacts, version 1. Repeat preserves counts; actual production `--force` CLI refuses and preserves counts. 88 focused tests, worker typecheck, normal full pre-push oxlint/residual ESLint/fast workspace types/Knip pass. Temporary probe removed.
+- Proof boundary: actual snapshot caller and real WorkspaceManager/CommandExecutor/CLI/DB/local object storage; SDK/provider completion, outer setup wrapper and shell injection mocked. Provider-hosted create/restore not exercised. Browser proof not applicable; no images or judge. No real customer messages.
+- 05:24 hosted CI and automated review in progress; head matches, mergeable. Human-review merge gate remains; no merge or approval authorized.
 - Required: identical baseline/head seed stimulus; actual durable demo rows and rerun idempotency; production refusal; focused worker tests, static gates, exact-head CI/review reconciliation.
 - Hosted snapshot creation/restore is not yet exercised. Any limit must remain explicit.
 
 ## Runnable continuation
 
 Run the existing worker snapshot suite with `pnpm exec dotenvx run -f .env.test -- pnpm --filter @roomote/worker exec vitest run src/commands/__tests__/snapshot.test.ts`, add the propagation regression, then exercise the actual seed CLI against a newly migrated disposable local PostgreSQL database. Recheck active PRs and current develop before implementation publication. Update this ledger at admission, progress and before yielding.
+
+For local command reproduction use a fresh disposable database, actual `createdb`, and `DATABASE_URL=postgresql://postgres@localhost:5432/roomote_shift_b_seed DRIZZLE_MIGRATIONS_FOLDER=drizzle pnpm --filter @roomote/db exec tsx src/run-migrations.ts`. Execute the two seed commands listed in PR #3459 through WorkspaceManager using snapshot setup's env, not the ambient harness env. Inspect `users`, `sessions`, `task_runs`, and `task_artifacts` directly, including uploaded/session ownership/version. Repeat at the pinned head; verify production refusal before dropping the disposable database. The owning task retains the full temporary probe and baseline/head receipts as durable artifacts.
+
+## Independent discovery — continuing intake
+
+- A1 is provider-settings in-place query recovery; files are web settings components/tests, independent of B.
+- 05:24 public-sanitized ledger and B1 are the only B branches. Next independent evidence sources: recent operator support, monitoring incidents, current required-command semantics and snapshot scrub receipts. No further admission yet.
