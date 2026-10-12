@@ -84,3 +84,11 @@ Next: reconcile B2 exact-head review/checks, repair actual findings, confirm rea
 - New A2 #3462 is task-model settings recovery; separate web/docs files. No B expansion or branch adoption.
 - New-support intake since 05:50 returns no new visible issues; historical issue updates not exhaustively covered by this created-time reader. Latest task/PR chronology supplies no new independent runtime failure candidate.
 - Existing evidence prerequisites remain unavailable/owner-held; no new implementation admitted. Continue bounded intake/reconciliation at the next confirmed interval, preserving readiness and proof limits. No workstream/occurrence completion claimed before cutoff.
+
+## Intake correction / active routes — 06:14–06:19 UTC
+
+- Two earlier bounded waits until 06:01 and 06:11 were not active intake; they are an explicit coverage gap. Requester corrected the approach. No further sleep/wake waits or idle polling. PR readiness is unaffected; do not infer continuous discovery coverage from prior interval entries.
+- Prepared API/BullMQ/controller/Redis/local artifact services are online. A disposable, separately scoped local Docker daemon was started using existing binaries and an isolated data root/socket; initial boolean argument syntax error was corrected. Daemon then reported Docker 29.1.3 with VFS, but network creation failed `operation not permitted` and even a no-network container failed layer registration (`unshare: operation not permitted`). Owned daemon stopped; no containers or daemon children remain. Real container/provider cancellation proof is kernel-blocked, not CLI-blocked.
+- Continuing distinct real-process/Postgres queue/controller-boundary routes: terminal-exit classification, actual cancellation cleanup, and persisted command-level receipts. No real provider/customer messages.
+- Exit/source investigation: explicit snapshot enqueue records request events but no snapshotRequestedAt field; controller exit classifier reads that field. The current runtime audit's misleading snapshot exit receipts warrant controlled event-order reproduction. This is a lead, not an admitted cause or fix yet.
+- A3 owns artifact CSV/TSV keyboard panning in viewer/client test/docs only; no B file overlap. Both shipped B exact heads remain untouched.
