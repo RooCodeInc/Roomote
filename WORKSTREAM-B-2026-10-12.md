@@ -30,6 +30,7 @@ This branch is an inspectable execution ledger, not a product-code change or mer
 - 05:23 exact-head replay from fresh migrated PostgreSQL: both real seed commands succeed, yielding 1 user / 4 sessions / 4 runs / 2 uploaded session-owned artifacts, version 1. Repeat preserves counts; actual production `--force` CLI refuses and preserves counts. 88 focused tests, worker typecheck, normal full pre-push oxlint/residual ESLint/fast workspace types/Knip pass. Temporary probe removed.
 - Proof boundary: actual snapshot caller and real WorkspaceManager/CommandExecutor/CLI/DB/local object storage; SDK/provider completion, outer setup wrapper and shell injection mocked. Provider-hosted create/restore not exercised. Browser proof not applicable; no images or judge. No real customer messages.
 - 05:24 hosted CI and automated review in progress; head matches, mergeable. Human-review merge gate remains; no merge or approval authorized.
+- 05:27 automated review finished clean at the exact head (zero findings, no threads); service promoted the PR to non-draft. By 05:30 all checks except the ongoing worker-image build pass. B retains final CI reconciliation.
 - Required: identical baseline/head seed stimulus; actual durable demo rows and rerun idempotency; production refusal; focused worker tests, static gates, exact-head CI/review reconciliation.
 - Hosted snapshot creation/restore is not yet exercised. Any limit must remain explicit.
 
@@ -43,3 +44,10 @@ For local command reproduction use a fresh disposable database, actual `createdb
 
 - A1 is provider-settings in-place query recovery; files are web settings components/tests, independent of B.
 - 05:24 public-sanitized ledger and B1 are the only B branches. Next independent evidence sources: recent operator support, monitoring incidents, current required-command semantics and snapshot scrub receipts. No further admission yet.
+- Recent snapshot/provider-default support report is covered by merged #3457; the separate upgrade/model-settings report remains unreproduced. No recent monitoring incidents returned. No admission for broad provider-row deletion or telemetry redesign.
+
+## B2 — honor required snapshot setup commands (admitted 05:31 UTC)
+
+1. **Capacity vs obligations:** B1 is proven, clean-review and non-draft; only its worker-image CI remains passive. B2 is one independent flag-forwarding and truthful-error increment, using isolated subprocess/filesystem resources, no new DB/global state, and a 3-case exact-head proof.
+2. **Baseline/claim/ownership/proof:** current develop `50a58ed4` passes `false` from snapshot setup but the repository-command wrapper ignores it and always continues. A real required child process exits 23, its dependent child still creates a marker, and the wrapper resolves with optional warnings. Snapshot readiness can therefore proceed despite a required prerequisite failure. Ordinary/resume and per-command optional continuation already have passing controls. Files: `apps/worker/src/commands/setup/workspace/environment-commands.ts`, new adjacent `__tests__/environment-commands.test.ts`, and one existing `setup/__tests__/workspace.test.ts` expectation. A informed; no web/shared ownership overlap.
+3. **Bounded plan/regression boundary/owner/next action:** B forwards the existing policy, preserves ordinary-task and explicitly optional continuation, and ensures required-failure messaging does not claim continuation. Use actual child processes, dependent file existence and persisted `.roomote/setup-status.json`/logs. Preserve existing snapshot failure handling; no schema/provider/readiness-receipt redesign. Next: implement, prove skip/failure persistence, check affected setup/static suites and publish independently.
