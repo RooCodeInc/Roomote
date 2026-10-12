@@ -12,6 +12,7 @@ export {
 export {
   type Context,
   router,
+  activeRunProcedure,
   authenticatedProcedure,
   optionalAuthProcedure,
 } from './trpc';

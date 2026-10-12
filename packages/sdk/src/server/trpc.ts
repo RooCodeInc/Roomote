@@ -48,6 +48,26 @@ export const authenticatedProcedure = t.procedure.use(async (opts) => {
 });
 
 /**
+ * Requires run tokens to still belong to an active run while preserving
+ * ordinary authenticated-user access.
+ */
+export const activeRunProcedure = authenticatedProcedure.use(
+  async ({ ctx, next }) => {
+    if (
+      isRunToken(ctx.auth) &&
+      !(await findTaskRunByRunTokenClaims(ctx.auth))
+    ) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'This task run is no longer active',
+      });
+    }
+
+    return next({ ctx });
+  },
+);
+
+/**
  * Blocks run tokens entirely. For endpoints workers should never access.
  */
 export const userOnlyProcedure = t.procedure.use(async (opts) => {

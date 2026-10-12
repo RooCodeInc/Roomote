@@ -66,6 +66,8 @@ describe('userApiKeysRouter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFindTaskRun.mockResolvedValue({
+      id: 42,
+      status: 'running',
       userId: 'owner-user',
       actingUserId: null,
     });
@@ -90,9 +92,9 @@ describe('userApiKeysRouter', () => {
   });
 
   it('uses taskRuns.actingUserId for run-token key lookups', async () => {
-    mockFindTaskRun.mockResolvedValueOnce({
-      actingUserId: 'actor-user',
-    });
+    mockFindTaskRun
+      .mockResolvedValueOnce({ id: 42, status: 'running' })
+      .mockResolvedValueOnce({ actingUserId: 'actor-user' });
     mockFindUserApiKey.mockResolvedValueOnce({ apiKey: 'encrypted-api-key' });
 
     const result = await createJobCaller().getDecryptedKey({
@@ -126,11 +128,13 @@ describe('userApiKeysRouter', () => {
     // attacker-chosen victim. This test pins the downstream half of the chain:
     // the effective user comes only from the persisted actingUserId, so the
     // key lookup targets the legitimate actor and never the victim.
-    mockFindTaskRun.mockResolvedValueOnce({
-      // The value that survives in the DB is the legitimate actor, because the
-      // sandbox's reassignment to 'victim-user' was stripped upstream.
-      actingUserId: 'owner-user',
-    });
+    mockFindTaskRun
+      .mockResolvedValueOnce({ id: 42, status: 'running' })
+      .mockResolvedValueOnce({
+        // The value that survives in the DB is the legitimate actor, because the
+        // sandbox's reassignment to 'victim-user' was stripped upstream.
+        actingUserId: 'owner-user',
+      });
     mockFindUserApiKey.mockResolvedValueOnce({ apiKey: 'owner-encrypted-key' });
 
     const result = await createJobCaller().getDecryptedKey({ provider });
@@ -148,5 +152,16 @@ describe('userApiKeysRouter', () => {
       column: 'userId',
       value: 'victim-user',
     });
+  });
+
+  it('rejects terminal run tokens before reading or decrypting a key', async () => {
+    mockFindTaskRun.mockResolvedValueOnce({ id: 42, status: 'completed' });
+
+    await expect(
+      createJobCaller().getDecryptedKey({ provider }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    expect(mockFindUserApiKey).not.toHaveBeenCalled();
+    expect(mockDecryptText).not.toHaveBeenCalled();
   });
 });
