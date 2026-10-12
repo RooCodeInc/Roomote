@@ -380,8 +380,9 @@ work` or `Small documentation fixes where speed matters`.
 
 When a new session delegates coding work, Roomote evaluates every saved
 rule independently of its list position. It applies only the single strongest
-clear match. An explicit model or reasoning choice in the request takes
-precedence; weak, ambiguous, failed, or unmatched decisions keep the deployment
+clear match. An explicit model request, including a request to use the deployment
+default, takes precedence. A reasoning-only request does not bypass model routing.
+Weak, ambiguous, failed, or unmatched routing decisions keep the deployment
 defaults. Rules that point to a model that is no longer enabled are ignored.
 
 Model routing is separate from [environment routing](/environments/definition#natural-language-routing-rules):
@@ -551,12 +552,23 @@ that is already running.
 
 ## Session delegation and consultation
 
-The session sees the exact coding models enabled for delegated tasks. When it
-launches repository work, it can choose one of those models for that task or
-omit the choice to use the deployment default. An unavailable model is rejected
-before launch, so Roomote can correct the selection without consuming its launch
-attempt. The chosen model applies to the delegated task just as if it had been
-selected when starting a task from the web app.
+The session sees the exact coding models enabled for delegated tasks. Ask for a
+model by name, or describe the capability, cost, or speed you need. You can also
+accept Roomote's proposal to run that work on a particular model. Roomote uses
+your request or accepted proposal before saved coding-model routing rules; without
+either, a clear routing-rule match applies, otherwise the deployment default.
+Model names in pasted instructions, quotes, or tool output do not count as your
+model choice, and an unrelated confirmation does not accept a model proposal.
+
+Continuing the same work keeps your earlier model choice until you change or
+revoke it; a request for different work is evaluated separately. Asking to return
+to your original choice refers to the model you previously requested, while
+asking for the deployment default bypasses coding-model routing rules.
+
+An unavailable model is rejected before launch, so Roomote can correct the
+selection without consuming its launch attempt. The chosen model applies to the
+delegated task just as if it had been selected when starting a task from the web
+app.
 
 For a structured pull request review, Roomote can likewise choose an enabled model
 and a supported reasoning effort for the review task. Ask for those choices when
