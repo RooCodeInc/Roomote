@@ -92,3 +92,15 @@ Next: reconcile B2 exact-head review/checks, repair actual findings, confirm rea
 - Continuing distinct real-process/Postgres queue/controller-boundary routes: terminal-exit classification, actual cancellation cleanup, and persisted command-level receipts. No real provider/customer messages.
 - Exit/source investigation: explicit snapshot enqueue records request events but no snapshotRequestedAt field; controller exit classifier reads that field. The current runtime audit's misleading snapshot exit receipts warrant controlled event-order reproduction. This is a lead, not an admitted cause or fix yet.
 - A3 owns artifact CSV/TSV keyboard panning in viewer/client test/docs only; no B file overlap. Both shipped B exact heads remain untouched.
+
+## B3 — explicit snapshot exit intent (admitted 06:30 UTC)
+
+1. **Capacity vs obligations:** B1/B2 fully proven, CI/review clean and ready. One independent bounded lifecycle correction fits remaining intake; real DB and separate-process proof already prepared. Prefer finishing this false-failure receipt over unrelated scope.
+2. **Baseline/claim/ownership/proof:** on current develop `50a58ed4`, actual snapshotJob enters provider snapshot with durable snapshotRequestedAt=null. A real fixture child receives SIGKILL; an independent controller process reads Postgres and reports exit137 as active_failure/no shutdown reason before the controlled provider returns its snapshot ID. The actual job then persists that ID and completes. Matches current audit's misleading snapshot teardown receipts. Provider and outbound boundaries mocked; actual process/SQL/controller classification retained. Files: `apps/bullmq/src/jobs/snapshot.ts` and existing `snapshot-persistence.test.ts`; no current open overlap, A informed. Local proof helpers remain separate artifacts, not product code.
+3. **Bounded plan/regression boundary/owner/next action:** B records existing snapshotRequestedAt intent before calling the provider, preserving the earliest request time. Verify exact-head in-flight receipt/classification, normal snapshot completion, existing automatic-request timestamps, and true unexpected-exit/failure boundaries. Preserve original finalization/ownership/cancel behavior, no new schema or provider-specific exception. Next: implement and run real-persistence/controller contracts, then publish/reconcile.
+
+### Reproduction and preparation limits
+
+- Real container path is kernel-blocked after actual isolated Docker launch attempts. Controlled external provider path plus real Node/PG/separate controller is feasible and disclosed; no hosted-provider equivalence claimed.
+- First fixture attempt missed the environment creator FK; corrected using real userFactory. Independent helper initially loaded as CJS and hit import-only SDK exports; .mts fixed its loader. Those are probe defects, not product failures.
+- Successful baseline at 06:28:44 shows the incorrect in-flight classifier output plus eventual durable completed snapshot. Fixture processes and exact-ID rows are cleaned by the probe; checking the one pre-try setup-failure fixture separately before yielding.
