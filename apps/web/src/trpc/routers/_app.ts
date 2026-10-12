@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sendSessionPeerMessageCommand } from '../commands/fast-sessions/peer-message';
 import { DEPLOYMENT_EXPERIMENT_IDS } from '@roomote/feature-flags';
 import { instanceSkillsRouter } from './instance-skills';
 import {
@@ -3396,6 +3397,17 @@ export const appRouter = createRouter({
   automations: automationsRouter,
 
   fastSessions: createRouter({
+    sendToPeople: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          clientMessageId: z.string().uuid(),
+          text: z.string().trim().min(1).max(20_000),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        sendSessionPeerMessageCommand(auth, input),
+      ),
     start: protectedProcedure
       .input(startFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>

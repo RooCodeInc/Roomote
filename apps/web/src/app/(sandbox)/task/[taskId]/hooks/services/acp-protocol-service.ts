@@ -355,7 +355,8 @@ export function toAcpUiMessage(
           normalized.eventType,
         ),
         role:
-          normalized.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt
+          normalized.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt ||
+          normalized.eventType === ACP_ENVELOPE_EVENT_TYPES.PeerMessage
             ? ('user' as const)
             : ('assistant' as const),
         kind: 'text',

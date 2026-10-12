@@ -9,9 +9,10 @@ export type SessionViewer = {
   imageUrl: string;
 };
 
-export function useSessionViewers(sessionId: string) {
+export function useSessionViewers(sessionId: string, enabled = true) {
   const { data, isError } = useQuery({
     queryKey: ['session-viewers', sessionId],
+    enabled,
     queryFn: async ({ signal }): Promise<SessionViewer[]> => {
       const response = await fetch(`/api/sessions/${sessionId}/presence`, {
         signal,
@@ -25,5 +26,5 @@ export function useSessionViewers(sessionId: string) {
     gcTime: 0,
   });
 
-  return isError ? [] : (data ?? []);
+  return !enabled || isError ? [] : (data ?? []);
 }

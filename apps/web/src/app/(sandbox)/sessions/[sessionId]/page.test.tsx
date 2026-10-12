@@ -129,6 +129,12 @@ vi.mock('@/components/sessions/SessionViewers', () => ({
   ),
 }));
 
+vi.mock('@/components/sessions/SessionParticipants', () => ({
+  SessionParticipants: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="session-viewers" data-session-id={sessionId} />
+  ),
+}));
+
 import SessionDetailPage, { generateMetadata } from './page';
 
 describe('Session detail page', () => {
