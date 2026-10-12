@@ -452,7 +452,7 @@ const serverSchema = {
   R_BRAIN_OPENROUTER_API_KEY: z.string().min(1).optional(),
   // Alternative to the above for deployments that would rather talk to
   // OpenAI directly than route through OpenRouter. Either key activates the
-  // Brain; the models both default to are OpenAI's either way, so this only
+  // Brain; both models default to OpenAI's either way, so this only
   // changes who bills for them. If both are set, OpenRouter wins, so adding
   // an OpenAI key for something else never silently re-points an existing
   // Brain at a different embedding path.

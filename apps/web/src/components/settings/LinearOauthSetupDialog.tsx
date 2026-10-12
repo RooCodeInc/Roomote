@@ -324,7 +324,7 @@ export function LinearOauthSetupDialog({
             )}
 
             <DialogFooter className="gap-2 justify-between">
-              <div className="flex flex-wrap gap-2 just">
+              <div className="flex flex-wrap gap-2">
                 {hasSavedCredentials ? (
                   <Button
                     type="button"
