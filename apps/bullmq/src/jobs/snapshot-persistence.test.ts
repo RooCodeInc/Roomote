@@ -144,6 +144,34 @@ describe('snapshot id persistence (real database)', () => {
     vi.clearAllMocks();
   });
 
+  it.each([null, new Date('2026-10-01T01:02:03.000Z')])(
+    'records snapshot intent before provider teardown without overwriting an earlier claim (%s)',
+    async (requestedAt) => {
+      const run = await createIdleRunAwaitingSnapshot();
+      await db
+        .update(taskRuns)
+        .set({ snapshotRequestedAt: requestedAt, sleepRequestedAt: null })
+        .where(eq(taskRuns.id, run.id));
+      mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+      mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
+        const inFlight = await readRun(run.id);
+        expect(inFlight.snapshotRequestedAt).toBeInstanceOf(Date);
+        if (requestedAt) {
+          expect(inFlight.snapshotRequestedAt?.toISOString()).toBe(
+            requestedAt.toISOString(),
+          );
+        }
+        await onSnapshotCreated?.('im-explicit-intent');
+        return { snapshotId: 'im-explicit-intent' };
+      });
+      await snapshotJob(buildJob(run.id, 0));
+      const finalized = await readRun(run.id);
+      expect(finalized.status).toBe(RunStatus.Completed);
+      expect(finalized.snapshotId).toBe('im-explicit-intent');
+      expect(finalized.snapshotRequestedAt).toBeInstanceOf(Date);
+    },
+  );
+
   it('records the snapshot id while the attempt is still in flight', async () => {
     const run = await createIdleRunAwaitingSnapshot();
 

@@ -373,6 +373,23 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     });
 
     try {
+      // Explicit snapshot requests do not pass through sleep-check's claim.
+      // Persist intent before the provider can stop the worker, so a concurrent
+      // controller exit observer can distinguish teardown from an active crash.
+      if (taskRun.snapshotRequestedAt === null) {
+        await db
+          .update(taskRuns)
+          .set({ snapshotRequestedAt: snapshotAttemptStartedAt })
+          .where(
+            and(
+              eq(taskRuns.id, runId),
+              eq(taskRuns.machineId, instanceId),
+              isNull(taskRuns.snapshotId),
+              isNull(taskRuns.snapshotRequestedAt),
+            ),
+          );
+      }
+
       await recordMutation({
         provider,
         operation: 'create_snapshot',
