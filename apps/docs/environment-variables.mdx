@@ -37,6 +37,9 @@ The exact order depends on the setting. A few important cases:
   deployment env vars. The default sandbox provider is special: an explicit
   admin selection saved in Roomote wins over `DEFAULT_COMPUTE_PROVIDER` because
   local and Compose stacks often set a default automatically.
+  On `develop` (not included in v1.17.0), default selection skips providers
+  whose required configuration is missing or that are excluded; see
+  [default fallback and removal](/compute#default-fallback-and-removing-saved-configuration).
 - Local development has safe defaults for Postgres, Redis, MinIO, signing keys,
   and local URLs. Dev login also stores an intentionally invalid inference
   placeholder when no provider is configured, so setup can complete without a
