@@ -68,8 +68,7 @@ export async function executeOrganizationEnvironmentRepositoryCommands(
     envVars,
     userEnvVars,
     preparedWorkspace,
-    continueRepositoryCommandFailures:
-      _continueRepositoryCommandFailures = false,
+    continueRepositoryCommandFailures = false,
     setupStatusWriter,
     recordPhase,
   }: SetupOrganizationEnvironmentOptions,
@@ -92,7 +91,7 @@ export async function executeOrganizationEnvironmentRepositoryCommands(
       repoPaths,
       userEnvVars,
       {
-        continueOnError: true,
+        continueOnError: continueRepositoryCommandFailures,
         onCommandStart: ({ repository, commandName }) => {
           setupStatusWriter?.markCommandRunning(repository, commandName);
         },
@@ -136,6 +135,19 @@ export async function executeOrganizationEnvironmentRepositoryCommands(
       },
     );
   } catch (error) {
+    if (error instanceof ExecutionError) {
+      // Required commands throw before the executor's result callback. Retain
+      // their exit/output receipt before finalizing the failed setup.
+      const repository = environment.environmentConfig.repositories.find(
+        (repository) => repository.commands?.includes(error.result.command),
+      );
+      if (repository) {
+        setupStatusWriter?.markCommandResult(
+          repository.repository,
+          error.result,
+        );
+      }
+    }
     setupStatusWriter?.finalize({
       warnings: warnings.map((warning) => warning.message),
       error: error instanceof Error ? error.message : String(error),
