@@ -75,7 +75,7 @@ import {
   resolveOpenCodeSmallModel,
 } from '../non-task-provider-usage';
 
-const DEFAULT_OPENCODE_CLI_VERSION = '1.18.30';
+const DEFAULT_OPENCODE_CLI_VERSION = '1.19.0';
 
 type SpawnedServer = EventEmitter & {
   stdout: EventEmitter;
