@@ -37,6 +37,7 @@ export function buildPersistedWorkerBootstrapRestartsQuery(
       and(
         eq(taskRuns.status, RunStatus.Pending),
         isNull(taskRuns.startedAt),
+        isNull(taskRuns.cancelRequestedAt),
         isNull(taskRuns.canceledAt),
         exists(matchingRestartEvent),
       ),

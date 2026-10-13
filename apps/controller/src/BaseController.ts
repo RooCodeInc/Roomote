@@ -975,6 +975,7 @@ export abstract class BaseController {
         ),
         isNull(taskRuns.startedAt),
         isNull(taskRuns.workerHeartbeatAt),
+        isNull(taskRuns.cancelRequestedAt),
         isNull(taskRuns.canceledAt),
       ),
       orderBy: [asc(taskRuns.provisionReadyAt)],
@@ -1048,6 +1049,7 @@ export abstract class BaseController {
             eq(taskRuns.status, RunStatus.Dequeued),
             isNull(taskRuns.startedAt),
             isNull(taskRuns.workerHeartbeatAt),
+            isNull(taskRuns.cancelRequestedAt),
             isNull(taskRuns.canceledAt),
           ),
         )
@@ -1147,6 +1149,7 @@ export abstract class BaseController {
           AND status = ${RunStatus.Dequeued}
           AND started_at IS NULL
           AND worker_heartbeat_at IS NULL
+          AND cancel_requested_at IS NULL
           AND canceled_at IS NULL
         FOR UPDATE
       `);
