@@ -665,7 +665,7 @@ describe('Telegram webhook handler', () => {
     expect(postMessageMock).not.toHaveBeenCalled();
   });
 
-  it('queues a new reaction on the owner’s bound Fast message', async () => {
+  it.each([false, true])('reaction admission (%s)', async (fail) => {
     findFastMessageSessionMock.mockResolvedValue({
       id: 'fast-session-1',
       userId: 'mapped-user-1',
@@ -677,6 +677,11 @@ describe('Telegram webhook handler', () => {
       },
     });
     mockTelegramLinkedSender('mapped-user-1');
+
+    if (fail)
+      queueFastReplyMock.mockRejectedValueOnce(
+        new Error('Controlled admission failure'),
+      );
 
     const response = await postTelegramUpdate({
       update_id: 124,
@@ -695,6 +700,16 @@ describe('Telegram webhook handler', () => {
       },
     });
 
+    if (fail) {
+      expect(response.status).toBe(500);
+      expect(redisEvalMock).toHaveBeenCalledWith(
+        expect.any(String),
+        1,
+        'telegram:update:124',
+        redisSetMock.mock.calls[0]?.[1],
+      );
+      return;
+    }
     await expect(response.json()).resolves.toEqual({
       ok: true,
       fastReactionQueued: true,
@@ -1054,7 +1069,12 @@ describe('Telegram webhook handler', () => {
 
     expect(response.status).toBe(500);
     expect(addReactionMock).not.toHaveBeenCalled();
-    expect(redisDelMock).toHaveBeenCalledWith('telegram:update:123');
+    expect(redisEvalMock).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      'telegram:update:123',
+      redisSetMock.mock.calls[0]?.[1],
+    );
   });
 
   it('fails closed when a Telegram reply targets a Fast message on another route', async () => {
@@ -1399,7 +1419,7 @@ describe('Telegram webhook handler', () => {
     expect(response.status).toBe(200);
     expect(redisSetMock).toHaveBeenCalledWith(
       'telegram:update:123',
-      '1',
+      expect.any(String),
       'EX',
       300,
       'NX',
@@ -1855,7 +1875,12 @@ describe('Telegram webhook handler', () => {
     const response = await postTelegramUpdate(createTelegramUpdate());
 
     expect(response.status).toBe(500);
-    expect(redisDelMock).toHaveBeenCalledWith('telegram:update:123');
+    expect(redisEvalMock).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      'telegram:update:123',
+      redisSetMock.mock.calls[0]?.[1],
+    );
   });
 
   it('acks a retried active-run update already queued by message id', async () => {

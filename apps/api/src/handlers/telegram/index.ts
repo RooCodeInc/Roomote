@@ -141,6 +141,7 @@ const TELEGRAM_LINK_START_PAYLOAD = 'link';
 
 type TelegramWebhookVariables = {
   claimedUpdateId: number | undefined;
+  claimedUpdateOwner: string | undefined;
   operationalFields: OperationalLogFields;
 };
 
@@ -246,8 +247,11 @@ telegram.use('*', async (c, next) => {
 
 telegram.onError(async (error, c) => {
   const claimedUpdateId = c.get('claimedUpdateId');
-  if (claimedUpdateId !== undefined) {
-    await releaseTelegramUpdateClaim(claimedUpdateId).catch(() => {});
+  const claimedUpdateOwner = c.get('claimedUpdateOwner');
+  if (claimedUpdateId !== undefined && claimedUpdateOwner !== undefined) {
+    await releaseTelegramUpdateClaim(claimedUpdateId, claimedUpdateOwner).catch(
+      () => {},
+    );
   }
   throw error;
 });
@@ -299,6 +303,7 @@ telegram.post('/', async (c) => {
       return c.json({ ok: true, duplicate: true });
     }
     c.set('claimedUpdateId', update.update_id);
+    c.set('claimedUpdateOwner', claimedReaction);
     const addedReactions = getNewTelegramMessageReactions(messageReaction);
     if (addedReactions.length === 0) {
       return c.json({ ok: true, ignored: 'reaction_removed_or_unchanged' });
@@ -403,6 +408,7 @@ telegram.post('/', async (c) => {
       return c.json({ ok: true, duplicate: true });
     }
     c.set('claimedUpdateId', update.update_id);
+    c.set('claimedUpdateOwner', claimedCallback);
 
     await handleTelegramCallbackQuery(callbackQuery);
 
@@ -433,6 +439,7 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, duplicate: true });
   }
   c.set('claimedUpdateId', update.update_id);
+  c.set('claimedUpdateOwner', claimed);
 
   if (isTelegramImplicitTopicCreatedMessage(message)) {
     const implicitThreadId = message.message_thread_id ?? message.message_id;
