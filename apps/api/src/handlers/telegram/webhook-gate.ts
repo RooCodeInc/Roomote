@@ -5,6 +5,12 @@ import { getRedis } from '@roomote/redis';
 
 const TELEGRAM_UPDATE_DEDUP_PREFIX = 'telegram:update:';
 const TELEGRAM_UPDATE_DEDUP_TTL_SECONDS = 5 * 60;
+const RELEASE_UPDATE_CLAIM_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`;
 const TELEGRAM_IMPLICIT_TOPIC_PREFIX = 'telegram:implicit-topic:';
 const TELEGRAM_IMPLICIT_TOPIC_TTL_SECONDS = 60 * 60;
 
@@ -80,23 +86,34 @@ export async function verifyTelegramWebhookSecret(
   return null;
 }
 
-export async function claimTelegramUpdate(updateId: number): Promise<boolean> {
+export async function claimTelegramUpdate(
+  updateId: number,
+): Promise<string | null> {
   const redis = getRedis();
+  const owner = crypto.randomUUID();
   const claimed = await redis.set(
     `${TELEGRAM_UPDATE_DEDUP_PREFIX}${updateId}`,
-    '1',
+    owner,
     'EX',
     TELEGRAM_UPDATE_DEDUP_TTL_SECONDS,
     'NX',
   );
 
-  return Boolean(claimed);
+  return claimed ? owner : null;
 }
 
 export async function releaseTelegramUpdateClaim(
   updateId: number,
+  owner: string,
 ): Promise<void> {
-  await getRedis().del(`${TELEGRAM_UPDATE_DEDUP_PREFIX}${updateId}`);
+  // A handler may fail after its claim expires and another request acquires
+  // the update. Never release that newer request's deduplication claim.
+  await getRedis().eval(
+    RELEASE_UPDATE_CLAIM_SCRIPT,
+    1,
+    `${TELEGRAM_UPDATE_DEDUP_PREFIX}${updateId}`,
+    owner,
+  );
 }
 
 const TELEGRAM_LINK_NUDGE_PREFIX = 'telegram:link-nudge:';
