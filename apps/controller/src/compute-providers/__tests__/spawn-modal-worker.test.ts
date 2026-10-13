@@ -970,12 +970,19 @@ describe('spawnModalWorker', () => {
     });
   });
 
-  it('cleans up when a later detached exit is claimed as a bootstrap failure', async () => {
-    const onWorkerExit = vi.fn().mockResolvedValue({
+  it.each([
+    {
       disposition: 'restart',
       classification: 'bootstrap_failure',
       shutdownReason: 'bootstrap_restart_pending',
-    });
+    },
+    {
+      disposition: 'failed',
+      classification: 'routine',
+      shutdownReason: 'cancel_requested',
+    },
+  ])('cleans up a claimed detached exit ($shutdownReason)', async (result) => {
+    const onWorkerExit = vi.fn().mockResolvedValue(result);
     const onWorkerRestart = vi.fn();
 
     await spawnModalWorker(
@@ -1009,7 +1016,9 @@ describe('spawnModalWorker', () => {
         onMutation: expect.any(Function),
       }),
     );
-    expect(onWorkerRestart).toHaveBeenCalledOnce();
+    expect(onWorkerRestart).toHaveBeenCalledTimes(
+      result.disposition === 'restart' ? 1 : 0,
+    );
   });
 
   it('waits for exit classification before unwinding an aborted admission', async () => {

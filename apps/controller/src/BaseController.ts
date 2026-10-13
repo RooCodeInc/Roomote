@@ -32,6 +32,7 @@ import {
   isNull,
   isNotNull,
   lt,
+  or,
   sql,
 } from '@roomote/db/server';
 import { dequeueTaskRun } from '@roomote/cloud-agents/server';
@@ -813,9 +814,13 @@ export abstract class BaseController {
 
     if (failed) {
       return {
+        // This terminal disposition also owns provider cleanup for deliberate
+        // cancellation; classification keeps it out of crash diagnostics.
         disposition: 'failed',
-        classification: 'bootstrap_failure',
-        shutdownReason: 'failed',
+        classification:
+          failed === RunStatus.Canceled ? 'routine' : 'bootstrap_failure',
+        shutdownReason:
+          failed === RunStatus.Canceled ? 'cancel_requested' : 'failed',
       };
     }
 
@@ -1017,6 +1022,21 @@ export abstract class BaseController {
         continue;
       }
 
+      // A stop can land after the durable restart decision cleared the old
+      // machine, but before its replacement was dispatched. No worker or
+      // ordinary orphan scan can finalize that canceled Pending retry.
+      if (taskRun.cancelRequestedAt) {
+        await this.claimWorkerBootstrapFailure(
+          taskRun,
+          'Worker bootstrap retry was canceled before dispatch',
+          {
+            message: 'Canceled worker bootstrap retry before dispatch',
+            signal: 'worker-bootstrap-canceled',
+          },
+        );
+        continue;
+      }
+
       this.scheduleWorkerBootstrapRestart(taskRun);
       recoveredCount += 1;
     }
@@ -1032,40 +1052,49 @@ export abstract class BaseController {
       signal: string;
       exitCode?: number;
     },
-  ): Promise<boolean> {
+  ): Promise<RunStatus.Failed | RunStatus.Canceled | null> {
     const now = new Date();
     const claimed = await db.transaction(async (tx) => {
       const updatedRuns = await tx
         .update(taskRuns)
         .set({
-          status: RunStatus.Failed,
+          status: sql`CASE WHEN ${taskRuns.cancelRequestedAt} IS NOT NULL THEN ${RunStatus.Canceled} ELSE ${RunStatus.Failed} END`,
           error: errorMessage,
-          completedAt: now,
+          canceledAt: sql`CASE WHEN ${taskRuns.cancelRequestedAt} IS NOT NULL THEN ${now.toISOString()}::timestamp ELSE ${taskRuns.canceledAt} END`,
+          completedAt: sql`CASE WHEN ${taskRuns.cancelRequestedAt} IS NOT NULL THEN NULL ELSE ${now.toISOString()}::timestamp END`,
         })
         .where(
           and(
             eq(taskRuns.id, taskRun.id),
-            eq(taskRuns.status, RunStatus.Dequeued),
+            or(
+              eq(taskRuns.status, RunStatus.Dequeued),
+              and(
+                eq(taskRuns.status, RunStatus.Pending),
+                isNotNull(taskRuns.cancelRequestedAt),
+              ),
+            ),
             isNull(taskRuns.startedAt),
             isNull(taskRuns.workerHeartbeatAt),
             isNull(taskRuns.canceledAt),
           ),
         )
-        .returning({ id: taskRuns.id });
+        .returning({ id: taskRuns.id, status: taskRuns.status });
 
       if (updatedRuns.length === 0) {
-        return false;
+        return null;
       }
 
       // Keep the task projection durable with the terminal run transition.
       // finishRun repeats this sync while applying notifications and cleanup,
       // but a later side-effect failure cannot leave the task active forever.
       await syncTaskStateFromRuns(tx, taskRun.taskId);
-      return true;
+      return updatedRuns[0]?.status === RunStatus.Canceled
+        ? RunStatus.Canceled
+        : RunStatus.Failed;
     });
 
     if (!claimed) {
-      return false;
+      return null;
     }
 
     // An environment-bound verification task that never reached the agent
@@ -1109,15 +1138,17 @@ export abstract class BaseController {
       {
         component: 'worker-lifecycle',
         signal: diagnostic.signal,
+        ...(claimed === RunStatus.Canceled ? { level: 'info' as const } : {}),
       },
     );
 
-    console.error(
-      `[BaseController] ❌ ${errorMessage} for task run #${taskRun.id}`,
+    const log = claimed === RunStatus.Canceled ? console.log : console.error;
+    log(
+      `[BaseController] ${claimed === RunStatus.Canceled ? 'Canceled bootstrap:' : '❌'} ${errorMessage} for task run #${taskRun.id}`,
     );
 
     try {
-      await this.finishFailedTaskRun(taskRun, errorMessage);
+      await finishRun({ id: taskRun.id, status: claimed, error: errorMessage });
     } catch (error) {
       captureControllerException(error, {
         runId: taskRun.id,
@@ -1131,7 +1162,7 @@ export abstract class BaseController {
       );
     }
 
-    return true;
+    return claimed;
   }
 
   private async claimWorkerBootstrapRestart(
@@ -1147,6 +1178,7 @@ export abstract class BaseController {
           AND status = ${RunStatus.Dequeued}
           AND started_at IS NULL
           AND worker_heartbeat_at IS NULL
+          AND cancel_requested_at IS NULL
           AND canceled_at IS NULL
         FOR UPDATE
       `);
