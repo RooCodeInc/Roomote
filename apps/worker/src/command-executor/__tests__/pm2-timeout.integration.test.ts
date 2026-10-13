@@ -76,7 +76,9 @@ it('bounds stalled real PM2 daemon IPC and recovers after the daemon resumes', a
     if (daemonPid) {
       try {
         process.kill(daemonPid, 'SIGCONT');
-      } catch {}
+      } catch {
+        // The owned daemon may already have exited.
+      }
     }
     await pending;
     if (invocation) await pm2(['kill']).catch(() => {});
