@@ -1022,7 +1022,6 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
     // The diagnostics reach both the durable run write and finishRun.
     expect(mockDbUpdateSet).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: RunStatus.Failed,
         error: expectedError,
       }),
     );

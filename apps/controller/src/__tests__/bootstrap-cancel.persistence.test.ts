@@ -17,24 +17,32 @@ import {
 } from '@roomote/db/server';
 import { RunStatus } from '@roomote/types';
 
-const { rpcEntered, rpcRelease, finishRun } = vi.hoisted(() => ({
+const { rpcEntered, rpcRelease, rpcFail, finishRun } = vi.hoisted(() => ({
   rpcEntered: vi.fn(),
   rpcRelease: vi.fn(),
+  rpcFail: vi.fn(),
   finishRun: vi.fn(),
 }));
 
 vi.mock(
   '../../../../packages/sdk/src/server/lib/auth/sandbox-server-rpc',
-  () => ({
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('../../../../packages/sdk/src/server/lib/auth/sandbox-server-rpc')
+    >()),
     withSandboxServerRpcClient: async () => {
       rpcEntered();
-      await new Promise<void>((resolve) =>
-        rpcRelease.mockImplementation(resolve),
-      );
+      await new Promise<void>((resolve, reject) => {
+        rpcRelease.mockImplementation(resolve);
+        rpcFail.mockImplementation(reject);
+      });
     },
   }),
 );
-vi.mock('@roomote/sdk/server', () => ({ finishRun }));
+vi.mock('@roomote/sdk/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
+  finishRun,
+}));
 vi.mock('../monitoring/sentry', () => ({
   captureControllerMessage: vi.fn(),
   captureControllerException: vi.fn(),
@@ -43,6 +51,7 @@ vi.mock('../monitoring/sentry', () => ({
 import { BaseController } from '../BaseController';
 import { findPersistedWorkerBootstrapRestarts } from '../worker-bootstrap-restarts';
 import { stopTaskRun } from '../../../../packages/sdk/src/server/lib/task-runs/stop-task-run';
+import { findFinishedRunsWithSandbox } from '../../../../apps/bullmq/src/scheduled-jobs/sleep-check';
 
 class Observer extends BaseController {
   constructor() {
@@ -57,6 +66,9 @@ class Observer extends BaseController {
   scan() {
     return this.failTimedOutWorkerBootstraps();
   }
+  recover() {
+    return this.recoverPersistedWorkerBootstrapRestarts();
+  }
 }
 
 describe('bootstrap recovery honors durable terminal cancel intent', () => {
@@ -67,7 +79,7 @@ describe('bootstrap recovery honors durable terminal cancel intent', () => {
     for (const id of ownedTasks.splice(0)) {
       await db.delete(tasks).where(eq(tasks.id, id));
     }
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     vi.restoreAllMocks();
   });
 
@@ -78,12 +90,13 @@ describe('bootstrap recovery honors durable terminal cancel intent', () => {
       taskId: task.id,
       status: RunStatus.Dequeued,
       machineId: 'controlled-bootstrap-machine',
+      vendor: 'roomote',
       sandboxServerUrl: 'http://controlled-sandbox.invalid',
       provisionReadyAt: new Date(Date.now() - 10 * 60_000),
     });
   }
 
-  it('does not restart a pre-claim worker while terminal cancel RPC is in flight', async () => {
+  it('durably cancels a pre-claim worker even when the stop RPC and finalization side effects fail', async () => {
     const run = await fixture();
     const stop = stopTaskRun({ run, terminate: true });
     await vi.waitFor(() => expect(rpcEntered).toHaveBeenCalled());
@@ -93,16 +106,25 @@ describe('bootstrap recovery honors durable terminal cancel intent', () => {
     expect(requested?.cancelRequestedAt).toBeInstanceOf(Date);
     expect(requested?.canceledAt).toBeNull();
 
+    finishRun.mockRejectedValueOnce(
+      new Error('Controlled finalization side-effect failure'),
+    );
     const result = await new Observer().observe(run);
     expect(result).toEqual({
-      disposition: 'ignore',
+      disposition: 'failed',
       classification: 'routine',
       shutdownReason: 'cancel_requested',
     });
     const persisted = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, run.id),
     });
-    expect(persisted?.status).toBe(RunStatus.Dequeued);
+    expect(persisted?.status).toBe(RunStatus.Canceled);
+    expect(persisted?.canceledAt).toBeInstanceOf(Date);
+    expect(persisted?.completedAt).toBeNull();
+    expect(
+      (await db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }))
+        ?.state,
+    ).toBe('canceled');
     expect(persisted?.machineId).toBe(run.machineId);
     expect(persisted?.cancelRequestedAt).toEqual(requested?.cancelRequestedAt);
     expect(
@@ -110,12 +132,16 @@ describe('bootstrap recovery honors durable terminal cancel intent', () => {
         where: eq(taskRunEvents.runId, run.id),
       }),
     ).toEqual([]);
-    expect(finishRun).not.toHaveBeenCalled();
-    rpcRelease();
-    await expect(stop).resolves.toEqual({
-      success: true,
-      mode: 'sandbox_stop',
-    });
+    expect(finishRun).toHaveBeenCalledWith(
+      expect.objectContaining({ id: run.id, status: RunStatus.Canceled }),
+    );
+    expect(
+      (
+        await findFinishedRunsWithSandbox(new Date(Date.now() + 3 * 60_000))
+      ).some((item) => item.id === run.id),
+    ).toBe(true);
+    rpcFail(new Error('Controlled dead sandbox'));
+    await expect(stop).rejects.toThrow('Controlled dead sandbox');
   });
 
   it('honors cancel intent from another process after a controlled worker SIGKILL', async () => {
@@ -152,7 +178,7 @@ describe('bootstrap recovery honors durable terminal cancel intent', () => {
       observer.send({ exitCode: 137 });
       expect((await response)[0]).toEqual({
         result: {
-          disposition: 'ignore',
+          disposition: 'failed',
           classification: 'routine',
           shutdownReason: 'cancel_requested',
         },
@@ -160,14 +186,18 @@ describe('bootstrap recovery honors durable terminal cancel intent', () => {
       const persisted = await db.query.taskRuns.findFirst({
         where: eq(taskRuns.id, run.id),
       });
-      expect(persisted?.status).toBe(RunStatus.Dequeued);
+      expect(persisted?.status).toBe(RunStatus.Canceled);
+      expect(persisted?.canceledAt).toBeInstanceOf(Date);
+      expect(persisted?.completedAt).toBeNull();
       expect(persisted?.machineId).toBe(run.machineId);
       expect(persisted?.cancelRequestedAt).toBeInstanceOf(Date);
       expect(
-        await db.query.taskRunEvents.findMany({
-          where: eq(taskRunEvents.runId, run.id),
-        }),
-      ).toEqual([]);
+        (
+          await db.query.taskRunEvents.findMany({
+            where: eq(taskRunEvents.runId, run.id),
+          })
+        ).some((event) => event.details?.stage === 'worker_bootstrap_restart'),
+      ).toBe(false);
     } finally {
       rpcRelease();
       await stop;
@@ -187,37 +217,39 @@ describe('bootstrap recovery honors durable terminal cancel intent', () => {
     });
     const stop = stopTaskRun({ run, terminate: true });
     await vi.waitFor(() => expect(rpcEntered).toHaveBeenCalled());
-    expect((await new Observer().observe(run)).disposition).toBe('ignore');
+    expect((await new Observer().observe(run)).disposition).toBe('failed');
     expect(
       (await db.query.taskRuns.findFirst({ where: eq(taskRuns.id, run.id) }))
         ?.status,
-    ).toBe(RunStatus.Dequeued);
-    expect(finishRun).not.toHaveBeenCalled();
+    ).toBe(RunStatus.Canceled);
+    expect(finishRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: RunStatus.Canceled }),
+    );
     rpcRelease();
     await stop;
   });
 
-  it('keeps canceled persisted retries out of restart recovery', async () => {
+  it('finalizes cancellation racing a persisted retry before any replacement dispatch', async () => {
     const run = await fixture();
-    await db
-      .update(taskRuns)
-      .set({ status: RunStatus.Pending, cancelRequestedAt: new Date() })
-      .where(eq(taskRuns.id, run.id));
-    await recordTaskRunLifecycleEvent(db, {
-      runId: run.id,
-      taskId: run.taskId,
-      eventType: 'decision',
-      message: 'Fixture prior retry',
-      details: { stage: 'worker_bootstrap_restart' },
+    expect((await new Observer().observe(run)).disposition).toBe('restart');
+    const stop = stopTaskRun({ run, terminate: true });
+    await vi.waitFor(() => expect(rpcEntered).toHaveBeenCalled());
+    await new Observer().recover();
+    const persisted = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, run.id),
     });
+    expect(persisted?.status).toBe(RunStatus.Canceled);
+    expect(persisted?.machineId).toBeNull();
+    expect(persisted?.canceledAt).toBeInstanceOf(Date);
     expect(
-      (await findPersistedWorkerBootstrapRestarts()).some(
-        (item) => item.id === run.id,
-      ),
-    ).toBe(false);
+      (await db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }))
+        ?.state,
+    ).toBe('canceled');
+    rpcFail(new Error('Old sandbox was removed'));
+    await expect(stop).rejects.toThrow('Old sandbox was removed');
   });
 
-  it('leaves terminal-cancel intent to cancellation cleanup instead of the bootstrap watchdog', async () => {
+  it('watchdog cancels an abandoned pre-claim stop and makes its sandbox cleanup eligible', async () => {
     const run = await fixture();
     const stop = stopTaskRun({ run, terminate: true });
     await vi.waitFor(() => expect(rpcEntered).toHaveBeenCalled());
@@ -231,13 +263,22 @@ describe('bootstrap recovery honors durable terminal cancel intent', () => {
         where: and(config?.where, inArray(taskRuns.taskId, ownedTasks)),
       });
     });
-    expect(await new Observer().scan()).toBe(0);
+    expect(await new Observer().scan()).toBe(1);
     const persisted = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, run.id),
     });
-    expect(persisted?.status).toBe(RunStatus.Dequeued);
+    expect(persisted?.status).toBe(RunStatus.Canceled);
+    expect(persisted?.canceledAt).toBeInstanceOf(Date);
+    expect(persisted?.completedAt).toBeNull();
     expect(persisted?.machineId).toBe(run.machineId);
-    expect(finishRun).not.toHaveBeenCalled();
+    expect(finishRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: RunStatus.Canceled }),
+    );
+    expect(
+      (
+        await findFinishedRunsWithSandbox(new Date(Date.now() + 3 * 60_000))
+      ).some((item) => item.id === run.id),
+    ).toBe(true);
     rpcRelease();
     await stop;
   });
