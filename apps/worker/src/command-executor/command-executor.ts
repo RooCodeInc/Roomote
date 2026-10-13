@@ -460,6 +460,7 @@ type Pm2Process = {
 const BACKGROUND_PROCESS_STARTUP_CHECK_MS = 2_000;
 const PM2_RESTART_DELAY_MS = 1_000;
 const PM2_MAX_RESTARTS = 1_000;
+const PM2_COMMAND_TIMEOUT_MS = 30_000;
 const ROOMOTE_PM2_PROCESS_PREFIX = 'roomote-';
 
 function buildMissingPm2ErrorMessage(): string {
@@ -760,7 +761,7 @@ async function tryResolvePm2Invocation({
         stdin: 'ignore',
         stdout: 'ignore',
         stderr: 'ignore',
-        timeout: 30_000,
+        timeout: PM2_COMMAND_TIMEOUT_MS,
       },
     ).catch(() => undefined);
 
@@ -826,15 +827,28 @@ async function runPm2(
     reject: boolean;
   },
 ) {
-  return execa(invocation.command, [...invocation.argsPrefix, ...args], {
-    cwd,
-    env,
-    extendEnv: false,
-    reject,
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  const result = await execa(
+    invocation.command,
+    [...invocation.argsPrefix, ...args],
+    {
+      cwd,
+      env,
+      extendEnv: false,
+      reject,
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: PM2_COMMAND_TIMEOUT_MS,
+    },
+  );
+  // reject:false still returns a failed result on timeout. Do not interpret
+  // an unavailable daemon as an empty process list and continue setup.
+  if (result.timedOut) {
+    throw new Error(
+      `PM2 ${args[0] ?? 'command'} timed out after ${PM2_COMMAND_TIMEOUT_MS / 1000} seconds`,
+    );
+  }
+  return result;
 }
 
 export function buildPm2ProcessName({
