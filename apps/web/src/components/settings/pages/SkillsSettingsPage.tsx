@@ -60,6 +60,7 @@ function AddCustomSkillDialog({
   const [availability, setAvailability] =
     useState<NewSkillAvailability>('shared');
   const [environmentIds, setEnvironmentIds] = useState<string[]>([]);
+  const [isRetryingEnvironments, setIsRetryingEnvironments] = useState(false);
   const form = useForm<SkillDefinition>({
     resolver: zodResolver(createCustomSkillInputSchema),
     defaultValues: { name: '', description: '', content: '' },
@@ -93,6 +94,15 @@ function AddCustomSkillDialog({
     }),
   );
   const isSaving = createShared.isPending || createEnvironment.isPending;
+  const retryEnvironments = async () => {
+    if (environments.isFetching || isRetryingEnvironments || isSaving) return;
+    setIsRetryingEnvironments(true);
+    try {
+      await environments.refetch();
+    } finally {
+      setIsRetryingEnvironments(false);
+    }
+  };
   const close = () => {
     if (!isSaving) resetAndClose();
   };
@@ -167,10 +177,31 @@ function AddCustomSkillDialog({
                   </div>
                 ) : null}
               </RadioGroup>
-              {isAdmin && environments.isError ? (
-                <p className="text-sm text-destructive" role="alert">
-                  Failed to load environments. Try again.
-                </p>
+              {isAdmin && (environments.isError || isRetryingEnvironments) ? (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <p className="text-sm text-destructive" role="alert">
+                    Failed to load environments. Try again.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Retry environments"
+                    aria-busy={
+                      environments.isFetching || isRetryingEnvironments
+                    }
+                    disabled={
+                      isSaving ||
+                      environments.isFetching ||
+                      isRetryingEnvironments
+                    }
+                    onClick={() => void retryEnvironments()}
+                  >
+                    {environments.isFetching || isRetryingEnvironments
+                      ? 'Retrying…'
+                      : 'Retry'}
+                  </Button>
+                </div>
               ) : null}
               {availability === 'environment' ? (
                 <div className="space-y-2 rounded-md border p-3">
