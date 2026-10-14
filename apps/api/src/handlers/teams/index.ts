@@ -127,9 +127,12 @@ import {
 } from '../tasks/suggestion-launch.js';
 import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
+import {
+  claimTeamsActivity,
+  releaseTeamsActivityClaim,
+  type TeamsActivityClaim,
+} from './webhook-gate.js';
 
-const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
-const TEAMS_ACTIVITY_DEDUP_TTL_SECONDS = 5 * 60;
 const TEAMS_AUTH_TOKEN_PREFIX = 'teams:auth:';
 const TEAMS_AUTH_TOKEN_TTL_SECONDS = 15 * 60;
 const TEAMS_ACCOUNT_LABEL = 'Microsoft Teams account';
@@ -360,23 +363,6 @@ async function verifyTeamsWebhookAuthorization(input: {
       error: 'teams_webhook_unauthorized',
     };
   }
-}
-
-async function claimTeamsActivity(activityId: string): Promise<boolean> {
-  const redis = getRedis();
-  const claimed = await redis.set(
-    `${TEAMS_ACTIVITY_DEDUP_PREFIX}${activityId}`,
-    '1',
-    'EX',
-    TEAMS_ACTIVITY_DEDUP_TTL_SECONDS,
-    'NX',
-  );
-
-  return Boolean(claimed);
-}
-
-async function releaseTeamsActivityClaim(activityId: string): Promise<void> {
-  await getRedis().del(`${TEAMS_ACTIVITY_DEDUP_PREFIX}${activityId}`);
 }
 
 function getTeamsAuthTokenKey(token: string): string {
@@ -1819,7 +1805,7 @@ async function resumePendingTeamsAuthToken(
 }
 
 type TeamsWebhookVariables = {
-  claimedActivityId: string | undefined;
+  activityClaim: TeamsActivityClaim | undefined;
 };
 
 export const teams = new Hono<{
@@ -1827,9 +1813,9 @@ export const teams = new Hono<{
 }>();
 
 teams.onError(async (error, c) => {
-  const claimedActivityId = c.get('claimedActivityId');
-  if (claimedActivityId !== undefined) {
-    await releaseTeamsActivityClaim(claimedActivityId).catch(() => {});
+  const activityClaim = c.get('activityClaim');
+  if (activityClaim) {
+    await releaseTeamsActivityClaim(activityClaim).catch(() => {});
   }
   throw error;
 });
@@ -1924,18 +1910,18 @@ teams.post('/', async (c) => {
 
   let claimedSuggestionReaction: ClaimedTeamsSuggestion | null = null;
   let suggestionReactionMappedUserId: string | null = null;
-  let claimedReactionActivity = false;
+  let activityClaim: TeamsActivityClaim | null = null;
 
   if (activity.type === 'messageReaction') {
     if (activity.id) {
-      claimedReactionActivity = await claimTeamsActivity(activity.id);
-      if (!claimedReactionActivity) {
+      activityClaim = await claimTeamsActivity(activity.id);
+      if (!activityClaim) {
         apiLogger.debug(
           `[teams] Skipping duplicate Teams reaction activity ${activity.id}`,
         );
         return c.json({ ok: true, duplicate: true });
       }
-      c.set('claimedActivityId', activity.id);
+      c.set('activityClaim', activityClaim);
     }
 
     const reactionTargetMessageId = activity.replyToId?.trim();
@@ -2135,16 +2121,15 @@ teams.post('/', async (c) => {
     return c.json({ ok: true, ignored: 'unsupported_activity' });
   }
 
-  const claimed =
-    claimedReactionActivity || (await claimTeamsActivity(queuedMessage.ts));
+  activityClaim ??= await claimTeamsActivity(queuedMessage.ts);
 
-  if (!claimed) {
+  if (!activityClaim) {
     apiLogger.debug(
       `[teams] Skipping duplicate Teams activity ${queuedMessage.ts}`,
     );
     return c.json({ ok: true, duplicate: true });
   }
-  c.set('claimedActivityId', queuedMessage.ts);
+  c.set('activityClaim', activityClaim);
 
   const metadata = getTeamsActivityCommunicationMetadata(activity);
   if (claimedSuggestionReaction) {
