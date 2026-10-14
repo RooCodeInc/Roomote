@@ -1,5 +1,5 @@
 import { installRepositoryJudgement } from '../../run-task/repository-judgement';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { TRPCError } from '@trpc/server';
@@ -189,6 +189,17 @@ async function prepareOnDemandRepository({
       alreadyCheckedOut: true,
       manifestPath: join(workspaceRoot, ON_DEMAND_REPOSITORIES_MANIFEST_FILE),
     };
+  }
+
+  if (
+    existsSync(repositoryPath) &&
+    (!statSync(repositoryPath).isDirectory() ||
+      readdirSync(repositoryPath).length > 0)
+  ) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: `Repository path '${repositoryPath}' already exists and is not a git checkout. Move it aside before retrying.`,
+    });
   }
 
   const preparedPath = await workspaceManager.prepareRepository(
