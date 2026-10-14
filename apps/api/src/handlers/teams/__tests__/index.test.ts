@@ -1153,6 +1153,12 @@ describe('Teams webhook handler', () => {
 
     expect(response.status).toBe(500);
     expect(resolveAndClaimTeamsSuggestionReactionMock).not.toHaveBeenCalled();
+    expect(redisEvalMock).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
+      1,
+      'teams:activity:suggestion-reaction-error',
+      redisSetMock.mock.calls[0]?.[1],
+    );
   });
 
   it('ignores reaction types outside the Teams native set', async () => {
@@ -1222,7 +1228,7 @@ describe('Teams webhook handler', () => {
     );
     expect(redisSetMock).toHaveBeenCalledWith(
       'teams:activity:activity-2',
-      '1',
+      expect.any(String),
       'EX',
       300,
       'NX',
@@ -1266,7 +1272,12 @@ describe('Teams webhook handler', () => {
     });
 
     expect(response.status).toBe(500);
-    expect(redisDelMock).toHaveBeenCalledWith('teams:activity:activity-2');
+    expect(redisEvalMock).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
+      1,
+      'teams:activity:activity-2',
+      redisSetMock.mock.calls[0]?.[1],
+    );
   });
 
   it('acks a retried active-run activity already queued by message id', async () => {
@@ -1629,7 +1640,12 @@ describe('Teams webhook handler', () => {
     });
 
     expect(response.status).toBe(500);
-    expect(redisDelMock).toHaveBeenCalledWith('teams:activity:activity-2');
+    expect(redisEvalMock).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
+      1,
+      'teams:activity:activity-2',
+      redisSetMock.mock.calls[0]?.[1],
+    );
   });
 
   it('queues image-only Teams attachments for matching active task runs', async () => {
