@@ -63,6 +63,7 @@ const config: KnipConfig = {
         'rg',
         'mysqladmin',
         'pg_isready',
+        'psql',
         'ps',
         'python',
         'fc-cache',
