@@ -147,7 +147,15 @@ describe('PostgreSQL managed port ownership (native clusters)', () => {
         { reject: false },
       );
     }
-    if (root) await rm(root, { recursive: true, force: true });
+    if (root) {
+      await execa('sudo', [
+        'chown',
+        '-R',
+        `${process.getuid!()}:${process.getgid!()}`,
+        root,
+      ]);
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('rejects an unrelated healthy port rather than returning its connection', async () => {
