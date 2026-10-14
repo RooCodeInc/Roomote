@@ -16,6 +16,7 @@ const managerInstructionsPlaceholder =
 
 afterEach(() => {
   cleanup();
+  state.realEnvironmentQuery = null;
 });
 
 const state = vi.hoisted(() => ({
@@ -103,6 +104,9 @@ const state = vi.hoisted(() => ({
     nextRunAt?: Date | null;
   }>,
   environments: [] as Array<{ id: string; name: string }>,
+  realEnvironmentQuery: null as
+    | null
+    | (() => Promise<Array<{ id: string; name: string }>>),
   nextUpdateSettingsResult: null as {
     success: true;
     settings: Record<string, unknown>;
@@ -556,6 +560,13 @@ vi.mock('@tanstack/react-query', () => ({
     ) {
       // environments.list and any leftover channel list keys
       if (queryOptions.queryKey?.[0] === 'environments') {
+        if (state.realEnvironmentQuery) {
+          return actualQuery.useQuery({
+            queryKey: queryOptions.queryKey!,
+            queryFn: state.realEnvironmentQuery,
+            retry: false,
+          });
+        }
         return { isPending: false, data: state.environments };
       }
     }
@@ -1014,6 +1025,73 @@ it('defaults new automations to Let Roomote decide', () => {
   );
 });
 
+it('recovers custom automation environment choices without losing the draft', async () => {
+  Element.prototype.scrollIntoView = vi.fn();
+  const query = vi.fn().mockRejectedValue(new Error('Environment read failed'));
+  state.realEnvironmentQuery = query;
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={client}>
+      <CustomAutomationsSection />
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(query).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+    target: { value: 'Scoped report' },
+  });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+    target: { value: 'Review the local preview.' },
+  });
+  editSummaryRow('Environment');
+  expect(
+    await screen.findByText('Failed to load environments.'),
+  ).toBeInTheDocument();
+  let rejectRetry!: (error: Error) => void;
+  query.mockImplementationOnce(
+    () => new Promise((_resolve, reject) => (rejectRetry = reject)),
+  );
+  const retry = screen.getByRole('button', { name: 'Retry' });
+  fireEvent.click(retry);
+  await waitFor(() => expect(retry).toBeDisabled());
+  expect(retry).toHaveAttribute('aria-busy', 'true');
+  expect(screen.getByRole('button', { name: 'Retry' })).toBe(retry);
+  fireEvent.click(retry);
+  expect(query).toHaveBeenCalledTimes(2);
+  await act(async () => rejectRetry(new Error('Retry failed')));
+  await waitFor(() => expect(retry).toBeEnabled());
+  query.mockResolvedValue([
+    { id: 'environment-proof', name: 'Preview environment' },
+  ]);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await waitFor(() =>
+    expect(
+      screen.queryByText('Failed to load environments.'),
+    ).not.toBeInTheDocument(),
+  );
+  fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+  fireEvent.click(
+    await screen.findByRole('option', { name: 'Preview environment' }),
+  );
+  expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
+    'Scoped report',
+  );
+  expect(screen.getByRole('textbox', { name: 'Prompt' })).toHaveValue(
+    'Review the local preview.',
+  );
+  mutations.updateSettings.mockClear();
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+  expect(mutations.updateSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: 'Scoped report',
+      prompt: 'Review the local preview.',
+      environmentId: 'environment-proof',
+    }),
+  );
+});
+
 async function openSuggesterCard() {
   fireEvent.click(
     await screen.findByRole('button', {
@@ -1157,6 +1235,64 @@ describe('AutomationsSettings', () => {
     }
     window.location.hash = '';
     Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it('preserves an edited automation and cached environment through refresh failure and retry', async () => {
+    setRunnableCustomAutomation();
+    state.customAutomations[0]!.executionMode = 'sandbox_task';
+    state.customAutomations[0]!.environmentId = 'environment-proof';
+    const query = vi.fn().mockRejectedValue(new Error('Refresh failed'));
+    state.realEnvironmentQuery = query;
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    client.setQueryData(
+      ['environments', 'list'],
+      [{ id: 'environment-proof', name: 'Cached environment' }],
+    );
+    render(
+      <QueryClientProvider client={client}>
+        <CustomAutomationsSection />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Daily scan' }),
+    );
+    expect(
+      await screen.findByText('Failed to refresh environments.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Cached environment', { exact: true }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Updated report' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'Preserve my edited prompt.' },
+    });
+    query.mockResolvedValue([
+      { id: 'environment-proof', name: 'Fresh environment' },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(
+      await screen.findByText('Fresh environment', { exact: true }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
+      'Updated report',
+    );
+    expect(screen.getByRole('textbox', { name: 'Prompt' })).toHaveValue(
+      'Preserve my edited prompt.',
+    );
+    mutations.updateSettings.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mutations.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'automation-1',
+        name: 'Updated report',
+        prompt: 'Preserve my edited prompt.',
+        environmentId: 'environment-proof',
+      }),
+    );
   });
 
   it('does not label automations as beta', async () => {

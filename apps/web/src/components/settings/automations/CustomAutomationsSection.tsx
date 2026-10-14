@@ -519,6 +519,7 @@ export function CustomAutomationsSection({
     }),
   );
   const environmentsQuery = useQuery(trpc.environments.list.queryOptions());
+  const [isRetryingEnvironments, setIsRetryingEnvironments] = useState(false);
   const slackChannelsQuery = useQuery(
     trpc.automations.listSlackChannels.queryOptions(undefined, {
       enabled: isAdmin,
@@ -1448,6 +1449,33 @@ export function CustomAutomationsSection({
           />
         )}
 
+        {environmentsQuery.isError || isRetryingEnvironments ? (
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <p role="alert" className="text-muted-foreground">
+              {environmentsQuery.data === undefined
+                ? 'Failed to load environments.'
+                : 'Failed to refresh environments.'}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={isRetryingEnvironments || environmentsQuery.isFetching}
+              aria-busy={isRetryingEnvironments}
+              onClick={async () => {
+                setIsRetryingEnvironments(true);
+                try {
+                  await environmentsQuery.refetch();
+                } finally {
+                  setIsRetryingEnvironments(false);
+                }
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : null}
+
         <SettingSummaryRow
           icon={Cpu}
           label="Model"
@@ -1455,7 +1483,7 @@ export function CustomAutomationsSection({
             <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1">
               <span>{selectedModelLabel}</span>
               {selectedReasoningLabel ? (
-                <span className="text-muted-foreground/80">
+                <span className="text-muted-foreground">
                   ({selectedReasoningLabel})
                 </span>
               ) : null}
