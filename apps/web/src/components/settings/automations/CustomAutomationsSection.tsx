@@ -976,7 +976,7 @@ export function CustomAutomationsSection({
         (candidate) =>
           candidate.id === window.location.hash.slice(prefix.length),
       );
-      if (row) {
+      if (row && row.id !== editingId) {
         setEditingId(row.id);
         setIsCreating(false);
         setEditingField(null);
@@ -999,7 +999,7 @@ export function CustomAutomationsSection({
     openLinkedAutomation();
     window.addEventListener('hashchange', openLinkedAutomation);
     return () => window.removeEventListener('hashchange', openLinkedAutomation);
-  }, [rows]);
+  }, [editingId, rows]);
 
   useEffect(() => {
     if (!capabilitiesLoaded) return;

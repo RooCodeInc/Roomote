@@ -15,6 +15,7 @@ const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
 });
 
@@ -1156,6 +1157,16 @@ describe('AutomationsSettings', () => {
       };
     }
     window.location.hash = '';
+    vi.spyOn(window.history, 'replaceState').mockImplementation(
+      (_data, _unused, url) => {
+        if (url != null) {
+          window.location.hash = new URL(
+            String(url),
+            window.location.origin,
+          ).hash;
+        }
+      },
+    );
     Element.prototype.scrollIntoView = vi.fn();
   });
 
@@ -2438,6 +2449,99 @@ describe('AutomationsSettings', () => {
         'Configure what runs, when it runs, and where the result is sent.',
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it('keeps an open saved-record draft and active field when the list refreshes', async () => {
+    setRunnableCustomAutomation();
+    const view = render(<CustomAutomationsSection />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Daily scan' }),
+    );
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Edited report' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'Keep this unsaved prompt.' },
+    });
+    editSummaryRow('Environment');
+
+    state.customAutomations = state.customAutomations.map((row) => ({
+      ...row,
+      updatedAt: new Date('2026-10-14T06:00:00Z'),
+    }));
+    view.rerender(<CustomAutomationsSection />);
+
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
+      'Edited report',
+    );
+    expect(screen.getByRole('textbox', { name: 'Prompt' })).toHaveValue(
+      'Keep this unsaved prompt.',
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Environment' }),
+    ).toBeInTheDocument();
+    act(() => window.dispatchEvent(new HashChangeEvent('hashchange')));
+    expect(screen.getByRole('textbox', { name: 'Prompt' })).toHaveValue(
+      'Keep this unsaved prompt.',
+    );
+    mutations.updateSettings.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mutations.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'automation-1',
+        name: 'Edited report',
+        prompt: 'Keep this unsaved prompt.',
+      }),
+    );
+
+    closeAutomationDialog();
+    expect(window.location.hash).toBe('');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Daily scan' }),
+    );
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
+      'Daily scan',
+    );
+    expect(screen.getByRole('textbox', { name: 'Prompt' })).toHaveValue(
+      'Find flaky tests.',
+    );
+  });
+
+  it('opens a deferred linked record and switches to a different hash target', async () => {
+    window.location.hash = '#custom-automation-automation-1';
+    state.customAutomationsPending = true;
+    state.customAutomationsLoaded = false;
+    const view = render(<CustomAutomationsSection />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    setRunnableCustomAutomation();
+    state.customAutomations.push({
+      ...state.customAutomations[0]!,
+      id: 'automation-2',
+      name: 'Second report',
+      prompt: 'Second saved prompt.',
+    });
+    state.customAutomationsPending = false;
+    state.customAutomationsLoaded = true;
+    view.rerender(<CustomAutomationsSection />);
+    expect(
+      await screen.findByRole('dialog', { name: 'Edit custom automation' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
+      'Daily scan',
+    );
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'First unsaved prompt.' },
+    });
+    act(() => {
+      window.location.hash = '#custom-automation-automation-2';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
+      'Second report',
+    );
+    expect(screen.getByRole('textbox', { name: 'Prompt' })).toHaveValue(
+      'Second saved prompt.',
+    );
   });
 
   it('keeps On-demand runnable and supports webhook enable, rotate, and revoke controls', async () => {
