@@ -111,7 +111,11 @@ describe('RecentSessions', () => {
       </SessionNavigationStateProvider>,
     );
 
-    expect(listInput.value).toEqual({ ownedOnly: true, limit: 20 });
+    expect(listInput.value).toEqual({
+      ownedOnly: true,
+      excludeAutomations: true,
+      limit: 20,
+    });
     expect(listOptions.value).toEqual(
       expect.objectContaining({ enabled: true }),
     );
