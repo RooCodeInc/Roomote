@@ -165,6 +165,84 @@ it('keeps private integrations out of the shared list', async () => {
   ).not.toBeInTheDocument();
 });
 
+it('clears the key immediately but preserves setup metadata for a failed-save retry', async () => {
+  let failSave!: (response: Response) => void;
+  fetchMock
+    .mockResolvedValueOnce(new Response(JSON.stringify({ secrets: [] })))
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          failSave = resolve;
+        }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ secret }), { status: 201 }),
+    )
+    .mockResolvedValueOnce(new Response(JSON.stringify({ secrets: [secret] })));
+  render(<YourIntegrations />);
+  await screen.findByText('No integrations yet.');
+  fireEvent.click(screen.getByRole('button', { name: 'Add integration' }));
+  fireEvent.change(await screen.findByLabelText('Name'), {
+    target: { value: 'Stripe' },
+  });
+  fireEvent.change(screen.getByLabelText('Service origin'), {
+    target: { value: 'https://api.stripe.com' },
+  });
+  fireEvent.change(screen.getByLabelText('Header that carries the key'), {
+    target: { value: 'x-api-key' },
+  });
+  fireEvent.change(
+    screen.getByLabelText(
+      'Lifetime in hours (leave empty to keep until revoked)',
+    ),
+    { target: { value: '24' } },
+  );
+  fireEvent.click(screen.getByLabelText('POST'));
+  fireEvent.change(screen.getByLabelText('API key'), {
+    target: { value: 'first-disposable-key' },
+  });
+  const save = screen.getByRole('button', { name: 'Save integration' });
+  fireEvent.click(save);
+  expect(screen.getByLabelText('API key')).toHaveValue('');
+  expect(screen.getByLabelText('Name')).toHaveValue('Stripe');
+  expect(save).toBeDisabled();
+  fireEvent.click(save);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  failSave(new Response(null, { status: 503 }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Could not save the integration.',
+  );
+  expect(screen.getByLabelText('Name')).toHaveValue('Stripe');
+  expect(screen.getByLabelText('Service origin')).toHaveValue(
+    'https://api.stripe.com',
+  );
+  expect(screen.getByLabelText('Header that carries the key')).toHaveValue(
+    'x-api-key',
+  );
+  expect(
+    screen.getByLabelText(
+      'Lifetime in hours (leave empty to keep until revoked)',
+    ),
+  ).toHaveValue(24);
+  expect(screen.getByLabelText('POST')).toBeChecked();
+  expect(screen.getByLabelText('API key')).toHaveValue('');
+  fireEvent.change(screen.getByLabelText('API key'), {
+    target: { value: 'replacement-disposable-key' },
+  });
+  fireEvent.click(save);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+  expect(JSON.parse(fetchMock.mock.calls[2]![1].body)).toMatchObject({
+    label: 'Stripe',
+    origin: 'https://api.stripe.com',
+    headerName: 'x-api-key',
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+    lifetimeHours: 24,
+    visibility: 'deployment',
+    secret: 'replacement-disposable-key',
+  });
+  expect(await screen.findByText('Stripe')).toBeInTheDocument();
+});
+
 it('shows only owned private integrations and always submits personal scope', async () => {
   const personalSecret = {
     ...secret,
