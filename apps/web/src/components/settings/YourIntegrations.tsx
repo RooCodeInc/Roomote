@@ -316,14 +316,17 @@ function AddIntegrationForm({
         if (busy) return;
         const form = new FormData(event.currentTarget);
         const lifetime = String(form.get('lifetimeHours') ?? '').trim();
+        const normalizedHeaderName = String(form.get('headerName') ?? '')
+          .trim()
+          .toLowerCase();
         const parsed = integrationCreateSchema.safeParse({
           label: form.get('label'),
           origin: form.get('origin'),
-          headerName: String(form.get('headerName') ?? '')
-            .trim()
-            .toLowerCase(),
+          headerName: normalizedHeaderName,
           headerPrefix:
-            headerName === 'authorization' ? form.get('headerPrefix') : '',
+            normalizedHeaderName === 'authorization'
+              ? form.get('headerPrefix')
+              : '',
           allowedMethods: methods,
           visibility: visibility ?? form.get('visibility'),
           ...(lifetime ? { lifetimeHours: Number(lifetime) } : {}),
