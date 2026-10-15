@@ -353,7 +353,7 @@ describe('SideNav recent sessions', () => {
       expect.objectContaining({ enabled: true }),
     );
     expect(sessionsQueryOptionsMock).toHaveBeenCalledWith(
-      { ownedOnly: true, limit: 20 },
+      { ownedOnly: true, excludeAutomations: true, limit: 20 },
       expect.objectContaining({ enabled: true }),
     );
   });
@@ -442,7 +442,7 @@ describe('SideNav recent sessions', () => {
       expect.objectContaining({ enabled: false }),
     );
     expect(sessionsQueryOptionsMock).toHaveBeenCalledWith(
-      { ownedOnly: true, limit: 20 },
+      { ownedOnly: true, excludeAutomations: true, limit: 20 },
       expect.objectContaining({ enabled: false }),
     );
   });
