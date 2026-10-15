@@ -1,6 +1,15 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 
-const { getSessionsMock, sessionStatusState } = vi.hoisted(() => ({
+const {
+  getSessionsMock,
+  getPreferencesMock,
+  redirectMock,
+  sessionStatusState,
+} = vi.hoisted(() => ({
+  getPreferencesMock: vi.fn().mockResolvedValue({}),
+  redirectMock: vi.fn((url: string) => {
+    throw new Error(`redirect:${url}`);
+  }),
   getSessionsMock: vi.fn(),
   sessionStatusState: {
     current: ['active', 'needs_input', 'blocked', 'ready', 'done'] as Array<
@@ -10,9 +19,14 @@ const { getSessionsMock, sessionStatusState } = vi.hoisted(() => ({
 }));
 
 vi.mock('next/navigation', () => ({
+  redirect: redirectMock,
   usePathname: () => '/sessions',
   useRouter: () => ({ replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock('@/lib/server/session-filter-preferences', () => ({
+  getSessionFilterPreferences: getPreferencesMock,
 }));
 
 vi.mock('@/components/sessions/use-session-status-mutation', () => ({
@@ -62,6 +76,8 @@ vi.mock('@/lib/server/sessions', () => ({
 describe('Sessions list', () => {
   beforeEach(() => {
     getSessionsMock.mockClear();
+    getPreferencesMock.mockReset().mockResolvedValue({});
+    redirectMock.mockClear();
     sessionStatusState.current = [
       'active',
       'needs_input',
@@ -123,7 +139,7 @@ describe('Sessions list', () => {
     expect(screen.getByText('No sessions match your filters.')).toBeVisible();
     expect(screen.getByRole('link', { name: 'Clear filters' })).toHaveAttribute(
       'href',
-      '/sessions',
+      '/sessions?scope=all',
     );
   });
 
@@ -138,7 +154,7 @@ describe('Sessions list', () => {
 
     expect(screen.getByRole('link', { name: 'Clear filters' })).toHaveAttribute(
       'href',
-      '/sessions?view=board',
+      '/sessions?view=board&scope=all',
     );
   });
 
@@ -180,7 +196,7 @@ describe('Sessions list', () => {
     expect(screen.getByText('No sessions match your filters.')).toBeVisible();
     expect(screen.getByRole('link', { name: 'Clear filters' })).toHaveAttribute(
       'href',
-      '/sessions',
+      '/sessions?scope=all',
     );
   });
 
@@ -200,6 +216,37 @@ describe('Sessions list', () => {
       'md:overflow-hidden',
     );
   });
+
+  it('restores saved filters on return/reload before making any sessions query', async () => {
+    getPreferencesMock.mockResolvedValue({
+      scope: 'tasks',
+      source: 'web',
+      q: 'release',
+    });
+    await expect(
+      SessionsPage({ searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow('redirect:/sessions?scope=tasks&source=web&q=release');
+    expect(getPreferencesMock).toHaveBeenCalledWith('user-1');
+    expect(getSessionsMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { scope: 'all' },
+    { source: 'slack' },
+    { status: '' },
+    { before: 'cursor' },
+  ])(
+    'lets explicit URLs fully override saved preferences: %j',
+    async (params) => {
+      getPreferencesMock.mockResolvedValue({ scope: 'tasks', source: 'web' });
+      await SessionsPage({ searchParams: Promise.resolve(params) });
+      expect(getPreferencesMock).not.toHaveBeenCalled();
+      expect(redirectMock).not.toHaveBeenCalled();
+      expect(getSessionsMock).toHaveBeenCalledOnce();
+      expect(getSessionsMock.mock.calls[0]?.[1].source).toBe(params.source);
+      expect(getSessionsMock.mock.calls[0]?.[1].scope).toBe('all');
+    },
+  );
 
   it('shows deployment-wide board lanes while preserving each Session card', async () => {
     render(
