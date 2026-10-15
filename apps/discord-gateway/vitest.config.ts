@@ -5,5 +5,6 @@ export default defineConfig({
     globals: true,
     watch: false,
     reporters: ['dot'],
+    globalSetup: './vitest.setup.server.ts',
   },
 });
