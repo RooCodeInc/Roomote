@@ -12,6 +12,7 @@ import {
   Button,
   Label,
   Skeleton,
+  Spinner,
   Textarea,
 } from '@/components/system';
 
@@ -52,6 +53,10 @@ export function AgentGuidanceSection() {
 
   const serverValue = settingsQuery.data?.globalAgentInstructions ?? '';
   const isDirty = value !== savedValue;
+  const hasLoadError =
+    !settingsQuery.data &&
+    (settingsQuery.isError ||
+      (settingsQuery.isFetching && settingsQuery.errorUpdatedAt > 0));
 
   useEffect(() => {
     if (!settingsQuery.data) {
@@ -106,14 +111,27 @@ export function AgentGuidanceSection() {
           irrespective of environment or repo. Think of it like a global
           AGENTS.MD file across all of Roomote.
         </p>
-        {settingsQuery.isPending ? (
+        {hasLoadError ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+            <AlertCircle className="size-4 shrink-0 text-destructive" />
+            <p className="grow text-destructive">
+              Failed to load agent guidance settings.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={settingsQuery.isFetching}
+              aria-busy={settingsQuery.isFetching}
+              onClick={() => void settingsQuery.refetch()}
+            >
+              {settingsQuery.isFetching ? <Spinner /> : null}
+              {settingsQuery.isFetching ? 'Retrying...' : 'Retry'}
+            </Button>
+          </div>
+        ) : settingsQuery.isPending ? (
           <div className="space-y-3">
             <Skeleton className="h-64 w-full" />
-          </div>
-        ) : settingsQuery.isError ? (
-          <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-            <AlertCircle className="mt-0.5 size-4 shrink-0" />
-            <p>Failed to load agent guidance settings.</p>
           </div>
         ) : (
           <div className="space-y-3">
