@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
 import {
   getSessionBoardColumn,
@@ -12,6 +12,7 @@ import {
 
 import { parseTimePeriodParam } from '@/types';
 import { authorize } from '@/lib/server/auth-context';
+import { getSessionFilterPreferences } from '@/lib/server/session-filter-preferences';
 import {
   getSessions,
   getSessionSources,
@@ -22,6 +23,7 @@ import { Empty, EmptyDescription, EmptyHeader } from '@/components/system';
 
 import { SessionsFilters } from './SessionsFilters';
 import { SessionCard } from './SessionCard';
+import { SESSION_FILTER_KEYS } from './filter-preferences';
 import {
   SessionBoard,
   SessionBoardCard,
@@ -55,6 +57,23 @@ export default async function SessionsPage({
   if (!authorizedUser.success) {
     notFound();
   }
+  // Resolve the saved selection before querying or rendering the list. An
+  // explicit filter URL is a complete selection, not a patch over preferences.
+  if (!SESSION_FILTER_KEYS.some((key) => key in params) && !params.before) {
+    const savedFilters = await getSessionFilterPreferences(
+      authorizedUser.userId,
+    );
+    if (Object.keys(savedFilters).length) {
+      const restoredParams = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value) restoredParams.set(key, value);
+      });
+      Object.entries(savedFilters).forEach(([key, value]) =>
+        restoredParams.set(key, value),
+      );
+      redirect(`/sessions?${restoredParams}`);
+    }
+  }
   const { before, user, period, q } = params;
   const view = params.view === 'board' ? 'board' : 'list';
   const scope = ['all', 'tasks', 'reviews', 'automations'].includes(
@@ -87,7 +106,7 @@ export default async function SessionsPage({
     archive !== 'non-archived',
   );
   const clearFiltersHref =
-    view === 'board' ? '/sessions?view=board' : '/sessions';
+    view === 'board' ? '/sessions?view=board&scope=all' : '/sessions?scope=all';
   const [result, sources] = await Promise.all([
     getSessions(authorizedUser, {
       before,
@@ -132,6 +151,7 @@ export default async function SessionsPage({
     <div className="flex h-full min-h-0 min-w-0 w-full flex-col bg-card">
       <div className="border-b-4 border-b-card bg-background p-4">
         <SessionsFilters
+          viewerUserId={authorizedUser.userId}
           userId={user ?? null}
           timePeriod={timePeriod}
           scope={scope}

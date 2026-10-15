@@ -15,6 +15,11 @@ import type { TimePeriodFilter } from '@/types';
 import { cn } from '@/lib/utils';
 import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
 import { TaskFilters } from '@/components/tasks';
+import { saveSessionFilterPreferences } from './filter-preference-actions';
+import {
+  SESSION_FILTER_KEYS,
+  sessionFiltersFromParams,
+} from './filter-preferences';
 import {
   Activity,
   Archive,
@@ -129,6 +134,7 @@ function writeStoredPreference(key: string, value: string): void {
 }
 
 export function SessionsFilters({
+  viewerUserId,
   userId,
   timePeriod,
   scope = 'all',
@@ -142,6 +148,7 @@ export function SessionsFilters({
   archive = 'non-archived',
   sourceOptions,
 }: {
+  viewerUserId: string;
   userId: string | null;
   timePeriod: TimePeriodFilter;
   scope?: string;
@@ -159,6 +166,21 @@ export function SessionsFilters({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const pendingPreferenceWrite = useRef(Promise.resolve());
+  const persistFilters = useCallback(
+    (params: URLSearchParams) => {
+      const filters = sessionFiltersFromParams(params);
+      // Serialize mount/deep-link and interaction writes so an earlier selection
+      // cannot finish after a later reset.
+      pendingPreferenceWrite.current = pendingPreferenceWrite.current
+        .then(() => saveSessionFilterPreferences(viewerUserId, filters))
+        .catch(() => {
+          /* Preference failures must not prevent navigation. */
+        });
+      return pendingPreferenceWrite.current;
+    },
+    [viewerUserId],
+  );
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [showSearch, setShowSearch] = useState(Boolean(query));
   const [searchValue, setSearchValue] = useState(query);
@@ -166,17 +188,33 @@ export function SessionsFilters({
     searchParams.has(param),
   );
   const advancedFiltersVisible = hasAdvancedUrlFilters || showAdvancedFilters;
+  const preferenceParams = new URLSearchParams();
+  for (const key of SESSION_FILTER_KEYS) {
+    const value = searchParams.get(key);
+    if (value !== null) preferenceParams.set(key, value);
+  }
+  const preferenceQuery = preferenceParams.toString();
 
   const updateParams = useCallback(
-    (mutate: (params: URLSearchParams) => void) => {
+    async (mutate: (params: URLSearchParams) => void) => {
       const params = new URLSearchParams(searchParams);
       mutate(params);
       params.delete('before');
+      if (!SESSION_FILTER_KEYS.some((key) => params.has(key)))
+        params.set('scope', 'all');
+      await persistFilters(params);
       const nextQuery = params.toString();
       router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
     },
-    [router, pathname, searchParams],
+    [router, pathname, searchParams, persistFilters],
   );
+
+  useEffect(() => {
+    // Explicit URLs (including Clear filters) also become the saved selection.
+    if (preferenceQuery) {
+      void persistFilters(new URLSearchParams(preferenceQuery));
+    }
+  }, [preferenceQuery, persistFilters]);
 
   useEffect(() => {
     setShowAdvancedFilters(readStoredBoolean(ADVANCED_FILTERS_STORAGE_KEY));
