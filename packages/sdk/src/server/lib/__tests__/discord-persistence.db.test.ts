@@ -357,7 +357,11 @@ describe('Discord persistence (real database)', () => {
       sequence: 10,
       shardCount: 1,
     });
-    await updateDiscordGatewaySequence({ ...key, sequence: 11 });
+    await updateDiscordGatewaySequence({
+      ...key,
+      sessionId: 'session-1',
+      sequence: 11,
+    });
     await recordDiscordGatewayHeartbeatAck({
       ...key,
       acknowledgedAt: new Date('2026-07-12T20:00:00.000Z'),
@@ -382,6 +386,11 @@ describe('Discord persistence (real database)', () => {
       ...key,
       lastError: 'invalid session',
     });
+    await updateDiscordGatewaySequence({
+      ...key,
+      sessionId: 'session-1',
+      sequence: 99,
+    });
     await expect(findDiscordGatewayResumeState(key)).resolves.toBeNull();
     await expect(
       db.query.discordGatewaySessions.findFirst({
@@ -390,6 +399,7 @@ describe('Discord persistence (real database)', () => {
     ).resolves.toMatchObject({
       id: `${key.tokenFingerprint}:0`,
       sessionId: null,
+      sequence: null,
       lastError: 'invalid session',
     } satisfies Partial<typeof discordGatewaySessions.$inferSelect>);
   });

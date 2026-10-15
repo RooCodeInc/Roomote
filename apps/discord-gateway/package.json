@@ -11,7 +11,7 @@
     "format:check": "oxfmt --check \"**/*.{js,jsx,ts,tsx,json,css}\"",
     "check-types": "tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",
-    "test": "vitest",
+    "test": "dotenvx run -f ../../.env.test -- vitest",
     "dev": "bash ./scripts/watchman.sh",
     "dev:prepare": "rimraf dist",
     "build": "tsup --clean",
