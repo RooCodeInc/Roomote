@@ -46,3 +46,8 @@ export function normalizeSessionFilters(
 export function sessionFiltersFromParams(params: URLSearchParams) {
   return normalizeSessionFilters(Object.fromEntries(params));
 }
+
+export function ensureExplicitSessionFilters(params: URLSearchParams) {
+  if (!SESSION_FILTER_KEYS.some((key) => params.has(key)))
+    params.set('scope', 'all');
+}

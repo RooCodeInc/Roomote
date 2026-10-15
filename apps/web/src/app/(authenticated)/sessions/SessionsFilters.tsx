@@ -17,6 +17,7 @@ import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
 import { TaskFilters } from '@/components/tasks';
 import { saveSessionFilterPreferences } from './filter-preference-actions';
 import {
+  ensureExplicitSessionFilters,
   SESSION_FILTER_KEYS,
   sessionFiltersFromParams,
 } from './filter-preferences';
@@ -196,13 +197,13 @@ export function SessionsFilters({
   const preferenceQuery = preferenceParams.toString();
 
   const updateParams = useCallback(
-    async (mutate: (params: URLSearchParams) => void) => {
+    (mutate: (params: URLSearchParams) => void) => {
       const params = new URLSearchParams(searchParams);
       mutate(params);
       params.delete('before');
-      if (!SESSION_FILTER_KEYS.some((key) => params.has(key)))
-        params.set('scope', 'all');
-      await persistFilters(params);
+      ensureExplicitSessionFilters(params);
+      // Saving must never defer navigation and later override a newer route.
+      void persistFilters(params);
       const nextQuery = params.toString();
       router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
     },

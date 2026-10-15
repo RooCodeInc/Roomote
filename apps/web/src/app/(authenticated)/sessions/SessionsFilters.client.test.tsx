@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -384,7 +385,7 @@ describe('SessionsFilters', () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
-  it('persists clearing the last filter before navigating and persists the clear-link state on remount', async () => {
+  it('queues clearing the last filter and persists the clear-link state on remount', async () => {
     searchParamsMock.current = new URLSearchParams('q=release&before=stale');
     const { unmount } = render(
       <SessionsFilters {...baseProps} query="release" />,
@@ -440,14 +441,29 @@ describe('SessionsFilters', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Toggle session search' }),
     );
-    expect(replaceMock).not.toHaveBeenCalled();
-    finishSave();
-    await waitFor(() =>
-      expect(replaceMock).toHaveBeenCalledWith('/sessions?scope=all'),
-    );
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?scope=all');
+    await act(async () => finishSave());
     expect(savePreferencesMock.mock.calls.map((call) => call[1])).toEqual([
       { q: 'release' },
       {},
     ]);
+  });
+
+  it('does not navigate back after a slow save finishes following navigation away', async () => {
+    let finishSave!: () => void;
+    savePreferencesMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const { unmount } = render(<SessionsFilters {...baseProps} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose automation' }));
+    await waitFor(() => expect(savePreferencesMock).toHaveBeenCalledTimes(1));
+    unmount();
+    replaceMock.mockClear();
+    replaceMock('/automations');
+    await act(async () => finishSave());
+    expect(replaceMock.mock.calls).toEqual([['/automations']]);
   });
 });
