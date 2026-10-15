@@ -23,7 +23,11 @@ export function RecentSessions({ enabled }: { enabled: boolean }) {
   const trpc = useTRPC();
   const { data, isError, isFetching, refetch } = useQuery(
     trpc.sessions.list.queryOptions(
-      { ownedOnly: true, limit: RECENT_SESSIONS_LIMIT },
+      {
+        ownedOnly: true,
+        excludeAutomations: true,
+        limit: RECENT_SESSIONS_LIMIT,
+      },
       {
         enabled,
         placeholderData: keepPreviousData,

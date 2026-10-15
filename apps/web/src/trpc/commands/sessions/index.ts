@@ -563,6 +563,7 @@ export const sessionsListInputSchema = z.object({
   q: z.string().max(200).nullish(),
   ids: z.array(z.string().uuid()).max(20).optional(),
   ownedOnly: z.boolean().optional(),
+  excludeAutomations: z.boolean().optional(),
   before: z.string().nullish(),
   limit: z.number().int().min(1).max(200).optional(),
 });
