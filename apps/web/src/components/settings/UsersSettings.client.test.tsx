@@ -71,6 +71,7 @@ function createDeferred<T>() {
 const {
   mockAuthorizedUser,
   mockSettingsState,
+  mockGetSettings,
   mockCreateInvite,
   mockRevokeInvite,
   mockUpdateUserRole,
@@ -104,6 +105,7 @@ const {
       } as LicenseSummary,
     },
   },
+  mockGetSettings: vi.fn(),
   mockCreateInvite: vi.fn(
     async (input: { label?: string; maxUses?: number }) => {
       mockSettingsState.current = {
@@ -195,7 +197,7 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['access-policy'],
         queryOptions: () => ({
           queryKey: ['access-policy'],
-          queryFn: async () => mockSettingsState.current,
+          queryFn: () => mockGetSettings(),
         }),
       },
       accountLinkHelp: {
@@ -266,16 +268,21 @@ function renderUsersSettings() {
     defaultOptions: { queries: { retry: false } },
   });
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <UsersSettings />
-    </QueryClientProvider>,
-  );
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <UsersSettings />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 describe('UsersSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetSettings.mockReset();
+    mockGetSettings.mockImplementation(async () => mockSettingsState.current);
     mockClipboardWriteText.mockResolvedValue(undefined);
     mockAuthorizedUser.current = { userId: 'user-1', cloudEnabled: false };
     mockAccountLinkHelpState.current = { helpText: null };
@@ -287,6 +294,79 @@ describe('UsersSettings', () => {
       users: [],
       license: unlicensedLicense,
     };
+  });
+
+  it('recovers an initial read failure through Retry and prevents duplicate retries', async () => {
+    const retry = createDeferred<typeof mockSettingsState.current>();
+    mockGetSettings.mockRejectedValueOnce(new Error('Read unavailable'));
+    mockGetSettings.mockImplementationOnce(() => retry.promise);
+    renderUsersSettings();
+
+    const button = await screen.findByRole('button', { name: 'Retry' });
+    expect(screen.getByText('Failed to load user settings.')).toBeVisible();
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Retry' }),
+      ).not.toBeInTheDocument(),
+    );
+    fireEvent.click(button);
+    expect(mockGetSettings).toHaveBeenCalledTimes(2);
+
+    await act(async () => retry.resolve(mockSettingsState.current));
+    expect(
+      await screen.findByRole('button', { name: 'Create invite' }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByText('Failed to load user settings.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the invite draft and cached settings usable after a background read failure', async () => {
+    const { queryClient } = renderUsersSettings();
+    const label = await screen.findByLabelText(/Label/);
+    fireEvent.change(label, { target: { value: 'Unsaved invite' } });
+    mockGetSettings.mockRejectedValueOnce(new Error('Read unavailable'));
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['access-policy'] });
+    });
+
+    expect(label).toBeVisible();
+    expect(label).toHaveValue('Unsaved invite');
+    expect(screen.getByRole('button', { name: 'Create invite' })).toBeEnabled();
+    expect(
+      screen.queryByText('Failed to load user settings.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('recovers the one-time invite link through Retry after post-create refresh fails', async () => {
+    const { queryClient } = renderUsersSettings();
+    await screen.findByRole('button', { name: 'Create invite' });
+    mockGetSettings.mockRejectedValueOnce(new Error('Read unavailable'));
+    fireEvent.click(screen.getByRole('button', { name: 'Create invite' }));
+    await waitFor(() => expect(mockGetSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+
+    expect(
+      screen.queryByText('Failed to load user settings.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Failed to refresh user settings.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(
+      await screen.findByText('https://roomote.example.com/invite/new-token'),
+    ).toBeVisible();
+    expect(
+      screen.queryByText('Failed to refresh user settings.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create invite' })).toBeEnabled();
+
+    mockGetSettings.mockRejectedValueOnce(new Error('Read unavailable'));
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['access-policy'] });
+    });
+    expect(
+      screen.getByText('https://roomote.example.com/invite/new-token'),
+    ).toBeVisible();
   });
 
   it('saves deployment-specific account linking help', async () => {
