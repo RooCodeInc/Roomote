@@ -60,12 +60,12 @@ const config: KnipConfig = {
       entry: ['scripts/**/*.ts'],
       project: ['src/**/*.ts', 'scripts/**/*.ts'],
       ignoreBinaries: [
-        'rg',
-        'mysqladmin',
-        'pg_isready',
         // Native Redis lifecycle proof runs only in opted-in worker sandboxes.
         'redis-cli',
         'redis-server',
+        'rg',
+        'mysqladmin',
+        'pg_isready',
         'ps',
         'python',
         'fc-cache',
