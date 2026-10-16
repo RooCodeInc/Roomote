@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   mutate: vi.fn(),
@@ -6,7 +6,14 @@ const mocks = vi.hoisted(() => ({
   refetch: vi.fn(),
   setQueryData: vi.fn(),
   updateOptions: undefined as
-    | { onError: (error: { message: string }) => void }
+    | {
+        onError: (error: { message: string }) => void;
+        onSuccess: (settings: {
+          instructions: string;
+          learnFromConversations: boolean;
+          version: number;
+        }) => void;
+      }
     | undefined,
   query: {
     data: undefined as unknown,
@@ -173,6 +180,94 @@ describe('PersonalizationSection', () => {
       expect.any(Object),
     );
   });
+
+  it('preserves a dirty draft across background refreshes and saves with the refreshed version', () => {
+    const { rerender } = render(<PersonalizationSection />);
+    const editor = screen.getByRole('textbox');
+    fireEvent.change(editor, { target: { value: 'Keep my unsaved draft.' } });
+
+    mocks.query.data = {
+      ...mocks.settings,
+      instructions: 'Saved in another tab.',
+      version: 4,
+    };
+    rerender(<PersonalizationSection />);
+
+    expect(editor).toHaveValue('Keep my unsaved draft.');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mocks.mutate).toHaveBeenCalledWith(
+      { expectedVersion: 4, instructions: 'Keep my unsaved draft.' },
+      expect.any(Object),
+    );
+  });
+
+  it('preserves an empty draft when a failed save refreshes the server settings', () => {
+    const { rerender } = render(<PersonalizationSection />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    act(() => mocks.updateOptions?.onError({ message: 'Conflict' }));
+    mocks.query.data = {
+      ...mocks.settings,
+      instructions: 'New server text.',
+      version: 4,
+    };
+    rerender(<PersonalizationSection />);
+
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  it('follows background updates while clean, including after reverting a draft', () => {
+    const { rerender } = render(<PersonalizationSection />);
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Draft' },
+    });
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: mocks.settings.instructions },
+    });
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    mocks.query.data = {
+      ...mocks.settings,
+      instructions: 'New server text.',
+      version: 4,
+    };
+    rerender(<PersonalizationSection />);
+    expect(screen.getByRole('textbox')).toHaveValue('New server text.');
+  });
+
+  it.each(['save', 'reset'])(
+    'clears the draft after successful %s and follows later updates',
+    (action) => {
+      const { rerender } = render(<PersonalizationSection />);
+      fireEvent.change(screen.getByRole('textbox'), {
+        target: { value: 'Draft' },
+      });
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: action === 'save' ? 'Save' : 'Reset',
+        }),
+      );
+      const saved = {
+        ...mocks.settings,
+        instructions: action === 'save' ? 'Draft' : '',
+        version: 4,
+      };
+      mocks.query.data = saved;
+      act(() => mocks.updateOptions?.onSuccess(saved));
+      rerender(<PersonalizationSection />);
+      expect(screen.getByRole('textbox')).toHaveValue(saved.instructions);
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+      mocks.query.data = {
+        ...saved,
+        instructions: 'Later update.',
+        version: 5,
+      };
+      rerender(<PersonalizationSection />);
+      expect(screen.getByRole('textbox')).toHaveValue('Later update.');
+    },
+  );
 
   it('updates learning separately and leaves the blob untouched', () => {
     render(<PersonalizationSection />);
