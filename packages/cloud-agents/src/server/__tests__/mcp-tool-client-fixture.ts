@@ -7,20 +7,33 @@ import {
   ListToolsRequestSchema,
   type CallToolRequest,
   type CallToolResult,
+  type ListToolsRequest,
+  type ListToolsResult,
 } from '@modelcontextprotocol/sdk/types.js';
 
 /** A real local MCP endpoint, shared by client and broker regression tests. */
 export async function startMcpToolTestServer(
   call: (request: CallToolRequest) => CallToolResult,
-  options: { httpFailure?: boolean } = {},
+  options: {
+    httpFailure?: boolean;
+    list?: (
+      request: ListToolsRequest,
+    ) => ListToolsResult | Promise<ListToolsResult>;
+  } = {},
 ) {
   const mcp = new Server(
     { name: 'mcp-tool-client-test', version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
-  mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [{ name: 'integration_request', inputSchema: { type: 'object' } }],
-  }));
+  mcp.setRequestHandler(
+    ListToolsRequestSchema,
+    async (request) =>
+      options.list?.(request) ?? {
+        tools: [
+          { name: 'integration_request', inputSchema: { type: 'object' } },
+        ],
+      },
+  );
   mcp.setRequestHandler(CallToolRequestSchema, async (request) =>
     call(request),
   );
