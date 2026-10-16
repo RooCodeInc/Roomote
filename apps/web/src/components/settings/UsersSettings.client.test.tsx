@@ -79,6 +79,7 @@ const {
   mockCreatePasswordResetLink,
   mockSetLicenseKey,
   mockAccountLinkHelpState,
+  mockGetAccountLinkHelp,
   mockSetAccountLinkHelp,
   mockClipboardWriteText,
   mockCapture,
@@ -166,6 +167,7 @@ const {
   mockAccountLinkHelpState: {
     current: { helpText: null as string | null },
   },
+  mockGetAccountLinkHelp: vi.fn(),
   mockSetAccountLinkHelp: vi.fn(async (input: { helpText: string | null }) => {
     mockAccountLinkHelpState.current = { helpText: input.helpText };
     return mockAccountLinkHelpState.current;
@@ -204,7 +206,7 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['account-link-help'],
         queryOptions: () => ({
           queryKey: ['account-link-help'],
-          queryFn: async () => mockAccountLinkHelpState.current,
+          queryFn: () => mockGetAccountLinkHelp(),
         }),
       },
       setAccountLinkHelp: {
@@ -283,6 +285,10 @@ describe('UsersSettings', () => {
     vi.clearAllMocks();
     mockGetSettings.mockReset();
     mockGetSettings.mockImplementation(async () => mockSettingsState.current);
+    mockGetAccountLinkHelp.mockReset();
+    mockGetAccountLinkHelp.mockImplementation(
+      async () => mockAccountLinkHelpState.current,
+    );
     mockClipboardWriteText.mockResolvedValue(undefined);
     mockAuthorizedUser.current = { userId: 'user-1', cloudEnabled: false };
     mockAccountLinkHelpState.current = { helpText: null };
@@ -384,6 +390,64 @@ describe('UsersSettings', () => {
       });
       expect(toast.success).toHaveBeenCalledWith('Account linking help saved.');
     });
+  });
+
+  it('recovers the independent initial account-linking-help read through Retry', async () => {
+    const retry = createDeferred<typeof mockAccountLinkHelpState.current>();
+    mockGetAccountLinkHelp.mockRejectedValueOnce(new Error('Help unavailable'));
+    mockGetAccountLinkHelp.mockImplementationOnce(() => retry.promise);
+    renderUsersSettings();
+
+    const button = await screen.findByRole('button', { name: 'Retry' });
+    expect(
+      screen.getByText('Failed to load account linking help.'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Create invite' })).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(mockGetAccountLinkHelp).toHaveBeenCalledTimes(2),
+    );
+    expect(
+      screen.queryByLabelText('Account linking help text'),
+    ).not.toBeInTheDocument();
+
+    await act(async () => retry.resolve({ helpText: 'Existing saved help.' }));
+    expect(
+      await screen.findByLabelText('Account linking help text'),
+    ).toHaveValue('Existing saved help.');
+    expect(
+      screen.queryByText('Failed to load account linking help.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps an account-linking-help draft usable through a failed background read and Retry', async () => {
+    const { queryClient } = renderUsersSettings();
+    const editor = await screen.findByLabelText('Account linking help text');
+    fireEvent.change(editor, { target: { value: 'Draft help to preserve.' } });
+    mockGetAccountLinkHelp.mockRejectedValueOnce(new Error('Help unavailable'));
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['account-link-help'] });
+    });
+
+    expect(
+      await screen.findByText('Failed to refresh account linking help.'),
+    ).toBeVisible();
+    expect(editor).toBeVisible();
+    expect(editor).toHaveValue('Draft help to preserve.');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText('Failed to refresh account linking help.'),
+      ).not.toBeInTheDocument(),
+    );
+    expect(editor).toHaveValue('Draft help to preserve.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(mockSetAccountLinkHelp.mock.calls[0]?.[0]).toEqual({
+        helpText: 'Draft help to preserve.',
+      }),
+    );
   });
 
   it('shows org membership rows only for configured org providers', async () => {
