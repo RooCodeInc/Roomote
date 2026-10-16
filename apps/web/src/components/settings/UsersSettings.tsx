@@ -891,7 +891,7 @@ export function UsersSettings() {
           {passwordResetLink ? (
             <div className="space-y-3 text-sm">
               <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
-                <span className="min-w-0 font-mono text-xs">
+                <span className="min-w-0 break-all font-mono text-xs">
                   {passwordResetLink.url}
                 </span>
                 <CopyIconButton
