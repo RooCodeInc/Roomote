@@ -98,7 +98,7 @@ export function PageNavigationShell<T extends string = string>({
         </aside>
       )}
 
-      <div
+      <main
         className={cn(
           'min-w-0 flex-1 space-y-6 max-w-6xl',
           !hideNavigation && 'lg:ml-68',
@@ -174,7 +174,7 @@ export function PageNavigationShell<T extends string = string>({
         >
           {children}
         </div>
-      </div>
+      </main>
     </div>
   );
 }
