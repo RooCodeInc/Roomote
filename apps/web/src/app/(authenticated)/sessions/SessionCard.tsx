@@ -145,7 +145,7 @@ export function SessionCard({
         ) : null}
       </div>
       <div className="pointer-events-none relative z-10 min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground/75 md:items-center">
+        <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground md:items-center">
           <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
             {session.privacy === 'private' ? <PrivateSessionIcon /> : null}
             <span className="truncate">
