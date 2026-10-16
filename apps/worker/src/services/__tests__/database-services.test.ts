@@ -431,13 +431,13 @@ describe('database service startup commands', () => {
     expect(runs).toEqual(
       expect.arrayContaining([
         expect.stringContaining('systemctl stop redis-server'),
-        expect.stringContaining('shutdown nosave'),
         expect.stringContaining('rm -f /data/services/redis/valkey.pid'),
         expect.stringContaining(
           'redis-server --daemonize yes --port 6380 --dir /data/services/redis --pidfile /data/services/redis/valkey.pid',
         ),
       ]),
     );
+    expect(runs.some((run) => run.includes('shutdown nosave'))).toBe(false);
   });
 
   it('cleans stale clickhouse status files before startup', async () => {

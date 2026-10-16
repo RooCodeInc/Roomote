@@ -63,6 +63,9 @@ const config: KnipConfig = {
         'rg',
         'mysqladmin',
         'pg_isready',
+        // Native Redis lifecycle proof runs only in opted-in worker sandboxes.
+        'redis-cli',
+        'redis-server',
         'ps',
         'python',
         'fc-cache',

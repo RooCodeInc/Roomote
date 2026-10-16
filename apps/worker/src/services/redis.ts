@@ -40,7 +40,7 @@ export function createRedisService(majorVersion: string): ServiceDefinition {
     return value.trim();
   };
 
-  return {
+  const service: ServiceDefinition = {
     defaultPort: rawConfig.defaultPort,
 
     async install(executor) {
@@ -84,12 +84,18 @@ export function createRedisService(majorVersion: string): ServiceDefinition {
         continue_on_error: true,
       });
 
-      await executor.execute({
-        name: 'Stop Redis instance on target port',
-        run: `${rawConfig.cliBinary} -p ${port} shutdown nosave 2>/dev/null || true; for i in {1..10}; do ! ${rawConfig.cliBinary} -p ${port} ping >/dev/null 2>&1 && break || sleep 1; done`,
-        timeout: 30,
-        continue_on_error: true,
-      });
+      // A healthy target may belong to repository setup rather than this
+      // service. Never shut it down or discard its unsaved work. Reusing our
+      // own running instance also preserves queued/cache data on repeated setup.
+      if (await healthCheck(port)) {
+        if (await service.verifyManagedInstance?.(port)) {
+          return;
+        }
+
+        throw new Error(
+          `${displayName} port ${port} is occupied by an unrelated Redis instance`,
+        );
+      }
 
       await executor.execute({
         name: 'Clean up stale Redis PID file',
@@ -164,4 +170,6 @@ export function createRedisService(majorVersion: string): ServiceDefinition {
       };
     },
   };
+
+  return service;
 }
