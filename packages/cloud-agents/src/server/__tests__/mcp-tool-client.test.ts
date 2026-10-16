@@ -1,4 +1,8 @@
 import { createServer } from 'node:http';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   ErrorCode,
@@ -67,6 +71,193 @@ describe('MCP tool client cancellation', () => {
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('MCP tool catalog pagination with the real SDK and local server', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('discovers and executes a later-page tool through its schema and durable provider receipt', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'roomote-mcp-pages-'));
+    const receipt = join(directory, 'receipt.json');
+    const cursors: Array<string | undefined> = [];
+    const startEndpoint = () =>
+      startMcpToolTestServer(
+        (request) => {
+          expect(request.params.name).toBe('write_note');
+          writeFileSync(receipt, JSON.stringify(request.params.arguments));
+          return { content: [{ type: 'text', text: '{"accepted":true}' }] };
+        },
+        {
+          list(request) {
+            cursors.push(request.params?.cursor);
+            return request.params?.cursor === 'later'
+              ? {
+                  tools: [
+                    {
+                      name: 'write_note',
+                      inputSchema: {
+                        type: 'object',
+                        properties: { note: { type: 'string' } },
+                        required: ['note'],
+                      },
+                    },
+                  ],
+                }
+              : {
+                  tools: [
+                    { name: 'read_first', inputSchema: { type: 'object' } },
+                  ],
+                  nextCursor: 'later',
+                };
+          },
+        },
+      );
+    const endpoint = await startEndpoint();
+    let callEndpoint: Awaited<ReturnType<typeof startEndpoint>> | undefined;
+    try {
+      const names = (await listMcpTools({ url: endpoint.url })).map(
+        ({ name }) => name,
+      );
+      const discoveryCursors = [...cursors];
+      cursors.length = 0;
+      callEndpoint = await startEndpoint();
+      const result = await callMcpTool({
+        url: callEndpoint.url,
+        toolName: 'write_note',
+        args: { note: 'disposable fixture' },
+      });
+      console.log({
+        names,
+        discoveryCursors,
+        callCursors: [...cursors],
+        result,
+      });
+      expect(names).toEqual(['read_first', 'write_note']);
+      expect(discoveryCursors).toEqual([undefined, 'later']);
+      expect(result).toEqual({ accepted: true });
+      expect(JSON.parse(await readFile(receipt, 'utf8'))).toEqual({
+        note: 'disposable fixture',
+      });
+      expect(cursors).toEqual([undefined, 'later']);
+    } finally {
+      await endpoint.close();
+      await callEndpoint?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['list', 'call'] as const)(
+    'rejects repeated cursors during %s and closes the transport',
+    async (operation) => {
+      let pages = 0;
+      const execute = vi.fn(() => ({ content: [] }));
+      const endpoint = await startMcpToolTestServer(execute, {
+        list() {
+          pages++;
+          return { tools: [], nextCursor: 'repeated' };
+        },
+      });
+      const close = vi.spyOn(StreamableHTTPClientTransport.prototype, 'close');
+      try {
+        const result =
+          operation === 'list'
+            ? listMcpTools({ url: endpoint.url })
+            : callMcpTool({ url: endpoint.url, toolName: 'absent' });
+        await expect(result).rejects.toThrow('repeated a pagination cursor');
+        expect(pages).toBe(2);
+        expect(execute).not.toHaveBeenCalled();
+        expect(close).toHaveBeenCalledOnce();
+      } finally {
+        await endpoint.close();
+      }
+    },
+  );
+
+  it('does not return a partial catalog when a later page fails', async () => {
+    const endpoint = await startMcpToolTestServer(() => ({ content: [] }), {
+      list(request) {
+        if (request.params?.cursor)
+          throw new McpError(ErrorCode.InternalError, 'later page unavailable');
+        return {
+          tools: [{ name: 'first', inputSchema: { type: 'object' } }],
+          nextCursor: 'later',
+        };
+      },
+    });
+    const close = vi.spyOn(StreamableHTTPClientTransport.prototype, 'close');
+    try {
+      await expect(listMcpTools({ url: endpoint.url })).rejects.toThrow(
+        'later page unavailable',
+      );
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      await endpoint.close();
+    }
+  });
+
+  it('still calls an earlier-page tool without depending on a broken later page', async () => {
+    const cursors: Array<string | undefined> = [];
+    const endpoint = await startMcpToolTestServer(
+      () => ({ content: [{ type: 'text', text: 'first page works' }] }),
+      {
+        list(request) {
+          cursors.push(request.params?.cursor);
+          if (request.params?.cursor)
+            throw new McpError(
+              ErrorCode.InternalError,
+              'later page unavailable',
+            );
+          return {
+            tools: [{ name: 'first', inputSchema: { type: 'object' } }],
+            nextCursor: 'later',
+          };
+        },
+      },
+    );
+    try {
+      await expect(
+        callMcpTool({ url: endpoint.url, toolName: 'first' }),
+      ).resolves.toBe('first page works');
+      expect(cursors).toEqual([undefined]);
+    } finally {
+      await endpoint.close();
+    }
+  });
+
+  it('cancels discovery while a later page is pending and closes the transport', async () => {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const endpoint = await startMcpToolTestServer(() => ({ content: [] }), {
+      async list(request) {
+        if (request.params?.cursor) {
+          markStarted();
+          await held;
+          return { tools: [] };
+        }
+        return { tools: [], nextCursor: 'later' };
+      },
+    });
+    const close = vi.spyOn(StreamableHTTPClientTransport.prototype, 'close');
+    try {
+      const controller = new AbortController();
+      const rejected = expect(
+        listMcpTools({ url: endpoint.url, signal: controller.signal }),
+      ).rejects.toThrow();
+      await started;
+      controller.abort(new Error('cancel pending catalog page'));
+      await rejected;
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      release();
+      await endpoint.close();
     }
   });
 });
