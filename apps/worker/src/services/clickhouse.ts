@@ -44,12 +44,12 @@ export function createClickhouseService(): ServiceDefinition {
       });
     },
 
-    async start(executor, _port) {
+    async start(executor, port) {
       // Set the default user password to match .env.test (CLICKHOUSE_PASSWORD=password).
       // The installer creates a random password, which we need to override.
       await executor.execute({
         name: 'Configure ClickHouse',
-        run: `sudo bash -c 'echo "<clickhouse><http_port>${CONFIG.httpPort}</http_port><tcp_port>${CONFIG.defaultPort}</tcp_port><profiles><default></default></profiles><users><default><password>password</password></default></users></clickhouse>" > config.xml'`,
+        run: `sudo bash -c 'echo "<clickhouse><http_port>${CONFIG.httpPort}</http_port><tcp_port>${port}</tcp_port><profiles><default></default></profiles><users><default><password>password</password></default></users></clickhouse>" > config.xml'`,
         cwd: installDir,
         timeout: 30,
         continue_on_error: false,
@@ -87,17 +87,25 @@ export function createClickhouseService(): ServiceDefinition {
 
       await executor.execute({
         name: 'Wait for ClickHouse to be ready',
-        run: `for i in {1..30}; do ${installDir}/clickhouse client --password password --query "SELECT 1" 2>/dev/null && break || sleep 1; done`,
+        run: `for i in {1..30}; do ${installDir}/clickhouse client --port ${port} --password password --query "SELECT 1" 2>/dev/null && break || sleep 1; done`,
         timeout: 60,
         continue_on_error: false,
       });
     },
 
-    async healthCheck(_port) {
+    async healthCheck(port) {
       try {
         await execa(
           `${installDir}/clickhouse`,
-          ['client', '--password', 'password', '--query', 'SELECT 1'],
+          [
+            'client',
+            '--port',
+            String(port),
+            '--password',
+            'password',
+            '--query',
+            'SELECT 1',
+          ],
           { timeout: 5000 },
         );
 
