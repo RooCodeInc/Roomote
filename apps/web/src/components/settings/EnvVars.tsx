@@ -85,19 +85,20 @@ export function EnvVars() {
                   key={envVar.id}
                   className="text-sm text-left border-b border-border last:border-none"
                 >
-                  <th className="font-mono">{envVar.name}</th>
+                  <th className="font-mono break-all">{envVar.name}</th>
                   <th>
                     <Badge variant="outline">
                       <Lock className="size-2 text-muted-foreground" />
                       &bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;
                     </Badge>
                   </th>
-                  <td className="text-right py-1 w-30">
+                  <td className="text-right py-1 w-12 sm:w-30">
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       onClick={() => setEditEnvVar(envVar)}
+                      aria-label={`Edit ${envVar.name}`}
                     >
                       <Pencil className="size-4" />
                     </Button>
@@ -114,6 +115,7 @@ export function EnvVars() {
                           await deleteEnvVar.mutateAsync({ id: envVar.id });
                         }
                       }}
+                      aria-label={`Delete ${envVar.name}`}
                       disabled={
                         deleteEnvVar.isPending &&
                         deleteEnvVar.variables?.id === envVar.id
