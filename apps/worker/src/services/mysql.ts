@@ -195,10 +195,11 @@ export function createMysqlService(_majorVersion: string): ServiceDefinition {
         continue_on_error: true,
       });
 
-      // Restart MySQL.
+      // Shut down only the bootstrap instance, allowing it to flush its data.
+      // Do not start the normal server unless that shutdown succeeds.
       await executor.execute({
         name: 'Restart MySQL',
-        run: `sudo pkill -9 mysqld 2>/dev/null || true; sleep 2; sudo rm -f ${config.socketPath} ${config.socketPath}.lock ${MYSQL_PID_FILE} ${config.dataDir}/*.pid 2>/dev/null || true; ${buildMysqlStartCommand(
+        run: `sudo mysqladmin --protocol=socket --socket=${config.socketPath} -u root --shutdown-timeout=30 shutdown && ${buildMysqlStartCommand(
           {
             dataDir: config.dataDir,
             socketPath: config.socketPath,
