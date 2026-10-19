@@ -45,7 +45,9 @@ const state = vi.hoisted(() => ({
     },
   ],
   searchParams: '',
-  prAction: 'draft' as 'draft' | 'create' | 'push',
+  prAction: 'draft' as 'draft' | 'create' | 'push' | undefined,
+  prActionError: false,
+  prActionFetching: false,
   configProviders: [
     { provider: 'github', configSatisfied: true },
     { provider: 'gitlab', configSatisfied: true },
@@ -64,6 +66,7 @@ const mutations = vi.hoisted(() => ({
   syncAdo: vi.fn(),
   syncBitbucket: vi.fn(),
   setPrAction: vi.fn(),
+  refetchPrAction: vi.fn(),
   setMarkRoomotePrReadyAfterCleanReview: vi.fn(),
   setGitHubRoomoteMention: vi.fn(),
 }));
@@ -157,8 +160,12 @@ vi.mock('@/hooks/source-control', () => ({
             : mutations.syncAdo,
   }),
   usePrAction: () => ({
-    data: { prAction: state.prAction },
+    data:
+      state.prAction === undefined ? undefined : { prAction: state.prAction },
     isLoading: false,
+    isError: state.prActionError,
+    isFetching: state.prActionFetching,
+    refetch: mutations.refetchPrAction,
   }),
   useSetPrAction: () => ({
     isPending: false,
@@ -370,6 +377,8 @@ describe('SourceControl settings', () => {
     vi.clearAllMocks();
     state.searchParams = '';
     state.prAction = 'draft';
+    state.prActionError = false;
+    state.prActionFetching = false;
     state.gitHubInstallations = [{ id: 'gh-1' }];
     state.gitHubRepositories = [
       {
@@ -676,6 +685,61 @@ describe('SourceControl settings', () => {
       'create',
       expect.anything(),
     );
+  });
+
+  it('replaces an unknown delivery choice with recovery and restores the saved choice', () => {
+    state.prAction = undefined;
+    state.prActionError = true;
+    const { rerender } = render(<SourceControl />);
+
+    expect(
+      screen.getByText('Failed to load pull request delivery.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: 'Pull request delivery' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('switch', {
+        name: 'Mark Roomote PR ready after clean review',
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(mutations.refetchPrAction).toHaveBeenCalledOnce();
+    expect(mutations.setPrAction).not.toHaveBeenCalled();
+
+    state.prActionFetching = true;
+    rerender(<SourceControl />);
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
+
+    state.prAction = 'push';
+    state.prActionError = false;
+    state.prActionFetching = false;
+    rerender(<SourceControl />);
+    expect(screen.getByTestId('pr-action-select')).toHaveAttribute(
+      'data-value',
+      'push',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Retry' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps a cached delivery choice after a background read error', () => {
+    state.prAction = 'draft';
+    state.prActionError = true;
+    render(<SourceControl />);
+    expect(screen.getByTestId('pr-action-select')).toHaveAttribute(
+      'data-value',
+      'draft',
+    );
+    expect(
+      screen.getByRole('switch', {
+        name: 'Mark Roomote PR ready after clean review',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Retry' }),
+    ).not.toBeInTheDocument();
   });
 
   it('lets admins opt out of the shorter GitHub mention', () => {
