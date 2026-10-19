@@ -652,6 +652,49 @@ describe('GitHub issue collector progress', () => {
       expect.objectContaining({ sort: 'updated', direction: 'desc' }),
     );
   });
+
+  it('retains positional continuation when the provider supplies no opaque cursor', async () => {
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.listForRepo
+      .mockResolvedValueOnce({
+        data: Array.from({ length: 50 }, (_, index) =>
+          makeIssue(index + 1, '2026-07-01T00:00:00Z'),
+        ),
+      })
+      .mockResolvedValueOnce({ data: [] });
+    const first = await backfillBrainGithubIssuesStep({ cursor: null });
+    expect(JSON.parse(first.nextCursor!)).toMatchObject({
+      repository: 'acme/a',
+      page: 2,
+    });
+    const second = await backfillBrainGithubIssuesStep({
+      cursor: first.nextCursor,
+    });
+    expect(githubMocks.listForRepo.mock.calls[1]?.[0]).toMatchObject({
+      page: 2,
+    });
+    expect(JSON.parse(second.nextCursor!).completed).toContain('acme/a');
+  });
+
+  it.each([403, 422, 429, 503])(
+    'holds a legacy cursor on unrelated provider error %i',
+    async (status) => {
+      githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+      const cursor = JSON.stringify({
+        completed: [],
+        repository: 'acme/a',
+        page: 200,
+      });
+      githubMocks.listForRepo.mockRejectedValueOnce(
+        Object.assign(new Error('Unrelated provider failure'), { status }),
+      );
+      expect(await backfillBrainGithubIssuesStep({ cursor })).toEqual({
+        pages: [],
+        nextCursor: cursor,
+        done: false,
+      });
+    },
+  );
 });
 
 describe('deep backfill completion and re-arming', () => {
