@@ -1294,6 +1294,41 @@ describe('FastSessionTranscript', () => {
       expect(next.pendingAfter).toBeNull();
     });
 
+    it('keeps peer discussion quiet on reload and while a request is active', () => {
+      const peer = {
+        ...textMessage({
+          id: 'peer',
+          role: 'user',
+          text: 'Compare logs',
+          ts: 3,
+        }),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.PeerMessage,
+      };
+      expect(
+        pendingResponseReducer(emptyState, {
+          type: 'hydrate',
+          messages: [peer],
+        }).pendingAfter,
+      ).toBeNull();
+      const request = textMessage({
+        id: 'request',
+        role: 'user',
+        text: 'Investigate',
+        ts: 2,
+      });
+      const active = pendingResponseReducer(emptyState, {
+        type: 'hydrate',
+        messages: [request],
+      });
+      expect(
+        pendingResponseReducer(active, {
+          type: 'messages',
+          messages: [peer],
+          newEventIds: new Set([peer.eventId]),
+        }).pendingAfter?.id,
+      ).toBe('request');
+    });
+
     it('uses the same ordering and visibility rules for hydration and streamed messages', () => {
       const hydrated = pendingResponseReducer(emptyState, {
         type: 'hydrate',

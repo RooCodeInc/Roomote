@@ -1,4 +1,5 @@
 import type { ModelMessage } from 'ai';
+import { captureFastAgentPeerDiscussion } from './fast-agent-peer-discussion';
 import {
   and,
   type CreateFastAgentMessage,
@@ -1730,6 +1731,13 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           message.metadata?.turnSource === 'human' &&
           message.metadata?.inputKind !== FAST_AGENT_REACTION_INPUT_TYPE;
         let initialHumanTurn = false;
+        if (
+          existingEvent &&
+          insertOnly &&
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.PeerMessage
+        ) {
+          return { initialHumanTurn: false, inserted: false };
+        }
         if (isSubstantiveHumanPrompt) {
           const [currentHumanPrompt] = await tx
             .select({ id: fastAgentMessages.id })
@@ -1779,9 +1787,18 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
 
         const metadata = message.metadata ? { ...message.metadata } : null;
         if (metadata) delete metadata.modelAuthorizationSnapshot;
+        const payload = { ...message.payload };
+        if (
+          !existingEvent &&
+          isSubstantiveHumanPrompt &&
+          message.source === 'web'
+        ) {
+          payload.peerDiscussionContext =
+            (await captureFastAgentPeerDiscussion(tx, conversationId)) ?? null;
+        }
         const insert = tx
           .insert(fastAgentMessages)
-          .values({ conversationId, ...message, metadata });
+          .values({ conversationId, ...message, metadata, payload });
         if (insertOnly) {
           await insert.onConflictDoNothing({
             target: [
@@ -1808,7 +1825,9 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               metadata: sql`case when ${fastAgentMessages.metadata} ? 'modelAuthorizationSnapshot'
                 then coalesce(${metadata ? JSON.stringify(metadata) : null}::jsonb, '{}'::jsonb) || jsonb_build_object('modelAuthorizationSnapshot', ${fastAgentMessages.metadata}->'modelAuthorizationSnapshot')
                 else ${metadata ? JSON.stringify(metadata) : null}::jsonb end`,
-              payload: message.payload ?? {},
+              payload: sql`case when ${fastAgentMessages.payload} ? 'peerDiscussionContext'
+                then ${JSON.stringify(payload)}::jsonb || jsonb_build_object('peerDiscussionContext', ${fastAgentMessages.payload}->'peerDiscussionContext')
+                else ${JSON.stringify(payload)}::jsonb end`,
               source: message.source ?? null,
               nativeSessionId: message.nativeSessionId ?? null,
               nativeMessageId: message.nativeMessageId ?? null,

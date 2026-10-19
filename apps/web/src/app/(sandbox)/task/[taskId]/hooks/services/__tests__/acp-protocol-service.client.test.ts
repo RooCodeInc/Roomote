@@ -2,7 +2,28 @@ import { ACP_ENVELOPE_EVENT_TYPES, type AcpMessage } from '@roomote/types';
 
 import type { TaskMessageEnvelope } from '@/types';
 
-import { AcpProtocolService } from '../acp-protocol-service';
+import { AcpProtocolService, toAcpUiMessage } from '../acp-protocol-service';
+
+it('preserves peer discussion as attributed user text for People only presentation', () => {
+  const message = toAcpUiMessage({
+    id: 'peer-message',
+    ts: 1,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.PeerMessage,
+    role: 'user',
+    kind: 'text',
+    text: 'Compare the logs',
+    contentBlocks: [{ type: 'text', text: 'Compare the logs' }],
+    metadata: { visibleInTranscript: true, userId: 'peer-user' },
+    payload: {},
+    userName: 'Peer User',
+  });
+  expect(message).toMatchObject({
+    role: 'user',
+    updateType: ACP_ENVELOPE_EVENT_TYPES.PeerMessage,
+    userId: 'peer-user',
+    userName: 'Peer User',
+  });
+});
 
 function assistantChunk(text: string, sequence: number): AcpMessage {
   return {
