@@ -866,6 +866,20 @@ describe('BaseController.dequeueTaskRun', () => {
     expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
   });
 
+  it('does not re-dispatch a run that already finished', async () => {
+    for (const status of [
+      RunStatus.Completed,
+      RunStatus.Failed,
+      RunStatus.Canceled,
+    ]) {
+      const job = makeTaskRun({ id: 82, status });
+
+      await expect(controller.testDequeueTaskRun(job)).resolves.toBeNull();
+    }
+    expect(mockUpdateWhere).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
+  });
+
   it('treats preparing jobs as recoverable before controller dequeue', async () => {
     const job = makeTaskRun({
       id: 80,

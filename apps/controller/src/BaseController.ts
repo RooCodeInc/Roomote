@@ -642,10 +642,13 @@ export abstract class BaseController {
   ): Promise<{ taskRun: TaskRun; authToken: string } | null> {
     const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
+    // A finished run can still surface here: a stale queue entry popped
+    // after its lock expired, or a fallback scan racing completion. Moving
+    // it back to dequeued would re-dispatch work that already ran.
     if (
       taskRun.cancelRequestedAt ||
       taskRun.canceledAt ||
-      taskRun.status === RunStatus.Canceled
+      isExitedRunStatus(taskRun.status)
     ) {
       return null;
     }

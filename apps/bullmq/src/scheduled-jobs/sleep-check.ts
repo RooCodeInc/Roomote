@@ -48,6 +48,8 @@ import {
   refreshTaskTitleOnCompletion,
 } from '@roomote/sdk/server';
 
+import { releaseTaskRun } from '@roomote/cloud-agents/server';
+
 import { tryRecordComputeProviderUsage } from '../compute-provider-usage';
 import { captureBullMqMessage } from '../monitoring/sentry';
 
@@ -238,6 +240,30 @@ function fingerprintEnvValues(values: Partial<Record<string, string>>): string {
       .filter(([, value]) => value !== undefined)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   );
+}
+
+/**
+ * Releases a run's queue-scope lock after a direct completion. finishRun
+ * releases it on every other terminal path; without this, a run completed
+ * here keeps its scope locked for the full lock TTL, so the next run on the
+ * same scope (another review of the same PR) can only start through orphan
+ * recovery. Owner-checked, so it cannot drop a newer run's lock.
+ */
+async function releaseCompletedRunLock(runId: number): Promise<void> {
+  try {
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, runId),
+    });
+    if (run) {
+      await releaseTaskRun(run);
+    }
+  } catch (error) {
+    console.warn(
+      `[sleepCheck] Failed to release queue lock for task run #${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 async function getSleepCheckClient(provider: ComputeProvider) {
@@ -1180,6 +1206,7 @@ async function claimAndEnterStandby(
       // registers a fresh workload (new generation) before the worker starts.
       await terminateCredentialEgressWorkloadsForRun(job.id, 'stopped', tx);
     });
+    await releaseCompletedRunLock(job.id);
 
     await recordSleepCheckEvent(
       job,
@@ -1668,6 +1695,7 @@ async function handleTimedSleepCandidate(params: {
       endedAt,
     });
   });
+  await releaseCompletedRunLock(job.id);
 
   if (job.taskId) {
     try {
