@@ -129,6 +129,34 @@ it('preserves a separate MySQL server while bootstrapping the managed service', 
       (await mysql(socket, 'SELECT value FROM preserved.marker')).stdout,
     ).toBe('42');
     expect((await readFile(pidfile, 'utf8')).trim()).toBe(siblingPid);
+    const managedPid = (await readFile('/tmp/mysql8.pid', 'utf8')).trim();
+    await mysql(
+      '/var/lib/mysql/mysql.sock',
+      'CREATE DATABASE managed_marker; CREATE TABLE managed_marker.marker (value INT); INSERT INTO managed_marker.marker VALUES (7)',
+    );
+    await manager.startServices(
+      { userLog: console, debug: console, setFilePath: () => {} },
+      [{ name: 'mysql8', port: 13316 }],
+    );
+    expect(
+      (
+        await mysql(
+          '/var/lib/mysql/mysql.sock',
+          'SELECT value FROM managed_marker.marker',
+        )
+      ).stdout,
+    ).toBe('7');
+    expect((await readFile('/tmp/mysql8.pid', 'utf8')).trim()).not.toBe(
+      managedPid,
+    );
+    expect(
+      (await execa('sudo', ['kill', '-0', managedPid], { reject: false }))
+        .exitCode,
+    ).not.toBe(0);
+    expect(
+      (await mysql(socket, 'SELECT value FROM preserved.marker')).stdout,
+    ).toBe('42');
+    expect((await readFile(pidfile, 'utf8')).trim()).toBe(siblingPid);
     // The configured TCP connection must also work after leaving bootstrap mode.
     expect(
       (
@@ -145,6 +173,41 @@ it('preserves a separate MySQL server while bootstrapping the managed service', 
         ])
       ).stdout,
     ).toBe('1');
+    expect(await readFile('/tmp/mysql8.log', 'utf8')).not.toContain(
+      'Unable to lock ./ibdata1',
+    );
+
+    const runningPid = await readFile('/tmp/mysql8.pid', 'utf8');
+    await mysql(
+      '/var/lib/mysql/mysql.sock',
+      "ALTER USER 'root'@'localhost' IDENTIFIED BY 'fixture-password'",
+    );
+    const authenticatedSql = (query: string) =>
+      execa('sudo', [
+        'mysql',
+        '--protocol=socket',
+        '--socket=/var/lib/mysql/mysql.sock',
+        '-u',
+        'root',
+        '--password=fixture-password',
+        '-Nse',
+        query,
+      ]);
+    try {
+      await expect(
+        manager.startServices(
+          { userLog: console, debug: console, setFilePath: () => {} },
+          [{ name: 'mysql8', port: 13316 }],
+        ),
+      ).rejects.toThrow('shutdown');
+      expect(await readFile('/tmp/mysql8.pid', 'utf8')).toBe(runningPid);
+      expect(
+        (await authenticatedSql('SELECT value FROM managed_marker.marker'))
+          .stdout,
+      ).toBe('7');
+    } finally {
+      await authenticatedSql("ALTER USER 'root'@'localhost' IDENTIFIED BY ''");
+    }
   } finally {
     await shutdown('/var/lib/mysql/mysql.sock', '/tmp/mysql8.pid');
     await shutdown(socket, pidfile);
