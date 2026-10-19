@@ -69,6 +69,20 @@ describe('findReusableReviewSummaryComment', () => {
 });
 
 describe('getPrBodyAttributionLine', () => {
+  it('includes session provenance without human attribution or a chat thread', () => {
+    const line = getPrBodyAttributionLine({
+      attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+      taskUrl: 'https://example.com/sessions/origin',
+      taskSurface: 'web',
+    });
+    expect(line).toContain('Created by Roomote.');
+    expect(line).toContain(
+      '[View the session](https://example.com/sessions/origin)',
+    );
+    expect(line).not.toContain('View the task');
+    expect(line).not.toContain('[Slack]');
+  });
+
   it('mentions @roomote by default', () => {
     const line = getPrBodyAttributionLine({
       attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,

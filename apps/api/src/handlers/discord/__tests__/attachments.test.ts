@@ -10,6 +10,43 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
 import { processDiscordAttachments } from '../attachments.js';
 
 describe('processDiscordAttachments', () => {
+  it.each(['application/json', 'application/octet-stream', undefined])(
+    'extracts HAR attachments with MIME %s without forwarding the CDN URL',
+    async (mimeType) => {
+      const har = JSON.stringify({
+        log: {
+          version: '1.2',
+          entries: [
+            {
+              request: { url: 'https://example.com/api' },
+              response: { status: 502 },
+            },
+          ],
+        },
+      });
+      const url =
+        'https://cdn.discordapp.com/attachments/1/2/network.har?ex=1&is=2&hm=3';
+      const fetchImpl = vi.fn().mockResolvedValue(new Response(har));
+      const result = await processDiscordAttachments(
+        [
+          {
+            id: 'har-1',
+            filename: 'network.HAR',
+            content_type: mimeType,
+            size: Buffer.byteLength(har),
+            url,
+          },
+        ],
+        { fetch: fetchImpl },
+      );
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(result.images).toEqual([]);
+      expect(result.warnings).toEqual([]);
+      expect(result.attachmentTexts).toEqual([expect.stringContaining(har)]);
+      expect(JSON.stringify(result)).not.toContain(url);
+    },
+  );
+
   beforeEach(() => {
     transcribeAudioAttachmentMock.mockReset();
   });

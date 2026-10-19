@@ -26,6 +26,7 @@ import { Env } from '@roomote/env';
 import { z } from 'zod';
 
 import type { Variables } from '../../types';
+import { normalizeNativeGitHubPrProvenance } from './github-pr-provenance';
 
 import {
   callEnablePullRequestAutoMerge,
@@ -265,6 +266,7 @@ export function createGithubMcp(options?: {
     // calls can select the installation that owns their target without a
     // prior request binding the upstream connection to another credential.
     statelessUpstream: true,
+    transformRequest: normalizeNativeGitHubPrProvenance,
     resolveCredentials: async (auth, _params, request) => {
       if (Array.isArray(request))
         throw new McpProxyError(

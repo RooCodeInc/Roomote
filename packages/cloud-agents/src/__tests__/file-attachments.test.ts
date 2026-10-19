@@ -16,6 +16,7 @@ describe('ROOMOTE_FILE_ATTACHMENT_ACCEPT', () => {
     expect(acceptValues).toContain('.pdf');
     expect(acceptValues).toContain('.r');
     expect(acceptValues).toContain('.ipynb');
+    expect(acceptValues).toContain('.har');
     expect(acceptValues).toContain('.tsx');
     expect(acceptValues).toContain(
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -24,6 +25,30 @@ describe('ROOMOTE_FILE_ATTACHMENT_ACCEPT', () => {
 });
 
 describe('file attachment classification', () => {
+  it.each([
+    ['network.har', 'application/json'],
+    ['network.har', 'application/octet-stream'],
+    ['network.har', 'text/plain'],
+    ['NETWORK.HAR', ''],
+    ['network.har', undefined],
+    ['network.har', 'application/json; charset=utf-8'],
+    ['network.har', 'application/har+json'],
+  ])('classifies HAR %s (%s) as text, not an image', (filename, mimeType) => {
+    expect(isRoomoteTextExtractableAttachment({ filename, mimeType })).toBe(
+      true,
+    );
+    expect(isRoomoteImageAttachment({ filename, mimeType })).toBe(false);
+  });
+
+  it('does not accept arbitrary octet-stream files', () => {
+    expect(
+      isRoomoteTextExtractableAttachment({
+        filename: 'archive.zip',
+        mimeType: 'application/octet-stream',
+      }),
+    ).toBe(false);
+  });
+
   it('keeps raster images as prompt images', () => {
     expect(
       isRoomoteImageAttachment({

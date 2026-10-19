@@ -43,11 +43,11 @@ const COMPLETION =
 describe('buildTerminalReviewStatus', () => {
   const url = 'https://roomote.dev/task/abc';
 
-  it('completed outcome includes a See task link', () => {
+  it('completed outcome includes a See session link', () => {
     expect(
       buildTerminalReviewStatus({ outcome: 'completed', taskUrl: url }),
     ).toBe(
-      `Review complete. <a href="${url}" target="_blank" rel="noopener noreferrer">See task</a>`,
+      `Review complete. <a href="${url}" target="_blank" rel="noopener noreferrer">See session</a>`,
     );
   });
 

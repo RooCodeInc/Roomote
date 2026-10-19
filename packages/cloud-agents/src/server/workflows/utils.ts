@@ -226,7 +226,7 @@ function buildPrBodyAttributionLine({
     // Email threads have no public permalink, so agentmail gets the chat
     // phrasing with no conversation link.
     taskSurface === 'agentmail';
-  const taskLinkLabel = isChatSurface ? 'the web UI' : 'View the task';
+  const taskLinkLabel = isChatSurface ? 'the web UI' : 'View the session';
   const taskLink = safeTaskUrl
     ? `[${taskLinkLabel}](${safeTaskUrl})`
     : undefined;

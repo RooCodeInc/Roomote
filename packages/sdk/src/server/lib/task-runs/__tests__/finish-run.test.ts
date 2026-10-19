@@ -214,6 +214,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: vi.fn(),
   releaseTaskRun: vi.fn().mockResolvedValue(undefined),
   getTaskUrl: vi.fn().mockReturnValue('https://example.com/task'),
+  getTaskSessionUrl: vi
+    .fn()
+    .mockResolvedValue('https://example.com/sessions/review-session'),
   suggestSlackQuestionChannels: (...args: unknown[]) =>
     mockSuggestSlackQuestionChannels(...args),
   buildTerminalReviewStatus: (...args: unknown[]) =>
@@ -1095,6 +1098,24 @@ describe('finishRun', () => {
         expect.objectContaining({ snapshotStatus: 'failed' }),
       );
     });
+
+    it.each([null, 'invalid'])(
+      'uses the default for missing/invalid snapshot vendor %s',
+      async (vendor) => {
+        mockFindFirstRun.mockResolvedValue(
+          makeSnapshotRun({ vendor: vendor as TaskRun['vendor'] }),
+        );
+        await finishRun({ id: 55, status: RunStatus.Canceled });
+        expect(mockResolveDefaultComputeProvider).toHaveBeenCalled();
+        expect(mockUpdatePendingEnvironmentSnapshot).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            provider: 'modal',
+            snapshotStatus: 'failed',
+          }),
+        );
+      },
+    );
 
     it('flips the pending row when a stop request normalizes the failure to canceled', async () => {
       mockFindFirstRun.mockResolvedValue(
@@ -2746,6 +2767,11 @@ describe('finishRun', () => {
       });
 
       await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockBuildTerminalReviewStatus).toHaveBeenCalledWith({
+        outcome: 'completed',
+        taskUrl: 'https://example.com/sessions/review-session',
+      });
 
       expect(mockAcquireRedisLock).toHaveBeenCalledWith(
         'pr-review-synchronize:owner/repo:42',

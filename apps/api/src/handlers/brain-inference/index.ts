@@ -257,6 +257,74 @@ function jsonResponseInstruction(responseFormat: unknown): string | null {
   return null;
 }
 
+/** Translate the native OpenAI Responses text contract into the helper input. */
+function responsesHelperBody(
+  body: Record<string, unknown>,
+): Record<string, unknown> | null {
+  // The helper is stateless and text-only; do not silently drop tool/image
+  // input or pretend a previous response has been loaded.
+  if (
+    (Array.isArray(body.tools) && body.tools.length > 0) ||
+    body.previous_response_id
+  )
+    return null;
+  if (typeof body.input !== 'string' && !Array.isArray(body.input)) return null;
+  const input =
+    typeof body.input === 'string'
+      ? [{ role: 'user', content: body.input }]
+      : Array.isArray(body.input)
+        ? body.input
+        : [];
+  if (
+    !input.every((message) => {
+      if (!message || typeof message !== 'object') return false;
+      if (!['system', 'developer', 'user', 'assistant'].includes(message.role))
+        return false;
+      if (message.type !== undefined && message.type !== 'message')
+        return false;
+      if (typeof message.content === 'string') return true;
+      return (
+        Array.isArray(message.content) &&
+        message.content.every((part: unknown) => {
+          if (!part || typeof part !== 'object') return false;
+          const value = part as Record<string, unknown>;
+          return (
+            ['input_text', 'output_text'].includes(String(value.type)) &&
+            typeof value.text === 'string'
+          );
+        })
+      );
+    })
+  )
+    return null;
+  const text =
+    body.text && typeof body.text === 'object'
+      ? (body.text as Record<string, unknown>)
+      : undefined;
+  const format =
+    text?.format && typeof text.format === 'object'
+      ? (text.format as Record<string, unknown>)
+      : undefined;
+  return {
+    ...body,
+    messages: [
+      ...(typeof body.instructions === 'string'
+        ? [{ role: 'system', content: body.instructions }]
+        : []),
+      ...input.map((message) =>
+        message && typeof message === 'object' && message.role === 'developer'
+          ? { ...message, role: 'system' }
+          : message,
+      ),
+    ],
+    max_tokens: body.max_output_tokens,
+    response_format:
+      format?.type === 'json_schema'
+        ? { type: 'json_schema', json_schema: format }
+        : format,
+  };
+}
+
 /**
  * Inference gateway for this deployment's Brain.
  *
@@ -311,7 +379,8 @@ brainInference.post('/*', async (c) => {
   // through the ordinary provider path below.
   let helperOverrideBody: string | undefined;
 
-  if (upstreamPath === '/v1/chat/completions') {
+  const isResponses = upstreamPath === '/v1/responses';
+  if (upstreamPath === '/v1/chat/completions' || isResponses) {
     let parsedBody: Record<string, unknown> | undefined;
 
     try {
@@ -338,8 +407,20 @@ brainInference.post('/*', async (c) => {
         );
       }
 
-      const { system, prompt } = toHelperPromptParts(body.messages);
-      const jsonInstruction = jsonResponseInstruction(body.response_format);
+      const helperBody = isResponses ? responsesHelperBody(body) : body;
+      if (!helperBody) {
+        return c.json(
+          {
+            error:
+              'The Brain helper model supports text-only Responses input without tools or previous responses.',
+          },
+          400,
+        );
+      }
+      const { system, prompt } = toHelperPromptParts(helperBody.messages);
+      const jsonInstruction = jsonResponseInstruction(
+        helperBody.response_format,
+      );
       const systemWithFormat = [system, jsonInstruction]
         .filter((part): part is string => Boolean(part))
         .join('\n\n');
@@ -351,14 +432,36 @@ brainInference.post('/*', async (c) => {
           system: systemWithFormat || undefined,
           prompt,
           maxOutputTokens:
-            typeof body.max_tokens === 'number' &&
-            Number.isFinite(body.max_tokens) &&
-            body.max_tokens > 0
-              ? body.max_tokens
+            typeof helperBody.max_tokens === 'number' &&
+            Number.isFinite(helperBody.max_tokens) &&
+            helperBody.max_tokens > 0
+              ? helperBody.max_tokens
               : HELPER_SYNTHESIS_DEFAULT_MAX_OUTPUT_TOKENS,
           timeoutMs: HELPER_SYNTHESIS_TIMEOUT_MS,
         });
 
+        if (isResponses) {
+          return c.json({
+            id: `resp_${randomUUID()}`,
+            object: 'response',
+            created_at: Math.floor(Date.now() / 1000),
+            status: 'completed',
+            model: BRAIN_HELPER_MODEL_ID,
+            error: null,
+            incomplete_details: null,
+            output: [
+              {
+                id: `msg_${randomUUID()}`,
+                type: 'message',
+                status: 'completed',
+                role: 'assistant',
+                content: [{ type: 'output_text', text, annotations: [] }],
+              },
+            ],
+            // Actual usage is recorded by the tracked helper call above.
+            usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+          });
+        }
         return c.json({
           id: `brain-helper-${randomUUID()}`,
           object: 'chat.completion',
@@ -386,10 +489,7 @@ brainInference.post('/*', async (c) => {
           }),
         );
 
-        return c.json(
-          { error: `Brain helper-model synthesis failed: ${detail}` },
-          502,
-        );
+        return c.json({ error: 'Brain helper-model synthesis failed' }, 502);
       }
     };
 

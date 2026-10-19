@@ -60,7 +60,7 @@ function buildGitLabMergeRequestSyncReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       review_scope:
         'Review the new GitLab merge request changes since the prior review. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the changed range with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -136,7 +136,7 @@ function buildGiteaPullRequestSyncReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       review_scope:
         'Review the new Gitea pull request changes since the prior review. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the changed range with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -212,7 +212,7 @@ function buildBitbucketPullRequestSyncReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       review_scope:
         'Review the new Bitbucket pull request changes since the prior review. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the changed range with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -288,7 +288,7 @@ function buildAdoPullRequestSyncReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       review_scope:
         'Review the new Azure DevOps pull request changes since the prior review. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the changed range with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -525,7 +525,7 @@ export async function githubPrReviewSync({
       comment_header_starting: '',
       comment_header_completed: '',
       task_link_follow: followLink,
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       linked_implementation_task_handoff_enabled: relayReviewResultsToTask,
       linked_implementation_task_id: linkedTaskId,
       pull_request_details: getPrDetails({ fullName, pr }),

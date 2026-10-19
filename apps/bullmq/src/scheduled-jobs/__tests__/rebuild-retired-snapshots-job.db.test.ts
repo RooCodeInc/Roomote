@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ComputeProvider } from '@roomote/types';
 
 const {
   mockLaunchMissingEnvironmentSnapshot,
@@ -59,7 +60,9 @@ describe('retired snapshot rebuild job', () => {
   const retiredAt = new Date(now.getTime() - 23 * 60 * 60 * 1000);
   const createdEnvironmentIds: string[] = [];
 
-  async function createRetiredEnvironment() {
+  async function createRetiredEnvironment(
+    snapshotProvider: ComputeProvider = provider,
+  ) {
     const [environment] = await db
       .insert(environments)
       .values({
@@ -72,7 +75,7 @@ describe('retired snapshot rebuild job', () => {
     createdEnvironmentIds.push(environmentId);
     await upsertEnvironmentSnapshot(db, {
       environmentId,
-      provider,
+      provider: snapshotProvider,
       snapshotId: `im-${randomUUID()}`,
       snapshotStatus: 'ready',
       snapshotCreatedAt: settled,
@@ -133,6 +136,33 @@ describe('retired snapshot rebuild job', () => {
     expect(result.rebuilt).toBeGreaterThanOrEqual(2);
     expect(result.errors).toBe(0);
   });
+
+  it('preserves the default-selection error before rebuilding', async () => {
+    mockResolveDefaultComputeProvider.mockRejectedValue(
+      new Error('No configured sandbox provider is available.'),
+    );
+    await expect(rebuildRetiredSnapshots(now)).rejects.toThrow(
+      'No configured sandbox provider is available.',
+    );
+    expect(mockLaunchMissingEnvironmentSnapshot).not.toHaveBeenCalled();
+  });
+
+  it.each(['docker', 'blaxel'] as const)(
+    'does not rebuild retired environment snapshots on %s',
+    async (unsupportedProvider) => {
+      await createRetiredEnvironment(unsupportedProvider);
+      mockResolveDefaultComputeProvider.mockResolvedValue(unsupportedProvider);
+      mockLaunchMissingEnvironmentSnapshot.mockResolvedValue({
+        kind: 'enqueued',
+        runId: 1,
+      });
+
+      const result = await rebuildRetiredSnapshots(now);
+
+      expect(mockLaunchMissingEnvironmentSnapshot).not.toHaveBeenCalled();
+      expect(result).toEqual({ rebuilt: 0, skipped: 0, errors: 0 });
+    },
+  );
 
   it('waits out the launch spacing before every launch after the first', async () => {
     await createRetiredEnvironment();

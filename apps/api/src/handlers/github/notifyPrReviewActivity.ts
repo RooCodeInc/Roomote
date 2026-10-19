@@ -12,6 +12,7 @@ import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
   completeGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification,
+  findCanonicalGithubPrReviewSummaryOwner,
   markRoomotePullRequestReadyAfterCleanReview,
   startPrReviewNotificationCycle,
   type EnqueuePrReviewNotificationInput,
@@ -404,7 +405,7 @@ type PrReviewSummaryLifecycle =
   | { kind: 'completed'; notification: PrReviewSummaryNotification }
   | {
       kind: 'reconciled';
-      taskId: string;
+      taskId?: string;
       reviewHeadSha: string;
     };
 
@@ -510,7 +511,7 @@ function buildPrReviewSummaryLifecycle(
   // `changes` is only present on issue_comment.edited payloads.
   if ('changes' in eventPayload) {
     if (!previousInProgress) {
-      return markerSha && reviewTaskId
+      return markerSha
         ? {
             kind: 'reconciled',
             taskId: reviewTaskId,
@@ -618,10 +619,26 @@ export async function queuePrReviewSummaryNotification(
       return;
     }
 
+    let reviewTaskId =
+      lifecycle.kind === 'reconciled'
+        ? lifecycle.taskId
+        : lifecycle.notification.input.event.reviewTaskId;
+    if (!reviewTaskId) {
+      // Session links are presentation, not a unique review-task identity.
+      // Recover the owner only from this exact canonical comment's persisted
+      // PR linkage; a session can contain several unrelated tasks.
+      const owner = await findCanonicalGithubPrReviewSummaryOwner({
+        repository: reference.repository,
+        prNumber: reference.prNumber,
+        commentId: eventPayload.comment.id,
+      });
+      reviewTaskId = owner?.taskId;
+    }
+
     if (lifecycle.kind === 'reconciled') {
-      if (!eventPayload.installation?.id) {
+      if (!eventPayload.installation?.id || !reviewTaskId) {
         console.warn(
-          `[queuePrReviewSummaryNotification] Skipping check reconciliation for ${reference.repository}#${reference.prNumber}: summary is missing installation id`,
+          `[queuePrReviewSummaryNotification] Skipping check reconciliation for ${reference.repository}#${reference.prNumber}: summary is missing installation id or review task identity`,
         );
         return;
       }
@@ -630,7 +647,7 @@ export async function queuePrReviewSummaryNotification(
         installationId: eventPayload.installation.id,
         repository: reference.repository,
         prNumber: reference.prNumber,
-        taskId: lifecycle.taskId,
+        taskId: reviewTaskId,
         reviewHeadSha: lifecycle.reviewHeadSha,
         reviewSummaryBody: eventPayload.comment.body ?? '',
         allowCompletedCheckUpdate: true,
@@ -639,6 +656,9 @@ export async function queuePrReviewSummaryNotification(
     }
 
     const { event } = lifecycle.notification.input;
+    if (reviewTaskId) {
+      event.reviewTaskId = reviewTaskId;
+    }
     const notificationResult = await enqueuePrReviewNotification(
       lifecycle.notification.input,
     );

@@ -198,19 +198,20 @@ export function getCustomAutomationNextRunAt(params: {
         ),
       )
     : params.lastRunAt;
-  if (
+  const presetFrequency = params.scheduleMode;
+  const isPresetDueAt = (at: Date) =>
     isRunDue({
-      now,
+      now: at,
       timeZone: params.timeZone,
-      frequency: params.scheduleMode,
+      frequency: presetFrequency,
       lastRunAt: presetLastRunAt,
       scheduleHourLocal:
         params.scheduleMode === 'daily' || params.scheduleMode === 'weekly'
           ? DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL
           : 0,
       windowDays: PRESET_WINDOW_DAYS,
-    })
-  ) {
+    });
+  if (isPresetDueAt(now)) {
     return now;
   }
 
@@ -246,6 +247,23 @@ export function getCustomAutomationNextRunAt(params: {
       'next',
       now,
     );
+  }
+
+  if (params.scheduleMode === 'weekly') {
+    // An elapsed week can end before the local run boundary after DST or an
+    // explicit early run. The scheduler will still wait for that boundary;
+    // do not preview an ineligible timestamp or skip this morning's run.
+    const eligibleAt = new Date(
+      Math.max(now.getTime(), presetLastRunAt.getTime() + intervalMs),
+    );
+    return isPresetDueAt(eligibleAt)
+      ? eligibleAt
+      : getCronOccurrence(
+          `0 ${DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL} * * *`,
+          params.timeZone,
+          'next',
+          eligibleAt,
+        );
   }
 
   const elapsedIntervals = Math.floor(

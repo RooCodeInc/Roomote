@@ -1188,6 +1188,9 @@ export const taskPullRequests = pgTable(
     // Only server-side PR creation marks this true. Transcript and review
     // associations must not count as Roomote-created PR outcomes.
     createdByRoomote: boolean('created_by_roomote').notNull().default(false),
+    // Explicit draft requests override deployment-level clean-review promotion.
+    // A hold on any association applies to the PR across tasks and new heads.
+    autoReadyBlocked: boolean('auto_ready_blocked').notNull().default(false),
 
     // Status
     status: text('status').$type<import('@roomote/types').PullRequestStatus>(),

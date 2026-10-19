@@ -183,7 +183,8 @@ else
 fi
 
 # Gateway mode holds no real provider key, so chat defaults to the
-# unqualified `roomote/helper` sentinel: the Roomote gateway answers it with the
+# native OpenAI `openai:roomote/helper` model: the client strips the provider
+# prefix, and the Roomote gateway answers the wire `roomote/helper` sentinel with the
 # deployment's helper model instead of forwarding to a provider, which is what
 # frees synthesis from needing a Brain provider key. Convergence rule: the
 # chat model is a plain env export re-derived on every boot (env wins over
@@ -192,7 +193,7 @@ fi
 # GBRAIN_MODEL (below) or R_BRAIN_MODEL (applied by the gateway per request)
 # still wins over the default.
 if [ -n "${OPENAI_BASE_URL:-}" ] && [ "$BRAIN_PROVIDER" != "none" ]; then
-  DEFAULT_CHAT_MODEL="roomote/helper"
+  DEFAULT_CHAT_MODEL="openai:roomote/helper"
 fi
 
 # An operator-chosen embedding model arrives as a bare id (text-embedding-3-large)

@@ -145,12 +145,29 @@ export function resolveFreshTaskComputeProvider(
   provider: string | null | undefined,
   fallback: ComputeProvider,
   taskType?: TaskPayloadKind,
+  cloudEnabled?: boolean,
+): ComputeProvider;
+export function resolveFreshTaskComputeProvider(
+  provider: string | null | undefined,
+  fallback: () => Promise<ComputeProvider>,
+  taskType?: TaskPayloadKind,
+  cloudEnabled?: boolean,
+): Promise<ComputeProvider>;
+export function resolveFreshTaskComputeProvider(
+  provider: string | null | undefined,
+  fallback: ComputeProvider | (() => Promise<ComputeProvider>),
+  taskType?: TaskPayloadKind,
   cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
-): ComputeProvider {
+): ComputeProvider | Promise<ComputeProvider> {
   // Managed deployments own the sandbox lifecycle, so fresh work must not
   // escape to a previously configured bring-your-own provider.
-  return cloudEnabled && taskType !== TaskPayloadKind.SnapshotEnvironment
-    ? 'roomote'
+  if (cloudEnabled && taskType !== TaskPayloadKind.SnapshotEnvironment) {
+    return typeof fallback === 'function'
+      ? Promise.resolve('roomote')
+      : 'roomote';
+  }
+  return typeof fallback === 'function'
+    ? resolveComputeProviderTarget(provider, fallback)
     : resolveComputeProviderTarget(provider, fallback);
 }
 
@@ -1551,9 +1568,9 @@ async function enqueueFreshLaunch(
   const titleIsLocked =
     explicitTitle !== null ||
     hasDeterministicTaskRunTitle(taskWithHarnessOverrides.type);
-  const targetComputeProvider = resolveFreshTaskComputeProvider(
+  const targetComputeProvider = await resolveFreshTaskComputeProvider(
     task.computeProvider,
-    await resolveDefaultComputeProvider(),
+    resolveDefaultComputeProvider,
     task.type,
   );
 
@@ -2534,9 +2551,9 @@ export async function enqueueTaskRelaunch(
     sandboxTimeoutMs: TASK_TIMEOUT_MS,
   });
 
-  const targetComputeProvider = resolveFreshTaskComputeProvider(
+  const targetComputeProvider = await resolveFreshTaskComputeProvider(
     task.computeProvider,
-    await resolveDefaultComputeProvider(),
+    resolveDefaultComputeProvider,
     task.type,
   );
 
@@ -2918,10 +2935,10 @@ async function enqueueSnapshotResume(
 
   const targetComputeProvider =
     sourceJobVendor ??
-    resolveComputeProviderTarget(
+    (await resolveComputeProviderTarget(
       task.computeProvider,
-      await resolveDefaultComputeProvider(),
-    );
+      resolveDefaultComputeProvider,
+    ));
 
   const resolvedTaskPolicy = resolveTaskRuntimePolicy({
     taskType: TaskPayloadKind.SnapshotResume,

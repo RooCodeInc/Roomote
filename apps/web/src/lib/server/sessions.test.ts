@@ -55,6 +55,43 @@ import {
 } from './sessions';
 
 describe('unified Session queries', () => {
+  it.each(['shared', 'private'] as const)(
+    'allows direct links to hidden %s automation origins under existing privacy rules',
+    async (privacy) => {
+      const owner = await userFactory.create();
+      const other = await userFactory.create();
+      await db
+        .insert(automations)
+        .values({ key: 'custom_automation' })
+        .onConflictDoNothing();
+      const task = await taskFactory.create({
+        initiatorKind: 'automation',
+        initiatorUserId: null,
+        initiatorAutomation: 'custom_automation',
+        visibility: 'hidden',
+        privacy,
+        privateOwnerUserId: privacy === 'private' ? owner.id : null,
+      });
+      const session = await ensureSessionForTask(db, { taskId: task.id });
+      try {
+        expect(session.visibility).toBe('hidden');
+        await expect(
+          getSessionById({ userId: owner.id, isAdmin: false }, session.id),
+        ).resolves.toMatchObject({ id: session.id });
+        const otherResult = await getSessionById(
+          { userId: other.id, isAdmin: false },
+          session.id,
+        );
+        if (privacy === 'private') expect(otherResult).toBeNull();
+        else expect(otherResult).toMatchObject({ id: session.id });
+      } finally {
+        await db.delete(sessions).where(eq(sessions.id, session.id));
+        await db.delete(tasks).where(eq(tasks.id, task.id));
+        await db.delete(users).where(inArray(users.id, [owner.id, other.id]));
+      }
+    },
+  );
+
   it.each(['task', 'fast'] as const)(
     'requires ownership of every %s provenance row, including missing IDs',
     async (provenance) => {

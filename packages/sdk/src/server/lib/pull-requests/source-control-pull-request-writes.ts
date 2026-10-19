@@ -18,7 +18,6 @@ import {
   bitbucketPullRequestSchema,
   giteaPullRequestSchema,
   gitLabMergeRequestSchema,
-  normalizeAdoBranchRef,
 } from './source-control-pull-request-branch-lookup';
 import {
   resolveAdoProviderContext,
@@ -33,7 +32,6 @@ import {
   buildGitLabTokenHeader,
   formatResponseBody,
   getPayloadRecord,
-  isDraftTitle,
   resolveRepositoryRow,
   resolveSourceControlHostForRepositoryFromPayload,
   resolveSourceControlProviderForRepositoryFromPayload,
@@ -42,6 +40,15 @@ import {
   type RepositoryRow,
 } from './source-control-pull-request-shared';
 import { markRoomotePullRequestReadyAfterCleanReview } from './mark-roomote-pull-request-ready';
+import {
+  assertProviderDraftState,
+  createProviderPullRequestUpdates,
+  explicitDraftUpdateWarning,
+} from './provider-pull-request-updates';
+import {
+  acquirePullRequestDraftTransitionLock,
+  setPullRequestAutoReadyBlocked,
+} from './pull-request-draft-intent';
 import { getTerminalReviewSummaryResult } from '../task-runs/github-pr-review-check';
 import { enqueuePrReviewNotification } from '../task-runs/pr-review-notification';
 
@@ -108,7 +115,7 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
   title: optionalTrimmedNonEmptyStringSchema,
   /** Required for reply, create_comment, and update_comment; optional for review. */
   body: z.string().optional(),
-  /** Optional draft state for update_pull_request. */
+  /** Explicit draft state for update_pull_request; true holds automatic clean-review promotion until a successful false update. */
   draft: z.boolean().optional(),
   /** Pull request identity updates deliberately exclude delivery metadata. */
   labels: z.never().optional(),
@@ -150,6 +157,16 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
 export type SourceControlPullRequestWriteInput = z.infer<
   typeof sourceControlPullRequestWriteInputSchema
 >;
+
+type PullRequestActionInput = Omit<
+  SourceControlPullRequestWriteInput,
+  'action'
+> & {
+  action: Exclude<
+    SourceControlPullRequestWriteInput['action'],
+    'update_pull_request'
+  >;
+};
 
 export type SourceControlPullRequestWriteResult = {
   success: true;
@@ -230,10 +247,6 @@ const gitHubResolvedThreadSchema = z
 const gitHubResolveMutationResponseSchema = z.object({
   resolveReviewThread: gitHubResolvedThreadSchema.optional(),
   unresolveReviewThread: gitHubResolvedThreadSchema.optional(),
-});
-
-const gitHubDraftMutationResponseSchema = z.object({
-  pullRequest: z.object({ isDraft: z.boolean() }).nullable(),
 });
 
 const gitLabNoteSchema = z
@@ -371,58 +384,134 @@ export async function writeSourceControlPullRequestForTaskRun({
     });
   }
 
-  let result: SourceControlPullRequestWriteResult;
-  switch (provider) {
-    case 'github':
+  const explicitDraft =
+    input.action === 'update_pull_request' ? input.draft : undefined;
+  const releaseDraftLock =
+    explicitDraft === undefined
+      ? undefined
+      : await acquirePullRequestDraftTransitionLock(repository, input.prNumber);
+  try {
+    releaseDraftLock?.signal.throwIfAborted();
+    if (explicitDraft === true) {
+      // Preserve intent even if an already-draft update is a provider no-op or
+      // the provider fails. A later successful explicit ready request releases it.
+      await setPullRequestAutoReadyBlocked(repository, input.prNumber, true);
+    }
+    releaseDraftLock?.signal.throwIfAborted();
+    let result: SourceControlPullRequestWriteResult;
+    if (input.action === 'update_pull_request') {
       try {
-        result = await writeGitHubPullRequest({ input, repository, provider });
+        const updates = await createProviderPullRequestUpdates(
+          provider,
+          repository,
+          input.prNumber,
+          fetchImpl,
+        );
+        const current =
+          provider === 'github' || input.draft !== undefined
+            ? await updates.read()
+            : undefined;
+        const warning = current
+          ? explicitDraftUpdateWarning(provider, current, input)
+          : undefined;
+        if (warning) {
+          result = buildWriteResult({
+            input,
+            provider,
+            repository,
+            applied: false,
+            warnings: [warning],
+          });
+        } else {
+          const updated = await updates.update(
+            current,
+            input,
+            releaseDraftLock?.signal,
+          );
+          if (input.draft !== undefined) {
+            assertProviderDraftState(
+              updated,
+              input.draft,
+              provider === 'github'
+                ? `GitHub did not confirm draft=${input.draft} for ${repository.fullName}#${input.prNumber}.`
+                : `Provider did not confirm draft=${input.draft} for ${input.repositoryFullName}#${input.prNumber}.`,
+            );
+          }
+          result = buildWriteResult({
+            input,
+            provider,
+            repository,
+            ...(provider === 'github' ? { url: updated.url } : {}),
+          });
+        }
       } catch (error) {
-        throw toGitHubWriteError(input, error);
+        throw provider === 'github' ? toGitHubWriteError(input, error) : error;
       }
-      break;
-    case 'gitlab':
-      result = await writeGitLabMergeRequest({
-        input,
-        repository,
-        provider,
-        fetchImpl,
-      });
-      break;
-    case 'gitea':
-      result = await writeGiteaPullRequest({
-        input,
-        repository,
-        provider,
-        fetchImpl,
-      });
-      break;
-    case 'bitbucket':
-      result = await writeBitbucketPullRequest({
-        input,
-        repository,
-        provider,
-        fetchImpl,
-      });
-      break;
-    case 'ado':
-      result = await writeAdoPullRequest({
-        input,
-        repository,
-        provider,
-        fetchImpl,
-      });
-      break;
-  }
+    } else {
+      const actionInput = { ...input, action: input.action };
+      switch (provider) {
+        case 'github':
+          try {
+            result = await writeGitHubPullRequest({
+              input: actionInput,
+              repository,
+              provider,
+            });
+          } catch (error) {
+            throw toGitHubWriteError(input, error);
+          }
+          break;
+        case 'gitlab':
+          result = await writeGitLabMergeRequest({
+            input: actionInput,
+            repository,
+            provider,
+            fetchImpl,
+          });
+          break;
+        case 'gitea':
+          result = await writeGiteaPullRequest({
+            input: actionInput,
+            repository,
+            provider,
+            fetchImpl,
+          });
+          break;
+        case 'bitbucket':
+          result = await writeBitbucketPullRequest({
+            input: actionInput,
+            repository,
+            provider,
+            fetchImpl,
+          });
+          break;
+        case 'ado':
+          result = await writeAdoPullRequest({
+            input: actionInput,
+            repository,
+            provider,
+            fetchImpl,
+          });
+          break;
+      }
+    }
 
-  await maybeMarkPullRequestReadyAfterReviewSummary({
-    taskRun,
-    input,
-    result,
-    provider,
-    host: payloadHost,
-    fetchImpl,
-  });
-  return result;
+    if (explicitDraft === false && result.applied) {
+      releaseDraftLock?.signal.throwIfAborted();
+      await setPullRequestAutoReadyBlocked(repository, input.prNumber, false);
+    }
+    await maybeMarkPullRequestReadyAfterReviewSummary({
+      taskRun,
+      input,
+      result,
+      provider,
+      host: payloadHost,
+      fetchImpl,
+    });
+    return result;
+  } finally {
+    await releaseDraftLock?.();
+  }
 }
 
 async function maybeMarkPullRequestReadyAfterReviewSummary({
@@ -597,19 +686,6 @@ function requirePullRequestUpdate(
       'update_pull_request requires at least one of targetBranch, title, body, or draft.',
     );
   }
-}
-
-function applyRequestedDraftTitle(
-  title: string,
-  draft: boolean,
-  prefix: 'Draft' | 'WIP',
-): string {
-  if (!draft) {
-    const stripped = title.replace(/^(draft|wip):\s*/i, '').trim();
-    return stripped.length > 0 ? stripped : title;
-  }
-
-  return isDraftTitle(title) ? title : `${prefix}: ${title}`;
 }
 
 function requireThreadId(input: SourceControlPullRequestWriteInput): string {
@@ -882,7 +958,7 @@ async function writeGitHubPullRequest({
   repository,
   provider,
 }: {
-  input: SourceControlPullRequestWriteInput;
+  input: PullRequestActionInput;
   repository: RepositoryRow;
   provider: 'github';
 }): Promise<SourceControlPullRequestWriteResult> {
@@ -921,63 +997,6 @@ async function writeGitHubPullRequest({
         repository,
         url: data.html_url ?? null,
       });
-    }
-    case 'update_pull_request': {
-      const { data: current } = await octokit.rest.pulls.get({
-        owner,
-        repo,
-        pull_number: input.prNumber,
-      });
-      let url = current.html_url ?? null;
-
-      if (
-        input.targetBranch !== undefined ||
-        input.title !== undefined ||
-        input.body !== undefined
-      ) {
-        const { data } = await octokit.rest.pulls.update({
-          owner,
-          repo,
-          pull_number: input.prNumber,
-          ...(input.targetBranch !== undefined
-            ? { base: input.targetBranch }
-            : {}),
-          ...(input.title !== undefined ? { title: input.title } : {}),
-          ...(input.body !== undefined ? { body: input.body } : {}),
-        });
-        url = data.html_url ?? url;
-      }
-
-      if (input.draft !== undefined && input.draft !== current.draft) {
-        const response = await octokit.graphql(
-          input.draft
-            ? `mutation ConvertPullRequestToDraft($pullRequestId: ID!) {
-                convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) {
-                  pullRequest { isDraft }
-                }
-              }`
-            : `mutation MarkPullRequestReadyForReview($pullRequestId: ID!) {
-                markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
-                  pullRequest { isDraft }
-                }
-              }`,
-          { pullRequestId: current.node_id },
-        );
-        const mutation = gitHubDraftMutationResponseSchema.parse(
-          input.draft
-            ? (response as { convertPullRequestToDraft?: unknown })
-                .convertPullRequestToDraft
-            : (response as { markPullRequestReadyForReview?: unknown })
-                .markPullRequestReadyForReview,
-        );
-        if (mutation.pullRequest?.isDraft !== input.draft) {
-          throw new Error(
-            `GitHub did not confirm draft=${input.draft} for ${repository.fullName}#${input.prNumber}.`,
-          );
-        }
-      }
-
-      return buildWriteResult({ input, provider, repository, url });
     }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
@@ -1276,7 +1295,7 @@ async function writeGitLabMergeRequest({
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestWriteInput;
+  input: PullRequestActionInput;
   repository: RepositoryRow;
   provider: 'gitlab';
   fetchImpl: FetchImpl;
@@ -1313,39 +1332,6 @@ async function writeGitLabMergeRequest({
         url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
         tokenHeader,
         body: { state_event: 'reopen' },
-        schema: gitLabMergeRequestSchema,
-      });
-
-      return buildWriteResult({ input, provider, repository });
-    }
-    case 'update_pull_request': {
-      let title = input.title;
-      if (input.draft !== undefined) {
-        const current = await requestJson({
-          fetchImpl,
-          url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
-          tokenHeader,
-          schema: gitLabMergeRequestSchema,
-        });
-        title = applyRequestedDraftTitle(
-          title ?? current.title,
-          input.draft,
-          'Draft',
-        );
-      }
-
-      await requestJson({
-        fetchImpl,
-        method: 'PUT',
-        url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
-        tokenHeader,
-        body: {
-          ...(input.targetBranch !== undefined
-            ? { target_branch: input.targetBranch }
-            : {}),
-          ...(title !== undefined ? { title } : {}),
-          ...(input.body !== undefined ? { description: input.body } : {}),
-        },
         schema: gitLabMergeRequestSchema,
       });
 
@@ -1792,7 +1778,7 @@ async function writeGiteaPullRequest({
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestWriteInput;
+  input: PullRequestActionInput;
   repository: RepositoryRow;
   provider: 'gitea';
   fetchImpl: FetchImpl;
@@ -1841,67 +1827,6 @@ async function writeGiteaPullRequest({
         ),
         tokenHeader,
         body: { state: 'open' },
-        schema: giteaPullRequestSchema,
-      });
-
-      return buildWriteResult({ input, provider, repository });
-    }
-    case 'update_pull_request': {
-      const url = buildApiUrl(
-        apiBaseUrl,
-        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${input.prNumber}`,
-        {},
-      );
-      let title = input.title;
-      if (input.draft !== undefined) {
-        const current = await requestJson({
-          fetchImpl,
-          url,
-          tokenHeader,
-          schema: giteaPullRequestSchema,
-        });
-        const currentTitle = current.title ?? '';
-        if (!currentTitle && title === undefined) {
-          return buildWriteResult({
-            input,
-            provider,
-            repository,
-            applied: false,
-            warnings: [
-              'Gitea did not expose the current title required for its Draft/WIP title transition, so none of the requested pull request updates were applied.',
-            ],
-          });
-        }
-        if (input.draft === false && current.draft === true) {
-          return buildWriteResult({
-            input,
-            provider,
-            repository,
-            applied: false,
-            warnings: [
-              'Gitea cannot change native draft state through this source-control interface, so none of the requested pull request updates were applied.',
-            ],
-          });
-        }
-        title = applyRequestedDraftTitle(
-          title ?? currentTitle,
-          input.draft,
-          'WIP',
-        );
-      }
-
-      await requestJson({
-        fetchImpl,
-        method: 'PATCH',
-        url,
-        tokenHeader,
-        body: {
-          ...(input.targetBranch !== undefined
-            ? { base: input.targetBranch }
-            : {}),
-          ...(title !== undefined ? { title } : {}),
-          ...(input.body !== undefined ? { body: input.body } : {}),
-        },
         schema: giteaPullRequestSchema,
       });
 
@@ -2096,7 +2021,7 @@ async function writeBitbucketPullRequest({
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestWriteInput;
+  input: PullRequestActionInput;
   repository: RepositoryRow;
   provider: 'bitbucket';
   fetchImpl: FetchImpl;
@@ -2147,54 +2072,6 @@ async function writeBitbucketPullRequest({
           {},
         ),
         tokenHeader,
-        schema: bitbucketPullRequestSchema,
-      });
-
-      return buildWriteResult({ input, provider, repository });
-    }
-    case 'update_pull_request': {
-      const url = buildApiUrl(
-        apiBaseUrl,
-        `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
-          repo,
-        )}/pullrequests/${input.prNumber}`,
-        {},
-      );
-      if (input.draft !== undefined) {
-        const current = await requestJson({
-          fetchImpl,
-          url,
-          tokenHeader,
-          schema: bitbucketPullRequestSchema,
-        });
-        if (typeof current.draft !== 'boolean') {
-          return buildWriteResult({
-            input,
-            provider,
-            repository,
-            applied: false,
-            warnings: [
-              'Bitbucket Cloud did not expose draft state, so none of the requested pull request updates were applied.',
-            ],
-          });
-        }
-      }
-
-      await requestJson({
-        fetchImpl,
-        method: 'PUT',
-        url,
-        tokenHeader,
-        body: {
-          ...(input.targetBranch !== undefined
-            ? {
-                destination: { branch: { name: input.targetBranch } },
-              }
-            : {}),
-          ...(input.title !== undefined ? { title: input.title } : {}),
-          ...(input.body !== undefined ? { description: input.body } : {}),
-          ...(input.draft !== undefined ? { draft: input.draft } : {}),
-        },
         schema: bitbucketPullRequestSchema,
       });
 
@@ -2458,7 +2335,7 @@ async function writeAdoPullRequest({
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestWriteInput;
+  input: PullRequestActionInput;
   repository: RepositoryRow;
   provider: 'ado';
   fetchImpl: FetchImpl;
@@ -2504,50 +2381,6 @@ async function writeAdoPullRequest({
         ),
         tokenHeader,
         body: { status: 'active' },
-        schema: adoPullRequestSchema,
-      });
-
-      return buildWriteResult({ input, provider, repository });
-    }
-    case 'update_pull_request': {
-      const url = buildApiUrl(
-        organizationApiBaseUrl,
-        `${repositoryPullRequestsPath}/${input.prNumber}`,
-        { 'api-version': ADO_API_VERSION },
-      );
-      if (input.draft !== undefined) {
-        const current = await requestJson({
-          fetchImpl,
-          url,
-          tokenHeader,
-          schema: adoPullRequestSchema,
-        });
-        if (typeof current.isDraft !== 'boolean') {
-          return buildWriteResult({
-            input,
-            provider,
-            repository,
-            applied: false,
-            warnings: [
-              'Azure DevOps did not expose draft state, so none of the requested pull request updates were applied.',
-            ],
-          });
-        }
-      }
-
-      await requestJson({
-        fetchImpl,
-        method: 'PATCH',
-        url,
-        tokenHeader,
-        body: {
-          ...(input.targetBranch !== undefined
-            ? { targetRefName: normalizeAdoBranchRef(input.targetBranch) }
-            : {}),
-          ...(input.title !== undefined ? { title: input.title } : {}),
-          ...(input.body !== undefined ? { description: input.body } : {}),
-          ...(input.draft !== undefined ? { isDraft: input.draft } : {}),
-        },
         schema: adoPullRequestSchema,
       });
 

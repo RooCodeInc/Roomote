@@ -21,6 +21,7 @@ const {
   mockRedisSet,
   mockUpdateWhere,
   mockSyncTaskStateFromRuns,
+  mockResolveDefaultComputeProvider,
 } = vi.hoisted(() => ({
   mockFinishRun: vi.fn().mockResolvedValue(undefined),
   mockCaptureControllerException: vi.fn(),
@@ -45,6 +46,7 @@ const {
     returning: vi.fn().mockResolvedValue([{}]),
   }),
   mockSyncTaskStateFromRuns: vi.fn().mockResolvedValue(undefined),
+  mockResolveDefaultComputeProvider: vi.fn().mockResolvedValue('docker'),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -87,7 +89,7 @@ vi.mock('@roomote/db/server', async () => {
       mockRecordTaskRunLifecycleEvent(...args),
     readManagedDeploymentAccess: (...args: unknown[]) =>
       mockReadManagedDeploymentAccess(...args),
-    resolveDefaultComputeProvider: vi.fn().mockResolvedValue('docker'),
+    resolveDefaultComputeProvider: mockResolveDefaultComputeProvider,
     syncTaskStateFromRuns: (...args: unknown[]) =>
       mockSyncTaskStateFromRuns(...args),
     updatePendingEnvironmentSnapshot: (...args: unknown[]) =>
@@ -133,6 +135,7 @@ import { DockerBootError } from '../compute-providers/docker-sandbox-security';
 
 // Create a concrete subclass for testing the abstract BaseController.
 class TestController extends BaseController {
+  public onSpawnProvider = vi.fn();
   constructor() {
     super('development');
   }
@@ -142,8 +145,18 @@ class TestController extends BaseController {
     _authToken: string,
     _deploymentSlug: string,
     _sandboxTimeoutMs: number,
+    provider?: import('@roomote/types').ComputeProvider,
   ): Promise<void> {
-    // no-op for testing
+    this.onSpawnProvider(provider);
+  }
+
+  public async testSpawnWorker(taskRun: TaskRun) {
+    this.isRunning = true;
+    try {
+      return await this.spawnWorker(taskRun);
+    } finally {
+      this.isRunning = false;
+    }
   }
 
   // Expose handleSpawnTaskRunError for direct testing.
@@ -188,6 +201,158 @@ class TestController extends BaseController {
 class SaturatedTestController extends TestController {
   protected readonly MAX_CONCURRENT_SPAWNS: number = 0;
 }
+
+class ShutdownTestController extends TestController {
+  public onSpawn = vi.fn().mockResolvedValue(undefined);
+  public onTeardown = vi.fn();
+  public onClaim = vi.fn();
+  public beforeClaim: Promise<void> = Promise.resolve();
+
+  constructor() {
+    super();
+    Object.defineProperty(this, 'SHUTDOWN_TIMEOUT_MS', { value: 50 });
+  }
+
+  protected async dequeueTaskRun(taskRun: TaskRun) {
+    this.onClaim();
+    await this.beforeClaim;
+    return { taskRun, authToken: 'synthetic-runtime-token' };
+  }
+
+  protected async spawnFreshWorker() {
+    await this.onSpawn();
+  }
+  protected async teardown() {
+    this.onTeardown();
+  }
+}
+
+function shutdownDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+describe('bounded controller shutdown', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    resetControllerMocks();
+    mockDequeueTaskRun.mockReset();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function startSpawn(
+    controller: ShutdownTestController,
+    queue: ReturnType<typeof shutdownDeferred<number | null>>,
+  ) {
+    mockTaskRunsFindFirst.mockResolvedValue(
+      makeTaskRun({ status: RunStatus.Pending }),
+    );
+    mockDequeueTaskRun
+      .mockResolvedValueOnce(42)
+      .mockImplementation(() => queue.promise);
+    const running = controller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.onSpawn).toHaveBeenCalledOnce();
+    return { running };
+  }
+
+  it('bounds a never-settling provider and spends one budget across both waits', async () => {
+    const provider = shutdownDeferred<void>();
+    const queue = shutdownDeferred<number | null>();
+    const controller = new ShutdownTestController();
+    controller.onSpawn.mockReturnValue(provider.promise);
+    const { running } = await startSpawn(controller, queue);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stopping = controller.stop();
+    await vi.advanceTimersByTimeAsync(40);
+    queue.resolve(null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.onTeardown).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10);
+    await stopping;
+    expect(controller.onTeardown).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining('unfinished spawn run IDs: 42'),
+    );
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    provider.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    await running;
+    warning.mockRestore();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('waits for normal settlement and clears shutdown/progress timers', async () => {
+    const provider = shutdownDeferred<void>();
+    const queue = shutdownDeferred<number | null>();
+    const controller = new ShutdownTestController();
+    controller.onSpawn.mockReturnValue(provider.promise);
+    const { running } = await startSpawn(controller, queue);
+    const stopping = controller.stop();
+    provider.resolve();
+    queue.resolve(null);
+    await vi.advanceTimersByTimeAsync(0);
+    await stopping;
+    await running;
+    expect(controller.onTeardown).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not dispatch an id returned by Redis after stop has timed out', async () => {
+    const queue = shutdownDeferred<number | null>();
+    const controller = new ShutdownTestController();
+    mockDequeueTaskRun.mockImplementation(() => queue.promise);
+    mockTaskRunsFindFirst.mockResolvedValue(
+      makeTaskRun({ status: RunStatus.Pending }),
+    );
+    const running = controller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const stopping = controller.stop();
+    await vi.advanceTimersByTimeAsync(50);
+    await stopping;
+    queue.resolve(42);
+    await vi.advanceTimersByTimeAsync(0);
+    await running;
+    expect(controller.onClaim).not.toHaveBeenCalled();
+    expect(controller.onSpawn).not.toHaveBeenCalled();
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(controller.onTeardown).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not start provider work when a database claim finishes after stop', async () => {
+    const claim = shutdownDeferred<void>();
+    const queue = shutdownDeferred<number | null>();
+    const controller = new ShutdownTestController();
+    controller.beforeClaim = claim.promise;
+    mockTaskRunsFindFirst.mockResolvedValue(
+      makeTaskRun({ status: RunStatus.Pending }),
+    );
+    mockDequeueTaskRun
+      .mockResolvedValueOnce(42)
+      .mockImplementation(() => queue.promise);
+    const running = controller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.onClaim).toHaveBeenCalledOnce();
+    const stopping = controller.stop();
+    await vi.advanceTimersByTimeAsync(50);
+    await stopping;
+    claim.resolve();
+    queue.resolve(null);
+    await vi.advanceTimersByTimeAsync(0);
+    await running;
+    expect(controller.onSpawn).not.toHaveBeenCalled();
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(controller.onTeardown).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -266,6 +431,7 @@ function resetControllerMocks() {
   mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
   mockDbExecute.mockReset().mockResolvedValue([]);
   mockDbTransaction.mockReset();
+  mockResolveDefaultComputeProvider.mockReset().mockResolvedValue('docker');
   mockUpdateWhere.mockReset().mockReturnValue({
     returning: vi.fn().mockResolvedValue([{}]),
   });
@@ -564,6 +730,56 @@ describe('BaseController.dequeueTaskRun', () => {
       }),
     );
   });
+
+  it('dequeues and spawns a pinned vendor without an eligible default', async () => {
+    mockResolveDefaultComputeProvider.mockRejectedValue(
+      new Error('No configured sandbox provider is available.'),
+    );
+    const job = makeTaskRun({ status: RunStatus.Pending, vendor: 'modal' });
+
+    await controller.testSpawnWorker(job);
+
+    expect(controller.onSpawnProvider).toHaveBeenCalledWith('modal');
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        details: expect.objectContaining({ provider: 'modal' }),
+      }),
+    );
+    expect(mockResolveDefaultComputeProvider).not.toHaveBeenCalled();
+    expect(mockFinishRun).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'invalid'])(
+    'uses an eligible default for missing/invalid vendor %s at dequeue and spawn',
+    async (vendor) => {
+      const job = makeTaskRun({
+        status: RunStatus.Pending,
+        vendor: vendor as TaskRun['vendor'],
+      });
+      await controller.testSpawnWorker(job);
+      expect(controller.onSpawnProvider).toHaveBeenCalledWith('docker');
+      expect(mockResolveDefaultComputeProvider).toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, 'invalid'])(
+    'rejects dequeue with no eligible default and vendor %s',
+    async (vendor) => {
+      mockResolveDefaultComputeProvider.mockRejectedValue(
+        new Error('No configured sandbox provider is available.'),
+      );
+      await expect(
+        controller.testDequeueTaskRun(
+          makeTaskRun({
+            status: RunStatus.Pending,
+            vendor: vendor as TaskRun['vendor'],
+          }),
+        ),
+      ).rejects.toThrow('No configured sandbox provider is available.');
+      expect(mockDbTransaction).not.toHaveBeenCalled();
+    },
+  );
 
   it('fails pending jobs before token minting when deployment is read-only', async () => {
     const job = makeTaskRun({

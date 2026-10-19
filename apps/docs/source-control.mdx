@@ -113,6 +113,11 @@ branches that changed after review remain drafts. This setting does not approve
 or merge anything, and it is inactive when delivery is already set to
 **Ready-for-review pull request** or **Push branch only**.
 
+An explicit draft-state update through Roomote keeps that pull request in draft
+across subsequent pushes and clean reviews. A later explicit ready-for-review
+update through Roomote releases this hold. Updating the title, description, or
+base branch does not release it.
+
 ## Pull request status notifications
 
 When a tracked, Roomote-created GitHub pull request becomes conflicted, Roomote

@@ -1,0 +1,1 @@
+ALTER TABLE "task_pull_requests" ADD COLUMN "auto_ready_blocked" boolean DEFAULT false NOT NULL;

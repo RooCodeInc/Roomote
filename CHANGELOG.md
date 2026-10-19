@@ -2,6 +2,39 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.18.0 (2026-10-19)
+
+Roomote 1.18 makes model choices easier to inspect and control, accepts HAR network exports for debugging, and improves Azure inference, draft pull-request handling, and task reliability.
+
+### Highlights
+
+- Attach HAR network exports to sessions and tasks to investigate request URLs, response statuses, and timings.
+- Discover enabled models through the account API, choose a session model at creation, and inspect stored model-setting sources.
+- Run Azure OpenAI and Azure AI Foundry tasks through correctly versioned gateway paths.
+- Keep explicit draft requests intact through clean reviews, with more reliable review completion and sandbox recovery.
+
+### Minor changes
+
+- Roomote MCP and account API clients can discover enabled models with paginated results, start sessions with an exact model and supported reasoning effort, and inspect whether session and task model settings are explicit overrides or inherited configuration. Configuration sources describe stored settings, not the model that ultimately executes after routing or fallback.
+- HTTP Archive (`.har`) exports are now accepted as structured-text attachments in sessions and tasks, including supported chat and MCP intake and generic browser MIME labels. Existing 8 MiB text-file and shared 200,000-character extraction limits still apply.
+
+### Patch changes
+
+- Agents can now update the separate audio and video model role without the request being rejected.
+- Automation catalog text is now easier to read.
+- Fix Azure OpenAI and Azure AI Foundry task requests being rejected by the inference gateway because their API paths were missing the version prefix.
+- Background snapshot jobs now skip unsupported or removed sandbox providers instead of failing on those configurations.
+- Memory expansion and synthesis requests using the native Responses format now route through the configured helper model instead of forwarding the helper placeholder to an inference provider.
+- Controllers can now shut down when a worker launch stalls instead of waiting indefinitely for the launch to finish.
+- Custom MCP tool catalogs can now be retried in place after a failed read without reopening the integration dialog.
+- Delegated work now honors explicitly requested or confirmed model choices instead of replacing them with routing defaults.
+- An explicit draft-state update through Roomote now keeps the pull request in draft across subsequent pushes and clean reviews until a later explicit ready-for-review update releases the hold. Title, description, and base-branch edits do not release it.
+- GitHub review checks now reach their final status when session-linked reviews finish instead of staying in progress.
+- Mobile navigation controls now have descriptive accessible names.
+- Pull-request provenance links now lead back to the originating session, keeping follow-up work connected to its conversation.
+- Routing settings now retain loaded rules and an open edit after a failed read, with Retry and write protection until recovery instead of showing an empty rules list.
+- Weekly automation next-run previews now follow the scheduler's eligibility rules, including same-morning and daylight-saving boundaries.
+
 ## 1.17.0 (2026-10-08)
 
 Roomote 1.17 adds dedicated audio and video model controls, authenticated task-output access through MCP, and Claude Haiku 5.5 recommendations while improving task recovery and delivery reliability.

@@ -39,6 +39,7 @@ import {
   FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
 } from './fast-agent-conversation';
+import type { ModelRequestMessage } from './fast-agent-model-authorization';
 
 export type FastAgentConversationRecord = {
   id: string;
@@ -550,6 +551,142 @@ export async function listRecentFastAgentHumanUserPromptTexts(input: {
   return groups.map((group) => group.texts.join('\n\n'));
 }
 
+/** Model consent reads typed canonical events, never compatibility envelopes. */
+export async function persistFastAgentModelAuthorizationSnapshot(
+  conversationId: string,
+  turnId: string,
+  messages: readonly ModelRequestMessage[],
+): Promise<void> {
+  const snapshot = JSON.stringify({ version: 1, messages });
+  const rows = await db
+    .update(fastAgentMessages)
+    .set({
+      metadata: sql`coalesce(${fastAgentMessages.metadata}, '{}'::jsonb) || jsonb_build_object('modelAuthorizationSnapshot', ${snapshot}::jsonb)`,
+    })
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.eventId, `${turnId}:user`),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        eq(fastAgentMessages.role, 'user'),
+      ),
+    )
+    .returning({ id: fastAgentMessages.id });
+  if (rows.length !== 1)
+    throw new Error('Model authorization prompt anchor unavailable');
+}
+
+export async function loadFastAgentModelAuthorizationSnapshot(
+  conversationId: string,
+  turnId: string,
+): Promise<ModelRequestMessage[] | null> {
+  const [row] = await db
+    .select({ metadata: fastAgentMessages.metadata })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.eventId, `${turnId}:user`),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        eq(fastAgentMessages.role, 'user'),
+      ),
+    )
+    .limit(1);
+  const snapshot = row?.metadata?.modelAuthorizationSnapshot as
+    | { version?: unknown; messages?: unknown }
+    | undefined;
+  if (snapshot?.version !== 1 || !Array.isArray(snapshot.messages)) return null;
+  if (
+    !snapshot.messages.every(
+      (message) =>
+        message &&
+        typeof message === 'object' &&
+        ['user', 'assistant', 'tool', 'untrusted'].includes(message.role) &&
+        typeof message.text === 'string',
+    )
+  )
+    return null;
+  return snapshot.messages as ModelRequestMessage[];
+}
+
+export async function listFastAgentModelRequestDialogue(input: {
+  conversationId: string;
+  beforeTs: number;
+  currentEventId: string;
+  currentTurnId: string;
+  requireAnchor?: boolean;
+}): Promise<ModelRequestMessage[]> {
+  const [anchor] = await db
+    .select({ createdAt: fastAgentMessages.createdAt })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        eq(fastAgentMessages.eventId, input.currentEventId),
+      ),
+    )
+    .limit(1);
+  if (input.requireAnchor && !anchor) return [];
+  const rows = await db
+    .select({
+      role: fastAgentMessages.role,
+      eventType: fastAgentMessages.eventType,
+      metadata: fastAgentMessages.metadata,
+      contentBlocks: fastAgentMessages.contentBlocks,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        lte(fastAgentMessages.ts, input.beforeTs),
+        ne(fastAgentMessages.eventId, input.currentEventId),
+        // Compare in Postgres without truncating timestamp precision to JS Date.
+        anchor
+          ? sql`${fastAgentMessages.createdAt} < (
+        select created_at from fast_agent_messages
+        where conversation_id = ${input.conversationId} and event_id = ${input.currentEventId}
+        limit 1
+      )`
+          : undefined,
+        sql`coalesce(${fastAgentMessages.metadata}->>'visibleInTranscript', 'true') <> 'false'`,
+        or(
+          eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.ToolResult),
+          eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+          and(
+            eq(
+              fastAgentMessages.eventType,
+              ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            ),
+            eq(fastAgentMessages.role, 'assistant'),
+            sql`${fastAgentMessages.turnId} is distinct from ${input.currentTurnId}`,
+            sql`coalesce(${fastAgentMessages.metadata}->>'inferenceRetryNotice', 'false') <> 'true'`,
+          ),
+        ),
+      ),
+    )
+    .orderBy(
+      desc(fastAgentMessages.ts),
+      desc(fastAgentMessages.createdAt),
+      desc(fastAgentMessages.turnSeq),
+    )
+    .limit(20);
+  return rows.reverse().map((row) => ({
+    role:
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult
+        ? 'tool'
+        : row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt
+          ? row.role === 'user' &&
+            row.metadata?.turnSource === 'human' &&
+            row.metadata?.inputKind !== FAST_AGENT_REACTION_INPUT_TYPE
+            ? 'user'
+            : 'untrusted'
+          : 'assistant',
+    text: row.contentBlocks
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n'),
+  }));
+}
+
 /**
  * What the agent said to the owner between their previous message and the
  * current one: its visible replies, oldest first. Auto reads it to learn what
@@ -560,6 +697,8 @@ export async function findFastAgentRepliesBeforeHumanPrompt(input: {
   conversationId: string;
   beforeTs: number;
   currentEventId: string;
+  /** Recover only the final proposal before a replayed human instruction. */
+  modelProposalTurnId?: string;
 }): Promise<string | undefined> {
   const [previousPrompt] = await db
     .select({ ts: fastAgentMessages.ts })
@@ -567,7 +706,9 @@ export async function findFastAgentRepliesBeforeHumanPrompt(input: {
     .where(
       and(
         eq(fastAgentMessages.conversationId, input.conversationId),
-        lt(fastAgentMessages.ts, input.beforeTs),
+        input.modelProposalTurnId
+          ? lte(fastAgentMessages.ts, input.beforeTs)
+          : lt(fastAgentMessages.ts, input.beforeTs),
         ne(fastAgentMessages.eventId, input.currentEventId),
         eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
         eq(fastAgentMessages.role, 'user'),
@@ -589,12 +730,15 @@ export async function findFastAgentRepliesBeforeHumanPrompt(input: {
           ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
         ),
         eq(fastAgentMessages.role, 'assistant'),
+        input.modelProposalTurnId
+          ? sql`${fastAgentMessages.turnId} is distinct from ${input.modelProposalTurnId}`
+          : undefined,
         sql`coalesce(${fastAgentMessages.metadata}->>'visibleInTranscript', 'true') <> 'false'`,
         sql`coalesce(${fastAgentMessages.metadata}->>'inferenceRetryNotice', 'false') <> 'true'`,
       ),
     )
     .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
-    .limit(FAST_AGENT_REPLIED_TO_MESSAGE_LIMIT);
+    .limit(input.modelProposalTurnId ? 1 : FAST_AGENT_REPLIED_TO_MESSAGE_LIMIT);
   const text = rows
     .reverse()
     .map((row) =>
@@ -1633,9 +1777,11 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             (Boolean(currentHumanPrompt) || !hasCompatibilityHumanPrompt);
         }
 
+        const metadata = message.metadata ? { ...message.metadata } : null;
+        if (metadata) delete metadata.modelAuthorizationSnapshot;
         const insert = tx
           .insert(fastAgentMessages)
-          .values({ conversationId, ...message });
+          .values({ conversationId, ...message, metadata });
         if (insertOnly) {
           await insert.onConflictDoNothing({
             target: [
@@ -1656,7 +1802,12 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               eventType: message.eventType,
               role: message.role ?? null,
               contentBlocks: message.contentBlocks ?? [],
-              metadata: message.metadata ?? null,
+              // The cache belongs to its dedicated writer. A replay upsert
+              // must preserve the newest stored value atomically, not reload
+              // and overwrite it with a possibly stale in-memory snapshot.
+              metadata: sql`case when ${fastAgentMessages.metadata} ? 'modelAuthorizationSnapshot'
+                then coalesce(${metadata ? JSON.stringify(metadata) : null}::jsonb, '{}'::jsonb) || jsonb_build_object('modelAuthorizationSnapshot', ${fastAgentMessages.metadata}->'modelAuthorizationSnapshot')
+                else ${metadata ? JSON.stringify(metadata) : null}::jsonb end`,
               payload: message.payload ?? {},
               source: message.source ?? null,
               nativeSessionId: message.nativeSessionId ?? null,

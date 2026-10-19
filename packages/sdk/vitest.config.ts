@@ -1,6 +1,7 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 
 const globalDbStateTests = [
+  'src/server/lib/pull-requests/__tests__/explicit-draft-intent.db.test.ts',
   // Other MCP setup suites make unscoped connection assertions. Keep this
   // real-token lifecycle fixture out of their parallel phase.
   'src/server/lib/mcp/data-refresh.db.test.ts',

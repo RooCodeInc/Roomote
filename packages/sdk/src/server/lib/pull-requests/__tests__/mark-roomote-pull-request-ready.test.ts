@@ -17,6 +17,7 @@ const {
   mockResolveAdoProviderContext,
   mockSupportsDraftTransition,
   mockUpdateTaskPrStatus,
+  mockIsAutoReadyBlocked,
 } = vi.hoisted(() => ({
   mockAcquireLifecycleLock: vi.fn(),
   mockCreateGitHubToken: vi.fn(),
@@ -34,6 +35,7 @@ const {
   mockResolveAdoProviderContext: vi.fn(),
   mockSupportsDraftTransition: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
+  mockIsAutoReadyBlocked: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -100,6 +102,12 @@ vi.mock('../../task-runs/github-pr-review-check', () => ({
 
 import { markRoomotePullRequestReadyAfterCleanReview } from '../mark-roomote-pull-request-ready';
 
+vi.mock('../pull-request-draft-intent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../pull-request-draft-intent')>()),
+  isPullRequestAutoReadyBlocked: (...args: unknown[]) =>
+    mockIsAutoReadyBlocked(...args),
+}));
+
 const REVIEW_HEAD_SHA = '1234567890abcdef1234567890abcdef12345678';
 const CLEAN_REVIEW = {
   outcome: 'clean',
@@ -151,8 +159,43 @@ function responseQueue(...bodies: unknown[]) {
   return vi.fn(async () => jsonResponse(bodies.shift()));
 }
 
+const httpProviders = ['gitlab', 'gitea', 'ado', 'bitbucket'] as const;
+function httpPullRequest(
+  provider: (typeof httpProviders)[number],
+  draft: boolean,
+  headSha = REVIEW_HEAD_SHA,
+) {
+  const title = draft ? 'wIp:  Add feature' : 'Add feature';
+  switch (provider) {
+    case 'gitlab':
+      return { iid: 42, title, state: 'opened', draft, sha: headSha };
+    case 'gitea':
+      return { number: 42, title, state: 'open', head: { sha: headSha } };
+    case 'ado':
+      return {
+        pullRequestId: 42,
+        title,
+        status: 'active',
+        isDraft: draft,
+        lastMergeSourceCommit: { commitId: headSha },
+      };
+    case 'bitbucket':
+      return {
+        id: 42,
+        title,
+        state: 'OPEN',
+        draft,
+        source: { commit: { hash: headSha } },
+      };
+  }
+}
+
 describe('markRoomotePullRequestReadyAfterCleanReview', () => {
   beforeEach(() => {
+    mockIsAutoReadyBlocked.mockReset().mockResolvedValue(false);
+    Object.assign(mockReleaseLifecycleLock, {
+      signal: new AbortController().signal,
+    });
     mockAcquireLifecycleLock
       .mockReset()
       .mockResolvedValue(mockReleaseLifecycleLock);
@@ -270,6 +313,18 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
     );
     expect(mockReleaseLifecycleLock).toHaveBeenCalledOnce();
   });
+
+  it.each(['github', 'gitlab', 'gitea', 'ado', 'bitbucket'] as const)(
+    'respects explicit draft intent before contacting %s',
+    async (provider) => {
+      mockIsAutoReadyBlocked.mockResolvedValue(true);
+      await expect(markReady(CLEAN_REVIEW, { provider })).resolves.toBe(
+        'draft_requested',
+      );
+      expect(mockGetOctokit).not.toHaveBeenCalled();
+      expect(mockReleaseLifecycleLock).toHaveBeenCalledOnce();
+    },
+  );
 
   it('converts the pull request back to draft when the mutation sees a newer head', async () => {
     mockGraphql
@@ -410,6 +465,84 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
       { host: 'github.com', repositoryId: 'repo-id' },
     );
   });
+
+  it('does not treat an unconfirmed GitHub response as a concurrent ready retry', async () => {
+    mockGraphql.mockResolvedValue({ markPullRequestReadyForReview: null });
+    mockPullRequestGet
+      .mockResolvedValueOnce(pullRequest())
+      .mockResolvedValueOnce(pullRequest({ draft: false }));
+    await expect(markReady()).rejects.toThrow(
+      'GitHub did not confirm ready transition',
+    );
+    expect(mockPullRequestGet).toHaveBeenCalledOnce();
+    expect(mockUpdateTaskPrStatus).not.toHaveBeenCalled();
+  });
+
+  it.each(httpProviders)(
+    'restores %s draft state when promotion observes a racing head, even after lock loss',
+    async (provider) => {
+      const ownership = new AbortController();
+      Object.assign(mockReleaseLifecycleLock, { signal: ownership.signal });
+      const responses = [
+        httpPullRequest(provider, true),
+        httpPullRequest(provider, false, 'new-head'),
+        httpPullRequest(provider, true, 'new-head'),
+      ];
+      const fetchImpl = vi.fn(async () => {
+        if (responses.length === 2)
+          ownership.abort(new Error('controlled lock loss'));
+        return jsonResponse(responses.shift());
+      });
+      await expect(
+        markReady(CLEAN_REVIEW, { provider, fetchImpl }),
+      ).resolves.toBe('head_changed');
+      const compensation =
+        provider === 'gitlab' || provider === 'gitea'
+          ? { title: 'wIp:  Add feature' }
+          : provider === 'ado'
+            ? { isDraft: true }
+            : { draft: true };
+      expect(fetchImpl).toHaveBeenNthCalledWith(
+        3,
+        expect.any(String),
+        expect.objectContaining({ body: JSON.stringify(compensation) }),
+      );
+      expect(mockUpdateTaskPrStatus).not.toHaveBeenCalled();
+      expect(mockReleaseLifecycleLock).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(httpProviders)(
+    'does not mutate %s after lock ownership is lost during its read',
+    async (provider) => {
+      const ownership = new AbortController();
+      Object.assign(mockReleaseLifecycleLock, { signal: ownership.signal });
+      const fetchImpl = vi.fn(async () => {
+        ownership.abort(new Error('controlled lock loss'));
+        return jsonResponse(httpPullRequest(provider, true));
+      });
+      await expect(
+        markReady(CLEAN_REVIEW, { provider, fetchImpl }),
+      ).rejects.toThrow('controlled lock loss');
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(mockUpdateTaskPrStatus).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(httpProviders)(
+    'fails closed when %s does not confirm its ready update',
+    async (provider) => {
+      const fetchImpl = responseQueue(
+        httpPullRequest(provider, true),
+        httpPullRequest(provider, true),
+      );
+      await expect(
+        markReady(CLEAN_REVIEW, { provider, fetchImpl }),
+      ).rejects.toThrow('did not confirm ready transition');
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(mockUpdateTaskPrStatus).not.toHaveBeenCalled();
+    },
+  );
 
   it('marks a GitLab draft merge request ready by removing its title prefix', async () => {
     const fetchImpl = responseQueue(

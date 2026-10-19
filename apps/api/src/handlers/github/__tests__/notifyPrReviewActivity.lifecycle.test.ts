@@ -33,6 +33,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
 vi.mock('@roomote/sdk/server', () => ({
   completeGithubPrReviewCheckFromSummary:
     mockCompleteGithubPrReviewCheckFromSummary,
+  findCanonicalGithubPrReviewSummaryOwner: vi.fn().mockResolvedValue(null),
   enqueuePrReviewNotification: mockEnqueuePrReviewNotification,
   markRoomotePullRequestReadyAfterCleanReview:
     mockMarkRoomotePullRequestReadyAfterCleanReview,

@@ -24,7 +24,7 @@ describe('githubPrReview prompt source', () => {
     );
     expect(workflowContent).toContain('task_link_follow: followLink');
     expect(workflowContent).toContain(
-      'task_link_see: `[See task](${taskRunUrl})`',
+      'task_link_see: `[See session](${taskRunUrl})`',
     );
     expect(workflowContent).not.toContain('task_link_fix_all:');
     expect(workflowContent).not.toContain('fix_issue_base_url:');

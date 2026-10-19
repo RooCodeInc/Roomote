@@ -33,7 +33,7 @@ export function githubPrConflictResolve({
       pull_request_number: prNumber,
       workflow: 'pr_conflict_resolve',
       task_link_follow: `[Follow](${taskRunUrl})`,
-      task_link_see: `[See task](${taskRunUrl})`,
+      task_link_see: `[See session](${taskRunUrl})`,
       pull_request_title: prTitle,
       pull_request_url: prUrl,
       head_branch: headRef,

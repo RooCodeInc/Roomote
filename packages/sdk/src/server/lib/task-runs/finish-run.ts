@@ -59,6 +59,7 @@ import {
   distillTaskRunTurnMemory,
   finalizeGithubPrReviewComment,
   getTaskUrl,
+  getTaskSessionUrl,
   releaseTaskRun,
   retryFailedTaskStart,
   suggestSlackQuestionChannels,
@@ -805,9 +806,9 @@ async function failPendingEnvironmentSnapshotForRun(
     return;
   }
 
-  const provider = resolveComputeProviderTarget(
+  const provider = await resolveComputeProviderTarget(
     run.vendor,
-    await resolveDefaultComputeProvider(),
+    resolveDefaultComputeProvider,
   );
 
   await updatePendingEnvironmentSnapshot(db, {
@@ -1000,7 +1001,7 @@ async function cleanupGithubPrReviewArtifacts(
                 : 'canceled';
           const terminalStatus = buildTerminalReviewStatus({
             outcome,
-            taskUrl: getTaskUrl({
+            taskUrl: await getTaskSessionUrl({
               taskId: run.taskId,
               utm: {
                 source: 'github-comment',

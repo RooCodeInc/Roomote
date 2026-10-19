@@ -1,6 +1,7 @@
 import {
   type ComputeProvider,
   resolveComputeProviderTarget,
+  getComputeProviderCapabilities,
 } from '@roomote/types';
 import {
   db,
@@ -133,6 +134,9 @@ export async function rebuildRetiredSnapshots(now: Date): Promise<{
   const provider = resolveComputeProviderTarget(
     await resolveDefaultComputeProvider(),
   );
+  if (!getComputeProviderCapabilities(provider).supportsSnapshots) {
+    return { rebuilt: 0, skipped: 0, errors: 0 };
+  }
   const candidates = await findRetiredSnapshotRebuildCandidates(now, provider);
 
   if (candidates.length === 0) {

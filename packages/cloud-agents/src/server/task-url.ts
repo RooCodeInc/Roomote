@@ -1,4 +1,9 @@
 import { Env } from '@roomote/env';
+import {
+  db,
+  ensureSessionForTask,
+  getSessionForTask,
+} from '@roomote/db/server';
 
 type UtmParams = {
   source: string;
@@ -21,4 +26,24 @@ export function getTaskUrl({
   utm: UtmParams;
 }): string {
   return buildAppUrl(`/task/${taskId}`, { source, medium, campaign });
+}
+
+/** Resolve the persisted origin, including direct and hidden automation work. */
+export async function getTaskSessionUrl({
+  taskId,
+  fastConversationId,
+  utm,
+}: {
+  taskId: string;
+  fastConversationId?: string;
+  utm: UtmParams;
+}): Promise<string> {
+  const session =
+    (await getSessionForTask(db, taskId)) ??
+    (await db.transaction((tx) =>
+      ensureSessionForTask(tx, { taskId, fastConversationId }),
+    ));
+  // Visibility controls discovery, not direct-link access. Session privacy
+  // remains enforced by the detail route, including automation-owned sessions.
+  return buildAppUrl(`/sessions/${session.id}`, utm);
 }

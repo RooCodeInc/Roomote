@@ -379,10 +379,7 @@ other lightweight calls:
 R_SMALL_MODEL=openrouter/openai/gpt-4.1-mini
 ```
 
-Set `R_VISION_MODEL` for image inspection. Audio transcription and video
-descriptions are off by default; turn on the **Audio/video** switch next to
-**Vision model** in **Settings > Models** to enable them. They use the Vision
-model only, so choose one that supports both. For coding tasks, Roomote configures a hidden OpenCode
+Set `R_VISION_MODEL` for image inspection. For coding tasks, Roomote configures a hidden OpenCode
 `visual` subagent only when this model differs from the effective coding model,
 and asks the parent agent to delegate screenshot, diagram, chart,
 rendered-document, and other visual inspection through it:
@@ -390,6 +387,12 @@ rendered-document, and other visual inspection through it:
 ```sh
 R_VISION_MODEL=openrouter/openai/gpt-5.6-sol
 ```
+
+Set `R_AUDIO_VIDEO_MODEL` for audio transcription and video descriptions, or
+choose the separate **Audio and video model** picker in **Settings > Models**.
+This role is independent of **Vision model** and defaults to **Same as coding
+model**, inheriting the coding model when unset. Choose a model that supports
+the audio and video inputs you use.
 
 Set `R_CODE_REVIEW_MODEL` when pull request and merge request review
 tasks, implementation judge passes, and other code-review-oriented analysis

@@ -7,6 +7,10 @@ import {
   normalizeTimeZone,
   validateCronExpression,
 } from '../custom-automation-schedule';
+import {
+  DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL,
+  isRunDue,
+} from '../scheduling-utils';
 
 describe('custom automation schedule helpers', () => {
   it('accepts standard five-field cron and rejects seconds or macros', () => {
@@ -118,6 +122,86 @@ describe('custom automation schedule helpers', () => {
       })?.toISOString(),
     ).toBe('2026-09-17T10:30:00.000Z');
   });
+
+  it.each([
+    [
+      'Europe/Berlin',
+      '2026-10-20T01:00:00Z',
+      '2026-10-26T12:00:00Z',
+      '2026-10-27T02:00:00Z',
+    ],
+    [
+      'Europe/Berlin',
+      '2026-10-20T01:00:00Z',
+      '2026-10-27T01:30:00Z',
+      '2026-10-27T02:00:00Z',
+    ],
+    [
+      'America/New_York',
+      '2026-10-27T07:00:00Z',
+      '2026-11-02T12:00:00Z',
+      '2026-11-03T08:00:00Z',
+    ],
+    [
+      'America/New_York',
+      '2026-10-27T07:00:00Z',
+      '2026-11-03T07:30:00Z',
+      '2026-11-03T08:00:00Z',
+    ],
+    [
+      'America/New_York',
+      '2026-10-01T05:00:00Z',
+      '2026-10-08T06:15:00Z',
+      '2026-10-08T07:00:00Z',
+    ],
+    [
+      'Europe/Berlin',
+      '2026-03-24T02:00:00Z',
+      '2026-03-30T12:00:00Z',
+      '2026-03-31T02:00:00Z',
+    ],
+    [
+      'America/New_York',
+      '2026-03-03T08:00:00Z',
+      '2026-03-09T12:00:00Z',
+      '2026-03-10T08:00:00Z',
+    ],
+  ])(
+    'previews the first eligible weekly run in %s after %s at %s',
+    (timeZone, baseline, now, expected) => {
+      const lastRunAt = new Date(baseline);
+      const next = getCustomAutomationNextRunAt({
+        enabled: true,
+        scheduleMode: 'weekly',
+        cronExpression: null,
+        timeZone,
+        timeZoneUpdatedAt: null,
+        lastRunAt,
+        now: new Date(now),
+      });
+      expect(next?.toISOString()).toBe(new Date(expected).toISOString());
+      expect(
+        isRunDue({
+          now: next!,
+          timeZone,
+          frequency: 'weekly',
+          lastRunAt,
+          scheduleHourLocal: DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL,
+          windowDays: { weekly: 7 },
+        }),
+      ).toBe(true);
+      expect(
+        isRunDue({
+          now: new Date(next!.getTime() - 1),
+          timeZone,
+          frequency: 'weekly',
+          lastRunAt,
+          scheduleHourLocal: DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL,
+          windowDays: { weekly: 7 },
+        }),
+      ).toBe(false);
+    },
+  );
 
   it.each(['every_hour', 'every_6_hours', 'daily', 'weekly'] as const)(
     'shows a new %s preset as due now after its local boundary',

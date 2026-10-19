@@ -241,14 +241,25 @@ export function resolveWorkerRuntimePaths(options?: {
  * Falls back to "docker" (or a caller-provided fallback) for undefined
  * or unsupported values — including the removed "sandbox" (Vercel Sandbox)
  * vendor persisted on historical task runs.
+ * A callback fallback is evaluated only for missing or invalid providers.
  */
 export function resolveComputeProviderTarget(
   provider: string | null | undefined,
-  fallback: ComputeProvider = 'docker',
-): ComputeProvider {
+  fallback?: ComputeProvider,
+): ComputeProvider;
+export function resolveComputeProviderTarget(
+  provider: string | null | undefined,
+  fallback: () => Promise<ComputeProvider>,
+): Promise<ComputeProvider>;
+export function resolveComputeProviderTarget(
+  provider: string | null | undefined,
+  fallback: ComputeProvider | (() => Promise<ComputeProvider>) = 'docker',
+): ComputeProvider | Promise<ComputeProvider> {
   if (provider && isComputeProvider(provider)) {
-    return provider;
+    return typeof fallback === 'function'
+      ? Promise.resolve(provider)
+      : provider;
   }
 
-  return fallback;
+  return typeof fallback === 'function' ? fallback() : fallback;
 }

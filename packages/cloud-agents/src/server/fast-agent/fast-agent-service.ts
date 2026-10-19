@@ -49,6 +49,7 @@ import {
   isMemoryMcpServer,
   truncateAcpOutputText,
   type ReasoningEffort,
+  type TaskModelOption,
   type RunStatus,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
@@ -213,6 +214,9 @@ import {
   findFastAgentRepliesBeforeHumanPrompt,
   findRecentFastAgentToolResults,
   listRecentFastAgentHumanUserPromptTexts,
+  listFastAgentModelRequestDialogue,
+  persistFastAgentModelAuthorizationSnapshot,
+  loadFastAgentModelAuthorizationSnapshot,
   claimFastAgentHumanFollowUpSteers,
   markFastAgentDurableTurnDelivered,
   markFastAgentInferenceRetryNoticeInterruption,
@@ -288,6 +292,10 @@ import {
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
 import { resolveFastAgentLaunchModel } from './fast-agent-launch-model';
+import {
+  snapshotModelRequestDialogue,
+  type ModelRequestMessage,
+} from './fast-agent-model-authorization';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -2217,6 +2225,8 @@ export async function answerFastAgentQuestion({
   // The most recent assistant message already in the conversation, so a
   // repeat of the same terminal failure does not post the same closeout again.
   let priorAssistantMessage: string | undefined;
+  let modelAuthorizationDialogue: ModelRequestMessage[] = [];
+  let modelAuthorizationModels: readonly TaskModelOption[] = [];
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
   let lastResolvedInferenceModel: string | undefined;
   let currentInstructionVersion = 0;
@@ -2993,7 +3003,24 @@ export async function answerFastAgentQuestion({
         const previousInstructionVersion = currentInstructionVersion;
         const steerInstructionVersion = previousInstructionVersion + 1;
         currentInstructionVersion = steerInstructionVersion;
+        modelAuthorizationDialogue = [
+          ...modelAuthorizationDialogue,
+          ...batch.map(({ followUp }) => ({
+            role: 'user' as const,
+            text: followUp.question,
+          })),
+        ];
         try {
+          // Persist received human intent before delivery/acknowledgment. A
+          // crash or failed steer must never resurrect a revoked model choice.
+          await persistFastAgentModelAuthorizationSnapshot(
+            canonicalConversationId!,
+            turnId,
+            snapshotModelRequestDialogue(
+              modelAuthorizationDialogue,
+              modelAuthorizationModels,
+            ),
+          );
           await nativeSteer({
             messageId: buildFastAgentNativeSteerMessageId(
               firstRow.id,
@@ -3260,6 +3287,7 @@ export async function answerFastAgentQuestion({
             truncated: false,
           }
         : serializeFastAgentToolOutput(result);
+    if (output) modelAuthorizationDialogue.push({ role: 'tool', text: output });
     await persistCanonicalMessage(
       {
         ...event.canonicalEvent,
@@ -3672,6 +3700,7 @@ export async function answerFastAgentQuestion({
     const priorAssistant = session.compatibilityMessages
       .filter((message) => message.role === 'assistant')
       .at(-1);
+    modelAuthorizationModels = taskModelOptions.models;
     priorAssistantMessage = priorAssistant
       ? extractModelMessageText(priorAssistant).join('\n')
       : undefined;
@@ -3887,6 +3916,56 @@ export async function answerFastAgentQuestion({
     // place and time so the transcript still reads in order.
     const userPromptTs =
       previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now();
+    const replay = resumedAfterInterruption || resumedAfterInferenceRetry;
+    const savedModelDialogue = replay
+      ? await loadFastAgentModelAuthorizationSnapshot(session.id, turnId)
+      : null;
+    if (savedModelDialogue)
+      modelAuthorizationDialogue = savedModelDialogue.map((message) => ({
+        ...message,
+      }));
+    if (substantiveHumanInput && !savedModelDialogue) {
+      let historyAvailable = true;
+      if (!replay || previousAttempt?.prompt) {
+        modelAuthorizationDialogue = await listFastAgentModelRequestDialogue({
+          conversationId: session.id,
+          beforeTs: userPromptTs,
+          currentEventId: `${turnId}:user`,
+          currentTurnId: turnId,
+          requireAnchor: replay,
+        }).catch((error) => {
+          historyAvailable = false;
+          degradedContextComponents.add('model_request_context');
+          console.warn(
+            `[Fast Agent] Model request dialogue unavailable: ${formatErrorForLog(error)}`,
+          );
+          return [];
+        });
+      }
+      if (
+        !replay &&
+        historyAvailable &&
+        modelAuthorizationDialogue.length === 0
+      ) {
+        // Cold Slack history retains platform-verified identity. Never recover
+        // roles by interpreting text inside compatibility/model envelopes.
+        modelAuthorizationDialogue = threadContext
+          .filter(
+            (message) =>
+              currentMessageId && Number(message.ts) < Number(currentMessageId),
+          )
+          .map((message) => ({
+            role:
+              slackRoomoteUserId && message.user === slackRoomoteUserId
+                ? 'assistant'
+                : message.bot_id
+                  ? 'untrusted'
+                  : 'user',
+            text: message.text,
+          }));
+      }
+      modelAuthorizationDialogue.push({ role: 'user', text: question });
+    }
     const userEvent = previousAttempt?.prompt
       ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
       : allocateCanonicalEvent('user');
@@ -3930,6 +4009,15 @@ export async function answerFastAgentQuestion({
     diagnostics.recordInitialHumanTurn(
       substantiveHumanInput ? userMessageResult?.initialHumanTurn : false,
     );
+    if (modelAuthorizationDialogue.length && !savedModelDialogue)
+      await persistFastAgentModelAuthorizationSnapshot(
+        session.id,
+        turnId,
+        snapshotModelRequestDialogue(
+          modelAuthorizationDialogue,
+          modelAuthorizationModels,
+        ),
+      );
     if (
       substantiveHumanInput ||
       (platformEvent && platformEventKind === 'automation')
@@ -3969,16 +4057,10 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
-    const collectUserMessageTexts = (): string[] => [
-      ...new Set([
-        ...threadContext
-          .filter((message) => !message.bot_id)
-          .map((message) => message.text),
-        ...[...session.compatibilityMessages, ...turnVisibleMessages]
-          .filter((message) => message.role === 'user')
-          .flatMap(extractModelMessageText),
-      ]),
-    ];
+    const collectUserMessageTexts = (): string[] =>
+      modelAuthorizationDialogue
+        .filter((message) => message.role === 'user')
+        .map((message) => message.text);
     const {
       bootstrapMessages,
       turnMessages,
@@ -4148,6 +4230,10 @@ export async function answerFastAgentQuestion({
         turnVisibleMessages.push(
           buildAssistantTextMessage(replyWithImages.message),
         );
+        modelAuthorizationDialogue.push({
+          role: 'assistant',
+          text: replyWithImages.message,
+        });
         await persistAssistantReply({
           reply: replyWithImages,
           event:
@@ -5494,6 +5580,7 @@ export async function answerFastAgentQuestion({
               claimedReasoningEffort: args.reasoningEffort,
               work: args.prompt,
               userMessages: collectUserMessageTexts(),
+              dialogue: modelAuthorizationDialogue,
               models: taskModelOptions.models,
               codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
               defaultModelId: taskModelOptions.defaultModelId,
@@ -5696,6 +5783,7 @@ export async function answerFastAgentQuestion({
               claimedReasoningEffort: args.reasoningEffort,
               work: `Review pull request ${repository}#${pullRequestNumber}`,
               userMessages: collectUserMessageTexts(),
+              dialogue: modelAuthorizationDialogue,
               models: taskModelOptions.models,
               codingModelRoutingRules: [],
               // An unoverridden review runs on the code-review model, which

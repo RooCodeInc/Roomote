@@ -1,6 +1,5 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import {
-  getDefaultAvailableComputeProvider,
   getSetupComputeProvider,
   pickPreferredConfiguredComputeProvider,
   SETUP_COMPUTE_PROVIDER_CATALOG,
@@ -132,7 +131,8 @@ function pickDefaultComputeProvider({
 }): ComputeProvider {
   if (
     persistedComputeConfig.defaultProvider &&
-    !excludedProviders.has(persistedComputeConfig.defaultProvider)
+    !excludedProviders.has(persistedComputeConfig.defaultProvider) &&
+    configuredProviders.includes(persistedComputeConfig.defaultProvider)
   ) {
     return persistedComputeConfig.defaultProvider;
   }
@@ -142,7 +142,8 @@ function pickDefaultComputeProvider({
     runtimeDefault &&
     isComputeProvider(runtimeDefault) &&
     !excludedProviders.has(runtimeDefault) &&
-    runtimeDefault !== 'docker'
+    runtimeDefault !== 'docker' &&
+    configuredProviders.includes(runtimeDefault)
   ) {
     return runtimeDefault;
   }
@@ -150,19 +151,10 @@ function pickDefaultComputeProvider({
   const preferredConfigured =
     pickPreferredConfiguredComputeProvider(configuredProviders);
 
-  if (
-    runtimeDefault === 'docker' &&
-    isComputeProvider(runtimeDefault) &&
-    !excludedProviders.has(runtimeDefault)
-  ) {
-    return preferredConfigured && preferredConfigured !== 'docker'
-      ? preferredConfigured
-      : 'docker';
+  if (!preferredConfigured) {
+    throw new Error('No configured sandbox provider is available.');
   }
-
-  return (
-    preferredConfigured ?? getDefaultAvailableComputeProvider(excludedProviders)
-  );
+  return preferredConfigured;
 }
 
 /**
@@ -235,14 +227,14 @@ export async function resolveComputeProviderSelection(
 
 /**
  * Resolves the deployment default compute provider. Order of preference:
- * 1. Persisted setup/admin default (explicit deployment choice).
- * 2. DEFAULT_COMPUTE_PROVIDER env when it is a non-docker provider (direct
- *    return — no catalog readiness scan on hot dispatch paths).
- * 3. When the env default is docker or unset: scan configured providers and
+ * Only configured, non-excluded providers can be selected:
+ * 1. Ready persisted setup/admin default (explicit deployment choice).
+ * 2. Ready DEFAULT_COMPUTE_PROVIDER env when it is a non-docker provider.
+ * 3. When the env default is docker or unset/unready: scan configured providers and
  *    prefer the last catalog-ordered configured cloud over Local Docker.
  *    Compose stacks often inject DEFAULT_COMPUTE_PROVIDER=docker; a ready
  *    cloud provider outranks that barrier default.
- * 4. Local Docker / remaining availability fallback.
+ * 4. Keyless Local Docker when allowed; fail if no provider is ready.
  */
 export async function resolveDefaultComputeProvider(
   options: {
@@ -250,47 +242,8 @@ export async function resolveDefaultComputeProvider(
     executor?: DatabaseOrTransaction;
   } = {},
 ): Promise<ComputeProvider> {
-  const runtimeEnv = options.runtimeEnv ?? process.env;
-  const executor = options.executor ?? db;
-  const persistedComputeConfig =
-    await loadPersistedRuntimeComputeConfig(executor);
-  const excludedProviders = getExcludedComputeProviders(
-    runtimeEnv,
-    persistedComputeConfig,
-  );
-
-  if (
-    persistedComputeConfig.defaultProvider &&
-    !excludedProviders.has(persistedComputeConfig.defaultProvider)
-  ) {
-    return persistedComputeConfig.defaultProvider;
-  }
-
-  const runtimeDefault = runtimeEnv.DEFAULT_COMPUTE_PROVIDER?.trim();
-  if (
-    runtimeDefault &&
-    isComputeProvider(runtimeDefault) &&
-    !excludedProviders.has(runtimeDefault) &&
-    runtimeDefault !== 'docker'
-  ) {
-    // Authoritative non-Docker env defaults skip the catalog readiness scan
-    // used by enqueue/retry/dequeue paths.
-    return runtimeDefault;
-  }
-
-  // Docker env default or unset: resolve cloud-vs-Local Docker from readiness.
-  const configuredProviders = await listConfiguredComputeProvidersFromState({
-    runtimeEnv,
-    executor,
-    excludedProviders,
-  });
-
-  return pickDefaultComputeProvider({
-    runtimeEnv,
-    persistedComputeConfig,
-    excludedProviders,
-    configuredProviders,
-  });
+  const selection = await resolveComputeProviderSelection(options);
+  return selection.defaultComputeProvider;
 }
 
 /**

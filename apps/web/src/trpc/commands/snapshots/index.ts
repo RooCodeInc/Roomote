@@ -124,9 +124,9 @@ export async function createEnvironmentSnapshotCommand(
 ): Promise<SnapshotResult> {
   try {
     const { userId } = auth;
-    const provider = resolveComputeProviderTarget(
+    const provider = await resolveComputeProviderTarget(
       input.provider,
-      await resolveDefaultComputeProvider(),
+      resolveDefaultComputeProvider,
     );
 
     if (!auth.isAdmin) {
@@ -276,9 +276,9 @@ export async function clearEnvironmentSnapshotCommand(
   input: { environmentId: string; provider?: ComputeProvider },
 ): Promise<SimpleResult> {
   try {
-    const provider = resolveComputeProviderTarget(
+    const provider = await resolveComputeProviderTarget(
       input.provider,
-      await resolveDefaultComputeProvider(),
+      resolveDefaultComputeProvider,
     );
 
     if (!auth.isAdmin) {

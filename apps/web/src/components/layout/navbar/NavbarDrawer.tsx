@@ -39,6 +39,7 @@ export const NavbarDrawer = ({
         <Button
           variant="ghost"
           className="md:hidden"
+          aria-label="Open navigation menu"
           onClick={() => setOpen(true)}
         >
           <Menu />
@@ -50,7 +51,7 @@ export const NavbarDrawer = ({
               <DrawerTitle className="sr-only">Navigation Menu</DrawerTitle>
               <div className="flex items-center justify-end">
                 <Button variant="ghost" asChild>
-                  <DrawerClose>
+                  <DrawerClose aria-label="Close navigation menu">
                     <X />
                   </DrawerClose>
                 </Button>

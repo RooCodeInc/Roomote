@@ -47,6 +47,9 @@ to the task runtime so OpenCode can initialize the provider.
 
 ## Common issues
 
+- **Tasks fail with a forbidden gateway path after an upgrade.** Upgrade Roomote
+  to 1.18 or later, then start a fresh task so it receives the corrected gateway
+  URLs. Existing task configurations can retain URLs from before the upgrade.
 - **The resource cannot be reached.** Enter only the resource name, such as
   `my-resource`, without a URL, path, or domain.
 - **Azure reports that the deployment does not exist.** Rename or recreate the

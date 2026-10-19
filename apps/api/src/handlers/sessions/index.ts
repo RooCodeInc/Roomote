@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { z } from 'zod';
 import {
   and,
   db,
@@ -13,6 +14,7 @@ import {
   fastAgentConversations,
   getSessionForFastConversation,
   getSessionGoal,
+  getDeploymentTaskModelOptions,
   ilike,
   inArray,
   isSessionConversationResponding,
@@ -30,6 +32,7 @@ import { getOrCreateFastAgentSession } from '@roomote/cloud-agents/server';
 import { queueFastAgentSurfaceReply } from '@roomote/sdk/server';
 import {
   SESSION_STATUSES,
+  REASONING_EFFORT_VALUES,
   type RoomoteSearchSessionsResponse,
   type RoomoteMessageAttachment,
   type SessionGoal,
@@ -47,6 +50,10 @@ import { logHandlerError } from '../utils';
 import { customAutomationHistoryAccess } from '../custom-automation-history-access';
 import { getLatestTaskRunsByTaskIds } from '../tasks/helpers';
 import {
+  configuredModelSelection,
+  configuredTaskModels,
+} from '../configured-models';
+import {
   getFastSessionMessagesForUser,
   sendMessageToFastSessionForUser,
 } from '../tasks/fastSessionCommunication';
@@ -59,6 +66,11 @@ import {
 type SessionContext = Context<{
   Variables: Variables & { mcpAuth: McpAuth };
 }>;
+
+const sessionModelSelectionSchema = z.object({
+  model: z.string().min(1).max(1024).optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
+});
 
 // Ordinary Sessions remain collaborative; custom automation history is private
 // to the current automation owner and deployment admins.
@@ -245,6 +257,7 @@ async function getChildTasks(sessionIds: string[], auth: McpAuth) {
             status: run.status,
             taskPhase: run.taskPhase as TaskPhase | null,
             error: run.error,
+            configuredModels: configuredTaskModels(run.payload),
           }
         : null,
     });
@@ -254,10 +267,42 @@ async function getChildTasks(sessionIds: string[], auth: McpAuth) {
   return bySession;
 }
 
+async function getConfiguredSessionModels(
+  rows: Array<typeof sessions.$inferSelect>,
+) {
+  const ids = rows.flatMap((row) =>
+    row.fastConversationId ? [row.fastConversationId] : [],
+  );
+  if (!ids.length)
+    return new Map<string, ReturnType<typeof configuredModelSelection>>();
+  const conversations = await db
+    .select({
+      id: fastAgentConversations.id,
+      model: fastAgentConversations.model,
+      reasoningEffort: fastAgentConversations.reasoningEffort,
+    })
+    .from(fastAgentConversations)
+    .where(inArray(fastAgentConversations.id, ids));
+  const byConversation = new Map(
+    conversations.map((row) => [
+      row.id,
+      configuredModelSelection(row.model, row.reasoningEffort),
+    ]),
+  );
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      byConversation.get(row.fastConversationId ?? '') ??
+        configuredModelSelection(null, null),
+    ]),
+  );
+}
+
 function serializeSession(
   session: typeof sessions.$inferSelect,
   childTasks: RoomoteSessionChildTask[],
   goal: SessionGoal | null,
+  configuredModel = configuredModelSelection(null, null),
 ): RoomoteSessionSummary {
   return {
     id: session.id,
@@ -275,6 +320,7 @@ function serializeSession(
     activityAt: session.activityAt,
     createdAt: session.createdAt.toISOString(),
     fastConversationId: session.fastConversationId,
+    configuredModel,
     goal: goal
       ? {
           ...goal,
@@ -321,6 +367,48 @@ async function startSession(c: SessionContext): Promise<Response> {
   const message = body.message?.trim();
   if (!message) return c.json({ error: 'message is required' }, 400);
 
+  const parsed = sessionModelSelectionSchema.safeParse(body);
+  if (!parsed.success)
+    return c.json(
+      { error: parsed.error.issues[0]?.message ?? 'Invalid model selection' },
+      400,
+    );
+  const selection = parsed.data;
+  if (selection.reasoningEffort && !selection.model)
+    return c.json(
+      { error: 'model is required when reasoningEffort is supplied' },
+      400,
+    );
+  if (selection.model) {
+    const { models } = await getDeploymentTaskModelOptions();
+    const model = models.find((option) => option.id === selection.model);
+    if (!model)
+      return c.json(
+        { error: 'model must be an exact enabled ID from list_models' },
+        400,
+      );
+    if (selection.reasoningEffort) {
+      const efforts = model.metadata?.supportedReasoningEfforts;
+      if (
+        model.metadata?.supportsReasoning === false ||
+        (efforts && !efforts.includes(selection.reasoningEffort))
+      )
+        return c.json(
+          {
+            error: `reasoningEffort '${selection.reasoningEffort}' is not supported by model '${selection.model}'`,
+          },
+          400,
+        );
+      if (!efforts)
+        return c.json(
+          {
+            error: `Supported reasoningEffort values are unknown for model '${selection.model}'; omit reasoningEffort`,
+          },
+          400,
+        );
+    }
+  }
+
   let prepared;
   try {
     prepared = await prepareMessageAttachments({
@@ -345,6 +433,8 @@ async function startSession(c: SessionContext): Promise<Response> {
       conversation,
       privacy,
       userInitiated: { surface: 'api', trigger: 'manual' },
+      initialModel: selection.model,
+      initialReasoningEffort: selection.reasoningEffort,
     });
     const session = await getSessionForFastConversation(db, fastSession.id);
     const queued = await queueFastAgentSurfaceReply({
@@ -469,12 +559,14 @@ async function searchSessions(c: SessionContext): Promise<Response> {
         ),
       ),
     );
+    const configuredModels = await getConfiguredSessionModels(page);
     const response = {
       sessions: page.map((session) =>
         serializeSession(
           session,
           childTasks.get(session.id) ?? [],
           goals.get(session.id) ?? null,
+          configuredModels.get(session.id),
         ),
       ),
       nextCursor:
@@ -497,10 +589,12 @@ async function getSessionSummary(c: SessionContext): Promise<Response> {
     const session = await findAccessibleSession(sessionId, c.get('mcpAuth'));
     if (!session) return c.json({ error: 'Session not found' }, 404);
     const childTasks = await getChildTasks([session.id], c.get('mcpAuth'));
+    const configuredModels = await getConfiguredSessionModels([session]);
     const response = serializeSession(
       session,
       childTasks.get(session.id) ?? [],
       await getSessionGoal(session.id),
+      configuredModels.get(session.id),
     );
     return c.json(response);
   } catch (error) {

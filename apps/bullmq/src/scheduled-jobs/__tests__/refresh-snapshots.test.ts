@@ -155,6 +155,40 @@ describe('refreshSnapshotsJob launch pacing', () => {
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
   });
 
+  it('does not enqueue maintenance when default selection fails', async () => {
+    mockResolveDefaultComputeProvider.mockRejectedValue(
+      new Error('No configured sandbox provider is available.'),
+    );
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(refreshSnapshotsJob()).rejects.toThrow(
+        'No configured sandbox provider is available.',
+      );
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+      expect(
+        mockClaimPendingEnvironmentSnapshotForAttachment,
+      ).not.toHaveBeenCalled();
+      expect(errorLog).toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it.each(['docker', 'blaxel'])(
+    'does not reserve or enqueue environment snapshots on %s',
+    async (provider) => {
+      mockResolveDefaultComputeProvider.mockResolvedValue(provider);
+      mockEnvironmentsFindMany.mockResolvedValue([makeEnvironment('env-1')]);
+
+      await refreshSnapshotsJob();
+
+      expect(
+        mockClaimPendingEnvironmentSnapshotForAttachment,
+      ).not.toHaveBeenCalled();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+    },
+  );
+
   it('does not sleep after a launch when every remaining candidate is skipped', async () => {
     mockEnvironmentsFindMany.mockResolvedValue([
       makeEnvironment('env-1'),

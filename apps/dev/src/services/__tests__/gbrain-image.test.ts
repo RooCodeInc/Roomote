@@ -37,7 +37,7 @@ describe('gbrain image configuration', () => {
     expect(entrypoint).toContain(
       'https://github.com/garrytan/gbrain/issues/4294',
     );
-    expect(entrypoint).toContain('DEFAULT_CHAT_MODEL="roomote/helper"');
+    expect(entrypoint).toContain('DEFAULT_CHAT_MODEL="openai:roomote/helper"');
     expect(entrypoint).not.toContain(
       'DEFAULT_CHAT_MODEL="${BRAIN_PROVIDER}:roomote/helper"',
     );

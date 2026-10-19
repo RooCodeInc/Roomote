@@ -117,6 +117,7 @@ export {
 export {
   acquireGithubPrReviewLifecycleLock,
   completeGithubPrReviewCheckFromSummary,
+  findCanonicalGithubPrReviewSummaryOwner,
   GITHUB_PR_REVIEW_CHECK_NAME,
   publishGithubPrReviewCheck,
   reconcileGithubPrReviewCheckForRun,

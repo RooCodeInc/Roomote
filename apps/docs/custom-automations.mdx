@@ -78,6 +78,11 @@ recurrence is ambiguous. Custom schedules do not support seconds or cron
 macros. The deployment's admin-only [scheduling timezone](/automation-configuration#scheduling-timezone)
 applies to every scheduled automation.
 
+The **Next** time shows when a preset is first eligible to run. Weekly presets
+wait until 3am in the scheduling timezone if their elapsed week ends earlier,
+including after a daylight-saving change. The preview keeps that morning's run
+visible rather than skipping ahead another week.
+
 Set the schedule to `on_demand` when the automation should run only from
 **Run now** or an enabled [webhook](/automation-webhooks).
 
