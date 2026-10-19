@@ -908,7 +908,7 @@ describe('BaseController.dequeueTaskRun', () => {
     expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
   });
 
-  it('releases the scope lock when a popped run is skipped before dispatch', async () => {
+  it('releases the scope lock when a popped run already ended', async () => {
     const job = makeTaskRun({
       id: 80,
       status: RunStatus.Pending,
@@ -917,13 +917,37 @@ describe('BaseController.dequeueTaskRun', () => {
     mockUpdateWhere.mockReturnValueOnce({
       returning: vi.fn().mockResolvedValue([]),
     });
-    mockTaskRunsFindFirst.mockResolvedValueOnce({
-      status: RunStatus.Dequeued,
-      canceledAt: null,
-    });
+    mockTaskRunsFindFirst
+      .mockResolvedValueOnce({ status: RunStatus.Canceled, canceledAt: null })
+      .mockResolvedValueOnce({
+        status: RunStatus.Canceled,
+        cancelRequestedAt: null,
+        canceledAt: new Date(),
+      });
 
     await expect(controller.testSpawnWorker(job)).resolves.toBe(false);
     expect(mockReleaseTaskRun).toHaveBeenCalledWith(job);
+  });
+
+  it('keeps the scope lock when another dispatch attempt won the run', async () => {
+    const job = makeTaskRun({
+      id: 81,
+      status: RunStatus.Pending,
+    });
+
+    mockUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([]),
+    });
+    mockTaskRunsFindFirst
+      .mockResolvedValueOnce({ status: RunStatus.Dequeued, canceledAt: null })
+      .mockResolvedValueOnce({
+        status: RunStatus.Dequeued,
+        cancelRequestedAt: null,
+        canceledAt: null,
+      });
+
+    await expect(controller.testSpawnWorker(job)).resolves.toBe(false);
+    expect(mockReleaseTaskRun).not.toHaveBeenCalled();
   });
 });
 

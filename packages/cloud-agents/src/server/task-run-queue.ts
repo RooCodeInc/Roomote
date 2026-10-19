@@ -222,7 +222,9 @@ local evictedIds = {}
 
 local existingId = redis.call('HGET', KEYS[2], incomingScope)
 
-if ARGV[5] == '1' and existingId then
+-- ARGV[6] names a stale id the caller verified; first-wins yields only to
+-- a different (newer) pointer, so a replacement that arrived since is kept.
+if ARGV[5] == '1' and existingId and existingId ~= ARGV[6] then
   return {incomingId}
 end
 
@@ -317,6 +319,9 @@ const taskRunQueueEntrySchema = z.object({
   scope: z.string(),
   availableAt: z.number().int().nonnegative().optional(),
   preserveExisting: z.boolean().optional(),
+  // Enqueue-time only: first-wins may replace the scope pointer when it
+  // still names this verified-stale id. Never persisted with the entry.
+  replaceStaleId: z.number().optional(),
 });
 
 export type TaskRunQueueEntry = z.infer<typeof taskRunQueueEntrySchema>;
@@ -592,9 +597,10 @@ export class TaskRunQueue {
       TaskRunQueueKeys.EntryScopes,
       entry.id.toString(),
       entry.scope,
-      JSON.stringify(entry),
+      JSON.stringify({ ...entry, replaceStaleId: undefined }),
       Math.max(0, (entry.availableAt ?? 0) - Date.now()).toString(),
       entry.preserveExisting ? '1' : '0',
+      entry.replaceStaleId?.toString() ?? '',
     );
 
     if (!Array.isArray(result)) {
@@ -1347,7 +1353,15 @@ async function pushRunOntoQueue(params: {
             })
           : undefined;
 
-      if (existingRun?.status === RunStatus.Pending) {
+      const incomingRun = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, taskRun.id),
+        columns: { status: true },
+      });
+
+      if (
+        existingRun?.status === RunStatus.Pending ||
+        incomingRun?.status !== RunStatus.Pending
+      ) {
         await cancelEvictedTaskRuns(
           [{ id: taskRun.id, scope }],
           'Another run for the same work is already queued.',
@@ -1355,13 +1369,20 @@ async function pushRunOntoQueue(params: {
         return;
       }
 
-      if (existingId !== null) {
-        await queue.removeEntry(existingId);
-      }
+      // Replace atomically, and only while the scope still names the stale
+      // id: a run queued in the meantime keeps first-wins precedence.
       evictedEntries = await queue.enqueue({
         ...entry,
-        preserveExisting: false,
+        ...(existingId !== null ? { replaceStaleId: existingId } : {}),
       });
+
+      if (evictedEntries.some((evicted) => evicted.id === taskRun.id)) {
+        await cancelEvictedTaskRuns(
+          [{ id: taskRun.id, scope }],
+          'Another run for the same work is already queued.',
+        );
+        return;
+      }
     }
 
     await cancelEvictedTaskRuns(

@@ -502,6 +502,20 @@ export abstract class BaseController {
     provider: ComputeProvider,
   ): Promise<void>;
 
+  private async skippedRunHasEnded(runId: number): Promise<boolean> {
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, runId),
+      columns: { status: true, cancelRequestedAt: true, canceledAt: true },
+    });
+
+    return (
+      !run ||
+      run.cancelRequestedAt !== null ||
+      run.canceledAt !== null ||
+      isExitedRunStatus(run.status)
+    );
+  }
+
   protected async spawnWorker(taskRun: TaskRun): Promise<boolean> {
     try {
       if (!this.isRunning) return false;
@@ -511,11 +525,14 @@ export abstract class BaseController {
         console.log(
           `[BaseController] Skipping spawn for task run #${taskRun.id} because it left the dequeueable state before dispatch`,
         );
-        // The pop took this run's scope lock. Without a release it holds the
-        // scope for the full lock TTL, so the next run on the same scope can
-        // only start through orphan recovery. Owner-checked, so it cannot
-        // drop a newer run's lock.
-        await releaseTaskRun(taskRun);
+        // The pop took this run's scope lock. When the run already ended,
+        // nothing else will release it and the scope stays blocked for the
+        // full lock TTL. A null dequeue can also mean another dispatch
+        // attempt won this same run; that winner still needs the lock, and
+        // the owner check cannot tell the two apart (same run id).
+        if (await this.skippedRunHasEnded(taskRun.id)) {
+          await releaseTaskRun(taskRun);
+        }
 
         return false;
       }
