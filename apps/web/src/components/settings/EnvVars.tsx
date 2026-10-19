@@ -28,7 +28,8 @@ export function EnvVars() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const { data: envVars = [], isPending } = useEnvVars();
+  const envVarsQuery = useEnvVars();
+  const { data: envVars = [], isPending } = envVarsQuery;
 
   const deleteEnvVar = useDeleteEnvVar();
 
@@ -73,6 +74,21 @@ export function EnvVars() {
               ))}
             </tbody>
           </table>
+        ) : envVarsQuery.isError && envVarsQuery.data === undefined ? (
+          <div className="space-y-2">
+            <p className="text-sm text-destructive">
+              Failed to load environment variables.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={envVarsQuery.isFetching}
+              onClick={() => void envVarsQuery.refetch()}
+            >
+              Retry
+            </Button>
+          </div>
         ) : envVars.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No environment variables defined yet.
