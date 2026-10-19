@@ -34,7 +34,7 @@ import {
   lt,
   sql,
 } from '@roomote/db/server';
-import { dequeueTaskRun } from '@roomote/cloud-agents/server';
+import { dequeueTaskRun, releaseTaskRun } from '@roomote/cloud-agents/server';
 import { finishRun } from '@roomote/sdk/server';
 
 import { getOrphanedTaskRun } from './orphaned-task-runs';
@@ -511,6 +511,11 @@ export abstract class BaseController {
         console.log(
           `[BaseController] Skipping spawn for task run #${taskRun.id} because it left the dequeueable state before dispatch`,
         );
+        // The pop took this run's scope lock. Without a release it holds the
+        // scope for the full lock TTL, so the next run on the same scope can
+        // only start through orphan recovery. Owner-checked, so it cannot
+        // drop a newer run's lock.
+        await releaseTaskRun(taskRun);
 
         return false;
       }

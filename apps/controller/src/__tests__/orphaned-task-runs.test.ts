@@ -1,13 +1,17 @@
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { TaskRun } from '@roomote/db/server';
 
-const { mockReleaseTaskRun, mockTransaction } = vi.hoisted(() => ({
-  mockReleaseTaskRun: vi.fn().mockResolvedValue(true),
-  mockTransaction: vi.fn(),
-}));
+const { mockReleaseTaskRun, mockRemoveTaskRunQueueEntry, mockTransaction } =
+  vi.hoisted(() => ({
+    mockReleaseTaskRun: vi.fn().mockResolvedValue(true),
+    mockRemoveTaskRunQueueEntry: vi.fn().mockResolvedValue(true),
+    mockTransaction: vi.fn(),
+  }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   releaseTaskRun: (...args: unknown[]) => mockReleaseTaskRun(...args),
+  removeTaskRunQueueEntry: (...args: unknown[]) =>
+    mockRemoveTaskRunQueueEntry(...args),
 }));
 
 vi.mock('@roomote/db/server', async () => {
@@ -75,6 +79,9 @@ describe('getOrphanedTaskRun', () => {
 
     await expect(getOrphanedTaskRun()).resolves.toBe(taskRun);
     expect(mockReleaseTaskRun).toHaveBeenCalledWith(taskRun);
+    // The recovered run starts from the database, so its queue entry and
+    // scope pointer must not linger for later first-wins enqueues.
+    expect(mockRemoveTaskRunQueueEntry).toHaveBeenCalledWith(taskRun);
 
     const claimQuery = execute.mock.calls[0]?.[0];
     const claimSql = collectStrings(claimQuery).join(' ');
@@ -98,5 +105,6 @@ describe('getOrphanedTaskRun', () => {
 
     await expect(getOrphanedTaskRun()).resolves.toBeNull();
     expect(mockReleaseTaskRun).not.toHaveBeenCalled();
+    expect(mockRemoveTaskRunQueueEntry).not.toHaveBeenCalled();
   });
 });

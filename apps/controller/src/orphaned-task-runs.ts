@@ -5,7 +5,10 @@ import {
   WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
 } from '@roomote/types';
 import { type TaskRun, db, taskRuns, eq, sql } from '@roomote/db/server';
-import { releaseTaskRun } from '@roomote/cloud-agents/server';
+import {
+  releaseTaskRun,
+  removeTaskRunQueueEntry,
+} from '@roomote/cloud-agents/server';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -85,6 +88,9 @@ export const getOrphanedTaskRun = async (): Promise<TaskRun | null> => {
   // A stale dequeue may still own its old Redis lock. Owner-checked release
   // cannot delete a newer run's lock even when both runs share a scope.
   await releaseTaskRun(taskRun);
+  // The run starts from the database now. Its Redis entry would otherwise
+  // linger, and a first-wins enqueue on the same scope would defer to it.
+  await removeTaskRunQueueEntry(taskRun);
 
   return taskRun;
 };

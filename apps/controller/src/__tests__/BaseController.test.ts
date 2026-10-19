@@ -14,6 +14,7 @@ const {
   mockTaskRunsFindMany,
   mockOrgsFindFirst,
   mockDequeueTaskRun,
+  mockReleaseTaskRun,
   mockFindPersistedWorkerBootstrapRestarts,
   mockGetOrphanedTaskRun,
   mockReadManagedDeploymentAccess,
@@ -30,6 +31,7 @@ const {
   mockTaskRunsFindMany: vi.fn(),
   mockOrgsFindFirst: vi.fn(),
   mockDequeueTaskRun: vi.fn().mockResolvedValue(null),
+  mockReleaseTaskRun: vi.fn().mockResolvedValue(true),
   mockFindPersistedWorkerBootstrapRestarts: vi.fn().mockResolvedValue([]),
   mockGetOrphanedTaskRun: vi.fn().mockResolvedValue(null),
   mockReadManagedDeploymentAccess: vi.fn().mockResolvedValue({
@@ -110,6 +112,7 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   dequeueTaskRun: (...args: unknown[]) => mockDequeueTaskRun(...args),
+  releaseTaskRun: (...args: unknown[]) => mockReleaseTaskRun(...args),
 }));
 
 vi.mock('../orphaned-task-runs', () => ({
@@ -903,6 +906,24 @@ describe('BaseController.dequeueTaskRun', () => {
 
     expect(result).toBeNull();
     expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
+  });
+
+  it('releases the scope lock when a popped run is skipped before dispatch', async () => {
+    const job = makeTaskRun({
+      id: 80,
+      status: RunStatus.Pending,
+    });
+
+    mockUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([]),
+    });
+    mockTaskRunsFindFirst.mockResolvedValueOnce({
+      status: RunStatus.Dequeued,
+      canceledAt: null,
+    });
+
+    await expect(controller.testSpawnWorker(job)).resolves.toBe(false);
+    expect(mockReleaseTaskRun).toHaveBeenCalledWith(job);
   });
 });
 

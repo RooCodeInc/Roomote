@@ -197,6 +197,22 @@ export function shouldCaptureActivationTaskCreatedEvent(input: {
   );
 }
 
+// Removes one run's queue entry and, when it still owns it, the scope pointer.
+const REMOVE_ENTRY_SCRIPT = `
+local entryId = ARGV[1]
+local entryScope = redis.call('HGET', KEYS[4], entryId)
+
+redis.call('LREM', KEYS[1], 0, entryId)
+redis.call('HDEL', KEYS[3], entryId)
+redis.call('HDEL', KEYS[4], entryId)
+
+if entryScope and redis.call('HGET', KEYS[2], entryScope) == entryId then
+  redis.call('HDEL', KEYS[2], entryScope)
+end
+
+return entryScope and 1 or 0
+`;
+
 const ATOMIC_ENQUEUE_SCRIPT = `
 local incomingId = ARGV[1]
 local incomingScope = ARGV[2]
@@ -629,6 +645,26 @@ export class TaskRunQueue {
     } while (blocking && Date.now() < deadline);
 
     return null;
+  }
+
+  /** The run id the scope currently points at, if any. */
+  public async getScopeEntryId(scope: string): Promise<number | null> {
+    const id = await this.redis.hget(TaskRunQueueKeys.Scopes, scope);
+    return id ? Number(id) : null;
+  }
+
+  /** Drops a run's queue entry and the scope pointer it still owns. */
+  public async removeEntry(id: number): Promise<boolean> {
+    const result = await this.redis.eval(
+      REMOVE_ENTRY_SCRIPT,
+      4,
+      TaskRunQueueKeys.Queue,
+      TaskRunQueueKeys.Scopes,
+      TaskRunQueueKeys.Entries,
+      TaskRunQueueKeys.EntryScopes,
+      id.toString(),
+    );
+    return result === 1;
   }
 
   public async releaseLock(scope: string, ownerId: number): Promise<boolean> {
@@ -1285,14 +1321,48 @@ async function pushRunOntoQueue(params: {
       payloadKind: taskRun.payloadKind,
       sourceControlProvider,
     });
-    const evictedEntries = await TaskRunQueue.getInstance().enqueue({
+    const queue = TaskRunQueue.getInstance();
+    const entry: TaskRunQueueEntry = {
       id: taskRun.id,
       scope,
       ...queuePolicy,
       ...(options.queueAvailableAt !== undefined
         ? { availableAt: options.queueAvailableAt }
         : {}),
-    });
+    };
+    let evictedEntries = await queue.enqueue(entry);
+
+    // First-wins enqueues hand the incoming run back when the scope already
+    // points at a queued run. That pointer can be stale: orphan recovery may
+    // have started the run from the database while its Redis entry stayed
+    // behind. Defer only to a run that is still waiting; otherwise drop the
+    // stale entry and queue the incoming run normally.
+    if (evictedEntries.some((evicted) => evicted.id === taskRun.id)) {
+      const existingId = await queue.getScopeEntryId(scope);
+      const existingRun =
+        existingId !== null && existingId !== taskRun.id
+          ? await db.query.taskRuns.findFirst({
+              where: eq(taskRuns.id, existingId),
+              columns: { status: true },
+            })
+          : undefined;
+
+      if (existingRun?.status === RunStatus.Pending) {
+        await cancelEvictedTaskRuns(
+          [{ id: taskRun.id, scope }],
+          'Another run for the same work is already queued.',
+        );
+        return;
+      }
+
+      if (existingId !== null) {
+        await queue.removeEntry(existingId);
+      }
+      evictedEntries = await queue.enqueue({
+        ...entry,
+        preserveExisting: false,
+      });
+    }
 
     await cancelEvictedTaskRuns(
       evictedEntries,
@@ -3086,6 +3156,14 @@ async function recordSnapshotResumeRequestEvent(input: {
 export async function dequeueTaskRun(): Promise<number | null> {
   const entry = await TaskRunQueue.getInstance().dequeue();
   return entry ? entry.id : null;
+}
+
+/**
+ * Drops a run's leftover queue entry once it is started outside the queue
+ * (orphan recovery), so its scope pointer cannot make later runs defer to it.
+ */
+export function removeTaskRunQueueEntry(taskRun: TaskRun): Promise<boolean> {
+  return TaskRunQueue.getInstance().removeEntry(taskRun.id);
 }
 
 export function releaseTaskRun(taskRun: TaskRun): Promise<boolean> {
