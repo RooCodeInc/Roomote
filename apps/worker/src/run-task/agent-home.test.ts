@@ -1095,7 +1095,7 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
-  it('rebases Azure providers onto the inference gateway without a /v1 suffix', () => {
+  it('rebases Azure providers onto the inference gateway with an explicit /v1 suffix', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
@@ -1113,11 +1113,12 @@ describe('generateOpenCodeConfig provider support', () => {
     };
 
     expect(config.provider.azure?.options).toMatchObject({
-      baseURL: 'https://api.example.com/api/inference/azure',
+      baseURL: 'https://api.example.com/api/inference/azure/v1',
       apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
     expect(config.provider['azure-cognitive-services']?.options).toMatchObject({
-      baseURL: 'https://api.example.com/api/inference/azure-cognitive-services',
+      baseURL:
+        'https://api.example.com/api/inference/azure-cognitive-services/v1',
       apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
   });

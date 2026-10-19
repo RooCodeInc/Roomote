@@ -53,6 +53,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@ai-sdk/azure": "3.0.93",
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
     "tsup": "^8.5.1",
