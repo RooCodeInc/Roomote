@@ -8,6 +8,7 @@ const TEXT_ATTACHMENT_EXTENSIONS = [
   'md',
   'markdown',
   'json',
+  'har',
   'yaml',
   'yml',
   'xml',

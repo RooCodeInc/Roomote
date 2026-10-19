@@ -116,118 +116,138 @@ describe('send_message / steer_message user context', () => {
     );
   });
 
-  it('forwards screenshot and log attachments through direct task messages', async () => {
-    mockTaskRunsFindFirst.mockResolvedValue({
-      actingUserId: 'user-current',
-      taskId: 'task-review',
-    });
-    const screenshot = Buffer.from('png-bytes').toString('base64');
+  it.each([
+    ['failure.log', 'text/plain', 'connection refused'],
+    [
+      'network.har',
+      'application/octet-stream',
+      '{"log":{"version":"1.2","entries":[]}}',
+    ],
+  ])(
+    'forwards screenshot and %s attachments through direct task messages',
+    async (filename, mimeType, content) => {
+      mockTaskRunsFindFirst.mockResolvedValue({
+        actingUserId: 'user-current',
+        taskId: 'task-review',
+      });
+      const screenshot = Buffer.from('png-bytes').toString('base64');
 
-    const response = await post(
-      createApp(userlessRunAuth),
-      '/tasks/task-impl/send_message',
-      {
-        message: 'Review these files',
-        attachments: [
-          {
-            filename: 'screenshot.png',
-            mimeType: 'image/png',
-            base64: screenshot,
-          },
-          {
-            filename: 'failure.log',
-            mimeType: 'text/plain',
-            base64: Buffer.from('connection refused').toString('base64'),
-          },
-        ],
-      },
-    );
-
-    expect(response.status).toBe(200);
-    expect(mockSendMessageToTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.stringContaining('connection refused'),
-        quoteText: 'Review these files',
-        images: [`data:image/png;base64,${screenshot}`],
-      }),
-    );
-
-    mockSteerMessageToTask.mockResolvedValue({ success: true, result: {} });
-    const steerResponse = await post(
-      createApp(userlessRunAuth),
-      '/tasks/task-impl/steer_message',
-      {
-        message: 'Review these files',
-        attachments: [
-          {
-            filename: 'failure.log',
-            mimeType: 'text/plain',
-            base64: Buffer.from('connection refused').toString('base64'),
-          },
-        ],
-      },
-    );
-
-    expect(steerResponse.status).toBe(200);
-    expect(mockSteerMessageToTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.stringContaining('connection refused'),
-        quoteText: 'Review these files',
-      }),
-    );
-  });
-
-  it('preserves attachment texts when task IDs fall back to Fast sessions', async () => {
-    mockTaskRunsFindFirst.mockResolvedValue({
-      actingUserId: 'user-current',
-      taskId: 'task-review',
-    });
-    mockSendMessageToTask.mockResolvedValue({
-      success: false,
-      status: 404,
-      error: 'Task not found',
-    });
-    mockSteerMessageToTask.mockResolvedValue({
-      success: false,
-      status: 404,
-      error: 'Task not found',
-    });
-    const body = {
-      message: 'Inspect the log',
-      attachments: [
+      const response = await post(
+        createApp(userlessRunAuth),
+        '/tasks/task-impl/send_message',
         {
-          filename: 'failure.log',
-          mimeType: 'text/plain',
-          base64: Buffer.from('connection refused').toString('base64'),
+          message: 'Review these files',
+          attachments: [
+            {
+              filename: 'screenshot.png',
+              mimeType: 'image/png',
+              base64: screenshot,
+            },
+            {
+              filename,
+              mimeType,
+              base64: Buffer.from(content).toString('base64'),
+            },
+          ],
         },
-      ],
-    };
+      );
 
-    await post(
-      createApp(userlessRunAuth),
-      '/tasks/task-impl/send_message',
-      body,
-    );
-    await post(
-      createApp(userlessRunAuth),
-      '/tasks/task-impl/steer_message',
-      body,
-    );
+      expect(response.status).toBe(200);
+      expect(mockSendMessageToTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(content),
+          quoteText: 'Review these files',
+          images: [`data:image/png;base64,${screenshot}`],
+        }),
+      );
 
-    expect(mockSendMessageToFastSessionForUser).toHaveBeenCalledTimes(2);
-    expect(mockSendMessageToFastSessionForUser).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        attachmentTexts: [expect.stringContaining('connection refused')],
-      }),
-    );
-    expect(mockSendMessageToFastSessionForUser).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        attachmentTexts: [expect.stringContaining('connection refused')],
-      }),
-    );
-  });
+      mockSteerMessageToTask.mockResolvedValue({ success: true, result: {} });
+      const steerResponse = await post(
+        createApp(userlessRunAuth),
+        '/tasks/task-impl/steer_message',
+        {
+          message: 'Review these files',
+          attachments: [
+            {
+              filename,
+              mimeType,
+              base64: Buffer.from(content).toString('base64'),
+            },
+          ],
+        },
+      );
+
+      expect(steerResponse.status).toBe(200);
+      expect(mockSteerMessageToTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(content),
+          quoteText: 'Review these files',
+        }),
+      );
+    },
+  );
+
+  it.each([
+    ['failure.log', 'text/plain', 'connection refused'],
+    [
+      'network.har',
+      'application/octet-stream',
+      '{"log":{"version":"1.2","entries":[]}}',
+    ],
+  ])(
+    'preserves %s text when task IDs fall back to sessions',
+    async (filename, mimeType, content) => {
+      mockTaskRunsFindFirst.mockResolvedValue({
+        actingUserId: 'user-current',
+        taskId: 'task-review',
+      });
+      mockSendMessageToTask.mockResolvedValue({
+        success: false,
+        status: 404,
+        error: 'Task not found',
+      });
+      mockSteerMessageToTask.mockResolvedValue({
+        success: false,
+        status: 404,
+        error: 'Task not found',
+      });
+      const body = {
+        message: 'Inspect the log',
+        attachments: [
+          {
+            filename,
+            mimeType,
+            base64: Buffer.from(content).toString('base64'),
+          },
+        ],
+      };
+
+      await post(
+        createApp(userlessRunAuth),
+        '/tasks/task-impl/send_message',
+        body,
+      );
+      await post(
+        createApp(userlessRunAuth),
+        '/tasks/task-impl/steer_message',
+        body,
+      );
+
+      expect(mockSendMessageToFastSessionForUser).toHaveBeenCalledTimes(2);
+      expect(mockSendMessageToFastSessionForUser).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          attachmentTexts: [expect.stringContaining(content)],
+        }),
+      );
+      expect(mockSendMessageToFastSessionForUser).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          attachmentTexts: [expect.stringContaining(content)],
+        }),
+      );
+    },
+  );
 
   it('send_message falls back to the task human owner when the run has no acting user', async () => {
     mockTaskRunsFindFirst.mockResolvedValue({

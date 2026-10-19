@@ -1,4 +1,5 @@
 import { tmpdir } from 'node:os';
+import { extractPromptTextAttachments } from '../../file-attachments';
 
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
@@ -11204,6 +11205,80 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(subagentWrites[1]?.eventId).toBe(subagentWrites[0]?.eventId);
     expect(subagentWrites[1]?.turnSeq).toBe(subagentWrites[0]?.turnSeq);
   });
+
+  it.each(['launch', 'running', 'completed'] as const)(
+    'forwards extracted HAR context through the %s task handoff',
+    async (target) => {
+      const har = JSON.stringify({
+        log: {
+          version: '1.2',
+          entries: [
+            {
+              request: {
+                method: 'GET',
+                url: 'https://example.com/api/checkout',
+              },
+              response: { status: 502 },
+            },
+          ],
+        },
+      });
+      const { attachmentTexts, warnings } = await extractPromptTextAttachments([
+        {
+          filename: 'network.har',
+          mimeType: 'application/octet-stream',
+          bytes: Buffer.from(har),
+        },
+      ]);
+      expect(warnings).toEqual([]);
+      expect(attachmentTexts).toHaveLength(1);
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+        success: true,
+        taskId: 'task-1',
+        taskUrl: 'https://roomote.example/task-1',
+      }));
+      if (target !== 'launch') {
+        mocks.getActiveTasks.mockResolvedValue([
+          { taskId: 'task-1', title: 'Checkout', status: target },
+        ]);
+        mocks.sendTaskMessage.mockResolvedValue({ success: true });
+      }
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(
+            target === 'launch'
+              ? nativeToolNames.launchTask
+              : nativeToolNames.sendTaskMessage,
+            {
+              ...(target === 'launch'
+                ? { prompt: 'Investigate checkout.' }
+                : { taskId: 'task-1', message: 'Investigate checkout.' }),
+              includeAttachments: true,
+            },
+          );
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        attachmentTexts,
+        adapter: callbacks({ launchTask }),
+      });
+      const expectedText = `Investigate checkout.\n\n${attachmentTexts[0]}`;
+      expect(expectedText).toContain(har);
+      if (target === 'launch') {
+        expect(launchTask).toHaveBeenCalledWith(
+          expect.objectContaining({ prompt: expectedText }),
+        );
+      } else {
+        expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ taskId: 'task-1', message: expectedText }),
+        );
+      }
+    },
+  );
 
   it('launches before the first reply and then posts the task link', async () => {
     mocks.evaluateDecisionModel.mockResolvedValue({

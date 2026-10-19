@@ -58,7 +58,7 @@ request body over 24 MiB returns HTTP 413 with
 | Content type    | File types                                                                                                                                    |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Pure text       | `.txt`, `.md`, `.markdown`                                                                                                                    |
-| Structured text | `.json`, `.yaml`, `.yml`, `.xml`, `.log`, `.conf`, `.config`, `.ini`, `.env`, `.sh`, `.bash`, `.zsh`, `.toml`, `.properties`                  |
+| Structured text | `.json`, `.har`, `.yaml`, `.yml`, `.xml`, `.log`, `.conf`, `.config`, `.ini`, `.env`, `.sh`, `.bash`, `.zsh`, `.toml`, `.properties`                  |
 | Code            | `.html`, `.htm`, `.css`, `.js`, `.jsx`, `.ts`, `.tsx`, `.py`, `.r`, `.ipynb`, `.rb`, `.go`, `.rs`, `.java`, `.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.sql` |
 | Spreadsheets    | `.csv`, `.tsv`, `.xlsx`, `.xls`                                                                                                               |
 | Documents       | `.pdf`, `.docx`                                                                                                                               |
@@ -72,6 +72,14 @@ See the [environment lifecycle](/environments#environment-lifecycle).
 | Images          | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`                                                                                              |
 
 ## How Roomote uses them
+
+HTTP Archive (`.har`) files are read as JSON text in sessions and tasks, including
+when the browser reports the file as `application/json` or
+`application/octet-stream`. Attach an export to investigate request URLs,
+response statuses, headers, and timings. HAR files use the existing 8 MB
+per-file limit and shared 200,000-character attachment text budget; large
+exports may be truncated. Supported chat providers and Roomote MCP use the
+same text extraction path.
 
 Text, code, spreadsheet, document, and presentation files are read into the
 task as attachment context. Images are passed through as image inputs so

@@ -414,7 +414,7 @@ export function isDiscordTextDocumentAttachment(
       'application/yaml',
       'application/x-yaml',
     ].includes(contentType ?? '') ||
-    /\.(?:c|cc|cpp|css|csv|go|h|html?|java|js|json|jsx|log|md|py|rb|rs|sh|sql|svg|toml|ts|tsx|txt|xml|ya?ml)$/iu.test(
+    /\.(?:c|cc|cpp|css|csv|go|h|har|html?|java|js|json|jsx|log|md|py|rb|rs|sh|sql|svg|toml|ts|tsx|txt|xml|ya?ml)$/iu.test(
       attachment.filename,
     )
   );

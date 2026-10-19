@@ -120,7 +120,7 @@ describe('MCP session routes', () => {
     );
   });
 
-  it('forwards screenshot and log attachments when starting a session', async () => {
+  it('forwards screenshot, log and HAR attachments when starting a session', async () => {
     const user = await userFactory.create();
     createdUserIds.push(user.id);
     const sessionId = crypto.randomUUID();
@@ -149,6 +149,13 @@ describe('MCP session routes', () => {
             mimeType: 'text/plain',
             base64: Buffer.from('connection refused').toString('base64'),
           },
+          {
+            filename: 'network.har',
+            mimeType: 'application/octet-stream',
+            base64: Buffer.from(
+              '{"log":{"version":"1.2","entries":[]}}',
+            ).toString('base64'),
+          },
         ],
       }),
     });
@@ -158,7 +165,10 @@ describe('MCP session routes', () => {
       expect.objectContaining({
         question: expect.stringContaining('connection refused'),
         images: [`data:image/png;base64,${screenshot}`],
-        attachmentTexts: [expect.stringContaining('failure.log')],
+        attachmentTexts: [
+          expect.stringContaining('failure.log'),
+          expect.stringContaining('"entries":[]'),
+        ],
       }),
     );
   });
@@ -642,7 +652,7 @@ describe('MCP session routes', () => {
     );
   });
 
-  it('forwards screenshot and diff attachments when continuing a session', async () => {
+  it('forwards screenshot, diff and HAR attachments when continuing a session', async () => {
     const owner = await userFactory.create();
     createdUserIds.push(owner.id);
     const [conversation] = await db
@@ -684,6 +694,13 @@ describe('MCP session routes', () => {
               mimeType: 'text/plain',
               base64: Buffer.from('- old\n+ new').toString('base64'),
             },
+            {
+              filename: 'network.har',
+              mimeType: 'application/octet-stream',
+              base64: Buffer.from(
+                '{"log":{"version":"1.2","entries":[]}}',
+              ).toString('base64'),
+            },
           ],
         }),
       },
@@ -694,7 +711,10 @@ describe('MCP session routes', () => {
       expect.objectContaining({
         question: expect.stringContaining('- old\n+ new'),
         images: [`data:image/png;base64,${screenshot}`],
-        attachmentTexts: [expect.stringContaining('change.diff')],
+        attachmentTexts: [
+          expect.stringContaining('change.diff'),
+          expect.stringContaining('"entries":[]'),
+        ],
       }),
     );
   });
