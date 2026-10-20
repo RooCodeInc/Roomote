@@ -181,6 +181,10 @@ jobs:
         run: pnpm --filter @roomote/db db:push:test --force
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/test
+      - name: Install native watcher test dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends inotify-tools
       - name: Run unit tests
         run: pnpm test:ci
         env:

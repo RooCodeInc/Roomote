@@ -6,6 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 const nativeInotify = spawnSync('which', ['inotifywait'], { encoding: 'utf8' });
 const hasInotify = process.platform === 'linux' && nativeInotify.status === 0;
+if (process.env.CI && process.platform === 'linux' && !hasInotify) {
+  throw new Error(
+    'Linux CI requires inotify-tools for native dev-watcher tests',
+  );
+}
 const scriptSource = fileURLToPath(
   new URL('../../../../../scripts/watchman.sh', import.meta.url),
 );
