@@ -143,6 +143,63 @@ describe('user task model mapping presets', () => {
     ).rejects.toThrow('A custom preset with that name already exists.');
   });
 
+  it('reads old and malformed saved JSON without repairing or deleting rows', async () => {
+    const owner = await userFactory.create();
+    const { audioVideo: _audioVideo, ...legacy } = buildRoles(
+      { helper: HELPER_MODEL_ID },
+      { coding: 'high', helper: null },
+    );
+    const storedRoles = [
+      legacy,
+      { ...legacy, audioVideo: null },
+      {
+        ...legacy,
+        coding: { modelId: 'removed/model', reasoningEffort: 'max' },
+      },
+      'bad',
+    ];
+    for (const [index, roles] of storedRoles.entries()) {
+      await db.insert(userTaskModelMappingPresets).values({
+        userId: owner.id,
+        name: `Saved ${index}`,
+        nameKey: `saved ${index}`,
+        roles: roles as UserTaskModelMapping,
+      });
+    }
+    const auth = buildAuth(owner.id);
+    const presets = await listUserTaskModelMappingPresetsCommand(auth);
+    expect(presets[0]?.roles).toEqual({ ...legacy, audioVideo: legacy.coding });
+    expect(presets[1]?.roles.audioVideo).toBeNull();
+    expect(presets[2]?.roles.audioVideo).toEqual({
+      modelId: 'removed/model',
+      reasoningEffort: 'max',
+    });
+    expect(
+      Object.values(presets[3]!.roles).every((role) => role === null),
+    ).toBe(true);
+    expect(await listUserTaskModelMappingPresetsCommand(auth)).toEqual(presets);
+    expect(mockGetTaskModelSettings).not.toHaveBeenCalled();
+    const stored = await db.query.userTaskModelMappingPresets.findMany({
+      where: eq(userTaskModelMappingPresets.userId, owner.id),
+      orderBy: (table, { asc }) => [asc(table.createdAt)],
+    });
+    expect(stored.map((preset) => preset.roles)).toEqual(storedRoles);
+    await expect(
+      createUserTaskModelMappingPresetCommand(auth, {
+        name: 'Still strict',
+        roles: legacy,
+      }),
+    ).rejects.toThrow();
+    await expect(
+      deleteUserTaskModelMappingPresetCommand(auth, { id: presets[1]!.id }),
+    ).resolves.toMatchObject({ name: 'Saved 1' });
+    expect(
+      await db.query.userTaskModelMappingPresets.findFirst({
+        where: eq(userTaskModelMappingPresets.id, presets[1]!.id),
+      }),
+    ).toBeUndefined();
+  });
+
   it('validates every model against its role’s current selectable models', async () => {
     const user = await userFactory.create();
     const auth = buildAuth(user.id);

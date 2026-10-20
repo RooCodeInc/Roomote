@@ -10,6 +10,7 @@ import {
   TASK_MODEL_ROLE_DISPLAY_NAMES,
   TASK_MODEL_ROLES,
   normalizeTaskModelId,
+  readPersistedUserTaskModelMapping,
   userTaskModelMappingPresetCreateSchema,
 } from '@roomote/types';
 import type {
@@ -46,7 +47,7 @@ export async function listUserTaskModelMappingPresetsCommand(
 ): Promise<UserTaskModelMappingPreset[]> {
   assertAdmin(auth);
 
-  return db.query.userTaskModelMappingPresets.findMany({
+  const presets = await db.query.userTaskModelMappingPresets.findMany({
     where: eq(userTaskModelMappingPresets.userId, auth.userId),
     columns: {
       id: true,
@@ -55,6 +56,11 @@ export async function listUserTaskModelMappingPresetsCommand(
     },
     orderBy: [asc(userTaskModelMappingPresets.createdAt)],
   });
+
+  return presets.map((preset) => ({
+    ...preset,
+    roles: readPersistedUserTaskModelMapping(preset.roles),
+  }));
 }
 
 export async function createUserTaskModelMappingPresetCommand(

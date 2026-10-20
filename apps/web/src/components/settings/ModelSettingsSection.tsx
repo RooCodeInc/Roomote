@@ -74,6 +74,7 @@ import {
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   getTaskModelReasoningEfforts,
   resolveTaskModelReasoningEffort,
+  readPersistedUserTaskModelMapping,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
   XAI_SUBSCRIPTION_PROVIDER_ID,
@@ -1443,7 +1444,14 @@ export function ModelSettingsSection({
       ),
     ]),
   ) as Record<TaskModelRole, MappingPresetModelOption[]>;
-  const customPresets = customPresetsQuery.data ?? [];
+  const customPresets = useMemo(
+    () =>
+      (customPresetsQuery.data ?? []).map((preset) => ({
+        ...preset,
+        roles: readPersistedUserTaskModelMapping(preset.roles),
+      })),
+    [customPresetsQuery.data],
+  );
   const getUnavailableCustomPresetRoles = (
     preset: UserTaskModelMappingPreset,
   ): TaskModelRole[] =>
@@ -1459,7 +1467,7 @@ export function ModelSettingsSection({
       }
 
       return !mappingModelOptionsByRole[role].some(
-        (model) => model.id === preset.roles[role].modelId,
+        (model) => model.id === preset.roles[role]?.modelId,
       );
     });
   const roleSelectValues = TASK_MODEL_ROLE_ORDER.reduce(
@@ -2077,6 +2085,13 @@ export function ModelSettingsSection({
           TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey
         ];
       const roleMapping = preset.roles[role];
+      if (!roleMapping) {
+        // Invalid env-managed selections are ignored just like unavailable
+        // ones. Other invalid roles are rejected by the availability guard.
+        if (status?.managedByEnv) continue;
+        toast.error('Choose current models for every role before applying.');
+        return;
+      }
       const modelId = roleMapping.modelId;
       const option = mappingModelOptionsByRole[role].find(
         (model) => model.id === modelId,
@@ -2231,9 +2246,9 @@ export function ModelSettingsSection({
             : (Object.fromEntries(
                 TASK_MODEL_ROLES.map((role) => [
                   role,
-                  applyDialog.preset.roles[role].modelId,
+                  applyDialog.preset.roles[role]?.modelId ?? null,
                 ]),
-              ) as Record<TaskModelRole, string>);
+              ) as Record<TaskModelRole, string | null>);
 
         return TASK_MODEL_ROLE_CONFIGS.map((config) => {
           const status =
@@ -2247,7 +2262,9 @@ export function ModelSettingsSection({
             : presetRoleModelIds.coding;
           const modelId = managedByEnv
             ? status?.effectiveModelId
-            : (presetRoleModelIds[config.role] ?? codingModelId);
+            : applyDialog.kind === 'custom'
+              ? presetRoleModelIds[config.role]
+              : (presetRoleModelIds[config.role] ?? codingModelId);
           const presetModel =
             applyDialog.kind === 'provider'
               ? Object.values(applyDialog.preset.roles).find(
@@ -2278,7 +2295,9 @@ export function ModelSettingsSection({
                   : undefined) ??
                 modelId.split('/').at(-1) ??
                 modelId)
-            : 'Not set';
+            : applyDialog.kind === 'custom' && !managedByEnv
+              ? 'Missing or invalid selection'
+              : 'Not set';
 
           return { config, displayName, managedByEnv, isUnavailable };
         });
@@ -2373,6 +2392,18 @@ export function ModelSettingsSection({
           </div>
         }
       >
+        {customPresetsQuery.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            Could not load custom presets. You can still change model settings.{' '}
+            <Button
+              variant="link"
+              size="sm"
+              onClick={() => void customPresetsQuery.refetch()}
+            >
+              Retry loading presets
+            </Button>
+          </p>
+        )}
         {modelFallbacks.enabled ? (
           <p className="text-sm text-muted-foreground">
             Pick default and fallback models for each role. Fallbacks are used
@@ -2550,7 +2581,7 @@ export function ModelSettingsSection({
           </DialogHeader>
           {unavailableCustomPresetRoles.length > 0 && (
             <p className="text-sm text-destructive">
-              This preset includes unavailable models for{' '}
+              This preset includes unavailable models or invalid selections for{' '}
               {unavailableCustomPresetRoles
                 .map(
                   (role) =>
