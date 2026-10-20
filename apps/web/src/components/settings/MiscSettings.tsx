@@ -73,16 +73,31 @@ export function MiscSettings() {
     );
   }
 
-  if (settingsQuery.isError || !settingsQuery.data) {
-    return (
-      <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-        <p>Failed to load settings.</p>
-      </div>
-    );
+  const readError = settingsQuery.isError ? (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm"
+    >
+      <p className="text-destructive">Failed to load settings.</p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={settingsQuery.isFetching}
+        onClick={() => void settingsQuery.refetch()}
+      >
+        {settingsQuery.isFetching ? 'Retrying…' : 'Retry'}
+      </Button>
+    </div>
+  ) : null;
+
+  if (!settingsQuery.data) {
+    return readError;
   }
 
   return (
     <div className="space-y-4">
+      {readError}
       <Section title="Regional settings">
         <DeploymentTimeZoneSetting />
       </Section>
