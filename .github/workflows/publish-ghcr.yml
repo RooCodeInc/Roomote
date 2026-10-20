@@ -181,6 +181,8 @@ jobs:
               ;;
           esac
           echo "version=$baseline" >> "$GITHUB_OUTPUT"
+      - name: Install model-settings smoke browser
+        run: npm install --global agent-browser@0.37.0 && agent-browser install --with-deps
       - name: Exercise deployment lifecycle
         env:
           BASELINE_VERSION: ${{ steps.baseline.outputs.version }}

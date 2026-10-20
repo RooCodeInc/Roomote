@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+web_port="${DEPLOYMENT_CI_WEB_PORT:-53000}"
+model_settings_session_token="$(openssl rand -hex 32)"
+
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 candidate_version="${CANDIDATE_VERSION:-deployment-ci}"
 baseline_version="${BASELINE_VERSION:-}"
@@ -107,6 +110,8 @@ COMPOSE_PROFILES=local-postgres
 DASHBOARD_PASSWORD=$dashboard_password
 DATABASE_URL=postgres://postgres:roomote-postgres-password@postgres:5432/roomote
 DEFAULT_COMPUTE_PROVIDER=docker
+DEPLOYMENT_CI_WEB_PORT=$web_port
+DEPLOYMENT_CI_MODEL_PROVIDER_KEY=deployment-ci-not-a-key
 DEPLOYMENT_CI_POSTGRES_PORT=$postgres_port
 DEPLOYMENT_CI_REDIS_PORT=$redis_port
 # CI runners are ephemeral and their Docker storage drivers cannot enforce
@@ -250,6 +255,47 @@ verify_marker() {
   }
 }
 
+seed_model_settings() {
+  compose exec -T postgres psql -v ON_ERROR_STOP=1 \
+    -v "session_token=$model_settings_session_token" -U postgres -d roomote \
+    <"$repo_root/deploy/ci/model-settings-fixture.sql"
+}
+
+verify_model_settings_preserved() {
+  compose exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres -d roomote <<'SQL'
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM deployment_ci_model_settings AS saved
+    JOIN user_task_model_mapping_presets AS preset ON preset.user_id = 'model-settings-ci'
+    JOIN deployment_settings AS settings ON settings.id = 'default'
+    WHERE preset.roles = saved.preset_roles
+      AND settings.model_fallback_config = saved.model_fallback_config
+  ) THEN RAISE EXCEPTION 'Saved preset or backup models changed across upgrade/rollback'; END IF;
+END $$;
+SQL
+}
+
+verify_model_settings_before_apply() {
+  compose exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres -d roomote <<'SQL'
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM deployment_ci_model_settings AS saved
+    JOIN deployment_settings AS settings ON settings.id = 'default'
+    WHERE settings.task_model_settings = saved.task_model_settings
+      AND settings.runtime_model_config = saved.runtime_model_config
+  ) THEN RAISE EXCEPTION 'Populated model selections changed during upgrade'; END IF;
+END $$;
+SQL
+}
+
+verify_model_settings_browser() {
+  MODEL_SETTINGS_SMOKE_URL="http://127.0.0.1:$web_port" \
+    MODEL_SETTINGS_SMOKE_SESSION_TOKEN="$model_settings_session_token" \
+    ENCRYPTION_KEY="$encryption_key" \
+    node "$repo_root/deploy/ci/model-settings-browser.mjs"
+  verify_model_settings_preserved
+}
+
 validate_upgrade_and_rollback() {
   if [ -z "$baseline_version" ]; then
     return 0
@@ -259,6 +305,7 @@ validate_upgrade_and_rollback() {
   start_stack
   verify_stack baseline
   write_marker
+  seed_model_settings
 
   printf 'Upgrading previous release to candidate\n'
   write_env "$candidate_version"
@@ -266,17 +313,23 @@ validate_upgrade_and_rollback() {
   verify_stack
   verify_marker
 
+  verify_model_settings_preserved
+  verify_model_settings_before_apply
+  verify_model_settings_browser
+
   printf 'Rolling back candidate to previous release\n'
   write_env baseline
   start_stack
   verify_stack baseline
   verify_marker
+  verify_model_settings_preserved
 
   printf 'Returning stack to candidate after rollback probe\n'
   write_env "$candidate_version"
   start_stack
   verify_stack
   verify_marker
+  verify_model_settings_browser
 }
 
 launch_docker_task() {
@@ -330,6 +383,8 @@ if [ -n "$baseline_version" ]; then
 else
   start_stack
   verify_stack
+  seed_model_settings
+  verify_model_settings_browser
 fi
 
 launch_docker_task

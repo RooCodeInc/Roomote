@@ -572,7 +572,16 @@ export function isDiscordTaskEntryEvent(
 ): boolean {
   const message = getDiscordMessageCreate(event);
   if (message) {
-    if (message.author.bot && options.channelAutoStart !== true) return false;
+    if (options.botUserId && message.author.id === options.botUserId)
+      return false;
+    const isAutomated =
+      message.author.bot === true || typeof message.webhook_id === 'string';
+    if (
+      isAutomated &&
+      options.channelAutoStart !== true &&
+      !isDiscordBotMentioned(message, options.botUserId)
+    )
+      return false;
     const hasContent = Boolean(
       getDiscordMessageContent(message) ||
       getDiscordMessageAttachments(message).length,

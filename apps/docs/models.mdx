@@ -210,6 +210,27 @@ later becomes unavailable, but cannot be applied until every unavailable role
 has a current model selection; deleting a preset does not change the active
 model mapping.
 
+### Saved presets after an upgrade
+
+Custom presets saved before a model role was introduced remain usable. A missing
+role that follows the coding model, such as **Audio and video**, uses the preset's
+saved coding model and reasoning level. Existing selections are preserved; simply
+opening settings does not rewrite your presets or backup-model configuration.
+
+If a preset contains an invalid selection or a model that is no longer available,
+open it from **Use a mapping preset** to inspect the affected roles. Applying it
+is disabled for roles you can edit until you create a replacement with current
+models. Environment-managed roles remain managed by their environment variables.
+You can delete the old preset from its preview without changing your active model
+mapping. Keep it until you have saved any selections you want to reuse.
+
+If custom presets fail to load, use **Retry loading presets**; the main model
+controls remain available. For an application error after upgrading, keep a
+database backup and collect the first browser-console exception, the installed
+version, and whether the error occurs on navigation or when opening a preset.
+Check migration logs for schema errors separately from invalid saved selections.
+Do not wipe model settings or reset the database to recover a preset.
+
 ## Env-based setup
 
 Most deployments should configure providers from **Settings > Models**. Use

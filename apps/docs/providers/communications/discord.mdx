@@ -79,8 +79,9 @@ Use **Repair** to register commands again and refresh server discovery.
 
 ## Link your account
 
-Discord tasks are attributed only to people who have linked their Discord
-account to a Roomote user.
+Work you start from your own Discord account requires linking that account to a
+Roomote user. Automated bot and webhook requests use the server installer's
+Roomote account instead, as described below.
 
 Generate a link command under **Settings > Personal > Linked Accounts** and run
 it in a direct message with the bot. This verifies that Roomote can reach you
@@ -182,6 +183,25 @@ and supported attachments to the task context. Image attachments are passed to
 the task as image input, and supported documents are downloaded and added to
 the request. Attachment downloads are size-limited and restricted to Discord's
 media hosts.
+
+### Requests from bots and webhooks
+
+Other bots and webhooks can request work by explicitly mentioning Roomote in a
+server channel or thread. Outside channels configured to start work
+automatically, automated posts must mention Roomote each time, including in an
+existing conversation. Roomote ignores its own posts.
+
+Automated requests run with the permissions and integrations of the Roomote
+account recorded for that server's installation. The bot or webhook does not
+need its own linked human account or a separate allowlist. Delegated tasks keep
+the external bot or webhook as their automation actor, and replies stay in the
+originating Discord conversation rather than using the installer's personal
+notification destination.
+
+If an automated mention is ignored, confirm that the server installation has an
+associated Roomote installer account, that the post mentions the installed bot,
+and that Roomote can read and reply in that channel. Roomote cannot start the
+request without an installer account to run it under.
 
 ## Self-hosted configuration
 

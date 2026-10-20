@@ -2,6 +2,22 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.18.2 (2026-10-20)
+
+Roomote 1.18.2 keeps integration tools available in Fast sessions, restores Discord bot and webhook requests, and preserves model settings when upgrading with older presets.
+
+### Highlights
+
+- Keep Fast session tools available across conversations and recover from temporary MCP connection failures.
+- Start work from Discord bot and webhook mentions, with replies staying in the originating conversation.
+- Upgrade with older model presets without losing access to model settings or resetting saved selections.
+
+### Patch changes
+
+- Discord bot and webhook posts that explicitly mention Roomote now reach the session instead of being ignored. Automated requests use the server installer's Roomote account, retain their automation attribution when delegating tasks, and keep replies in the originating Discord conversation.
+- Fast sessions keep integration tools available across repeated conversations and retry failed MCP connections before later turns. This fixes tools disappearing after a temporary connection failure or after many sessions have used the same server.
+- Keep model settings usable after upgrades with older custom presets. Missing inherited roles use the preset's coding selection, and invalid or unavailable presets can be inspected and deleted without resetting model settings. Thanks to @fdev23408 for reporting [#3523](https://github.com/RooCodeInc/Roomote/issues/3523).
+
 ## 1.18.1 (2026-10-20)
 
 Roomote 1.18.1 keeps pull-request reviews moving after an interrupted worker without unnecessary cancellations or duplicate reviews.

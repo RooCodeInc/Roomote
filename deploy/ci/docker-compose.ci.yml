@@ -7,6 +7,15 @@ services:
 
   web:
     env_file: !reset []
+    ports:
+      - '127.0.0.1:${DEPLOYMENT_CI_WEB_PORT:-53000}:3000'
+    environment:
+      R_APP_URL: http://127.0.0.1:${DEPLOYMENT_CI_WEB_PORT:-53000}
+      ROOMOTE_APP_URL: http://127.0.0.1:${DEPLOYMENT_CI_WEB_PORT:-53000}
+      R_PUBLIC_URL: http://127.0.0.1:${DEPLOYMENT_CI_WEB_PORT:-53000}
+      ROOMOTE_PUBLIC_URL: http://127.0.0.1:${DEPLOYMENT_CI_WEB_PORT:-53000}
+      # Synthetic presence-only credential; this probe never calls inference.
+      OPENROUTER_API_KEY: ${DEPLOYMENT_CI_MODEL_PROVIDER_KEY:-}
 
   api:
     env_file: !reset []
