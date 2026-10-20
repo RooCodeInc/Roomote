@@ -1,6 +1,7 @@
 import {
   db,
   eq,
+  sql,
   userFactory,
   userTaskModelMappingPresets,
 } from '@roomote/db/server';
@@ -124,6 +125,38 @@ describe('user task model mapping presets', () => {
     await expect(
       listUserTaskModelMappingPresetsCommand(buildAuth(owner.id)),
     ).resolves.toEqual([]);
+  });
+
+  it('reads older role maps unchanged while keeping new preset validation strict', async () => {
+    const owner = await userFactory.create();
+    const auth = buildAuth(owner.id);
+    const roles = buildRoles({ helper: HELPER_MODEL_ID });
+    const preset = await createUserTaskModelMappingPresetCommand(auth, {
+      name: 'Pre-media preset',
+      roles,
+    });
+    await db
+      .update(userTaskModelMappingPresets)
+      .set({
+        roles: sql`${userTaskModelMappingPresets.roles} - 'audioVideo'`,
+      })
+      .where(eq(userTaskModelMappingPresets.id, preset.id));
+    const { audioVideo: _audioVideo, ...olderRoles } = roles;
+
+    await expect(listUserTaskModelMappingPresetsCommand(auth)).resolves.toEqual(
+      [{ ...preset, roles: olderRoles }],
+    );
+    const stored = await db.query.userTaskModelMappingPresets.findFirst({
+      where: eq(userTaskModelMappingPresets.id, preset.id),
+      columns: { roles: true },
+    });
+    expect(stored?.roles).toEqual(olderRoles);
+    await expect(
+      createUserTaskModelMappingPresetCommand(auth, {
+        name: 'New incomplete preset',
+        roles: olderRoles,
+      }),
+    ).rejects.toThrow();
   });
 
   it('rejects duplicate names regardless of case and surrounding whitespace', async () => {

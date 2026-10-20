@@ -44,5 +44,6 @@ export const userTaskModelMappingPresetCreateSchema = z.object({
 export type UserTaskModelMappingPreset = {
   id: string;
   name: string;
-  roles: UserTaskModelMapping;
+  // Saved presets can predate roles introduced by a later release.
+  roles: Partial<UserTaskModelMapping>;
 };
