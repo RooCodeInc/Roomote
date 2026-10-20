@@ -59,6 +59,57 @@ function messageEvent(input: {
 }
 
 describe('Discord Gateway event normalization', () => {
+  it.each([
+    { author: { id: 'feed-1', username: 'feed', bot: true } },
+    { author: { id: 'feed-1', username: 'feed' }, webhook_id: 'hook-1' },
+  ])(
+    'requires a current-bot mention for automated entries outside auto-start: %j',
+    (automated) => {
+      for (const guild_id of [undefined, 'guild-1']) {
+        for (const content of [
+          'alert',
+          '<@old-bot> alert',
+          `<@${botUserId}> alert`,
+        ]) {
+          const event = parse({
+            t: 'MESSAGE_CREATE',
+            d: {
+              id: 'message-1',
+              channel_id: 'channel-1',
+              guild_id,
+              content,
+              ...automated,
+            },
+          });
+          expect(
+            isDiscordTaskEntryEvent(event, { botUserId, isTaskThread: true }),
+          ).toBe(content.includes(botUserId));
+          expect(
+            isDiscordTaskEntryEvent(event, {
+              botUserId,
+              channelAutoStart: true,
+            }),
+          ).toBe(true);
+        }
+      }
+    },
+  );
+
+  it('rejects self messages even in auto-start channels', () => {
+    const event = parse({
+      t: 'MESSAGE_CREATE',
+      d: {
+        id: 'message-1',
+        channel_id: 'channel-1',
+        content: `<@${botUserId}> self`,
+        author: { id: botUserId, username: 'Roomote', bot: true },
+      },
+    });
+    expect(
+      isDiscordTaskEntryEvent(event, { botUserId, channelAutoStart: true }),
+    ).toBe(false);
+  });
+
   it('removes the bot mention without flattening a multiline request', () => {
     const event = messageEvent({
       content: '<@bot-1> Fix the tests\n\nThen run:\n```sh\npnpm test\n```',
