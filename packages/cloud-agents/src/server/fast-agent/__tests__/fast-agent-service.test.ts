@@ -7071,6 +7071,35 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
   });
 
+  it('leaves failed MCP servers alone when the turn has no code-mode integrations', async () => {
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.generateText.mock.calls[0]?.[2]).not.toHaveProperty(
+      'reconnectFailedMcpServers',
+    );
+  });
+
+  it('asks OpenCode to reconnect failed MCP servers on code-mode turns', async () => {
+    mocks.getNativeRuntime.mockImplementation(async () => {
+      mocks.mcpCapabilityAvailable = true;
+      return {
+        directory: '/tmp/fast-native-tools',
+        mcpCapability: 'mcp-capability-1',
+        codeModeIntegrationsActive: true,
+        env: {
+          ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
+          ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'test-token',
+        },
+      };
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.generateText.mock.calls[0]?.[2]).toMatchObject({
+      reconnectFailedMcpServers: true,
+    });
+  });
+
   it('mounts a colliding integration mid-turn under its unique code-mode name', async () => {
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;

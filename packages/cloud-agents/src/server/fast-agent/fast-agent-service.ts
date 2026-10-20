@@ -7059,6 +7059,12 @@ export async function answerFastAgentQuestion({
                               toolConfigDisposeState,
                           }
                         : {}),
+                      // A failed MCP client stays failed for the life of the
+                      // directory's OpenCode instance, which would leave
+                      // `execute` without that server on every later turn.
+                      ...(nativeRuntime.codeModeIntegrationsActive
+                        ? { reconnectFailedMcpServers: true }
+                        : {}),
                       ...(toolApprovalBridge
                         ? { onPermissionAsked: toolApprovalBridge.handleAsk }
                         : {}),
