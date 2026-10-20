@@ -95,14 +95,6 @@ export class WorkerReleaseWatcherService {
       `[worker-release-watcher] Watching ${WATCH_DIRS.length} directories for changes`,
     );
 
-    // Build immediately if the archive doesn't exist yet.
-    if (!fs.existsSync(this.workerReleasePath)) {
-      console.log(
-        '[worker-release-watcher] Archive not found on disk -- running initial build',
-      );
-      await this.rebuild(true);
-    }
-
     for (const relDir of WATCH_DIRS) {
       const absDir = path.resolve(this.rootDir, relDir);
 
@@ -155,6 +147,15 @@ export class WorkerReleaseWatcherService {
       }
     }
 
+    // Observe edits during the initial build too. They use the same pending
+    // rebuild path as edits during later builds, rather than being lost.
+    if (!fs.existsSync(this.workerReleasePath)) {
+      console.log(
+        '[worker-release-watcher] Archive not found on disk -- running initial build',
+      );
+      await this.rebuild(true);
+    }
+
     console.log('[worker-release-watcher] Ready -- waiting for file changes');
   }
 
@@ -162,6 +163,7 @@ export class WorkerReleaseWatcherService {
    * Stop all file watchers and cancel any pending rebuild.
    */
   public stop(): void {
+    this.pendingRebuild = false;
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
@@ -233,6 +235,7 @@ export class WorkerReleaseWatcherService {
         `[worker-release-watcher] Rebuild failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       if (throwOnFailure) {
+        this.stop();
         throw err;
       }
     } finally {
