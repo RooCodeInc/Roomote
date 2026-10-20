@@ -34,7 +34,7 @@ import {
   lt,
   sql,
 } from '@roomote/db/server';
-import { dequeueTaskRun } from '@roomote/cloud-agents/server';
+import { dequeueTaskRun, releaseTaskRun } from '@roomote/cloud-agents/server';
 import { finishRun } from '@roomote/sdk/server';
 
 import { getOrphanedTaskRun } from './orphaned-task-runs';
@@ -502,6 +502,20 @@ export abstract class BaseController {
     provider: ComputeProvider,
   ): Promise<void>;
 
+  private async skippedRunHasEnded(runId: number): Promise<boolean> {
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, runId),
+      columns: { status: true, cancelRequestedAt: true, canceledAt: true },
+    });
+
+    return (
+      !run ||
+      run.cancelRequestedAt !== null ||
+      run.canceledAt !== null ||
+      isExitedRunStatus(run.status)
+    );
+  }
+
   protected async spawnWorker(taskRun: TaskRun): Promise<boolean> {
     try {
       if (!this.isRunning) return false;
@@ -511,6 +525,14 @@ export abstract class BaseController {
         console.log(
           `[BaseController] Skipping spawn for task run #${taskRun.id} because it left the dequeueable state before dispatch`,
         );
+        // The pop took this run's scope lock. When the run already ended,
+        // nothing else will release it and the scope stays blocked for the
+        // full lock TTL. A null dequeue can also mean another dispatch
+        // attempt won this same run; that winner still needs the lock, and
+        // the owner check cannot tell the two apart (same run id).
+        if (await this.skippedRunHasEnded(taskRun.id)) {
+          await releaseTaskRun(taskRun);
+        }
 
         return false;
       }
@@ -620,10 +642,13 @@ export abstract class BaseController {
   ): Promise<{ taskRun: TaskRun; authToken: string } | null> {
     const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
+    // A finished run can still surface here: a stale queue entry popped
+    // after its lock expired, or a fallback scan racing completion. Moving
+    // it back to dequeued would re-dispatch work that already ran.
     if (
       taskRun.cancelRequestedAt ||
       taskRun.canceledAt ||
-      taskRun.status === RunStatus.Canceled
+      isExitedRunStatus(taskRun.status)
     ) {
       return null;
     }

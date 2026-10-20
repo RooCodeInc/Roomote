@@ -2,6 +2,19 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.18.1 (2026-10-20)
+
+Roomote 1.18.1 keeps pull-request reviews moving after an interrupted worker without unnecessary cancellations or duplicate reviews.
+
+### Highlights
+
+- Follow-up pull-request reviews can start promptly after recovery instead of stalling or canceling themselves.
+- Finished review runs stay finished, preventing duplicate reviews after recovery.
+
+### Patch changes
+
+- Pull-request reviews now recover reliably after a worker stops unexpectedly, avoiding stalled follow-up reviews, incorrect “Superseded by a newer task run” cancellations, and duplicate reviews from already-finished runs.
+
 ## 1.18.0 (2026-10-19)
 
 Roomote 1.18 makes model choices easier to inspect and control, accepts HAR network exports for debugging, and improves Azure inference, draft pull-request handling, and task reliability.

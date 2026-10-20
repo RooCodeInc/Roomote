@@ -108,6 +108,14 @@ const {
   };
 });
 
+const { mockReleaseTaskRun } = vi.hoisted(() => ({
+  mockReleaseTaskRun: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  releaseTaskRun: (...args: unknown[]) => mockReleaseTaskRun(...args),
+}));
+
 vi.mock('@roomote/compute-providers', () => ({
   createComputeProviderClient: mockCreateComputeProviderClient,
   getComputeProviderCapabilities: (
@@ -898,6 +906,10 @@ describe('sleepCheckJob', () => {
     });
     returningFn.mockResolvedValue([{ id: 6626 }]);
 
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
+      ...mockJob,
+      queueScope: 'acme/widgets:6626',
+    });
     await sleepCheckJob();
 
     expect(mockCreateComputeProviderClient).toHaveBeenCalledWith({
@@ -926,6 +938,7 @@ describe('sleepCheckJob', () => {
         eventType: 'completed',
       }),
     );
+    expect(mockReleaseTaskRun).toHaveBeenCalledTimes(1);
   });
 
   it('retains due Box jobs on standby using the Box client', async () => {
@@ -1036,6 +1049,10 @@ describe('sleepCheckJob', () => {
     });
     returningFn.mockResolvedValue([{ id: 99 }]);
 
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
+      ...mockJob,
+      queueScope: 'acme/widgets:99',
+    });
     await sleepCheckJob();
 
     expect(mockCreateSnapshot).not.toHaveBeenCalled();
@@ -1066,6 +1083,9 @@ describe('sleepCheckJob', () => {
       }),
     });
     expect(captureBullMqMessageMock).not.toHaveBeenCalled();
+    // finishRun is bypassed here, so the queue-scope lock is released
+    // explicitly; otherwise the PR stays locked for the full lock TTL.
+    expect(mockReleaseTaskRun).toHaveBeenCalledTimes(1);
   });
 
   it('reports provider-timeout backstop shutdowns to Sentry', async () => {
