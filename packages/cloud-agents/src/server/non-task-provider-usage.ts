@@ -1489,38 +1489,42 @@ async function reconnectFailedOpenCodeMcpServers(
   directory: string,
   signal: AbortSignal,
 ): Promise<void> {
-  let statuses: Record<string, { status?: string; error?: string }>;
-  try {
-    const result = await client.mcp.status(
-      { directory },
-      {
-        signal: AbortSignal.any([
-          signal,
-          AbortSignal.timeout(MCP_STATUS_TIMEOUT_MS),
-        ]),
-      },
-    );
-    if (!result.data) return;
-    statuses = result.data as Record<
-      string,
-      { status?: string; error?: string }
-    >;
-  } catch (error) {
-    console.warn(
-      `[NonTaskProviderUsage] OpenCode MCP status check failed: ${formatOpenCodeSdkError(error)}`,
-    );
-    return;
-  }
+  const readStatuses = async () => {
+    try {
+      const result = await client.mcp.status(
+        { directory },
+        {
+          signal: AbortSignal.any([
+            signal,
+            AbortSignal.timeout(MCP_STATUS_TIMEOUT_MS),
+          ]),
+        },
+      );
+      return (result.data ?? null) as Record<
+        string,
+        { status?: string; error?: string }
+      > | null;
+    } catch (error) {
+      console.warn(
+        `[NonTaskProviderUsage] OpenCode MCP status check failed: ${formatOpenCodeSdkError(error)}`,
+      );
+      return null;
+    }
+  };
 
+  const statuses = await readStatuses();
+  if (!statuses) return;
   const failed = Object.entries(statuses).filter(
     ([, entry]) => entry?.status === 'failed',
   );
   if (failed.length === 0) return;
 
-  const results = await Promise.all(
-    failed.map(async ([name, entry]) => {
+  // OpenCode answers a connect with success even when the attempt leaves the
+  // server failed, so the outcome is read back from the status map instead.
+  await Promise.all(
+    failed.map(async ([name]) => {
       try {
-        const result = await client.mcp.connect(
+        await client.mcp.connect(
           { name, directory },
           {
             signal: AbortSignal.any([
@@ -1529,16 +1533,19 @@ async function reconnectFailedOpenCodeMcpServers(
             ]),
           },
         );
-        return { name, error: entry.error, ok: !result.error };
       } catch {
-        return { name, error: entry.error, ok: false };
+        // The status read below reports the server as still failed.
       }
     }),
   );
-  const reconnected = results.filter((result) => result.ok);
-  const stillFailed = results.filter((result) => !result.ok);
+  const after = await readStatuses();
+  const names = failed.map(([name]) => name);
+  const reconnected = names.filter(
+    (name) => after?.[name]?.status === 'connected',
+  );
+  const stillFailed = names.filter((name) => !reconnected.includes(name));
   console.warn(
-    `[NonTaskProviderUsage] Reconnected failed OpenCode MCP servers. reconnected=${reconnected.map((result) => result.name).join(',') || 'none'} stillFailed=${stillFailed.map((result) => result.name).join(',') || 'none'} errors=${JSON.stringify(Object.fromEntries(results.map((result) => [result.name, result.error ?? null])))}`,
+    `[NonTaskProviderUsage] Reconnected failed OpenCode MCP servers. reconnected=${reconnected.join(',') || 'none'} stillFailed=${stillFailed.join(',') || 'none'} errors=${JSON.stringify(Object.fromEntries(failed.map(([name, entry]) => [name, after?.[name]?.error ?? entry.error ?? null])))}`,
   );
 }
 

@@ -816,22 +816,26 @@ describe('resolveOpenCodeSmallModel', () => {
       R_MODEL: 'openrouter/openai/gpt-5.4',
     });
     const calls: string[] = [];
+    let reconnectAttempted = false;
     const mcpStatusMock = vi.fn(async () => {
       calls.push('status');
       return {
         data: {
-          gbrain: { status: 'failed', error: 'Request timed out' },
+          gbrain: reconnectAttempted
+            ? { status: 'connected' }
+            : { status: 'failed', error: 'Request timed out' },
           github: { status: 'connected' },
           sentry: { status: 'failed', error: 'SSE error: Non-200 (409)' },
         },
         error: undefined,
       };
     });
+    // OpenCode answers every connect with success, even when the attempt
+    // leaves the server failed; only the status read tells them apart.
     const mcpConnectMock = vi.fn(async ({ name }: { name: string }) => {
       calls.push(`connect:${name}`);
-      return name === 'gbrain'
-        ? { data: true, error: undefined }
-        : { data: undefined, error: { name: 'McpConnectError' } };
+      reconnectAttempted = true;
+      return { data: true, error: undefined };
     });
     createOpencodeClientMock.mockReturnValue({
       config: { providers: configProvidersMock },
@@ -887,11 +891,12 @@ describe('resolveOpenCodeSmallModel', () => {
       { signal: expect.any(AbortSignal) },
     );
     // Only failed servers are retried, and the prompt waits for the retries.
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(5);
     expect(calls[0]).toBe('status');
     expect(calls.slice(1, 3)).toEqual(
       expect.arrayContaining(['connect:gbrain', 'connect:sentry']),
     );
+    expect(calls[3]).toBe('status');
     expect(calls.at(-1)).toBe('prompt');
     expect(mcpConnectMock).toHaveBeenCalledWith(
       { name: 'gbrain', directory: '/tmp/roomote-fast-native-test' },
