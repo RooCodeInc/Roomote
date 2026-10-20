@@ -2254,6 +2254,86 @@ describe('ModelSettingsSection', () => {
     expect(updateMutateAsyncMock).not.toHaveBeenCalled();
   });
 
+  it.each(['audioVideo', 'coding'] as const)(
+    'keeps a preset missing %s inspectable and deletable without inventing a model',
+    async (missingRole) => {
+      settingsData.current = buildSettingsData();
+      const roles: Partial<UserTaskModelMapping> = buildUserModelMapping();
+      delete roles[missingRole];
+      customPresetsData.current = [
+        { id: 'legacy-preset', name: 'Legacy map', roles },
+      ];
+      renderModelSettingsSection();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Use a mapping preset' }),
+      );
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'Custom preset: Legacy map (unavailable models)',
+        }),
+      );
+      const dialog = screen.getByRole('dialog');
+      expect(within(dialog).getByText('Not set')).toBeVisible();
+      const apply = within(dialog).getByRole('button', { name: 'Apply' });
+      expect(apply).toBeDisabled();
+      fireEvent.click(apply);
+      expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+      expect(Object.keys(roles)).toHaveLength(TASK_MODEL_ROLES.length - 1);
+
+      fireEvent.click(
+        within(dialog).getByRole('button', { name: 'Delete Legacy map' }),
+      );
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Delete preset',
+        }),
+      );
+      await waitFor(() =>
+        expect(deleteCustomPresetMutateAsyncMock).toHaveBeenCalledWith({
+          id: 'legacy-preset',
+        }),
+      );
+      expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('applies older saved choices while leaving a missing env-managed role untouched', async () => {
+    const data = buildSettingsData({
+      audioVideoEffectiveModelId: 'openrouter/z-ai/glm-5.2',
+      audioVideoPersistedModelId: 'openrouter/openai/gpt-5.4',
+    });
+    data.runtimeModels.audioVideoModel.managedByEnv = true;
+    settingsData.current = data;
+    const roles: Partial<UserTaskModelMapping> = buildUserModelMapping({
+      helper: 'openrouter/z-ai/glm-5.2',
+    });
+    delete roles.audioVideo;
+    customPresetsData.current = [
+      { id: 'legacy-env-preset', name: 'Legacy env map', roles },
+    ];
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Custom preset: Legacy env map',
+      }),
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByText('Not set')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1));
+    const update = updateMutateAsyncMock.mock.calls[0]?.[0];
+    expect(update).toMatchObject({ helperModelId: 'openrouter/z-ai/glm-5.2' });
+    expect(update).toMatchObject({
+      audioVideoModelId: 'openrouter/openai/gpt-5.4',
+    });
+    expect(roles).not.toHaveProperty('audioVideo');
+  });
+
   it('confirms custom preset deletion without changing the active mapping', async () => {
     settingsData.current = buildSettingsData();
     customPresetsData.current = [

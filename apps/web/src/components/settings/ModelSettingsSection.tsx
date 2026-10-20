@@ -1459,7 +1459,7 @@ export function ModelSettingsSection({
       }
 
       return !mappingModelOptionsByRole[role].some(
-        (model) => model.id === preset.roles[role].modelId,
+        (model) => model.id === preset.roles[role]?.modelId,
       );
     });
   const roleSelectValues = TASK_MODEL_ROLE_ORDER.reduce(
@@ -2077,6 +2077,9 @@ export function ModelSettingsSection({
           TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey
         ];
       const roleMapping = preset.roles[role];
+      if (!roleMapping) {
+        continue;
+      }
       const modelId = roleMapping.modelId;
       const option = mappingModelOptionsByRole[role].find(
         (model) => model.id === modelId,
@@ -2231,9 +2234,9 @@ export function ModelSettingsSection({
             : (Object.fromEntries(
                 TASK_MODEL_ROLES.map((role) => [
                   role,
-                  applyDialog.preset.roles[role].modelId,
+                  applyDialog.preset.roles[role]?.modelId ?? null,
                 ]),
-              ) as Record<TaskModelRole, string>);
+              ) as Record<TaskModelRole, string | null>);
 
         return TASK_MODEL_ROLE_CONFIGS.map((config) => {
           const status =
@@ -2247,7 +2250,9 @@ export function ModelSettingsSection({
             : presetRoleModelIds.coding;
           const modelId = managedByEnv
             ? status?.effectiveModelId
-            : (presetRoleModelIds[config.role] ?? codingModelId);
+            : applyDialog.kind === 'custom'
+              ? presetRoleModelIds[config.role]
+              : (presetRoleModelIds[config.role] ?? codingModelId);
           const presetModel =
             applyDialog.kind === 'provider'
               ? Object.values(applyDialog.preset.roles).find(
