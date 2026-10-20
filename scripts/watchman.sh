@@ -73,10 +73,13 @@ if command -v inotifywait &>/dev/null; then
   RUN_PID=""
   WATCH_PID=""
   EVENT_DIR=""
+  EVENT_FD=""
   cleanup_inotify() {
     local status=$?
     trap - EXIT INT TERM
-    exec 3<&-
+    if [[ -n "$EVENT_FD" ]]; then
+      exec {EVENT_FD}<&-
+    fi
     if [[ -n "$WATCH_PID" ]]; then
       kill "$WATCH_PID" 2>/dev/null || true
       wait "$WATCH_PID" 2>/dev/null || true
@@ -107,9 +110,11 @@ if command -v inotifywait &>/dev/null; then
     "$REPO_ROOT/packages" \
     >"$EVENT_DIR/events" 2>&1 &
   WATCH_PID=$!
-  exec 3<"$EVENT_DIR/events"
+  # Let Bash choose an unused descriptor: PM2 reserves fd3 for Node IPC, which
+  # build/runtime children must continue to inherit unchanged.
+  exec {EVENT_FD}<"$EVENT_DIR/events"
   WATCH_READY=false
-  while IFS= read -r event <&3; do
+  while IFS= read -r -u "$EVENT_FD" event; do
     if [[ "$event" == "Watches established." ]]; then
       WATCH_READY=true
       break
@@ -122,20 +127,20 @@ if command -v inotifywait &>/dev/null; then
   fi
 
   echo "[$SERVICE_NAME:inotifywait] Initial build..."
-  bash -lc "$BUILD_CMD" 3<&-
+  bash -lc "$BUILD_CMD" {EVENT_FD}<&-
 
   echo "[$SERVICE_NAME:inotifywait] Starting runtime..."
-  bash -c "export PATH='$CURRENT_PATH' && cd '$APP_DIR' && $RUN_CMD" 3<&- &
+  bash -c "export PATH='$CURRENT_PATH' && cd '$APP_DIR' && $RUN_CMD" {EVENT_FD}<&- &
   RUN_PID=$!
 
   echo "[$SERVICE_NAME:inotifywait] Watching for changes in $APP_REL/src/ and packages/..."
-  while IFS= read -r event <&3; do
+  while IFS= read -r -u "$EVENT_FD" event; do
     sleep 0.2
     # Coalesce the pre-build burst only. Events received during the build stay
     # queued for the next pass. Bound draining so continuous edits cannot starve
     # compilation, and treat monitor EOF as failure rather than a rebuild loop.
     for ((i = 0; i < 1000; i++)); do
-      if IFS= read -r -t 0.01 event <&3; then
+      if IFS= read -r -t 0.01 -u "$EVENT_FD" event; then
         continue
       else
         read_status=$?
@@ -153,10 +158,10 @@ if command -v inotifywait &>/dev/null; then
     wait "$RUN_PID" 2>/dev/null || true
 
     RUN_PID=""
-    bash -c "export PATH='$CURRENT_PATH' && cd '$APP_DIR' && $BUILD_CMD" 3<&- || true
+    bash -c "export PATH='$CURRENT_PATH' && cd '$APP_DIR' && $BUILD_CMD" {EVENT_FD}<&- || true
 
     echo "[$SERVICE_NAME:inotifywait] Restarting runtime..."
-    bash -c "export PATH='$CURRENT_PATH' && cd '$APP_DIR' && $RUN_CMD" 3<&- &
+    bash -c "export PATH='$CURRENT_PATH' && cd '$APP_DIR' && $RUN_CMD" {EVENT_FD}<&- &
     RUN_PID=$!
   done
   echo "[$SERVICE_NAME:inotifywait] File watcher stopped." >&2

@@ -27,6 +27,7 @@ describe.skipIf(!hasInotify)('shared dev watcher with native inotify', () => {
   let child: ChildProcess | undefined;
   let exited: Promise<number | null> | undefined;
   let output: string;
+  let ipcMessages: unknown[];
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'dev-watch-native-'));
@@ -52,6 +53,7 @@ describe.skipIf(!hasInotify)('shared dev watcher with native inotify', () => {
       `
 import fs from 'node:fs/promises';
 const text = await fs.readFile('src/revision.ts', 'utf8');
+if (process.send) await fs.appendFile('build-ipc-fds', (await fs.readlink('/proc/self/fd/3')) + '\\n');
 await fs.appendFile('builds', text + '\\n');
 if (text === 'fail') process.exit(17);
 if (text === 'second') {
@@ -69,15 +71,18 @@ await fs.writeFile('published', text);
       `
 import fs from 'node:fs';
 fs.appendFileSync('runtime-pids', process.pid + '\\n');
+fs.appendFileSync('runtime-revisions', fs.readFileSync('published', 'utf8') + '\\n');
+process.send?.({ kind: 'watch-runtime', pid: process.pid });
 setInterval(() => {}, 1000);
 `,
     );
     output = '';
+    ipcMessages = [];
     child = undefined;
     exited = undefined;
   });
 
-  const start = () => {
+  const start = (ipc = false) => {
     child = spawn(
       'bash',
       [
@@ -94,7 +99,11 @@ setInterval(() => {}, 1000);
           PATH: `${root}/bin:${process.env.PATH}`,
           TMPDIR: path.join(root, 'tmp'),
         },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        // PM2 also launches shell interpreters with an inherited Node IPC
+        // socket on fd3. Keep that real channel in the regression boundary.
+        stdio: ipc
+          ? ['ignore', 'pipe', 'pipe', 'ipc']
+          : ['ignore', 'pipe', 'pipe'],
       },
     );
     child.stdout!.on('data', (chunk) => {
@@ -103,6 +112,7 @@ setInterval(() => {}, 1000);
     child.stderr!.on('data', (chunk) => {
       output += chunk;
     });
+    child.on('message', (message) => ipcMessages.push(message));
     exited = new Promise((resolve) => child!.once('exit', resolve));
   };
   const ready = async () => {
@@ -127,7 +137,10 @@ setInterval(() => {}, 1000);
     await vi.waitFor(() => {
       expect(isAlive(monitor)).toBe(false);
       for (const pid of runtimes.trim().split(/\s+/).filter(Boolean))
-        expect(isAlive(Number(pid))).toBe(false);
+        expect(
+          isAlive(Number(pid)),
+          `runtime ${pid} remains after shell exit`,
+        ).toBe(false);
     });
     expect(await fs.readdir(path.join(root, 'tmp'))).toEqual([]);
   };
@@ -145,12 +158,16 @@ setInterval(() => {}, 1000);
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it.each(['initial', 'later'])(
-    'retains edits during the %s compilation and reaps owned children on idle TERM',
-    async (build) => {
+  it.each([
+    { build: 'initial', ipc: false },
+    { build: 'later', ipc: false },
+    { build: 'later', ipc: true },
+  ])(
+    'retains edits during $build compilation (IPC=$ipc) and reaps owned children on idle TERM',
+    async ({ build, ipc }) => {
       if (build === 'initial')
         await fs.writeFile(path.join(app, 'src/revision.ts'), 'second');
-      start();
+      start(ipc);
       if (build === 'later') {
         await ready();
         await fs.writeFile(path.join(app, 'src/revision.ts'), 'second');
@@ -167,11 +184,31 @@ setInterval(() => {}, 1000);
           ),
         { timeout: 5_000 },
       );
+      // Publication happens inside the build. Establish the claimed idle
+      // runtime boundary before sending the shutdown signal.
+      await vi.waitFor(
+        async () =>
+          expect(
+            await fs.readFile(path.join(app, 'runtime-revisions'), 'utf8'),
+          ).toContain('third\n'),
+        { timeout: 5_000 },
+      );
       child!.kill('SIGTERM');
       await vi.waitFor(() => expect(child!.exitCode).toBe(143), {
         timeout: 5_000,
       });
       await expectCleaned();
+      if (ipc) {
+        expect(ipcMessages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ kind: 'watch-runtime' }),
+          ]),
+        );
+        expect(
+          await fs.readFile(path.join(app, 'build-ipc-fds'), 'utf8'),
+        ).toMatch(/^socket:\[\d+\]/);
+        expect(output).not.toMatch(/Assertion|Aborted/);
+      }
     },
     15_000,
   );
@@ -193,6 +230,13 @@ setInterval(() => {}, 1000);
         expect(await fs.readFile(path.join(app, 'published'), 'utf8')).toBe(
           'third',
         ),
+      { timeout: 5_000 },
+    );
+    await vi.waitFor(
+      async () =>
+        expect(
+          await fs.readFile(path.join(app, 'runtime-revisions'), 'utf8'),
+        ).toContain('third\n'),
       { timeout: 5_000 },
     );
     child!.kill('SIGTERM');
