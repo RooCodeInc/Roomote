@@ -192,7 +192,7 @@ describe('processDiscordFastAgentMessage', () => {
       if (busy) {
         mocks.acquireLock.mockResolvedValueOnce(null);
         mocks.admitHumanFollowUp.mockResolvedValueOnce({
-          kind: 'queued',
+          kind: 'steered',
           abort: vi.fn(),
         });
       }
@@ -246,6 +246,13 @@ describe('processDiscordFastAgentMessage', () => {
       });
       expect(event.delegatedTaskInitiator).not.toHaveProperty('actingUserId');
       if (busy) expect(mocks.answerQuestion).not.toHaveBeenCalled();
+      else
+        expect(mocks.answerQuestion).toHaveBeenCalledWith(
+          expect.objectContaining({
+            delegatedTaskInitiator: event.delegatedTaskInitiator,
+            delegatedTaskVisibleInTranscript: false,
+          }),
+        );
     },
   );
 

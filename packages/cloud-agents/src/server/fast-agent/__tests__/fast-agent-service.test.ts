@@ -3353,6 +3353,201 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  const automatedLaunchContext = {
+    delegatedTaskInitiator: {
+      kind: 'automation' as const,
+      key: 'slack_channel_auto_start' as const,
+      actor: { externalId: 'feed-1', displayName: 'Feed' },
+    },
+    delegatedTaskVisibleInTranscript: false,
+  };
+
+  it.each([
+    {
+      name: 'human to automation',
+      active: {},
+      incoming: automatedLaunchContext,
+    },
+    {
+      name: 'automation to human',
+      active: automatedLaunchContext,
+      incoming: {},
+    },
+    {
+      name: 'visibility-only change',
+      active: automatedLaunchContext,
+      incoming: {
+        ...automatedLaunchContext,
+        delegatedTaskVisibleInTranscript: true,
+      },
+    },
+    {
+      name: 'different automation actor',
+      active: automatedLaunchContext,
+      incoming: {
+        ...automatedLaunchContext,
+        delegatedTaskInitiator: {
+          ...automatedLaunchContext.delegatedTaskInitiator,
+          actor: { externalId: 'feed-2', displayName: 'Other feed' },
+        },
+      },
+    },
+  ])(
+    'keeps $name context changes durable during live native steering',
+    async ({ active, incoming }) => {
+      vi.useFakeTimers();
+      try {
+        const row = (id: string, question: string, context: typeof active) => ({
+          id,
+          createdAt: new Date(),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: id,
+            currentMessageId: id,
+            userId: 'user-1',
+            question,
+            directedAtRoomote: true,
+            ...context,
+          },
+        });
+        const prefix = row(
+          '66666666-6666-4666-8666-666666666666',
+          'Compatible correction.',
+          active,
+        );
+        const boundary = row(
+          '77777777-7777-4777-8777-777777777777',
+          'Context-changing request.',
+          incoming,
+        );
+        const later = row(
+          '88888888-8888-4888-8888-888888888888',
+          'Do not jump ahead.',
+          active,
+        );
+        mocks.getPendingHumanFollowUp
+          .mockResolvedValueOnce([prefix, boundary, later])
+          .mockResolvedValueOnce([boundary, later])
+          .mockResolvedValue([]);
+        let finishGeneration: ((value: string) => void) | undefined;
+        mocks.generateText.mockImplementation(
+          async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-1');
+            options.onPromptStarted?.();
+            options.onNativeSteerReady?.(mocks.nativeSteer);
+            return await new Promise<string>((resolve) => {
+              finishGeneration = resolve;
+            });
+          },
+        );
+        const resultPromise = answerFastAgentQuestion({
+          ...baseParams,
+          ...active,
+          directedAtRoomote: true,
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'guild-1',
+            conversationId: 'thread-1',
+            replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+          },
+          adapter: callbacks(),
+        });
+        await vi.advanceTimersByTimeAsync(250);
+        expect(mocks.nativeSteer).toHaveBeenCalledOnce();
+        const steer = mocks.nativeSteer.mock.calls[0]![0];
+        expect(steer.text).toContain('Compatible correction.');
+        expect(steer.text).not.toContain('Context-changing request.');
+        expect(steer.text).not.toContain('Do not jump ahead.');
+        expect(mocks.inArray).toHaveBeenCalledWith('id', [prefix.id]);
+        for (const pending of [boundary, later]) {
+          expect(mocks.inArray).not.toHaveBeenCalledWith(
+            'id',
+            expect.arrayContaining([pending.id]),
+          );
+          expect(mocks.upsertMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+              message: expect.objectContaining({
+                eventId: `${pending.id}:user`,
+              }),
+            }),
+          );
+        }
+        finishGeneration?.('Original turn finished');
+        await expect(resultPromise).resolves.toBe('Original turn finished');
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([
+    {
+      name: 'automated',
+      active: automatedLaunchContext,
+      incoming: automatedLaunchContext,
+    },
+    {
+      name: 'human default visibility',
+      active: {},
+      incoming: { delegatedTaskVisibleInTranscript: true },
+    },
+  ])(
+    'steers a $name follow-up with equivalent launcher context',
+    async ({ active, incoming }) => {
+      vi.useFakeTimers();
+      try {
+        mocks.getPendingHumanFollowUp
+          .mockResolvedValueOnce([
+            {
+              id: '77777777-7777-4777-8777-777777777777',
+              createdAt: new Date(),
+              parent: { sessionId: 'conversation-1' },
+              event: {
+                type: 'human_follow_up',
+                eventId: 'automated-follow-up',
+                currentMessageId: 'automated-follow-up',
+                userId: 'user-1',
+                question: 'Same feed correction.',
+                directedAtRoomote: true,
+                ...structuredClone(incoming),
+              },
+            },
+          ])
+          .mockResolvedValue([]);
+        let finishGeneration: ((value: string) => void) | undefined;
+        mocks.generateText.mockImplementation(
+          async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-1');
+            options.onPromptStarted?.();
+            options.onNativeSteerReady?.(mocks.nativeSteer);
+            return await new Promise<string>((resolve) => {
+              finishGeneration = resolve;
+            });
+          },
+        );
+        const resultPromise = answerFastAgentQuestion({
+          ...baseParams,
+          ...active,
+          directedAtRoomote: true,
+          adapter: callbacks(),
+        });
+        await vi.advanceTimersByTimeAsync(250);
+        expect(mocks.nativeSteer).toHaveBeenCalledOnce();
+        expect(mocks.nativeSteer.mock.calls[0]![0].text).toContain(
+          'Same feed correction.',
+        );
+        expect(mocks.inArray).toHaveBeenCalledWith('id', [
+          '77777777-7777-4777-8777-777777777777',
+        ]);
+        finishGeneration?.('Automated turn finished');
+        await expect(resultPromise).resolves.toBe('Automated turn finished');
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('leaves a same-user follow-up routed in from a pull request out of native steering', async () => {
     vi.useFakeTimers();
     try {

@@ -4005,6 +4005,13 @@ describe('deliverFastAgentParentEvent', () => {
         event: recoveredEvent,
       });
       const launch = mocks.enqueueTask.mock.calls[0]![0];
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          delegatedTaskInitiator: recoveredEvent.delegatedTaskInitiator,
+          delegatedTaskVisibleInTranscript:
+            recoveredEvent.delegatedTaskVisibleInTranscript,
+        }),
+      );
       expect(launch.initiator).toEqual(
         automated
           ? { ...automationInitiator, actingUserId: 'installer-1' }

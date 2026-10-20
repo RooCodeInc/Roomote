@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { addRemoteCustomMcpForFast } from '@roomote/sdk/server/add-remote-custom-mcp';
@@ -62,6 +63,7 @@ import {
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   type FastAgentSurface,
+  type FastAgentHumanFollowUpEvent,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
   LIST_REPOSITORIES_MAX_LIMIT,
@@ -2044,6 +2046,8 @@ export async function answerFastAgentQuestion({
   allowSilentAmbientReply = false,
   directedAtRoomote,
   peerDirectedTurn = false,
+  delegatedTaskInitiator,
+  delegatedTaskVisibleInTranscript,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
   currentDurableHumanFollowUpEventId,
@@ -2111,6 +2115,9 @@ export async function answerFastAgentQuestion({
   directedAtRoomote?: boolean;
   /** Surface-level classification that this turn belongs to human peers. */
   peerDirectedTurn?: boolean;
+  /** Immutable child-task launch context bound by this turn's adapter. */
+  delegatedTaskInitiator?: FastAgentHumanFollowUpEvent['delegatedTaskInitiator'];
+  delegatedTaskVisibleInTranscript?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
   slackRoomoteUserId?: string;
   /** The durable row currently running as a fallback whole turn. Excluding it
@@ -2815,6 +2822,20 @@ export async function answerFastAgentQuestion({
         }
 
         const followUp = parsed.data;
+        if (
+          !isDeepStrictEqual(
+            followUp.delegatedTaskInitiator,
+            delegatedTaskInitiator,
+          ) ||
+          (followUp.delegatedTaskVisibleInTranscript ?? true) !==
+            (delegatedTaskVisibleInTranscript ?? true)
+        ) {
+          // Native steering cannot replace the active task launcher. Keep
+          // attribution/visibility changes and all later rows for their own
+          // turns, where the adapter is rebuilt from the durable context.
+          requiresSeparateTurn = true;
+          break;
+        }
         if (followUp.userId !== userId) {
           // The active turn's tools and integration clients are scoped to its
           // initiating user. Preserve global queue order: deliver the current

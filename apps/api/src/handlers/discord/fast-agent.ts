@@ -421,6 +421,9 @@ export async function processDiscordFastAgentMessage(
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
     const response = await answerFastAgentQuestion({
       question,
+      delegatedTaskInitiator: humanFollowUpEvent.delegatedTaskInitiator,
+      delegatedTaskVisibleInTranscript:
+        humanFollowUpEvent.delegatedTaskVisibleInTranscript,
       ...(images.length ? { images } : {}),
       ...(input.attachmentTexts?.length
         ? { attachmentTexts: input.attachmentTexts }

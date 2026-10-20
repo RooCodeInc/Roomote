@@ -3381,6 +3381,13 @@ export async function deliverFastAgentParentEventWithLock(
       params.event.type === 'scheduled_wakeup' &&
       (await isTaskCommunicationTriageEnabled());
     await answerFastAgentQuestion({
+      ...(humanFollowUp && parentTurn.conversation.surface === 'discord'
+        ? {
+            delegatedTaskInitiator: humanFollowUp.delegatedTaskInitiator,
+            delegatedTaskVisibleInTranscript:
+              humanFollowUp.delegatedTaskVisibleInTranscript,
+          }
+        : {}),
       question:
         humanFollowUp?.question ??
         `<platform_event>${JSON.stringify(promptEvent)}</platform_event>`,
