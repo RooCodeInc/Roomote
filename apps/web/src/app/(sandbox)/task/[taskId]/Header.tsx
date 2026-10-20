@@ -217,6 +217,7 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
             }}
           >
             <Input
+              aria-label="Task title"
               type="text"
               value={titleDraft}
               onChange={(event) => setTitleDraft(event.target.value)}
