@@ -417,6 +417,52 @@ describe('ResultsPage', () => {
     ).toBeInTheDocument();
   });
 
+  it.each([true, false])(
+    'prevents clearing an incoming selection while prior detail is visible (desktop=%s)',
+    async (isDesktop) => {
+      mocks.isDesktop = isDesktop;
+      let resolveNext!: (result: ResultInboxItem) => void;
+      mocks.get.mockImplementation((input: { id: string }) =>
+        input.id === results[1]!.id
+          ? new Promise<ResultInboxItem>((resolve) => {
+              resolveNext = resolve;
+            })
+          : Promise.resolve(results[0]),
+      );
+      renderPage();
+      fireEvent.click(
+        await screen.findByRole('option', {
+          name: /Three dependency risks need review/,
+        }),
+      );
+      await screen.findByText('Full report');
+      fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+      expect(
+        screen.getByRole('heading', {
+          name: 'Three dependency risks need review',
+        }),
+      ).toBeInTheDocument();
+      const clear = screen.getByRole('button', { name: 'Clear' });
+      expect(clear).toBeDisabled();
+      fireEvent.click(clear);
+      fireEvent.keyDown(document.body, { key: 'Delete' });
+      expect(mocks.clearOne).not.toHaveBeenCalled();
+
+      await act(async () => resolveNext(results[1]!));
+      await screen.findByRole('heading', { name: 'Simplify the worker' });
+      const readyClear = screen.getByRole('button', {
+        name: 'Clear',
+      });
+      expect(readyClear).toBeEnabled();
+      fireEvent.click(readyClear);
+      await waitFor(() => expect(mocks.clearOne).toHaveBeenCalledTimes(1));
+      expect(mocks.clearOne).toHaveBeenCalledWith(
+        { id: results[1]!.id, kind: results[1]!.kind },
+        expect.anything(),
+      );
+    },
+  );
+
   it('ignores a stale detail response after selection returns to another row', async () => {
     let resolveSuggestion!: (result: ResultInboxItem) => void;
     const delayedSuggestion = new Promise<ResultInboxItem>((resolve) => {
