@@ -290,6 +290,20 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       senderExternalId: input.sender.id,
+      ...(input.delegatedTaskInitiator?.kind === 'automation'
+        ? {
+            delegatedTaskInitiator: {
+              kind: input.delegatedTaskInitiator.kind,
+              key: input.delegatedTaskInitiator.key,
+              ...(input.delegatedTaskInitiator.actor
+                ? { actor: input.delegatedTaskInitiator.actor }
+                : {}),
+            },
+          }
+        : {}),
+      ...(input.visibleInTranscript !== undefined
+        ? { delegatedTaskVisibleInTranscript: input.visibleInTranscript }
+        : {}),
       directedAtRoomote: turnDirectedAtRoomote,
       allowSilentAmbientReply,
       ...(needsPeerCaution ? { peerDirectedTurn: true } : {}),

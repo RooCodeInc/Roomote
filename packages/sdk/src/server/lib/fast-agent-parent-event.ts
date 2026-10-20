@@ -1463,6 +1463,9 @@ export function createFastAgentDiscordTaskLauncher(params: {
   conversation: Extract<FastAgentConversation, { surface: 'discord' }>;
   /** Set when the conversation is a custom automation run. */
   automation?: FastAutomationLaunchContext | null;
+  /** Per-turn attribution and prompt visibility from an automated mention. */
+  delegatedTaskInitiator?: FastAgentHumanFollowUpEvent['delegatedTaskInitiator'];
+  visibleInTranscript?: boolean;
 }): LaunchFastAgentTask {
   const { payload: automationPayload, ...automationLaunchOptions } =
     params.automation
@@ -1470,7 +1473,17 @@ export function createFastAgentDiscordTaskLauncher(params: {
           userId: params.userId,
           automation: params.automation,
         })
-      : { payload: {} };
+      : {
+          payload: {},
+          ...(params.delegatedTaskInitiator
+            ? {
+                initiator: {
+                  ...params.delegatedTaskInitiator,
+                  actingUserId: params.userId,
+                },
+              }
+            : {}),
+        };
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'discord',
@@ -1497,6 +1510,9 @@ export function createFastAgentDiscordTaskLauncher(params: {
           ...resolveFastAgentLaunchWorkspace(environmentId),
           description: prompt,
           ...automationPayload,
+          ...(params.visibleInTranscript !== undefined
+            ? { visibleInTranscript: params.visibleInTranscript }
+            : {}),
           communicationProvider: 'discord',
           communicationChannelId:
             thread?.parentChannelId ??
@@ -1705,6 +1721,12 @@ async function createDiscordFastAgentParentTurn(
       userId: actorUserId,
       conversation,
       automation,
+      ...(params.event.type === 'human_follow_up'
+        ? {
+            delegatedTaskInitiator: params.event.delegatedTaskInitiator,
+            visibleInTranscript: params.event.delegatedTaskVisibleInTranscript,
+          }
+        : {}),
     }),
     postReply: async ({
       message,

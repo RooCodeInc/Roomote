@@ -661,18 +661,20 @@ async function processDiscordGatewayEvent(
   }
   // Match automated channel entry: act as the installer, while delegated tasks
   // retain the external author's automation provenance.
-  const automationEntry = isAutomatedMessage
-    ? {
-        delegatedTaskInitiator: {
-          kind: 'automation' as const,
-          key: 'slack_channel_auto_start' as const,
-          actor: {
-            externalId: sender.id,
-            displayName: sender.global_name?.trim() || sender.username,
+  const automationEntry =
+    isAutomatedMessage && senderUserId
+      ? {
+          delegatedTaskInitiator: {
+            kind: 'automation' as const,
+            key: 'slack_channel_auto_start' as const,
+            actingUserId: senderUserId,
+            actor: {
+              externalId: sender.id,
+              displayName: sender.global_name?.trim() || sender.username,
+            },
           },
-        },
-      }
-    : {};
+        }
+      : {};
   const conversation = {
     provider: 'discord' as const,
     channelId: metadata.communicationChannelId,

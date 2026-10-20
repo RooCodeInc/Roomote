@@ -126,7 +126,11 @@ vi.mock('../task-orchestration.js', () => ({
   startNewDiscordTask: mocks.startTask,
 }));
 
-import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  fastAgentHumanFollowUpEventSchema,
+} from '@roomote/types';
 
 import {
   getDiscordFastLaunchSourceEventId,
@@ -181,6 +185,69 @@ describe('processDiscordFastAgentMessage', () => {
       taskUrl: 'https://roomote.example.com/task/task-1',
     });
   });
+
+  it.each([false, true])(
+    'persists automation provenance for %s busy-turn admission',
+    async (busy) => {
+      if (busy) {
+        mocks.acquireLock.mockResolvedValueOnce(null);
+        mocks.admitHumanFollowUp.mockResolvedValueOnce({
+          kind: 'queued',
+          abort: vi.fn(),
+        });
+      }
+      if (!busy) mocks.answerQuestion.mockResolvedValueOnce(null);
+      await processDiscordFastAgentMessage({
+        eventId: 'automated-mention',
+        question: 'Investigate the alert',
+        sender: { id: 'feed-1', username: 'Feed', bot: true },
+        senderUserId: 'installer-1',
+        provider: {} as never,
+        applicationId: 'app-1',
+        channel: {
+          channelId: 'thread-1',
+          channelName: 'Alerts',
+          channelType: 11,
+          guildId: 'guild-1',
+          parentChannelId: 'channel-1',
+          isThread: true,
+          isDirectMessage: false,
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationThreadId: 'thread-1',
+          communicationMessageId: 'automated-mention',
+        },
+        conversationId: 'thread-1',
+        directedAtRoomote: true,
+        delegatedTaskInitiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          actingUserId: 'installer-1',
+          actor: { externalId: 'feed-1', displayName: 'Feed' },
+        },
+        visibleInTranscript: false,
+      });
+      const call = busy
+        ? mocks.admitHumanFollowUp.mock.calls[0]
+        : mocks.persistInlineHumanTurn.mock.calls[0];
+      const event = fastAgentHumanFollowUpEventSchema.parse(
+        JSON.parse(JSON.stringify(call![0].event)),
+      );
+      expect(event).toMatchObject({
+        userId: 'installer-1',
+        delegatedTaskVisibleInTranscript: false,
+        delegatedTaskInitiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          actor: { externalId: 'feed-1', displayName: 'Feed' },
+        },
+      });
+      expect(event.delegatedTaskInitiator).not.toHaveProperty('actingUserId');
+      if (busy) expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    },
+  );
 
   it('accepts a suggestion on its original conversation and sends replies and delegated work to the canonical target', async () => {
     const conversation = {

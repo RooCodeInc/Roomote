@@ -497,6 +497,7 @@ describe('Discord Gateway event handler', () => {
           initiator: {
             kind: 'automation',
             key: 'slack_channel_auto_start',
+            actingUserId: 'installer-1',
             actor: { externalId: 'feed-1', displayName: 'Deploy feed' },
           },
           queuedMessage: expect.objectContaining({ userId: 'installer-1' }),
