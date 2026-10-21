@@ -107,6 +107,72 @@ Roomote surfaces release history and available updates in the web app:
   image, with the latest release expanded. After an upgrade, Roomote also shows
   the latest "what's new" notice once.
 
+## Rotate the encryption key
+
+`ENCRYPTION_KEY` encrypts the secrets Roomote stores in PostgreSQL:
+integration credentials and OAuth tokens, environment variables, API keys,
+webhook secrets, and generated auth keypairs. Changing it alone makes every
+stored secret unreadable. Rotate it in two phases instead, keeping the old key
+available until every stored value has been re-encrypted.
+
+1. **Take a backup.** Run `roomote backup` so you can return to the old key and
+   data if anything goes wrong.
+2. **Decide what signs sign-in sessions.** If `BETTER_AUTH_SECRET` is unset,
+   sessions are signed with the encryption key. During the rotation Roomote
+   keeps signing them with `ENCRYPTION_KEY_PREVIOUS`, so users stay signed in,
+   but removing the previous key in step 7 would switch session signing to the
+   new key and sign everyone out. To avoid that, set `BETTER_AUTH_SECRET` now:
+   to the old `ENCRYPTION_KEY` value to keep existing sessions, or to a new
+   random value (`openssl rand -base64 32`) if you are rotating because the old
+   key may be exposed. A new value signs everyone out once.
+3. **Install the new key.** In `/opt/roomote/.env`, move the current value to
+   `ENCRYPTION_KEY_PREVIOUS` and set a new `ENCRYPTION_KEY`:
+
+   ```sh
+   ENCRYPTION_KEY_PREVIOUS=<old key>
+   ENCRYPTION_KEY=<output of openssl rand -base64 32>
+   ```
+
+   Both must be at least 32 characters. Apply them with `roomote up`, which
+   recreates the services with the new environment. Roomote now writes every
+   new or updated secret with the new key and reads older ones with the
+   previous key.
+4. **Preview the re-encryption.** From `/opt/roomote`:
+
+   ```sh
+   docker compose --env-file .env -f docker-compose.prod.yml exec -T api \
+     /roomote/.docker/app/entrypoint.sh reencrypt-secrets --dry-run
+   ```
+
+   The command lists every table and column that holds encrypted values with
+   counts of rows already on the current key (`current`), rows that would be
+   rewritten (`migrated`), rows that open with neither key (`unreadable`), and
+   rows that are not encrypted at all (`not_encrypted`). Nothing is written.
+5. **Re-encrypt.** Run the same command without `--dry-run`. It works in
+   batches, rewrites only values that still use the previous key, and never
+   overwrites a value that changes while it runs; such rows are reported as
+   `conflicts`. It is safe to run again at any time.
+6. **Verify.** Run the dry run again. When it reports
+   `No rows remain on the previous key`, the rotation is complete. The command
+   exits non-zero while any row is unreadable or conflicted; re-run it for
+   conflicts. Unreadable rows were already unreadable before the rotation
+   (they were written with some other key); re-save those secrets in Roomote.
+7. **Remove the previous key.** Delete `ENCRYPTION_KEY_PREVIOUS` from `.env`
+   and run `roomote up` again. Keep the old key in your secret manager until
+   you no longer need backups taken before the rotation, since those backups
+   still contain data encrypted with it.
+
+On a hosting platform, set `ENCRYPTION_KEY_PREVIOUS` and the new
+`ENCRYPTION_KEY` on every service that has `ENCRYPTION_KEY` (web, api, bullmq,
+and controller), redeploy, and run
+`/roomote/.docker/app/entrypoint.sh reencrypt-secrets --dry-run` from a shell
+in the api service. The previous key is never passed to task sandboxes.
+
+The encryption key also keys a few non-secret identifiers. Credential
+substitutes issued to runs that are in progress during step 3 stop matching
+until the run restarts or resumes, and provider usage-limit alerts may repeat
+once because their credential fingerprints change.
+
 ## Common issues
 
 - **Callbacks fail.** For providers that use callbacks or webhooks, confirm the

@@ -1,7 +1,12 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: {
+    index: 'src/index.ts',
+    // Operator one-shot run inside the app image via the entrypoint's
+    // `reencrypt-secrets` command after an ENCRYPTION_KEY rotation.
+    'reencrypt-secrets': 'src/reencrypt-secrets.ts',
+  },
   format: ['esm'],
   target: 'node22',
   platform: 'node',

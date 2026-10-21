@@ -81,7 +81,7 @@ jq -e '
   ][] | . as $key | $root.services.controller.environment[$key] == null] | all) and
   ([[
     "JOB_AUTH_PRIVATE_KEY", "PREVIEW_AUTH_PRIVATE_KEY", "ENCRYPTION_KEY",
-    "S3_SECRET_ACCESS_KEY", "OPENAI_API_KEY"
+    "ENCRYPTION_KEY_PREVIOUS", "S3_SECRET_ACCESS_KEY", "OPENAI_API_KEY"
   ][] | . as $key | $root.services["preview-proxy"].environment[$key] == null] | all) and
   ([[
     "PREVIEW_AUTH_PRIVATE_KEY",

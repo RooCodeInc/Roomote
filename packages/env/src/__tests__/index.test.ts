@@ -614,6 +614,50 @@ describe('Env', () => {
     expect(env.PREVIEW_AUTH_PRIVATE_KEY).toBe('');
   });
 
+  describe('ENCRYPTION_KEY_PREVIOUS', () => {
+    const controllerEnv: NodeJS.ProcessEnv = {
+      NODE_ENV: 'production',
+      APP_ENV: 'production',
+      ROOMOTE_SERVICE: 'controller',
+      R_APP_URL: 'https://roomote.example.com',
+      TRPC_URL: 'https://api.roomote.example.com',
+      DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
+      REDIS_URL: 'redis://redis:6379',
+      JOB_AUTH_PRIVATE_KEY: 'job-private-key',
+      JOB_AUTH_PUBLIC_KEY: 'job-public-key',
+      ENCRYPTION_KEY: '12345678901234567890123456789012',
+    };
+
+    it('accepts a previous key of at least 32 characters', () => {
+      const env = createRoomoteEnv({
+        ...controllerEnv,
+        ENCRYPTION_KEY_PREVIOUS: 'abcdefghijklmnopqrstuvwxyz012345',
+      });
+
+      expect(env.ENCRYPTION_KEY_PREVIOUS).toBe(
+        'abcdefghijklmnopqrstuvwxyz012345',
+      );
+    });
+
+    it('treats an empty value (Compose default) as unset', () => {
+      const env = createRoomoteEnv({
+        ...controllerEnv,
+        ENCRYPTION_KEY_PREVIOUS: '',
+      });
+
+      expect(env.ENCRYPTION_KEY_PREVIOUS).toBeUndefined();
+    });
+
+    it('rejects a previous key shorter than 32 characters', () => {
+      expect(() =>
+        createRoomoteEnv({
+          ...controllerEnv,
+          ENCRYPTION_KEY_PREVIOUS: 'too-short',
+        }),
+      ).toThrow();
+    });
+  });
+
   it('requires job auth keys for bullmq because Fast Agent mints MCP tokens', () => {
     const runtimeEnv: NodeJS.ProcessEnv = {
       NODE_ENV: 'production',
