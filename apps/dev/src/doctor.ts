@@ -120,7 +120,9 @@ async function getDockerContainerEnv(
 }
 
 async function listPm2Processes(): Promise<Pm2Process[]> {
-  const { stdout } = await execa('pm2', ['--silent', 'jlist']);
+  const { stdout } = await execa('pm2', ['--silent', 'jlist'], {
+    timeout: 10_000,
+  });
   return JSON.parse(stdout) as Pm2Process[];
 }
 
