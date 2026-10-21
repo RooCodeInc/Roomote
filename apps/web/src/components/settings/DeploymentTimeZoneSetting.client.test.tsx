@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
     anonymousAnalyticsEnabled: true,
   },
   save: vi.fn(),
+  readGate: null as Promise<void> | null,
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -30,7 +31,10 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['misc-settings'],
         queryOptions: () => ({
           queryKey: ['misc-settings'],
-          queryFn: async () => state.settings,
+          queryFn: async () => {
+            await state.readGate;
+            return state.settings;
+          },
         }),
       },
       setTimeZone: {
@@ -47,7 +51,10 @@ vi.mock('@/trpc/client', () => ({
 function SettingsObservation() {
   const { data } = useQuery({
     queryKey: ['misc-settings'],
-    queryFn: async () => state.settings,
+    queryFn: async () => {
+      await state.readGate;
+      return state.settings;
+    },
   });
   return <span>{JSON.stringify(data)}</span>;
 }
@@ -85,6 +92,7 @@ beforeEach(() => {
     anonymousAnalyticsEnabled: true,
   };
   state.save.mockReset();
+  state.readGate = null;
   state.save.mockImplementation(async ({ timeZone }: { timeZone: string }) => {
     state.settings = {
       ...state.settings,
@@ -92,6 +100,7 @@ beforeEach(() => {
       effectiveTimeZone: timeZone,
       timeZoneSource: 'explicit',
     };
+    return { timeZone, effectiveTimeZone: timeZone };
   });
 });
 
@@ -139,4 +148,31 @@ it('keeps the draft while editing but uses the latest saved timezone after Cance
     screen.getByRole('combobox', { name: 'Scheduling timezone' }),
   ).toHaveTextContent('Asia/Tokyo');
   expect(state.save).not.toHaveBeenCalled();
+});
+
+it('reopens the just-saved timezone while its settings refetch is still pending', async () => {
+  const client = renderSetting();
+  await chooseBerlin();
+  let release!: () => void;
+  state.readGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save timezone' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+  expect(client.isFetching({ queryKey: ['misc-settings'] })).toBe(1);
+  const reopenedValue = screen.getByRole('combobox', {
+    name: 'Scheduling timezone',
+  }).textContent;
+  await act(async () => {
+    release();
+  });
+  await waitFor(() =>
+    expect(client.isFetching({ queryKey: ['misc-settings'] })).toBe(0),
+  );
+  await screen.findByText(/"effectiveTimeZone":"Europe\/Berlin"/);
+  expect(reopenedValue).toBe('Europe/Berlin');
+  expect(
+    screen.getByRole('combobox', { name: 'Scheduling timezone' }),
+  ).toHaveTextContent('Europe/Berlin');
+  expect(screen.getByRole('button', { name: 'Save timezone' })).toBeDisabled();
 });
