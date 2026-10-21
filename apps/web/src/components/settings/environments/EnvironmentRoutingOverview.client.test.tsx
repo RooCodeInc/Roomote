@@ -22,6 +22,7 @@ const routingSettings = {
       description: 'Messages from hospital-bugs belong here.',
       target: 'env-1',
     },
+    { description: 'Documentation changes', target: 'env-1' },
   ],
 };
 
@@ -78,6 +79,70 @@ beforeEach(() => {
 });
 
 describe('EnvironmentRoutingOverview', () => {
+  it.each([0, 1])(
+    'keeps deletions from retargeting the edit of rule %i',
+    async (editingIndex) => {
+      renderRouting();
+      const editedRule = routingSettings.rules[editingIndex]!;
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: `Edit ${editedRule.description}`,
+        }),
+      );
+      fireEvent.change(screen.getByLabelText('Rule description'), {
+        target: { value: 'Updated routing description' },
+      });
+
+      for (const rule of routingSettings.rules) {
+        const remove = screen.getByRole('button', {
+          name: `Delete ${rule.description}`,
+        });
+        expect(remove).toBeDisabled();
+        fireEvent.click(remove);
+      }
+      expect(mutateAsync).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'Save Rule' }));
+
+      await waitFor(() =>
+        expect(mutateAsync).toHaveBeenCalledExactlyOnceWith({
+          rules: routingSettings.rules.map((rule, index) =>
+            index === editingIndex
+              ? { ...rule, description: 'Updated routing description' }
+              : rule,
+          ),
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', {
+            name: 'Delete Updated routing description',
+          }),
+        ).toBeEnabled(),
+      );
+    },
+  );
+
+  it('allows ordinary deletion after cancelling an edit', async () => {
+    renderRouting();
+    const firstRule = routingSettings.rules[0]!;
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Edit ${firstRule.description}`,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    const remove = screen.getByRole('button', {
+      name: `Delete ${firstRule.description}`,
+    });
+    expect(remove).toBeEnabled();
+    fireEvent.click(remove);
+    await waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledExactlyOnceWith({
+        rules: [routingSettings.rules[1]],
+      }),
+    );
+  });
+
   it('does not persist a deletion when edit starts', async () => {
     renderRouting();
     await screen.findByRole('button', {
