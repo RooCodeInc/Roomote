@@ -37,6 +37,7 @@ function formatRow(
     `unreadable=${report.unreadable}`,
     `not_encrypted=${report.notEncrypted}`,
     `conflicts=${report.conflicts}`,
+    `remaining_on_previous=${report.remainingOnPreviousKey}`,
   ].join(' ');
 }
 

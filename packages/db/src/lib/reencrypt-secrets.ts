@@ -288,14 +288,28 @@ export interface LocationReport {
   scanned: number;
   /** Rows already encrypted with the current key. */
   current: number;
-  /** Rows rewritten to the current key (dry run: rows that would be). */
+  /**
+   * Rows with at least one previous-key value rewritten to the current key
+   * (dry run: rows that would be). Counted independently of the row's
+   * aggregate status, so a jsonb row holding both a previous-key value and a
+   * value neither key opens counts as both `migrated` and `unreadable`.
+   */
   migrated: number;
-  /** Rows that decrypt with neither key. Left untouched. */
+  /**
+   * Rows with a value that decrypts with neither key. Those values are left
+   * untouched; readable previous-key values in the same row are still
+   * rewritten.
+   */
   unreadable: number;
   /** Rows whose value is not ciphertext (legacy plaintext). Left untouched. */
   notEncrypted: number;
   /** Rows changed concurrently between read and rewrite; re-run to retry. */
   conflicts: number;
+  /**
+   * Rows that may still hold a previous-key value after this run: every
+   * `migrated` row in a dry run, every conflicted row in a live run.
+   */
+  remainingOnPreviousKey: number;
   /** Set when the table or column does not exist in this database. */
   skipped?: string;
 }
@@ -366,6 +380,7 @@ async function reencryptLocation(
     unreadable: 0,
     notEncrypted: 0,
     conflicts: 0,
+    remainingOnPreviousKey: 0,
   };
 
   if (!(await columnExists(database, location.table, location.column))) {
@@ -438,13 +453,15 @@ async function reencryptLocation(
         continue;
       }
 
-      // A row with an unreadable value still has its previous-key values
-      // rewritten, but it is counted as unreadable rather than migrated.
-      if (status === 'previous') {
-        report.migrated += 1;
-      }
+      // A pending rewrite means the row holds at least one value only the
+      // previous key opens. Count it even when another value in the same
+      // jsonb row is unreadable: the readable values are rewritten (the
+      // jsonb_set edits never touch the unreadable leaf), and the operator
+      // must not be told the previous key is unused while any remain.
+      report.migrated += 1;
 
       if (dryRun) {
+        report.remainingOnPreviousKey += 1;
         continue;
       }
 
@@ -457,10 +474,9 @@ async function reencryptLocation(
       `);
 
       if (updated.length === 0) {
-        if (status === 'previous') {
-          report.migrated -= 1;
-        }
+        report.migrated -= 1;
         report.conflicts += 1;
+        report.remainingOnPreviousKey += 1;
       }
     }
 
@@ -507,6 +523,8 @@ export async function reencryptSecrets(
       unreadable: sum.unreadable + report.unreadable,
       notEncrypted: sum.notEncrypted + report.notEncrypted,
       conflicts: sum.conflicts + report.conflicts,
+      remainingOnPreviousKey:
+        sum.remainingOnPreviousKey + report.remainingOnPreviousKey,
     }),
     {
       scanned: 0,
@@ -515,6 +533,7 @@ export async function reencryptSecrets(
       unreadable: 0,
       notEncrypted: 0,
       conflicts: 0,
+      remainingOnPreviousKey: 0,
     },
   );
 
@@ -523,9 +542,6 @@ export async function reencryptSecrets(
     previousKeyConfigured: Boolean(getEncryptionKeyPrevious()),
     locations: reports,
     totals,
-    remainingOnPreviousKey: dryRun
-      ? totals.migrated
-      : // A conflicted row may or may not still be on the previous key.
-        totals.conflicts,
+    remainingOnPreviousKey: totals.remainingOnPreviousKey,
   };
 }

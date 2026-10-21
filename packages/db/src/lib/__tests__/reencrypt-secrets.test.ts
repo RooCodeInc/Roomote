@@ -384,6 +384,73 @@ describe('reencryptSecrets', () => {
     });
   });
 
+  it('migrates readable values in a row that also holds an unreadable one', async () => {
+    // Two headers on one server: one only the previous key opens, one
+    // neither key opens. The row must not hide the pending previous-key
+    // value behind its unreadable status.
+    const previousHeader = encryptWith(OLD_KEY, 'Bearer still-readable');
+    const foreignHeader = encryptWith(OTHER_KEY, 'Bearer lost');
+    const [server] = await db
+      .insert(customMcpServers)
+      .values({
+        name: 'rotation-test-mixed-headers',
+        url: 'https://mcp.example.com',
+        headers: { Authorization: previousHeader, 'X-Lost': foreignHeader },
+      })
+      .returning({ id: customMcpServers.id });
+    const headersOnly = listEncryptedLocations().filter(
+      (entry) =>
+        entry.table === 'custom_mcp_servers' && entry.column === 'headers',
+    );
+
+    useRotatedKeys();
+
+    const dryRun = await reencryptSecrets({
+      dryRun: true,
+      locations: headersOnly,
+    });
+    expect(counts(location(dryRun, 'custom_mcp_servers', 'headers'))).toEqual({
+      scanned: 1,
+      current: 0,
+      migrated: 1,
+      unreadable: 1,
+      notEncrypted: 0,
+      conflicts: 0,
+    });
+    expect(dryRun.remainingOnPreviousKey).toBe(1);
+
+    const live = await reencryptSecrets({ locations: headersOnly });
+    expect(location(live, 'custom_mcp_servers', 'headers')).toMatchObject({
+      migrated: 1,
+      unreadable: 1,
+      remainingOnPreviousKey: 0,
+    });
+    expect(live.remainingOnPreviousKey).toBe(0);
+
+    useKeys({ ENCRYPTION_KEY: NEW_KEY });
+    const stored = await db.query.customMcpServers.findFirst({
+      where: eq(customMcpServers.id, server!.id),
+    });
+    expect(decryptWithKeyGeneration(stored!.headers!.Authorization!)).toEqual({
+      plaintext: 'Bearer still-readable',
+      key: 'current',
+    });
+    // The unreadable value is left byte-for-byte as it was.
+    expect(stored!.headers!['X-Lost']).toBe(foreignHeader);
+
+    // Nothing left on the previous key now; the unreadable value remains.
+    useRotatedKeys();
+    const again = await reencryptSecrets({
+      dryRun: true,
+      locations: headersOnly,
+    });
+    expect(location(again, 'custom_mcp_servers', 'headers')).toMatchObject({
+      migrated: 0,
+      unreadable: 1,
+      remainingOnPreviousKey: 0,
+    });
+  });
+
   it('skips a row that changed after it was read', async () => {
     const user = await userFactory.create();
     useKeys({ ENCRYPTION_KEY: OLD_KEY });

@@ -645,6 +645,8 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'DOCKER_WORKER_IMAGE',
   // Compose passes `${ENCRYPTION_KEY_PREVIOUS:-}`; empty means "no rotation".
   'ENCRYPTION_KEY_PREVIOUS',
+  // Compose passes `${BETTER_AUTH_SECRET:-}`; empty means "use the fallback".
+  'BETTER_AUTH_SECRET',
   'R_GBRAIN_URL',
   'R_GBRAIN_INGEST_TOKEN',
   'R_GBRAIN_AGENT_TOKEN',

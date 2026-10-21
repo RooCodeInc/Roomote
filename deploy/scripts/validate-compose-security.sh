@@ -81,8 +81,12 @@ jq -e '
   ][] | . as $key | $root.services.controller.environment[$key] == null] | all) and
   ([[
     "JOB_AUTH_PRIVATE_KEY", "PREVIEW_AUTH_PRIVATE_KEY", "ENCRYPTION_KEY",
-    "ENCRYPTION_KEY_PREVIOUS", "S3_SECRET_ACCESS_KEY", "OPENAI_API_KEY"
+    "ENCRYPTION_KEY_PREVIOUS", "BETTER_AUTH_SECRET", "S3_SECRET_ACCESS_KEY",
+    "OPENAI_API_KEY"
   ][] | . as $key | $root.services["preview-proxy"].environment[$key] == null] | all) and
+  (.services.web.environment | has("BETTER_AUTH_SECRET")) and
+  ([["api", "controller", "bullmq"][] | . as $service |
+    $root.services[$service].environment.BETTER_AUTH_SECRET == null] | all) and
   ([[
     "PREVIEW_AUTH_PRIVATE_KEY",
     "PREVIEW_AUTH_PUBLIC_KEY", "S3_SECRET_ACCESS_KEY",

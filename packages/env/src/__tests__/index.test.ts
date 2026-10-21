@@ -648,6 +648,15 @@ describe('Env', () => {
       expect(env.ENCRYPTION_KEY_PREVIOUS).toBeUndefined();
     });
 
+    it('treats an empty BETTER_AUTH_SECRET (Compose default) as unset', () => {
+      const env = createRoomoteEnv({
+        ...controllerEnv,
+        BETTER_AUTH_SECRET: '',
+      });
+
+      expect(env.BETTER_AUTH_SECRET).toBeUndefined();
+    });
+
     it('rejects a previous key shorter than 32 characters', () => {
       expect(() =>
         createRoomoteEnv({
