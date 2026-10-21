@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execa } from 'execa';
 
 import { withAptLock } from '../commands/setup/package-manager';
+import type { CommandExecutor } from '../command-executor';
 
 import type { ServiceDefinition } from './types';
 import { SERVICE_CONFIG } from './constants';
@@ -41,6 +42,24 @@ async function verifyManagedMariadbInstance(port: number): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function configureMariadbAccess(
+  executor: CommandExecutor,
+): Promise<void> {
+  const { socketPath } = SERVICE_CONFIG.mariadb10;
+  await executor.execute({
+    name: 'Configure passwordless root access',
+    run: `sudo mysql --protocol=socket --socket=${socketPath} -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING '';"`,
+    timeout: 30,
+    continue_on_error: true,
+  });
+  await executor.execute({
+    name: 'Create root user for remote connections',
+    run: `sudo mysql --protocol=socket --socket=${socketPath} -e "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY ''; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"`,
+    timeout: 30,
+    continue_on_error: true,
+  });
 }
 
 function buildMariadbStartCommand({
@@ -130,7 +149,10 @@ export function createMariadbService(_majorVersion: string): ServiceDefinition {
       });
 
       if (runningInstance.stdout?.trim()) {
-        if (isManagedMariadbInstance(runningInstance.stdout, port)) return;
+        if (isManagedMariadbInstance(runningInstance.stdout, port)) {
+          await configureMariadbAccess(executor);
+          return;
+        }
         throw new Error(
           `A different MariaDB instance is already using ${config.socketPath}; expected ${config.dataDir} on port ${port}`,
         );
@@ -187,21 +209,7 @@ export function createMariadbService(_majorVersion: string): ServiceDefinition {
         continue_on_error: false,
       });
 
-      // Configure passwordless root access (switch from unix_socket to mysql_native_password).
-      await executor.execute({
-        name: 'Configure passwordless root access',
-        run: `sudo mysql --protocol=socket --socket=${config.socketPath} -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING '';"`,
-        timeout: 30,
-        continue_on_error: true, // May fail on snapshot restore if already configured.
-      });
-
-      // Create root user for remote connections with full privileges.
-      await executor.execute({
-        name: 'Create root user for remote connections',
-        run: `sudo mysql --protocol=socket --socket=${config.socketPath} -e "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY ''; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"`,
-        timeout: 30,
-        continue_on_error: true, // May fail on snapshot restore if already configured.
-      });
+      await configureMariadbAccess(executor);
     },
 
     healthCheck: verifyManagedMariadbInstance,

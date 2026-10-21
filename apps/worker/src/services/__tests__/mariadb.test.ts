@@ -14,10 +14,14 @@ describe('MariaDB running-instance preservation', () => {
     vi.resetAllMocks();
   });
 
-  it('reuses a matching live instance without stopping it or removing its socket', async () => {
+  it('finishes access configuration when reusing a live instance without stopping it or removing its socket', async () => {
     execute.mockResolvedValue({ stdout: '23306\t/data/services/mysql/\n' });
     await service.start(executor, 23306);
-    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls.map(([command]) => command.name)).toEqual([
+      'Check running MariaDB instance',
+      'Configure passwordless root access',
+      'Create root user for remote connections',
+    ]);
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'Check running MariaDB instance',
