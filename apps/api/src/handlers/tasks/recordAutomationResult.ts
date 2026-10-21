@@ -22,7 +22,7 @@ const bodySchema = z.object({
 
 export async function recordAutomationResult(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
-) {
+): Promise<Response> {
   const auth = c.get('mcpAuth');
   const taskId = c.req.param('taskId');
   if (!taskId) return c.json({ error: 'taskId is required' }, 400);

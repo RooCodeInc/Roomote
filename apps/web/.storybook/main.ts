@@ -131,13 +131,22 @@ const config: StorybookConfig = {
     config.server = config.server || {};
     config.server.allowedHosts = true;
 
-    // unicorn-magic splits exports: "node" condition → node.js (toPath,
-    // traversePathUp), "default" → default.js (only delay). npm-run-path
-    // (via execa) needs the Node exports. Adding "node" to resolve.conditions
-    // ensures both Vite and the Chromatic addon's esbuild resolve the correct
-    // entry point.
+    // npm-run-path (via execa) needs unicorn-magic's Node exports. Resolve
+    // only that package with Node conditions; applying "node" globally also
+    // selects Node-only vfile and uuid implementations for browser stories.
     config.resolve = config.resolve || {};
-    config.resolve.conditions = ['node', ...(config.resolve.conditions || [])];
+    config.plugins = [
+      ...(config.plugins || []),
+      {
+        name: 'storybook-unicorn-magic-node-exports',
+        enforce: 'pre',
+        resolveId(id, importer) {
+          if (id === 'unicorn-magic' && importer) {
+            return createRequire(importer).resolve(id);
+          }
+        },
+      },
+    ];
 
     const existingAliases = Array.isArray(config.resolve.alias)
       ? config.resolve.alias
