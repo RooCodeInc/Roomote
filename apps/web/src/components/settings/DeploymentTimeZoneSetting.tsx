@@ -61,10 +61,10 @@ export function DeploymentTimeZoneSetting() {
   const [isTimeZonePickerOpen, setIsTimeZonePickerOpen] = useState(false);
 
   useEffect(() => {
-    if (settings.data) {
+    if (settings.data && !isEditing) {
       setTimeZone(settings.data.timeZone ?? settings.data.effectiveTimeZone);
     }
-  }, [settings.data]);
+  }, [settings.data, isEditing]);
 
   const update = useMutation(
     trpc.miscSettings.setTimeZone.mutationOptions({
