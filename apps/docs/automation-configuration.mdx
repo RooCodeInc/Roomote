@@ -192,12 +192,21 @@ Vulnerability watch is **disabled by default**. An admin can enable it in
 individual connected repositories. New repositories are included by default.
 Remediation requires a configured executable environment mapped to the repository.
 
+GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket repositories are supported
+through their existing Roomote connections.
+
 The watch consumes the [official CVEProject feed](https://github.com/CVEProject/cvelistV5)
 using the daily baseline and cumulative hourly new **and updated** records.
 The first poll assesses the current inventory against existing advisories.
 A durable cursor resumes after interruptions; a new baseline recovers missed
 days, and a changed inventory triggers a full assessment. Repository reads are
 pinned to immutable default-branch commits and refreshed on hourly polls.
+
+Initial scans, missed-day recovery, and inventory changes download the full
+official baseline. This can be a substantial download (approximately 640 MB
+compressed when this feature was introduced); allow sufficient outbound bandwidth
+and time for the first assessment. Later hourly updates use cumulative deltas
+until another full assessment is needed.
 
 Resolved direct and transitive packages are supported in npm v2/v3 lockfiles,
 pnpm v6–v9, Cargo, Poetry, uv, and Composer lockfiles. Exact-version enrichment

@@ -121,7 +121,21 @@ existing snapshot. Update its OS certificates, Python environments and independe
 harness binaries too, and recreate warm sandboxes. A successful browser or curl
 check does not verify every application's TLS trust store.
 
+The trust updates in Roomote 1.19.0 are partial remediation, not a fleet-wide
+TLS guarantee. Bun/Brain/OpenCode, MinIO/mc, and other independent verifiers
+require separate updates and verification. Environment snapshots pick up the
+updated runtime at their daily refresh. Rebuild custom worker images, migrate
+saved task snapshots you keep, and restart affected running tools; upgrading the
+application alone does not update them.
+
 ## Rotate the encryption key
+
+<Warning>
+  Encryption-key rotation requires Roomote 1.19.0 or later on every service.
+  Before changing any keys, upgrade all services to images that include this
+  feature. Older releases, including v1.18.2, do not support
+  `ENCRYPTION_KEY_PREVIOUS` or the `reencrypt-secrets` command.
+</Warning>
 
 `ENCRYPTION_KEY` encrypts the secrets Roomote stores in PostgreSQL:
 integration credentials and OAuth tokens, environment variables, API keys,
