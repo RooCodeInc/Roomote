@@ -207,9 +207,35 @@ type MarkdownBlock =
   | { kind: 'footer'; text: string }
   | { kind: 'paragraph'; lines: string[] };
 
-const UNORDERED_ITEM_PATTERN = /^[-*+]\s+(.*)$/;
-const ORDERED_ITEM_PATTERN = /^\d+[.)]\s+(.*)$/;
 const BLOCKQUOTE_PATTERN = /^>\s?(.*)$/;
+
+function parseListItem(
+  line: string,
+): { kind: 'unordered-list' | 'ordered-list'; text: string } | null {
+  let index = 0;
+  let kind: 'unordered-list' | 'ordered-list';
+
+  if (line[0] === '-' || line[0] === '*' || line[0] === '+') {
+    kind = 'unordered-list';
+    index = 1;
+  } else {
+    while (index < line.length && /[0-9]/.test(line[index] ?? '')) index += 1;
+    if (index === 0 || (line[index] !== '.' && line[index] !== ')'))
+      return null;
+    kind = 'ordered-list';
+    index += 1;
+  }
+
+  const whitespaceStart = index;
+  while (index < line.length && /\s/.test(line[index] ?? '')) index += 1;
+  if (index === whitespaceStart) return null;
+
+  const text = line.slice(index);
+  // Match the former dot capture: separators are allowed in the marker's
+  // whitespace, but not in item content. Neither scan retries earlier splits.
+  if (/[\r\n\u2028\u2029]/.test(text)) return null;
+  return { kind, text };
+}
 
 function parseHeading(line: string): { level: number; text: string } | null {
   let level = 0;
@@ -278,26 +304,18 @@ function splitBlocks(
       continue;
     }
 
-    const unordered = UNORDERED_ITEM_PATTERN.exec(line);
+    const item = parseListItem(line);
 
-    if (unordered) {
-      if (current?.kind === 'unordered-list') {
-        current.items.push(unordered[1] ?? '');
+    if (item) {
+      if (
+        (current?.kind === 'unordered-list' ||
+          current?.kind === 'ordered-list') &&
+        current.kind === item.kind
+      ) {
+        current.items.push(item.text);
       } else {
         flush();
-        current = { kind: 'unordered-list', items: [unordered[1] ?? ''] };
-      }
-      continue;
-    }
-
-    const ordered = ORDERED_ITEM_PATTERN.exec(line);
-
-    if (ordered) {
-      if (current?.kind === 'ordered-list') {
-        current.items.push(ordered[1] ?? '');
-      } else {
-        flush();
-        current = { kind: 'ordered-list', items: [ordered[1] ?? ''] };
+        current = { kind: item.kind, items: [item.text] };
       }
       continue;
     }
