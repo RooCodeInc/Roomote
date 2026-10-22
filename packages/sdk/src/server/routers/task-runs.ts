@@ -13,6 +13,7 @@ import {
   eq,
   isDeploymentExperimentEnabled,
   slackInstallations,
+  recordVulnerabilityAssessment,
 } from '@roomote/db/server';
 
 import {
@@ -863,6 +864,22 @@ export const taskRunsRouter = router({
   reportToParentSession: runScoped(parentSessionReportSchema, 'runId').mutation(
     async ({ input }) => reportToParentSession(input),
   ),
+  reportVulnerabilityAssessment: runScoped(
+    z.object({
+      runId: z.number().int().positive(),
+      state: z.enum(['not_affected', 'blocked', 'fix_proposed']),
+      evidence: z.string().trim().min(20).max(8000),
+    }),
+    'runId',
+  ).mutation(async ({ input }) => {
+    const run = await findTaskRun(input.runId);
+    if (!run) throw new TRPCError({ code: 'NOT_FOUND' });
+    return recordVulnerabilityAssessment({
+      taskId: run.taskId,
+      state: input.state,
+      evidence: input.evidence,
+    });
+  }),
   // N-1 compatibility for workers that were already running when the
   // coding-task-facing tool was renamed to report_to_parent_session.
   relayFastAgentChildChatReply: runScoped(

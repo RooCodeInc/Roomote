@@ -79,6 +79,7 @@ import {
   SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS,
 } from './ScheduleOnlyAutomationContent';
 import { CustomAutomationsSection } from './CustomAutomationsSection';
+import { VulnerabilityWatch } from './VulnerabilityWatch';
 import { AutomationListRow, type AutomationListFilter } from './AutomationList';
 import {
   AutomationDestinationPicker,
@@ -3360,7 +3361,13 @@ export function AutomationsSettings({
       >
         {settingsQuery.isPending || !formState ? (
           <LoadingSkeleton />
-        ) : visibleBuiltInAutomations.size === 0 ? (
+        ) : visibleBuiltInAutomations.size === 0 &&
+          !(
+            !automationSearch ||
+            'vulnerability watch cve dependencies security'.includes(
+              automationSearch.toLowerCase(),
+            )
+          ) ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">
             No built-in automations match your search.
           </p>
@@ -3372,6 +3379,13 @@ export function AutomationsSettings({
               onToggle: toggleAutomation,
             }}
           >
+            {automationFilter !== 'custom' &&
+            (!automationSearch ||
+              'vulnerability watch cve dependencies security'.includes(
+                automationSearch.toLowerCase(),
+              )) ? (
+              <VulnerabilityWatch name="Vulnerability watch" />
+            ) : null}
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.callRoomoteViaEmoji}
               isAvailableMatch={visibleBuiltInAutomations.has(

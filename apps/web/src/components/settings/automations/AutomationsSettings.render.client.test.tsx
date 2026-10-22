@@ -785,6 +785,8 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
+vi.mock('./VulnerabilityWatch', () => ({ VulnerabilityWatch: () => null }));
+
 import { AutomationsSettings } from './AutomationsSettings';
 import {
   CustomAutomationsSection,

@@ -26,6 +26,7 @@ export const MANAGER_STATS_SETTINGS_HASH = 'weekly-manager-stats';
 export const SUGGEST_IDEAS_SETTINGS_HASH = 'suggest-ideas';
 export const SENTRY_TRIAGE_SETTINGS_HASH = 'sentry-triage';
 export const DEPENDABOT_TRIAGE_SETTINGS_HASH = 'dependabot-triage';
+export const VULNERABILITY_WATCH_SETTINGS_HASH = 'vulnerability-watch';
 export const CODEQL_TRIAGE_SETTINGS_HASH = 'codeql-triage';
 export const ISSUE_FIXER_SETTINGS_HASH = 'issue-fixer';
 export const SECURITY_AUDITOR_SETTINGS_HASH = 'security-auditor';
@@ -44,6 +45,7 @@ export type BackgroundAutomationSettingsHash =
   | typeof SUGGEST_IDEAS_SETTINGS_HASH
   | typeof SENTRY_TRIAGE_SETTINGS_HASH
   | typeof DEPENDABOT_TRIAGE_SETTINGS_HASH
+  | typeof VULNERABILITY_WATCH_SETTINGS_HASH
   | typeof CODEQL_TRIAGE_SETTINGS_HASH
   | typeof ISSUE_FIXER_SETTINGS_HASH
   | typeof SECURITY_AUDITOR_SETTINGS_HASH
@@ -179,6 +181,18 @@ const PROVIDER_USAGE_LIMIT_SCHEDULE_MODES = [
 ] as const satisfies readonly ProviderUsageLimitFrequency[];
 
 export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
+  {
+    automationKey: 'vulnerability_watch',
+    label: 'Vulnerability watch',
+    slackIcon: 'shield-check',
+    scheduleModes: ['off', 'every_hour'],
+    manualTriggerRequirements: ['repository'],
+    usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    supportedSourceControlProviders: sourceControlProviders,
+    // A global deterministic triage service: exclusions are explicit repository
+    // IDs, not natural-language Additional rules interpreted by a model.
+  },
   {
     automationKey: 'conflict_resolver',
     label: 'Resolve PR Conflicts',

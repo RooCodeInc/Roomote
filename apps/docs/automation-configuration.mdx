@@ -127,6 +127,7 @@ facing updates and suggestions.
 | **Inference Provider Usage Alerts** | Warnings when an inference-provider quota approaches exhaustion. | Hourly. |
 | **Triage Sentry Issues** | Prioritized Sentry follow-up work. | Daily or weekly. |
 | **Triage Dependabot Alerts** | Suggested follow-up tasks for open dependency alerts. | Daily or weekly. |
+| **Vulnerability watch** | Official CVE matches, dependency-remediation sessions, proposed fix PRs, and coverage blockers. | Hourly when enabled; disabled by default. |
 | **Triage CodeQL Alerts** | Remediation follow-up tasks for code-scanning alerts. | Daily or weekly. |
 | **Security Auditor** | Security follow-up work from recently merged pull requests. | Every hour, every 6 hours, daily, or weekly. |
 | **Code Quality Auditor** | High-confidence maintainability follow-up work from recently merged pull requests. | Every hour, every 6 hours, daily, or weekly. |
@@ -183,6 +184,51 @@ Gitea, but not Bitbucket because its API does not expose the required
 mergeability and label signals.
 
 ## Scan and update behavior
+
+### Vulnerability watch
+
+Vulnerability watch is **disabled by default**. An admin can enable it in
+**Settings → Automations**, inspect its findings and coverage, and exclude
+individual connected repositories. New repositories are included by default.
+Remediation requires a configured executable environment mapped to the repository.
+
+The watch consumes the [official CVEProject feed](https://github.com/CVEProject/cvelistV5)
+using the daily baseline and cumulative hourly new **and updated** records.
+The first poll assesses the current inventory against existing advisories.
+A durable cursor resumes after interruptions; a new baseline recovers missed
+days, and a changed inventory triggers a full assessment. Repository reads are
+pinned to immutable default-branch commits and refreshed on hourly polls.
+
+Resolved direct and transitive packages are supported in npm v2/v3 lockfiles,
+pnpm v6–v9, Cargo, Poetry, uv, and Composer lockfiles. Exact-version enrichment
+uses [OSV](https://osv.dev), which receives package names, ecosystems, and resolved
+versions. The official CVE must still be published. npm semantic-version ranges
+are also checked directly. Unsupported version schemes and product-only matches
+are **uncertain**, not confirmed vulnerabilities; they do not automatically launch
+remediation. Pinned Node.js/Python runtime and Docker base-image declarations are
+inventory candidates, not resolved image or operating-system package coverage.
+Unsupported lockfiles, inaccessible files, stale inventory, and traversal limits
+remain visible. An empty finding list never implies complete coverage.
+
+Credible matches start assessment sessions through the normal authorized task
+path. At most two watch assessments are active at once; pending findings remain
+visible in the backlog. Sessions check source usage, dependency and configuration
+evidence, recognize existing remediation PRs, and group CVEs resolved by the same
+dependency fix. Fixes preserve the repository's dependency release-age policy,
+run relevant non-offensive regression/build checks, and propose a reviewable PR.
+There is **no automatic merge**, exploit generation, vulnerability reproduction,
+or offensive probing.
+
+Findings persist as **investigating**, **not affected**, **fix proposed**,
+**fixed**, or **blocked**. Assessment sessions record their evidence; admins can
+also record applicability evidence or blockers. Later inventory/advisory changes
+reconsider prior decisions. A subsequent inventory assessment verifies that an
+affected dependency is gone before marking a dependency remediation fixed;
+code/configuration mitigations retain their documented assessment outcome.
+Repeated healthy polls stay quiet. Changed actionable findings, PR states, and
+coverage blockers report to the default automation destination and results inbox.
+
+### Other scan automations
 
 **Code Quality Auditor** inspects recently merged pull request diffs and posts
 only high-confidence maintainability issues worth a real follow-up task. It is
