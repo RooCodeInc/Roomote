@@ -120,7 +120,10 @@ five minutes and queues replacements from the current image, with rebuilds paced
 across environments; the daily refresh remains in place too. Rebuild custom
 worker images yourself, and migrate or update saved task snapshots you intend to
 keep using. The fresh-start fallback applies to environment snapshots, not saved
-task snapshots.
+task snapshots. Starting with Roomote 1.19.2, follow-ups can resume saved task
+snapshots created with an older release: worker startup warns about the older
+image and continues, preserving the task's files. The installed worker must still
+match the application release. This does not update tools inside the snapshot.
 
 An application upgrade does not replace tools or certificate bundles inside an
 existing snapshot. Update its OS certificates, Python environments and independent

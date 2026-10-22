@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.19.2 (2026-10-22)
+
+Roomote 1.19.2 lets you continue tasks saved before an upgrade without losing access to their saved work.
+
+### Highlights
+
+- Resume saved tasks after an upgrade instead of encountering a worker installation failure caused by an older snapshot image.
+
+### Patch changes
+
+- Follow-ups can now resume tasks saved before a Roomote upgrade instead of failing during worker installation because the task snapshot was created with an older release. Worker startup warns about the older snapshot image and continues while still requiring the installed worker to match the application release.
+
 ## 1.19.1 (2026-10-22)
 
 Roomote 1.19.1 keeps tasks starting after an upgrade by skipping outdated environment snapshots and rebuilding them automatically.
