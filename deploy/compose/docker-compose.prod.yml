@@ -121,9 +121,11 @@ x-roomote-web-env: &roomote-web-env
   PREVIEW_AUTH_PUBLIC_KEY: ${PREVIEW_AUTH_PUBLIC_KEY:?PREVIEW_AUTH_PUBLIC_KEY is required}
   ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
   ENCRYPTION_KEY_PREVIOUS: ${ENCRYPTION_KEY_PREVIOUS:-}
-  # Sign-in session signing secret (web only). Empty falls back to the
-  # encryption key; see getBetterAuthSecret.
-  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+  # Sign-in session signing secret (web only). When unset, fall back the same
+  # way getBetterAuthSecret does (previous encryption key, then the current
+  # one) so the value is never empty: earlier releases reject an empty
+  # BETTER_AUTH_SECRET, which would break a one-release rollback.
+  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-${ENCRYPTION_KEY_PREVIOUS:-${ENCRYPTION_KEY}}}
   ARTIFACT_SIGNING_KEY: ${ARTIFACT_SIGNING_KEY:?ARTIFACT_SIGNING_KEY is required}
   ARTIFACT_SIGNING_KEY_PREVIOUS: ${ARTIFACT_SIGNING_KEY_PREVIOUS:-}
   DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
