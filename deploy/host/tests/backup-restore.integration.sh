@@ -21,6 +21,9 @@ cleanup() {
   if [ -n "${race_worker_id:-}" ]; then
     docker rm -f "$race_worker_id" >/dev/null 2>&1 || true
   fi
+  if [ -n "${race_worker_network:-}" ]; then
+    docker network rm "$race_worker_network" >/dev/null 2>&1 || true
+  fi
   if [ -f "$fresh_root/docker-compose.prod.yml" ] && [ -f "$fresh_root/.env" ]; then
     docker compose --project-name "$compose_project" \
       --env-file "$fresh_root/.env" -f "$fresh_root/docker-compose.prod.yml" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -117,9 +120,13 @@ compose_at "$source_root" exec -T minio sh -c \
 # Remove a real worker after enumeration but before docker stop receives its
 # ID. All Docker operations, including the resulting failed stop, stay real.
 real_docker="$(command -v docker)"
+race_worker_network="$(awk -F= '$1 == "DOCKER_WORKER_NETWORK" { print $2 }' "$source_root/.env")"
+test -n "$race_worker_network"
+docker network create "$race_worker_network" >/dev/null
 race_worker_id="$(docker run -d --name "roomote-worker-backup-race-$$" \
-  --network roomote_backup_ci_default redis:7-alpine sh -c 'sleep infinity')"
+  --network "$race_worker_network" redis:7-alpine sh -c 'sleep infinity')"
 race_worker_id="${race_worker_id:0:12}"
+docker ps --filter "network=$race_worker_network" --format '{{.ID}}' | grep -Fxq "$race_worker_id"
 mkdir -p "$work_dir/race-bin"
 cat >"$work_dir/race-bin/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -142,6 +149,7 @@ if env PATH="$work_dir/race-bin:$PATH" ROOMOTE_REAL_DOCKER="$real_docker" \
   ROOMOTE_TEST_MODE=true ROOMOTE_INSTALL_ROOT="$source_root" \
   "$roomote_cli" backup --passphrase-file "$passphrase_file" \
   --output "$work_dir/interrupted-backup.enc" >"$work_dir/interrupted-backup.log" 2>&1; then
+  cat "$work_dir/interrupted-backup.log"
   printf 'backup unexpectedly succeeded after its enumerated worker disappeared\n' >&2
   exit 1
 fi
