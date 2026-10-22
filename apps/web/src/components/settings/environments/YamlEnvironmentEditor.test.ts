@@ -8,6 +8,30 @@ import {
 import { configToYaml } from './yaml-utils';
 
 describe('configToYaml', () => {
+  it.each([undefined, 0, 2])(
+    'preserves command retries (%s) through an unrelated YAML edit',
+    (retries) => {
+      const config = environmentConfigSchema.parse({
+        name: 'Retry preservation',
+        repositories: [
+          {
+            repository: 'Roomote/example-app',
+            commands: [{ name: 'Install', run: 'pnpm install', retries }],
+          },
+        ],
+      });
+      const yaml = configToYaml(config).replace(
+        'name: Retry preservation',
+        'name: Renamed environment',
+      );
+      const saved = environmentConfigSchema.parse(YAML.parse(yaml));
+
+      expect(saved.name).toBe('Renamed environment');
+      expect(saved.repositories[0]!.commands![0]!.retries).toBe(retries);
+      expect(saved.repositories[0]!.commands![0]!.run).toBe('pnpm install');
+    },
+  );
+
   it('omits an empty repository set from user-authored YAML', () => {
     const yaml = configToYaml({
       name: 'Repository-free Env',
