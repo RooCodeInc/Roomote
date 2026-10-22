@@ -18,6 +18,9 @@ compose_at() {
 }
 
 cleanup() {
+  if [ -n "${race_worker_id:-}" ]; then
+    docker rm -f "$race_worker_id" >/dev/null 2>&1 || true
+  fi
   if [ -f "$fresh_root/docker-compose.prod.yml" ] && [ -f "$fresh_root/.env" ]; then
     docker compose --project-name "$compose_project" \
       --env-file "$fresh_root/.env" -f "$fresh_root/docker-compose.prod.yml" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -110,6 +113,51 @@ compose_at "$source_root" exec -T postgres \
 compose_at "$source_root" exec -T redis redis-cli SET recovery:queued redis-survived >/dev/null
 compose_at "$source_root" exec -T minio sh -c \
   "mkdir -p /data/roomote-artifacts && printf 'artifact-survived' >/data/roomote-artifacts/probe.txt"
+
+# Remove a real worker after enumeration but before docker stop receives its
+# ID. All Docker operations, including the resulting failed stop, stay real.
+real_docker="$(command -v docker)"
+race_worker_id="$(docker run -d --name "roomote-worker-backup-race-$$" \
+  --network roomote_backup_ci_default redis:7-alpine sh -c 'sleep infinity')"
+race_worker_id="${race_worker_id:0:12}"
+mkdir -p "$work_dir/race-bin"
+cat >"$work_dir/race-bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = 'stop' ]; then
+  for argument in "$@"; do
+    if [ "$argument" = "$ROOMOTE_RACE_WORKER_ID" ]; then
+      "$ROOMOTE_REAL_DOCKER" rm -f "$argument" >/dev/null
+      : >"$ROOMOTE_RACE_MARKER"
+      break
+    fi
+  done
+fi
+exec "$ROOMOTE_REAL_DOCKER" "$@"
+EOF
+chmod +x "$work_dir/race-bin/docker"
+
+if env PATH="$work_dir/race-bin:$PATH" ROOMOTE_REAL_DOCKER="$real_docker" \
+  ROOMOTE_RACE_WORKER_ID="$race_worker_id" ROOMOTE_RACE_MARKER="$work_dir/worker-removed" \
+  ROOMOTE_TEST_MODE=true ROOMOTE_INSTALL_ROOT="$source_root" \
+  "$roomote_cli" backup --passphrase-file "$passphrase_file" \
+  --output "$work_dir/interrupted-backup.enc" >"$work_dir/interrupted-backup.log" 2>&1; then
+  printf 'backup unexpectedly succeeded after its enumerated worker disappeared\n' >&2
+  exit 1
+fi
+cat "$work_dir/interrupted-backup.log"
+test -f "$work_dir/worker-removed"
+test ! -e "$work_dir/interrupted-backup.enc"
+for service in web api controller bullmq preview-proxy; do
+  container_id="$(compose_at "$source_root" ps -aq "$service")"
+  if [ "$(docker inspect --format '{{.State.Running}}' "$container_id")" != 'true' ]; then
+    printf 'interrupted backup left %s stopped\n' "$service" >&2
+    exit 1
+  fi
+done
+test "$(compose_at "$source_root" exec -T postgres \
+  psql -U postgres -d roomote -Atqc 'SELECT value FROM recovery_probe')" = 'database-survived'
+printf 'Interrupted backup recovered application services and preserved PostgreSQL.\n'
 
 env ROOMOTE_TEST_MODE=true ROOMOTE_INSTALL_ROOT="$source_root" \
   "$roomote_cli" backup --include-redis --passphrase-file "$passphrase_file" --output "$bundle"
