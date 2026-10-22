@@ -692,7 +692,8 @@ restore_image_identities() {
   done <"$identities_file"
 }
 
-cmd_backup() {
+# EXIT cleanup must share the scope of backup state, including on errexit.
+cmd_backup() (
   local include_redis='false'
   local passphrase_arg=''
   local output_file=''
@@ -769,6 +770,7 @@ cmd_backup() {
   collect_image_identities "$staging_dir/images.txt"
 
   log "Quiescing Roomote application writers"
+  services_stopped='true'
   compose stop web api controller bullmq preview-proxy
   stop_task_workers
   # The Brain (opt-in `brain` profile) writes its own volume and its Postgres
@@ -780,7 +782,6 @@ cmd_backup() {
     brain_included='true'
     compose stop gbrain
   fi
-  services_stopped='true'
 
   log "Dumping PostgreSQL"
   postgres_command '' 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' \
@@ -890,7 +891,7 @@ EOF
   fi
   trap - EXIT
   log "Encrypted deployment backup written to $output_file"
-}
+)
 
 validate_archive_paths() {
   local archive_file="$1"
