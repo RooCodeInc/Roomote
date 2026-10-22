@@ -1,3 +1,5 @@
+import { isEnvironmentSnapshotFromRelease } from '@roomote/compute-providers';
+import { Env } from '@roomote/env';
 import {
   type ComputeProvider,
   resolveComputeProviderTarget,
@@ -13,6 +15,7 @@ import {
   eq,
   exists,
   gte,
+  inArray,
   isNotNull,
   isNull,
   lte,
@@ -122,6 +125,59 @@ export async function findRetiredSnapshotRebuildCandidates(
 }
 
 /**
+ * Retires ready snapshots that another release built. Launches already skip
+ * them, so retiring them lets the rebuild below replace them within minutes
+ * of an upgrade instead of waiting for the daily refresh.
+ */
+export async function retireEnvironmentSnapshotsFromOtherReleases(
+  now: Date,
+  provider: ComputeProvider,
+  applicationProductVersion: string | null | undefined,
+): Promise<number> {
+  const liveReadySnapshots = await db
+    .select({
+      id: environmentSnapshots.id,
+      workerVersion: environmentSnapshots.workerVersion,
+    })
+    .from(environmentSnapshots)
+    .where(
+      and(
+        eq(environmentSnapshots.provider, provider),
+        eq(environmentSnapshots.snapshotStatus, 'ready'),
+        isNotNull(environmentSnapshots.snapshotId),
+        isNull(environmentSnapshots.deletedAt),
+      ),
+    );
+
+  const staleIds = liveReadySnapshots
+    .filter(
+      (snapshot) =>
+        !isEnvironmentSnapshotFromRelease(
+          snapshot.workerVersion,
+          applicationProductVersion,
+        ),
+    )
+    .map((snapshot) => snapshot.id);
+
+  if (staleIds.length === 0) {
+    return 0;
+  }
+
+  const retired = await db
+    .update(environmentSnapshots)
+    .set({ deletedAt: now, updatedAt: now })
+    .where(
+      and(
+        inArray(environmentSnapshots.id, staleIds),
+        isNull(environmentSnapshots.deletedAt),
+      ),
+    )
+    .returning({ id: environmentSnapshots.id });
+
+  return retired.length;
+}
+
+/**
  * Rebuilds environment snapshots soon after an edit retires them, instead of
  * leaving every launch to set the environment up from scratch until the next
  * daily refresh.
@@ -137,6 +193,20 @@ export async function rebuildRetiredSnapshots(now: Date): Promise<{
   if (!getComputeProviderCapabilities(provider).supportsSnapshots) {
     return { rebuilt: 0, skipped: 0, errors: 0 };
   }
+  const retiredFromOtherReleases =
+    await retireEnvironmentSnapshotsFromOtherReleases(
+      now,
+      provider,
+      Env.RELEASE_PRODUCT_VERSION,
+    );
+  if (retiredFromOtherReleases > 0) {
+    console.log(
+      `${LOG_PREFIX} Retired ${retiredFromOtherReleases} snapshot(s) built by another release ${JSON.stringify(
+        { provider, applicationProductVersion: Env.RELEASE_PRODUCT_VERSION },
+      )}`,
+    );
+  }
+
   const candidates = await findRetiredSnapshotRebuildCandidates(now, provider);
 
   if (candidates.length === 0) {

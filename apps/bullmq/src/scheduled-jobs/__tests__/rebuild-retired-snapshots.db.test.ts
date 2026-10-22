@@ -12,6 +12,7 @@ import {
 
 import {
   findRetiredSnapshotRebuildCandidates,
+  retireEnvironmentSnapshotsFromOtherReleases,
   RETIRED_SNAPSHOT_REBUILD_QUIET_MS,
   RETIRED_SNAPSHOT_REBUILD_WINDOW_MS,
 } from '../rebuild-retired-snapshots';
@@ -157,5 +158,58 @@ describe('retired snapshot rebuild candidates (real database)', () => {
     );
 
     expect(selected).toEqual([environmentId]);
+  });
+  it('retires ready snapshots built by another release so they are rebuilt', async () => {
+    const stamp = async (environmentId: string, workerVersion: string | null) =>
+      upsertEnvironmentSnapshot(db, {
+        environmentId,
+        provider,
+        snapshotId: `im-${randomUUID()}`,
+        snapshotStatus: 'ready',
+        snapshotCreatedAt: ago(3_600_000),
+        snapshotExpiresAt: null,
+        workerVersion,
+      });
+
+    const previousRelease = await createEnvironment(settled);
+    await stamp(previousRelease, 'v1.18.2');
+    const unstamped = await createEnvironment(settled);
+    await stamp(unstamped, null);
+    const currentRelease = await createEnvironment(settled);
+    await stamp(currentRelease, 'v1.19.0');
+
+    await retireEnvironmentSnapshotsFromOtherReleases(
+      settled,
+      provider,
+      '1.19.0',
+    );
+
+    const rows = await db
+      .select({
+        environmentId: environmentSnapshots.environmentId,
+        deletedAt: environmentSnapshots.deletedAt,
+      })
+      .from(environmentSnapshots)
+      .where(
+        inArray(environmentSnapshots.environmentId, [
+          previousRelease,
+          unstamped,
+          currentRelease,
+        ]),
+      );
+    const retiredIds = rows
+      .filter((row) => row.deletedAt !== null)
+      .map((row) => row.environmentId);
+
+    expect(retiredIds).toEqual(
+      expect.arrayContaining([previousRelease, unstamped]),
+    );
+    expect(retiredIds).not.toContain(currentRelease);
+
+    const selected = await candidateIds();
+    expect(selected).toEqual(
+      expect.arrayContaining([previousRelease, unstamped]),
+    );
+    expect(selected).not.toContain(currentRelease);
   });
 });
