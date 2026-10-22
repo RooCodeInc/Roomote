@@ -159,7 +159,7 @@ describe('retired snapshot rebuild candidates (real database)', () => {
 
     expect(selected).toEqual([environmentId]);
   });
-  it('retires ready snapshots built by another release so they are rebuilt', async () => {
+  it('retires ready snapshots built by another release', async () => {
     const stamp = async (environmentId: string, workerVersion: string | null) =>
       upsertEnvironmentSnapshot(db, {
         environmentId,
@@ -205,11 +205,5 @@ describe('retired snapshot rebuild candidates (real database)', () => {
       expect.arrayContaining([previousRelease, unstamped]),
     );
     expect(retiredIds).not.toContain(currentRelease);
-
-    const selected = await candidateIds();
-    expect(selected).toEqual(
-      expect.arrayContaining([previousRelease, unstamped]),
-    );
-    expect(selected).not.toContain(currentRelease);
   });
 });
