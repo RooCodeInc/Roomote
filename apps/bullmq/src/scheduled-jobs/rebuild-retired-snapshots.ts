@@ -15,7 +15,6 @@ import {
   eq,
   exists,
   gte,
-  inArray,
   isNotNull,
   isNull,
   lte,
@@ -137,6 +136,7 @@ export async function retireEnvironmentSnapshotsFromOtherReleases(
   const liveReadySnapshots = await db
     .select({
       id: environmentSnapshots.id,
+      snapshotId: environmentSnapshots.snapshotId,
       workerVersion: environmentSnapshots.workerVersion,
     })
     .from(environmentSnapshots)
@@ -149,32 +149,40 @@ export async function retireEnvironmentSnapshotsFromOtherReleases(
       ),
     );
 
-  const staleIds = liveReadySnapshots
-    .filter(
-      (snapshot) =>
-        !isEnvironmentSnapshotFromRelease(
-          snapshot.workerVersion,
-          applicationProductVersion,
-        ),
-    )
-    .map((snapshot) => snapshot.id);
+  const staleSnapshots = liveReadySnapshots.filter(
+    (snapshot) =>
+      !isEnvironmentSnapshotFromRelease(
+        snapshot.workerVersion,
+        applicationProductVersion,
+      ),
+  );
 
-  if (staleIds.length === 0) {
-    return 0;
+  let retired = 0;
+
+  for (const snapshot of staleSnapshots) {
+    if (!snapshot.snapshotId) continue;
+    // Compare-and-swap against the observed state: a concurrent claim or
+    // attach may have turned this row into a pending build or a snapshot from
+    // the running release since the read above, and neither may be retired.
+    const rows = await db
+      .update(environmentSnapshots)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(environmentSnapshots.id, snapshot.id),
+          isNull(environmentSnapshots.deletedAt),
+          eq(environmentSnapshots.snapshotStatus, 'ready'),
+          eq(environmentSnapshots.snapshotId, snapshot.snapshotId),
+          snapshot.workerVersion === null
+            ? isNull(environmentSnapshots.workerVersion)
+            : eq(environmentSnapshots.workerVersion, snapshot.workerVersion),
+        ),
+      )
+      .returning({ id: environmentSnapshots.id });
+    retired += rows.length;
   }
 
-  const retired = await db
-    .update(environmentSnapshots)
-    .set({ deletedAt: now, updatedAt: now })
-    .where(
-      and(
-        inArray(environmentSnapshots.id, staleIds),
-        isNull(environmentSnapshots.deletedAt),
-      ),
-    )
-    .returning({ id: environmentSnapshots.id });
-
-  return retired.length;
+  return retired;
 }
 
 /**
