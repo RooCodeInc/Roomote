@@ -17,7 +17,7 @@ checkout. If you want to operate Roomote for a team, start with the public
 
 The dev toolchain runs on Node.js 24.22.1, pinned in `.tool-versions`,
 `.nvmrc`, and `.node-version`. The `package.json` `engines` field accepts
-22.x or 24.x, and `.npmrc` has `engine-strict=true`.
+22.x from 22.23.4 or 24.x from 24.22.1, and `.npmrc` has `engine-strict=true`.
 
 ## Environment Setup
 
