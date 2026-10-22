@@ -17,6 +17,68 @@ import {
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
+import type {
+  VulnerabilityDependency,
+  VulnerabilityEvidence,
+  VulnerabilityFeedCursor,
+  VulnerabilityFindingState,
+} from '@roomote/types';
+
+export const vulnerabilityWatchState = pgTable('vulnerability_watch_state', {
+  id: text('id').primaryKey(),
+  cursor: jsonb('cursor').$type<VulnerabilityFeedCursor>(),
+  leaseToken: uuid('lease_token'),
+  leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  error: text('error'),
+  notificationHash: text('notification_hash'),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const vulnerabilityInventories = pgTable('vulnerability_inventories', {
+  repositoryId: uuid('repository_id')
+    .primaryKey()
+    .references(() => repositories.id, { onDelete: 'cascade' }),
+  revision: text('revision').notNull(),
+  fingerprint: text('fingerprint').notNull(),
+  dependencies: jsonb('dependencies')
+    .$type<VulnerabilityDependency[]>()
+    .notNull(),
+  gaps: jsonb('gaps').$type<string[]>().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const vulnerabilityFindings = pgTable(
+  'vulnerability_findings',
+  {
+    id: text('id').primaryKey(),
+    repositoryId: uuid('repository_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    packageKey: text('package_key').notNull(),
+    revision: text('revision').notNull(),
+    evidence: jsonb('evidence').$type<VulnerabilityEvidence[]>().notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    dispatchedFingerprint: text('dispatched_fingerprint'),
+    state: text('state')
+      .$type<VulnerabilityFindingState>()
+      .notNull()
+      .default('investigating'),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    note: text('note'),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('vulnerability_findings_repository_idx').on(table.repositoryId),
+  ],
+);
 
 import type {
   TaskPayloadKind,

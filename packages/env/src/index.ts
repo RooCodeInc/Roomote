@@ -320,6 +320,9 @@ const serverSchema = {
   // ENCRYPTION_KEY (see getBetterAuthSecret) when unset for backward compat.
   BETTER_AUTH_SECRET: z.string().min(32).optional(),
   ENCRYPTION_KEY: z.string().min(32),
+  // Previous at-rest encryption key, set only while rotating ENCRYPTION_KEY.
+  // Decryption falls back to it; encryption always uses ENCRYPTION_KEY.
+  ENCRYPTION_KEY_PREVIOUS: z.string().min(32).optional(),
   ARTIFACT_SIGNING_KEY: z.string().min(32),
   ARTIFACT_SIGNING_KEY_PREVIOUS: z.string().min(32).optional(),
   API_DEBUG_LOGS: z.string().optional(),
@@ -640,6 +643,10 @@ const OVERRIDE_KEYS = new Set(['NODE_ENV', 'APP_ENV', 'SLACK_API_TIMEOUT_MS']);
 
 const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'DOCKER_WORKER_IMAGE',
+  // Compose passes `${ENCRYPTION_KEY_PREVIOUS:-}`; empty means "no rotation".
+  'ENCRYPTION_KEY_PREVIOUS',
+  // Compose passes `${BETTER_AUTH_SECRET:-}`; empty means "use the fallback".
+  'BETTER_AUTH_SECRET',
   'R_GBRAIN_URL',
   'R_GBRAIN_INGEST_TOKEN',
   'R_GBRAIN_AGENT_TOKEN',
@@ -723,6 +730,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_LINEAR_WEBHOOK_SECRET',
   'R_LINEAR_REDIRECT_URI',
   'ARTIFACT_SIGNING_KEY_PREVIOUS',
+  'ENCRYPTION_KEY_PREVIOUS',
   'SETUP_TOKEN',
   'API_DEBUG_LOGS',
   'SLACK_DEBUG_LOGS',

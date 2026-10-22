@@ -7,6 +7,7 @@ import {
   conflictScanJob,
   customAutomationsJob,
   dependabotTriageJob,
+  vulnerabilityWatchJob,
   managerStatsJob,
   providerUsageLimitJob,
   securityAuditorJob,
@@ -91,6 +92,7 @@ const AUTOMATION_JOBS: Record<
   provider_usage_limit: providerUsageLimitJob,
   sentry_triage: sentryTriageJob,
   dependabot_triage: dependabotTriageJob,
+  vulnerability_watch: vulnerabilityWatchJob,
   codeql_triage: codeqlTriageJob,
   security_auditor: securityAuditorJob,
   code_quality_auditor: codeQualityAuditorJob,
@@ -132,6 +134,10 @@ async function createJobs(queue: Queue): Promise<void> {
 
   // Automation jobs tick at their minimum supported cadence and due-gate
   // themselves against automations.enabled/schedule/lastRunAt.
+  await queue.upsertJobScheduler(
+    'vulnerability_watch' satisfies ScheduledAutomationJobName,
+    { every: 60 * 60 * 1000 },
+  );
   await queue.upsertJobScheduler(
     'conflict_resolver' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.

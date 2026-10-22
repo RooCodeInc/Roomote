@@ -65,6 +65,61 @@ describe('renderAgentMailHtml', () => {
     );
   });
 
+  it.each(['-', '*', '+', '1.', '02)', '123.'])(
+    'preserves list marker %s with mixed whitespace and empty items',
+    (marker) => {
+      const tag = ['-', '*', '+'].includes(marker) ? 'ul' : 'ol';
+      const whitespace = ' \t\v\f\r\u00a0\u2028\u2029\ufeff';
+
+      expect(
+        renderAgentMailHtml(
+          `${marker}${whitespace}item  \n${marker}${whitespace}`,
+        ),
+      ).toBe(`<${tag}><li>item  </li><li></li></${tag}>`);
+    },
+  );
+
+  it.each(['-', '1)'])(
+    'keeps line separators in %s item content literal',
+    (marker) => {
+      for (const separator of ['\r', '\u2028', '\u2029']) {
+        for (const suffix of ['', 'more']) {
+          const markdown = `${marker} item${separator}${suffix}`;
+          expect(renderAgentMailHtml(markdown)).toBe(`<p>${markdown}</p>`);
+        }
+      }
+    },
+  );
+
+  it.each([
+    '-item',
+    '*',
+    '+',
+    '1.item',
+    '1)',
+    '1a. item',
+    '١. item',
+    ' - item',
+  ])('keeps non-list prefix %s as a paragraph', (markdown) => {
+    expect(renderAgentMailHtml(markdown)).toBe(`<p>${markdown}</p>`);
+  });
+
+  it.each(['-', '1.'])(
+    'handles bounded whitespace-heavy %s items without backtracking',
+    (marker) => {
+      const tag = marker === '-' ? 'ul' : 'ol';
+      for (const size of [1_000, 10_000, AGENTMAIL_MAX_TEXT_LENGTH - 10]) {
+        const prefix = `${marker}${' \t'.repeat(Math.floor(size / 2))}`;
+        expect(renderAgentMailHtml(`${prefix}item`)).toBe(
+          `<${tag}><li>item</li></${tag}>`,
+        );
+        expect(renderAgentMailHtml(prefix)).toBe(`<${tag}><li></li></${tag}>`);
+        const rejected = `${prefix}x\u2028`;
+        expect(renderAgentMailHtml(rejected)).toBe(`<p>${rejected}</p>`);
+      }
+    },
+  );
+
   it('renders blockquotes', () => {
     expect(renderAgentMailHtml('> quoted line')).toBe(
       '<blockquote><p>quoted line</p></blockquote>',
@@ -139,6 +194,16 @@ describe('renderAgentMailPlainText', () => {
 });
 
 describe('buildAgentMailEmailBody', () => {
+  it('preserves list transitions, escaping, plain text and the final footer', () => {
+    const footer = formatAgentMailFooterMarkdown('Reply anytime');
+    const markdown = `- **one** & <two>\n+ next\n1) ordered\n02. \t\nparagraph\n\n${footer}`;
+
+    expect(buildAgentMailEmailBody(markdown)).toEqual({
+      html: '<div><ul><li><strong>one</strong> &amp; &lt;two&gt;</li><li>next</li></ul><ol><li>ordered</li><li></li></ol><p>paragraph</p><p style="font-size:0.875em">Reply anytime</p></div>',
+      text: '- one & <two>\n+ next\n1) ordered\n02. \t\nparagraph\n\n--\nReply anytime',
+    });
+  });
+
   it('wraps the html body in a minimal div and pairs it with plain text', () => {
     expect(buildAgentMailEmailBody('**hi** there')).toEqual({
       html: '<div><p><strong>hi</strong> there</p></div>',

@@ -2,6 +2,28 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.19.0 (2026-10-22)
+
+Roomote 1.19.0 adds encryption-key rotation and opt-in vulnerability monitoring, improves email formatting, and preserves task work during worker startup failures.
+
+### Highlights
+
+- Rotate stored-secret encryption keys after upgrading every service, with a preview and verification step before retiring the old key.
+- Opt into Vulnerability watch for CVE assessments and proposed fix PRs, with visible coverage gaps and no automatic merge.
+- Preserve retained Azure task work when worker startup fails.
+- Get updated runtime trust inputs; environment snapshots move to them at their daily refresh, and independent TLS verifiers still require separate remediation.
+
+### Minor changes
+
+- Rotate stored-secret encryption keys without losing integration credentials or environment secrets. Configure a previous key, preview and run batched re-encryption, and verify completion before removing it. Rotation preserves concurrent writes, finds secrets across PostgreSQL search paths, and supports keeping sign-in sessions valid with a dedicated signing secret. Upgrade every service before changing keys.
+- Enable Vulnerability watch to check connected repositories against official CVE records and start evidence-backed remediation assessments that propose reviewable fix PRs. Admins can exclude repositories and inspect findings, coverage gaps, and the assessment backlog. The watch is disabled by default, preserves dependency release-age policies, and never automatically merges fixes.
+
+### Patch changes
+
+- AgentMail list formatting no longer stalls on whitespace-heavy list items. Outgoing email keeps its existing HTML, plain-text, and footer formatting while list markers are processed in linear time.
+- Preserve retained Azure sandboxes when worker bootstrap fails by suspending them instead of deleting them. Failed or unavailable suspension no longer falls back to deletion, keeping saved task work intact during runtime-update failures.
+- Update Node, OS certificate, and Python trust inputs in application and worker images. Worker startup warns, without stopping, when a custom image or saved snapshot still has an older Node runtime. Environment snapshots are rebuilt on the updated runtime by the daily snapshot refresh; rebuild custom images and migrate saved task snapshots you keep. This is partial TLS remediation: Bun/Brain/OpenCode, MinIO/mc, other independent verifiers, and existing running or saved environments still require separate updates and verification.
+
 ## 1.18.2 (2026-10-20)
 
 Roomote 1.18.2 keeps integration tools available in Fast sessions, restores Discord bot and webhook requests, and preserves model settings when upgrading with older presets.
