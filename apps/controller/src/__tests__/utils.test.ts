@@ -6,6 +6,7 @@ import {
   SANDBOX_SERVER_NAMED_PORT,
 } from '@roomote/types';
 import { db } from '@roomote/db/server';
+import { rehydrateEnv } from '@roomote/env';
 
 import {
   clearTaskRunMachine,
@@ -39,6 +40,7 @@ type MockEnvironmentSnapshot = {
   snapshotStatus: string | null;
   snapshotCreatedAt: Date | null;
   snapshotExpiresAt: Date | null;
+  workerVersion?: string | null;
 };
 
 const mockGetEnvironmentSnapshot = vi.fn<
@@ -293,6 +295,60 @@ describe('getNamedPortsForTaskRun', () => {
   });
 
   describe('environment snapshots', () => {
+    it('boots fresh instead of reusing a snapshot built by another release', async () => {
+      vi.stubEnv('RELEASE_PRODUCT_VERSION', '1.19.0');
+      rehydrateEnv();
+      vi.mocked(db.query.environments.findFirst).mockResolvedValue({
+        id: 'env-123',
+        config: mockEnvironmentConfig(),
+      } as unknown as Awaited<
+        ReturnType<typeof db.query.environments.findFirst>
+      >);
+      const taskRun = {
+        id: 123,
+        vendor: 'modal',
+        payload: {
+          environmentId: 'env-123',
+        },
+      } as Parameters<typeof getNamedPortsForTaskRun>[0];
+      const snapshot = {
+        provider: 'modal' as const,
+        snapshotId: 'snapshot-456',
+        snapshotStatus: 'ready',
+        snapshotCreatedAt: new Date(),
+        snapshotExpiresAt: null,
+      };
+
+      try {
+        mockGetEnvironmentSnapshot.mockResolvedValue({
+          ...snapshot,
+          workerVersion: 'v1.18.2',
+        });
+        expect(
+          (await getNamedPortsForTaskRun(taskRun)).environmentSnapshotId,
+        ).toBeUndefined();
+
+        mockGetEnvironmentSnapshot.mockResolvedValue({
+          ...snapshot,
+          workerVersion: null,
+        });
+        expect(
+          (await getNamedPortsForTaskRun(taskRun)).environmentSnapshotId,
+        ).toBeUndefined();
+
+        mockGetEnvironmentSnapshot.mockResolvedValue({
+          ...snapshot,
+          workerVersion: 'v1.19.0',
+        });
+        expect(
+          (await getNamedPortsForTaskRun(taskRun)).environmentSnapshotId,
+        ).toBe('snapshot-456');
+      } finally {
+        vi.unstubAllEnvs();
+        rehydrateEnv();
+      }
+    });
+
     it('returns old Modal environment snapshots without application expiry', async () => {
       vi.mocked(db.query.environments.findFirst).mockResolvedValue({
         id: 'env-123',

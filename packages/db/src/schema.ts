@@ -5982,6 +5982,10 @@ export const environmentSnapshots = pgTable(
     snapshotStatus: text('snapshot_status').$type<
       'pending' | 'ready' | 'expired' | 'failed'
     >(),
+    // Worker release that built the snapshot. The snapshot bakes that release's
+    // worker image, and install-worker.sh rejects a worker from another release,
+    // so launches only reuse snapshots built by the running release.
+    workerVersion: text('worker_version'),
     deletedAt: timestamp('deleted_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),

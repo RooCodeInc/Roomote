@@ -90,6 +90,31 @@ export function getWorkerReleaseCompatibilityVersion(
   return match?.[1] ?? null;
 }
 
+/**
+ * Environment snapshots bake the worker image of the release that built them,
+ * and install-worker.sh rejects a worker from a different release. A snapshot
+ * is reusable only when the running application release built it; unstamped
+ * snapshots predate the stamp and count as stale. Without a known application
+ * release (local or unversioned builds) every snapshot stays reusable.
+ */
+export function isEnvironmentSnapshotFromRelease(
+  snapshotWorkerVersion: string | null | undefined,
+  applicationProductVersion: string | null | undefined,
+): boolean {
+  const applicationCompatibilityVersion = getWorkerReleaseCompatibilityVersion(
+    applicationProductVersion,
+  );
+
+  if (!applicationCompatibilityVersion) {
+    return true;
+  }
+
+  return (
+    getWorkerReleaseCompatibilityVersion(snapshotWorkerVersion) ===
+    applicationCompatibilityVersion
+  );
+}
+
 function parseComparableWorkerReleaseVersion(
   version: string,
 ): ParsedComparableWorkerReleaseVersion | null {
