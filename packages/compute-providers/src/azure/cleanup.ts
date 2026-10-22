@@ -12,7 +12,10 @@ function resolveCleanupReason(error: unknown): 'abort' | 'error' {
 }
 
 export async function cleanupAzureInstance(options: {
-  computeClient: Pick<ComputeProviderClient, 'destroyInstance'>;
+  computeClient: Pick<
+    ComputeProviderClient,
+    'destroyInstance' | 'enterStandby'
+  >;
   instanceId: string;
   phase: string;
   error: unknown;
@@ -25,6 +28,11 @@ export async function cleanupAzureInstance(options: {
   const { computeClient, instanceId, phase, error, logPrefix, onMutation } =
     options;
   const reason = resolveCleanupReason(error);
+  // Standby resume reuses the original task filesystem. Cleanup must never
+  // delete that retained instance, including when re-suspension fails.
+  const retained = options.launchMode === 'task_standby';
+  const operation = retained ? 'enter_standby' : 'destroy_instance';
+  const method = retained ? 'enterStandby' : 'destroyInstance';
   const mutationDetails = buildComputeProviderMutationDetails(
     {
       launchMode: options.launchMode,
@@ -50,21 +58,32 @@ export async function cleanupAzureInstance(options: {
   try {
     await onMutation?.({
       provider: 'azure',
-      operation: 'destroy_instance',
+      operation,
       eventType: 'started',
       instanceId,
-      message: `Calling destroyInstance for Azure instance ${instanceId}.`,
+      message: `Calling ${method} for Azure instance ${instanceId}.`,
       details: mutationDetails,
     });
 
-    await computeClient.destroyInstance({ instanceId });
+    if (retained) {
+      if (!computeClient.enterStandby) {
+        throw new Error(
+          'Azure client cannot restore standby; retained sandbox has not been deleted',
+        );
+      }
+      // Cleanup must still run after a cancelled bootstrap, so do not reuse its
+      // aborted signal. A failed stop is reported without a destructive fallback.
+      await computeClient.enterStandby({ instanceId });
+    } else {
+      await computeClient.destroyInstance({ instanceId });
+    }
 
     await onMutation?.({
       provider: 'azure',
-      operation: 'destroy_instance',
+      operation,
       eventType: 'completed',
       instanceId,
-      message: `destroyInstance completed for Azure instance ${instanceId}.`,
+      message: `${method} completed for Azure instance ${instanceId}.`,
       details: mutationDetails,
     });
 
@@ -76,10 +95,10 @@ export async function cleanupAzureInstance(options: {
   } catch (cleanupError) {
     await onMutation?.({
       provider: 'azure',
-      operation: 'destroy_instance',
+      operation,
       eventType: 'failed',
       instanceId,
-      message: `destroyInstance failed for Azure instance ${instanceId}.`,
+      message: `${method} failed for Azure instance ${instanceId}.`,
       details: {
         ...mutationDetails,
         error:
