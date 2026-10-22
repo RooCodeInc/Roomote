@@ -107,6 +107,19 @@ Roomote surfaces release history and available updates in the web app:
   image, with the latest release expanded. After an upgrade, Roomote also shows
   the latest "what's new" notice once.
 
+### Worker runtime and saved snapshots
+
+Worker bootstrap requires Node 22.23.4, 24.22.1 or 26.12.1 (or a newer patch
+within those branches). An older image or saved task snapshot stops before
+worker installation and reports the required TLS trust update. Task files are
+preserved. Rebuild custom worker images and refresh environment snapshots; migrate
+or update saved task snapshots before resuming them.
+
+An application upgrade does not replace tools or certificate bundles inside an
+existing snapshot. Update its OS certificates, Python environments and independent
+harness binaries too, and recreate warm sandboxes. A successful browser or curl
+check does not verify every application's TLS trust store.
+
 ## Rotate the encryption key
 
 `ENCRYPTION_KEY` encrypts the secrets Roomote stores in PostgreSQL:

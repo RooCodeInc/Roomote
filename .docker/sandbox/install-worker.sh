@@ -461,9 +461,33 @@ exec node $pm2_entry \"\$@\""
   echo "pm2 installed at $cli_path"
 }
 
+# A restored filesystem keeps its original Node binary, even when this script
+# and the worker archive are refreshed. Reject it before npm or worker startup;
+# do not delete task state or silently fall back to an older TLS verifier.
+validate_tls_runtime() {
+  local version major minor patch minimum_minor minimum_patch
+  version="$(node --version)" || return 1
+  if [[ "$version" =~ ^v(22|24|26)\.([0-9]+)\.([0-9]+)$ ]]; then
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    patch="${BASH_REMATCH[3]}"
+    case "$major" in
+      22) minimum_minor=23; minimum_patch=4 ;;
+      24) minimum_minor=22; minimum_patch=1 ;;
+      26) minimum_minor=12; minimum_patch=1 ;;
+    esac
+    if (( minor > minimum_minor || (minor == minimum_minor && patch >= minimum_patch) )); then
+      return 0
+    fi
+  fi
+  echo "Error: Node $version does not meet the TLS trust minimum (22.23.4, 24.22.1 or 26.12.1). Rebuild the worker image and environment snapshot; migrate or update this task snapshot before resuming it. Task files have not been removed." >&2
+  return 1
+}
+
 # Fail fast per phase: the script's exit code must reflect the first failing
 # phase, not the last phase, and callers invoke this via `bash <script>` so
 # the shebang's -e does not apply.
+run_phase "tls_runtime" validate_tls_runtime || exit "$?"
 run_phase "worker_install" install_worker || exit "$?"
 run_phase "worker_compatibility" validate_worker_compatibility || exit "$?"
 run_phase "worker_cli_install" install_worker_cli || exit "$?"

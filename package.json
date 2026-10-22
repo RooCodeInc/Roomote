@@ -4,7 +4,7 @@
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
-    "node": "22.x || 24.x",
+    "node": "^22.23.4 || ^24.22.1",
     "pnpm": "10.x"
   },
   "scripts": {
@@ -35,7 +35,7 @@
     "db:reset": "pnpm db:down && docker volume rm -f roomote_pg_data roomote_redis_data roomote_minio_data && pnpm db:up",
     "db:seed": "pnpm --silent --filter @roomote/db db:seed",
     "db:seed:demo": "pnpm --silent --filter @roomote/db db:seed:demo",
-    "deployment:validate": "node --test deploy/ci/deployment-scripts.test.mjs && node deploy/ci/validate-deployment-artifacts.mjs",
+    "deployment:validate": "node --test deploy/ci/deployment-scripts.test.mjs deploy/ci/worker-tls-runtime.test.mjs && node deploy/ci/validate-deployment-artifacts.mjs",
     "deployment:smoke": "bash deploy/ci/deployment-smoke.sh",
     "dev": "pnpm --silent --filter @roomote/dev dev",
     "doctor": "pnpm --filter @roomote/dev run doctor",

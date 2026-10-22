@@ -15,7 +15,7 @@ checkout. If you want to operate Roomote for a team, start with the public
 | OpenCode CLI   | Latest  | Required to run tasks and server-side model calls. Install with `npm install -g opencode-ai`.                |
 | Python 3       | Latest  | Required by the server-side OpenCode CLI helper. Install with `brew install python` if `python3` is missing. |
 
-The dev toolchain runs on Node.js 24.13.1, pinned in `.tool-versions`,
+The dev toolchain runs on Node.js 24.22.1, pinned in `.tool-versions`,
 `.nvmrc`, and `.node-version`. The `package.json` `engines` field accepts
 22.x or 24.x, and `.npmrc` has `engine-strict=true`.
 
