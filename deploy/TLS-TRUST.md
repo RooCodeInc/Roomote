@@ -29,11 +29,13 @@ References: [incident and downstream fix matrix](https://emudhra.we-have-a-probl
 ## Snapshots and persistent tasks
 
 A filesystem snapshot retains its original tools and CA bundles. Uploading a
-new worker archive does not replace those tools. The worker installer rejects
-Node versions below the fixed supported branch floors **before** installing the
-archive, running npm or starting the worker. It preserves task files and reports
-that the image/snapshot must be rebuilt or migrated. This check is a Node runtime
-minimum, **not** an attestation of every trust store in a snapshot.
+new worker archive does not replace those tools. The worker installer warns
+when Node is below the fixed supported branch floors and continues, so tasks
+launched from older snapshots and paused tasks keep working. The daily
+environment snapshot refresh rebuilds environment snapshots from the current base
+image; custom images and saved task snapshots still need a rebuild or migration.
+This check is a Node runtime minimum, **not** an attestation of every trust store
+in a snapshot.
 
 Refresh environment snapshots from a rebuilt image. Preserve task work when
 migrating saved task snapshots, and separately update/validate their OS CA store,

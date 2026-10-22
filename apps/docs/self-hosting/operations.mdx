@@ -109,11 +109,12 @@ Roomote surfaces release history and available updates in the web app:
 
 ### Worker runtime and saved snapshots
 
-Worker bootstrap requires Node 22.23.4, 24.22.1 or 26.12.1 (or a newer patch
-within those branches). An older image or saved task snapshot stops before
-worker installation and reports the required TLS trust update. Task files are
-preserved. Rebuild custom worker images and refresh environment snapshots; migrate
-or update saved task snapshots before resuming them.
+The worker image ships Node 22.23.4, and the TLS trust minimum is Node 22.23.4,
+24.22.1 or 26.12.1 (or a newer patch within those branches). When an older image
+or saved snapshot starts, worker bootstrap logs a warning and continues.
+Environment snapshots are rebuilt from the current image by the daily snapshot
+refresh. Rebuild custom worker images yourself, and migrate or update saved task
+snapshots you intend to keep using.
 
 An application upgrade does not replace tools or certificate bundles inside an
 existing snapshot. Update its OS certificates, Python environments and independent

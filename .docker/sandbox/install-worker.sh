@@ -462,8 +462,11 @@ exec node $pm2_entry \"\$@\""
 }
 
 # A restored filesystem keeps its original Node binary, even when this script
-# and the worker archive are refreshed. Reject it before npm or worker startup;
-# do not delete task state or silently fall back to an older TLS verifier.
+# and the worker archive are refreshed. Warn instead of failing: environment
+# snapshots are rebuilt from the current base image by the daily refresh, and
+# a hard stop would break every task launched from an older snapshot (and every
+# paused task) until then. The warning tells operators what still needs a
+# rebuild or migration.
 validate_tls_runtime() {
   local version major minor patch minimum_minor minimum_patch
   version="$(node --version)" || return 1
@@ -480,8 +483,8 @@ validate_tls_runtime() {
       return 0
     fi
   fi
-  echo "Error: Node $version does not meet the TLS trust minimum (22.23.4, 24.22.1 or 26.12.1). Rebuild the worker image and environment snapshot; migrate or update this task snapshot before resuming it. Task files have not been removed." >&2
-  return 1
+  echo "Warning: Node $version does not meet the TLS trust minimum (22.23.4, 24.22.1 or 26.12.1). Continuing; rebuild the worker image or environment snapshot to pick up the updated trust store." >&2
+  return 0
 }
 
 # Fail fast per phase: the script's exit code must reflect the first failing
