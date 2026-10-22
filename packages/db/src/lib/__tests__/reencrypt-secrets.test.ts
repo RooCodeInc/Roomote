@@ -515,6 +515,88 @@ describe('reencryptSecrets', () => {
     expect(report.locations[0]!.skipped).toMatch(/not present/);
   });
 
+  it('rotates the table resolved later in the search path', async () => {
+    const ciphertext = encryptWith(OLD_KEY, 'search-path-secret');
+    useRotatedKeys();
+
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`CREATE SCHEMA rotation_search_path`);
+      try {
+        await tx.execute(
+          sql`SET LOCAL search_path TO rotation_search_path, public`,
+        );
+        await tx.execute(sql`
+          INSERT INTO deployment_secrets (name, value)
+          VALUES ('ROTATION_SEARCH_PATH', ${ciphertext})
+        `);
+        const [resolved] = await tx.execute<{
+          schema: string;
+          table: string;
+        }>(sql`
+          SELECT current_schema() AS schema,
+                 to_regclass('deployment_secrets')::text AS "table"
+        `);
+        expect(resolved).toEqual({
+          schema: 'rotation_search_path',
+          table: 'deployment_secrets',
+        });
+
+        const options = {
+          db: tx,
+          locations: listEncryptedLocations().filter(
+            (entry) => entry.table === 'deployment_secrets',
+          ),
+        };
+        const dryRun = await reencryptSecrets({ ...options, dryRun: true });
+        expect(dryRun.totals).toMatchObject({ scanned: 1, migrated: 1 });
+        expect(dryRun.remainingOnPreviousKey).toBe(1);
+        const [untouched] = await tx.execute<{ value: string }>(sql`
+          SELECT value FROM deployment_secrets WHERE name = 'ROTATION_SEARCH_PATH'
+        `);
+        expect(untouched!.value).toBe(ciphertext);
+
+        const live = await reencryptSecrets(options);
+        expect(live.totals).toMatchObject({ scanned: 1, migrated: 1 });
+        expect(live.locations[0]!.skipped).toBeUndefined();
+        expect(live.remainingOnPreviousKey).toBe(0);
+        useKeys({ ENCRYPTION_KEY: NEW_KEY });
+        const [stored] = await tx.execute<{ value: string }>(sql`
+          SELECT value FROM deployment_secrets WHERE name = 'ROTATION_SEARCH_PATH'
+        `);
+        expect(decryptWithKeyGeneration(stored!.value)).toEqual({
+          plaintext: 'search-path-secret',
+          key: 'current',
+        });
+        const again = await reencryptSecrets(options);
+        expect(again.totals).toMatchObject({ current: 1, migrated: 0 });
+      } finally {
+        await tx.execute(sql`DROP SCHEMA rotation_search_path`);
+      }
+    });
+  });
+
+  it('checks columns on the resolved table rather than a shadowed table', async () => {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`CREATE SCHEMA rotation_shadow`);
+      try {
+        await tx.execute(
+          sql`CREATE TABLE rotation_shadow.deployment_secrets (id text)`,
+        );
+        await tx.execute(sql`SET LOCAL search_path TO rotation_shadow, public`);
+        const report = await reencryptSecrets({
+          db: tx,
+          locations: listEncryptedLocations().filter(
+            (entry) => entry.table === 'deployment_secrets',
+          ),
+        });
+        expect(report.locations[0]!.skipped).toMatch(/not present/);
+      } finally {
+        await tx.execute(sql`DROP TABLE rotation_shadow.deployment_secrets`);
+        await tx.execute(sql`DROP SCHEMA rotation_shadow`);
+      }
+    });
+  });
+
   it('leaves encryptJSON object payloads readable', async () => {
     useKeys({ ENCRYPTION_KEY: OLD_KEY });
     const stored = encryptJSON({ token: 'abc' });

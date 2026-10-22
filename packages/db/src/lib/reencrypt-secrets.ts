@@ -356,10 +356,11 @@ async function columnExists(
   const rows = await database.execute<{ exists: boolean }>(sql`
     SELECT EXISTS (
       SELECT 1
-      FROM information_schema.columns
-      WHERE table_schema = current_schema()
-        AND table_name = ${table}
-        AND column_name = ${column}
+      FROM pg_catalog.pg_attribute
+      WHERE attrelid = to_regclass(quote_ident(${table}))
+        AND attname = ${column}
+        AND attnum > 0
+        AND NOT attisdropped
     ) AS exists
   `);
   return Boolean(rows[0]?.exists);
