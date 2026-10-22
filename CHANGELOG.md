@@ -2,6 +2,19 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.19.1 (2026-10-22)
+
+Roomote 1.19.1 keeps tasks starting after an upgrade by skipping outdated environment snapshots and rebuilding them automatically.
+
+### Highlights
+
+- Start tasks from a fresh environment instead of failing on an outdated environment snapshot after an upgrade.
+- Rebuild stale environment snapshots automatically, with paced replacements queued within minutes.
+
+### Patch changes
+
+- Tasks now start from a fresh environment when a saved environment snapshot belongs to an older Roomote release or has no recorded release, instead of failing during worker startup after an upgrade. Stale environment snapshots are automatically retired and queued for rebuilding within minutes, with rebuilds paced across environments.
+
 ## 1.19.0 (2026-10-22)
 
 Roomote 1.19.0 adds encryption-key rotation and opt-in vulnerability monitoring, improves email formatting, and preserves task work during worker startup failures.
