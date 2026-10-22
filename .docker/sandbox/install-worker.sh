@@ -185,6 +185,14 @@ validate_worker_compatibility() {
     fi
 
     if [ "$worker_compatibility_version" != "$expected_compatibility_version" ]; then
+      # A restored task snapshot keeps the image it started on, so its baked
+      # release trails the deployment after every upgrade. The task's files
+      # live in that snapshot and cannot boot fresh, so report the drift and
+      # keep going. The application release must still match the worker.
+      if [ "$expected_name" = "baked_worker_product_version" ]; then
+        echo "Warning: worker release $worker_version differs from $expected_name $expected_version. Continuing; rebuild the worker image or environment snapshot to pick up the current release." >&2
+        continue
+      fi
       echo "Error: worker release $worker_version is incompatible with $expected_name $expected_version" >&2
       return 1
     fi

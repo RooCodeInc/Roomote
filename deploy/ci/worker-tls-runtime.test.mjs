@@ -72,3 +72,43 @@ test('worker bootstrap warns about outdated restored runtimes without stopping',
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('worker bootstrap warns when a restored snapshot baked an older release', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'worker-compat-'));
+  try {
+    writeFileSync(join(directory, 'VERSION'), 'v1.19.0\n');
+    const definitions = source.slice(
+      0,
+      source.indexOf('# Fail fast per phase:'),
+    );
+    assert.ok(definitions.includes('validate_worker_compatibility()'));
+    const run = (variables) =>
+      spawnSync('bash', [], {
+        input: `${definitions}\nWORKER_DIR=${JSON.stringify(directory)}\n${variables}\nvalidate_worker_compatibility\n`,
+        encoding: 'utf8',
+        env: { ...process.env, ROOMOTE_APPLICATION_PRODUCT_VERSION: '' },
+      });
+
+    // Task snapshots cannot boot fresh, so an older baked release only warns.
+    const stale = run(
+      'APPLICATION_PRODUCT_VERSION=1.19.0\nBAKED_WORKER_PRODUCT_VERSION=1.18.0',
+    );
+    assert.equal(stale.status, 0, stale.stderr);
+    assert.match(
+      stale.stderr,
+      /Warning: worker release v1\.19\.0 differs from baked_worker_product_version 1\.18\.0/,
+    );
+
+    // The worker must still match the application release it serves.
+    const mismatched = run(
+      'APPLICATION_PRODUCT_VERSION=1.18.2\nBAKED_WORKER_PRODUCT_VERSION=1.19.0',
+    );
+    assert.equal(mismatched.status, 1);
+    assert.match(
+      mismatched.stderr,
+      /Error: worker release v1\.19\.0 is incompatible with application_product_version 1\.18\.2/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
