@@ -109,6 +109,13 @@ Roomote surfaces release history and available updates in the web app:
 
 ## Rotate the encryption key
 
+<Warning>
+  Encryption-key rotation is available on `develop` but is not included in
+  v1.18.2. Before changing any keys, upgrade every service to an image that
+  includes this feature. Older images do not support `ENCRYPTION_KEY_PREVIOUS`
+  or the `reencrypt-secrets` command.
+</Warning>
+
 `ENCRYPTION_KEY` encrypts the secrets Roomote stores in PostgreSQL:
 integration credentials and OAuth tokens, environment variables, API keys,
 webhook secrets, and generated auth keypairs. Changing it alone makes every
