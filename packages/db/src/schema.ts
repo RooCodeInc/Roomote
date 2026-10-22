@@ -22,6 +22,9 @@ import type {
   VulnerabilityEvidence,
   VulnerabilityFeedCursor,
   VulnerabilityFindingState,
+  VulnerabilityInventoryMetadata,
+  VulnerabilityFindingMetadata,
+  VulnerabilityEvidenceMetadata,
 } from '@roomote/types';
 
 export const vulnerabilityWatchState = pgTable('vulnerability_watch_state', {
@@ -46,6 +49,8 @@ export const vulnerabilityInventories = pgTable('vulnerability_inventories', {
     .$type<VulnerabilityDependency[]>()
     .notNull(),
   gaps: jsonb('gaps').$type<string[]>().notNull(),
+  // Keep legacy display fields for N-1 readers/writers; metadata is additive.
+  gapMetadata: jsonb('gap_metadata').$type<VulnerabilityInventoryMetadata>(),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -61,6 +66,8 @@ export const vulnerabilityFindings = pgTable(
     packageKey: text('package_key').notNull(),
     revision: text('revision').notNull(),
     evidence: jsonb('evidence').$type<VulnerabilityEvidence[]>().notNull(),
+    evidenceMetadata:
+      jsonb('evidence_metadata').$type<VulnerabilityEvidenceMetadata>(),
     fingerprint: text('fingerprint').notNull(),
     dispatchedFingerprint: text('dispatched_fingerprint'),
     state: text('state')
@@ -71,6 +78,8 @@ export const vulnerabilityFindings = pgTable(
       onDelete: 'set null',
     }),
     note: text('note'),
+    policyMetadata:
+      jsonb('policy_metadata').$type<VulnerabilityFindingMetadata>(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
