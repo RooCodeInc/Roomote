@@ -56,6 +56,7 @@ export const ConversationScrollButton = ({
     >
       <div className="relative w-full 2xl:max-w-4xl">
         <Button
+          aria-label="Scroll to bottom"
           className={cn(
             'pointer-events-auto cursor-pointer absolute right-6 rounded-full bg-card',
             'transition-all',
