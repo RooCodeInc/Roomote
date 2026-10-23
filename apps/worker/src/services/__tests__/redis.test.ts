@@ -1,5 +1,7 @@
 import { execa } from 'execa';
 
+import type { CommandExecutor } from '../../command-executor';
+
 import { createRedisService } from '../redis';
 
 vi.mock('execa', () => ({
@@ -10,8 +12,48 @@ describe('createRedisService', () => {
   const mockedExeca = vi.mocked(execa);
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
+
+  it.each(['6', '7'])(
+    'rejects an unrelated Redis %s target before changing its files or process',
+    async (version) => {
+      const execute = vi.fn().mockResolvedValue({ success: true });
+      const executor = { execute } as unknown as CommandExecutor;
+      mockedExeca.mockResolvedValue({ stdout: 'PONG' } as Awaited<
+        ReturnType<typeof execa>
+      >);
+      const service = createRedisService(version);
+      vi.spyOn(service, 'verifyManagedInstance').mockResolvedValue(false);
+
+      await expect(service.start(executor, 6380)).rejects.toThrow(
+        'port 6380 is occupied by an unrelated Redis instance',
+      );
+      expect(execute.mock.calls.map(([command]) => command.name)).toEqual([
+        'Create Redis data directory',
+        'Stop auto-started Redis',
+      ]);
+    },
+  );
+
+  it.each(['6', '7'])(
+    'reuses an already managed Redis %s instance',
+    async (version) => {
+      const execute = vi.fn().mockResolvedValue({ success: true });
+      const executor = { execute } as unknown as CommandExecutor;
+      mockedExeca.mockResolvedValue({ stdout: 'PONG' } as Awaited<
+        ReturnType<typeof execa>
+      >);
+      const service = createRedisService(version);
+      vi.spyOn(service, 'verifyManagedInstance').mockResolvedValue(true);
+
+      await expect(service.start(executor, 6380)).resolves.toBeUndefined();
+      expect(execute.mock.calls.map(([command]) => command.name)).toEqual([
+        'Create Redis data directory',
+        'Stop auto-started Redis',
+      ]);
+    },
+  );
 
   it('verifies the managed Redis instance from live server state', async () => {
     mockedExeca.mockImplementation((async (
