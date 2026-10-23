@@ -24,6 +24,24 @@ function readAppendix(skillContent: string, appendixName: string) {
   return skillContent.slice(startIndex, endIndex);
 }
 
+function readSharedBlock(skillContent: string, name: string) {
+  const match = skillContent.match(
+    new RegExp(`^<${name}>\\n([\\s\\S]*?)^</${name}>`, 'm'),
+  );
+  if (!match) {
+    throw new Error(`Could not find shared block ${name}`);
+  }
+  return match[1]!;
+}
+
+function readReviewPath(skillContent: string, appendixName: string) {
+  const appendix = readAppendix(skillContent, appendixName);
+  if (!appendix.includes('Execute `<sync_review_flow>`')) {
+    return appendix;
+  }
+  return `${appendix}\n${readSharedBlock(skillContent, 'sync_review_flow')}`;
+}
+
 function expectAppendixAvoidsCiBookkeeping(
   appendix: string,
   summaryTitleMarker: string,
@@ -57,16 +75,36 @@ describe('review-code GitHub workflow paths', () => {
     expect(skillContent).toContain(
       'Never copy the prior head or prior cycle identity onto the current result.',
     );
+    const noChange = readSharedBlock(skillContent, 'sync_no_change_result');
+    expect(noChange).toContain(
+      'review the full current PR before publishing a disposition',
+    );
+    expect(noChange).toContain(
+      'phase=reviewed outcome=incomplete finding_count=0',
+    );
+    expect(noChange).toContain(
+      'stop without approval or a clean/no-op handoff',
+    );
+    expect(noChange).toContain('revalidate the live PR head before publishing');
+    expect(noChange).toContain(
+      'Keep unresolved findings unchecked with their exact positive count',
+    );
+    expect(noChange).toContain(
+      'Skip the approval step when carrying forward a no-change result',
+    );
     for (const appendixName of [
       'sync-github-pr-review',
       'sync-github-pr-review-with-approval',
     ]) {
-      const appendix = readAppendix(skillContent, appendixName);
+      const appendix = readReviewPath(skillContent, appendixName);
       expect(appendix).toContain(
         'Before changing the canonical summary, save the prior result as required by `<sync_no_change_result>`.',
       );
-      expect(appendix.match(/follow `<sync_no_change_result>`/g)).toHaveLength(
-        2,
+      expect(appendix).toContain(
+        'the current head SHA matches `last_review_sha`, follow `<sync_no_change_result>`',
+      );
+      expect(appendix).toContain(
+        'If it is empty, follow `<sync_no_change_result>`',
       );
       expect(appendix).toContain(
         'use `<outcome>no_new_delta</outcome>` only when the published result is clean.',
@@ -76,6 +114,119 @@ describe('review-code GitHub workflow paths', () => {
         'continue directly to the linked-task handoff step',
       );
     }
+  });
+
+  it('routes both stable sync entry points through one lifecycle with distinct policies', () => {
+    const sharedFlow = readSharedBlock(skillContent, 'sync_review_flow');
+    expect(skillContent.match(/^<sync_review_flow>$/gm)).toHaveLength(1);
+    for (const name of [
+      'sync-github-pr-review',
+      'sync-github-pr-review-with-approval',
+    ]) {
+      const entry = readAppendix(skillContent, name);
+      expect(entry).toContain('Execute `<sync_review_flow>`');
+      expect(entry).toContain('Do not execute the other sync entry point.');
+      expect(entry).toContain('<sync_approval_policy>');
+      expect(entry).toContain('<sync_handoff_policy>');
+      expect(entry).not.toContain('<phase');
+      const reachableFlow = readReviewPath(skillContent, name);
+      for (const title of [
+        'Recover the prior review anchor and canonical summary comment',
+        'Fetch the live delta and current discussion',
+        'Verify prior comments against the current code',
+        'Publish net-new findings on the pull request',
+        'Refresh the canonical summary comment',
+        'Verify sync-review discipline',
+        'Send the final review result to the linked implementation task when enabled',
+      ]) {
+        expect(reachableFlow).toContain(`<title>${title}</title>`);
+        expect(sharedFlow.split(`<title>${title}</title>`)).toHaveLength(2);
+      }
+    }
+    expect(
+      skillContent.split(
+        '<title>Recover the prior review anchor and canonical summary comment</title>',
+      ),
+    ).toHaveLength(2);
+    expect(sharedFlow).toContain('two-dot delta and commit log only to focus');
+    expect(sharedFlow).toContain(
+      'Report findings only for hunks that appear in that current PR diff.',
+    );
+    expect(sharedFlow).toContain('legacy_full_rereview_path');
+    expect(sharedFlow).toContain(
+      'treat `applied: false` as a non-blocking capability gap',
+    );
+    expect(sharedFlow).toContain('always include it on Azure DevOps');
+    expect(sharedFlow).toContain(
+      'If `linked_implementation_task_handoff_enabled` is absent or false, skip this handoff entirely.',
+    );
+    expect(sharedFlow).toContain(
+      'Use `linked_implementation_task_id` from task context as the only allowed linked-task target',
+    );
+    expect(sharedFlow).toContain(
+      'skip the handoff when the pull request is no longer open',
+    );
+    expect(sharedFlow).toContain(
+      "Do not bypass, skip, or reprioritize the task's existing queue handling.",
+    );
+    expect(sharedFlow).toContain('best-effort handoff failures only');
+    expect(sharedFlow).toContain(
+      "selected entry point's `<sync_approval_policy>`",
+    );
+    expect(sharedFlow).toContain(
+      "selected entry point's `<sync_handoff_policy>`",
+    );
+    expect(sharedFlow).not.toContain('action: "submit_pull_request_review"');
+    expect(
+      sharedFlow.indexOf('<title>Refresh the canonical summary comment'),
+    ).toBeLessThan(
+      sharedFlow.indexOf('<title>Apply the selected sync entry point'),
+    );
+    expect(
+      sharedFlow.indexOf('<title>Verify sync-review discipline'),
+    ).toBeLessThan(sharedFlow.indexOf('<title>Send the final review result'));
+  });
+
+  it('keeps approval and handoff outcomes specific to the selected sync policy', () => {
+    const commentOnly = readAppendix(skillContent, 'sync-github-pr-review');
+    expect(commentOnly).toContain(
+      'Do not approve the pull request in this variant.',
+    );
+    expect(commentOnly).toContain(
+      '<outcome>findings_remain|clean|no_new_delta</outcome>',
+    );
+    expect(commentOnly).toContain('omit approval status');
+    expect(commentOnly).not.toContain('action: "submit_pull_request_review"');
+
+    const approval = readAppendix(
+      skillContent,
+      'sync-github-pr-review-with-approval',
+    );
+    expect(approval).toContain(
+      'For a carried-forward no-change result, skip approval',
+    );
+    expect(approval).toContain(
+      'if any surviving or net-new actionable issue remains, take no approval action.',
+    );
+    expect(approval).toContain('`isRoomoteGitHubLogin()`');
+    expect(approval).toContain(
+      'If the pull request author matches any of those normalized Roomote-managed logins, take no approval action.',
+    );
+    expect(approval).toContain(
+      '`reviewEvent: "approve"`, passing no body or comment text.',
+    );
+    expect(approval).toContain(
+      '<outcome>findings_remain|approved|clean_approval_skipped|no_new_delta</outcome>',
+    );
+    expect(approval).toContain(
+      '<approval_status>approved|skipped</approval_status>',
+    );
+    expect(approval).toContain(
+      'Incomplete results follow `<sync_no_change_result>` instead of a terminal handoff.',
+    );
+    expect(approval).toContain(
+      'never report an unapplied approval as approved',
+    );
   });
 
   it('forbids nested judge subagent spawns during code review', () => {
@@ -97,11 +248,17 @@ describe('review-code GitHub workflow paths', () => {
     ]) {
       expect(skillContent).toContain(`<angle name="${angle}">`);
     }
-    expect(
-      skillContent.match(
-        /Hunt for candidates with every angle in `<review_angles>`/g,
-      )?.length,
-    ).toBe(5);
+    for (const name of [
+      'review-github-pr',
+      'review-github-pr-with-approval',
+      'sync-github-pr-review',
+      'sync-github-pr-review-with-approval',
+      'review-merge-resolution',
+    ]) {
+      expect(readReviewPath(skillContent, name)).toContain(
+        'Hunt for candidates with every angle in `<review_angles>`',
+      );
+    }
     expect(readAppendix(skillContent, 'review-merge-resolution')).toContain(
       'Hunt for candidates with every angle in `<review_angles>`, scoped to the resolved conflict hunks',
     );
@@ -145,7 +302,7 @@ describe('review-code GitHub workflow paths', () => {
       'review-github-pr',
       'review-github-pr-with-approval',
     ]) {
-      const appendix = readAppendix(skillContent, appendixName);
+      const appendix = readReviewPath(skillContent, appendixName);
       expect(appendix).toContain(
         "For a GitHub cross-repository PR, run `git fetch origin '<targetBranch>' '+refs/pull/[PR_NUMBER]/head:refs/remotes/origin/pr-[PR_NUMBER]-head'`, then verify `git rev-parse refs/remotes/origin/pr-[PR_NUMBER]-head` exactly equals `<headSha>` from `get_pull_request`.",
       );
@@ -159,7 +316,7 @@ describe('review-code GitHub workflow paths', () => {
       'sync-github-pr-review',
       'sync-github-pr-review-with-approval',
     ]) {
-      const appendix = readAppendix(skillContent, appendixName);
+      const appendix = readReviewPath(skillContent, appendixName);
       expect(appendix).toContain(
         "For a GitHub cross-repository PR, fetch the upstream PR ref with `git fetch origin '+refs/pull/[PR_NUMBER]/head:refs/remotes/origin/pr-[PR_NUMBER]-head'`, verify its resolved SHA exactly equals `<headSha>` from `get_pull_request`, and if it differs call `get_pull_request` once more and proceed only when the fetched SHA matches the refreshed `<headSha>`; otherwise report the blocker. Then run `git checkout --detach <headSha>`.",
       );
@@ -194,7 +351,7 @@ describe('review-code GitHub workflow paths', () => {
       'review-github-pr-with-approval',
     ]) {
       expectAppendixAvoidsCiBookkeeping(
-        readAppendix(skillContent, appendixName),
+        readReviewPath(skillContent, appendixName),
         '<title>Update the canonical summary comment</title>',
         'Review the diff in context first before publishing the review findings.',
         'For each finding, check the fetched review threads for an existing thread anchored on the same file and overlapping lines.',
@@ -206,7 +363,7 @@ describe('review-code GitHub workflow paths', () => {
       'sync-github-pr-review-with-approval',
     ]) {
       expectAppendixAvoidsCiBookkeeping(
-        readAppendix(skillContent, appendixName),
+        readReviewPath(skillContent, appendixName),
         '<title>Refresh the canonical summary comment</title>',
         'Review the delta in context first before publishing the review findings.',
         'For each net-new finding, check the fetched review threads for an existing thread anchored on the same file and overlapping lines.',
@@ -461,7 +618,7 @@ describe('review-code GitHub workflow paths', () => {
       'sync-github-pr-review',
       'sync-github-pr-review-with-approval',
     ]) {
-      const appendix = readAppendix(skillContent, appendixName);
+      const appendix = readReviewPath(skillContent, appendixName);
       expect(appendix).toContain(
         'post one new line-anchored inline comment per finding with `mcp__roomote__manage_source_control` `action: "create_pull_request_review_comment"`',
       );
@@ -482,7 +639,7 @@ describe('review-code GitHub workflow paths', () => {
       'sync-github-pr-review',
       'sync-github-pr-review-with-approval',
     ]) {
-      const appendix = readAppendix(skillContent, appendixName);
+      const appendix = readReviewPath(skillContent, appendixName);
       expect(appendix).toContain(
         'A thread whose `outdated` flag is true reports its original anchor line and means the flagged lines were changed by later commits',
       );
@@ -496,7 +653,7 @@ describe('review-code GitHub workflow paths', () => {
       'sync-github-pr-review',
       'sync-github-pr-review-with-approval',
     ]) {
-      const appendix = readAppendix(skillContent, appendixName);
+      const appendix = readReviewPath(skillContent, appendixName);
       expect(appendix).toContain(
         'Treat a thread whose `outdated` flag is true as a weaker match for new findings',
       );
