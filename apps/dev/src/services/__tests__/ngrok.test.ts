@@ -1,4 +1,6 @@
 import fs from 'fs';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 import { execa } from 'execa';
 
@@ -208,4 +210,96 @@ describe('NgrokService.resolvePublicUrl', () => {
 
     expect(execa).not.toHaveBeenCalled();
   });
+
+  it.each(['headers', 'body'] as const)(
+    'reuses a healthy inspector after an earlier inspector stalls its %s',
+    async (stall) => {
+      process.env.R_PUBLIC_URL = 'https://static-roomote.ngrok.app';
+      vi.mocked(execa).mockResolvedValue({
+        stdout: 'Valid configuration file at /tmp/ngrok.yml',
+      } as Awaited<ReturnType<typeof execa>>);
+      vi.spyOn(fs, 'readFileSync').mockReturnValue('authtoken: fixture');
+
+      const slow = http.createServer((_request, response) => {
+        if (stall === 'body') {
+          response.writeHead(200, { 'content-type': 'application/json' });
+          response.flushHeaders();
+          response.write('{"tunnels":');
+        }
+      });
+      const healthy = http.createServer((_request, response) => {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            tunnels: [
+              {
+                config: { addr: 'http://localhost:13000' },
+                public_url: 'https://static-roomote.ngrok.app',
+              },
+            ],
+          }),
+        );
+      });
+      const listen = async (server: http.Server) => {
+        await new Promise<void>((resolve) =>
+          server.listen(0, '127.0.0.1', resolve),
+        );
+        return (server.address() as AddressInfo).port;
+      };
+      const realFetch = globalThis.fetch;
+      let resolution:
+        | ReturnType<typeof NgrokService.resolvePublicUrl>
+        | undefined;
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const slowPort = await listen(slow);
+        const healthyPort = await listen(healthy);
+        const fetch = vi.fn((input: string, init?: RequestInit) => {
+          // Route the normal inspect-port scan to isolated ephemeral peers,
+          // retaining real fetch headers/body behavior and the supplied signal.
+          const port = new URL(input).port === '4040' ? slowPort : healthyPort;
+          return realFetch(`http://127.0.0.1:${port}/api/tunnels`, init);
+        });
+        vi.stubGlobal('fetch', fetch);
+        resolution = NgrokService.resolvePublicUrl({
+          port: 13000,
+          verbose: false,
+        });
+        const boundedResolution = Promise.race([
+          resolution,
+          new Promise<never>((_resolve, reject) => {
+            watchdog = setTimeout(
+              () => reject(new Error('inspect scan stalled')),
+              3_000,
+            );
+          }),
+        ]);
+        await expect(boundedResolution).resolves.toEqual({
+          autoNgrok: true,
+          publicUrl: 'https://static-roomote.ngrok.app',
+        });
+        expect(fetch.mock.calls.map(([url]) => new URL(url).port)).toEqual([
+          '4040',
+          '4041',
+        ]);
+        expect(execa).not.toHaveBeenCalledWith(
+          'pm2',
+          expect.anything(),
+          expect.anything(),
+        );
+      } finally {
+        clearTimeout(watchdog);
+        slow.closeAllConnections();
+        await resolution?.catch(() => undefined);
+        healthy.closeAllConnections();
+        await Promise.all(
+          [slow, healthy].map(
+            (server) =>
+              new Promise<void>((resolve) => server.close(() => resolve())),
+          ),
+        );
+      }
+    },
+    5_000,
+  );
 });
