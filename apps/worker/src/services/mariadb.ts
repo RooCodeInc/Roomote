@@ -1,12 +1,66 @@
+import path from 'node:path';
+
 import { execa } from 'execa';
 
 import { withAptLock } from '../commands/setup/package-manager';
+import type { CommandExecutor } from '../command-executor';
 
 import type { ServiceDefinition } from './types';
 import { SERVICE_CONFIG } from './constants';
 
 const MARIADB_LOG_FILE = '/tmp/mariadb-start.log';
 const MARIADB_PID_FILE = '/data/services/mysql/mariadb.pid';
+const MARIADB_IDENTITY_QUERY = 'SELECT @@port, @@datadir';
+
+function isManagedMariadbInstance(stdout: string, port: number): boolean {
+  const [actualPort, dataDir] = stdout.trim().split('\t');
+  return (
+    Number(actualPort) === port &&
+    !!dataDir &&
+    path.resolve(dataDir) === path.resolve(SERVICE_CONFIG.mariadb10.dataDir)
+  );
+}
+
+async function verifyManagedMariadbInstance(port: number): Promise<boolean> {
+  try {
+    const { stdout } = await execa(
+      'sudo',
+      [
+        'mysql',
+        '--protocol=socket',
+        `--socket=${SERVICE_CONFIG.mariadb10.socketPath}`,
+        '-u',
+        'root',
+        '--batch',
+        '--skip-column-names',
+        '-e',
+        MARIADB_IDENTITY_QUERY,
+      ],
+      { timeout: 5000 },
+    );
+    return isManagedMariadbInstance(stdout, port);
+  } catch {
+    return false;
+  }
+}
+
+async function configureMariadbAccess(
+  executor: CommandExecutor,
+): Promise<void> {
+  const { socketPath } = SERVICE_CONFIG.mariadb10;
+  await executor.execute({
+    name: 'Configure passwordless root access',
+    run: `sudo mysql --protocol=socket --socket=${socketPath} -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING '';"`,
+    timeout: 30,
+    continue_on_error: true,
+  });
+  await executor.execute({
+    name: 'Create root user for remote connections',
+    run: `sudo mysql --protocol=socket --socket=${socketPath} -e "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY ''; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"`,
+    timeout: 30,
+    continue_on_error: true,
+  });
+}
 
 function buildMariadbStartCommand({
   dataDir,
@@ -87,6 +141,23 @@ export function createMariadbService(_majorVersion: string): ServiceDefinition {
     },
 
     async start(executor, port) {
+      const runningInstance = await executor.execute({
+        name: 'Check running MariaDB instance',
+        run: `if sudo mysqladmin --protocol=socket --socket=${config.socketPath} ping -u root >/dev/null 2>&1; then sudo mysql --protocol=socket --socket=${config.socketPath} -u root --batch --skip-column-names -e "${MARIADB_IDENTITY_QUERY}"; fi`,
+        timeout: 10,
+        continue_on_error: false,
+      });
+
+      if (runningInstance.stdout?.trim()) {
+        if (isManagedMariadbInstance(runningInstance.stdout, port)) {
+          await configureMariadbAccess(executor);
+          return;
+        }
+        throw new Error(
+          `A different MariaDB instance is already using ${config.socketPath}; expected ${config.dataDir} on port ${port}`,
+        );
+      }
+
       await executor.execute({
         name: 'Stop auto-started MariaDB services',
         run: `sudo systemctl stop mariadb 2>/dev/null || sudo service mariadb stop 2>/dev/null || sudo systemctl stop mysql 2>/dev/null || sudo service mysql stop 2>/dev/null || true`,
@@ -138,41 +209,11 @@ export function createMariadbService(_majorVersion: string): ServiceDefinition {
         continue_on_error: false,
       });
 
-      // Configure passwordless root access (switch from unix_socket to mysql_native_password).
-      await executor.execute({
-        name: 'Configure passwordless root access',
-        run: `sudo mysql --protocol=socket --socket=${config.socketPath} -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING '';"`,
-        timeout: 30,
-        continue_on_error: true, // May fail on snapshot restore if already configured.
-      });
-
-      // Create root user for remote connections with full privileges.
-      await executor.execute({
-        name: 'Create root user for remote connections',
-        run: `sudo mysql --protocol=socket --socket=${config.socketPath} -e "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY ''; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"`,
-        timeout: 30,
-        continue_on_error: true, // May fail on snapshot restore if already configured.
-      });
+      await configureMariadbAccess(executor);
     },
 
-    async healthCheck(_port) {
-      try {
-        await execa(
-          'mysqladmin',
-          [
-            '--protocol=socket',
-            `--socket=${config.socketPath}`,
-            '-u',
-            'root',
-            'ping',
-          ],
-          { timeout: 5000 },
-        );
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    healthCheck: verifyManagedMariadbInstance,
+    verifyManagedInstance: verifyManagedMariadbInstance,
 
     getConnectionInfo(port) {
       return {
