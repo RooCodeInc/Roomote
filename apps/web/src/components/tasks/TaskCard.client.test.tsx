@@ -43,7 +43,7 @@ vi.mock('@/lib', async () => ({
   formatInferenceCost: (await import('@/lib/formatters')).formatInferenceCost,
 }));
 
-vi.mock('@/components/system', () => ({
+vi.mock('@/components/system', async () => ({
   Ban: (props: React.SVGProps<SVGSVGElement>) => (
     <svg aria-hidden="true" {...props} />
   ),
@@ -64,40 +64,11 @@ vi.mock('@/components/system', () => ({
   DollarSign: (props: React.SVGProps<SVGSVGElement>) => (
     <svg aria-hidden="true" {...props} />
   ),
-  Avatar: React.forwardRef<
-    HTMLDivElement,
-    {
-      imageUrl?: string | null;
-      name?: string | null;
-      email?: string | null;
-      alt?: string;
-    }
-  >(function Avatar({ imageUrl, name, email, alt, ...props }, ref) {
-    const resolved = imageUrl?.trim() ? imageUrl.trim() : null;
-    const label = alt ?? name ?? email ?? '';
-    if (resolved) {
-      return (
-        <div ref={ref} {...props}>
-          {/* eslint-disable-next-line @next/next/no-img-element -- mock mirrors the real Avatar's img element */}
-          <img src={resolved} alt={label} />
-        </div>
-      );
-    }
-    const trimmedName = name?.trim();
-    const initials = trimmedName
-      ? trimmedName
-          .split(/\s+/)
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((part) => part[0]?.toUpperCase())
-          .join('')
-      : (email?.trim()?.[0]?.toUpperCase() ?? '?');
-    return (
-      <div ref={ref} {...props}>
-        <span aria-hidden="true">{initials || '?'}</span>
-      </div>
-    );
-  }),
+  Avatar: (
+    await vi.importActual<
+      typeof import('@/components/system/primitives/avatar')
+    >('@/components/system/primitives/avatar')
+  ).Avatar,
 }));
 
 vi.mock('@/components/sandbox', () => ({
@@ -187,10 +158,11 @@ describe('TaskCard', () => {
     expect(screen.getByText('started a task')).toBeInTheDocument();
     expect(screen.queryByText(/with Agent/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/completed/i)).not.toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Ada Lovelace' })).toHaveAttribute(
+    expect(container.querySelector('img')).toHaveAttribute(
       'src',
       'https://example.com/avatar.png',
     );
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
     expect(container.querySelectorAll('svg')).toHaveLength(0);
   });
 
@@ -269,7 +241,7 @@ describe('TaskCard', () => {
     );
 
     expect(screen.getByText('kyle')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'kyle' })).toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
   it('keeps the user avatar as the only avatar even when both filters are active', () => {
@@ -282,7 +254,8 @@ describe('TaskCard', () => {
       />,
     );
 
-    expect(screen.getAllByRole('img')).toHaveLength(1);
+    expect(container.querySelectorAll('img')).toHaveLength(1);
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
     expect(container.querySelectorAll('svg')).toHaveLength(0);
   });
 
@@ -409,7 +382,7 @@ describe('TaskCard', () => {
   it('renders the model after the PR badge when a PR exists', () => {
     const baseTask = createTask();
 
-    const { container } = render(
+    render(
       <TaskCard
         task={createTask({
           model: 'openrouter/openai/gpt-5.5',
@@ -426,9 +399,7 @@ describe('TaskCard', () => {
       />,
     );
 
-    const metadataRow = container.querySelector(
-      '.text-muted-foreground.text-xs',
-    );
+    const metadataRow = screen.getByText('GPT 5.5').parentElement;
 
     expect(metadataRow?.textContent).toContain(
       'Roomote/example-appRooCodeInc/Roomote#163GPT 5.5',

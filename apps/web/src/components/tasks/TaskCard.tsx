@@ -94,7 +94,7 @@ export const TaskCard = ({
                   email={task.user.email}
                   size="md"
                   className="ring-1 ring-background"
-                  alt={userDisplayName}
+                  alt=""
                 />
               </TooltipTrigger>
               <TooltipContent>

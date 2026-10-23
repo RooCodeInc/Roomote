@@ -31,6 +31,9 @@ describe('Avatar', () => {
     );
 
     expect(container.firstChild).toHaveAttribute('aria-label', 'Grace Hopper');
+    expect(screen.getByRole('img', { name: 'Grace Hopper' })).toBe(
+      container.firstChild,
+    );
     expect(screen.getByText('GH')).toBeInTheDocument();
     expect(document.querySelector('img')).toBeNull();
   });
@@ -73,6 +76,9 @@ describe('Avatar', () => {
 
     expect(document.querySelector('img')).toBeNull();
     expect(screen.getByText('GH')).toBeInTheDocument();
+    expect(
+      screen.getByRole('img', { name: 'Grace Hopper' }),
+    ).toBeInTheDocument();
     expect(screen.queryByText('Grace Hopper')).not.toBeInTheDocument();
   });
 
@@ -136,5 +142,32 @@ describe('Avatar', () => {
 
     expect(screen.getByText('RD')).toBeInTheDocument();
     expect(document.querySelector('img')).toBeNull();
+  });
+
+  it('keeps decorative fallbacks hidden and lets callers own their semantics', () => {
+    const { rerender, container } = render(
+      <Avatar name="Grace Hopper" alt="" />,
+    );
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(container.firstChild).toHaveAttribute('aria-hidden', 'true');
+    rerender(
+      <Avatar name="Grace Hopper" role="presentation" aria-label={undefined} />,
+    );
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(container.firstChild).toHaveAttribute('role', 'presentation');
+    expect(container.firstChild).not.toHaveAttribute('aria-label');
+  });
+
+  it('names the avatar once when its decorative image is loaded', () => {
+    const { container } = render(
+      <Avatar imageUrl="https://example.com/avatar.png" name="Grace Hopper" />,
+    );
+    expect(screen.getAllByRole('img', { name: 'Grace Hopper' })).toHaveLength(
+      1,
+    );
+    expect(screen.getByRole('img', { name: 'Grace Hopper' })).toBe(
+      container.firstChild,
+    );
+    expect(container.querySelector('img')).toHaveAttribute('alt', '');
   });
 });

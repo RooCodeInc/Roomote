@@ -101,6 +101,7 @@ export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
     return (
       <div
         ref={ref}
+        role={label ? 'img' : undefined}
         aria-label={label || undefined}
         aria-hidden={label ? undefined : true}
         className={cn(
