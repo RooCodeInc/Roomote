@@ -287,3 +287,49 @@ it('reports load failures', async () => {
     'Integrations are unavailable.',
   );
 });
+
+it.each([
+  ['authorization', 'authorization', 'Token '],
+  ['Authorization', 'authorization', 'Token '],
+  ['  AUTHORIZATION  ', 'authorization', 'Token '],
+  ['X-API-Key', 'x-api-key', ''],
+] as const)(
+  'preserves the selected scheme for normalized header %s',
+  async (header, normalized, prefix) => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ secrets: [] })))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ secret }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ secrets: [secret] })),
+      );
+    render(<YourIntegrations />);
+    await screen.findByText('No integrations yet.');
+    fireEvent.click(screen.getByRole('button', { name: 'Add integration' }));
+    fireEvent.change(await screen.findByLabelText('Name'), {
+      target: { value: 'Stripe' },
+    });
+    fireEvent.change(screen.getByLabelText('Service origin'), {
+      target: { value: 'https://api.stripe.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Header that carries the key'), {
+      target: { value: header },
+    });
+    if (prefix) {
+      fireEvent.change(screen.getByLabelText('Scheme'), {
+        target: { value: prefix },
+      });
+    } else {
+      expect(screen.queryByLabelText('Scheme')).not.toBeInTheDocument();
+    }
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'disposable-test-credential' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const body = JSON.parse(fetchMock.mock.calls[1]![1].body);
+    expect(body.headerName).toBe(normalized);
+    expect(body.headerPrefix).toBe(prefix);
+  },
+);
