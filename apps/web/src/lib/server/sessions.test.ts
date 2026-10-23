@@ -254,6 +254,15 @@ describe('unified Session queries', () => {
       ).sessions.map((row) => row.id),
     ).toEqual([session.id]);
     expect(
+      (
+        await getSessions(ownerAuth, {
+          ids: [session.id],
+          ownedOnly: true,
+          excludeAutomations: true,
+        })
+      ).sessions,
+    ).toEqual([]);
+    expect(
       (await getSessions(otherAuth, { ids: [session.id] })).sessions,
     ).toEqual([]);
     await expect(getSessionById(otherAuth, session.id)).resolves.toMatchObject({

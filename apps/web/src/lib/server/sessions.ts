@@ -21,6 +21,7 @@ import {
   like,
   llmUsageEvents,
   lt,
+  ne,
   or,
   privateSessionAccess,
   repositories,
@@ -76,6 +77,7 @@ type SessionListInput = {
   q?: string | null;
   ids?: string[];
   ownedOnly?: boolean;
+  excludeAutomations?: boolean;
   includeJudgedStatus?: boolean;
   before?: string | null;
   limit?: number;
@@ -525,6 +527,7 @@ function listConditions(
   return and(
     sessionListScope(auth),
     input.ownedOnly ? sessionOwnerScope(auth) : undefined,
+    input.excludeAutomations ? ne(sessions.ownerKind, 'automation') : undefined,
     eq(sessions.visibility, 'visible'),
     archive === 'archived'
       ? isNotNull(sessions.archivedAt)
