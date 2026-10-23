@@ -34,6 +34,8 @@ export function DiscordDefaultChannelPicker() {
   const channelSelectRef = useRef<SelectHandoffTarget>(null);
   const guildTriggerRef = useRef<HTMLButtonElement>(null);
   const [pendingChannelHandoff, setPendingChannelHandoff] = useState(false);
+  const [retryingGuilds, setRetryingGuilds] = useState(false);
+  const [retryingChannels, setRetryingChannels] = useState(false);
 
   const currentGuild = useMemo(
     () =>
@@ -103,11 +105,33 @@ export function DiscordDefaultChannelPicker() {
     }),
   );
 
-  if (guilds.isPending) {
+  const guildsFailed = guilds.isError || retryingGuilds;
+  const channelsFailed = channels.isError || retryingChannels;
+  const readsFailed = guildsFailed || channelsFailed;
+  const retryGuilds = () => {
+    setRetryingGuilds(true);
+    void guilds.refetch().finally(() => setRetryingGuilds(false));
+  };
+  const retryChannels = () => {
+    setRetryingChannels(true);
+    void channels.refetch().finally(() => setRetryingChannels(false));
+  };
+
+  if (guilds.isPending && !retryingGuilds) {
     return null;
   }
 
-  if (guilds.isError || (guilds.data?.guilds.length ?? 0) === 0) {
+  if (!guilds.data && guildsFailed) {
+    return (
+      <DiscordCatalogError
+        kind="servers"
+        isRetrying={guilds.isFetching || retryingGuilds}
+        onRetry={retryGuilds}
+      />
+    );
+  }
+
+  if (!guilds.data || guilds.data.guilds.length === 0) {
     return null;
   }
 
@@ -118,10 +142,25 @@ export function DiscordDefaultChannelPicker() {
         Where Roomote posts suggestions, reports, and other proactive updates.
         Replies always stay in the conversation they started in.
       </p>
+      {guildsFailed ? (
+        <DiscordCatalogError
+          kind="servers"
+          isRetrying={guilds.isFetching || retryingGuilds}
+          onRetry={retryGuilds}
+        />
+      ) : null}
+      {channelsFailed ? (
+        <DiscordCatalogError
+          kind="channels"
+          isRetrying={channels.isFetching || retryingChannels}
+          onRetry={retryChannels}
+        />
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         {guilds.data.guilds.length > 1 ? (
           <Select
             value={effectiveGuildId ?? ''}
+            disabled={guildsFailed}
             handoffTargetOnSelect={
               effectiveChannelId ? undefined : channelSelectRef
             }
@@ -146,7 +185,9 @@ export function DiscordDefaultChannelPicker() {
           handoffRef={channelSelectRef}
           value={effectiveChannelId ?? ''}
           onValueChange={(value) => setSelectedChannelId(value)}
-          disabled={effectiveGuildId === null || channels.isPending}
+          disabled={
+            effectiveGuildId === null || channels.isPending || readsFailed
+          }
         >
           <SelectTrigger className="w-56">
             <SelectValue
@@ -177,6 +218,7 @@ export function DiscordDefaultChannelPicker() {
           size="sm"
           disabled={
             save.isPending ||
+            readsFailed ||
             effectiveGuildId === null ||
             effectiveChannelId === null ||
             effectiveChannelId === savedChannelId
@@ -198,6 +240,34 @@ export function DiscordDefaultChannelPicker() {
           Currently posting to #{currentGuild.defaultChannelName}.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function DiscordCatalogError({
+  kind,
+  isRetrying,
+  onRetry,
+}: {
+  kind: 'servers' | 'channels';
+  isRetrying: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+      <p>Couldn&apos;t load Discord {kind}.</p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        aria-label={`Retry Discord ${kind}`}
+        aria-busy={isRetrying}
+        disabled={isRetrying}
+        onClick={onRetry}
+      >
+        {isRetrying ? <Spinner size="sm" /> : null}
+        {isRetrying ? 'Retrying...' : 'Retry'}
+      </Button>
     </div>
   );
 }
