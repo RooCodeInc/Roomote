@@ -201,6 +201,8 @@ jobs:
         run: bash deploy/host/tests/upgrade-failed-pull.sh
       - name: Distinguish absent Brain databases from failed probes
         run: bash deploy/host/tests/backup-brain-probe.sh
+      - name: Verify failed restores clean decrypted data
+        run: bash deploy/host/tests/restore-cleanup.sh
       - name: Restore an encrypted bundle onto empty volumes
         run: bash deploy/host/tests/backup-restore.integration.sh
 
