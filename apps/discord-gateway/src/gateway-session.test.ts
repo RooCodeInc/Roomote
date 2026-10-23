@@ -176,6 +176,7 @@ describe('DiscordGatewaySession durable resume wiring', () => {
     expect(repository.updateSequence).toHaveBeenCalledWith({
       tokenFingerprint: 'fingerprint',
       shardId: 0,
+      sessionId: 'session-1',
       sequence: 43,
     });
 

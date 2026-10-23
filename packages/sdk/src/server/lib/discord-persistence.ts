@@ -677,6 +677,7 @@ export async function saveDiscordGatewayResumeState(
 
 export async function updateDiscordGatewaySequence(
   input: DiscordGatewaySessionKey & {
+    sessionId: string;
     sequence: number;
     updatedAt?: Date;
   },
@@ -684,7 +685,12 @@ export async function updateDiscordGatewaySequence(
   await db
     .update(discordGatewaySessions)
     .set({ sequence: input.sequence, updatedAt: input.updatedAt ?? new Date() })
-    .where(eq(discordGatewaySessions.id, discordGatewaySessionRowId(input)));
+    .where(
+      and(
+        eq(discordGatewaySessions.id, discordGatewaySessionRowId(input)),
+        eq(discordGatewaySessions.sessionId, input.sessionId),
+      ),
+    );
 }
 
 export async function recordDiscordGatewayHeartbeatAck(

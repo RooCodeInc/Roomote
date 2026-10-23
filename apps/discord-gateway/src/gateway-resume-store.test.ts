@@ -125,6 +125,7 @@ describe('DiscordGatewayResumeStore', () => {
     expect(repository.updateSequence).toHaveBeenCalledWith({
       tokenFingerprint: 'fingerprint',
       shardId: 0,
+      sessionId: 'session-1',
       sequence: 13,
     });
   });
@@ -146,6 +147,31 @@ describe('DiscordGatewayResumeStore', () => {
     await store.update(0, null);
     store.endSessionHandoff();
     expect(repository.clear).toHaveBeenCalledOnce();
+  });
+
+  it('retries a failed checkpoint while the same session still owns it', async () => {
+    const repository = createRepository();
+    repository.updateSequence.mockRejectedValueOnce(
+      new Error('Temporary database failure'),
+    );
+    const store = new DiscordGatewayResumeStore(
+      'fingerprint',
+      repository,
+      60_000,
+    );
+    await store.retrieve(0);
+    await store.update(0, { ...persistedSession, sequence: 11 });
+    store.acknowledgeDispatch(0, 11);
+    await expect(store.flush()).rejects.toThrow('Temporary database failure');
+    await store.flush();
+    expect(repository.updateSequence).toHaveBeenCalledTimes(2);
+    expect(repository.updateSequence).toHaveBeenLastCalledWith({
+      tokenFingerprint: 'fingerprint',
+      shardId: 0,
+      sessionId: 'session-1',
+      sequence: 11,
+    });
+    await expect(store.retrieve(0)).resolves.toMatchObject({ sequence: 11 });
   });
 
   it('records heartbeat acknowledgements for the matching token and shard', async () => {

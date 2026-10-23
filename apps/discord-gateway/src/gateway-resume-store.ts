@@ -198,27 +198,40 @@ export class DiscordGatewayResumeStore {
       return;
     }
 
-    const pending = [...this.pendingSequences.entries()];
+    // A replacement session can arrive while a checkpoint write is in flight.
+    // Fence both the database write and its local bookkeeping to that identity.
+    const pending = [...this.pendingSequences.entries()].map(
+      ([shardId, sequence]) => ({
+        shardId,
+        sequence,
+        sessionId: this.sessions.get(shardId)?.sessionId,
+      }),
+    );
     this.pendingSequences.clear();
     this.activeFlush = Promise.all(
-      pending.map(([shardId, sequence]) =>
-        this.repository.updateSequence({
-          ...this.key(shardId),
-          sequence,
-        }),
+      pending.map(({ shardId, sequence, sessionId }) =>
+        sessionId
+          ? this.repository.updateSequence({
+              ...this.key(shardId),
+              sessionId,
+              sequence,
+            })
+          : Promise.resolve(),
       ),
     ).then(() => undefined);
 
     try {
       await this.activeFlush;
-      for (const [shardId, sequence] of pending) {
+      for (const { shardId, sequence, sessionId } of pending) {
+        if (this.sessions.get(shardId)?.sessionId !== sessionId) continue;
         this.durableSequences.set(
           shardId,
           Math.max(sequence, this.durableSequences.get(shardId) ?? sequence),
         );
       }
     } catch (error) {
-      for (const [shardId, sequence] of pending) {
+      for (const { shardId, sequence, sessionId } of pending) {
+        if (this.sessions.get(shardId)?.sessionId !== sessionId) continue;
         const newerSequence = this.pendingSequences.get(shardId);
         this.pendingSequences.set(
           shardId,
