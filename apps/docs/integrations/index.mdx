@@ -157,9 +157,9 @@ general API or admin access.
 
 For most teams, this order works well:
 
-1. the required providers:
-   [Comms](/communications), [Source Control](/source-control),
-   [Inference](/models), and [Sandboxes](/compute)
+1. [Inference](/models) for conversations, plus [Source Control](/source-control)
+   and [Sandboxes](/compute) for repository tasks; follow
+   [Run your first task](/first-task) to verify this path in the dashboard
 2. one task-tracking integration, such as Linear, Jira, or Asana, if your team
    already works there
 3. one monitoring or deployment integration, such as Sentry, Grafana, Railway,
@@ -174,3 +174,7 @@ For most teams, this order works well:
 After each connection, run a small task that uses the new context. For example,
 ask Roomote to summarize a linked issue, inspect a monitoring alert, or explain
 which environment a support thread belongs to.
+
+[Communications providers](/communications) are optional. Connect one when you
+want to start work from chat or email, or deliver automation reports there;
+you can use Roomote entirely from the web dashboard.
