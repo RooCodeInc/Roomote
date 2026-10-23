@@ -13,6 +13,16 @@ import {
 const TRUNCATED_MARKER = '[truncated]';
 const OMITTED_ATTACHMENT_MARKER = '[omitted: attachment budget exhausted]';
 
+const DOCUMENT_MIME_EXTENSIONS: Partial<Record<string, string>> = {
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+    'docx',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation':
+    'pptx',
+  'application/pdf': 'pdf',
+};
+
 export interface PromptTextAttachmentInput {
   filename: string;
   mimeType?: string;
@@ -249,8 +259,13 @@ async function extractAttachmentText(
   }
 
   const buffer = toBuffer(input.bytes);
-  const extension = getNormalizedExtension(input.filename);
+  const filenameExtension = getNormalizedExtension(input.filename);
   const mimeType = normalizeMimeType(input.mimeType);
+  const extension = ['xls', 'xlsx', 'docx', 'pptx', 'pdf'].includes(
+    filenameExtension ?? '',
+  )
+    ? filenameExtension
+    : (DOCUMENT_MIME_EXTENSIONS[mimeType ?? ''] ?? filenameExtension);
 
   if (buffer.byteLength > ROOMOTE_FILE_ATTACHMENT_MAX_BYTES) {
     throw new Error(
