@@ -627,6 +627,33 @@ describe('collector continuation orchestration', () => {
     );
   });
 
+  it('skips a tick while another collector run is still in flight', async () => {
+    let release: (() => void) | undefined;
+    mockRunBrainCollectors.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({ backfillProgressed: false, interrupted: false });
+        }),
+    );
+
+    const first = brainCollectorsJob();
+    await vi.waitFor(() => expect(mockRunBrainCollectors).toHaveBeenCalled());
+
+    await brainCollectorsJob();
+    expect(mockRunBrainCollectors).toHaveBeenCalledTimes(1);
+
+    release?.();
+    await first;
+
+    mockRunBrainCollectors.mockResolvedValueOnce({
+      backfillProgressed: false,
+      interrupted: false,
+    });
+    await brainCollectorsJob();
+    expect(mockRunBrainCollectors).toHaveBeenCalledTimes(2);
+  });
+
   it('stops before collectors when PR-fact ingestion hits Brain backpressure', async () => {
     mockPullRequestFacts.mockResolvedValue([
       {
@@ -668,6 +695,25 @@ describe('historical ingestion continuation', () => {
     const wait = vi.fn(async () => {});
 
     await drainBrainHistoricalIngestion({ runPass, wait });
+
+    expect(runPass).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledTimes(2);
+  });
+
+  it('ends the run once its budget is spent while backfill still progresses', async () => {
+    let clock = 0;
+    const runPass = vi.fn(async () => {
+      clock += 4 * 60 * 1000;
+      return { progressed: true, interrupted: false };
+    });
+    const wait = vi.fn(async () => {});
+
+    await drainBrainHistoricalIngestion({
+      runPass,
+      wait,
+      budgetMs: 10 * 60 * 1000,
+      now: () => clock,
+    });
 
     expect(runPass).toHaveBeenCalledTimes(3);
     expect(wait).toHaveBeenCalledTimes(2);
