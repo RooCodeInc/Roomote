@@ -155,11 +155,12 @@ function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <ResultsPage />
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 import { ResultsPage } from './ResultsPage';
@@ -211,6 +212,7 @@ describe('ResultsPage', () => {
       }),
     ).not.toBeInTheDocument();
 
+    first.focus();
     fireEvent.click(first);
     expect(
       await screen.findByRole('heading', {
@@ -226,6 +228,7 @@ describe('ResultsPage', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText('Full report')).toBeInTheDocument();
+    expect(first).toHaveFocus();
     expect(screen.getByRole('link', { name: 'Open task' })).toHaveAttribute(
       'href',
       '/task/task-1',
@@ -306,6 +309,227 @@ describe('ResultsPage', () => {
       screen.getByRole('button', { name: 'Close result details' }),
     );
     expect(row).toBeInTheDocument();
+  });
+
+  it('focuses the matching mobile heading after a cold detail fetch completes', async () => {
+    mocks.isDesktop = false;
+    let resolveDetail!: (result: ResultInboxItem) => void;
+    mocks.get.mockImplementation(
+      () =>
+        new Promise<ResultInboxItem>((resolve) => (resolveDetail = resolve)),
+    );
+    renderPage();
+    const row = await screen.findByRole('option', {
+      name: /Three dependency risks need review/,
+    });
+    row.focus();
+    fireEvent.click(row);
+    await waitFor(() => expect(mocks.get).toHaveBeenCalled());
+    // Outlast both the old one-frame handoff and the delayed skeleton.
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 510));
+    });
+    await act(async () => resolveDetail(results[0]!));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', {
+          name: 'Three dependency risks need review',
+        }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it.each(['focus', 'pointer'] as const)(
+    'cancels a delayed mobile handoff after intervening %s navigation',
+    async (intent) => {
+      mocks.isDesktop = false;
+      let resolveDetail!: (result: ResultInboxItem) => void;
+      mocks.get.mockImplementation(
+        () =>
+          new Promise<ResultInboxItem>((resolve) => (resolveDetail = resolve)),
+      );
+      renderPage();
+      const row = await screen.findByRole('option', {
+        name: /Three dependency risks need review/,
+      });
+      row.focus();
+      fireEvent.click(row);
+      await waitFor(() => expect(mocks.get).toHaveBeenCalled());
+      const clearAll = screen.getByRole('button', { name: 'Clear all' });
+      if (intent === 'focus') clearAll.focus();
+      else
+        fireEvent.pointerDown(screen.getByRole('heading', { name: 'Results' }));
+      await act(async () => resolveDetail(results[0]!));
+      const heading = await screen.findByRole('heading', {
+        name: 'Three dependency risks need review',
+      });
+      expect(heading).not.toHaveFocus();
+      if (intent === 'focus') expect(clearAll).toHaveFocus();
+    },
+  );
+
+  it('waits for the new mobile heading and ignores a late superseded response', async () => {
+    mocks.isDesktop = false;
+    const resolvers = new Map<string, (result: ResultInboxItem) => void>();
+    mocks.get.mockImplementation(
+      (input: { id: string }) =>
+        new Promise<ResultInboxItem>((resolve) =>
+          resolvers.set(input.id, resolve),
+        ),
+    );
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    );
+    await waitFor(() => expect(resolvers.has(results[0]!.id)).toBe(true));
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+    await waitFor(() => expect(resolvers.has(results[1]!.id)).toBe(true));
+    await act(async () => resolvers.get(results[1]!.id)!(results[1]!));
+    const heading = await screen.findByRole('heading', {
+      name: 'Simplify the worker',
+    });
+    await waitFor(() => expect(heading).toHaveFocus());
+    const action = screen.getByRole('button', { name: 'Start investigation' });
+    action.focus();
+    await act(async () => resolvers.get(results[0]!.id)!(results[0]!));
+    expect(action).toHaveFocus();
+    expect(
+      screen.queryByRole('heading', {
+        name: 'Three dependency risks need review',
+      }),
+    ).toBeNull();
+  });
+
+  it('never focuses the retained prior heading during a mobile detail transition', async () => {
+    mocks.isDesktop = false;
+    let resolveSuggestion!: (result: ResultInboxItem) => void;
+    mocks.get.mockImplementation((input: { id: string }) =>
+      input.id === results[1]!.id
+        ? new Promise<ResultInboxItem>(
+            (resolve) => (resolveSuggestion = resolve),
+          )
+        : Promise.resolve(results[0]),
+    );
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    );
+    const firstHeading = await screen.findByRole('heading', {
+      name: 'Three dependency risks need review',
+    });
+    await waitFor(() => expect(firstHeading).toHaveFocus());
+    const clearAll = screen.getByRole('button', { name: 'Clear all' });
+    clearAll.focus();
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+    await waitFor(() => expect(resolveSuggestion).toBeDefined());
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    expect(clearAll).toHaveFocus();
+    await act(async () => resolveSuggestion(results[1]!));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', { name: 'Simplify the worker' }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it.each(['close', 'URL', 'desktop'] as const)(
+    'cancels pending mobile focus after %s changes the selection surface',
+    async (change) => {
+      mocks.isDesktop = false;
+      let resolveSuggestion!: (result: ResultInboxItem) => void;
+      mocks.get.mockImplementation((input: { id: string }) =>
+        input.id === results[1]!.id
+          ? new Promise<ResultInboxItem>(
+              (resolve) => (resolveSuggestion = resolve),
+            )
+          : Promise.resolve(results[0]),
+      );
+      const view = renderPage();
+      fireEvent.click(
+        await screen.findByRole('option', {
+          name: /Three dependency risks need review/,
+        }),
+      );
+      await screen.findByRole('heading', {
+        name: 'Three dependency risks need review',
+      });
+      fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+      await waitFor(() => expect(resolveSuggestion).toBeDefined());
+      if (change === 'close') {
+        fireEvent.click(
+          screen.getByRole('button', { name: 'Close result details' }),
+        );
+      } else {
+        if (change === 'desktop') mocks.isDesktop = true;
+        else
+          mocks.searchParams = new URLSearchParams({
+            result: `report:${results[0]!.id}`,
+          });
+        view.rerender(
+          <QueryClientProvider client={view.queryClient}>
+            <ResultsPage />
+          </QueryClientProvider>,
+        );
+      }
+      await act(async () => resolveSuggestion(results[1]!));
+      expect(
+        screen.queryByRole('heading', { name: 'Simplify the worker' }),
+      ).not.toBe(document.activeElement);
+      if (change === 'close') {
+        await waitFor(() =>
+          expect(
+            screen.getByRole('option', { name: /Simplify the worker/ }),
+          ).toHaveFocus(),
+        );
+      }
+    },
+  );
+
+  it('focuses a mobile error fallback once and preserves focus through background refetch', async () => {
+    mocks.isDesktop = false;
+    mocks.get.mockRejectedValue(new Error('Detail failed'));
+    const view = renderPage();
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    );
+    const heading = await screen.findByRole('heading', {
+      name: 'Three dependency risks need review',
+    });
+    await waitFor(() => expect(heading).toHaveFocus());
+    const close = screen.getByRole('button', { name: 'Close result details' });
+    close.focus();
+    mocks.get.mockResolvedValue({
+      ...results[0]!,
+      content: 'Fresh background report',
+    });
+    await act(async () => {
+      await view.queryClient.invalidateQueries({
+        queryKey: ['results', 'get'],
+      });
+    });
+    await screen.findByText('Fresh background report');
+    expect(close).toHaveFocus();
+    fireEvent.click(close);
+    const row = await screen.findByRole('option', {
+      name: /Three dependency risks need review/,
+    });
+    await waitFor(() => expect(row).toHaveFocus());
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', {
+          name: 'Three dependency risks need review',
+        }),
+      ).toHaveFocus(),
+    );
   });
 
   it('clears the selected result without treating selection as disposition', async () => {

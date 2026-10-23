@@ -140,6 +140,7 @@ export function ResultsPage() {
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const resultListRef = useRef<HTMLDivElement>(null);
   const detailHeadingRef = useRef<HTMLHeadingElement>(null);
+  const pendingHeadingFocusKeyRef = useRef<string | null>(null);
   const mainActionRef = useRef<HTMLAnchorElement | HTMLButtonElement>(null);
   const trackedInboxViewRef = useRef(false);
   const [canScrollResultsUp, setCanScrollResultsUp] = useState(false);
@@ -287,6 +288,36 @@ export function ResultsPage() {
     }
   }, [detailQuery.data, detailQuery.isError, selectedKey, selectedSummary]);
 
+  useEffect(() => {
+    const pendingKey = pendingHeadingFocusKeyRef.current;
+    if (!pendingKey) return;
+    if (isDesktop || selectedKey !== pendingKey) {
+      pendingHeadingFocusKeyRef.current = null;
+      return;
+    }
+    // Wait for the selected heading, not a retained prior result or skeleton.
+    if (
+      displayedKey === pendingKey &&
+      !showDetailSkeleton &&
+      detailHeadingRef.current
+    ) {
+      pendingHeadingFocusKeyRef.current = null;
+      detailHeadingRef.current.focus();
+      return;
+    }
+
+    // A delayed response must not interrupt navigation the user started meanwhile.
+    const cancelPendingFocus = () => {
+      pendingHeadingFocusKeyRef.current = null;
+    };
+    document.addEventListener('focusin', cancelPendingFocus);
+    document.addEventListener('pointerdown', cancelPendingFocus, true);
+    return () => {
+      document.removeEventListener('focusin', cancelPendingFocus);
+      document.removeEventListener('pointerdown', cancelPendingFocus, true);
+    };
+  }, [displayedKey, isDesktop, selectedKey, showDetailSkeleton]);
+
   const closeResultDetail = () => {
     const prior = selectedKey;
     setSelectedKey('');
@@ -299,6 +330,7 @@ export function ResultsPage() {
 
   const selectResult = (result: ResultInboxItem) => {
     const key = resultKey(result);
+    pendingHeadingFocusKeyRef.current = isDesktop ? null : key;
     setSelectedKey(key);
     setShowSuggestionComposer(false);
     capture('result_selected', {
@@ -307,9 +339,6 @@ export function ResultsPage() {
       preparation: result.preparationStatus,
     });
     replaceResultParam(key);
-    if (!isDesktop) {
-      requestAnimationFrame(() => detailHeadingRef.current?.focus());
-    }
   };
 
   const clearResult = (result: ResultInboxItem) => {
