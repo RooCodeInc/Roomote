@@ -28,6 +28,8 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
   const [renderedTab, setRenderedTab] = useState<HomeTab | null>(null);
   const [panelHeight, setPanelHeight] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
+  const recentTabRef = useRef<HTMLButtonElement>(null);
+  const pullRequestsTabRef = useRef<HTMLButtonElement>(null);
   const pullRequestsQuery = useQuery(
     trpc.tasks.recentPullRequests.queryOptions(),
   );
@@ -117,13 +119,14 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
         <div className="flex divide-x-2 divide-background items-center text-sm font-medium transition-all bg-card">
           <BasicTooltip content="Opt/Alt + T">
             <button
+              ref={recentTabRef}
               type="button"
               onClick={() => onTabClick('recent')}
               className={cn(
                 'pl-4 pr-5 py-3 cursor-pointer font-semibold text-left transition-colors text-nowrap',
                 activeTab === 'recent'
                   ? 'bg-foreground text-accent-foreground dark:bg-accent-foreground dark:text-card'
-                  : 'text-muted-foreground/80 hover:text-accent-foreground',
+                  : 'text-muted-foreground hover:text-accent-foreground',
               )}
             >
               Recent Sessions
@@ -132,13 +135,14 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
 
           <BasicTooltip content="Opt/Alt + P">
             <button
+              ref={pullRequestsTabRef}
               type="button"
               onClick={() => onTabClick('pullRequests')}
               className={cn(
                 'px-5 py-3 cursor-pointer font-semibold text-left transition-colors text-nowrap',
                 activeTab === 'pullRequests'
                   ? 'bg-foreground text-accent-foreground dark:bg-accent-foreground dark:text-card'
-                  : 'text-muted-foreground/80 hover:text-accent-foreground',
+                  : 'text-muted-foreground hover:text-accent-foreground',
               )}
             >
               Recent PRs
@@ -151,8 +155,16 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
           <div className="ml-auto flex min-w-0 items-center">
             <button
               type="button"
-              onClick={closeSheet}
+              onClick={() => {
+                closeSheet();
+                (activeTab === 'recent'
+                  ? recentTabRef
+                  : pullRequestsTabRef
+                ).current?.focus();
+              }}
               aria-label="Close bottom sheet"
+              aria-hidden={!isExpanded}
+              disabled={!isExpanded}
               className={cn(
                 'relative mr-2 inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground/80 transition-all duration-500 delay-150 hover:text-foreground',
                 isExpanded ? 'top-0 opacity-100' : 'top-6 opacity-0',
@@ -166,6 +178,8 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
         <div
           className="overflow-hidden bg-card border-l border-r border-background transition-[height] duration-500 ease-in-out"
           style={{ height: panelHeight }}
+          inert={!isExpanded}
+          aria-hidden={!isExpanded}
           onTransitionEnd={(event) => {
             if (event.propertyName === 'height' && activeTab === null) {
               setRenderedTab(null);

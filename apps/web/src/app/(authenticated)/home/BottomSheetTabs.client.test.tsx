@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const { useQueryMock } = vi.hoisted(() => ({
   useQueryMock: vi.fn(),
@@ -23,7 +23,11 @@ vi.mock('./PullRequestsList', () => ({
 }));
 
 vi.mock('./RecentSessionsList', () => ({
-  RecentSessionsList: () => <div>Recent sessions</div>,
+  RecentSessionsList: () => (
+    <div>
+      Recent sessions<button>Recent session action</button>
+    </div>
+  ),
 }));
 
 import { BottomSheetTabs } from './BottomSheetTabs';
@@ -41,6 +45,59 @@ it('renders the home tabs', () => {
   expect(
     screen.getByRole('button', { name: 'Recent PRs' }),
   ).toBeInTheDocument();
+});
+
+it('keeps the hidden close control out of keyboard and assistive navigation', () => {
+  const { container } = render(<BottomSheetTabs />);
+
+  expect(
+    screen.queryByRole('button', { name: 'Close bottom sheet' }),
+  ).toBeNull();
+  expect(
+    container.querySelector('[aria-label="Close bottom sheet"]'),
+  ).toBeDisabled();
+});
+
+it.each(['Recent Sessions', 'Recent PRs'])(
+  'returns focus to %s when closing its sheet',
+  (name) => {
+    render(<BottomSheetTabs />);
+    const tab = screen.getByRole('button', { name });
+    fireEvent.click(tab);
+    const close = screen.getByRole('button', { name: 'Close bottom sheet' });
+    expect(close).toBeEnabled();
+    close.focus();
+    fireEvent.click(close);
+
+    expect(tab).toHaveFocus();
+    expect(close).toBeDisabled();
+    expect(
+      screen.queryByRole('button', { name: 'Close bottom sheet' }),
+    ).toBeNull();
+  },
+);
+
+it('returns focus to the current tab after switching the open sheet', () => {
+  render(<BottomSheetTabs />);
+  fireEvent.click(screen.getByRole('button', { name: 'Recent Sessions' }));
+  const pullRequests = screen.getByRole('button', { name: 'Recent PRs' });
+  fireEvent.click(pullRequests);
+  fireEvent.click(screen.getByRole('button', { name: 'Close bottom sheet' }));
+
+  expect(pullRequests).toHaveFocus();
+});
+
+it('hides retained panel controls from assistive navigation as soon as closing starts', () => {
+  render(<BottomSheetTabs />);
+  fireEvent.click(screen.getByRole('button', { name: 'Recent Sessions' }));
+  expect(
+    screen.getByRole('button', { name: 'Recent session action' }),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Close bottom sheet' }));
+
+  expect(
+    screen.queryByRole('button', { name: 'Recent session action' }),
+  ).toBeNull();
 });
 
 it('shows the loaded open PR count before the tab is selected', () => {
