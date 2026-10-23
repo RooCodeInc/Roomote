@@ -156,6 +156,7 @@ const ARTIFACT_NAVIGATION_CONTROL_SELECTOR = [
   '[role="slider"]',
   '[role="spinbutton"]',
   '[role="textbox"]',
+  'table[tabindex]',
 ].join(',');
 
 function shouldIgnoreArtifactNavigation(event: React.KeyboardEvent): boolean {
@@ -231,7 +232,10 @@ function TabularArtifactPreview({
         </div>
       )}
       <div className="min-w-0 overflow-x-auto">
-        <Table className="w-max min-w-full border-separate border-spacing-0 font-mono text-xs">
+        <Table
+          tabIndex={0}
+          className="w-max min-w-full border-separate border-spacing-0 font-mono text-xs focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
           <caption className="sr-only">
             {format === 'csv' ? 'CSV' : 'TSV'} preview. The first artifact row
             is{' '}

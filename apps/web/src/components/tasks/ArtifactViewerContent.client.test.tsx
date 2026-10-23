@@ -278,6 +278,47 @@ describe('ArtifactViewerContent', () => {
     expect(onNextArtifact).not.toHaveBeenCalled();
   });
 
+  it.each(['csv', 'tsv'] as const)(
+    'reserves focused %s table arrows for native scrolling while preserving viewer navigation',
+    (format) => {
+      const onPreviousArtifact = vi.fn();
+      const onNextArtifact = vi.fn();
+      const delimiter = format === 'csv' ? ',' : '\t';
+      render(
+        <ArtifactViewerContent
+          taskId="task-1"
+          artifact={{
+            ...navigationArtifact,
+            path: `reports/data.${format}`,
+            contentType:
+              format === 'csv' ? 'text/csv' : 'text/tab-separated-values',
+            content: `name${delimiter}value\nAda${delimiter}42`,
+          }}
+          onPreviousArtifact={onPreviousArtifact}
+          onNextArtifact={onNextArtifact}
+        />,
+      );
+      const table = screen.getByRole('table', { name: /preview/ });
+      table.focus();
+      expect(table).toHaveFocus();
+      for (const key of ['ArrowLeft', 'ArrowRight']) {
+        const event = new KeyboardEvent('keydown', {
+          key,
+          bubbles: true,
+          cancelable: true,
+        });
+        fireEvent(table, event);
+        expect(event.defaultPrevented).toBe(false);
+      }
+      expect(onPreviousArtifact).not.toHaveBeenCalled();
+      expect(onNextArtifact).not.toHaveBeenCalled();
+      const viewer = screen.getByRole('region', { name: 'Artifact viewer' });
+      viewer.focus();
+      fireEvent.keyDown(viewer, { key: 'ArrowRight' });
+      expect(onNextArtifact).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('omits artifact navigation for a single item', () => {
     render(
       <ArtifactViewerContent taskId="task-1" artifact={navigationArtifact} />,
