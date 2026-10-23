@@ -77,6 +77,8 @@ type InferenceProviderSectionProps = {
    */
   trialInferenceActive?: boolean;
   providerSetupPending: boolean;
+  providerSetupRetrying: boolean;
+  onRetryProviderSetup: () => void;
   connectedProviders: SetupModelProviderStatus[];
   availableProviders: SetupModelProviderStatus[];
   /**
@@ -1113,6 +1115,8 @@ export function InferenceProviderSection({
   providerSetup,
   trialInferenceActive = false,
   providerSetupPending,
+  providerSetupRetrying,
+  onRetryProviderSetup,
   connectedProviders,
   availableProviders,
   onRecommendedModelsAdded,
@@ -1540,9 +1544,25 @@ export function InferenceProviderSection({
   if (!providerSetup) {
     return (
       <Section icon={KeyRound} title="Inference Providers">
-        <p className="text-sm text-destructive">
-          Failed to load inference provider settings.
-        </p>
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-2"
+          role="alert"
+        >
+          <p className="text-sm text-foreground">
+            Failed to load inference provider settings.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onRetryProviderSetup}
+            disabled={providerSetupRetrying}
+            aria-busy={providerSetupRetrying}
+            aria-label="Retry inference provider settings"
+          >
+            {providerSetupRetrying ? <Spinner /> : null}
+            {providerSetupRetrying ? 'Retrying…' : 'Retry'}
+          </Button>
+        </div>
       </Section>
     );
   }
