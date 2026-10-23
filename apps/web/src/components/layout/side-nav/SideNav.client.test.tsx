@@ -493,15 +493,34 @@ describe('SideNav recent sessions', () => {
     );
   });
 
-  it('opens the new session dialog with the desktop N shortcut', () => {
+  it.each(['n', 'N'])(
+    'opens the new session dialog with the desktop %s shortcut',
+    (key) => {
+      render(<SideNav />);
+
+      fireEvent.keyDown(document, { key });
+
+      expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+        'data-open',
+        'true',
+      );
+    },
+  );
+
+  it('ignores compatibility keydown events that do not carry a key', () => {
     render(<SideNav />);
-
-    fireEvent.keyDown(document, { key: 'n' });
-
-    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
-      'data-open',
-      'true',
-    );
+    const onError = vi.fn((event: ErrorEvent) => event.preventDefault());
+    window.addEventListener('error', onError);
+    try {
+      fireEvent(document, new Event('keydown', { bubbles: true }));
+      expect(onError).not.toHaveBeenCalled();
+      expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+        'data-open',
+        'false',
+      );
+    } finally {
+      window.removeEventListener('error', onError);
+    }
   });
 
   it('does not handle the N shortcut while a text field is focused', () => {

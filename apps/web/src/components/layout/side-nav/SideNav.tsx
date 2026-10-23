@@ -125,7 +125,7 @@ export const SideNav = () => {
         event.metaKey ||
         event.ctrlKey ||
         event.altKey ||
-        event.key.toLowerCase() !== 'n' ||
+        (event.key !== 'n' && event.key !== 'N') ||
         !window.matchMedia('(min-width: 768px)').matches ||
         isEditingText
       ) {
