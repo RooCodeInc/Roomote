@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -7,10 +8,16 @@ import {
 } from '@testing-library/react';
 import Link from 'next/link';
 
-const { replaceMock, searchParamsMock, viewport } = vi.hoisted(() => ({
-  replaceMock: vi.fn(),
-  searchParamsMock: { current: new URLSearchParams() },
-  viewport: { isMobile: false },
+const { replaceMock, searchParamsMock, viewport, savePreferencesMock } =
+  vi.hoisted(() => ({
+    savePreferencesMock: vi.fn().mockResolvedValue(undefined),
+    replaceMock: vi.fn(),
+    searchParamsMock: { current: new URLSearchParams() },
+    viewport: { isMobile: false },
+  }));
+
+vi.mock('./filter-preference-actions', () => ({
+  saveSessionFilterPreferences: savePreferencesMock,
 }));
 
 vi.mock('@/hooks/useIsMobile', () => ({
@@ -70,6 +77,7 @@ vi.mock('@/components/tasks', () => ({
 import { SessionsFilters } from './SessionsFilters';
 
 const baseProps = {
+  viewerUserId: 'viewer-1',
   userId: null,
   timePeriod: 'all' as const,
   sourceOptions: ['slack', 'web'],
@@ -79,6 +87,7 @@ describe('SessionsFilters', () => {
   beforeEach(() => {
     viewport.isMobile = false;
     replaceMock.mockReset();
+    savePreferencesMock.mockClear();
     searchParamsMock.current = new URLSearchParams();
     localStorage.clear();
   });
@@ -104,7 +113,7 @@ describe('SessionsFilters', () => {
     },
   );
 
-  it('shows the user and automation filter with the primary controls', () => {
+  it('shows the user and automation filter with the primary controls', async () => {
     render(<SessionsFilters {...baseProps} />);
 
     expect(screen.getByTestId('time-filter')).toHaveAttribute(
@@ -112,6 +121,7 @@ describe('SessionsFilters', () => {
       'true',
     );
     fireEvent.click(screen.getByRole('button', { name: 'Choose automation' }));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalled());
     expect(replaceMock).toHaveBeenCalledWith(
       '/sessions?user=automation%3Asentry_triage',
     );
@@ -127,6 +137,7 @@ describe('SessionsFilters', () => {
       ).toBeInTheDocument(),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Choose environment' }));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalled());
     expect(replaceMock).toHaveBeenCalledWith(
       '/sessions?repository=env%3Afixture-environment',
     );
@@ -139,19 +150,24 @@ describe('SessionsFilters', () => {
       <SessionsFilters {...baseProps} repository="env:fixture-environment" />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Choose Has PR' }));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalled());
 
     expect(replaceMock).toHaveBeenCalledWith(
       '/sessions?repository=env%3Afixture-environment&pullRequest=__has_pr__',
     );
   });
 
-  it('always exposes the board switch and preserves its URL', () => {
+  it('always exposes the board switch and preserves its URL', async () => {
     render(<SessionsFilters {...baseProps} view="list" />);
     fireEvent.click(screen.getByRole('button', { name: 'Board view' }));
-    expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith(
+        '/sessions?view=board&scope=all',
+      ),
+    );
   });
 
-  it('clears a board-only Done status when switching to list view', () => {
+  it('clears a board-only Done status when switching to list view', async () => {
     searchParamsMock.current = new URLSearchParams(
       'view=board&status=done&archive=all&before=cursor',
     );
@@ -165,6 +181,7 @@ describe('SessionsFilters', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'List view' }));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalled());
 
     expect(replaceMock).toHaveBeenCalledWith('/sessions?archive=all');
   });
@@ -271,6 +288,7 @@ describe('SessionsFilters', () => {
     ).toHaveAttribute('data-state', 'checked');
 
     fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Archived' }));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalled());
     expect(replaceMock).toHaveBeenCalledWith('/sessions?archive=archived');
 
     replaceMock.mockReset();
@@ -283,7 +301,9 @@ describe('SessionsFilters', () => {
     fireEvent.click(
       screen.getByRole('menuitemcheckbox', { name: 'Non-Archived' }),
     );
-    expect(replaceMock).toHaveBeenCalledWith('/sessions');
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith('/sessions?scope=all'),
+    );
   });
 
   it('hides the status filter in board view while keeping advanced filters', async () => {
@@ -296,7 +316,7 @@ describe('SessionsFilters', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('expands search to the left and shows a submit hint', () => {
+  it('expands search to the left and shows a submit hint', async () => {
     render(<SessionsFilters {...baseProps} />);
     const searchButton = screen.getByRole('button', {
       name: 'Toggle session search',
@@ -320,10 +340,11 @@ describe('SessionsFilters', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Submit session search' }),
     );
+    await waitFor(() => expect(replaceMock).toHaveBeenCalled());
     expect(replaceMock).toHaveBeenCalledWith('/sessions?q=release+notes');
   });
 
-  it('clears the search query from the URL when search is closed', () => {
+  it('clears the search query from the URL when search is closed', async () => {
     searchParamsMock.current = new URLSearchParams(
       'q=release+notes&view=board',
     );
@@ -335,9 +356,114 @@ describe('SessionsFilters', () => {
     expect(searchButton).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(searchButton);
+    await waitFor(() => expect(replaceMock).toHaveBeenCalled());
 
     expect(screen.queryByPlaceholderText('Search...')).not.toBeInTheDocument();
     expect(searchButton).toHaveAttribute('aria-pressed', 'false');
-    expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board&scope=all');
+  });
+
+  it('saves explicit URL selections for the viewer without cursor or view state', async () => {
+    searchParamsMock.current = new URLSearchParams(
+      'scope=tasks&user=other-user&period=7&status=active&q=release&repository=env:fixture&pullRequest=__has_pr__&source=slack&model=example/model&archive=all&before=stale&view=board',
+    );
+    render(<SessionsFilters {...baseProps} />);
+    await waitFor(() =>
+      expect(savePreferencesMock).toHaveBeenCalledWith('viewer-1', {
+        scope: 'tasks',
+        user: 'other-user',
+        period: '7',
+        status: 'active',
+        q: 'release',
+        repository: 'env:fixture',
+        pullRequest: '__has_pr__',
+        source: 'slack',
+        model: 'example/model',
+        archive: 'all',
+      }),
+    );
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('queues clearing the last filter and persists the clear-link state on remount', async () => {
+    searchParamsMock.current = new URLSearchParams('q=release&before=stale');
+    const { unmount } = render(
+      <SessionsFilters {...baseProps} query="release" />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Toggle session search' }),
+    );
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith('/sessions?scope=all'),
+    );
+    expect(savePreferencesMock).toHaveBeenLastCalledWith('viewer-1', {});
+    unmount();
+    searchParamsMock.current = new URLSearchParams('scope=all');
+    render(<SessionsFilters {...baseProps} />);
+    await waitFor(() =>
+      expect(savePreferencesMock).toHaveBeenLastCalledWith('viewer-1', {}),
+    );
+  });
+
+  it('still navigates when saving preferences fails', async () => {
+    savePreferencesMock.mockRejectedValueOnce(new Error('unavailable'));
+    render(<SessionsFilters {...baseProps} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose automation' }));
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith(
+        '/sessions?user=automation%3Asentry_triage',
+      ),
+    );
+  });
+
+  it('does not resave on server rerenders or pagination-only URL changes', async () => {
+    searchParamsMock.current = new URLSearchParams('scope=tasks');
+    const { rerender } = render(
+      <SessionsFilters {...baseProps} scope="tasks" />,
+    );
+    await waitFor(() => expect(savePreferencesMock).toHaveBeenCalledTimes(1));
+    searchParamsMock.current = new URLSearchParams('scope=tasks&before=older');
+    rerender(<SessionsFilters {...baseProps} scope="tasks" />);
+    await waitFor(() => expect(savePreferencesMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('orders a reset after an in-flight deep-link save', async () => {
+    let finishSave!: () => void;
+    savePreferencesMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    searchParamsMock.current = new URLSearchParams('q=release');
+    render(<SessionsFilters {...baseProps} query="release" />);
+    await waitFor(() => expect(savePreferencesMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Toggle session search' }),
+    );
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?scope=all');
+    await act(async () => finishSave());
+    expect(savePreferencesMock.mock.calls.map((call) => call[1])).toEqual([
+      { q: 'release' },
+      {},
+    ]);
+  });
+
+  it('does not navigate back after a slow save finishes following navigation away', async () => {
+    let finishSave!: () => void;
+    savePreferencesMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const { unmount } = render(<SessionsFilters {...baseProps} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose automation' }));
+    await waitFor(() => expect(savePreferencesMock).toHaveBeenCalledTimes(1));
+    unmount();
+    replaceMock.mockClear();
+    replaceMock('/automations');
+    await act(async () => finishSave());
+    expect(replaceMock.mock.calls).toEqual([['/automations']]);
   });
 });

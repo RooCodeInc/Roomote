@@ -233,13 +233,26 @@ describe('SessionBoard drag interaction', () => {
     expect(activeHeading.nextElementSibling).toHaveTextContent('1');
 
     fireEvent.click(screen.getByRole('button', { name: 'Show all sessions' }));
-    expect(testState.replace).toHaveBeenCalledWith('/sessions?view=board');
+    expect(testState.replace).toHaveBeenCalledWith(
+      '/sessions?view=board&scope=all',
+    );
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Show only completed sessions' }),
     );
     expect(testState.replace).toHaveBeenCalledWith(
       '/sessions?view=board&status=done',
+    );
+  });
+
+  it('keeps other filters when clearing a board status and drops only the cursor', () => {
+    testState.searchParams = new URLSearchParams(
+      'view=board&status=active&q=release&before=cursor',
+    );
+    renderInteractionBoard();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all sessions' }));
+    expect(testState.replace).toHaveBeenCalledWith(
+      '/sessions?view=board&q=release',
     );
   });
 

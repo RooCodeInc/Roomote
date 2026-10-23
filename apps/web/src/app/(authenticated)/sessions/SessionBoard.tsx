@@ -53,6 +53,8 @@ import {
   registerSessionBoard,
 } from '@/components/sessions/session-board-motion';
 
+import { ensureExplicitSessionFilters } from './filter-preferences';
+
 const BOARD_LAYOUT_TRANSITION = {
   type: 'spring' as const,
   stiffness: 500,
@@ -416,6 +418,7 @@ export const SessionBoardColumn = forwardRef<
               if (filterActive) params.delete('status');
               else params.set('status', column);
               params.delete('before');
+              ensureExplicitSessionFilters(params);
               const nextQuery = params.toString();
               router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
             }}
