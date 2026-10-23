@@ -178,11 +178,13 @@ function formValuesToInput(values: ServerFormValues) {
 function KeyValueRows({
   entries,
   onChange,
+  entryLabel,
   namePlaceholder,
   isEdit,
 }: {
   entries: { name: string; value: string }[];
   onChange: (entries: { name: string; value: string }[]) => void;
+  entryLabel: 'Header' | 'Environment variable';
   namePlaceholder: string;
   isEdit: boolean;
 }) {
@@ -192,6 +194,7 @@ function KeyValueRows({
         <div key={index} className="flex gap-2">
           <div className="flex-1">
             <Input
+              aria-label={`${entryLabel} ${index + 1} name`}
               className="font-mono"
               placeholder={namePlaceholder}
               value={entry.name}
@@ -210,6 +213,7 @@ function KeyValueRows({
           <div className="flex-1">
             <Input
               secret
+              aria-label={`${entryLabel} ${index + 1} value`}
               className="ph-no-capture ph-mask font-mono sentry-mask"
               placeholder={
                 isEdit ? 'Leave blank to keep the existing value' : 'Value'
@@ -228,6 +232,7 @@ function KeyValueRows({
             />
           </div>
           <Button
+            aria-label={`Remove ${entryLabel.toLowerCase()} ${index + 1}`}
             type="button"
             variant="ghost"
             size="sm"
@@ -623,6 +628,7 @@ function ServerFormDialog({
                 <div className="space-y-2">
                   <Label>Headers</Label>
                   <KeyValueRows
+                    entryLabel="Header"
                     entries={headers}
                     onChange={(entries) => setValue('headers', entries)}
                     namePlaceholder="e.g. x-api-key"
@@ -708,6 +714,7 @@ function ServerFormDialog({
               <div className="space-y-2">
                 <Label>Environment variables</Label>
                 <KeyValueRows
+                  entryLabel="Environment variable"
                   entries={stdioEnv}
                   onChange={(entries) => setValue('stdioEnv', entries)}
                   namePlaceholder="e.g. EXAMPLE_TOKEN"
