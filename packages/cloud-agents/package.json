@@ -99,7 +99,7 @@
     "@ai-sdk/mcp": "^1.0.25",
     "@aws-sdk/client-s3": "3.1000.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@opencode-ai/sdk": "1.18.30",
+    "@opencode-ai/sdk": "1.19.0",
     "@roo-code/judgement": "0.4.1",
     "@roomote/ado": "workspace:^",
     "@roomote/auth": "workspace:^",

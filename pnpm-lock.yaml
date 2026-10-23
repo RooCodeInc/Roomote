@@ -1162,8 +1162,8 @@ importers:
         specifier: 1.32.0
         version: 1.32.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
       '@opencode-ai/sdk':
-        specifier: 1.18.30
-        version: 1.18.30
+        specifier: 1.19.0
+        version: 1.19.0
       '@roo-code/judgement':
         specifier: 0.4.1
         version: 0.4.1
@@ -3490,8 +3490,8 @@ packages:
     resolution: {integrity: sha512-da6KbdNCV5sr1/txD896V+6W0iamFWrvVl8cHkBSPT+YlvmT3DwXa4jxZnQc+gnuTEqSWbBeoSZYTayXH9wXcw==}
     engines: {node: '>= 20'}
 
-  '@opencode-ai/sdk@1.18.30':
-    resolution: {integrity: sha512-uviJ+PZLc/D1szt33WGzzt/rqJ+IaNmRGBb+UcOXrcQANl8XXKJrp4CNQQ2UAnUJ3Ek+VqcamIwjtKHUW/OjOQ==}
+  '@opencode-ai/sdk@1.19.0':
+    resolution: {integrity: sha512-lDFYTD6qxzq1mfwxF6Kq1DAs6rEwF4xoZ2I3G1sB7hAZ8Yb28JurtSmmcK7ZzZ8Z4qBUYbZimHJ6DM4JFq5amw==}
 
   '@opentelemetry/api-logs@0.207.0':
     resolution: {integrity: sha512-lAb0jQRVyleQQGiuuvCOTDVspc14nx6XJjP4FspJ1sNARo3Regq4ZZbrc3rN4b1TYSuUCvgH+UXUPug4SLOqEQ==}
@@ -14447,7 +14447,7 @@ snapshots:
       '@octokit/request-error': 7.1.0
       '@octokit/webhooks-methods': 6.0.0
 
-  '@opencode-ai/sdk@1.18.30':
+  '@opencode-ai/sdk@1.19.0':
     dependencies:
       cross-spawn: 7.0.6
 
