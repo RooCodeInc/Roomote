@@ -38,6 +38,7 @@ const { state, createMock, updateMock, deleteMock, saveManualMock } =
       ],
       createResult: null as Promise<{ success: true }> | null,
       environmentError: false,
+      environmentGate: null as Promise<void> | null,
       skillsError: false,
       listGate: null as Promise<void> | null,
       isAdmin: false,
@@ -94,6 +95,7 @@ vi.mock('@/trpc/client', () => ({
             if (state.environmentError) {
               throw new Error('Environment query failed');
             }
+            await state.environmentGate;
             return {
               deploymentName: 'this deployment',
               environments: state.environments,
@@ -178,6 +180,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.createResult = null;
   state.environmentError = false;
+  state.environmentGate = null;
   state.skillsError = false;
   state.listGate = null;
   state.isAdmin = false;
@@ -368,7 +371,7 @@ it('keeps the submitted catalog invalidation stable while creation is pending', 
   });
 });
 
-it('disables environment creation when environments fail to load', async () => {
+it('recovers environment creation in the dialog without losing its draft', async () => {
   state.isAdmin = true;
   state.environmentError = true;
   renderSkills();
@@ -386,6 +389,69 @@ it('disables environment creation when environments fail to load', async () => {
       name: 'Only in selected environments',
     }),
   ).toBeDisabled();
+  fireEvent.change(within(dialog).getByLabelText('Slug'), {
+    target: { value: 'recovered-skill' },
+  });
+  fireEvent.change(within(dialog).getByLabelText('Description'), {
+    target: { value: 'Preserved description' },
+  });
+  fireEvent.change(within(dialog).getByLabelText('Content'), {
+    target: { value: '# Preserved instructions' },
+  });
+  const retry = within(dialog).getByRole('button', {
+    name: 'Retry environments',
+  });
+  fireEvent.click(retry);
+  await waitFor(() => expect(retry).toBeEnabled());
+  expect(within(dialog).getByRole('alert')).toBeVisible();
+
+  state.environmentError = false;
+  let release!: () => void;
+  state.environmentGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  fireEvent.click(retry);
+  expect(retry).toBeDisabled();
+  expect(retry).toHaveAttribute('aria-busy', 'true');
+  await waitFor(() => expect(retry).toBeDisabled());
+  expect(
+    within(dialog).getByRole('button', { name: 'Retry environments' }),
+  ).toBe(retry);
+  await act(async () => release());
+  await waitFor(() =>
+    expect(
+      within(dialog).getByRole('radio', {
+        name: 'Only in selected environments',
+      }),
+    ).toBeEnabled(),
+  );
+  expect(
+    within(dialog).queryByRole('button', {
+      name: 'Retry environments',
+    }),
+  ).not.toBeInTheDocument();
+  expect(within(dialog).getByLabelText('Content')).toHaveValue(
+    '# Preserved instructions',
+  );
+  fireEvent.click(
+    within(dialog).getByRole('radio', {
+      name: 'Only in selected environments',
+    }),
+  );
+  fireEvent.click(within(dialog).getByLabelText('Alpha'));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save Skill' }));
+  await waitFor(() =>
+    expect(saveManualMock).toHaveBeenCalledWith(
+      {
+        name: 'recovered-skill',
+        description: 'Preserved description',
+        content: '# Preserved instructions\n',
+        environmentIds: ['00000000-0000-4000-8000-000000000011'],
+      },
+      expect.anything(),
+    ),
+  );
+  expect(createMock).not.toHaveBeenCalled();
 });
 
 it('updates a creator skill and invalidates the catalog', async () => {
