@@ -835,7 +835,7 @@ export const ModelReasoningPickerTrigger = forwardRef<
       {reasoningEffort ? (
         <span
           className={cn(
-            'text-muted-foreground/70 transition-colors duration-500 motion-reduce:transition-none',
+            'text-muted-foreground transition-colors duration-500 motion-reduce:transition-none',
             selectionFlash && 'text-accent-foreground duration-0',
           )}
         >
