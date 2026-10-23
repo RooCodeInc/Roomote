@@ -67,6 +67,10 @@ const config: KnipConfig = {
         'python',
         'fc-cache',
         'dpkg-query',
+        // Native MySQL lifecycle integration test (disposable workers only).
+        'groupadd',
+        'useradd',
+        'mysql',
       ],
     },
 
