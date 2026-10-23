@@ -7,9 +7,15 @@ type SchedulerQueue = Pick<Queue, 'getJobSchedulers' | 'removeJobScheduler'>;
 function fakeQueue(
   schedulers: Array<{ key: string; every?: number; offset?: number }>,
 ) {
-  const removeJobScheduler = vi.fn(async () => true);
+  // Mirrors bullmq: schedulers are read by rank and removal shifts later ones.
+  const backing = [...schedulers];
+  const removeJobScheduler = vi.fn(async (key: string) => {
+    const index = backing.findIndex((s) => s.key === key);
+    if (index >= 0) backing.splice(index, 1);
+    return index >= 0;
+  });
   const getJobSchedulers = vi.fn(async (start = 0, end = -1) =>
-    schedulers.slice(start, end + 1).map((s) => ({ name: s.key, ...s })),
+    backing.slice(start, end + 1).map((s) => ({ name: s.key, ...s })),
   );
 
   return {
@@ -18,6 +24,7 @@ function fakeQueue(
       removeJobScheduler,
     } as unknown as SchedulerQueue,
     removeJobScheduler,
+    backing,
   };
 }
 
@@ -36,6 +43,20 @@ describe('removeSchedulersWithStaleOffsets', () => {
       'custom_automations',
     ]);
     expect(removeJobScheduler).toHaveBeenCalledTimes(2);
+  });
+
+  it('removes stale schedulers on every page even as removals shift ranks', async () => {
+    const schedulers = Array.from({ length: 150 }, (_, index) => ({
+      key: `job-${index}`,
+      every: 60_000,
+      offset: 120_000,
+    }));
+    const { queue, backing } = fakeQueue(schedulers);
+
+    await expect(removeSchedulersWithStaleOffsets(queue)).resolves.toHaveLength(
+      150,
+    );
+    expect(backing).toHaveLength(0);
   });
 
   it('pages through every scheduler', async () => {

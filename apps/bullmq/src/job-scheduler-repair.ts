@@ -16,7 +16,9 @@ const SCHEDULER_PAGE_SIZE = 100;
 export async function removeSchedulersWithStaleOffsets(
   queue: Pick<Queue, 'getJobSchedulers' | 'removeJobScheduler'>,
 ): Promise<string[]> {
-  const removed: string[] = [];
+  // Collect first: schedulers are paged by sorted-set rank, so deleting while
+  // paging would shift later entries left and skip them.
+  const stale: string[] = [];
 
   for (let start = 0; ; start += SCHEDULER_PAGE_SIZE) {
     const page = await queue.getJobSchedulers(
@@ -30,13 +32,18 @@ export async function removeSchedulersWithStaleOffsets(
       const offset = Number(scheduler.offset);
 
       if (every > 0 && Number.isFinite(offset) && offset >= every) {
-        await queue.removeJobScheduler(scheduler.key);
-        removed.push(scheduler.key);
+        stale.push(scheduler.key);
       }
     }
 
     if (page.length < SCHEDULER_PAGE_SIZE) {
-      return removed;
+      break;
     }
   }
+
+  for (const key of stale) {
+    await queue.removeJobScheduler(key);
+  }
+
+  return stale;
 }
