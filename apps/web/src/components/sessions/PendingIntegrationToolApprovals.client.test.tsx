@@ -5,6 +5,9 @@ import type { IntegrationToolApprovalMetadata } from '@roomote/types';
 
 import { PendingIntegrationToolApprovals } from './PendingIntegrationToolApprovals';
 
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+vi.mock('sonner', () => ({ toast: { error: toastError } }));
+
 const pending: IntegrationToolApprovalMetadata[] = [
   {
     approvalId: '3f0c8f0e-1111-4222-8333-444455556666',
@@ -23,6 +26,7 @@ describe('PendingIntegrationToolApprovals', () => {
 
   beforeEach(() => {
     fetchMock.mockClear();
+    toastError.mockClear();
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -58,6 +62,50 @@ describe('PendingIntegrationToolApprovals', () => {
     expect(JSON.parse(String(init.body))).toEqual({
       approvalId: pending[0]!.approvalId,
       decision,
+    });
+  });
+
+  it.each([403, 404, 500])(
+    'reports an unsuccessful HTTP %s decision and leaves the card usable',
+    async (status) => {
+      fetchMock.mockResolvedValueOnce(new Response('{}', { status }));
+      renderCard();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
+
+      await waitFor(() =>
+        expect(toastError).toHaveBeenCalledWith(
+          'Could not save your decision. Try again.',
+        ),
+      );
+      expect(screen.getByRole('button', { name: 'Deny' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Allow once' })).toBeEnabled();
+      expect(screen.getByTestId('pending-tool-approvals')).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('handles a transport failure and allows an explicit successful retry', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    renderCard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Allow once' })).toBeEnabled(),
+    );
+    expect(toastError).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[1] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(JSON.parse(String(init.body))).toEqual({
+      approvalId: pending[0]!.approvalId,
+      decision: 'approved',
     });
   });
 
