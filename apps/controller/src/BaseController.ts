@@ -21,6 +21,7 @@ import {
   type TaskRun,
   db,
   taskRuns,
+  taskRunEvents,
   readManagedDeploymentAccess,
   recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
@@ -693,11 +694,30 @@ export abstract class BaseController {
     await db.transaction(async (tx) => {
       const updatedRuns = await tx
         .update(taskRuns)
-        .set({ status: RunStatus.Dequeued, dequeuedAt: new Date() })
+        .set({
+          status: RunStatus.Dequeued,
+          // Recovered runs already have a dequeue lease. Advance its Date-visible
+          // identity even when two dispatch attempts share a clock millisecond.
+          dequeuedAt: sql`GREATEST(clock_timestamp() AT TIME ZONE 'UTC', ${taskRuns.dequeuedAt} + INTERVAL '1 millisecond')`,
+        })
         .where(
           and(
             eq(taskRuns.id, taskRun.id),
             eq(taskRuns.status, taskRun.status),
+            taskRun.status === RunStatus.Dequeued
+              ? taskRun.dequeuedAt
+                ? sql`date_trunc('milliseconds', ${taskRuns.dequeuedAt}) = ${taskRun.dequeuedAt.toISOString()}::timestamp`
+                : isNull(taskRuns.dequeuedAt)
+              : undefined,
+            taskRun.status !== RunStatus.Pending && taskRun.dequeuedAt
+              ? sql`NOT EXISTS (
+                  SELECT 1 FROM ${taskRunEvents}
+                  WHERE ${taskRunEvents.runId} = ${taskRun.id}
+                    AND ${taskRunEvents.source} = 'run_lifecycle'
+                    AND ${taskRunEvents.details}->>'stage' = 'controller_dequeue'
+                    AND ${taskRunEvents.createdAt} >= ${taskRun.dequeuedAt.toISOString()}::timestamp
+                )`
+              : undefined,
             isNull(taskRuns.cancelRequestedAt),
             isNull(taskRuns.canceledAt),
           ),
@@ -713,6 +733,9 @@ export abstract class BaseController {
         runId: taskRun.id,
         taskId: taskRun.taskId,
         eventType: 'decision',
+        // The durable dispatch decision owns this Date-visible lease, including
+        // a Redis replay that reads the row after the transaction commits.
+        createdAt: updatedRuns[0]!.dequeuedAt!,
         message:
           'Controller dequeued task run and handed it to provider dispatch.',
         details: {
@@ -726,6 +749,12 @@ export abstract class BaseController {
     });
 
     if (dequeueSkipped) {
+      if (
+        taskRun.status === RunStatus.Dequeued ||
+        (taskRun.status !== RunStatus.Pending && taskRun.dequeuedAt)
+      ) {
+        return null;
+      }
       const latestRun = await db.query.taskRuns.findFirst({
         where: eq(taskRuns.id, taskRun.id),
         columns: {
