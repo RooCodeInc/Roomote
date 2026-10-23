@@ -139,7 +139,7 @@ export function SkillListRow({
       </div>
       <div
         role="cell"
-        className="col-span-2 col-start-1 row-start-2 min-w-0 text-xs text-muted-foreground/80 md:col-span-1 md:col-start-2 md:row-start-1"
+        className="col-span-2 col-start-1 row-start-2 min-w-0 text-xs text-muted-foreground md:col-span-1 md:col-start-2 md:row-start-1"
       >
         {description}
       </div>
