@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@10.29.3",
   "dependencies": {
-    "dompurify": "3.4.16",
+    "dompurify": "3.4.17",
     "jsdom": "26.1.0",
     "snowflake-sdk": "3.3.0",
     "zod": "3.25.76"
@@ -14,7 +14,7 @@
       "axios": "1.20.0",
       "follow-redirects": "1.16.1",
       "moment": "2.31.0",
-      "toml": "4.2.0"
+      "toml": "5.0.1"
     }
   }
 }

@@ -1,9 +1,7 @@
 import 'next/dist/server/node-environment';
 import { createRequestStoreForAPI } from 'next/dist/server/async-storage/request-store';
-import {
-  workAsyncStorage,
-  type WorkStore,
-} from 'next/dist/server/app-render/work-async-storage.external';
+import { workAsyncStorage } from 'next/dist/server/app-render/work-async-storage.external';
+import { createWorkStore } from 'next/dist/server/async-storage/work-store';
 import { workUnitAsyncStorage } from 'next/dist/server/app-render/work-unit-async-storage.external';
 import { NextRequest } from 'next/server';
 import { authSessions, authUsers, db, eq } from '@roomote/db/server';
@@ -75,7 +73,29 @@ describe('browser session renewal with real Better Auth, Next cookies and Postgr
     );
     store.phase = phase;
     const result = await workAsyncStorage.run(
-      { route: '/sessions', isStaticGeneration: false } as WorkStore,
+      createWorkStore({
+        page: '/sessions/page',
+        renderOpts: {
+          cacheLifeProfiles: {
+            default: { stale: 300, revalidate: 900, expire: 4294967294 },
+          },
+          staticPageGenerationTimeout: 60,
+          cacheComponents: false,
+          validationLevel: 'warning',
+          experimental: {
+            authInterrupts: false,
+            useCacheTimeout: 50,
+            durableUseCacheEntries: false,
+          },
+          isBuildTimePrerendering: false,
+          waitUntil: undefined,
+          onClose: () => {},
+          onAfterTaskError: undefined,
+        },
+        deploymentId: 'test',
+        buildId: 'test',
+        previouslyRevalidatedTags: [],
+      }),
       () => workUnitAsyncStorage.run(store, callback),
     );
     return { result, outgoing };
