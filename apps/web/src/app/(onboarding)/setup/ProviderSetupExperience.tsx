@@ -820,6 +820,7 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
         <p className="font-semibold">
           Create a new {providerSetupCopy.setupLabel}.
           <Button
+            asChild
             variant="outline"
             size="sm"
             className="ml-2 h-auto px-2 py-0.75"
