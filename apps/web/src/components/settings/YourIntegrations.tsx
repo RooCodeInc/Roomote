@@ -302,14 +302,13 @@ function AddIntegrationForm({
   onSaved: () => Promise<void>;
   visibility?: ServiceCredentialVisibility;
 }) {
-  const formRef = useRef<HTMLFormElement>(null);
+  const keyInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [headerName, setHeaderName] = useState('authorization');
   const [methods, setMethods] = useState<CredentialEgressMethod[]>(readOnly);
   return (
     <form
-      ref={formRef}
       className="space-y-3"
       onSubmit={async (event) => {
         event.preventDefault();
@@ -346,7 +345,7 @@ function AddIntegrationForm({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(parsed.data),
           });
-          formRef.current?.reset();
+          if (keyInputRef.current) keyInputRef.current.value = '';
           const response = await request;
           if (!response.ok) throw new Error('Unavailable');
           toast.success('Integration saved.');
@@ -464,6 +463,7 @@ function AddIntegrationForm({
           <Label htmlFor="integration-secret">API key</Label>
           <Input
             id="integration-secret"
+            ref={keyInputRef}
             name="secret"
             secret
             required
