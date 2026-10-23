@@ -211,7 +211,7 @@ export function EnvironmentRoutingOverview() {
                     variant="ghost"
                     size="icon"
                     aria-label={`Delete ${rule.description}`}
-                    disabled={writesDisabled}
+                    disabled={writesDisabled || editingIndex !== null}
                     onClick={async () => {
                       try {
                         await saveRules(rules.filter((_, i) => i !== index));
