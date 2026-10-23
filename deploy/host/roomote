@@ -924,7 +924,8 @@ validate_volume_archive() {
   die "volume snapshot contains unsupported links or special files"
 }
 
-cmd_restore() {
+# Keep restore state in scope for EXIT cleanup after an errexit failure.
+cmd_restore() (
   local backup_file=''
   local confirmed='false'
   local passphrase_arg=''
@@ -1114,7 +1115,7 @@ cmd_restore() {
   fi
   trap - EXIT
   log "Restore complete"
-}
+)
 
 command="${1:-help}"
 shift || true
