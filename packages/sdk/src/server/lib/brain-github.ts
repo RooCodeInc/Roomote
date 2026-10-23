@@ -664,6 +664,7 @@ type BackfillCursor = {
   completed: string[];
   repository: string | null;
   page: number;
+  after?: string;
 };
 
 function parseBackfillCursor(cursor: string | null): BackfillCursor {
@@ -684,6 +685,9 @@ function parseBackfillCursor(cursor: string | null): BackfillCursor {
         typeof parsed.repository === 'string' ? parsed.repository : null,
       page:
         typeof parsed.page === 'number' && parsed.page > 0 ? parsed.page : 1,
+      ...(typeof parsed.after === 'string' && parsed.after.length > 0
+        ? { after: parsed.after }
+        : {}),
     };
   } catch {
     return { completed: [], repository: null, page: 1 };
@@ -694,11 +698,11 @@ function parseBackfillCursor(cursor: string | null): BackfillCursor {
  * One bounded deep-backfill step: a single page of one repository's full
  * issue history, newest first, so a long backlog surfaces its most useful
  * (recent) issues before its stale tail. An issue updated mid-walk shifts
- * toward page 1 and can be missed by the positional cursor, but the
+ * toward the first page and can be missed by the pagination cursor, but the
  * incremental pass owns updates and re-reads it from the watermark.
  * Completed repository identities are retained while the collector stays
  * open, so a repository connected later is found and backfilled without
- * invalidating a positional cursor.
+ * invalidating the in-progress pagination cursor.
  */
 export async function backfillBrainGithubIssuesStep(input: {
   cursor: string | null;
@@ -744,6 +748,8 @@ export async function backfillBrainGithubIssuesStep(input: {
   }
 
   const page = repository.fullName === cursor.repository ? cursor.page : 1;
+  const after =
+    repository.fullName === cursor.repository ? cursor.after : undefined;
   const [owner, repo] = repository.fullName.split('/');
 
   if (!owner || !repo) {
@@ -770,7 +776,7 @@ export async function backfillBrainGithubIssuesStep(input: {
       sort: 'updated',
       direction: 'desc',
       per_page: BACKFILL_PER_PAGE,
-      page,
+      ...(after ? { after } : page > 1 ? { page } : {}),
     });
 
     const rawIssues = response.data as GithubIssue[];
@@ -782,8 +788,15 @@ export async function backfillBrainGithubIssuesStep(input: {
       commentBudget: { remaining: MAX_COMMENT_FETCHES_PER_PASS },
     });
 
-    // Short page means this repository's history is exhausted.
-    const repositoryExhausted = rawIssues.length < BACKFILL_PER_PAGE;
+    // Retain only the opaque cursor, never follow a provider-supplied URL.
+    // Older GitHub servers can still use positional page continuation.
+    const nextLink = response.headers?.link?.match(/<([^>]+)>;\s*rel="next"/);
+    const nextAfter = nextLink
+      ? new URL(nextLink[1]!).searchParams.get('after')
+      : null;
+    const repositoryExhausted = nextAfter
+      ? false
+      : Boolean(after) || rawIssues.length < BACKFILL_PER_PAGE;
     if (repositoryExhausted) {
       completed.add(repository.fullName);
     }
@@ -800,6 +813,7 @@ export async function backfillBrainGithubIssuesStep(input: {
             completed: [...completed].sort(),
             repository: repository.fullName,
             page: page + 1,
+            ...(nextAfter ? { after: nextAfter } : {}),
           } satisfies BackfillCursor),
       done: false,
     };
@@ -810,7 +824,31 @@ export async function backfillBrainGithubIssuesStep(input: {
       }`,
     );
 
-    // No progress: hold this cursor and retry on the next tick.
+    // A legacy offset cannot be translated into an opaque cursor. Replay
+    // this repository from its first page instead of retrying a rejected
+    // offset forever; idempotent issue slugs make that replay safe.
+    if (
+      !after &&
+      page > 1 &&
+      error instanceof Error &&
+      'status' in error &&
+      error.status === 422 &&
+      error.message.includes(
+        'Pagination with the page parameter is not supported',
+      )
+    ) {
+      return {
+        pages: [],
+        nextCursor: JSON.stringify({
+          completed: [...completed].sort(),
+          repository: repository.fullName,
+          page: 1,
+        } satisfies BackfillCursor),
+        done: false,
+      };
+    }
+
+    // Other failures hold this cursor and retry on the next tick.
     return { pages: [], nextCursor: input.cursor, done: false };
   }
 }
