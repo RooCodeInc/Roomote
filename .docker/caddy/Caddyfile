@@ -38,7 +38,7 @@
 	}
 
 	handle @api_webhooks {
-		reverse_proxy host.docker.internal:13001 {
+		reverse_proxy host.docker.internal:{$ROOMOTE_API_PORT:13001} {
 			lb_try_duration 10s
 			lb_try_interval 250ms
 		}
@@ -50,7 +50,7 @@
 
 	handle @api {
 		uri strip_prefix /_roomote-api
-		reverse_proxy host.docker.internal:13001 {
+		reverse_proxy host.docker.internal:{$ROOMOTE_API_PORT:13001} {
 			lb_try_duration 10s
 			lb_try_interval 250ms
 		}
@@ -73,7 +73,7 @@
 	}
 
 	handle {
-		reverse_proxy host.docker.internal:13000 {
+		reverse_proxy host.docker.internal:{$ROOMOTE_WEB_PORT:13000} {
 			lb_try_duration 10s
 			lb_try_interval 250ms
 		}
