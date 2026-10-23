@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -28,13 +28,14 @@ export function PersonalizationSection() {
   const personalization = useQuery(
     trpc.preferences.getPersonalization.queryOptions(),
   );
-  const [instructions, setInstructions] = useState('');
+  const [draft, setDraft] = useState<string | null>(null);
+  const settings = personalization.data;
+  const instructions = draft ?? settings?.instructions ?? '';
 
-  useEffect(() => {
-    if (personalization.data) {
-      setInstructions(personalization.data.instructions);
-    }
-  }, [personalization.data]);
+  // Once saved data matches the draft, follow subsequent clean refreshes again.
+  if (draft !== null && draft === settings?.instructions) {
+    setDraft(null);
+  }
 
   const update = useMutation(
     trpc.preferences.updatePersonalization.mutationOptions({
@@ -43,7 +44,7 @@ export function PersonalizationSection() {
           queryKey,
           settings,
         );
-        setInstructions(settings.instructions);
+        setDraft(null);
       },
       onError: (error) => {
         toast.error(error.message);
@@ -52,7 +53,6 @@ export function PersonalizationSection() {
     }),
   );
 
-  const settings = personalization.data;
   const isBusy = personalization.isPending || update.isPending;
   const hasChanges = settings?.instructions !== instructions;
 
@@ -80,7 +80,7 @@ export function PersonalizationSection() {
                 rows={7}
                 className="md:min-h-48"
                 placeholder="For example: Keep answers concise, lead with a recommendation, and use examples when explaining unfamiliar concepts."
-                onChange={(event) => setInstructions(event.target.value)}
+                onChange={(event) => setDraft(event.target.value)}
               />
               {instructions.length > MAX_INSTRUCTIONS_LENGTH * 0.8 && (
                 <div className="flex justify-end text-xs text-muted-foreground">
