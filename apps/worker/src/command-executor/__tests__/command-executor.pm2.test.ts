@@ -2,6 +2,7 @@ import { execa } from 'execa';
 
 import {
   resolvePm2Invocation,
+  CommandExecutor,
   ROOMOTE_BUNDLED_PM2_BINARY_PATH,
   ROOMOTE_PATH_PM2_BINARY,
 } from '../command-executor';
@@ -56,6 +57,34 @@ describe('resolvePm2Invocation', () => {
     ]);
     expect(mockedExeca.mock.calls.some(([command]) => command === 'npx')).toBe(
       false,
+    );
+  });
+
+  it('reports timed-out process reconciliation instead of silently treating it as an empty daemon', async () => {
+    mockedExeca.mockResolvedValueOnce({ exitCode: 0 } as Awaited<
+      ReturnType<typeof execa>
+    >);
+    mockedExeca.mockResolvedValueOnce({
+      exitCode: undefined,
+      stdout: '',
+      timedOut: true,
+    } as Awaited<ReturnType<typeof execa>>);
+    const executor = new CommandExecutor(
+      '/tmp',
+      { PATH: '/fixture/bin' },
+      false,
+      { detachedProcessManager: 'pm2' },
+    );
+    await expect(executor.executeAll([])).rejects.toThrow(
+      'PM2 jlist timed out after 30 seconds',
+    );
+    expect(mockedExeca.mock.calls[1]?.[1]).toEqual(['jlist']);
+    expect((mockedExeca.mock.calls as unknown[][])[1]?.[2]).toEqual(
+      expect.objectContaining({
+        timeout: 30_000,
+        reject: false,
+        extendEnv: false,
+      }),
     );
   });
 });
