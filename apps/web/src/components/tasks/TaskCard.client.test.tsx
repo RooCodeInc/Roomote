@@ -409,7 +409,7 @@ describe('TaskCard', () => {
   it('renders the model after the PR badge when a PR exists', () => {
     const baseTask = createTask();
 
-    const { container } = render(
+    render(
       <TaskCard
         task={createTask({
           model: 'openrouter/openai/gpt-5.5',
@@ -426,9 +426,7 @@ describe('TaskCard', () => {
       />,
     );
 
-    const metadataRow = container.querySelector(
-      '.text-muted-foreground.text-xs',
-    );
+    const metadataRow = screen.getByText('GPT 5.5').parentElement;
 
     expect(metadataRow?.textContent).toContain(
       'Roomote/example-appRooCodeInc/Roomote#163GPT 5.5',

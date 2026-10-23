@@ -157,7 +157,7 @@ export const TaskCard = ({
 
       {/* Content */}
       <div className="flex flex-col min-w-0 flex-1">
-        <div className="flex items-start md:items-center gap-2 justify-between text-xs text-muted-foreground/75">
+        <div className="flex items-start md:items-center gap-2 justify-between text-xs text-muted-foreground">
           <div className="flex items-center gap-1 text-nowrap flex-wrap">
             <span className="ph-no-capture">{actorName}</span>
             <span>

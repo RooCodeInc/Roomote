@@ -74,7 +74,7 @@ function BoardTaskCard({ task }: { task: Task }) {
         aria-label={`Open task: ${stripMarkdown(stripHtmlTags(task.title))}`}
         className="absolute inset-0 z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
       />
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground/75">
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
         <span className="truncate">Started by {actorName}</span>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -209,7 +209,7 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
                     className="text-sm font-semibold"
                   >
                     {column.label}
-                    <span className="text-sm text-muted-foreground/50 ml-1">
+                    <span className="text-sm text-muted-foreground ml-1">
                       {columnTasks.length}
                     </span>
                   </h2>
@@ -227,9 +227,7 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
                   <BoardTaskCard key={task.id} task={task} />
                 ))
               ) : (
-                <div className="pl-4 text-xs text-muted-foreground/50">
-                  Empty
-                </div>
+                <div className="pl-4 text-xs text-muted-foreground">Empty</div>
               )}
             </div>
 
