@@ -1042,7 +1042,7 @@ describe('setupOrganizationEnvironment', () => {
       { 'owner/repo': '/tmp/workspace/owner/repo' },
       undefined,
       {
-        continueOnError: true,
+        continueOnError: false,
         onCommandStart: expect.any(Function),
         onCommandResult: expect.any(Function),
         onCommandFailure: expect.any(Function),
