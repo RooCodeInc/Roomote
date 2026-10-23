@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { formatTimeZone } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
+import type { MiscSettings } from '@/trpc/commands/misc-settings';
 import { SettingSummaryRow } from '@/components/settings';
 import {
   Button,
@@ -61,14 +62,21 @@ export function DeploymentTimeZoneSetting() {
   const [isTimeZonePickerOpen, setIsTimeZonePickerOpen] = useState(false);
 
   useEffect(() => {
-    if (settings.data) {
+    if (settings.data && !isEditing) {
       setTimeZone(settings.data.timeZone ?? settings.data.effectiveTimeZone);
     }
-  }, [settings.data]);
+  }, [settings.data, isEditing]);
 
   const update = useMutation(
     trpc.miscSettings.setTimeZone.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (saved) => {
+        queryClient.setQueryData<MiscSettings>(
+          trpc.miscSettings.get.queryKey(),
+          (current) =>
+            current
+              ? { ...current, ...saved, timeZoneSource: 'explicit' }
+              : current,
+        );
         toast.success('Scheduling timezone updated');
         setIsEditing(false);
         await Promise.all([
