@@ -323,17 +323,23 @@ done`;
           return false;
         }
 
-        const postmasterPid = (
+        const [postmasterPid, , , postmasterPort] = (
           await execa(
             'sudo',
-            ['head', '-n', '1', `${config.dataDir}/postmaster.pid`],
+            ['head', '-n', '4', `${config.dataDir}/postmaster.pid`],
             {
               timeout: 5000,
             },
           )
-        ).stdout.trim();
+        ).stdout
+          .trim()
+          .split(/\r?\n/);
 
-        if (!/^\d+$/.test(postmasterPid)) {
+        if (
+          !postmasterPid ||
+          !/^\d+$/.test(postmasterPid) ||
+          postmasterPort !== String(port)
+        ) {
           return false;
         }
 
