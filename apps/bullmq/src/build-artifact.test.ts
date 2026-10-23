@@ -26,7 +26,12 @@ describe('BullMQ build artifact', () => {
           '--out-dir',
           outputDirectory,
         ],
-        { cwd: packageDirectory, stdio: 'pipe', timeout: 45_000 },
+        {
+          cwd: packageDirectory,
+          stdio: 'pipe',
+          timeout: 45_000,
+          killSignal: 'SIGKILL',
+        },
       );
 
       const bundlePath = join(outputDirectory, 'index.js');
