@@ -15,6 +15,14 @@ describe('PortService.checkPorts', () => {
   const occupiedPorts = new Set<number>();
 
   beforeEach(() => {
+    for (const key of [
+      'ROOMOTE_WEB_PORT',
+      'ROOMOTE_API_PORT',
+      'ROOMOTE_BULLMQ_PORT',
+      'ROOMOTE_PREVIEW_PROXY_PORT',
+    ]) {
+      vi.stubEnv(key, '');
+    }
     vi.useFakeTimers();
     occupiedPorts.clear();
     vi.mocked(createConnection).mockImplementation(
@@ -37,6 +45,7 @@ describe('PortService.checkPorts', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.useRealTimers();
     vi.clearAllMocks();
   });
@@ -61,4 +70,27 @@ describe('PortService.checkPorts', () => {
       await Promise.all([result, vi.runAllTimersAsync()]);
     },
   );
+
+  describe.each([
+    ['ROOMOTE_WEB_PORT', 13000, '@roomote/web'],
+    ['ROOMOTE_API_PORT', 13001, '@roomote/api'],
+    ['ROOMOTE_BULLMQ_PORT', 13002, '@roomote/bullmq'],
+    ['ROOMOTE_PREVIEW_PROXY_PORT', 18081, '@roomote/preview-proxy'],
+  ] as const)('%s', (key, defaultPort, service) => {
+    it('allows an unrelated listener on the unused default port', async () => {
+      vi.stubEnv(key, '23100');
+      occupiedPorts.add(defaultPort);
+      const result = expect(PortService.checkPorts()).resolves.toBeUndefined();
+      await Promise.all([result, vi.runAllTimersAsync()]);
+    });
+
+    it('reports the configured port when it stays occupied', async () => {
+      vi.stubEnv(key, '23100');
+      occupiedPorts.add(23100);
+      const result = expect(PortService.checkPorts()).rejects.toThrow(
+        `Port 23100: ${service}`,
+      );
+      await Promise.all([result, vi.runAllTimersAsync()]);
+    });
+  });
 });
