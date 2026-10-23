@@ -41,6 +41,10 @@ repositories authorized for the task through its `REPOSITORIES.md` index, or
 search them live by name or description. An additional checkout does not
 provision another environment's services.
 
+On-demand checkout leaves existing git checkouts unchanged. If the destination
+already contains files outside a git checkout, Roomote preserves them and stops
+the checkout. Move the occupied path aside, then retry the checkout.
+
 You can name a repository loosely ("my fork of widgets", "the billing repo")
 without setting up an environment for it. Fast sees the deployment's active
 connected repositories and can search all of them by name or description, so it
