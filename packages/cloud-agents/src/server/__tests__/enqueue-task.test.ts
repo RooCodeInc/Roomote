@@ -33,7 +33,6 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   getFastAgentParentFromPayload,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
-  computeProviders,
 } from '@roomote/types';
 import {
   db,
@@ -57,7 +56,24 @@ import {
   userFactory,
   environmentFactory,
   repositoryFactory,
+  resolveDefaultComputeProvider,
+  withoutEligibleComputeDefault,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
+
+const computeDefaultFixture = vi.hoisted(() => ({
+  executor: undefined as DatabaseOrTransaction | undefined,
+}));
+vi.mock('@roomote/db/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/db/server')>();
+  return {
+    ...actual,
+    resolveDefaultComputeProvider: () =>
+      actual.resolveDefaultComputeProvider({
+        executor: computeDefaultFixture.executor,
+      }),
+  };
+});
 
 import {
   TaskRunQueue,
@@ -150,35 +166,17 @@ describe('resolveFreshTaskComputeProvider', () => {
 async function withoutEligibleDefault<T>(
   callback: () => Promise<T>,
 ): Promise<T> {
-  const prior = await db.query.deploymentSettings.findFirst({
-    where: eq(deploymentSettings.id, 'default'),
+  return withoutEligibleComputeDefault(async (executor) => {
+    computeDefaultFixture.executor = executor;
+    try {
+      await expect(resolveDefaultComputeProvider()).rejects.toThrow(
+        'No configured sandbox provider is available.',
+      );
+      return await callback();
+    } finally {
+      computeDefaultFixture.executor = undefined;
+    }
   });
-  await db
-    .insert(deploymentSettings)
-    .values({
-      id: 'default',
-      runtimeComputeConfig: {
-        defaultProvider: null,
-        excludedProviders: [...computeProviders],
-      },
-    })
-    .onConflictDoUpdate({
-      target: deploymentSettings.id,
-      set: {
-        runtimeComputeConfig: {
-          defaultProvider: null,
-          excludedProviders: [...computeProviders],
-        },
-      },
-    });
-  try {
-    return await callback();
-  } finally {
-    await db
-      .update(deploymentSettings)
-      .set({ runtimeComputeConfig: prior?.runtimeComputeConfig ?? null })
-      .where(eq(deploymentSettings.id, 'default'));
-  }
 }
 
 describe('pinned launch providers without an eligible default', () => {
