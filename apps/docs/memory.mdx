@@ -144,7 +144,8 @@ OpenRouter and OpenAI both support memory embedding calls.
 ### Run embeddings locally
 
 Self-hosted Compose deployments can keep embeddings on their own hardware
-while continuing to send chat synthesis to the configured memory provider.
+while continuing to send chat synthesis to the deployment's helper model or
+an explicitly configured memory inference provider.
 Enable both services and point memory at the bundled inference server:
 
 ```sh
@@ -282,8 +283,10 @@ Two settings pick the memory models:
 | `R_BRAIN_MODEL`               | Sourced synthesis | your provider's naming            | any time              |
 | `R_BRAIN_EMBEDDING_MODEL`     | Semantic recall   | a plain model id                  | before the first boot |
 
-Leave them unset and memory uses OpenAI's `gpt-5.6-luna` and
-`text-embedding-3-small` through whichever provider you configured.
+In the bundled deployment, synthesis defaults to the deployment's helper
+model. `R_BRAIN_MODEL` overrides synthesis through the configured memory
+inference provider. Embeddings default to `text-embedding-3-small` through
+OpenAI or OpenRouter unless you configure a self-run upstream.
 
 Memory search does not use a cross-encoder reranker: retrieval is hybrid
 (vector + keyword fusion), which keeps search latency flat and provider
