@@ -111,6 +111,36 @@ Environment setup still matters no matter which provider you choose. The
 sandbox provider supplies the sandbox; the environment tells Roomote what to
 put inside it.
 
+### Default fallback and removing saved configuration
+
+<Note>
+  The fallback and removal behavior below is on `develop` and is not included
+  in the v1.17.0 release.
+</Note>
+
+For self-hosted tasks that need the deployment default, Roomote selects only
+providers with the required configuration present and that are not excluded:
+
+1. Use the admin's saved default if it is still configured.
+2. Otherwise, use a configured non-Docker `DEFAULT_COMPUTE_PROVIDER`.
+3. Otherwise, prefer a configured hosted provider over Local Docker. Docker
+   needs no provider credentials and remains eligible unless excluded.
+
+If no eligible provider remains, default-selected work fails with **No configured
+sandbox provider is available.** Configure a provider in **Settings > Sandboxes**
+or allow Local Docker. Configuration checks do not test live provider health;
+invalid credentials or a provider outage can still prevent a sandbox from starting.
+
+Removing a provider's saved configuration also clears the saved default if it
+points to that provider. Process environment values are untouched, so a provider
+configured through deployment env vars can remain available. Removal does not
+purge queued tasks or retained sandboxes, or move existing work to another provider.
+
+Scheduled environment-snapshot maintenance skips providers without environment
+snapshot support, including Docker and Blaxel. Those providers continue to use
+their own task-resume mechanisms; skipping environment snapshots does not disable
+task resume.
+
 ## Common issues
 
 - **A hosted provider cannot start tasks.** Confirm its API credentials are
