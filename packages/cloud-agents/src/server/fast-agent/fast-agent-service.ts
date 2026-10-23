@@ -4078,10 +4078,6 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
-    const collectUserMessageTexts = (): string[] =>
-      modelAuthorizationDialogue
-        .filter((message) => message.role === 'user')
-        .map((message) => message.text);
     const {
       bootstrapMessages,
       turnMessages,
@@ -5600,7 +5596,6 @@ export async function answerFastAgentQuestion({
               claimedModel: args.model,
               claimedReasoningEffort: args.reasoningEffort,
               work: args.prompt,
-              userMessages: collectUserMessageTexts(),
               dialogue: modelAuthorizationDialogue,
               models: taskModelOptions.models,
               codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
@@ -5803,7 +5798,6 @@ export async function answerFastAgentQuestion({
               claimedModel: args.model,
               claimedReasoningEffort: args.reasoningEffort,
               work: `Review pull request ${repository}#${pullRequestNumber}`,
-              userMessages: collectUserMessageTexts(),
               dialogue: modelAuthorizationDialogue,
               models: taskModelOptions.models,
               codingModelRoutingRules: [],

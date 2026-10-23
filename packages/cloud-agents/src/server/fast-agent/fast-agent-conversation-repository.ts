@@ -697,8 +697,6 @@ export async function findFastAgentRepliesBeforeHumanPrompt(input: {
   conversationId: string;
   beforeTs: number;
   currentEventId: string;
-  /** Recover only the final proposal before a replayed human instruction. */
-  modelProposalTurnId?: string;
 }): Promise<string | undefined> {
   const [previousPrompt] = await db
     .select({ ts: fastAgentMessages.ts })
@@ -706,9 +704,7 @@ export async function findFastAgentRepliesBeforeHumanPrompt(input: {
     .where(
       and(
         eq(fastAgentMessages.conversationId, input.conversationId),
-        input.modelProposalTurnId
-          ? lte(fastAgentMessages.ts, input.beforeTs)
-          : lt(fastAgentMessages.ts, input.beforeTs),
+        lt(fastAgentMessages.ts, input.beforeTs),
         ne(fastAgentMessages.eventId, input.currentEventId),
         eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
         eq(fastAgentMessages.role, 'user'),
@@ -730,15 +726,12 @@ export async function findFastAgentRepliesBeforeHumanPrompt(input: {
           ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
         ),
         eq(fastAgentMessages.role, 'assistant'),
-        input.modelProposalTurnId
-          ? sql`${fastAgentMessages.turnId} is distinct from ${input.modelProposalTurnId}`
-          : undefined,
         sql`coalesce(${fastAgentMessages.metadata}->>'visibleInTranscript', 'true') <> 'false'`,
         sql`coalesce(${fastAgentMessages.metadata}->>'inferenceRetryNotice', 'false') <> 'true'`,
       ),
     )
     .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
-    .limit(input.modelProposalTurnId ? 1 : FAST_AGENT_REPLIED_TO_MESSAGE_LIMIT);
+    .limit(FAST_AGENT_REPLIED_TO_MESSAGE_LIMIT);
   const text = rows
     .reverse()
     .map((row) =>
