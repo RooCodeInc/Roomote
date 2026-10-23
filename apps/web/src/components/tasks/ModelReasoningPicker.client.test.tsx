@@ -614,6 +614,27 @@ describe('ModelReasoningPicker', () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each([false, true])(
+    'allows native Enter activation of the model settings link (mobile: %s)',
+    (mobile) => {
+      mobileState.current = mobile;
+      userState.isAdmin = true;
+      render(<Harness />);
+      fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+      const settingsLink = screen.getByRole('link', {
+        name: 'Open model settings in a new tab',
+      });
+      act(() => settingsLink.focus());
+
+      expect(fireEvent.keyDown(settingsLink, { key: 'Enter' })).toBe(true);
+      expect(settingsLink).toHaveFocus();
+      expect(screen.getByRole('listbox', { name: 'Models' })).toBeVisible();
+      expect(screen.getByTestId('selection')).toHaveTextContent(
+        'provider/alpha:low',
+      );
+    },
+  );
+
   it('hides the model settings shortcut on the model settings page', () => {
     userState.isAdmin = true;
     pathnameState.current = '/settings/models';

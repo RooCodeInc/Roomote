@@ -285,6 +285,12 @@ function PickerContent({
         return;
       }
       if (event.key === 'Enter') {
+        if (
+          event.target instanceof Element &&
+          event.target.closest('a[href]')
+        ) {
+          return;
+        }
         event.preventDefault();
         setTypeaheadQuery('');
         onClose?.();
