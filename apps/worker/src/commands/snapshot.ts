@@ -83,6 +83,7 @@ export async function snapshot({
     const envVars: Record<string, string> = {
       ...fetchedEnvVars,
       ...(sourceControlToken?.envVars ?? { GH_TOKEN }),
+      ROOMOTE_TASK_ID: taskId,
     };
 
     setWorkerRuntimeContext({
