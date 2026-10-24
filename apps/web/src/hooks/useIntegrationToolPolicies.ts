@@ -284,6 +284,10 @@ export function useIntegrationToolPolicies(
 
   return {
     isLoading: listQuery.isLoading,
+    hasData: listQuery.data !== undefined,
+    isError: listQuery.isError,
+    isFetching: listQuery.isFetching,
+    refetch: listQuery.refetch,
     modes,
     isUpdating: writePolicies.isPending || savePolicies.isPending,
     setMode: (
