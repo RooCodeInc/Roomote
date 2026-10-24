@@ -26,6 +26,7 @@ import {
   type SessionTitleRefreshJob,
 } from '@roomote/cloud-agents/server';
 
+import { removeSchedulersWithStaleOffsets } from './job-scheduler-repair';
 import { getRedis } from './redis';
 import {
   ScheduledJobName,
@@ -105,6 +106,15 @@ function isAutomationJobName(name: string): name is ScheduledAutomationJobName {
 async function createJobs(queue: Queue): Promise<void> {
   for (const retiredName of RETIRED_JOB_SCHEDULER_NAMES) {
     await queue.removeJobScheduler(retiredName);
+  }
+
+  // Upserts keep a scheduler's stored offset, so one left larger than its
+  // interval by an earlier cadence keeps firing late; re-create it fresh.
+  const staleSchedulers = await removeSchedulersWithStaleOffsets(queue);
+  if (staleSchedulers.length > 0) {
+    console.warn(
+      `[scheduler] Re-creating job schedulers with stale offsets: ${staleSchedulers.join(', ')}`,
+    );
   }
 
   await queue.upsertJobScheduler(

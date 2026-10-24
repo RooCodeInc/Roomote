@@ -2,6 +2,20 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.19.3 (2026-10-24)
+
+Roomote 1.19.3 keeps scheduled automations and worker health checks running reliably while memory history backfills make progress in the background.
+
+### Highlights
+
+- Keep memory history backfills from crowding out scheduled automations and worker health checks.
+- Automatically repair outdated scheduler offsets so heartbeat and automation checks return to their intended cadence.
+
+### Patch changes
+
+- Memory history backfills no longer pile up overlapping collector runs that delay scheduled automations, make worker health checks go stale, and trigger repeated worker restarts. Collection runs one at a time and yields between bounded backfill passes, preserving progress for the next scheduled run.
+- Scheduled heartbeat and automation checks now recover their intended cadence after an interval change instead of continuing to run late because of an outdated scheduler offset. Roomote repairs affected schedules automatically when the background worker starts.
+
 ## 1.19.2 (2026-10-22)
 
 Roomote 1.19.2 lets you continue tasks saved before an upgrade without losing access to their saved work.
