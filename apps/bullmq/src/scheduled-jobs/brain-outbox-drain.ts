@@ -705,6 +705,14 @@ async function backfillTaskHistoryOnce(): Promise<void> {
  */
 let brainCollectorsInFlight = false;
 
+/**
+ * Set when a run ends on its time budget mid-backfill. The next run resumes
+ * PR facts from their exact saved cursor instead of rewinding by the overlap
+ * window, which would rewrite the same facts every tick when one pass fills
+ * the budget. In-process only: after a restart the overlap rewind is safe.
+ */
+let resumePullRequestFactsExactly = false;
+
 export async function brainCollectorsJob(): Promise<void> {
   if (brainCollectorsInFlight) {
     console.log(`${LOG_PREFIX} collectors already running; skipping this tick`);
@@ -763,12 +771,14 @@ async function runBrainCollectorsJob(): Promise<void> {
 
   let includeIncremental = true;
   let continueCollectorIds: string[] = [];
+  let restartPullRequestFactsFromOverlap = !resumePullRequestFactsExactly;
 
-  await drainBrainHistoricalIngestion({
+  const outcome = await drainBrainHistoricalIngestion({
     async runPass() {
       const pullRequestFactsResult = await syncPullRequestFacts(connection, {
-        restartFromOverlap: includeIncremental,
+        restartFromOverlap: restartPullRequestFactsFromOverlap,
       });
+      restartPullRequestFactsFromOverlap = false;
 
       if (pullRequestFactsResult.interrupted) {
         return { progressed: false, interrupted: true };
@@ -794,6 +804,7 @@ async function runBrainCollectorsJob(): Promise<void> {
       };
     },
   });
+  resumePullRequestFactsExactly = outcome === 'budget';
 }
 
 /**
@@ -807,7 +818,7 @@ export async function drainBrainHistoricalIngestion(input: {
   wait?: () => Promise<void>;
   budgetMs?: number;
   now?: () => number;
-}): Promise<void> {
+}): Promise<'settled' | 'interrupted' | 'budget'> {
   const now = input.now ?? Date.now;
   const budgetMs = input.budgetMs ?? BACKFILL_RUN_BUDGET_MS;
   const startedAt = now();
@@ -821,8 +832,12 @@ export async function drainBrainHistoricalIngestion(input: {
   for (;;) {
     const result = await input.runPass();
 
-    if (result.interrupted || !result.progressed) {
-      return;
+    if (result.interrupted) {
+      return 'interrupted';
+    }
+
+    if (!result.progressed) {
+      return 'settled';
     }
 
     // End the run before the next scheduled tick; that tick resumes the
@@ -831,7 +846,7 @@ export async function drainBrainHistoricalIngestion(input: {
       console.log(
         `${LOG_PREFIX} historical ingestion advanced; resuming on the next scheduled tick`,
       );
-      return;
+      return 'budget';
     }
 
     console.log(

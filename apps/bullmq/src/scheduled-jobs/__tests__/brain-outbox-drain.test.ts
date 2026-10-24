@@ -719,6 +719,38 @@ describe('historical ingestion continuation', () => {
     expect(wait).toHaveBeenCalledTimes(2);
   });
 
+  it('reports why the run ended', async () => {
+    const settled = vi.fn(async () => ({
+      progressed: false,
+      interrupted: false,
+    }));
+    const interrupted = vi.fn(async () => ({
+      progressed: true,
+      interrupted: true,
+    }));
+    let clock = 0;
+    const slow = vi.fn(async () => {
+      clock += 11 * 60 * 1000;
+      return { progressed: true, interrupted: false };
+    });
+    const wait = vi.fn(async () => {});
+
+    await expect(
+      drainBrainHistoricalIngestion({ runPass: settled, wait }),
+    ).resolves.toBe('settled');
+    await expect(
+      drainBrainHistoricalIngestion({ runPass: interrupted, wait }),
+    ).resolves.toBe('interrupted');
+    await expect(
+      drainBrainHistoricalIngestion({
+        runPass: slow,
+        wait,
+        budgetMs: 10 * 60 * 1000,
+        now: () => clock,
+      }),
+    ).resolves.toBe('budget');
+  });
+
   it('stops immediately on Brain backpressure', async () => {
     const runPass = vi
       .fn()
