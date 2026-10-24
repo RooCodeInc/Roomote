@@ -447,7 +447,7 @@ Roomote asks a decision model small typed questions: whether a turn is worth
 saving to Memory, who an unmentioned thread reply is for, when a running task
 has news for the user, which model a delegated task should use. With a
 TypeSafe key in **Settings → Models**, Jev answers them. Without one, the
-`judgment` service can: it runs `roomote/roomote-judgment-gliner`, a public
+`judgment` service runs `roomote/roomote-judgment-gliner`, a public
 GLiNER 2.5 model fine-tuned on Roomote's decisions, on CPU inside the project.
 
 The service is part of the template and idles without loading its model. To
@@ -524,7 +524,7 @@ Those redeploys can be automated from any CI system against Railway's public
 GraphQL API using a **project token** (scoped to a single environment).
 Resolve the environment from the token itself
 (`query { projectToken { environmentId } }`), find the services whose image
-starts with `ghcr.io/<owner>/roomote-app`, then for each issue
+starts with `ghcr.io/<owner>/roomote-app`, then, for each service, issue
 `serviceInstanceUpdate` pointing at an immutable tag (e.g.
 `develop-<short-sha>` or `v1.2.3`) followed by `serviceInstanceDeploy`. Both
 mutations are idempotent, so a retried or partially failed run is safe to
