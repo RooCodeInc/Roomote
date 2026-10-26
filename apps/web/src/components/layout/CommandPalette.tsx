@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { defaultFilter } from 'cmdk';
 
 import {
   CommandDialog,
@@ -35,6 +36,9 @@ import {
 
 const DEFAULT_TASKS_LIMIT = 5;
 const SEARCH_TASKS_LIMIT = 15;
+
+const filterPaletteCommands: typeof defaultFilter = (value, search, keywords) =>
+  defaultFilter(value, search.trim(), keywords);
 
 type CommandPaletteAutoFocusSignals = {
   anyHoverNone: boolean;
@@ -230,6 +234,7 @@ function AuthorizedCommandPalette() {
 
   return (
     <CommandDialog
+      filter={filterPaletteCommands}
       open={open}
       onOpenChange={(v) => {
         setOpen(v);

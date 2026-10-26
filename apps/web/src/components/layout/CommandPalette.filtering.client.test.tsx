@@ -21,8 +21,9 @@ vi.mock('@/components/system', async () => {
       children,
       value,
       onValueChange,
+      filter,
     }: React.ComponentProps<typeof Command>) => (
-      <Command value={value} onValueChange={onValueChange}>
+      <Command value={value} onValueChange={onValueChange} filter={filter}>
         {children}
       </Command>
     ),
@@ -79,18 +80,17 @@ import { CommandPalette } from './CommandPalette';
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   searchSessions.mockImplementation(async (query: string) => ({
-    sessions:
-      query === 'billing' || query === 'launch'
-        ? [
-            {
-              id: 'session-launch',
-              title: 'Summarize launch readiness',
-              executionCount: 0,
-              searchSnippet:
-                'Authentication, billing, and rollback checks passed.',
-            },
-          ]
-        : [],
+    sessions: ['billing', 'launch'].includes(query.trim().toLowerCase())
+      ? [
+          {
+            id: 'session-launch',
+            title: 'Summarize launch readiness',
+            executionCount: 0,
+            searchSnippet:
+              'Authentication, billing, and rollback checks passed.',
+          },
+        ]
+      : [],
   }));
 });
 
@@ -106,20 +106,24 @@ function renderPalette() {
   return screen.getByRole('combobox');
 }
 
-it('keeps a server transcript match visible and keyboard-selectable without a title match', async () => {
-  const input = renderPalette();
-  fireEvent.change(input, { target: { value: 'billing' } });
+it.each(['billing', ' BILLING '])(
+  'keeps server transcript match %j visible and keyboard-selectable without a title match',
+  async (query) => {
+    const input = renderPalette();
+    fireEvent.change(input, { target: { value: query } });
 
-  const result = await screen.findByRole('option', {
-    name: /Summarize launch readiness/,
-  });
-  expect(result).toBeVisible();
-  expect(screen.queryByText('No results found.')).not.toBeInTheDocument();
-  fireEvent.keyDown(input, { key: 'ArrowDown' });
-  fireEvent.keyDown(input, { key: 'Enter' });
-  expect(push).toHaveBeenCalledWith('/sessions/session-launch');
-  expect(setOpen).toHaveBeenCalledWith(false);
-});
+    const result = await screen.findByRole('option', {
+      name: /Summarize launch readiness/,
+    });
+    expect(result).toBeVisible();
+    expect(input).toHaveValue(query);
+    expect(screen.queryByText('No results found.')).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(push).toHaveBeenCalledWith('/sessions/session-launch');
+    expect(setOpen).toHaveBeenCalledWith(false);
+  },
+);
 
 it('preserves title matches, local navigation filtering, and the empty state after changing queries', async () => {
   const input = renderPalette();
@@ -128,9 +132,11 @@ it('preserves title matches, local navigation filtering, and the empty state aft
     await screen.findByRole('option', { name: /Summarize launch readiness/ }),
   ).toBeVisible();
 
-  fireEvent.change(input, { target: { value: 'settings' } });
+  fireEvent.change(input, { target: { value: ' settings ' } });
   expect(screen.getByRole('option', { name: 'Settings' })).toBeVisible();
-  await waitFor(() => expect(searchSessions).toHaveBeenCalledWith('settings'));
+  await waitFor(() =>
+    expect(searchSessions).toHaveBeenCalledWith(' settings '),
+  );
   expect(
     screen.queryByRole('option', { name: /Summarize launch readiness/ }),
   ).toBeNull();
