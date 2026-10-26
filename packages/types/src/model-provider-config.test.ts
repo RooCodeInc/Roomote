@@ -818,7 +818,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
-  it('offers GPT-6.1 Terra only on verified routes and keeps Fast provider-specific', () => {
+  it('offers GPT-6.1 Terra only on verified routes', () => {
     const terraRoutes = SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) =>
       provider.suggestedTaskModels
         .filter((model) => model.displayName.startsWith('GPT-6.1 Terra'))
@@ -829,7 +829,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       ['roomote', 'roomote/openai/gpt-6.1-terra'],
       ['openrouter', 'openrouter/openai/gpt-6.1-terra'],
       ['vercel', 'vercel/openai/gpt-6.1-terra'],
-      ['vercel', 'vercel/openai/gpt-6.1-terra-fast'],
       ['requesty', 'requesty/azure/gpt-6.1-terra@swedencentral'],
       ['openai', 'openai/gpt-6.1-terra'],
       ['azure', 'azure/gpt-6.1-terra'],

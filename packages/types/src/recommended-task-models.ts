@@ -48,11 +48,6 @@ export const RECOMMENDED_TASK_MODELS = [
   { id: 'gpt-6-sol', displayName: 'GPT-6 Sol', family: 'GPT' },
   { id: 'gpt-6-1-sol', displayName: 'GPT-6.1 Sol', family: 'GPT' },
   { id: 'gpt-6-1-terra', displayName: 'GPT-6.1 Terra', family: 'GPT' },
-  {
-    id: 'gpt-6-1-terra-fast',
-    displayName: 'GPT-6.1 Terra (Fast)',
-    family: 'GPT',
-  },
   { id: 'gpt-5-6-terra', displayName: 'GPT 5.6 Terra', family: 'GPT' },
   { id: 'gpt-5-6-luna', displayName: 'GPT 5.6 Luna', family: 'GPT' },
   { id: 'gpt-6-luna', displayName: 'GPT-6 Luna', family: 'GPT' },

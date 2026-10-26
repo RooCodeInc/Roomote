@@ -50,8 +50,6 @@ describe('mergeOpenCodeChatGptFastModeOptions', () => {
         'openrouter/openai/gpt-5.4',
         'openrouter/openai/gpt-6.1-terra',
         'vercel/openai/gpt-6.1-terra',
-        'vercel/openai/gpt-6.1-terra-fast',
-        'openai/gpt-6.1-terra-fast',
         'openai/gpt-5.4-mini',
         'openai/gpt-5.3-codex-spark',
       ]),
