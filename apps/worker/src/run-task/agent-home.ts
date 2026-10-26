@@ -55,6 +55,7 @@ import {
   mergeBedrockMantleProviderConfig,
   mergeCatalogProviderCredentialConfig,
   mergeKimiForCodingProviderConfig,
+  mergeCuratedOpenCodeModelConfig,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
@@ -1740,12 +1741,15 @@ function resolveModelBackedOpenCodeConfig(
     // config entry or its cost block is silently dropped.
     ...Object.keys(modelCosts),
   ];
-  const providerModelConfig = chatGptFastMode
-    ? mergeOpenCodeChatGptFastModeOptions(
-        providerReasoningConfig,
-        configuredModelIds,
-      )
-    : providerReasoningConfig;
+  const providerModelConfig = mergeCuratedOpenCodeModelConfig(
+    chatGptFastMode
+      ? mergeOpenCodeChatGptFastModeOptions(
+          providerReasoningConfig,
+          configuredModelIds,
+        )
+      : providerReasoningConfig,
+    configuredModelIds,
+  );
   const providerConfig = mergeInferenceGatewayProviderConfig(
     // Binds the keys OpenCode would not find under its catalog's env var
     // names. Gateway mode replaces the key and base URL just above.

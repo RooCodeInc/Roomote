@@ -94,6 +94,10 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
         'gpt-6-astra': createModel('gpt-6-astra'),
         'gpt-6-sol': createModel('gpt-6-sol'),
         'gpt-6.1-sol': createModel('gpt-6.1-sol'),
+        'gpt-6.1-terra': {
+          ...createModel('gpt-6.1-terra'),
+          limit: { context: 1_050_000, input: 922_000, output: 128_000 },
+        },
         'gpt-6-luna': createModel('gpt-6-luna'),
         'gpt-5.6-luna': createModel('gpt-5.6-luna'),
         'gpt-5.6': createModel('gpt-5.6'),
@@ -110,6 +114,7 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
       'gpt-6-astra',
       'gpt-6-sol',
       'gpt-6.1-sol',
+      'gpt-6.1-terra',
       'gpt-6-luna',
       'gpt-5.6-luna',
       'gpt-5.6',
@@ -120,6 +125,10 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
       input: 0,
       output: 0,
       cache: { read: 0, write: 0 },
+    });
+    expect(models['gpt-6.1-terra']).toMatchObject({
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 1_050_000, input: 922_000, output: 128_000 },
     });
     expect(models['gpt-6-astra']).toMatchObject({
       cost: {

@@ -818,6 +818,25 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
+  it('offers GPT-6.1 Terra only on verified routes', () => {
+    const terraRoutes = SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) =>
+      provider.suggestedTaskModels
+        .filter((model) => model.displayName.startsWith('GPT-6.1 Terra'))
+        .map((model) => [provider.id, model.id]),
+    );
+
+    expect(terraRoutes).toEqual([
+      ['roomote', 'roomote/openai/gpt-6.1-terra'],
+      ['openrouter', 'openrouter/openai/gpt-6.1-terra'],
+      ['vercel', 'vercel/openai/gpt-6.1-terra'],
+      ['requesty', 'requesty/azure/gpt-6.1-terra@swedencentral'],
+      ['openai', 'openai/gpt-6.1-terra'],
+      ['azure', 'azure/gpt-6.1-terra'],
+      ['azure-cognitive-services', 'azure-cognitive-services/gpt-6.1-terra'],
+      ['chatgpt', 'openai/gpt-6.1-terra'],
+    ]);
+  });
+
   it('uses the Default Luna preset for every applicable role', () => {
     for (const provider of SETUP_MODEL_PROVIDER_CATALOG) {
       const luna = provider.suggestedTaskModels.find(
@@ -1208,6 +1227,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gpt-5.6-sol@eu',
       'requesty/gpt-6-sol@eu',
       'requesty/gpt-6.1-sol@eu',
+      'requesty/azure/gpt-6.1-terra@swedencentral',
       'requesty/gpt-5.6-terra@eu',
       'requesty/gpt-5.6-luna@eu',
       'requesty/gpt-6-luna@eu',

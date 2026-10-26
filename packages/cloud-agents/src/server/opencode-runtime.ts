@@ -16,6 +16,7 @@ import {
   mergeBedrockMantleProviderConfig,
   mergeCatalogProviderCredentialConfig,
   mergeKimiForCodingProviderConfig,
+  mergeCuratedOpenCodeModelConfig,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
@@ -192,13 +193,15 @@ function buildModelBackedOpenCodeConfigContent(
   const configuredModelIds = NON_TASK_OPENCODE_MODEL_ROLES.map(
     (role) => roleConfig[role].model,
   );
-  const providerModelConfig =
+  const providerModelConfig = mergeCuratedOpenCodeModelConfig(
     env[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1'
       ? mergeOpenCodeChatGptFastModeOptions(
           providerReasoningConfig,
           configuredModelIds,
         )
-      : providerReasoningConfig;
+      : providerReasoningConfig,
+    configuredModelIds,
+  );
   // Same Bedrock provider registrations the task worker applies: OpenCode's
   // catalog knows neither Mantle endpoint, and the native provider does not
   // read the deployment's bearer token on its own.
@@ -495,7 +498,7 @@ function mergeBedrockRegistrationsIntoConfigContent(
         mergeBedrockMantleOpenAiProviderConfig(
           mergeKimiForCodingProviderConfig(
             mergeCatalogProviderCredentialConfig(
-              existingProvider,
+              mergeCuratedOpenCodeModelConfig(existingProvider, roleModelIds),
               env,
               roleModelIds,
             ),
