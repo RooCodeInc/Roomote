@@ -706,10 +706,11 @@ async function backfillTaskHistoryOnce(): Promise<void> {
 let brainCollectorsInFlight = false;
 
 /**
- * Set when a run ends on its time budget mid-backfill. The next run resumes
+ * Set when a run stops mid-backfill on its budget or Brain backpressure. The next run resumes
  * PR facts from their exact saved cursor instead of rewinding by the overlap
  * window, which would rewrite the same facts every tick when one pass fills
- * the budget. In-process only: after a restart the overlap rewind is safe.
+ * the budget or the sink only accepts part of a batch. In-process only:
+ * after a restart the overlap rewind is safe.
  */
 let resumePullRequestFactsExactly = false;
 
@@ -804,7 +805,7 @@ async function runBrainCollectorsJob(): Promise<void> {
       };
     },
   });
-  resumePullRequestFactsExactly = outcome === 'budget';
+  resumePullRequestFactsExactly = outcome !== 'settled';
 }
 
 /**
@@ -1547,12 +1548,27 @@ async function syncPullRequestFacts(
   }
 
   let ingested = 0;
+  let lastIngested: (typeof facts)[number] | undefined;
+  const checkpointProgress = async () => {
+    if (!lastIngested) return;
+    await upsertBrainSyncState(db, PR_FACTS_COLLECTOR_ID, {
+      watermark: lastIngested.updatedAt,
+      backfillCursor: JSON.stringify({
+        updatedAt: lastIngested.updatedAt.toISOString(),
+        id: lastIngested.id,
+      } satisfies PullRequestFactsCursor),
+    });
+  };
 
   for (const fact of facts) {
     try {
       await postToBrain(buildPullRequestFactPage(fact), connection);
       ingested++;
+      lastIngested = fact;
     } catch (error) {
+      // Keep the prefix the sink accepted. Replaying it on every retry can
+      // consume the entire rate limit before the failed fact is reached.
+      await checkpointProgress();
       // Leave the watermark unadvanced past this fact; retry next tick.
       console.warn(
         `${LOG_PREFIX} PR fact sync failed for ${fact.repositoryFullName}#${fact.prNumber}: ${
@@ -1566,14 +1582,7 @@ async function syncPullRequestFacts(
     }
   }
 
-  const last = facts.at(-1)!;
-  await upsertBrainSyncState(db, PR_FACTS_COLLECTOR_ID, {
-    watermark: last.updatedAt,
-    backfillCursor: JSON.stringify({
-      updatedAt: last.updatedAt.toISOString(),
-      id: last.id,
-    } satisfies PullRequestFactsCursor),
-  });
+  await checkpointProgress();
 
   if (ingested > 0) {
     console.log(
