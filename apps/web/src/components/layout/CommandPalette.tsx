@@ -293,6 +293,7 @@ function AuthorizedCommandPalette() {
               <CommandItem
                 key={session.id}
                 value={`${session.title}-${session.id}`}
+                keywords={[debouncedSearch]}
                 onSelect={() => navigate(`/sessions/${session.id}`)}
               >
                 <span className="min-w-0 flex-1">
