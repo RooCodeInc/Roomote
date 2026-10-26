@@ -274,6 +274,12 @@ service hook, Bitbucket needs commit-status webhook events and the Pipelines
 OAuth scope, and Gitea needs the `workflow_run` webhook event. CI Failure Triage
 is webhook-driven; a scheduled check does not scan repositories.
 
+**Run now** is also available. Each explicit run launches at most one
+investigation for the first eligible environment-mapped repository without an
+active triage claim; it is not a full scan of every repository. For GitLab, Azure
+DevOps, Bitbucket, and Gitea, Roomote first checks that repository's latest
+default-branch pipeline or build and skips it unless it failed.
+
 **Announce Roomote Updates** posts only after the deployment finishes readiness
 checks for a newer installed release. The first observation establishes a
 silent baseline, restarts and rollbacks do not repost, and patch-only changes

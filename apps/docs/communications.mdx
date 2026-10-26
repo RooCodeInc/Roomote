@@ -35,7 +35,10 @@ Before connecting a communications provider, make sure your deployment has:
 1. a stable public HTTPS URL when the provider uses callbacks or webhooks
 2. provider app or bot credentials
 3. at least one Roomote user who can sign in
-4. an environment that tasks can run against
+
+An environment is optional for conversations and repository-only tasks. Configure
+a [sandbox provider](/compute) when a request needs command execution; add an
+[environment](/environments) for reusable services, setup commands, or previews.
 
 After connecting the provider, start a small session from chat and confirm that:
 

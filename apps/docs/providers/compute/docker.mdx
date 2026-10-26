@@ -1,6 +1,6 @@
 ---
 title: Docker
-icon: 'https://api.iconify.design/simple-icons:docker.svg?color=currentColor'
+icon: 'https://api.iconify.design/simple-icons/docker.svg?color=currentColor'
 description: Run Roomote task sandboxes as Docker containers on the same host as the deployment.
 ---
 
@@ -40,7 +40,7 @@ DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
 DOCKER_WORKER_CPU_LIMIT=2
 DOCKER_WORKER_MEMORY_LIMIT=4g
 DOCKER_TASK_DAEMON_MEMORY_LIMIT=8g
-DOCKER_WORKER_PIDS_LIMIT=512
+DOCKER_WORKER_PIDS_LIMIT=2048
 DOCKER_WORKER_DISK_LIMIT=20g
 DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=false
 DOCKER_WORKER_LOG_MAX_SIZE=10m
@@ -76,11 +76,15 @@ the same task-scoped routing, while their Docker control plane is not exposed
 to other tasks. The daemon, inner containers, network, and workspace volume are
 stopped or removed with the task lifecycle.
 
-Workers default to 2 CPUs, 4 GiB of memory with no additional swap, 512 PIDs,
+Workers default to 2 CPUs, 4 GiB of memory with no additional swap, 2048 PIDs,
 a requested 20 GiB writable-layer quota, and three 10 MiB JSON log files. The
 dedicated Docker daemon used by Docker-project tasks receives an 8 GiB memory
 limit by default while inheriting the other worker resource limits. The
 variables above can tune those bounds.
+The supplied production and Docker compute Compose files explicitly set a
+512-PID default. Set `DOCKER_WORKER_PIDS_LIMIT=2048` in the Compose environment
+file and recreate the controller when browser-heavy tasks need more headroom;
+new task containers receive the updated limit.
 Writable-layer quotas require a Docker
 storage driver that supports `--storage-opt size`. When the driver rejects that
 option, Roomote refuses to start the task rather than allowing untrusted code to
@@ -172,7 +176,7 @@ one to a fix.
   sandbox needs. Stop it, or change the conflicting service's port, then retry.
 - **The worker release archive is missing.** The Docker provider installs the
   worker from a local release archive. For local development, run
-  `pnpm dev --use-release` (or the worker-release build step) so the archive
+   `pnpm dev` (or the worker-release build step) so the local archive
   exists before starting tasks.
 - **The worker failed while contacting the Roomote API (`fetch failed`).**
   The container cannot reach the API URL from inside Docker. Verify

@@ -17,7 +17,7 @@ export function IntegrationName({ href, icon, name }) {
     manualIcons[icon] ??
     (icon?.startsWith('/')
       ? icon
-      : `https://api.iconify.design/simple-icons:${icon}.svg?color=currentColor`);
+      : `https://api.iconify.design/simple-icons/${icon}.svg?color=currentColor`);
 
   return (
     <a href={href} className="integration-name">
