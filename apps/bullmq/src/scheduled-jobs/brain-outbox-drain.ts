@@ -706,7 +706,7 @@ async function backfillTaskHistoryOnce(): Promise<void> {
 let brainCollectorsInFlight = false;
 
 /**
- * Set when a run stops mid-backfill on its budget or Brain backpressure. The next run resumes
+ * Set while the PR-fact scan itself needs another pass. The next run resumes
  * PR facts from their exact saved cursor instead of rewinding by the overlap
  * window, which would rewrite the same facts every tick when one pass fills
  * the budget or the sink only accepts part of a batch. In-process only:
@@ -773,12 +773,14 @@ async function runBrainCollectorsJob(): Promise<void> {
   let includeIncremental = true;
   let continueCollectorIds: string[] = [];
   let restartPullRequestFactsFromOverlap = !resumePullRequestFactsExactly;
+  let pullRequestFactsNeedContinuation = false;
 
-  const outcome = await drainBrainHistoricalIngestion({
+  await drainBrainHistoricalIngestion({
     async runPass() {
       const pullRequestFactsResult = await syncPullRequestFacts(connection, {
         restartFromOverlap: restartPullRequestFactsFromOverlap,
       });
+      pullRequestFactsNeedContinuation = pullRequestFactsResult.resumeExactly;
       restartPullRequestFactsFromOverlap = false;
 
       if (pullRequestFactsResult.interrupted) {
@@ -805,7 +807,7 @@ async function runBrainCollectorsJob(): Promise<void> {
       };
     },
   });
-  resumePullRequestFactsExactly = outcome !== 'settled';
+  resumePullRequestFactsExactly = pullRequestFactsNeedContinuation;
 }
 
 /**
@@ -1496,7 +1498,11 @@ async function syncPullRequestFacts(
   options: {
     restartFromOverlap: boolean;
   },
-): Promise<{ progressed: boolean; interrupted: boolean }> {
+): Promise<{
+  progressed: boolean;
+  interrupted: boolean;
+  resumeExactly: boolean;
+}> {
   const state = await getBrainSyncState(db, PR_FACTS_COLLECTOR_ID);
   const cursor = getPullRequestFactsResumeCursor(
     state,
@@ -1544,7 +1550,7 @@ async function syncPullRequestFacts(
     .limit(PR_FACTS_BATCH_SIZE);
 
   if (facts.length === 0) {
-    return { progressed: false, interrupted: false };
+    return { progressed: false, interrupted: false, resumeExactly: false };
   }
 
   let ingested = 0;
@@ -1575,9 +1581,14 @@ async function syncPullRequestFacts(
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      const interrupted = isBrainRateLimited(error) || isBrainNotReady(error);
       return {
         progressed: false,
-        interrupted: isBrainRateLimited(error) || isBrainNotReady(error),
+        interrupted,
+        // A fresh overlap rejected before any write must retry that overlap:
+        // its saved checkpoint may still be ahead of the rejected late fact.
+        resumeExactly:
+          interrupted && (ingested > 0 || !options.restartFromOverlap),
       };
     }
   }
@@ -1593,5 +1604,6 @@ async function syncPullRequestFacts(
   return {
     progressed: facts.length === PR_FACTS_BATCH_SIZE,
     interrupted: false,
+    resumeExactly: facts.length === PR_FACTS_BATCH_SIZE,
   };
 }
