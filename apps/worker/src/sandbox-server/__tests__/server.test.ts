@@ -112,6 +112,50 @@ const validAuthTokenContext = {
 } satisfies AuthTokenContext;
 
 describe('sandbox server transports', () => {
+  it('closes active HTTP subscriptions before disposing the harness', async () => {
+    const sandbox = await startSandboxServer(
+      vi.fn().mockResolvedValue(validRunTokenContext),
+    );
+    const abort = new AbortController();
+    const dispose = vi.spyOn(sandbox.harness, 'dispose');
+    let closing: Promise<void> | undefined;
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${sandbox.port}/trpc/commands.sandboxStream`,
+        {
+          headers: { Authorization: 'Bearer ok-token' },
+          signal: abort.signal,
+        },
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain(
+        'text/event-stream',
+      );
+      const reader = response.body!.getReader();
+      await reader.read();
+      expect(sandbox.harness.listenerCount('runtimeOutput')).toBe(1);
+
+      closing = sandbox.close();
+      await expect(
+        Promise.race([
+          closing.then(() => 'closed'),
+          new Promise((resolve) =>
+            setTimeout(() => resolve('still open'), 1_000),
+          ),
+        ]),
+      ).resolves.toBe('closed');
+      expect(dispose).toHaveBeenCalledOnce();
+      await vi.waitFor(() => {
+        expect(sandbox.harness.listenerCount('runtimeOutput')).toBe(0);
+        expect(sandbox.harnessManager.listenerCount('stateChange')).toBe(0);
+      });
+    } finally {
+      abort.abort();
+      await (closing ?? sandbox.close());
+    }
+  });
+
   it('allows private-network preflight requests from ngrok-hosted pages', async () => {
     const sandbox = await startSandboxServer(vi.fn());
 

@@ -333,6 +333,12 @@ export function createServer({
         }),
         new Promise<void>((resolve) => {
           server.close(() => resolve());
+          // HTTP subscriptions can stay open indefinitely, just like the
+          // WebSocket clients terminated above. Stop accepting first, then
+          // close active HTTP connections so they cannot hold up disposal.
+          if ('closeAllConnections' in server) {
+            server.closeAllConnections();
+          }
         }),
       ]);
 
