@@ -260,6 +260,7 @@ return evictedIds
 const ATOMIC_DEQUEUE_SCRIPT = `
 local queueLength = redis.call('LLEN', KEYS[1])
 local lockTtlSeconds = tonumber(ARGV[1])
+local nowMs = tonumber(ARGV[2])
 
 for _ = 1, queueLength do
   local entryId = redis.call('LPOP', KEYS[1])
@@ -269,24 +270,34 @@ for _ = 1, queueLength do
     local entryScope = redis.call('HGET', KEYS[4], entryId)
 
     if rawValue and entryScope then
-      local acquired = redis.call(
-        'SET',
-        entryScope,
-        entryId,
-        'EX',
-        lockTtlSeconds,
-        'NX'
-      )
+      local decoded, entry = pcall(function() return cjson.decode(rawValue) end)
+      local availableAt = decoded and type(entry) == 'table' and tonumber(entry.availableAt) or nil
+      local delayMs = availableAt and math.ceil(availableAt - nowMs) or 0
 
-      if acquired then
-        redis.call('HDEL', KEYS[3], entryId)
-        redis.call('HDEL', KEYS[4], entryId)
+      -- An active owner's lock can prevent enqueue from installing its delay
+      -- marker. Releasing or expiring that lock must not bypass the deadline.
+      if delayMs > 0 then
+        redis.call('SET', entryScope, 'delay:' .. entryId, 'PX', delayMs, 'NX')
+      else
+        local acquired = redis.call(
+          'SET',
+          entryScope,
+          entryId,
+          'EX',
+          lockTtlSeconds,
+          'NX'
+        )
 
-        if redis.call('HGET', KEYS[2], entryScope) == entryId then
-          redis.call('HDEL', KEYS[2], entryScope)
+        if acquired then
+          redis.call('HDEL', KEYS[3], entryId)
+          redis.call('HDEL', KEYS[4], entryId)
+
+          if redis.call('HGET', KEYS[2], entryScope) == entryId then
+            redis.call('HDEL', KEYS[2], entryScope)
+          end
+
+          return rawValue
         end
-
-        return rawValue
       end
 
       redis.call('RPUSH', KEYS[1], entryId)
@@ -626,6 +637,7 @@ export class TaskRunQueue {
         TaskRunQueueKeys.Entries,
         TaskRunQueueKeys.EntryScopes,
         Math.ceil(TASK_TIMEOUT_MS / 1000).toString(),
+        Date.now().toString(),
       );
 
       if (!rawValue) {
