@@ -70,17 +70,17 @@ These connections use metered API billing or a provider-managed gateway:
 | --- | --- | --- |
 | [Amazon Bedrock](/providers/inference/amazon-bedrock) | Mantle API key and optional AWS region | AWS account |
 | [Anthropic](/providers/inference/anthropic) | Anthropic API key | Anthropic API organization |
-| [Azure AI Foundry](/providers/inference/azure-foundry) | Azure AI Services API key and resource name | Azure subscription |
-| [Azure OpenAI](/providers/inference/azure-openai) | Azure OpenAI API key and resource name | Azure subscription |
+| <IntegrationName href="/providers/inference/azure-foundry" icon="azure" name="Azure AI Foundry" /> | Azure AI Services API key and resource name | Azure subscription |
+| <IntegrationName href="/providers/inference/azure-openai" icon="azure" name="Azure OpenAI" /> | Azure OpenAI API key and resource name | Azure subscription |
 | [Baseten](/providers/inference/baseten) | Baseten API key | Baseten workspace |
 | [DeepSeek](/providers/inference/deepseek) | DeepSeek API key | DeepSeek platform balance |
 | [Google Gemini](/providers/inference/google-gemini) | Google AI Studio key | Google Cloud project |
 | [MiniMax](/providers/inference/minimax) | MiniMax API key | MiniMax account |
-| [Moonshot AI (Kimi)](/providers/inference/moonshot-ai) | Kimi Open Platform key | Moonshot Open Platform balance |
-| [OpenAI](/providers/inference/openai) | OpenAI API key | OpenAI API project |
+| <IntegrationName href="/providers/inference/moonshot-ai" icon="moonshot" name="Moonshot AI (Kimi)" /> | Kimi Open Platform key | Moonshot Open Platform balance |
+| <IntegrationName href="/providers/inference/openai" icon="openai" name="OpenAI" /> | OpenAI API key | OpenAI API project |
 | <IntegrationName href="/providers/inference/opencode" icon="opencode" name="OpenCode Zen" /> | OpenCode API key | OpenCode account |
-| [OpenRouter](/providers/inference/openrouter) | OpenRouter API key | OpenRouter balance and key limit |
-| [Requesty](/providers/inference/requesty) | Requesty API key | Requesty organization |
+| <IntegrationName href="/providers/inference/openrouter" icon="openrouter" name="OpenRouter" /> | OpenRouter API key | OpenRouter balance and key limit |
+| <IntegrationName href="/providers/inference/requesty" icon="requesty" name="Requesty" /> | Requesty API key | Requesty organization |
 | [Together AI](/providers/inference/together-ai) | Together AI API key | Together AI account |
 | <IntegrationName href="/providers/inference/typesafe" icon="typesafe" name="TypeSafe" /> | TypeSafe API key, used only for the [judgment model](#judgment-model) | TypeSafe account |
 | <IntegrationName href="/providers/inference/vercel-ai-gateway" icon="vercel" name="Vercel AI Gateway" /> | AI Gateway API key | Vercel team |
@@ -94,10 +94,10 @@ general API balance:
 
 | Provider | Connection | Usage behavior |
 | --- | --- | --- |
-| [ChatGPT Subscription](/providers/inference/chatgpt) | OpenAI device authorization | ChatGPT plan windows |
+| <IntegrationName href="/providers/inference/chatgpt" icon="openai" name="ChatGPT Subscription" /> | OpenAI device authorization | ChatGPT plan windows |
 | <IntegrationName href="/providers/inference/github-copilot" icon="githubcopilot" name="GitHub Copilot" /> | GitHub device authorization | Copilot plan allowance |
-| [Kimi for Coding](/providers/inference/kimi-for-coding) | Kimi membership key | Coding membership allowance |
-| [OpenCode Go](/providers/inference/opencode-go) | OpenCode API key | Go plan allowance |
+| <IntegrationName href="/providers/inference/kimi-for-coding" icon="kimi" name="Kimi for Coding" /> | Kimi membership key | Coding membership allowance |
+| <IntegrationName href="/providers/inference/opencode-go" icon="opencode" name="OpenCode Go" /> | OpenCode API key | Go plan allowance |
 | [xAI Grok Subscription](/providers/inference/xai-subscription) | xAI account authorization | SuperGrok or eligible X plan allowance |
 | [Z.AI Coding Plan](/providers/inference/zai-coding-plan) | Regional Coding Plan key | Coding Plan quota windows |
 
@@ -264,11 +264,11 @@ For manual configuration, use the provider's full task model ID:
 
 | Provider | Kimi K3.1 Pro | Kimi K3.1 Pro Highspeed |
 | --- | --- | --- |
-| Moonshot AI | `moonshotai/kimi-k3.1-pro` | `moonshotai/kimi-k3.1-pro-highspeed` |
-| OpenRouter | `openrouter/moonshotai/kimi-k3.1-pro` | — |
-| Vercel AI Gateway | `vercel/moonshotai/kimi-k3.1-pro` | `vercel/moonshotai/kimi-k3.1-pro-highspeed` |
-| Kimi for Coding | `kimi-for-coding/k3.1-pro` | `kimi-for-coding/k3.1-pro-highspeed` |
-| OpenCode Go | `opencode-go/kimi-k3.1-pro` | — |
+| <IntegrationName href="/providers/inference/moonshot-ai" icon="moonshot" name="Moonshot AI" /> | `moonshotai/kimi-k3.1-pro` | `moonshotai/kimi-k3.1-pro-highspeed` |
+| <IntegrationName href="/providers/inference/openrouter" icon="openrouter" name="OpenRouter" /> | `openrouter/moonshotai/kimi-k3.1-pro` | — |
+| <IntegrationName href="/providers/inference/vercel-ai-gateway" icon="vercel" name="Vercel AI Gateway" /> | `vercel/moonshotai/kimi-k3.1-pro` | `vercel/moonshotai/kimi-k3.1-pro-highspeed` |
+| <IntegrationName href="/providers/inference/kimi-for-coding" icon="kimi" name="Kimi for Coding" /> | `kimi-for-coding/k3.1-pro` | `kimi-for-coding/k3.1-pro-highspeed` |
+| <IntegrationName href="/providers/inference/opencode-go" icon="opencode" name="OpenCode Go" /> | `opencode-go/kimi-k3.1-pro` | — |
 
 Kimi for Coding requires an eligible membership plan; access to the full 1M
 context window and Highspeed depends on the plan. Keep thinking enabled and

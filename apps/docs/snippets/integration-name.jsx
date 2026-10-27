@@ -12,12 +12,17 @@ export function IntegrationName({ href, icon, name }) {
     rippling: '/logo/integrations/rippling.svg',
     typesafe: '/logo/integrations/typesafe.svg',
     voice: '/logo/integrations/voice.svg',
+    openai: '/logo/integrations/openai.svg',
+    openrouter: '/logo/integrations/openrouter.svg',
+    kimi: '/logo/integrations/kimi.svg',
+    moonshot: '/logo/integrations/moonshot.svg',
+    requesty: '/logo/integrations/requesty.png',
   };
   const iconSrc =
     manualIcons[icon] ??
     (icon?.startsWith('/')
       ? icon
-      : `https://api.iconify.design/simple-icons:${icon}.svg?color=currentColor`);
+      : `https://api.iconify.design/simple-icons/${icon}.svg?color=currentColor`);
 
   return (
     <a href={href} className="integration-name">
