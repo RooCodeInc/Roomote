@@ -148,6 +148,30 @@ describe('completeSetupCommand', () => {
     mockFindDeploymentSettings.mockResolvedValue(undefined);
   });
 
+  it('honors explicit Cloud analytics opt-out while retaining the Memory default', async () => {
+    mockEnv.R_CLOUD_ENABLED = true;
+    mockFindDeploymentSettings.mockResolvedValue({
+      brainEnabled: null,
+      metadata: { otherSetting: 'preserve' },
+      setupCompletedAt: null,
+      setupNewState: null,
+    });
+
+    await completeSetupCommand(buildAuth({ cloudEnabled: true }), {
+      anonymousAnalyticsEnabled: false,
+    });
+
+    expect(mockInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brainEnabled: true,
+        metadata: {
+          otherSetting: 'preserve',
+          anonymous_analytics_enabled: false,
+        },
+      }),
+    );
+  });
+
   it('defaults Memory without overwriting a concurrent explicit choice', async () => {
     mockEnv.R_CLOUD_ENABLED = true;
     mockFindDeploymentSettings.mockResolvedValue({

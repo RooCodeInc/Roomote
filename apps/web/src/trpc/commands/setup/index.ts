@@ -468,9 +468,7 @@ export async function completeSetupCommand(
         .automationRecommendations?.status === 'ready';
     let metadataUpdate: Record<string, unknown> | undefined;
     const cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
-    const anonymousAnalyticsEnabled = cloudEnabled
-      ? true
-      : input?.anonymousAnalyticsEnabled;
+    const anonymousAnalyticsEnabled = input?.anonymousAnalyticsEnabled;
     // Setup completion is the shared creation boundary. Default only unfinished
     // Cloud deployments so existing instances and explicit choices stay intact.
     const brainEnabledDefault =

@@ -3,6 +3,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const mocks = vi.hoisted(() => ({
   setQueryData: vi.fn(),
   setAnonymousAnalytics: vi.fn(),
+  refresh: vi.fn(),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: mocks.refresh }),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
@@ -54,6 +59,14 @@ vi.mock('./DeploymentTimeZoneSetting', () => ({
 import { MiscSettings } from './MiscSettings';
 
 describe('MiscSettings', () => {
+  it('offers the existing anonymous analytics control in Cloud mode', () => {
+    render(<MiscSettings />);
+
+    expect(
+      screen.getByRole('switch', { name: /anonymous analytics/i }),
+    ).toBeChecked();
+  });
+
   it('does not render the Private Sessions experiment', () => {
     render(<MiscSettings />);
 

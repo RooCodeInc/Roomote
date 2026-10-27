@@ -435,10 +435,7 @@ export async function authorize(
 
   const anonymousAnalyticsEnabled =
     isTelemetryEnvAllowed() &&
-    isAnonymousAnalyticsEnabledFromMetadata(
-      authContext.deploymentMetadata,
-      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
-    );
+    isAnonymousAnalyticsEnabledFromMetadata(authContext.deploymentMetadata);
 
   return {
     success: true,

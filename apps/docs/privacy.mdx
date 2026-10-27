@@ -6,9 +6,8 @@ description: Understand Roomote data handling, anonymous telemetry, and the cont
 
 Roomote keeps the data boundaries for a deployment explicit. Product content,
 credentials, prompts, code, and repository names are not part of the default
-anonymous telemetry payload. Deployment administrators control whether a
-self-hosted deployment shares that telemetry, while Roomote Cloud follows its
-own privacy policy.
+anonymous telemetry payload. Deployment administrators control whether
+self-hosted and Roomote Cloud deployments share that telemetry.
 
 This page covers the telemetry payload, its identifiers, the controls that turn
 it off, and the separate version-availability check. It does not replace the
@@ -30,7 +29,7 @@ integration providers you connect.
 ## Anonymous telemetry
 
 Roomote can share **anonymous telemetry** with the Roomote team to help improve
-the product. This is on by default for self-hosted deployments, controlled
+the product. This is on by default for self-hosted and Roomote Cloud deployments, controlled
 entirely by deployment admins, and designed so that Roomote-generated
 identifiers and the default payload cannot identify your company, users, code,
 or repositories.
@@ -82,19 +81,20 @@ sends the configured value with telemetry and version checks.
 
 Anonymous telemetry is opt-out:
 
-- during setup, the final step includes an **Anonymous analytics** switch
-- afterwards, admins can change it any time in **Settings > Deployment**
+- admins can change it any time in **Settings > Deployment > Privacy**
+- turn off **Anonymous analytics** to opt the deployment out
 
-The setting applies to everyone in the deployment. When disabled, no
-analytics code runs in the browser and no usage events or daily reports
-leave your servers.
+The setting applies to everyone in the deployment. When disabled, anonymous
+usage events and daily reports are not sent, and unsent event batches are
+dropped. Other open pages receive the updated browser setting when refreshed;
+the server also enforces the choice on incoming telemetry and before delivery.
 
 ## Roomote Cloud Specifics
 
-Roomote Cloud deployments always keep Roomote anonymous analytics enabled and
-do not show this switch, as described in our privacy policy. Cookie consent
-controls only optional support and product-experience services such as Intercom
-and PostHog.
+Roomote Cloud administrators use the same **Anonymous analytics** setting.
+Cookie consent separately controls optional support and product-experience
+services such as Intercom and PostHog. Changing anonymous analytics does not
+change that consent.
 
 ## Version checks
 
