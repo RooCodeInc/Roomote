@@ -21,7 +21,7 @@ const nonEmptyTrimmedStringSchema = z
   });
 const uuidStringSchema = z
   .string()
-  .refine((value) => z.string().uuid().safeParse(value).success, {
+  .refine((value) => z.guid().safeParse(value).success, {
     message: 'Value must be a UUID.',
   });
 

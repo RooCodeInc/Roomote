@@ -16,7 +16,7 @@
     "@roomote/db": "workspace:^",
     "@roomote/source-control-oauth": "workspace:^",
     "@roomote/types": "workspace:^",
-    "zod": "^3.25.76"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",

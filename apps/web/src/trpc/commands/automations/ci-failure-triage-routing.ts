@@ -32,11 +32,9 @@ import type { UserAuthSuccess } from '@/types';
 const resolutionSchema = z
   .object({
     status: z.enum(['resolved', 'ambiguous']),
-    repositoryIds: z.array(z.string().uuid()).nullable(),
+    repositoryIds: z.array(z.guid()).nullable(),
     destinations: z.array(
-      z
-        .object({ repositoryId: z.string().uuid(), destinationId: z.string() })
-        .strict(),
+      z.object({ repositoryId: z.guid(), destinationId: z.string() }).strict(),
     ),
     instructions: z.string(),
     clarification: z.string().nullable(),

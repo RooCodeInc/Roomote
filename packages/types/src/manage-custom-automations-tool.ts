@@ -66,8 +66,8 @@ export const manageCustomAutomationsFieldSchemas = {
   enabled: z.boolean().optional(),
   resultPriority: z
     .enum(AUTOMATION_RESULT_PRIORITIES)
-    .describe('Result inbox priority. Defaults to normal when creating.')
-    .optional(),
+    .optional()
+    .describe('Result inbox priority. Defaults to normal when creating.'),
   schedule: z
     .string()
     .optional()
@@ -77,42 +77,42 @@ export const manageCustomAutomationsFieldSchemas = {
   model: z
     .string()
     .nullable()
+    .optional()
     .describe(
       'Optional provider/model launch override. Call list_models first and pass an exact returned model ID. The ID prefix selects the configured inference route; openai/... includes connected ChatGPT subscription routing. Omit to keep the deployment default; pass null on update to clear an existing override.',
-    )
-    .optional(),
+    ),
   reasoningEffort: z
     .enum(REASONING_EFFORT_VALUES)
     .nullable()
+    .optional()
     .describe(
       'Optional reasoning effort for the selected model. Omit to keep the model default; pass null on update to clear an existing override.',
-    )
-    .optional(),
+    ),
   environmentId: z
     .string()
+    .optional()
     .describe(
       `Environment UUID, "${ALL_REPOSITORIES}", "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, or "${FAST_EXECUTION}" for Fast mode without an initial sandbox task.`,
-    )
-    .optional(),
+    ),
   targetProvider: z
     .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
     .nullable()
+    .optional()
     .describe(
       'Destination provider. Pass null on update to clear the report destination.',
-    )
-    .optional(),
+    ),
   targetMode: z
     .enum(['channel', 'direct_message'])
+    .optional()
     .describe(
       'Destination mode. Use direct_message to send reports privately to the automation owner through the selected connected provider. Email only supports direct_message.',
-    )
-    .optional(),
+    ),
   targetChannelId: z
     .string()
+    .optional()
     .describe(
       'Channel identifier for channel destinations, or the opaque account identity id returned by list_destinations for Email. Never pass a raw email address. Account verification is required for inbound email commands and replies, not for receiving automation reports; replying to a Roomote email from the account address verifies it implicitly.',
-    )
-    .optional(),
+    ),
 } satisfies z.ZodRawShape;
 
 export const manageCustomAutomationsInputSchema = z.object(

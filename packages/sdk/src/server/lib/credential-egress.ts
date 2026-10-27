@@ -77,16 +77,13 @@ export class CredentialEgressRequestError extends Error {
   }
 }
 
-function parse<T>(
-  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
-  input: unknown,
-): T {
+function parse<T>(schema: z.ZodType<T, unknown>, input: unknown): T {
   const parsed = schema.safeParse(input);
   if (!parsed.success) throw new CredentialEgressRequestError(400, 'malformed');
   return parsed.data;
 }
 
-const workloadIdSchema = z.string().uuid();
+const workloadIdSchema = z.guid();
 
 export async function registerWorkload(
   input: unknown,

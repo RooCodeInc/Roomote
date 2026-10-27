@@ -605,7 +605,7 @@ import {
 } from '../commands/platform-issue-reports';
 import { getStatuspageIncident } from '@roomote/slack';
 
-const stateRecordSchema = z.record(z.string());
+const stateRecordSchema = z.record(z.string(), z.string());
 
 function assertAdmin(auth: { isAdmin: boolean }) {
   if (!auth.isAdmin) throw new Error('Unauthorized');
@@ -721,7 +721,7 @@ const automationsRouter = createRouter({
         ),
         reviewerEnabled: z.boolean(),
         reviewerEnvironmentScope: z.enum(['all', 'specific']),
-        reviewerEnvironmentIds: z.array(z.string().uuid()),
+        reviewerEnvironmentIds: z.array(z.guid()),
         reviewerAuthorReviewMode: z.enum(['all', 'specific', 'none']),
         reviewerCollaborators: z.array(z.string().trim().min(1).max(255)),
         reviewerExcludedAuthors: z.string().max(8_000).nullable(),
@@ -1033,7 +1033,7 @@ const automationsRouter = createRouter({
   ),
 
   getCustomAutomationOptions: protectedProcedure
-    .input(z.object({ automationId: z.string().uuid().optional() }).optional())
+    .input(z.object({ automationId: z.guid().optional() }).optional())
     .query(({ ctx: { auth }, input }) =>
       getCustomAutomationOptionsCommand(auth, input ?? {}),
     ),
@@ -1069,7 +1069,7 @@ const automationsRouter = createRouter({
           .optional(),
         reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
         environmentId: z.union([
-          z.string().uuid(),
+          z.guid(),
           z.literal(ALL_REPOSITORIES),
           z.literal(NO_REPOSITORIES),
           z.literal(FAST_EXECUTION),
@@ -1095,7 +1095,7 @@ const automationsRouter = createRouter({
   updateCustomAutomation: protectedProcedure
     .input(
       z.object({
-        id: z.string().uuid(),
+        id: z.guid(),
         name: z.string().trim().min(1).max(100),
         prompt: z
           .string()
@@ -1124,7 +1124,7 @@ const automationsRouter = createRouter({
           .optional(),
         reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
         environmentId: z.union([
-          z.string().uuid(),
+          z.guid(),
           z.literal(ALL_REPOSITORIES),
           z.literal(NO_REPOSITORIES),
           z.literal(FAST_EXECUTION),
@@ -1148,31 +1148,31 @@ const automationsRouter = createRouter({
     ),
 
   getCustomAutomationWebhook: protectedProcedure
-    .input(z.object({ id: z.string().uuid() }))
+    .input(z.object({ id: z.guid() }))
     .query(({ ctx: { auth }, input }) =>
       getCustomAutomationWebhookCommand(auth, input),
     ),
 
   setCustomAutomationWebhookEnabled: protectedProcedure
-    .input(z.object({ id: z.string().uuid(), enabled: z.boolean() }))
+    .input(z.object({ id: z.guid(), enabled: z.boolean() }))
     .mutation(({ ctx: { auth }, input }) =>
       setCustomAutomationWebhookEnabledCommand(auth, input),
     ),
 
   rotateCustomAutomationWebhook: protectedProcedure
-    .input(z.object({ id: z.string().uuid() }))
+    .input(z.object({ id: z.guid() }))
     .mutation(({ ctx: { auth }, input }) =>
       rotateCustomAutomationWebhookCommand(auth, input),
     ),
 
   deleteCustomAutomation: protectedProcedure
-    .input(z.object({ id: z.string().uuid() }))
+    .input(z.object({ id: z.guid() }))
     .mutation(({ ctx: { auth }, input }) =>
       deleteCustomAutomationCommand(auth, input),
     ),
 
   triggerCustomAutomation: protectedProcedure
-    .input(z.object({ id: z.string().uuid() }))
+    .input(z.object({ id: z.guid() }))
     .mutation(({ ctx: { auth }, input }) =>
       triggerCustomAutomationCommand(auth, input),
     ),
@@ -1266,7 +1266,7 @@ export const appRouter = createRouter({
             .object({
               createdAt: z.string(),
               ts: z.number(),
-              id: z.string().uuid(),
+              id: z.guid(),
             })
             .optional(),
         }),
@@ -1349,12 +1349,12 @@ export const appRouter = createRouter({
 
   platformIssueReports: createRouter({
     byId: protectedProcedure
-      .input(z.object({ reportId: z.string().uuid() }))
+      .input(z.object({ reportId: z.guid() }))
       .query(({ ctx: { auth }, input }) =>
         getPlatformIssueReportCommand(auth, input.reportId),
       ),
     submit: protectedProcedure
-      .input(z.object({ reportId: z.string().uuid() }))
+      .input(z.object({ reportId: z.guid() }))
       .mutation(({ ctx: { auth }, input }) =>
         submitPlatformIssueReportCommand(auth, input.reportId),
       ),
@@ -1366,7 +1366,7 @@ export const appRouter = createRouter({
         z
           .object({
             taskId: z.string().optional(),
-            sessionId: z.string().uuid().optional(),
+            sessionId: z.guid().optional(),
             path: z.string(),
             version: z.number().optional(),
             preview: z.boolean().optional(),
@@ -1384,7 +1384,7 @@ export const appRouter = createRouter({
         z
           .object({
             taskId: z.string().optional(),
-            sessionId: z.string().uuid().optional(),
+            sessionId: z.guid().optional(),
             path: z.string(),
           })
           .refine(
@@ -1613,7 +1613,7 @@ export const appRouter = createRouter({
       .input(
         z.object({
           provider: sourceControlProviderSchema,
-          values: z.record(z.string().trim()).optional(),
+          values: z.record(z.string(), z.string().trim()).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -1914,7 +1914,7 @@ export const appRouter = createRouter({
       ),
 
     listConfigVersions: protectedProcedure
-      .input(z.object({ environmentId: z.string().uuid() }))
+      .input(z.object({ environmentId: z.guid() }))
       .query(({ ctx: { auth }, input }) =>
         listEnvironmentConfigVersionsCommand(auth, input),
       ),
@@ -1922,7 +1922,7 @@ export const appRouter = createRouter({
     getConfigVersion: protectedProcedure
       .input(
         z.object({
-          environmentId: z.string().uuid(),
+          environmentId: z.guid(),
           version: z.number().int().min(1),
         }),
       )
@@ -1937,7 +1937,7 @@ export const appRouter = createRouter({
     activeDefinitionTask: protectedProcedure
       .input(
         z.object({
-          environmentId: z.string().uuid(),
+          environmentId: z.guid(),
         }),
       )
       .query(({ ctx: { auth }, input }) =>
@@ -1949,7 +1949,7 @@ export const appRouter = createRouter({
         z.object({
           name: z.string().min(1),
           description: z.string().optional(),
-          config: z.record(z.unknown()),
+          config: z.record(z.string(), z.unknown()),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -1966,7 +1966,7 @@ export const appRouter = createRouter({
           name: z.string().min(1).optional(),
           description: z.string().optional(),
           agentInstructions: z.string().optional(),
-          config: z.record(z.unknown()).optional(),
+          config: z.record(z.string(), z.unknown()).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -1979,7 +1979,7 @@ export const appRouter = createRouter({
     startDefinitionTask: protectedProcedure
       .input(
         z.object({
-          repositoryIds: z.array(z.string().uuid()),
+          repositoryIds: z.array(z.guid()),
           environmentId: z.string().optional(),
           changeRequest: z.string().trim().min(1).max(8_000).optional(),
           selectedModelId: z.string().trim().min(1).optional(),
@@ -1996,7 +1996,7 @@ export const appRouter = createRouter({
       ),
 
     retryVerification: protectedProcedure
-      .input(z.object({ environmentId: z.string().uuid() }))
+      .input(z.object({ environmentId: z.guid() }))
       .mutation(({ ctx: { auth }, input }) =>
         retryEnvironmentVerificationCommand(auth, input),
       ),
@@ -2125,7 +2125,7 @@ export const appRouter = createRouter({
     setVisibility: protectedProcedure
       .input(
         z.object({
-          id: z.string().uuid(),
+          id: z.guid(),
           visibility: customMcpServerVisibilitySchema,
         }),
       )
@@ -2134,21 +2134,19 @@ export const appRouter = createRouter({
       ),
 
     update: protectedProcedure
-      .input(
-        z.object({ id: z.string().uuid(), server: customMcpServerInputSchema }),
-      )
+      .input(z.object({ id: z.guid(), server: customMcpServerInputSchema }))
       .mutation(({ ctx: { auth }, input }) =>
         updateCustomMcpServerCommand(auth, input),
       ),
 
     delete: protectedProcedure
-      .input(z.object({ id: z.string().uuid() }))
+      .input(z.object({ id: z.guid() }))
       .mutation(({ ctx: { auth }, input }) =>
         deleteCustomMcpServerCommand(auth, input),
       ),
 
     setEnabled: protectedProcedure
-      .input(z.object({ id: z.string().uuid(), enabled: z.boolean() }))
+      .input(z.object({ id: z.guid(), enabled: z.boolean() }))
       .mutation(({ ctx: { auth }, input }) =>
         setCustomMcpServerEnabledCommand(auth, input),
       ),
@@ -2156,7 +2154,7 @@ export const appRouter = createRouter({
     setDisabledTools: protectedProcedure
       .input(
         z.object({
-          id: z.string().uuid(),
+          id: z.guid(),
           disabledTools: z.array(z.string().min(1)),
         }),
       )
@@ -2165,21 +2163,19 @@ export const appRouter = createRouter({
       ),
 
     listTools: protectedProcedure
-      .input(z.object({ id: z.string().uuid() }))
+      .input(z.object({ id: z.guid() }))
       .query(({ ctx: { auth }, input }) =>
         listCustomMcpServerToolsCommand(auth, input),
       ),
 
     connect: protectedProcedure
-      .input(
-        z.object({ id: z.string().uuid(), redirectTo: z.string().optional() }),
-      )
+      .input(z.object({ id: z.guid(), redirectTo: z.string().optional() }))
       .mutation(({ ctx: { auth }, input }) =>
         connectCustomMcpServerCommand(auth, input),
       ),
 
     disconnect: protectedProcedure
-      .input(z.object({ id: z.string().uuid() }))
+      .input(z.object({ id: z.guid() }))
       .mutation(({ ctx: { auth }, input }) =>
         disconnectCustomMcpServerCommand(auth, input),
       ),
@@ -2427,7 +2423,7 @@ export const appRouter = createRouter({
       .input(
         z.object({
           provider: z.enum(COMMS_PROVIDER_IDS),
-          values: z.record(z.string().trim()).optional(),
+          values: z.record(z.string(), z.string().trim()).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -2494,7 +2490,7 @@ export const appRouter = createRouter({
       .input(
         z.object({
           provider: z.enum(computeProviders),
-          values: z.record(z.string().trim()).optional(),
+          values: z.record(z.string(), z.string().trim()).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -2661,7 +2657,7 @@ export const appRouter = createRouter({
         ),
 
       delete: protectedProcedure
-        .input(z.object({ id: z.string().uuid() }))
+        .input(z.object({ id: z.guid() }))
         .mutation(({ ctx: { auth }, input }) =>
           deleteUserTaskModelMappingPresetCommand(auth, input),
         ),
@@ -2691,7 +2687,9 @@ export const appRouter = createRouter({
             .trim()
             .refine(isSetupModelProviderId, 'Invalid model provider.'),
           apiKey: z.string().trim().optional(),
-          additionalEnvValues: z.record(z.string().trim()).optional(),
+          additionalEnvValues: z
+            .record(z.string(), z.string().trim())
+            .optional(),
           connectionName: z.string().trim().optional(),
           modelId: z.string().trim().optional(),
         }),
@@ -2897,7 +2895,7 @@ export const appRouter = createRouter({
       .input(
         z.object({
           enabled: z.boolean(),
-          roles: z.record(
+          roles: z.partialRecord(
             z.enum(TASK_MODEL_ROLES as [TaskModelRole, ...TaskModelRole[]]),
             z.object({
               modelId: z.string().trim().min(1),
@@ -3010,7 +3008,7 @@ export const appRouter = createRouter({
             .array(
               z.object({
                 name: z.string().min(1).max(100),
-                repositoryIds: z.array(z.string().uuid()),
+                repositoryIds: z.array(z.guid()),
                 installCommand: z.string().max(500).optional(),
                 testCommand: z.string().max(500).optional(),
               }),
@@ -3042,7 +3040,7 @@ export const appRouter = createRouter({
     completeWithStarterTasks: protectedProcedure
       .input(
         z.object({
-          launchBatchId: z.string().uuid(),
+          launchBatchId: z.guid(),
           selectedStarterTaskIds: z
             .array(z.enum(SETUP_STARTER_TASK_IDS))
             .max(SETUP_STARTER_TASK_IDS.length),
@@ -3063,7 +3061,7 @@ export const appRouter = createRouter({
     ),
 
     skipSourceControl: protectedProcedure
-      .input(z.object({ sessionId: z.string().uuid() }))
+      .input(z.object({ sessionId: z.guid() }))
       .mutation(({ ctx: { auth }, input }) =>
         skipSetupSourceControlCommand(auth, input.sessionId),
       ),
@@ -3071,9 +3069,12 @@ export const appRouter = createRouter({
     submitSessionUserInput: protectedProcedure
       .input(
         z.object({
-          sessionId: z.string().uuid(),
+          sessionId: z.guid(),
           requestId: z.string().min(1),
-          answers: z.record(z.object({ answers: z.array(z.string()).max(50) })),
+          answers: z.record(
+            z.string(),
+            z.object({ answers: z.array(z.string()).max(50) }),
+          ),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -3114,7 +3115,7 @@ export const appRouter = createRouter({
       .input(
         z.object({
           provider: z.enum(SETUP_AUTH_PROVIDER_IDS),
-          values: z.record(z.string().trim()).optional(),
+          values: z.record(z.string(), z.string().trim()).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -3129,7 +3130,9 @@ export const appRouter = createRouter({
             .trim()
             .refine(isSetupModelProviderId, 'Invalid model provider.'),
           apiKey: z.string().trim().optional(),
-          additionalEnvValues: z.record(z.string().trim()).optional(),
+          additionalEnvValues: z
+            .record(z.string(), z.string().trim())
+            .optional(),
           connectionName: z.string().trim().optional(),
           modelId: z.string().trim().optional(),
         }),
@@ -3164,7 +3167,7 @@ export const appRouter = createRouter({
       .input(
         z.object({
           provider: z.enum(computeProviders),
-          values: z.record(z.string().trim()).optional(),
+          values: z.record(z.string(), z.string().trim()).optional(),
         }),
       )
       .mutation(async ({ ctx: { auth }, input }) => {
@@ -3192,7 +3195,7 @@ export const appRouter = createRouter({
       .input(
         z.object({
           provider: sourceControlProviderSchema,
-          values: z.record(z.string().trim()).optional(),
+          values: z.record(z.string(), z.string().trim()).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -3202,7 +3205,7 @@ export const appRouter = createRouter({
     saveQueuedTasks: protectedProcedure
       .input(
         z.object({
-          selectedSuggestionIds: z.array(z.string().uuid()).max(5),
+          selectedSuggestionIds: z.array(z.guid()).max(5),
           customTaskPrompt: z.string().trim().max(4_000).optional(),
         }),
       )
@@ -3251,7 +3254,7 @@ export const appRouter = createRouter({
       .input(
         z.object({
           provider: z.enum(SETUP_AUTH_PROVIDER_IDS),
-          values: z.record(z.string().trim()).optional(),
+          values: z.record(z.string(), z.string().trim()).optional(),
           setupToken: z.string().optional(),
         }),
       )
@@ -3340,7 +3343,7 @@ export const appRouter = createRouter({
     dismiss: protectedProcedure
       .input(
         z.object({
-          suggestionId: z.string().uuid(),
+          suggestionId: z.guid(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -3355,7 +3358,7 @@ export const appRouter = createRouter({
     get: protectedProcedure
       .input(
         z.object({
-          id: z.string().uuid(),
+          id: z.guid(),
           kind: z.enum(['report', 'suggestion']),
         }),
       )
@@ -3369,7 +3372,7 @@ export const appRouter = createRouter({
     act: protectedProcedure
       .input(
         z.object({
-          id: z.string().uuid(),
+          id: z.guid(),
           kind: z.enum(['report', 'suggestion']),
           action: z.enum(['accept', 'ignore']),
         }),
@@ -3381,13 +3384,13 @@ export const appRouter = createRouter({
     clearOne: protectedProcedure
       .input(
         z.object({
-          id: z.string().uuid(),
+          id: z.guid(),
           kind: z.enum(['report', 'suggestion']),
         }),
       )
       .mutation(({ ctx: { auth }, input }) => clearResultCommand(auth, input)),
     acceptSuggestion: protectedProcedure
-      .input(z.object({ id: z.string().uuid() }))
+      .input(z.object({ id: z.guid() }))
       .mutation(({ ctx: { auth }, input }) =>
         acceptSuggestionResultCommand(auth, input),
       ),
@@ -3426,7 +3429,7 @@ export const appRouter = createRouter({
     startGoal: protectedProcedure
       .input(
         z.object({
-          sessionId: z.string().uuid(),
+          sessionId: z.guid(),
           objective: sessionGoalInputSchema.shape.objective,
           clientMessageId: z.string().optional(),
         }),
@@ -3460,24 +3463,24 @@ export const appRouter = createRouter({
         setFastSessionAutoToolApprovalsCommand(auth, input),
       ),
     tasks: protectedProcedure
-      .input(z.object({ sessionId: z.string().uuid() }))
+      .input(z.object({ sessionId: z.guid() }))
       .query(({ ctx: { auth }, input }) =>
         getFastSessionTasksCommand(auth, input.sessionId),
       ),
     messages: protectedProcedure
-      .input(z.object({ sessionId: z.string().uuid() }))
+      .input(z.object({ sessionId: z.guid() }))
       .query(({ ctx: { auth }, input }) =>
         getFastSessionMessagesCommand(auth, input.sessionId),
       ),
     olderMessages: protectedProcedure
       .input(
         z.object({
-          sessionId: z.string().uuid(),
+          sessionId: z.guid(),
           cursor: z.object({
             createdAt: z.string().min(1).max(64),
             ts: z.number().int(),
             turnSeq: z.number().int(),
-            id: z.string().uuid(),
+            id: z.guid(),
           }),
         }),
       )
@@ -3487,9 +3490,12 @@ export const appRouter = createRouter({
     submitUserInput: protectedProcedure
       .input(
         z.object({
-          sessionId: z.string().uuid(),
+          sessionId: z.guid(),
           requestId: z.string().min(1),
-          answers: z.record(z.object({ answers: z.array(z.string()).max(50) })),
+          answers: z.record(
+            z.string(),
+            z.object({ answers: z.array(z.string()).max(50) }),
+          ),
           resolution: z.enum(['submitted', 'cancelled']).optional(),
         }),
       )
@@ -3499,7 +3505,7 @@ export const appRouter = createRouter({
     composerSuggestion: protectedProcedure
       .input(
         z.object({
-          sessionId: z.string().uuid(),
+          sessionId: z.guid(),
           // Client-side cache keys: bump when the live transcript or the
           // delegated tasks' state meaningfully change so stale suggestions
           // are never shown. The server derives its own cache keys from
@@ -3540,7 +3546,7 @@ export const appRouter = createRouter({
     recordTurn: protectedProcedure
       .input(
         z.object({
-          sessionId: z.string().uuid(),
+          sessionId: z.guid(),
           role: z.enum(['user', 'assistant']),
           text: z.string().trim().min(1).max(20_000),
         }),
@@ -3551,7 +3557,7 @@ export const appRouter = createRouter({
     recordCallEvent: protectedProcedure
       .input(
         z.object({
-          sessionId: z.string().uuid(),
+          sessionId: z.guid(),
           phase: z.enum(['started', 'ended']),
           durationMs: z.number().int().nonnegative().optional(),
         }),
@@ -3568,7 +3574,7 @@ export const appRouter = createRouter({
         getSessionWakeupsCommand(auth, input.sessionId),
       ),
     cancelWakeup: protectedProcedure
-      .input(sessionIdInputSchema.extend({ wakeupId: z.string().uuid() }))
+      .input(sessionIdInputSchema.extend({ wakeupId: z.guid() }))
       .mutation(({ ctx: { auth }, input }) =>
         cancelSessionWakeupCommand(auth, input),
       ),
@@ -3710,7 +3716,7 @@ export const appRouter = createRouter({
     revokeInvite: protectedProcedure
       .input(
         z.object({
-          inviteId: z.string().uuid(),
+          inviteId: z.guid(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) => revokeInviteCommand(auth, input)),
@@ -3777,7 +3783,7 @@ export const appRouter = createRouter({
       .input(
         z.object({
           skillId: z.string().min(3),
-          environmentIds: z.array(z.string().uuid()).min(1),
+          environmentIds: z.array(z.guid()).min(1),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -3790,7 +3796,7 @@ export const appRouter = createRouter({
           name: z.string().min(1),
           description: z.string().min(1),
           content: z.string().min(1),
-          environmentIds: z.array(z.string().uuid()).min(1),
+          environmentIds: z.array(z.guid()).min(1),
           previousSkillId: z.string().min(3).optional(),
         }),
       )

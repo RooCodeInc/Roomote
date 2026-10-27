@@ -103,7 +103,7 @@ const taskSuggestionSchema = z.object({
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
   investigationContext: z.string().trim().max(4000).optional(),
   targetRepositoryFullName: z.string().trim().min(1).optional(),
-  targetEnvironmentId: z.string().uuid().optional(),
+  targetEnvironmentId: z.guid().optional(),
   workspaceReadiness: workspaceReadinessSchema.optional(),
   readinessMessage: z.string().trim().min(1).max(500).optional(),
 });

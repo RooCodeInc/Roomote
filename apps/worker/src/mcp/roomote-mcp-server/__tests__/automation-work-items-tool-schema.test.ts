@@ -34,14 +34,11 @@ describe('automationWorkItemInputSchema', () => {
     )) {
       let schema: z.ZodTypeAny = fieldSchema;
 
-      while (
-        schema instanceof z.ZodOptional ||
-        schema instanceof z.ZodEffects
-      ) {
+      while (schema instanceof z.ZodOptional || schema instanceof z.ZodPipe) {
         schema =
           schema instanceof z.ZodOptional
-            ? schema.unwrap()
-            : schema.innerType();
+            ? (schema.unwrap() as z.ZodType)
+            : (schema.in as z.ZodType);
       }
 
       expect(

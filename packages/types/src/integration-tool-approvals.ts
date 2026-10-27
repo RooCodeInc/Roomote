@@ -183,7 +183,7 @@ export interface IntegrationToolApprovals {
 }
 
 export const integrationToolApprovalDecisionSchema = z.object({
-  approvalId: z.string().uuid(),
+  approvalId: z.guid(),
   /** `approved_for_session` approves this call and stops asking for the tool. */
   decision: z.enum(['approved', 'approved_for_session', 'rejected']),
 });

@@ -60,7 +60,7 @@ const giteaHookSchema = z
   .object({
     id: z.number(),
     type: z.string().optional(),
-    config: z.record(z.string()).optional(),
+    config: z.record(z.string(), z.string()).optional(),
   })
   .passthrough();
 const giteaHookListSchema = z.array(giteaHookSchema);

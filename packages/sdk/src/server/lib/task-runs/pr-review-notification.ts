@@ -173,13 +173,13 @@ export const prReviewNotificationRequestSchema = z.object({
   batchId: z.string().optional(),
   sourceControlProvider: sourceControlProviderSchema.optional(),
   host: z.string().nullable().optional(),
-  repositoryId: z.string().uuid().nullable().optional(),
+  repositoryId: z.guid().nullable().optional(),
   deliveryIds: z.array(z.string()).optional(),
   leaseToken: z.string().optional(),
   events: z.array(prReviewActivityEventSchema).optional(),
   ownershipVersion: z.enum(['legacy', 'canonical']).optional(),
-  deliveryId: z.string().uuid().optional(),
-  notificationUnitId: z.string().uuid().optional(),
+  deliveryId: z.guid().optional(),
+  notificationUnitId: z.guid().optional(),
   destinationKey: z.string().optional(),
   deliveryState: z
     .enum([

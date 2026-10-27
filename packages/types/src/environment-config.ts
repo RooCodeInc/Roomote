@@ -7,15 +7,17 @@ import { gitBranchNameSchema } from './git-ref';
 import { collectReservedEnvReferences } from './reserved-mcp-env-vars';
 import { SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME } from './sandbox-preview-inference';
 
-const environmentEnvMapSchema = z.record(z.string()).superRefine((env, ctx) => {
-  if (SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in env) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: [SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
-      message: `${SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME} is a deployment-level preview key and cannot be stored in an environment definition`,
-    });
-  }
-});
+const environmentEnvMapSchema = z
+  .record(z.string(), z.string())
+  .superRefine((env, ctx) => {
+    if (SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in env) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
+        message: `${SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME} is a deployment-level preview key and cannot be stored in an environment definition`,
+      });
+    }
+  });
 
 /**
  * Command
@@ -410,7 +412,7 @@ export function slugToPortKey(slug: string): string {
  */
 const environmentMcpServerStreamableHttpInputSchema = z.object({
   url: z.string().min(1),
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
   command: z.undefined().optional(),
   args: z.undefined().optional(),
   env: z.undefined().optional(),
@@ -717,7 +719,8 @@ export const environmentConfigSchema = z
     services: z
       .array(serviceConfigSchema)
       .optional()
-      .transform(filterLegacyServices),
+      .transform(filterLegacyServices)
+      .optional(),
     /**
      * Customer-owned Docker Compose projects or Dockerfiles to start after
      * their repositories have been prepared.

@@ -16,7 +16,7 @@
   "dependencies": {
     "@roomote/types": "workspace:^",
     "@t3-oss/env-nextjs": "^0.13.10",
-    "zod": "^3.25.76"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",

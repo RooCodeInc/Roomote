@@ -30,7 +30,7 @@ async function handle(request: Request, props: Props, method: 'GET' | 'POST') {
     const auth = await authorize();
     if (!auth.success || !auth.userId) return error(401);
     const params = z
-      .object({ sessionId: z.string().uuid() })
+      .object({ sessionId: z.guid() })
       .safeParse(await props.params);
     if (!params.success) return error(400);
     const context = { sessionId: params.data.sessionId, userId: auth.userId };

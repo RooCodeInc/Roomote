@@ -39,7 +39,7 @@
     "hono": "4.13.11",
     "ioredis": "^5.10.1",
     "jsdom": "26.1.0",
-    "zod": "^3.25.76"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",

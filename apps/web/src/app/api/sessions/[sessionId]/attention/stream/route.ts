@@ -16,9 +16,9 @@ import { findAccessibleSession } from '@/lib/server/sessions';
 
 export const runtime = 'nodejs';
 
-const paramsSchema = z.object({ sessionId: z.string().uuid() });
+const paramsSchema = z.object({ sessionId: z.guid() });
 const querySchema = z.object({
-  clientId: z.string().uuid(),
+  clientId: z.guid(),
   permission: z.enum(['granted', 'default', 'denied', 'unsupported']),
 });
 const POLL_INTERVAL_MS = 1_000;
