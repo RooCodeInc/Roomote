@@ -38,6 +38,8 @@ describe('mergeKimiForCodingProviderConfig', () => {
     expect(Object.keys(models).sort()).toEqual([
       'k3',
       'k3-256k',
+      'k3.1-pro',
+      'k3.1-pro-highspeed',
       'kimi-for-coding',
       'kimi-for-coding-highspeed',
     ]);
@@ -52,6 +54,31 @@ describe('mergeKimiForCodingProviderConfig', () => {
       'kimi-for-coding': { limit: { context: 1_048_576, output: 32_768 } },
     });
   });
+
+  it.each(['k3.1-pro', 'k3.1-pro-highspeed'])(
+    'registers %s with full capabilities on the membership endpoint',
+    (modelId) => {
+      const merged = mergeKimiForCodingProviderConfig({}, [
+        `kimi-for-coding/${modelId}`,
+      ]);
+
+      expect(merged['kimi-for-coding']).toMatchObject({
+        npm: '@ai-sdk/anthropic',
+        api: 'https://api.kimi.com/coding/v1',
+        models: {
+          [modelId]: {
+            family: 'kimi-k3',
+            reasoning: true,
+            temperature: false,
+            tool_call: true,
+            attachment: true,
+            modalities: { input: ['text', 'image', 'video'], output: ['text'] },
+            limit: { context: 1_048_576, output: 131_072 },
+          },
+        },
+      });
+    },
+  );
 
   it('gives a selected model Kimi added later a usable entry', () => {
     const merged = mergeKimiForCodingProviderConfig({}, [

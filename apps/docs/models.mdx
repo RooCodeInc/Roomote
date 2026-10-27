@@ -252,6 +252,30 @@ version, and whether the error occurs on navigation or when opening a preset.
 Check migration logs for schema errors separately from invalid saved selections.
 Do not wipe model settings or reset the database to recover a preset.
 
+### Kimi K3.1 Pro
+
+**Kimi K3.1 Pro** is recommended through Moonshot AI, OpenRouter, Vercel AI
+Gateway, Requesty, Kimi for Coding, and OpenCode Go. **Kimi K3.1 Pro Highspeed**
+is also available through Moonshot AI, Vercel AI Gateway, Requesty, and Kimi
+for Coding.
+
+In **Settings > Models**, connect one of these providers and select the model.
+For manual configuration, use the provider's full task model ID:
+
+| Provider | Kimi K3.1 Pro | Kimi K3.1 Pro Highspeed |
+| --- | --- | --- |
+| Moonshot AI | `moonshotai/kimi-k3.1-pro` | `moonshotai/kimi-k3.1-pro-highspeed` |
+| OpenRouter | `openrouter/moonshotai/kimi-k3.1-pro` | — |
+| Vercel AI Gateway | `vercel/moonshotai/kimi-k3.1-pro` | `vercel/moonshotai/kimi-k3.1-pro-highspeed` |
+| Requesty | `requesty/moonshot/kimi-k3.1-pro` | `requesty/moonshot/kimi-k3.1-pro-highspeed` |
+| Kimi for Coding | `kimi-for-coding/k3.1-pro` | `kimi-for-coding/k3.1-pro-highspeed` |
+| OpenCode Go | `opencode-go/kimi-k3.1-pro` | — |
+
+Kimi for Coding requires an eligible membership plan; access to the full 1M
+context window and Highspeed depends on the plan. Keep thinking enabled and
+start a new session when moving from an older Kimi model. See
+[Kimi's model and membership requirements](https://www.kimi.com/code/docs/en/kimi-code/models.html).
+
 ## Env-based setup
 
 Most deployments should configure providers from **Settings > Models**. Use
