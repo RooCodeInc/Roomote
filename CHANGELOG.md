@@ -2,6 +2,20 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.19.4 (2026-10-27)
+
+Roomote 1.19.4 expands model choice with GPT-6.1 Terra and Kimi K3.1 Pro, including Highspeed options on supported Kimi providers.
+
+### Highlights
+
+- Use GPT-6.1 Terra across supported API and subscription providers, with Fast mode on eligible ChatGPT plans.
+- Choose Kimi K3.1 Pro or its Highspeed variant through supported Kimi providers and gateways.
+
+### Patch changes
+
+- Select GPT-6.1 Terra through Roomote inference, OpenRouter, Vercel AI Gateway, OpenAI, Azure OpenAI, Azure AI Foundry, Requesty, and ChatGPT Subscription, including Fast mode on eligible ChatGPT plans. Existing defaults and saved model mappings stay unchanged.
+- Select Kimi K3.1 Pro through Moonshot AI, OpenRouter, Vercel AI Gateway, Kimi for Coding, and OpenCode Go, with Highspeed available through Moonshot AI, Vercel AI Gateway, and eligible Kimi for Coding memberships.
+
 ## 1.19.3 (2026-10-24)
 
 Roomote 1.19.3 keeps scheduled automations and worker health checks running reliably while memory history backfills make progress in the background.
