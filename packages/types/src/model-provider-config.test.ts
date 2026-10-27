@@ -543,7 +543,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         expected: [
           ['openrouter', 'openrouter/moonshotai/kimi-k3.1-pro'],
           ['vercel', 'vercel/moonshotai/kimi-k3.1-pro'],
-          ['requesty', 'requesty/moonshot/kimi-k3.1-pro'],
           ['moonshotai', 'moonshotai/kimi-k3.1-pro'],
           ['kimi-for-coding', 'kimi-for-coding/k3.1-pro'],
           ['opencode-go', 'opencode-go/kimi-k3.1-pro'],
@@ -553,7 +552,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         displayName: 'Kimi K3.1 Pro Highspeed',
         expected: [
           ['vercel', 'vercel/moonshotai/kimi-k3.1-pro-highspeed'],
-          ['requesty', 'requesty/moonshot/kimi-k3.1-pro-highspeed'],
           ['moonshotai', 'moonshotai/kimi-k3.1-pro-highspeed'],
           ['kimi-for-coding', 'kimi-for-coding/k3.1-pro-highspeed'],
         ],
@@ -1215,7 +1213,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
   });
 
-  it('maps Requesty to verified model routes and its coding default', () => {
+  it('maps Requesty to its current models.dev catalog and coding default', () => {
     const requestyProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
       (provider) => provider.id === 'requesty',
     );
@@ -1254,8 +1252,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gemini-3.8-flash',
       'requesty/glm-5.3-flash',
       'requesty/glm-5.3',
-      'requesty/moonshot/kimi-k3.1-pro',
-      'requesty/moonshot/kimi-k3.1-pro-highspeed',
       'requesty/kimi-k3',
       'requesty/xai/grok-4.7',
     ]);

@@ -483,47 +483,6 @@ describe('lookupModelMetadataFromCatalog', () => {
     expect(result.displayName).toBe('Claude Sonnet 5');
   });
 
-  it.each(['kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed'])(
-    'resolves metadata for the live Requesty moonshot/%s route',
-    (slug) => {
-      const catalog = buildCatalog({
-        gatewayModelsByLowerSlug: {
-          requesty: {
-            [slug]: {
-              limit: { context: 1_048_576 },
-              modalities: { input: ['text', 'image', 'video'] },
-              reasoning: true,
-              reasoning_options: [
-                { type: 'effort', values: ['low', 'high', 'max'] },
-              ],
-              cost: { input: 2, output: 10 },
-            },
-          },
-        },
-      });
-      const modelId = `requesty/moonshot/${slug}`;
-
-      expect(lookupModelMetadataFromCatalog(catalog, modelId).metadata).toEqual(
-        {
-          contextWindow: 1_048_576,
-          inputTypes: ['text', 'image', 'video'],
-          supportsReasoning: true,
-          supportedReasoningEfforts: ['low', 'high', 'max'],
-          inputPricePerToken: 0.000002,
-          outputPricePerToken: 0.00001,
-        },
-      );
-
-      // When models.dev adopts Requesty's real route, its metadata wins.
-      catalog.gatewayModelsByLowerSlug.requesty![`moonshot/${slug}`] = {
-        limit: { context: 262_144 },
-      };
-      expect(
-        lookupModelMetadataFromCatalog(catalog, modelId).metadata.contextWindow,
-      ).toBe(262_144);
-    },
-  );
-
   it.each(['k3.1-pro', 'k3.1-pro-highspeed'])(
     'resolves Kimi for Coding %s metadata through the renamed catalog provider',
     (slug) => {

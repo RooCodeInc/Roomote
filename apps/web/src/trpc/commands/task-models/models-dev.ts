@@ -319,17 +319,8 @@ export function lookupModelMetadataFromCatalog(
   );
 
   if (gatewayProviderId) {
-    const gatewayModels = catalog.gatewayModelsByLowerSlug[gatewayProviderId];
-    // Requesty's API publishes these routes with `moonshot/`, while models.dev
-    // currently uses bare ids. Prefer the real route if the catalog catches up.
-    const legacyRequestySlug =
-      gatewayProviderId === 'requesty' &&
-      /^moonshot\/kimi-k3\.1-pro(?:-highspeed)?$/u.test(slug)
-        ? slug.slice('moonshot/'.length)
-        : undefined;
     const gatewayEntry = extractMetadataFromEntry(
-      gatewayModels?.[slug.toLowerCase()] ??
-        (legacyRequestySlug ? gatewayModels?.[legacyRequestySlug] : undefined),
+      catalog.gatewayModelsByLowerSlug[gatewayProviderId]?.[slug.toLowerCase()],
     );
     if (
       Object.keys(gatewayEntry.metadata ?? {}).length > 0 ||

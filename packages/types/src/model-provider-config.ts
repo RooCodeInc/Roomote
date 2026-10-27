@@ -832,9 +832,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gemini-3-8-flash': 'requesty/gemini-3.8-flash',
       'glm-5-3-flash': 'requesty/glm-5.3-flash',
       'glm-5-3': 'requesty/glm-5.3',
-      // Verified against Requesty's live catalog, which includes the lab prefix.
-      'kimi-k3-1-pro': 'requesty/moonshot/kimi-k3.1-pro',
-      'kimi-k3-1-pro-highspeed': 'requesty/moonshot/kimi-k3.1-pro-highspeed',
       'kimi-k3': 'requesty/kimi-k3',
       'grok-4-7': 'requesty/xai/grok-4.7',
     }),
