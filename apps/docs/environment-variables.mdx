@@ -66,12 +66,12 @@ Use environment variables when:
 - you want changes reviewed in infrastructure config
 - you need to prevent in-app overrides
 
-`/setup` also respects env-managed provider configuration. If an inference
-provider is fully configured from environment variables, setup skips the
-inference-provider step. If a hosted sandbox provider such as Modal, E2B, or
-Daytona is fully configured from environment variables, setup skips the sandbox
-provider step too. Local Docker is still treated as the default local fallback,
-so Docker-only configuration does not skip that step.
+`/setup` also respects env-managed provider configuration. The initial bootstrap
+establishes the administrator account and inference, then opens a setup
+conversation. Repository access and sandbox configuration are handled there as
+needed, rather than in a separate sandbox-provider wizard step. A configured
+provider can satisfy the capability without entering its credentials again;
+complete a real task to verify that it works.
 
 ## Production recommendations
 
@@ -260,7 +260,7 @@ manifest changes.
 
 | Env var                              | Required          | Used for                                                                                                                                 |
 | ------------------------------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, `daytona`, `blaxel`, `box`, `azure`, and the Roomote Cloud-only `roomote`. |
+| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Accepted environment-variable values are `docker`, `modal`, `e2b`, `daytona`, `box`, `azure`, and the Roomote Cloud-only `roomote`. Select Blaxel through **Settings > Sandboxes** instead; the current deployment env validator does not accept `blaxel` here. |
 | `EXCLUDED_COMPUTE_PROVIDERS`         | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                                  |
 | `DOCKER_WORKER_IMAGE`                | Optional          | Worker image used by Docker. In production, prefer an immutable registry-qualified tag.                                                  |
 | `ROOMOTE_WORKER_IMAGE_REPO`          | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                          |
@@ -270,7 +270,7 @@ manifest changes.
 | `DOCKER_WORKER_CPU_LIMIT`            | Optional          | CPU limit per Docker task. Defaults to `2`.                                                                                              |
 | `DOCKER_WORKER_MEMORY_LIMIT`         | Optional          | Memory and memory+swap limit for each Docker worker. Defaults to `4g`.                                                                   |
 | `DOCKER_TASK_DAEMON_MEMORY_LIMIT`    | Optional          | Memory and memory+swap limit for the nested Docker daemon used by Docker-project tasks. Defaults to `8g`.                                |
-| `DOCKER_WORKER_PIDS_LIMIT`           | Optional          | Process limit per Docker task. Defaults to `512`.                                                                                        |
+| `DOCKER_WORKER_PIDS_LIMIT`           | Optional          | Process limit per Docker task. The runtime default is `2048`; the supplied production and Docker compute Compose files explicitly default it to `512`. Set it in the Compose environment file to override that value. |
 | `DOCKER_WORKER_DISK_LIMIT`           | Optional          | Writable-layer limit. Defaults to `20g`; tasks fail closed when the Docker storage driver cannot enforce it.                             |
 | `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK` | Optional          | Explicitly permits startup without `--storage-opt size`. Defaults to `false`; use only with an equivalent host-level quota.              |
 | `DOCKER_WORKER_LOG_MAX_SIZE`         | Optional          | Maximum size of each Docker JSON log file. Defaults to `10m`.                                                                            |
