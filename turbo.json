@@ -8,6 +8,12 @@
     "apps/worker/Dockerfile",
     "apps/worker/package.json",
     "ecosystem.config.js",
+    "packages/*/src/**",
+    "packages/*/package.json",
+    "packages/*/tsconfig*.json",
+    "packages/config-eslint/*.js",
+    "packages/config-typescript/*.json",
+    "tsconfig.json",
     "scripts/build-worker-release.sh"
   ],
   "globalPassThroughEnv": [
