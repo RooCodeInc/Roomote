@@ -586,10 +586,8 @@ export async function getMiscSettingsCommand(
     ]);
 
   return {
-    anonymousAnalyticsEnabled: isAnonymousAnalyticsEnabledFromMetadata(
-      metadata,
-      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
-    ),
+    anonymousAnalyticsEnabled:
+      isAnonymousAnalyticsEnabledFromMetadata(metadata),
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
     telemetryEnvAllowed: isTelemetryEnvAllowed(),
     diagnostics,
@@ -687,10 +685,9 @@ export async function setAnonymousAnalyticsCommand(
     columns: { metadata: true },
   });
 
-  const cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
   const nextMetadata: Record<string, unknown> = {
     ...normalizeMetadata(existingSettings?.metadata),
-    [ANONYMOUS_ANALYTICS_METADATA_KEY]: cloudEnabled ? true : input.enabled,
+    [ANONYMOUS_ANALYTICS_METADATA_KEY]: input.enabled,
   };
 
   if (!existingSettings) {

@@ -28,7 +28,10 @@ export default defineConfig({
             '!src/{hooks,components}/**/*.test.{js,jsx,ts,tsx}',
           ],
           environment: 'node',
-          exclude: ['src/trpc/commands/snapshots/provider-cleanup.db.test.ts'],
+          exclude: [
+            'src/trpc/commands/snapshots/provider-cleanup.db.test.ts',
+            'src/trpc/commands/misc-settings/anonymous-analytics.db.test.ts',
+          ],
           // Keep DB-backed server tests below the local Postgres connection limit.
           maxWorkers: 4,
           globalSetup: './vitest.setup.server.ts',
@@ -39,12 +42,14 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'server-global-db-state',
-          include: ['src/trpc/commands/snapshots/provider-cleanup.db.test.ts'],
+          include: [
+            'src/trpc/commands/snapshots/provider-cleanup.db.test.ts',
+            'src/trpc/commands/misc-settings/anonymous-analytics.db.test.ts',
+          ],
           environment: 'node',
           globalSetup: './vitest.setup.server.ts',
           setupFiles: './vitest.setup.mocks.ts',
-          // The no-eligible-provider fixture temporarily changes the shared
-          // deployment default; run it after ordinary server/client suites.
+          // Deployment-wide fixtures run after ordinary server/client suites.
           sequence: { groupOrder: 1 },
           fileParallelism: false,
           maxWorkers: 1,
