@@ -47,6 +47,28 @@ type KimiForCodingModelDefinition = {
 const KIMI_FOR_CODING_MODELS: Readonly<
   Record<string, KimiForCodingModelDefinition>
 > = {
+  'k3.1-pro': {
+    name: 'Kimi K3.1 Pro',
+    family: 'kimi-k3',
+    release_date: '2026-10-23',
+    attachment: true,
+    reasoning: true,
+    temperature: false,
+    tool_call: true,
+    modalities: { input: ['text', 'image', 'video'], output: ['text'] },
+    limit: { context: 1_048_576, output: 131_072 },
+  },
+  'k3.1-pro-highspeed': {
+    name: 'Kimi K3.1 Pro Highspeed',
+    family: 'kimi-k3',
+    release_date: '2026-10-23',
+    attachment: true,
+    reasoning: true,
+    temperature: false,
+    tool_call: true,
+    modalities: { input: ['text', 'image', 'video'], output: ['text'] },
+    limit: { context: 1_048_576, output: 131_072 },
+  },
   k3: {
     name: 'Kimi K3',
     family: 'kimi-k3',

@@ -539,6 +539,24 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         ],
       },
       {
+        displayName: 'Kimi K3.1 Pro',
+        expected: [
+          ['openrouter', 'openrouter/moonshotai/kimi-k3.1-pro'],
+          ['vercel', 'vercel/moonshotai/kimi-k3.1-pro'],
+          ['moonshotai', 'moonshotai/kimi-k3.1-pro'],
+          ['kimi-for-coding', 'kimi-for-coding/k3.1-pro'],
+          ['opencode-go', 'opencode-go/kimi-k3.1-pro'],
+        ],
+      },
+      {
+        displayName: 'Kimi K3.1 Pro Highspeed',
+        expected: [
+          ['vercel', 'vercel/moonshotai/kimi-k3.1-pro-highspeed'],
+          ['moonshotai', 'moonshotai/kimi-k3.1-pro-highspeed'],
+          ['kimi-for-coding', 'kimi-for-coding/k3.1-pro-highspeed'],
+        ],
+      },
+      {
         displayName: 'Kimi K3',
         expected: [
           ['openrouter', 'openrouter/moonshotai/kimi-k3'],
