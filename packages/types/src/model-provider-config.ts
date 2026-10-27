@@ -779,6 +779,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-6-sol': 'vercel/openai/gpt-6-sol',
       'gpt-6-1-sol': 'vercel/openai/gpt-6.1-sol',
+      'gpt-6-1-terra': 'vercel/openai/gpt-6.1-terra',
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
       'gpt-6-luna': 'vercel/openai/gpt-6-luna',
@@ -787,6 +788,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
       'glm-5-3-flash': 'vercel/zai/glm-5.3-flash',
       'glm-5-3': 'vercel/zai/glm-5.3',
+      'kimi-k3-1-pro': 'vercel/moonshotai/kimi-k3.1-pro',
+      'kimi-k3-1-pro-highspeed': 'vercel/moonshotai/kimi-k3.1-pro-highspeed',
       'kimi-k3': 'vercel/moonshotai/kimi-k3',
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
       'qwen3-8-max': 'vercel/alibaba/qwen3.8-max',
@@ -821,6 +824,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
       'gpt-6-sol': 'requesty/gpt-6-sol@eu',
       'gpt-6-1-sol': 'requesty/gpt-6.1-sol@eu',
+      // Requesty's live catalog publishes explicit Azure regional routes.
+      'gpt-6-1-terra': 'requesty/azure/gpt-6.1-terra@swedencentral',
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
       'gpt-6-luna': 'requesty/gpt-6-luna@eu',
@@ -906,6 +911,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-6-sol': 'openai/gpt-6-sol',
       'gpt-6-1-sol': 'openai/gpt-6.1-sol',
+      'gpt-6-1-terra': 'openai/gpt-6.1-terra',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
       'gpt-6-luna': 'openai/gpt-6-luna',
@@ -936,6 +942,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'azure/gpt-5.6-sol',
       'gpt-6-sol': 'azure/gpt-6-sol',
       'gpt-6-1-sol': 'azure/gpt-6.1-sol',
+      'gpt-6-1-terra': 'azure/gpt-6.1-terra',
       'gpt-5-6-terra': 'azure/gpt-5.6-terra',
       'gpt-5-6-luna': 'azure/gpt-5.6-luna',
       'gpt-6-luna': 'azure/gpt-6-luna',
@@ -978,6 +985,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'azure-cognitive-services/gpt-5.6-sol',
       'gpt-6-sol': 'azure-cognitive-services/gpt-6-sol',
       'gpt-6-1-sol': 'azure-cognitive-services/gpt-6.1-sol',
+      'gpt-6-1-terra': 'azure-cognitive-services/gpt-6.1-terra',
       'gpt-5-6-terra': 'azure-cognitive-services/gpt-5.6-terra',
       'gpt-5-6-luna': 'azure-cognitive-services/gpt-5.6-luna',
       'gpt-6-luna': 'azure-cognitive-services/gpt-6-luna',
@@ -1029,6 +1037,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       linkLabel: 'Open Kimi API Platform keys',
     },
     suggestedTaskModels: mapRecommendedTaskModels({
+      'kimi-k3-1-pro': 'moonshotai/kimi-k3.1-pro',
+      'kimi-k3-1-pro-highspeed': 'moonshotai/kimi-k3.1-pro-highspeed',
       'kimi-k3': 'moonshotai/kimi-k3',
       'kimi-k2-7-code': 'moonshotai/kimi-k2.7-code',
     }),
@@ -1056,6 +1066,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // renamed upstream to `kimi-for-coding`, the rolling default coding model
     // (no longer K2.7, so it is not offered under that recommended name).
     suggestedTaskModels: mapRecommendedTaskModels({
+      'kimi-k3-1-pro': 'kimi-for-coding/k3.1-pro',
+      'kimi-k3-1-pro-highspeed': 'kimi-for-coding/k3.1-pro-highspeed',
       'kimi-k3': 'kimi-for-coding/k3',
     }),
     recommendedRoleModels: {
@@ -1137,6 +1149,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'glm-5-3': 'opencode-go/glm-5.3',
       'grok-4-7': 'opencode-go/grok-4.7',
       'kimi-k2-7-code': 'opencode-go/kimi-k2.7-code',
+      'kimi-k3-1-pro': 'opencode-go/kimi-k3.1-pro',
       'kimi-k3': 'opencode-go/kimi-k3',
       'minimax-m3': 'opencode-go/minimax-m3',
       'qwen3-8-max': 'opencode-go/qwen3.8-max',
@@ -1409,6 +1422,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-6-sol': 'openai/gpt-6-sol',
       'gpt-6-1-sol': 'openai/gpt-6.1-sol',
+      'gpt-6-1-terra': 'openai/gpt-6.1-terra',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
       'gpt-6-luna': 'openai/gpt-6-luna',
