@@ -578,9 +578,14 @@ export async function createTaskRunWorkerGitHubTokenWithMetadata(
 
 /**
  * Errors that will not clear on retry: the installation was suspended,
- * removed, or lost access to the repositories (401/403/404/422).
+ * removed, or lost access to the repositories (401/403/404/422). GitHub also
+ * answers rate limits with 403 and token-endpoint spam protection with 422,
+ * so recognized rate limits stay transient.
  */
 function isPermanentInstallationTokenError(error: unknown): boolean {
+  if (getGitHubRateLimitRetryAfterMs(error) !== null) {
+    return false;
+  }
   const status =
     typeof error === 'object' && error !== null && 'status' in error
       ? Number((error as { status: unknown }).status)

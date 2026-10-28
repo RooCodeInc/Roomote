@@ -923,6 +923,47 @@ describe('createTaskRunGitHubToken', () => {
     ).rejects.toThrow('Service unavailable');
   });
 
+  it.each([
+    Object.assign(new Error('API rate limit exceeded for installation'), {
+      status: 403,
+    }),
+    Object.assign(new Error('The endpoint has been spammed'), { status: 422 }),
+  ])(
+    'treats a rate-limited mint on another installation as transient',
+    async (rateLimitError) => {
+      mockFindMany.mockResolvedValue([
+        {
+          fullName: 'owner-a/api',
+          installationId: 'install-a',
+          githubRepoId: 401,
+        },
+        {
+          fullName: 'owner-b/web',
+          installationId: 'install-b',
+          githubRepoId: 402,
+        },
+      ]);
+      mockCreateGitHubTokenWithMetadata
+        .mockResolvedValueOnce({
+          token: 'ghs_primary_token',
+          expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+        })
+        .mockRejectedValueOnce(rateLimitError);
+
+      await expect(
+        createTaskRunWorkerGitHubTokenWithMetadata(
+          buildTaskRun({
+            repo: 'owner-b/web',
+            repositoryProviders: {
+              'owner-a/api': 'github',
+              'owner-b/web': 'github',
+            },
+          } as TaskRun['payload']),
+        ),
+      ).rejects.toBe(rateLimitError);
+    },
+  );
+
   it('evicts a cached task token and retries once after a 401', async () => {
     mockCreateGitHubTokenWithMetadata
       .mockResolvedValueOnce({
