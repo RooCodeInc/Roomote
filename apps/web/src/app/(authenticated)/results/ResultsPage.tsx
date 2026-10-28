@@ -313,6 +313,7 @@ export function ResultsPage() {
   };
 
   const clearResult = (result: ResultInboxItem) => {
+    if (isDetailTransition || clearMutation.isPending) return;
     if (resultKey(result) !== selectedKey) return;
     const index = results.findIndex(
       (candidate) => resultKey(candidate) === resultKey(result),
@@ -706,9 +707,11 @@ export function ResultsPage() {
                         )}
                         <Button
                           variant="outline"
-                          disabled={clearMutation.isPending || !selectedSummary}
+                          disabled={
+                            clearMutation.isPending || !actionableResult
+                          }
                           onClick={() =>
-                            selectedSummary && clearResult(selectedSummary)
+                            actionableResult && clearResult(actionableResult)
                           }
                         >
                           <X />
