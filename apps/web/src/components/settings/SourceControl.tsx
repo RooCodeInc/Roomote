@@ -477,7 +477,7 @@ export function SourceControl() {
 
 function SourceControlAdminSettings() {
   const prActionQuery = usePrAction();
-  const currentPrAction = prActionQuery.data?.prAction ?? 'draft';
+  const currentPrAction = prActionQuery.data?.prAction;
 
   return (
     <>
@@ -542,6 +542,25 @@ function PrActionSetting({
 }) {
   const setPrAction = useSetPrAction();
   const currentPrAction = prActionQuery.data?.prAction ?? 'draft';
+
+  if (prActionQuery.isError && prActionQuery.data === undefined) {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-destructive">
+          Failed to load pull request delivery.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={prActionQuery.isFetching}
+          onClick={() => void prActionQuery.refetch()}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
