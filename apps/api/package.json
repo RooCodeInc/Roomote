@@ -49,7 +49,7 @@
     "p-map": "^7.0.4",
     "snowflake-sdk": "3.3.0",
     "svix": "^1.99.1",
-    "undici": "^7.29.1",
+    "undici": "^7.30.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
