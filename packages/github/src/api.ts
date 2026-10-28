@@ -281,6 +281,61 @@ export async function resolveTaskRunEnvironmentGitHubRepositories(
   });
 }
 
+/**
+ * Narrows a stamped repository scope that spans GitHub App installations to
+ * the repositories on the installation that owns the task's own repository
+ * (`payload.repo`). Returns null when that repository is not an active GitHub
+ * repository, so callers keep failing closed.
+ */
+async function resolvePrimaryRepositoryInstallationScope(
+  taskRun: TaskRun,
+  stampedRepositories: string[],
+): Promise<CreateGitHubTokenOptions | null> {
+  const primaryRepository = taskRun.payload.repo;
+  if (
+    !primaryRepository ||
+    primaryRepository === ALL_REPOSITORIES ||
+    !stampedRepositories.includes(primaryRepository)
+  ) {
+    return null;
+  }
+
+  const stampedRows = await db.query.repositories.findMany({
+    where: and(
+      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
+      eq(repositories.isActive, true),
+      inArray(repositories.fullName, stampedRepositories),
+    ),
+  });
+  const primaryInstallationId = stampedRows.find(
+    (row) => row.fullName === primaryRepository,
+  )?.installationId;
+  if (!primaryInstallationId) {
+    return null;
+  }
+
+  const sameInstallationRows = stampedRows.filter(
+    (row) => row.installationId === primaryInstallationId,
+  );
+  const includedRepositories = new Set(
+    sameInstallationRows.map((row) => row.fullName),
+  );
+  const excludedRepositories = stampedRepositories.filter(
+    (repository) => !includedRepositories.has(repository),
+  );
+  console.warn(
+    `[resolveTaskRunGitHubTokenOptions] Stamped GitHub repositories for task run ${taskRun.id} span multiple installations; minting the ${primaryRepository} installation only. Not reachable with this token: ${excludedRepositories.join(', ')}`,
+  );
+
+  return resolveTokenOptionsForRepositoryNames({
+    taskRun,
+    repositoryNames: sameInstallationRows.map((row) => row.fullName),
+    repositoryRows: sameInstallationRows,
+    missingMessagePrefix: 'Stamped repositories not found',
+    spanningMessagePrefix: 'Stamped repositories',
+  });
+}
+
 async function resolveTaskRunGitHubTokenOptions(
   taskRun: TaskRun,
 ): Promise<CreateGitHubTokenOptions> {
@@ -314,12 +369,27 @@ async function resolveTaskRunGitHubTokenOptions(
         skipUnavailableRepositories: true,
       });
     } catch (error) {
+      if (!isGitHubInstallationSpanError(error)) {
+        throw error;
+      }
+
+      // Without an environment (all-repository workspaces, PR reviews), keep
+      // the stamped repositories on the task's own repository installation so
+      // a second connected organization does not block every run.
+      if (!repositoryRows?.length) {
+        const primaryOptions = await resolvePrimaryRepositoryInstallationScope(
+          taskRun,
+          stampedRepositories,
+        );
+        if (!primaryOptions) {
+          throw error;
+        }
+        return primaryOptions;
+      }
+
       // Extra advertised checkouts can span GitHub App installations. Mint the
       // environment's installation instead of blocking a workspace that already
       // has a single-installation GitHub scope.
-      if (!repositoryRows?.length || !isGitHubInstallationSpanError(error)) {
-        throw error;
-      }
 
       // The payload still advertises the excluded repositories as on-demand
       // checkouts, so name them: a later clone failure is otherwise opaque.
