@@ -6,7 +6,7 @@ const CLOUDFLARE_WORKERS_AI_ACCOUNT_ID_RE = /^[a-f0-9]{32}$/i;
 export const CLOUDFLARE_WORKERS_AI_EMBEDDING_MODEL = '@cf/baai/bge-m3';
 export const CLOUDFLARE_WORKERS_AI_EMBEDDING_DIMENSIONS = 1024;
 
-export type CloudflareWorkersAiEmbeddings = {
+type CloudflareWorkersAiEmbeddings = {
   baseUrl: string;
   apiKey: string;
 };
