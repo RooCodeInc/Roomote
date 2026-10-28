@@ -47,9 +47,13 @@ export function PersonalIntegrations() {
         mcpEnabled ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label="Add personal integration"
+              >
                 <Plus />
-                Add personal integration
+                Add
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
@@ -64,9 +68,14 @@ export function PersonalIntegrations() {
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <Button variant="outline" size="sm" onClick={keys.openAddDialog}>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="Add personal integration"
+            onClick={keys.openAddDialog}
+          >
             <Plus />
-            Add personal integration
+            Add
           </Button>
         )
       }
@@ -76,19 +85,21 @@ export function PersonalIntegrations() {
           {message}
         </p>
       ))}
-      <div role="table" aria-label="Personal integrations">
-        <div role="rowgroup" className="divide-y divide-background">
-          {isLoading ? <Skeleton className="h-16 w-full" /> : null}
-          {items.map((item) => (
-            <IntegrationListRow key={item.id} item={item} stackDescription />
-          ))}
-          {!isLoading && items.length === 0 && errors.length === 0 ? (
-            <p className="px-4 py-3 text-sm text-muted-foreground">
-              No personal integrations yet.
-            </p>
-          ) : null}
+      {isLoading ? <Skeleton className="h-16 w-full" /> : null}
+      {items.length > 0 ? (
+        <div role="table" aria-label="Personal integrations">
+          <div role="rowgroup" className="divide-y divide-background">
+            {items.map((item) => (
+              <IntegrationListRow key={item.id} item={item} stackDescription />
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
+      {!isLoading && items.length === 0 && errors.length === 0 ? (
+        <p className="px-4 py-3 text-sm text-muted-foreground">
+          No personal integrations yet.
+        </p>
+      ) : null}
       {mcpEnabled ? mcp.dialogs : null}
       {keys.dialogs}
     </Section>
