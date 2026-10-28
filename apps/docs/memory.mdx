@@ -140,6 +140,23 @@ with no redeploy.
 
 OpenRouter and OpenAI both support memory embedding calls.
 
+### Cloudflare Workers AI
+
+Deployments that already have a Workers AI token can use it for Memory
+embeddings. Set `CLOUDFLARE_WORKERS_AI_API_TOKEN` and
+`CLOUDFLARE_WORKERS_AI_ACCOUNT_ID`. Roomote forwards embeddings to Workers
+AI's OpenAI-compatible endpoint. Set the embedding model and dimensions
+before Memory's first boot:
+
+```sh
+R_BRAIN_EMBEDDING_MODEL=@cf/baai/bge-m3
+R_BRAIN_EMBEDDING_DIMENSIONS=1024
+```
+
+Leave `R_BRAIN_EMBEDDINGS_UPSTREAM_URL` unset unless you want to override
+that auto-wired endpoint. An explicit upstream URL must be the Workers AI
+`/ai` base; Roomote appends `/v1/embeddings`.
+
 ### Run embeddings locally
 
 Self-hosted Compose deployments can keep embeddings on their own hardware
@@ -212,10 +229,10 @@ pages written over the last 30 days and the memories written most recently.
 source. Selecting a new memory opens it in the browser and updates the page URL
 without adding browser history.
 
-**Status** reports whether recall is semantic or keyword-only and which provider
-is serving its embeddings and synthesis. Memory that is running but has no
-provider key is called out as needing attention rather than shown as healthy:
-without one it can only match keywords, so recall would look real while missing
+**Status** reports whether recall is semantic or keyword-only and which path is
+serving embeddings and synthesis. Memory that is running but has no embeddings
+path is called out as needing attention rather than shown as healthy: without
+embeddings it can only match keywords, so recall would look real while missing
 everything semantic.
 
 **Sources** shows connected sources with their current collection state, when
@@ -312,10 +329,11 @@ it takes effect on the next request with nothing to restart.
 
 ## If you turned memory on later
 
-Memory that first boots without a provider key is created with semantic
+Memory that first boots without an embeddings path is created with semantic
 recall switched off, because the embedding model sizes its vector storage at
-creation time. Adding a key later is still fine: memory notices on its next
-start, enables semantic recall, and embeds whatever it already holds. It logs
+creation time. Adding a provider key, Cloudflare Workers AI, or an embeddings
+upstream later is still fine: memory notices on its next start, enables
+semantic recall, and embeds whatever it already holds. It logs
 `semantic recall enabled` when it does.
 
 That repair runs once and is safe, since memory in this state has no

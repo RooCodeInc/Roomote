@@ -6,12 +6,14 @@ const {
   mockGetBrainGatewayToken,
   mockResolveBrainInferenceProvider,
   mockMapBrainModelName,
+  mockResolveBrainEmbeddingsUpstream,
   mockGenerateTrackedNonTaskText,
   mockEnv,
 } = vi.hoisted(() => ({
   mockGetBrainGatewayToken: vi.fn(),
   mockResolveBrainInferenceProvider: vi.fn(),
   mockMapBrainModelName: vi.fn(),
+  mockResolveBrainEmbeddingsUpstream: vi.fn(),
   mockGenerateTrackedNonTaskText: vi.fn(),
   mockEnv: {} as Record<string, string | undefined>,
 }));
@@ -22,6 +24,7 @@ vi.mock('@roomote/sdk/server', () => ({
   getBrainGatewayToken: mockGetBrainGatewayToken,
   resolveBrainInferenceProvider: mockResolveBrainInferenceProvider,
   mapBrainModelName: mockMapBrainModelName,
+  resolveBrainEmbeddingsUpstream: mockResolveBrainEmbeddingsUpstream,
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -70,6 +73,17 @@ beforeEach(() => {
   }
   mockGetBrainGatewayToken.mockReturnValue(GATEWAY_TOKEN);
   mockResolveBrainInferenceProvider.mockResolvedValue(OPENROUTER);
+  mockResolveBrainEmbeddingsUpstream.mockImplementation(async () => {
+    const configured = mockEnv.R_BRAIN_EMBEDDINGS_UPSTREAM_URL?.trim();
+    if (!configured) {
+      return null;
+    }
+    return {
+      baseUrl: configured.replace(/\/$/, ''),
+      apiKey: mockEnv.R_BRAIN_INFERENCE_UPSTREAM_API_KEY?.trim() || undefined,
+      source: 'configured' as const,
+    };
+  });
   mockMapBrainModelName.mockImplementation((requested: string) =>
     requested === 'text-embedding-3-small'
       ? 'openai/text-embedding-3-small'
@@ -293,6 +307,61 @@ describe('local inference upstreams', () => {
 
     expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('routes embeddings to Cloudflare Workers AI without an OpenAI key', async () => {
+    mockResolveBrainInferenceProvider.mockResolvedValue(null);
+    mockResolveBrainEmbeddingsUpstream.mockResolvedValue({
+      baseUrl: `https://api.cloudflare.com/client/v4/accounts/${'a1b2c3d4e5f6789012345678abcdef90'}/ai`,
+      apiKey: 'cfat_test',
+      source: 'cloudflare-workers-ai',
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await post('/v1/embeddings', {
+      token: GATEWAY_TOKEN,
+      body: { model: '@cf/baai/bge-m3', input: 'hello' },
+    });
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1/embeddings',
+    );
+    const headers = new Headers((init as RequestInit).headers);
+    expect(headers.get('authorization')).toBe('Bearer cfat_test');
+    expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+      model: '@cf/baai/bge-m3',
+    });
+    expect(mockMapBrainModelName).not.toHaveBeenCalled();
+    expect(mockResolveBrainInferenceProvider).not.toHaveBeenCalled();
+  });
+
+  it('keeps chat on the provider when Cloudflare embeddings are wired', async () => {
+    mockResolveBrainEmbeddingsUpstream.mockResolvedValue({
+      baseUrl:
+        'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai',
+      apiKey: 'cfat_test',
+      source: 'cloudflare-workers-ai',
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await post('/v1/chat/completions', {
+      token: GATEWAY_TOKEN,
+      body: { model: 'gpt-5.6-luna', messages: [] },
+    });
+
+    expect(mockResolveBrainInferenceProvider).toHaveBeenCalled();
+    expect(String(fetchMock.mock.calls[0]![0])).toContain('openrouter.ai');
   });
 });
 

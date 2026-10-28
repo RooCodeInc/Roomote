@@ -253,8 +253,10 @@ manifest changes.
 | `R_BRAIN_MODEL`                        | Optional     | Memory synthesis model in the configured provider's naming. Changes apply immediately.                                                  |
 | `R_BRAIN_EMBEDDING_MODEL`              | Before first Memory boot | Embedding model id that sizes Memory's vector storage. Changing it later requires re-embedding.                              |
 | `R_BRAIN_EMBEDDING_DIMENSIONS`         | Before first Memory boot | Output width for `R_BRAIN_EMBEDDING_MODEL`; it must match the served model.                                                   |
-| `R_BRAIN_EMBEDDINGS_UPSTREAM_URL`      | Optional     | OpenAI-compatible embeddings endpoint used instead of the Memory provider.                                                               |
+| `R_BRAIN_EMBEDDINGS_UPSTREAM_URL`      | Optional     | OpenAI-compatible embeddings endpoint used instead of the Memory provider. Wins over Cloudflare Workers AI auto-wire.                    |
 | `R_BRAIN_INFERENCE_UPSTREAM_API_KEY`   | Optional     | Bearer key for the self-run embeddings upstream; omit it for a trusted private-network service.                         |
+| `CLOUDFLARE_WORKERS_AI_API_TOKEN`      | Optional     | Workers AI token used for Memory embeddings when no embeddings upstream URL is set.                                                      |
+| `CLOUDFLARE_WORKERS_AI_ACCOUNT_ID`     | Optional     | 32-hex Cloudflare account id paired with the Workers AI token.                                                                           |
 
 ### Sandbox providers
 

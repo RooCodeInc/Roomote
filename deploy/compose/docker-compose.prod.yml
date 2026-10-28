@@ -104,6 +104,11 @@ x-roomote-inference-env: &roomote-inference-env
   OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:-}
   BASETEN_API_KEY: ${BASETEN_API_KEY:-}
   TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
+  # Memory embeddings auto-wire to Workers AI when these are set and
+  # R_BRAIN_EMBEDDINGS_UPSTREAM_URL is empty. Set R_BRAIN_EMBEDDING_MODEL
+  # and R_BRAIN_EMBEDDING_DIMENSIONS to @cf/baai/bge-m3 / 1024 before first boot.
+  CLOUDFLARE_WORKERS_AI_API_TOKEN: ${CLOUDFLARE_WORKERS_AI_API_TOKEN:-}
+  CLOUDFLARE_WORKERS_AI_ACCOUNT_ID: ${CLOUDFLARE_WORKERS_AI_ACCOUNT_ID:-}
 
 x-roomote-web-env: &roomote-web-env
   <<: *roomote-inference-env

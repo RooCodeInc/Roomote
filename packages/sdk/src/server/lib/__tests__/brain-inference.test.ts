@@ -7,14 +7,19 @@ vi.mock('@roomote/db/server', () => ({
 const mockEnv: {
   R_BRAIN_MODEL?: string;
   R_BRAIN_EMBEDDING_MODEL?: string;
+  R_BRAIN_EMBEDDING_DIMENSIONS?: number;
   R_BRAIN_EMBEDDINGS_UPSTREAM_URL?: string;
+  R_BRAIN_INFERENCE_UPSTREAM_API_KEY?: string;
 } = {};
 
 vi.mock('@roomote/env', () => ({ Env: mockEnv }));
 
 const {
   mapBrainModelName,
+  describeBrainModels,
   isBrainEmbeddingAvailable,
+  resolveBrainEmbeddingsUpstream,
+  resetBrainEmbeddingsUpstreamCache,
   resetBrainInferenceProviderCache,
 } = await import('../brain-inference');
 const { resolveModelProviderEnvValue } = await import('@roomote/db/server');
@@ -24,14 +29,35 @@ const mockResolveModelProviderEnvValue = vi.mocked(
 
 const OPENROUTER = { providerId: 'openrouter', apiKey: 'sk-or' } as const;
 const OPENAI = { providerId: 'openai', apiKey: 'sk' } as const;
+const CF_ACCOUNT_ID = 'a1b2c3d4e5f6789012345678abcdef90';
+
+function envVarNames(names: string | readonly string[]): readonly string[] {
+  return typeof names === 'string' ? [names] : names;
+}
+
+function mockCloudflareWorkersAi(): void {
+  mockResolveModelProviderEnvValue.mockImplementation(async (names) => {
+    const list = envVarNames(names);
+    if (list.includes('CLOUDFLARE_WORKERS_AI_API_TOKEN')) {
+      return 'cfat_test';
+    }
+    if (list.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
+      return CF_ACCOUNT_ID;
+    }
+    return undefined;
+  });
+}
 
 beforeEach(() => {
   delete mockEnv.R_BRAIN_MODEL;
   delete mockEnv.R_BRAIN_EMBEDDING_MODEL;
+  delete mockEnv.R_BRAIN_EMBEDDING_DIMENSIONS;
   delete mockEnv.R_BRAIN_EMBEDDINGS_UPSTREAM_URL;
+  delete mockEnv.R_BRAIN_INFERENCE_UPSTREAM_API_KEY;
   mockResolveModelProviderEnvValue.mockReset();
   mockResolveModelProviderEnvValue.mockResolvedValue(undefined);
   resetBrainInferenceProviderCache();
+  resetBrainEmbeddingsUpstreamCache();
 });
 
 describe('mapBrainModelName', () => {
@@ -103,5 +129,109 @@ describe('isBrainEmbeddingAvailable', () => {
   it('treats a whitespace-only upstream as unset', async () => {
     mockEnv.R_BRAIN_EMBEDDINGS_UPSTREAM_URL = '   ';
     await expect(isBrainEmbeddingAvailable()).resolves.toBe(false);
+  });
+
+  it('is ready when Cloudflare Workers AI can embed, with no OpenAI key', async () => {
+    mockCloudflareWorkersAi();
+    await expect(isBrainEmbeddingAvailable()).resolves.toBe(true);
+  });
+
+  it('is not ready with a Cloudflare token and no account id', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(async (names) => {
+      const list = envVarNames(names);
+      if (list.includes('CLOUDFLARE_WORKERS_AI_API_TOKEN')) {
+        return 'cfat_test';
+      }
+      return undefined;
+    });
+    await expect(isBrainEmbeddingAvailable()).resolves.toBe(false);
+  });
+
+  it('is not ready with a Cloudflare account id and no token', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(async (names) => {
+      const list = envVarNames(names);
+      if (list.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
+        return CF_ACCOUNT_ID;
+      }
+      return undefined;
+    });
+    await expect(isBrainEmbeddingAvailable()).resolves.toBe(false);
+  });
+
+  it('is not ready with an account id that is not 32 hex characters', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(async (names) => {
+      const list = envVarNames(names);
+      if (list.includes('CLOUDFLARE_WORKERS_AI_API_TOKEN')) {
+        return 'cfat_test';
+      }
+      if (list.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
+        return 'not-a-cloudflare-account-id';
+      }
+      return undefined;
+    });
+    await expect(isBrainEmbeddingAvailable()).resolves.toBe(false);
+  });
+
+  it('is not ready with a 32-character account id that is not hex', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(async (names) => {
+      const list = envVarNames(names);
+      if (list.includes('CLOUDFLARE_WORKERS_AI_API_TOKEN')) {
+        return 'cfat_test';
+      }
+      if (list.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
+        return 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
+      }
+      return undefined;
+    });
+    await expect(isBrainEmbeddingAvailable()).resolves.toBe(false);
+  });
+});
+
+describe('resolveBrainEmbeddingsUpstream', () => {
+  it('returns the configured URL and key, without reading Cloudflare', async () => {
+    mockEnv.R_BRAIN_EMBEDDINGS_UPSTREAM_URL = 'https://embedder.example/v1/';
+    mockEnv.R_BRAIN_INFERENCE_UPSTREAM_API_KEY = 'local-key';
+    mockCloudflareWorkersAi();
+
+    await expect(resolveBrainEmbeddingsUpstream()).resolves.toEqual({
+      baseUrl: 'https://embedder.example/v1',
+      apiKey: 'local-key',
+      source: 'configured',
+    });
+    expect(mockResolveModelProviderEnvValue).not.toHaveBeenCalled();
+  });
+
+  it('wires Cloudflare Workers AI as an OpenAI-compatible /ai base', async () => {
+    mockCloudflareWorkersAi();
+
+    await expect(resolveBrainEmbeddingsUpstream()).resolves.toEqual({
+      baseUrl: `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai`,
+      apiKey: 'cfat_test',
+      source: 'cloudflare-workers-ai',
+    });
+  });
+
+  it('caches a Cloudflare miss so an unconfigured tick does not re-read settings', async () => {
+    await expect(resolveBrainEmbeddingsUpstream()).resolves.toBeNull();
+    await expect(resolveBrainEmbeddingsUpstream()).resolves.toBeNull();
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledTimes(2);
+  });
+
+  it('caches a Cloudflare hit across embeddings requests', async () => {
+    mockCloudflareWorkersAi();
+    await resolveBrainEmbeddingsUpstream();
+    await resolveBrainEmbeddingsUpstream();
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('describeBrainModels', () => {
+  it('reports 1024 dimensions for bge-m3', () => {
+    mockEnv.R_BRAIN_EMBEDDING_MODEL = '@cf/baai/bge-m3';
+
+    expect(describeBrainModels('openai')).toMatchObject({
+      embeddingModel: '@cf/baai/bge-m3',
+      embeddingDimensions: 1024,
+    });
   });
 });
