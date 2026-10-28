@@ -309,6 +309,23 @@ describe('local inference upstreams', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('passes the requested embedding model to the local upstream resolver', async () => {
+    mockResolveBrainEmbeddingsUpstream.mockResolvedValue(null);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await post('/v1/embeddings', {
+      token: GATEWAY_TOKEN,
+      body: { model: '@cf/baai/bge-m3', input: 'hello' },
+    });
+
+    expect(mockResolveBrainEmbeddingsUpstream).toHaveBeenCalledWith(
+      '@cf/baai/bge-m3',
+    );
+  });
+
   it('routes embeddings to Cloudflare Workers AI without an OpenAI key', async () => {
     mockResolveBrainInferenceProvider.mockResolvedValue(null);
     mockResolveBrainEmbeddingsUpstream.mockResolvedValue({

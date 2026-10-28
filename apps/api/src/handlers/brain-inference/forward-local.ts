@@ -12,6 +12,25 @@ import { copyAllowedHeaders } from './copy-headers';
 
 type GatewayContext = Context<{ Variables: Variables }>;
 
+function embeddingModelFromBody(body: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(body);
+
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'model' in parsed &&
+      typeof parsed.model === 'string'
+    ) {
+      return parsed.model.trim() || undefined;
+    }
+  } catch {
+    // Forward the body unchanged; a missing model only affects routing.
+  }
+
+  return undefined;
+}
+
 export async function forwardLocalEmbeddings(
   c: GatewayContext,
   upstreamPath: string,
@@ -21,7 +40,10 @@ export async function forwardLocalEmbeddings(
     return null;
   }
 
-  const localUpstream = await resolveBrainEmbeddingsUpstream();
+  const body = await c.req.text();
+  const localUpstream = await resolveBrainEmbeddingsUpstream(
+    embeddingModelFromBody(body),
+  );
 
   if (!localUpstream) {
     return null;
@@ -41,7 +63,7 @@ export async function forwardLocalEmbeddings(
   try {
     upstream = await fetch(
       `${localUpstream.baseUrl}${upstreamPath}${requestUrl.search}`,
-      { method: 'POST', headers, body: await c.req.text() },
+      { method: 'POST', headers, body },
     );
   } catch (error) {
     console.warn(

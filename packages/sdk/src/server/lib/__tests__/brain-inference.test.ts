@@ -48,6 +48,25 @@ function mockCloudflareWorkersAi(): void {
   });
 }
 
+function mockCloudflareAndOpenRouter(): void {
+  mockResolveModelProviderEnvValue.mockImplementation(async (names) => {
+    const list = envVarNames(names);
+    if (list.includes('CLOUDFLARE_WORKERS_AI_API_TOKEN')) {
+      return 'cfat_test';
+    }
+    if (list.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
+      return CF_ACCOUNT_ID;
+    }
+    if (
+      list.includes('R_BRAIN_OPENROUTER_API_KEY') ||
+      list.includes('OPENROUTER_API_KEY')
+    ) {
+      return 'sk-or';
+    }
+    return undefined;
+  });
+}
+
 beforeEach(() => {
   delete mockEnv.R_BRAIN_MODEL;
   delete mockEnv.R_BRAIN_EMBEDDING_MODEL;
@@ -212,25 +231,26 @@ describe('resolveBrainEmbeddingsUpstream', () => {
   });
 
   it('does not auto-wire Cloudflare when an OpenAI or OpenRouter key already serves embeddings', async () => {
-    mockResolveModelProviderEnvValue.mockImplementation(async (names) => {
-      const list = envVarNames(names);
-      if (list.includes('CLOUDFLARE_WORKERS_AI_API_TOKEN')) {
-        return 'cfat_test';
-      }
-      if (list.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
-        return CF_ACCOUNT_ID;
-      }
-      if (
-        list.includes('R_BRAIN_OPENROUTER_API_KEY') ||
-        list.includes('OPENROUTER_API_KEY')
-      ) {
-        return 'sk-or';
-      }
-      return undefined;
-    });
+    mockCloudflareAndOpenRouter();
 
     await expect(resolveBrainEmbeddingsUpstream()).resolves.toBeNull();
+    await expect(
+      resolveBrainEmbeddingsUpstream('text-embedding-3-small'),
+    ).resolves.toBeNull();
     await expect(isBrainEmbeddingAvailable()).resolves.toBe(true);
+  });
+
+  it('keeps Cloudflare-model corpora on Cloudflare when a provider key is added', async () => {
+    mockCloudflareAndOpenRouter();
+
+    await expect(resolveBrainEmbeddingsUpstream()).resolves.toBeNull();
+    await expect(
+      resolveBrainEmbeddingsUpstream('@cf/baai/bge-m3'),
+    ).resolves.toEqual({
+      baseUrl: `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai`,
+      apiKey: 'cfat_test',
+      source: 'cloudflare-workers-ai',
+    });
   });
 
   it('caches a Cloudflare miss so an unconfigured tick does not re-read settings', async () => {

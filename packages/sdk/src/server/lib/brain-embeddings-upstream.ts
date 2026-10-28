@@ -1,23 +1,19 @@
-import { resolveModelProviderEnvValue } from '@roomote/db/server';
-import { Env } from '@roomote/env';
-
+import {
+  type BrainEmbeddingsUpstream,
+  readBrainEmbeddingsUpstream,
+} from './brain-embeddings-upstream-read';
 import { resolveBrainInferenceProvider } from './brain-inference-provider';
 
-/** Workers AI account ids are 32 hex chars. */
-const CLOUDFLARE_WORKERS_AI_ACCOUNT_ID_RE = /^[a-f0-9]{32}$/i;
+export {
+  CLOUDFLARE_WORKERS_AI_EMBEDDING_DIMENSIONS,
+  CLOUDFLARE_WORKERS_AI_EMBEDDING_MODEL,
+} from './brain-embeddings-cloudflare';
+export type { BrainEmbeddingsUpstream } from './brain-embeddings-upstream-read';
+
 const UPSTREAM_CACHE_TTL_MS = 30_000;
 
-export const CLOUDFLARE_WORKERS_AI_EMBEDDING_MODEL = '@cf/baai/bge-m3';
-export const CLOUDFLARE_WORKERS_AI_EMBEDDING_DIMENSIONS = 1024;
-
-export type BrainEmbeddingsUpstream = {
-  baseUrl: string;
-  apiKey?: string;
-  source: 'configured' | 'cloudflare-workers-ai';
-};
-
 let upstreamCache: {
-  value: BrainEmbeddingsUpstream | null;
+  values: Map<string, BrainEmbeddingsUpstream | null>;
   expiresAtMs: number;
 } | null = null;
 
@@ -28,57 +24,35 @@ export function resetBrainEmbeddingsUpstreamCache(): void {
 
 /**
  * Where Memory embeddings are forwarded. `R_BRAIN_EMBEDDINGS_UPSTREAM_URL`
- * always wins. Cloudflare Workers AI auto-wires only when no OpenAI or
- * OpenRouter Memory key is set, so an existing OpenAI-model brain keeps
- * its provider path. Base `.../ai`; the gateway appends `/v1/embeddings`.
+ * always wins. A `@cf/` request stays on Workers AI even after a chat/task
+ * provider key is added. With no requested model, Cloudflare auto-wires only
+ * when no OpenAI or OpenRouter Memory key is set. Base `.../ai`.
  */
-export async function resolveBrainEmbeddingsUpstream(): Promise<BrainEmbeddingsUpstream | null> {
+export async function resolveBrainEmbeddingsUpstream(
+  requestedModel?: string,
+): Promise<BrainEmbeddingsUpstream | null> {
+  const cacheKey = requestedModel ?? '';
   const cached = upstreamCache;
 
-  if (cached && cached.expiresAtMs > Date.now()) {
-    return cached.value;
+  if (
+    cached &&
+    cached.expiresAtMs > Date.now() &&
+    cached.values.has(cacheKey)
+  ) {
+    return cached.values.get(cacheKey)!;
   }
 
-  const value = await readBrainEmbeddingsUpstream();
-  upstreamCache = { value, expiresAtMs: Date.now() + UPSTREAM_CACHE_TTL_MS };
-  return value;
-}
+  const value = await readBrainEmbeddingsUpstream(requestedModel);
 
-async function readBrainEmbeddingsUpstream(): Promise<BrainEmbeddingsUpstream | null> {
-  const configured = Env.R_BRAIN_EMBEDDINGS_UPSTREAM_URL?.trim();
-
-  if (configured) {
-    return {
-      baseUrl: configured.replace(/\/$/, ''),
-      apiKey: Env.R_BRAIN_INFERENCE_UPSTREAM_API_KEY?.trim() || undefined,
-      source: 'configured',
+  if (!upstreamCache || upstreamCache.expiresAtMs <= Date.now()) {
+    upstreamCache = {
+      values: new Map(),
+      expiresAtMs: Date.now() + UPSTREAM_CACHE_TTL_MS,
     };
   }
 
-  if (await resolveBrainInferenceProvider()) {
-    return null;
-  }
-
-  const apiKey = (
-    await resolveModelProviderEnvValue(['CLOUDFLARE_WORKERS_AI_API_TOKEN'])
-  )?.trim();
-  const accountId = (
-    await resolveModelProviderEnvValue(['CLOUDFLARE_WORKERS_AI_ACCOUNT_ID'])
-  )?.trim();
-
-  if (
-    !apiKey ||
-    !accountId ||
-    !CLOUDFLARE_WORKERS_AI_ACCOUNT_ID_RE.test(accountId)
-  ) {
-    return null;
-  }
-
-  return {
-    baseUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai`,
-    apiKey,
-    source: 'cloudflare-workers-ai',
-  };
+  upstreamCache.values.set(cacheKey, value);
+  return value;
 }
 
 /**
