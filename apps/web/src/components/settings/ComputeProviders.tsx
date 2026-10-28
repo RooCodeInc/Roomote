@@ -217,7 +217,10 @@ export function ComputeProviders() {
             }
             disabled={setDefaultProvider.isPending}
           >
-            <SelectTrigger className="w-full sm:w-72">
+            <SelectTrigger
+              aria-label="Default sandbox provider"
+              className="w-full sm:w-72"
+            >
               <SelectValue placeholder="Select a sandbox provider" />
             </SelectTrigger>
             <SelectContent>
