@@ -67,6 +67,10 @@ export function configToYaml(config: EnvironmentConfig): string {
             cleanCmd.timeout = cmd.timeout;
           }
 
+          if (cmd.retries !== undefined) {
+            cleanCmd.retries = cmd.retries;
+          }
+
           if (cmd.continue_on_error) {
             cleanCmd.continue_on_error = cmd.continue_on_error;
           }
