@@ -140,6 +140,15 @@ export function createMysqlService(_majorVersion: string): ServiceDefinition {
         continue_on_error: true,
       });
 
+      // Repeated setup must stop a live instance before removing its socket
+      // and PID files. A missing or stale socket needs only the cleanup below.
+      await executor.execute({
+        name: 'Stop running MySQL instance',
+        run: `if sudo mysqladmin --protocol=socket --socket=${config.socketPath} -u root ping >/dev/null 2>&1; then sudo mysqladmin --protocol=socket --socket=${config.socketPath} -u root --shutdown-timeout=30 shutdown; fi`,
+        timeout: 60,
+        continue_on_error: false,
+      });
+
       // Initialize MySQL data directory only when it is empty. Ubuntu's
       // native packages may pre-create files directly under /var/lib/mysql
       // without the old nested directory sentinel.
@@ -195,10 +204,11 @@ export function createMysqlService(_majorVersion: string): ServiceDefinition {
         continue_on_error: true,
       });
 
-      // Restart MySQL.
+      // Shut down only the bootstrap instance, allowing it to flush its data.
+      // Do not start the normal server unless that shutdown succeeds.
       await executor.execute({
         name: 'Restart MySQL',
-        run: `sudo pkill -9 mysqld 2>/dev/null || true; sleep 2; sudo rm -f ${config.socketPath} ${config.socketPath}.lock ${MYSQL_PID_FILE} ${config.dataDir}/*.pid 2>/dev/null || true; ${buildMysqlStartCommand(
+        run: `sudo mysqladmin --protocol=socket --socket=${config.socketPath} -u root --shutdown-timeout=30 shutdown && ${buildMysqlStartCommand(
           {
             dataDir: config.dataDir,
             socketPath: config.socketPath,
