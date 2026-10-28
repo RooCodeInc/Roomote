@@ -147,6 +147,7 @@ function EditableSessionTitleControl({
             }}
           >
             <Input
+              aria-label="Session title"
               type="text"
               value={titleDraft}
               onChange={(event) => setTitleDraft(event.target.value)}
