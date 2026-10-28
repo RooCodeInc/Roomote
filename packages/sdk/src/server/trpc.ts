@@ -87,7 +87,7 @@ export function runScoped<T extends z.ZodType>(
     .use(async ({ ctx, input, next }) => {
       const targetId = (
         typeof extractRunId === 'function'
-          ? extractRunId(input)
+          ? extractRunId(input as z.output<T>)
           : (input as Record<string, unknown>)[extractRunId as string]
       ) as number;
 

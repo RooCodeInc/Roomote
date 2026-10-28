@@ -23,7 +23,7 @@ export const pullRequestMergeabilityCheckRequestSchema = z
     // still picked up.
     baseRef: z.string().min(1).optional(),
     prNumber: z.number().int().positive().optional(),
-    taskPullRequestIds: z.array(z.string().uuid()).min(1).optional(),
+    taskPullRequestIds: z.array(z.guid()).min(1).optional(),
     deduplicationKey: z.string().min(1),
     retryAttempt: z.union([z.literal(0), z.literal(1)]),
     allowNotifiedConflictCheck: z.boolean().default(false),

@@ -92,7 +92,7 @@ const snapshotFailureMetadataSchema = z
   .object({
     name: z.string().min(1).nullish(),
     responseHeaders: z
-      .record(z.unknown())
+      .record(z.string(), z.unknown())
       .nullish()
       .transform((headers) =>
         Object.fromEntries(

@@ -21,7 +21,7 @@
     "execa": "9.6.1",
     "jsonwebtoken": "^9.0.3",
     "p-map": "^7.0.4",
-    "zod": "^3.25.76"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",

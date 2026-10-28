@@ -153,7 +153,7 @@ const webhookAgentActivitySchema = z.object({
   userId: z.string().optional(),
   content: webhookAgentActivityContentSchema,
   signal: humanToAgentSignalSchema.nullish(),
-  signalMetadata: z.record(z.unknown()).nullish(),
+  signalMetadata: z.record(z.string(), z.unknown()).nullish(),
   ephemeral: z.boolean().optional(),
 });
 

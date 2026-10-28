@@ -7,11 +7,12 @@
     "dompurify": "3.4.17",
     "jsdom": "26.1.0",
     "snowflake-sdk": "3.3.0",
-    "zod": "3.25.76"
+    "zod": "4.6.6"
   },
   "pnpm": {
     "overrides": {
       "axios": "1.20.0",
+      "@azure/msal-node": "7.1.0",
       "follow-redirects": "1.16.1",
       "moment": "2.31.0",
       "toml": "5.0.1"

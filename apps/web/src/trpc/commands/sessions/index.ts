@@ -62,7 +62,7 @@ const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 const TASK_STOP_WAIT_MS = 15_000;
 const TASK_STOP_POLL_MS = 100;
 
-export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
+export const sessionIdInputSchema = z.object({ sessionId: z.guid() });
 export const sessionStatusInputSchema = sessionIdInputSchema.extend({
   status: z.enum(SESSION_MANUAL_STATUSES),
 });
@@ -561,7 +561,7 @@ export const sessionsListInputSchema = z.object({
   model: z.string().nullish(),
   period: z.union([z.literal('all'), z.number().int().positive()]).optional(),
   q: z.string().max(200).nullish(),
-  ids: z.array(z.string().uuid()).max(20).optional(),
+  ids: z.array(z.guid()).max(20).optional(),
   ownedOnly: z.boolean().optional(),
   before: z.string().nullish(),
   limit: z.number().int().min(1).max(200).optional(),

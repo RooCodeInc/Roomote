@@ -21,7 +21,7 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 
-const canonicalFastSessionIdSchema = z.string().uuid();
+const canonicalFastSessionIdSchema = z.guid();
 
 export async function getFastSessionMessagesForUser(params: {
   sessionId: string;

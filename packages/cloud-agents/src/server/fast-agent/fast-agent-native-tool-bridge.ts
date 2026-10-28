@@ -264,7 +264,7 @@ const bridgeRequestSchema = z.object({
       ...FastAgentNativeToolName[],
     ],
   ),
-  args: z.record(z.unknown()),
+  args: z.record(z.string(), z.unknown()),
   agent: z.string().min(1).optional(),
 });
 
@@ -690,7 +690,7 @@ export default {
   description: "Add or reconnect one remote MCP integration from its HTTPS streamable-HTTP endpoint. Any member may call this. Use it for a service's official hosted remote MCP endpoint or a URL the human supplied; never invent a URL, and a local stdio project is not a hosted MCP. It is shared with everyone in the deployment by default, like an integration key; pass visibility 'owner' only when the human asked to keep it private to them, and say which it is when you report it. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or a settingsUrl for static headers/manual OAuth client setup: the Integrations page for a shared server, or Personal settings for a private one. Roomote registers this deployment with the provider before returning an authorization link, so a returned link can succeed. A client-registration-required or needs-static-headers result means this human cannot connect it now: relay the result's reason (the provider's own words) when present, share settingsUrl as the alternative, and continue with the integration-key route. A pending-owner result means a shared server someone else added is still waiting on them or an administrator: say so, share no link, and continue with the integration-key route or a private server of their own if they ask. Server-backed results include integrationId, the actual Fast catalog ID: use that exact integrationId with find_integration_tools and call_integration_tool, never a server UUID, but do not narrate IDs or catalog checks to the human. Share authorizeUrl and settingsUrl exactly unchanged, labeled 'Authorize <name>' and 'Integration settings' respectively; never rewrite either target. The conversation resumes automatically after the human authorizes, so never ask them to send a follow-up. In user-visible progress say at most that you are checking. Never ask for or accept secrets in chat or tool arguments.",
   args: {
     name: z.string().trim().min(1).max(80).describe("Short integration name; Roomote normalizes it to a lowercase slug"),
-    url: z.string().url().startsWith("https://").max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
+    url: z.string().regex(/^https:\/\/.*/).url().max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
     visibility: z.enum(["owner", "deployment"]).optional().describe("deployment (default) shares it with everyone; owner keeps it private to the requesting human"),
   },
   execute: (args, context) => invoke("add_remote_mcp", args, context),

@@ -186,7 +186,7 @@ export function resolveRepositoryProvidersFromPayload(payload: {
   repositoryProviders?: unknown;
 }): Record<string, SourceControlProvider> | undefined {
   const parsed = z
-    .record(sourceControlProviderSchema)
+    .record(z.string(), sourceControlProviderSchema)
     .safeParse(payload.repositoryProviders);
 
   return parsed.success && Object.keys(parsed.data).length > 0

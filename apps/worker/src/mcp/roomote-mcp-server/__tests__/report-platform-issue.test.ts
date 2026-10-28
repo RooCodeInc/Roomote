@@ -34,6 +34,19 @@ describe('handleReportPlatformIssue', () => {
     const parsed = JSON.parse(text);
 
     expect(parsed.success).toBe(false);
-    expect(parsed.error).toContain('String must contain at least 1 character');
+    expect(JSON.parse(parsed.error)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'too_small',
+          minimum: 1,
+          path: ['title'],
+        }),
+        expect.objectContaining({
+          code: 'too_small',
+          minimum: 1,
+          path: ['summary'],
+        }),
+      ]),
+    );
   });
 });

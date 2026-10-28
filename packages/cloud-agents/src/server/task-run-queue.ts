@@ -2791,7 +2791,7 @@ function inheritSnapshotResumeSourceControlStamps(
 
   if (usesSourceProvider && payload.repositoryProviders === undefined) {
     const repositoryProviders = z
-      .record(sourceControlProviderSchema)
+      .record(z.string(), sourceControlProviderSchema)
       .safeParse(source.repositoryProviders);
 
     if (repositoryProviders.success) {
@@ -2838,7 +2838,7 @@ function inheritSnapshotResumeFastAgentSession(
 ): void {
   const fastAgentSessionId = z
     .string()
-    .uuid()
+    .check(z.guid())
     .safeParse(
       sourcePayload && typeof sourcePayload === 'object'
         ? (sourcePayload as Record<string, unknown>).fastAgentSessionId

@@ -27,7 +27,7 @@ const tokenSchema = z.discriminatedUnion('grant_type', [
   z.object({
     grant_type: z.literal('authorization_code'),
     code: z.string().min(1),
-    client_id: z.string().uuid(),
+    client_id: z.guid(),
     redirect_uri: z.string().url(),
     code_verifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/),
     resource: z.string().url().optional(),
@@ -35,7 +35,7 @@ const tokenSchema = z.discriminatedUnion('grant_type', [
   z.object({
     grant_type: z.literal('refresh_token'),
     refresh_token: z.string().min(1),
-    client_id: z.string().uuid(),
+    client_id: z.guid(),
     resource: z.string().url().optional(),
     scope: z.string().optional(),
   }),

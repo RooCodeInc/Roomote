@@ -151,7 +151,7 @@
     "undici": "^7.29.1",
     "unzipper": "^0.12.5",
     "yaml": "^2.9.0",
-    "zod": "^3.25.76"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",

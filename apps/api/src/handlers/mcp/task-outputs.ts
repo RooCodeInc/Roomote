@@ -83,7 +83,7 @@ const commandCursorSchema = z
       .max(100)
       .refine((value) => Number.isFinite(Date.parse(value))),
     ts: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    id: z.string().uuid(),
+    id: z.guid(),
   })
   .strict();
 
@@ -238,7 +238,7 @@ export async function downloadMemberTaskArtifact(
     const input = z
       .object({
         taskId: z.string().regex(/^[0-9a-z]{13}$/),
-        artifactId: z.string().uuid(),
+        artifactId: z.guid(),
       })
       .strict()
       .safeParse(c.req.query());

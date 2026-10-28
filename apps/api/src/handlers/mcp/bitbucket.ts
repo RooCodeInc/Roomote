@@ -109,11 +109,12 @@ function createServer(auth: Variables['authContext']) {
       connected?: Awaited<ReturnType<typeof authorize>>,
     ) => Promise<unknown>,
   ) {
-    server.registerTool(
+    const inputSchema = z.object(shape).strict();
+    server.registerTool<z.ZodRawShape, typeof inputSchema>(
       name,
       {
         description,
-        inputSchema: z.object(shape).strict(),
+        inputSchema,
         annotations: {
           readOnlyHint: readOnly,
           destructiveHint: !readOnly,
@@ -122,7 +123,9 @@ function createServer(auth: Variables['authContext']) {
       },
       async (input) => {
         try {
-          const fullName = repository.parse(input.repositoryFullName);
+          const fullName = repository.parse(
+            (input as Record<string, unknown>).repositoryFullName,
+          );
           const connected = await authorize(auth, fullName);
           // Resolve through the existing refresh coordinator on every call, never at discovery.
           const token = await resolveBitbucketOAuthAccessToken();

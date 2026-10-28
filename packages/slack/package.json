@@ -26,7 +26,7 @@
     "@roomote/redis": "workspace:^",
     "@roomote/types": "workspace:^",
     "@slack/web-api": "^7.19.0",
-    "zod": "^3.25.76"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",

@@ -1,4 +1,4 @@
-import zodToJsonSchema from 'zod-to-json-schema';
+import { z } from 'zod';
 
 const { mockGenerateTrackedNonTaskObject } = vi.hoisted(() => ({
   mockGenerateTrackedNonTaskObject: vi.fn(),
@@ -107,9 +107,10 @@ describe('suggestSlackQuestionChannels', () => {
       false,
     );
 
-    const wireSchema = zodToJsonSchema(schema, {
-      $refStrategy: 'none',
-      target: 'jsonSchema7',
+    const wireSchema = z.toJSONSchema(schema, {
+      reused: 'inline',
+      target: 'draft-7',
+      io: 'input',
     });
     expect(JSON.stringify(wireSchema)).not.toMatch(
       /"(?:minItems|maxItems|minLength|maxLength|minimum|maximum|exclusiveMinimum|exclusiveMaximum)"/,

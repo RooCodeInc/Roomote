@@ -102,7 +102,7 @@ export async function validateRunToken(
   const parseResult = compatibleRunTokenPayloadSchema.safeParse(rawPayload);
 
   if (!parseResult.success) {
-    const validationErrors = parseResult.error.errors
+    const validationErrors = parseResult.error.issues
       .map((err) => `${err.path.join('.')}: ${err.message}`)
       .join(', ');
 

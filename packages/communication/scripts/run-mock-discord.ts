@@ -52,7 +52,7 @@ const configSchema = z.object({
     .array(
       z.object({
         kind: z.enum(['message', 'interaction']),
-        payload: z.record(z.unknown()),
+        payload: z.record(z.string(), z.unknown()),
         eventId: z.string().min(1).optional(),
       }),
     )
