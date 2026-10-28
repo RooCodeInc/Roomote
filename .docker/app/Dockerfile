@@ -20,7 +20,7 @@ FROM docker:28-cli AS docker-cli
 # Base stage: one workspace install plus the full source tree that every app
 # build stage below branches from.
 # ---------------------------------------------------------------------------
-FROM node:24.13.1-slim AS base
+FROM node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -35,6 +35,7 @@ RUN apt -qq update && \
   jq \
   git \
   python3 \
+  && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20250419~deb12u2' \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /roomote
@@ -279,7 +280,7 @@ RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
 # plane services. Heavier runtime tools (OpenCode, gh, Docker CLI) are layered
 # on via dedicated stages below.
 # ---------------------------------------------------------------------------
-FROM node:24.13.1-slim AS runtime-base
+FROM node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS runtime-base
 
 LABEL org.opencontainers.image.source=https://github.com/RooCodeInc/Roomote
 
@@ -288,6 +289,7 @@ RUN apt -qq update && \
   ca-certificates \
   curl \
   tini \
+  && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20250419~deb12u2' \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /roomote

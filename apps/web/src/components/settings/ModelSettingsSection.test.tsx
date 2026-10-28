@@ -13,7 +13,9 @@ const settingsData = vi.hoisted(() => ({
 }));
 const customPresetsData = vi.hoisted(() => ({
   current: [] as Array<Record<string, unknown>>,
+  isError: false,
 }));
+const refetchCustomPresetsMock = vi.hoisted(() => vi.fn());
 const providerSetupData = vi.hoisted(() => ({
   current: null as Record<string, unknown> | null,
 }));
@@ -49,7 +51,10 @@ vi.mock('@tanstack/react-query', () => ({
     return {
       data,
       isPending: data === null,
-      isError: isSuggestions && suggestionQueryError.current,
+      isError: isCustomPresets
+        ? customPresetsData.isError
+        : isSuggestions && suggestionQueryError.current,
+      refetch: refetchCustomPresetsMock,
     };
   },
   useMutation: (options?: { mutationKey?: unknown[] }) => {
@@ -505,6 +510,7 @@ describe('ModelSettingsSection', () => {
     invalidateQueriesMock.mockReset();
     settingsData.current = null;
     customPresetsData.current = [];
+    customPresetsData.isError = false;
     providerSetupData.current = buildProviderSetupData();
     suggestionData.current = undefined;
     suggestionQueryError.current = false;
@@ -2170,6 +2176,175 @@ describe('ModelSettingsSection', () => {
     );
   });
 
+  it.each([false, true])(
+    'loads and applies a v1.15.1 preset with backups enabled=%s',
+    async (enabled) => {
+      const data = buildSettingsData();
+      data.modelFallbacks = {
+        enabled,
+        roles: {
+          coding: {
+            modelId: 'openrouter/z-ai/glm-5.2',
+            reasoningEffort: 'low',
+          },
+        },
+      };
+      settingsData.current = data;
+      const { audioVideo: _audioVideo, ...roles } = buildUserModelMapping(
+        {},
+        { coding: 'high' },
+      );
+      customPresetsData.current = [
+        { id: 'legacy', name: 'Legacy mapping', roles },
+      ];
+      renderModelSettingsSection();
+      expect(
+        screen.getByRole('button', { name: 'Coding model and reasoning' }),
+      ).toBeEnabled();
+      expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Use a mapping preset' }),
+      );
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'Custom preset: Legacy mapping',
+        }),
+      );
+      const dialog = screen.getByRole('dialog');
+      expect(within(dialog).getAllByText('GPT 5.4')).toHaveLength(
+        TASK_MODEL_ROLES.length,
+      );
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Apply' }));
+      await waitFor(() =>
+        expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1),
+      );
+      expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultModelId: roles.coding.modelId,
+          audioVideoModelId: roles.coding.modelId,
+          audioVideoModelReasoningEffort: 'high',
+          codingModelReasoningEffort: 'high',
+        }),
+      );
+      expect(
+        screen.getByRole('switch', { name: 'Fallback config' }),
+      ).toHaveAttribute('aria-checked', String(enabled));
+      if (enabled)
+        expect(
+          screen.getByRole('button', {
+            name: 'Coding model fallback model and reasoning',
+          }),
+        ).toHaveTextContent('GLM 5.2');
+    },
+  );
+
+  it.each([
+    null,
+    'bad',
+    { modelId: 12, reasoningEffort: 'high' },
+    { modelId: 'openrouter/z-ai/glm-5.2', reasoningEffort: 'invalid' },
+  ])(
+    'keeps a malformed preset inspectable and deletable: %j',
+    async (audioVideo) => {
+      settingsData.current = buildSettingsData();
+      customPresetsData.current = [
+        {
+          id: 'broken',
+          name: 'Broken mapping',
+          roles: { ...buildUserModelMapping(), audioVideo },
+        },
+      ];
+      renderModelSettingsSection();
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Use a mapping preset' }),
+      );
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'Custom preset: Broken mapping (unavailable models)',
+        }),
+      );
+      const dialog = screen.getByRole('dialog');
+      expect(
+        within(dialog).getByText('Missing or invalid selection'),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole('button', { name: 'Apply' }),
+      ).toBeDisabled();
+      fireEvent.click(
+        within(dialog).getByRole('button', { name: 'Delete Broken mapping' }),
+      );
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Delete preset',
+        }),
+      );
+      await waitFor(() =>
+        expect(deleteCustomPresetMutateAsyncMock).toHaveBeenCalledWith({
+          id: 'broken',
+        }),
+      );
+      expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves environment-managed models and reasoning when applying incomplete saved presets', async () => {
+    const data = buildSettingsData({
+      helperReasoningManagedByEnv: true,
+      helperReasoningEffort: 'high',
+    });
+    data.runtimeModels.audioVideoModel.managedByEnv = true;
+    data.runtimeModels.audioVideoModel.effectiveModelId =
+      'openrouter/google/gemini-3.8-flash';
+    settingsData.current = data;
+    customPresetsData.current = [
+      {
+        id: 'env',
+        name: 'Environment mapping',
+        roles: {
+          ...buildUserModelMapping({ helper: 'openrouter/z-ai/glm-5.2' }),
+          audioVideo: null,
+        },
+      },
+    ];
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Custom preset: Environment mapping',
+      }),
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Gemini 3.8 Flash')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Apply' })).toBeEnabled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1));
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audioVideoModelId: null,
+        helperModelReasoningEffort: 'high',
+      }),
+    );
+  });
+
+  it('surfaces preset query failures while model controls remain usable', () => {
+    settingsData.current = buildSettingsData();
+    customPresetsData.isError = true;
+    renderModelSettingsSection();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Could not load custom presets',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Coding model and reasoning' }),
+    ).toBeEnabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry loading presets' }),
+    );
+    expect(refetchCustomPresetsMock).toHaveBeenCalledTimes(1);
+    expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
   it('normalizes saved reasoning efforts against each model’s current metadata', async () => {
     const data = buildSettingsData();
     const codingMetadata = data.models[0]!.metadata as TaskModelMetadata;
@@ -2223,36 +2398,45 @@ describe('ModelSettingsSection', () => {
     );
   });
 
-  it('keeps stale custom presets visible but prevents applying them', async () => {
-    settingsData.current = buildSettingsData();
-    customPresetsData.current = [
-      {
-        id: 'stale-preset',
-        name: 'Old model map',
-        roles: buildUserModelMapping({ coding: 'openrouter/old-model' }),
-      },
-    ];
-    renderModelSettingsSection();
+  it.each([false, true])(
+    'keeps stale custom presets visible but prevents applying them (legacy=%s)',
+    async (legacy) => {
+      settingsData.current = buildSettingsData();
+      const roles: Partial<UserTaskModelMapping> = buildUserModelMapping({
+        coding: 'openrouter/old-model',
+      });
+      if (legacy) delete roles.audioVideo;
+      customPresetsData.current = [
+        {
+          id: 'stale-preset',
+          name: 'Old model map',
+          roles,
+        },
+      ];
+      renderModelSettingsSection();
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use a mapping preset' }),
-    );
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'Custom preset: Old model map (unavailable models)',
-      }),
-    );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Use a mapping preset' }),
+      );
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'Custom preset: Old model map (unavailable models)',
+        }),
+      );
 
-    const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByText(/unavailable models/i)).toBeInTheDocument();
-    expect(
-      within(dialog).getByText('openrouter/old-model (unavailable)'),
-    ).toBeInTheDocument();
-    expect(
-      within(dialog).getByRole('button', { name: 'Apply' }),
-    ).toBeDisabled();
-    expect(updateMutateAsyncMock).not.toHaveBeenCalled();
-  });
+      const dialog = screen.getByRole('dialog');
+      expect(
+        within(dialog).getByText(/unavailable models/i),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getAllByText('openrouter/old-model (unavailable)'),
+      ).toHaveLength(legacy ? 2 : 1);
+      expect(
+        within(dialog).getByRole('button', { name: 'Apply' }),
+      ).toBeDisabled();
+      expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('confirms custom preset deletion without changing the active mapping', async () => {
     settingsData.current = buildSettingsData();

@@ -1420,6 +1420,17 @@ describe('Fast native OpenCode tool bridge', () => {
         toolName: 'search_pages',
         args: {},
       });
+
+      // A standalone SSE GET would stay open forever; the stateless bridge
+      // must refuse it immediately so clients do not hold a stream per server.
+      const sseResponse = await fetch(url, {
+        method: 'GET',
+        headers: { ...headers, Accept: 'text/event-stream' },
+        signal: AbortSignal.timeout(2_000),
+      });
+      expect(sseResponse.status).toBe(405);
+      expect(sseResponse.headers.get('allow')).toBe('POST');
+      await sseResponse.text();
     } finally {
       unbind();
     }

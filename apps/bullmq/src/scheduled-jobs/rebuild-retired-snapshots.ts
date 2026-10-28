@@ -1,3 +1,5 @@
+import { isEnvironmentSnapshotFromRelease } from '@roomote/compute-providers';
+import { Env } from '@roomote/env';
 import {
   type ComputeProvider,
   resolveComputeProviderTarget,
@@ -122,6 +124,68 @@ export async function findRetiredSnapshotRebuildCandidates(
 }
 
 /**
+ * Retires ready snapshots that another release built. Launches already skip
+ * them, so retiring them lets the rebuild below replace them within minutes
+ * of an upgrade instead of waiting for the daily refresh.
+ */
+export async function retireEnvironmentSnapshotsFromOtherReleases(
+  now: Date,
+  provider: ComputeProvider,
+  applicationProductVersion: string | null | undefined,
+): Promise<number> {
+  const liveReadySnapshots = await db
+    .select({
+      id: environmentSnapshots.id,
+      snapshotId: environmentSnapshots.snapshotId,
+      workerVersion: environmentSnapshots.workerVersion,
+    })
+    .from(environmentSnapshots)
+    .where(
+      and(
+        eq(environmentSnapshots.provider, provider),
+        eq(environmentSnapshots.snapshotStatus, 'ready'),
+        isNotNull(environmentSnapshots.snapshotId),
+        isNull(environmentSnapshots.deletedAt),
+      ),
+    );
+
+  const staleSnapshots = liveReadySnapshots.filter(
+    (snapshot) =>
+      !isEnvironmentSnapshotFromRelease(
+        snapshot.workerVersion,
+        applicationProductVersion,
+      ),
+  );
+
+  let retired = 0;
+
+  for (const snapshot of staleSnapshots) {
+    if (!snapshot.snapshotId) continue;
+    // Compare-and-swap against the observed state: a concurrent claim or
+    // attach may have turned this row into a pending build or a snapshot from
+    // the running release since the read above, and neither may be retired.
+    const rows = await db
+      .update(environmentSnapshots)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(environmentSnapshots.id, snapshot.id),
+          isNull(environmentSnapshots.deletedAt),
+          eq(environmentSnapshots.snapshotStatus, 'ready'),
+          eq(environmentSnapshots.snapshotId, snapshot.snapshotId),
+          snapshot.workerVersion === null
+            ? isNull(environmentSnapshots.workerVersion)
+            : eq(environmentSnapshots.workerVersion, snapshot.workerVersion),
+        ),
+      )
+      .returning({ id: environmentSnapshots.id });
+    retired += rows.length;
+  }
+
+  return retired;
+}
+
+/**
  * Rebuilds environment snapshots soon after an edit retires them, instead of
  * leaving every launch to set the environment up from scratch until the next
  * daily refresh.
@@ -137,6 +201,20 @@ export async function rebuildRetiredSnapshots(now: Date): Promise<{
   if (!getComputeProviderCapabilities(provider).supportsSnapshots) {
     return { rebuilt: 0, skipped: 0, errors: 0 };
   }
+  const retiredFromOtherReleases =
+    await retireEnvironmentSnapshotsFromOtherReleases(
+      now,
+      provider,
+      Env.RELEASE_PRODUCT_VERSION,
+    );
+  if (retiredFromOtherReleases > 0) {
+    console.log(
+      `${LOG_PREFIX} Retired ${retiredFromOtherReleases} snapshot(s) built by another release ${JSON.stringify(
+        { provider, applicationProductVersion: Env.RELEASE_PRODUCT_VERSION },
+      )}`,
+    );
+  }
+
   const candidates = await findRetiredSnapshotRebuildCandidates(now, provider);
 
   if (candidates.length === 0) {

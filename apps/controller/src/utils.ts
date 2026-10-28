@@ -20,6 +20,7 @@ import {
 import {
   buildMachineRoutingInfo,
   getNamedPortsForEnvironment,
+  isEnvironmentSnapshotFromRelease,
 } from '@roomote/compute-providers';
 
 interface NamedPortsResult {
@@ -121,7 +122,28 @@ export async function getNamedPortsForTaskRun(
         snapshot.snapshotStatus === 'ready' &&
         isSnapshotResumable(snapshot.snapshotCreatedAt, provider)
       ) {
-        environmentSnapshotId = snapshot.snapshotId;
+        if (
+          isEnvironmentSnapshotFromRelease(
+            snapshot.workerVersion,
+            Env.RELEASE_PRODUCT_VERSION,
+          )
+        ) {
+          environmentSnapshotId = snapshot.snapshotId;
+        } else {
+          // Booting a snapshot from another release fails worker install;
+          // start fresh until the rebuild job replaces it.
+          console.log(
+            `[getNamedPortsForTaskRun] Skipping environment snapshot from another release ${JSON.stringify(
+              {
+                runId: taskRun.id,
+                environmentId: environment.id,
+                snapshotId: snapshot.snapshotId,
+                snapshotWorkerVersion: snapshot.workerVersion,
+                applicationProductVersion: Env.RELEASE_PRODUCT_VERSION,
+              },
+            )}`,
+          );
+        }
       }
 
       return {

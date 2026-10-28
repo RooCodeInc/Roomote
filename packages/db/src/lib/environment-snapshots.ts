@@ -21,6 +21,7 @@ export interface EnvironmentSnapshotRecord {
   snapshotStatus: EnvironmentSnapshotStatus | null;
   snapshotCreatedAt: Date | null;
   snapshotExpiresAt: Date | null;
+  workerVersion: string | null;
 }
 
 export interface EnvironmentSnapshotMutationInput {
@@ -30,6 +31,8 @@ export interface EnvironmentSnapshotMutationInput {
   snapshotStatus: EnvironmentSnapshotStatus | null;
   snapshotCreatedAt: Date | null;
   snapshotExpiresAt: Date | null;
+  /** Worker release that built the snapshot; omitted keeps the stored value. */
+  workerVersion?: string | null;
   updatedAt?: Date;
 }
 
@@ -159,6 +162,7 @@ export async function loadEnvironmentSnapshots(
         snapshotStatus: true,
         snapshotCreatedAt: true,
         snapshotExpiresAt: true,
+        workerVersion: true,
       },
     });
 
@@ -172,6 +176,7 @@ export async function loadEnvironmentSnapshots(
         snapshotStatus: snapshot.snapshotStatus,
         snapshotCreatedAt: snapshot.snapshotCreatedAt,
         snapshotExpiresAt: snapshot.snapshotExpiresAt,
+        workerVersion: snapshot.workerVersion,
       };
       snapshotsByEnvironment.set(snapshot.environmentId, current);
     }
@@ -196,6 +201,7 @@ export async function getEnvironmentSnapshot(params: {
       snapshotStatus: true,
       snapshotCreatedAt: true,
       snapshotExpiresAt: true,
+      workerVersion: true,
     },
   });
 
@@ -206,6 +212,7 @@ export async function getEnvironmentSnapshot(params: {
       snapshotStatus: snapshot.snapshotStatus,
       snapshotCreatedAt: snapshot.snapshotCreatedAt,
       snapshotExpiresAt: snapshot.snapshotExpiresAt,
+      workerVersion: snapshot.workerVersion,
     };
   }
 
@@ -236,6 +243,7 @@ async function upsertEnvironmentSnapshotLocked(
       snapshotStatus: params.snapshotStatus,
       snapshotCreatedAt: params.snapshotCreatedAt,
       snapshotExpiresAt: params.snapshotExpiresAt,
+      workerVersion: params.workerVersion ?? null,
       deletedAt: null,
       updatedAt: now,
     })
@@ -256,6 +264,9 @@ async function upsertEnvironmentSnapshotLocked(
         snapshotStatus: params.snapshotStatus,
         snapshotCreatedAt: params.snapshotCreatedAt,
         snapshotExpiresAt: params.snapshotExpiresAt,
+        ...(params.workerVersion !== undefined
+          ? { workerVersion: params.workerVersion }
+          : {}),
         deletedAt: null,
         updatedAt: now,
       })
@@ -359,6 +370,7 @@ export async function claimPendingEnvironmentSnapshotForAttachment(
       snapshotStatus: 'pending',
       snapshotCreatedAt: null,
       snapshotExpiresAt: null,
+      workerVersion: null,
       updatedAt: now,
     });
 
@@ -443,6 +455,7 @@ async function updateActiveEnvironmentSnapshot(
       snapshotStatus: params.snapshotStatus,
       snapshotCreatedAt: params.snapshotCreatedAt,
       snapshotExpiresAt: params.snapshotExpiresAt,
+      workerVersion: params.workerVersion ?? null,
       deletedAt: null,
       updatedAt: now,
     })
@@ -585,6 +598,7 @@ async function updatePendingEnvironmentSnapshotLocked(
       snapshotStatus: params.snapshotStatus,
       snapshotCreatedAt: params.snapshotCreatedAt,
       snapshotExpiresAt: params.snapshotExpiresAt,
+      workerVersion: params.workerVersion ?? null,
       deletedAt: null,
       updatedAt: now,
     })

@@ -14,6 +14,7 @@ export { codeQualityAuditorJob } from './code-quality-auditor';
 export { codeqlTriageJob } from './codeql-triage';
 export { conflictScanJob } from './conflict-scan';
 export { dependabotTriageJob } from './dependabot-triage';
+export { vulnerabilityWatchJob } from './vulnerability-watch';
 export { issueFixerJob } from './issue-fixer';
 export { managerStatsJob, formatManagerStatsMessage } from './manager-stats';
 export {

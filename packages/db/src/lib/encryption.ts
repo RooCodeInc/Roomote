@@ -6,7 +6,7 @@ import {
   scryptSync,
 } from 'crypto';
 
-import { getEncryptionKey } from '@roomote/env';
+import { getEncryptionKey, getEncryptionKeyPrevious } from '@roomote/env';
 
 const ALGORITHM = 'aes-256-gcm';
 const SALT_LENGTH = 32;
@@ -18,14 +18,18 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function keyFingerprint(key: string, length: number): string {
+  return createHash('sha256').update(key).digest('hex').slice(0, length);
+}
+
 function describeEncryptionKey(): string {
   const key = getEncryptionKey();
-  const fingerprint = createHash('sha256')
-    .update(key)
-    .digest('hex')
-    .slice(0, 12);
+  const previous = getEncryptionKeyPrevious();
+  const current = `ENCRYPTION_KEY(length=${key.length}, fingerprint=${keyFingerprint(key, 12)})`;
 
-  return `ENCRYPTION_KEY(length=${key.length}, fingerprint=${fingerprint})`;
+  return previous
+    ? `${current}; ENCRYPTION_KEY_PREVIOUS(length=${previous.length}, fingerprint=${keyFingerprint(previous, 12)})`
+    : current;
 }
 
 // scrypt is deliberately expensive and scryptSync blocks the event loop.
@@ -33,19 +37,16 @@ function describeEncryptionKey(): string {
 // re-derives the same keys: without this cache, every request that decrypts
 // N rows pays N derivations, serially, ahead of any real work. Keyed by
 // encryption key fingerprint as well as salt so a key rotation cannot serve
-// a stale derivation.
+// a stale derivation, and so current- and previous-key derivations for the
+// same salt never collide.
 const derivedKeyCache = new Map<string, Buffer>();
 const DERIVED_KEY_CACHE_MAX_ENTRIES = 500;
 
 /**
- * Derives a key from the encryption key using scrypt.
+ * Derives a per-value key from an encryption key using scrypt.
  */
-function deriveKey(salt: Buffer): Buffer {
-  const encryptionKey = getEncryptionKey();
-  const cacheKey = `${createHash('sha256')
-    .update(encryptionKey)
-    .digest('hex')
-    .slice(0, 16)}:${salt.toString('base64')}`;
+function deriveKey(encryptionKey: string, salt: Buffer): Buffer {
+  const cacheKey = `${keyFingerprint(encryptionKey, 16)}:${salt.toString('base64')}`;
 
   const cached = derivedKeyCache.get(cacheKey);
 
@@ -71,13 +72,14 @@ function deriveKey(salt: Buffer): Buffer {
   return derived;
 }
 
+/** Encrypts with the current `ENCRYPTION_KEY`; never with the previous key. */
 export function encrypt(text: string): string {
   // Generate random salt and IV.
   const salt = randomBytes(SALT_LENGTH);
   const iv = randomBytes(IV_LENGTH);
 
   // Derive key from password and salt.
-  const key = deriveKey(salt);
+  const key = deriveKey(getEncryptionKey(), salt);
 
   // Create cipher.
   const cipher = createCipheriv(ALGORITHM, key, iv);
@@ -98,7 +100,7 @@ export function encrypt(text: string): string {
   return combined.toString('base64');
 }
 
-export function decrypt(encryptedText: string): string {
+function decryptWithKey(encryptedText: string, encryptionKey: string): string {
   // Decode from base64.
   const combined = Buffer.from(encryptedText, 'base64');
 
@@ -114,7 +116,7 @@ export function decrypt(encryptedText: string): string {
   const encrypted = combined.subarray(SALT_LENGTH + IV_LENGTH + TAG_LENGTH);
 
   // Derive key from password and salt.
-  const key = deriveKey(salt);
+  const key = deriveKey(encryptionKey, salt);
 
   // Create decipher.
   const decipher = createDecipheriv(ALGORITHM, key, iv);
@@ -127,6 +129,47 @@ export function decrypt(encryptedText: string): string {
   ]);
 
   return decrypted.toString('utf8');
+}
+
+/** Which configured key authenticated a ciphertext. */
+export type EncryptionKeyGeneration = 'current' | 'previous';
+
+/**
+ * Decrypts with the current `ENCRYPTION_KEY`, falling back to
+ * `ENCRYPTION_KEY_PREVIOUS` (when configured) for values written before a key
+ * rotation, and reports which key worked. When neither key authenticates the
+ * value, the current key's error is thrown unchanged, so callers see the same
+ * failure they would without a previous key.
+ */
+export function decryptWithKeyGeneration(encryptedText: string): {
+  plaintext: string;
+  key: EncryptionKeyGeneration;
+} {
+  try {
+    return {
+      plaintext: decryptWithKey(encryptedText, getEncryptionKey()),
+      key: 'current',
+    };
+  } catch (currentKeyError) {
+    const previousKey = getEncryptionKeyPrevious();
+
+    if (!previousKey) {
+      throw currentKeyError;
+    }
+
+    try {
+      return {
+        plaintext: decryptWithKey(encryptedText, previousKey),
+        key: 'previous',
+      };
+    } catch {
+      throw currentKeyError;
+    }
+  }
+}
+
+export function decrypt(encryptedText: string): string {
+  return decryptWithKeyGeneration(encryptedText).plaintext;
 }
 
 export function encryptJSON<T>(data: T): string {

@@ -1,0 +1,1 @@
+ALTER TABLE "vulnerability_watch_state" ADD COLUMN "notification_hash" text;

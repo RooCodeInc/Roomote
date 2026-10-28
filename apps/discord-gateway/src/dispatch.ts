@@ -228,15 +228,8 @@ export async function handleGatewayDispatch(
     );
     const botAuthored =
       message.author?.bot === true || typeof message.webhook_id === 'string';
-    if (botAuthored) {
-      const isOwnMessage = Boolean(
-        botUserId && message.author?.id === botUserId,
-      );
-      // Bot- and webhook-authored messages (deploy feeds, alert bots) only
-      // matter to auto-respond channels; Roomote's own posts never re-enter.
-      if (!autoStartChannel || isOwnMessage) {
-        return 'ignored';
-      }
+    if (botUserId && message.author?.id === botUserId) {
+      return 'ignored';
     }
     // Discord's mention autocomplete often resolves a bot by its managed
     // role (same name as the bot), which arrives as mention_roles +
@@ -257,6 +250,15 @@ export async function handleGatewayDispatch(
         id: botUserId,
         username: botUsername,
       });
+    }
+    // Automated posts need an explicit mention outside auto-respond channels,
+    // including in DMs and threads. Check after managed-role normalization.
+    if (
+      botAuthored &&
+      !autoStartChannel &&
+      !isBotMentioned(message, botUserId)
+    ) {
+      return 'ignored';
     }
     // Discord sends every message from subscribed guild channels. Root
     // channels only start Roomote work when the bot is mentioned — except

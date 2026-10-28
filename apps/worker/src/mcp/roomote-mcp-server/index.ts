@@ -86,6 +86,7 @@ import {
 } from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
 import { handleReportToParentSession } from './report-to-parent-session.js';
+import { handleVulnerabilityAssessment } from './vulnerability-assessment.js';
 import {
   type ChatReplyPurpose,
   recordChatReplyDeliveryFailure,
@@ -1923,6 +1924,33 @@ if (
       return recordFailedChatDeliveryResult(result, {
         sessionId: extra.sessionId,
       });
+    },
+  );
+}
+
+if (process.env.ROOMOTE_AUTOMATION_TASK === 'true') {
+  roomoteMcpServer.registerTool(
+    'report_vulnerability_assessment',
+    {
+      title: 'Record vulnerability assessment',
+      description:
+        'Record source/dependency/configuration applicability evidence for the vulnerability watch finding assigned to this task. State may be not_affected, blocked, or fix_proposed (requires a linked open fix PR). Other tasks cannot update findings. Fixed is verified by a later inventory poll.',
+      inputSchema: {
+        state: z.enum(['not_affected', 'blocked', 'fix_proposed']),
+        evidence: z.string().trim().min(20).max(8000),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (input) => {
+      const config = getRoomoteConfig();
+      return config
+        ? handleVulnerabilityAssessment(input, config)
+        : errorResult('Task configuration is unavailable');
     },
   );
 }

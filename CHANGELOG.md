@@ -2,6 +2,97 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.19.4 (2026-10-27)
+
+Roomote 1.19.4 expands model choice with GPT-6.1 Terra and Kimi K3.1 Pro, including Highspeed options on supported Kimi providers.
+
+### Highlights
+
+- Use GPT-6.1 Terra across supported API and subscription providers, with Fast mode on eligible ChatGPT plans.
+- Choose Kimi K3.1 Pro or its Highspeed variant through supported Kimi providers and gateways.
+
+### Patch changes
+
+- Select GPT-6.1 Terra through Roomote inference, OpenRouter, Vercel AI Gateway, OpenAI, Azure OpenAI, Azure AI Foundry, Requesty, and ChatGPT Subscription, including Fast mode on eligible ChatGPT plans. Existing defaults and saved model mappings stay unchanged.
+- Select Kimi K3.1 Pro through Moonshot AI, OpenRouter, Vercel AI Gateway, Kimi for Coding, and OpenCode Go, with Highspeed available through Moonshot AI, Vercel AI Gateway, and eligible Kimi for Coding memberships.
+
+## 1.19.3 (2026-10-24)
+
+Roomote 1.19.3 keeps scheduled automations and worker health checks running reliably while memory history backfills make progress in the background.
+
+### Highlights
+
+- Keep memory history backfills from crowding out scheduled automations and worker health checks.
+- Automatically repair outdated scheduler offsets so heartbeat and automation checks return to their intended cadence.
+
+### Patch changes
+
+- Memory history backfills no longer pile up overlapping collector runs that delay scheduled automations, make worker health checks go stale, and trigger repeated worker restarts. Collection runs one at a time and yields between bounded backfill passes, preserving progress for the next scheduled run.
+- Scheduled heartbeat and automation checks now recover their intended cadence after an interval change instead of continuing to run late because of an outdated scheduler offset. Roomote repairs affected schedules automatically when the background worker starts.
+
+## 1.19.2 (2026-10-22)
+
+Roomote 1.19.2 lets you continue tasks saved before an upgrade without losing access to their saved work.
+
+### Highlights
+
+- Resume saved tasks after an upgrade instead of encountering a worker installation failure caused by an older snapshot image.
+
+### Patch changes
+
+- Follow-ups can now resume tasks saved before a Roomote upgrade instead of failing during worker installation because the task snapshot was created with an older release. Worker startup warns about the older snapshot image and continues while still requiring the installed worker to match the application release.
+
+## 1.19.1 (2026-10-22)
+
+Roomote 1.19.1 keeps tasks starting after an upgrade by skipping outdated environment snapshots and rebuilding them automatically.
+
+### Highlights
+
+- Start tasks from a fresh environment instead of failing on an outdated environment snapshot after an upgrade.
+- Rebuild stale environment snapshots automatically, with paced replacements queued within minutes.
+
+### Patch changes
+
+- Tasks now start from a fresh environment when a saved environment snapshot belongs to an older Roomote release or has no recorded release, instead of failing during worker startup after an upgrade. Stale environment snapshots are automatically retired and queued for rebuilding within minutes, with rebuilds paced across environments.
+
+## 1.19.0 (2026-10-22)
+
+Roomote 1.19.0 adds encryption-key rotation and opt-in vulnerability monitoring, improves email formatting, and preserves task work during worker startup failures.
+
+### Highlights
+
+- Rotate stored-secret encryption keys after upgrading every service, with a preview and verification step before retiring the old key.
+- Opt into Vulnerability watch for CVE assessments and proposed fix PRs, with visible coverage gaps and no automatic merge.
+- Preserve retained Azure task work when worker startup fails.
+- Get updated runtime trust inputs; environment snapshots move to them at their daily refresh, and independent TLS verifiers still require separate remediation.
+
+### Minor changes
+
+- Rotate stored-secret encryption keys without losing integration credentials or environment secrets. Configure a previous key, preview and run batched re-encryption, and verify completion before removing it. Rotation preserves concurrent writes, finds secrets across PostgreSQL search paths, and supports keeping sign-in sessions valid with a dedicated signing secret. Upgrade every service before changing keys.
+- Enable Vulnerability watch to check connected repositories against official CVE records and start evidence-backed remediation assessments that propose reviewable fix PRs. Admins can exclude repositories and inspect findings, coverage gaps, and the assessment backlog. The watch is disabled by default, preserves dependency release-age policies, and never automatically merges fixes.
+
+### Patch changes
+
+- AgentMail list formatting no longer stalls on whitespace-heavy list items. Outgoing email keeps its existing HTML, plain-text, and footer formatting while list markers are processed in linear time.
+- Preserve retained Azure sandboxes when worker bootstrap fails by suspending them instead of deleting them. Failed or unavailable suspension no longer falls back to deletion, keeping saved task work intact during runtime-update failures.
+- Update Node, OS certificate, and Python trust inputs in application and worker images. Worker startup warns, without stopping, when a custom image or saved snapshot still has an older Node runtime. Environment snapshots are rebuilt on the updated runtime by the daily snapshot refresh; rebuild custom images and migrate saved task snapshots you keep. This is partial TLS remediation: Bun/Brain/OpenCode, MinIO/mc, other independent verifiers, and existing running or saved environments still require separate updates and verification.
+
+## 1.18.2 (2026-10-20)
+
+Roomote 1.18.2 keeps integration tools available in Fast sessions, restores Discord bot and webhook requests, and preserves model settings when upgrading with older presets.
+
+### Highlights
+
+- Keep Fast session tools available across conversations and recover from temporary MCP connection failures.
+- Start work from Discord bot and webhook mentions, with replies staying in the originating conversation.
+- Upgrade with older model presets without losing access to model settings or resetting saved selections.
+
+### Patch changes
+
+- Discord bot and webhook posts that explicitly mention Roomote now reach the session instead of being ignored. Automated requests use the server installer's Roomote account, retain their automation attribution when delegating tasks, and keep replies in the originating Discord conversation.
+- Fast sessions keep integration tools available across repeated conversations and retry failed MCP connections before later turns. This fixes tools disappearing after a temporary connection failure or after many sessions have used the same server.
+- Keep model settings usable after upgrades with older custom presets. Missing inherited roles use the preset's coding selection, and invalid or unavailable presets can be inspected and deleted without resetting model settings. Thanks to @fdev23408 for reporting [#3523](https://github.com/RooCodeInc/Roomote/issues/3523).
+
 ## 1.18.1 (2026-10-20)
 
 Roomote 1.18.1 keeps pull-request reviews moving after an interrupted worker without unnecessary cancellations or duplicate reviews.

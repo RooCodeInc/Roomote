@@ -42,6 +42,7 @@ type AzureLifecycleClient = Pick<
   | 'createInstance'
   | 'resumeFromSnapshot'
   | 'resumeFromStandby'
+  | 'enterStandby'
   | 'writeFiles'
   | 'runCommand'
   | 'destroyInstance'
@@ -543,9 +544,9 @@ export async function createAzureMachine(
         ...mutationContext,
       });
 
-      // A standby resume bootstraps the retained sandbox itself, and the
-      // cleanup above just deleted it, so the same handle cannot be resumed
-      // again. Only launches that mint a fresh instance can start over.
+      // A standby resume bootstraps the retained sandbox itself. Preserve it
+      // for explicit recovery rather than automatically resuming it again.
+      // Only launches that mint a fresh instance can start over.
       if (
         resumeHandle !== undefined ||
         isAbortError(error) ||

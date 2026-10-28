@@ -192,6 +192,7 @@ export async function createEnvironmentSnapshotCommand(
           snapshotStatus: existingSnapshot.snapshotStatus,
           snapshotCreatedAt: existingSnapshot.snapshotCreatedAt,
           snapshotExpiresAt: existingSnapshot.snapshotExpiresAt,
+          workerVersion: existingSnapshot.workerVersion,
         });
       } else {
         await clearEnvironmentSnapshot(db, {

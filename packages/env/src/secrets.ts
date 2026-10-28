@@ -13,6 +13,7 @@ import { Env } from './index';
  */
 export const SECRET_NAMES = [
   'ENCRYPTION_KEY',
+  'ENCRYPTION_KEY_PREVIOUS',
   'ARTIFACT_SIGNING_KEY',
   'ARTIFACT_SIGNING_KEY_PREVIOUS',
   'DASHBOARD_PASSWORD',
@@ -75,6 +76,16 @@ export function getEncryptionKey(): string {
   return requireSecret('ENCRYPTION_KEY');
 }
 
+/**
+ * Previous at-rest encryption key, configured only while rotating
+ * `ENCRYPTION_KEY`. Decryption falls back to it for values written before the
+ * rotation; new values are always encrypted with the current key. Remove it
+ * once the re-encryption command reports no rows left on the previous key.
+ */
+export function getEncryptionKeyPrevious(): string | undefined {
+  return activeProvider.getSecret('ENCRYPTION_KEY_PREVIOUS') || undefined;
+}
+
 /** Current key for signing artifact download URLs. */
 export function getArtifactSigningKey(): string {
   return requireSecret('ARTIFACT_SIGNING_KEY');
@@ -107,7 +118,19 @@ export function resolveDashboardPassword(): string | undefined {
  * to `ENCRYPTION_KEY` for backward compatibility with deployments that have not
  * set a dedicated secret; setting `BETTER_AUTH_SECRET` later rotates the signing
  * key and invalidates existing sessions.
+ *
+ * During an `ENCRYPTION_KEY` rotation the fallback prefers
+ * `ENCRYPTION_KEY_PREVIOUS`: that is the value the deployment was signing
+ * sessions with before the rotation, so rotating the at-rest key does not also
+ * log every user out. The fallback only bridges the rotation window; removing
+ * `ENCRYPTION_KEY_PREVIOUS` afterwards moves the fallback to the new key. Set
+ * `BETTER_AUTH_SECRET` (for example to the old `ENCRYPTION_KEY`) before
+ * removing the previous key to keep sessions valid permanently.
  */
 export function getBetterAuthSecret(): string {
-  return activeProvider.getSecret('BETTER_AUTH_SECRET') || getEncryptionKey();
+  return (
+    activeProvider.getSecret('BETTER_AUTH_SECRET') ||
+    getEncryptionKeyPrevious() ||
+    getEncryptionKey()
+  );
 }

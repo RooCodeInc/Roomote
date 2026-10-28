@@ -3,5 +3,6 @@ import { getDeploymentTaskModelOptions } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 
-export const listTaskModels = async (c: Context<{ Variables: Variables }>) =>
-  c.json(await getDeploymentTaskModelOptions());
+export const listTaskModels = async (
+  c: Context<{ Variables: Variables }>,
+): Promise<Response> => c.json(await getDeploymentTaskModelOptions());

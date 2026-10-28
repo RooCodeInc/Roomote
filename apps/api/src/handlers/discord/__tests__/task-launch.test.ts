@@ -72,6 +72,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import { DiscordApiError } from '@roomote/communication/discord-provider';
+import { getTaskInitiatorLinkedUserId } from '@roomote/types';
 
 import { launchDiscordTask } from '../task-launch.js';
 
@@ -958,10 +959,11 @@ describe('launchDiscordTask', () => {
 
     await launchDiscordTask({
       provider: provider as never,
-      // No launch owner: automation-owned launch for a bot-authored message.
+      launchOwnerUserId: 'installer-1',
       initiator: {
         kind: 'automation',
         key: 'slack_channel_auto_start',
+        actingUserId: 'installer-1',
         actor: { externalId: 'alert-bot', displayName: 'alerts' },
       },
       agentPromptText: 'Alert triage.\n\nDeploy failed for api@1.2.3',
@@ -999,9 +1001,11 @@ describe('launchDiscordTask', () => {
     expect(launch.initiator).toEqual({
       kind: 'automation',
       key: 'slack_channel_auto_start',
+      actingUserId: 'installer-1',
       actor: { externalId: 'alert-bot', displayName: 'alerts' },
     });
     // Automation launches must not force the 'human' class.
+    expect(getTaskInitiatorLinkedUserId(launch.initiator)).toBe('installer-1');
     expect(options).not.toHaveProperty('launchClass');
   });
 

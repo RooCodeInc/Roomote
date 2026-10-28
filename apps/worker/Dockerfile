@@ -2,7 +2,7 @@
 # Build context: repository root.
 # This image is the source of truth for Roomote's durable worker OS/tooling layer.
 
-FROM ubuntu:24.04 AS runtime
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS runtime
 
 # Connects the GHCR package to this repository and links pulled images back
 # to their source.
@@ -80,6 +80,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     sleep 20; \
   done \
+  && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20260816ubuntu0.24.04.1' \
   && ln -sf "$(command -v python3)" /usr/local/bin/python \
   && docker compose version \
   && rm -rf /var/lib/apt/lists/*
@@ -172,11 +173,11 @@ RUN mkdir -p /home/roomote/.config/mise \
 # ruby = "3.4.8"
 # python = "3.14.2"
 # go = "1.25.5"
-node = '22.17.1'
+node = '22.23.4'
 pnpm = '10.29.3'
 rust = '1.92.0'
 ripgrep = '15.1.0'
-uv = '0.11.8'
+uv = '0.13.4'
 
 [settings]
 experimental = true
@@ -188,24 +189,25 @@ EOF_MISE
 # Keep Rust in mise's install graph without asking mise to execute rustc during
 # arm64-to-amd64 Docker builds; rustc currently segfaults under qemu.
 # See https://github.com/rust-lang/rust/issues/147026.
-RUN ~/.local/bin/mise install -y node@22.17.1 pnpm@10.29.3 ripgrep@15.1.0 uv@0.11.8 \
+RUN ~/.local/bin/mise install -y node@22.23.4 pnpm@10.29.3 ripgrep@15.1.0 uv@0.13.4 \
   && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --profile minimal --default-toolchain 1.92.0 --no-modify-path \
   && mkdir -p "$MISE_DATA_DIR/installs/rust" \
   && printf 'rust\ncore:rust' > "$MISE_DATA_DIR/installs/rust/.mise.backend" \
   && ln -sfn "$CARGO_HOME/bin" "$MISE_DATA_DIR/installs/rust/1.92.0" \
   && ~/.local/bin/mise reshim \
-  && test "$(node --version)" = "v22.17.1" \
+  && test "$(node --version)" = "v22.23.4" \
   && test "$(pnpm --version)" = "10.29.3" \
   && test -x "$CARGO_HOME/bin/rustc" \
   && test -L "$MISE_DATA_DIR/installs/rust/1.92.0" \
   && test "$(rg --version | awk 'NR == 1 { print $2 }')" = "15.1.0" \
-  && test "$(uv --version | awk 'NR == 1 { print $2 }')" = "0.11.8"
+  && test "$(uv --version | awk 'NR == 1 { print $2 }')" = "0.13.4"
 
 RUN UV_ROOT="$(~/.local/bin/mise where uv)" \
   && UV_BIN="$(find "$UV_ROOT" -type f -name uv -perm -111 | head -n 1)" \
   && test -x "$UV_BIN" \
-  && sudo "$UV_BIN" pip install --system --break-system-packages openai
+  && sudo "$UV_BIN" pip install --system --break-system-packages \
+    openai 'certifi==2026.10.19' 'pip==26.2.2'
 
 ENV SHELL=/bin/bash
 
@@ -325,7 +327,7 @@ RUN sudo apt-get update \
 
 # Shared with WORKER_RUNTIME_SCHEMA_VERSION in @roomote/types. Local builds
 # pass this explicitly; the default keeps direct/release Docker builds labeled.
-ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=4
+ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=5
 LABEL dev.roomote.worker-image.schema-version="${ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION}"
 
 WORKDIR /sandbox

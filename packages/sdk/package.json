@@ -144,15 +144,22 @@
     "bullmq": "^5.78.0",
     "cron-parser": "5.6.1",
     "htmlparser2": "8.0.2",
+    "semver": "^7.8.5",
+    "smol-toml": "1.9.0",
     "superjson": "^2.2.6",
     "turndown": "7.2.0",
     "undici": "^7.29.1",
+    "unzipper": "^0.12.5",
+    "yaml": "^2.9.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
+    "@types/semver": "^7.8.0",
     "@types/turndown": "5.0.5",
+    "@types/unzipper": "^0.10.11",
+    "fflate": "^0.8.3",
     "vitest": "^4.1.1"
   }
 }

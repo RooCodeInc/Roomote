@@ -1,0 +1,1 @@
+ALTER TABLE "environment_snapshots" ADD COLUMN "worker_version" text;

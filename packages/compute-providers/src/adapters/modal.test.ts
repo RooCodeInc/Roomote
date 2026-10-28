@@ -1254,22 +1254,22 @@ describe('ModalClient', () => {
     expect(dockerfile).not.toContain('ARG RUST_VERSION=');
     expect(dockerfile).not.toContain('ARG RIPGREP_VERSION=');
     expect(dockerfile).not.toContain('ARG UV_VERSION=');
-    expect(dockerfile).toContain("node = '22.17.1'");
+    expect(dockerfile).toContain("node = '22.23.4'");
     expect(dockerfile).toContain("pnpm = '10.29.3'");
     expect(dockerfile).toContain("rust = '1.92.0'");
     expect(dockerfile).toContain("ripgrep = '15.1.0'");
-    expect(dockerfile).toContain("uv = '0.11.8'");
+    expect(dockerfile).toContain("uv = '0.13.4'");
     expect(dockerfile).toContain('ENV RUSTUP_HOME=/home/roomote/.rustup');
     expect(dockerfile).toContain('ENV CARGO_HOME=/home/roomote/.cargo');
     expect(dockerfile).toContain('ENV RUST_MIN_STACK=16777216');
     expect(dockerfile).toContain(
-      'mise install -y node@22.17.1 pnpm@10.29.3 ripgrep@15.1.0 uv@0.11.8',
+      'mise install -y node@22.23.4 pnpm@10.29.3 ripgrep@15.1.0 uv@0.13.4',
     );
     expect(dockerfile).toContain('--default-toolchain 1.92.0');
     expect(dockerfile).toContain(
       'ln -sfn "$CARGO_HOME/bin" "$MISE_DATA_DIR/installs/rust/1.92.0"',
     );
-    expect(dockerfile).toContain('test "$(node --version)" = "v22.17.1"');
+    expect(dockerfile).toContain('test "$(node --version)" = "v22.23.4"');
     expect(dockerfile).toContain('test "$(pnpm --version)" = "10.29.3"');
     expect(dockerfile).toContain('test -x "$CARGO_HOME/bin/rustc"');
     expect(dockerfile).toContain(
@@ -1279,7 +1279,7 @@ describe('ModalClient', () => {
       'test "$(rg --version | awk \'NR == 1 { print $2 }\')" = "15.1.0"',
     );
     expect(dockerfile).toContain(
-      'test "$(uv --version | awk \'NR == 1 { print $2 }\')" = "0.11.8"',
+      'test "$(uv --version | awk \'NR == 1 { print $2 }\')" = "0.13.4"',
     );
     expect(dockerfile).toContain('    bubblewrap \\');
     expect(expectedNodePtyVersion).toBeDefined();

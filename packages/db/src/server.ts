@@ -42,6 +42,8 @@ export * from './lib/map-raw-row';
 export * from './lib/legacy-task-inference-usage';
 export * from './lib/llm-usage';
 export * from './lib/deployment-auth-keypairs';
+export * from './lib/reencrypt-secrets';
+export { runReencryptSecretsCli } from './lib/reencrypt-secrets-cli';
 export * from './lib/migration-readiness';
 export * from './lib/environment-variables';
 export * from './lib/task-id';
@@ -65,6 +67,12 @@ export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
 export * from './lib/cancel-task-run';
 export * from './lib/automations';
+export * from './lib/vulnerability-watch';
+export {
+  vulnerabilityWatchState,
+  vulnerabilityInventories,
+  vulnerabilityFindings,
+} from './schema';
 export * from './lib/automation-results';
 export * from './lib/custom-automations';
 export * from './lib/custom-automation-access';
