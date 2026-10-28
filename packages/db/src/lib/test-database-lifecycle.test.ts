@@ -85,6 +85,26 @@ describe('setupTestDatabaseLifecycle', () => {
     expect(mockEnd).toHaveBeenCalledTimes(1);
   });
 
+  it('targets public tables during setup and teardown regardless of the search path', async () => {
+    mockReservedSql
+      .mockReset()
+      .mockImplementation(async (query: TemplateStringsArray) =>
+        query.join('').includes('information_schema')
+          ? [{ table_name: 'probe"table' }]
+          : [],
+      );
+
+    const teardown = await setupTestDatabaseLifecycle(
+      'postgres://postgres@localhost:5432/roomote_search_path_test',
+    );
+    await teardown();
+
+    expect(mockUnsafe.mock.calls).toEqual([
+      ['TRUNCATE TABLE "public"."probe""table" CASCADE'],
+      ['TRUNCATE TABLE "public"."probe""table" CASCADE'],
+    ]);
+  });
+
   it('shares ownership across independently evaluated setup modules', async () => {
     vi.resetModules();
     const otherModule = await import('./test-database-lifecycle');
