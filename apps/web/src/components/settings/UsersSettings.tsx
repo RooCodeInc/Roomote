@@ -43,7 +43,7 @@ import { AccountLinkHelpSection } from './AccountLinkHelpSection';
 import { formatDistanceToNow } from 'date-fns';
 
 const LICENSE_PURCHASE_URL =
-  'https://cloud.roomote.dev/sign-up?utm_source=self-host&utm_medium=settings_users&utm_campaign=license_purchase';
+  'mailto:help@roomote.dev?subject=Roomote%20self-hosted%20license';
 const LICENSE_PORTAL_URL = 'https://cloud.roomote.dev/';
 const LICENSE_EXPIRY_WARNING_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -306,7 +306,7 @@ export function UsersSettings() {
           })
         }
       >
-        Buy a license on Roomote Cloud
+        Contact Roomote for a license
       </a>
     </Button>
   );
@@ -378,7 +378,7 @@ export function UsersSettings() {
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Refresh the key in Roomote Cloud
+                    Refresh the key in your license account
                   </a>{' '}
                   and replace it here before it expires.
                 </p>
@@ -428,9 +428,9 @@ export function UsersSettings() {
             )}
             <p className="text-sm text-muted-foreground">
               Deployments are free for up to {license.freeSeatLimit} users. A
-              license purchased on Roomote Cloud unlocks more seats. Apply it
-              here or set <span className="font-mono">R_LICENSE_KEY</span> in
-              the deployment environment.
+              self-hosted license unlocks more seats. Apply it here or set{' '}
+              <span className="font-mono">R_LICENSE_KEY</span> in the deployment
+              environment.
             </p>
           </div>
         </Section>

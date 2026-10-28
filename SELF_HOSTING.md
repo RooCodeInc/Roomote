@@ -980,8 +980,8 @@ Roomote is licensed under the Fair Core License 1.0 (FCL-1.0-ALv2, see
 registered user account counts toward the limit, whichever sign-in path or
 surface it uses. Removing a user frees their seat.
 
-To go beyond 10 users, [buy a self-hosted license on Roomote
-Cloud](https://cloud.roomote.dev/sign-up) and apply its key in either of these
+To go beyond 10 users, [contact Roomote for a self-hosted
+license](mailto:help@roomote.dev) and apply its key in either of these
 ways:
 
 - Enter it in **Settings → Users → License** as an admin, or
@@ -990,7 +990,7 @@ ways:
   any key stored in Settings.
 
 Purchased keys are issued annually. While the subscription is active, refresh
-the key in the Roomote Cloud portal and replace the value in Settings or
+the key in your existing license account and replace the value in Settings or
 `R_LICENSE_KEY` before its displayed expiry date. Keys are verified offline;
 usage reporting does not activate or validate them.
 

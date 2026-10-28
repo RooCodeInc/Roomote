@@ -98,10 +98,8 @@ describe('StepConfigureInference', () => {
     expect(
       screen.getByRole('heading', { name: 'Configure inference' }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Your Roomote Cloud trial includes/),
-    ).toHaveTextContent(
-      'Your Roomote Cloud trial includes $5 of inference to try things out, or you can configure your own provider directly.',
+    expect(screen.getByText(/Your deployment includes/)).toHaveTextContent(
+      'Your deployment includes $5 of inference to try things out, or you can configure your own provider directly.',
     );
     expect(
       screen.getByText(/Some Roomote functionality uses fast judgement models/),
