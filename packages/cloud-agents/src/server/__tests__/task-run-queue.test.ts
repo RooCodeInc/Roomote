@@ -219,6 +219,79 @@ describe('TaskRunQueue - Basic Operations', () => {
       await expect(queue.dequeue(false)).resolves.toBeNull();
     });
 
+    it('removes a lingering entry and the scope pointer it owns', async () => {
+      const scope = 'stale-scope';
+      const stale = createTestEntry(1, scope);
+
+      await queue.enqueue(stale);
+      await expect(queue.getScopeEntryId(scope)).resolves.toBe(stale.id);
+
+      await expect(queue.removeEntry(stale.id)).resolves.toBe(true);
+      await expect(queue.getScopeEntryId(scope)).resolves.toBeNull();
+      await expect(redis.llen(QUEUE_KEY)).resolves.toBe(0);
+      await expect(
+        redis.hget(ENTRIES_KEY, String(stale.id)),
+      ).resolves.toBeNull();
+
+      // A first-wins enqueue on the cleared scope is queued, not handed back.
+      const incoming = { ...createTestEntry(2, scope), preserveExisting: true };
+      await expect(queue.enqueue(incoming)).resolves.toEqual([]);
+      await expect(queue.dequeue(false)).resolves.toEqual(incoming);
+    });
+
+    it('replaces a verified-stale pointer under first-wins', async () => {
+      const scope = 'verified-stale-scope';
+      const stale = createTestEntry(1, scope);
+      const incoming = {
+        ...createTestEntry(3, scope),
+        preserveExisting: true,
+        replaceStaleId: stale.id,
+      };
+
+      await queue.enqueue(stale);
+      await expect(queue.enqueue(incoming)).resolves.toEqual([
+        { id: stale.id, scope },
+      ]);
+      await expect(queue.getScopeEntryId(scope)).resolves.toBe(incoming.id);
+      // The enqueue-time hint is not persisted with the queued entry.
+      const queued = await queue.dequeue(false);
+      expect(queued).toEqual({
+        ...createTestEntry(3, scope),
+        preserveExisting: true,
+      });
+      expect(queued).not.toHaveProperty('replaceStaleId');
+    });
+
+    it('keeps a replacement queued since the stale pointer was observed', async () => {
+      const scope = 'replaced-stale-scope';
+      const stale = createTestEntry(1, scope);
+      const replacement = createTestEntry(2, scope);
+      const incoming = {
+        ...createTestEntry(3, scope),
+        preserveExisting: true,
+        replaceStaleId: stale.id,
+      };
+
+      await queue.enqueue(stale);
+      await queue.enqueue(replacement);
+      await expect(queue.enqueue(incoming)).resolves.toEqual([
+        { id: incoming.id, scope },
+      ]);
+      await expect(queue.getScopeEntryId(scope)).resolves.toBe(replacement.id);
+    });
+
+    it('keeps a newer scope pointer when removing an older entry', async () => {
+      const scope = 'shared-scope';
+      const older = createTestEntry(1, scope);
+      const newer = createTestEntry(2, scope);
+
+      await queue.enqueue(older);
+      await queue.enqueue(newer);
+
+      await expect(queue.removeEntry(older.id)).resolves.toBe(false);
+      await expect(queue.getScopeEntryId(scope)).resolves.toBe(newer.id);
+    });
+
     it('should handle multiple enqueue/dequeue cycles', async () => {
       // Cycle 1
       await queue.enqueue(createTestEntry(1, 'scope-1'));

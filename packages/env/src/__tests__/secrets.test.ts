@@ -8,6 +8,7 @@ import {
   getBetterAuthSecret,
   getDashboardPassword,
   getEncryptionKey,
+  getEncryptionKeyPrevious,
   getSecretProvider,
   resetSecretProvider,
   setSecretProvider,
@@ -81,6 +82,42 @@ describe('secret provider', () => {
   it('falls back to ENCRYPTION_KEY when BETTER_AUTH_SECRET is unset', () => {
     setSecretProvider(fakeProvider({ ENCRYPTION_KEY: 'enc-key' }));
     expect(getBetterAuthSecret()).toBe('enc-key');
+  });
+
+  it('returns the previous encryption key only while one is configured', () => {
+    setSecretProvider(fakeProvider({ ENCRYPTION_KEY: 'enc-key' }));
+    expect(getEncryptionKeyPrevious()).toBeUndefined();
+
+    setSecretProvider(
+      fakeProvider({
+        ENCRYPTION_KEY: 'enc-key',
+        ENCRYPTION_KEY_PREVIOUS: 'old-enc-key',
+      }),
+    );
+    expect(getEncryptionKeyPrevious()).toBe('old-enc-key');
+  });
+
+  it('keeps signing sessions with the old key while ENCRYPTION_KEY rotates', () => {
+    // Deployments without BETTER_AUTH_SECRET signed sessions with the old
+    // ENCRYPTION_KEY, so rotating the at-rest key must not log users out.
+    setSecretProvider(
+      fakeProvider({
+        ENCRYPTION_KEY: 'new-enc-key',
+        ENCRYPTION_KEY_PREVIOUS: 'old-enc-key',
+      }),
+    );
+    expect(getBetterAuthSecret()).toBe('old-enc-key');
+  });
+
+  it('prefers BETTER_AUTH_SECRET over the previous encryption key', () => {
+    setSecretProvider(
+      fakeProvider({
+        BETTER_AUTH_SECRET: 'dedicated-auth-secret',
+        ENCRYPTION_KEY: 'new-enc-key',
+        ENCRYPTION_KEY_PREVIOUS: 'old-enc-key',
+      }),
+    );
+    expect(getBetterAuthSecret()).toBe('dedicated-auth-secret');
   });
 
   it('keeps every named secret in the agent-sandbox denylist', () => {

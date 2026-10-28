@@ -25,6 +25,98 @@ describe('handleGatewayDispatch', () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { author: { id: 'feed-1', bot: true }, content: '<@bot-1> fix it' },
+    {
+      author: { id: 'feed-1' },
+      webhook_id: 'hook-1',
+      content: '<@bot-1> fix it',
+    },
+    {
+      author: { id: 'feed-1', bot: true },
+      content: '<@&role-1> fix it',
+      mention_roles: ['role-1'],
+    },
+  ])(
+    'forwards automated current-bot mentions after role normalization and dedupes: %j',
+    async (message) => {
+      const enqueue = vi
+        .fn()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+      const packet = {
+        t: 'MESSAGE_CREATE',
+        d: {
+          id: 'message-1',
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          ...message,
+        },
+      };
+      const dependencies = {
+        enqueue,
+        rest: { post: vi.fn() },
+        now,
+        getBotUserId: () => 'bot-1',
+        getBotRoleId: () => 'role-1',
+        getBotUsername: () => 'Roomote',
+      };
+      await expect(handleGatewayDispatch(packet, dependencies)).resolves.toBe(
+        'enqueued',
+      );
+      await expect(handleGatewayDispatch(packet, dependencies)).resolves.toBe(
+        'duplicate',
+      );
+      expect(enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventId: 'message-1',
+          payload: expect.objectContaining({ content: '<@bot-1> fix it' }),
+        }),
+      );
+    },
+  );
+
+  it.each([
+    { author: { id: 'feed-1', bot: true }, content: 'not directed' },
+    {
+      author: { id: 'feed-1' },
+      webhook_id: 'hook-1',
+      content: '<@old-bot> fix it',
+    },
+    { author: { id: 'bot-1' }, content: '<@bot-1> self' },
+  ])(
+    'does not forward unmentioned automated or self messages in DMs or threads: %j',
+    async (message) => {
+      const enqueue = vi.fn();
+      for (const guild_id of [undefined, 'guild-1']) {
+        await expect(
+          handleGatewayDispatch(
+            {
+              t: 'MESSAGE_CREATE',
+              d: {
+                id: 'message-1',
+                channel_id: 'channel-1',
+                guild_id,
+                ...message,
+              },
+            },
+            {
+              enqueue,
+              rest: { post: vi.fn() },
+              getBotUserId: () => 'bot-1',
+              getCachedChannel: () => ({
+                id: 'channel-1',
+                type: 11,
+                isThread: true,
+              }),
+            },
+          ),
+        ).resolves.toBe('ignored');
+      }
+      expect(enqueue).not.toHaveBeenCalled();
+    },
+  );
+
   it('enqueues complete user messages including attachments', async () => {
     const enqueue = vi.fn().mockResolvedValue(true);
     const rest = { post: vi.fn() };

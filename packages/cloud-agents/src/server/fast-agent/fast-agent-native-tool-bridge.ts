@@ -1250,6 +1250,17 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
         writeJson(response, 401, { ok: false, error: 'unauthorized' });
         return;
       }
+      // The bridge is stateless and only answers POSTed JSON-RPC. A GET would
+      // open the transport's standalone SSE stream, which never closes: OpenCode
+      // opens one per mounted server per directory instance and keeps it, and
+      // after about 21 instances those streams exhaust OpenCode's outbound
+      // request pool, so every later tools/list times out. 405 tells MCP
+      // clients that this server offers no stream.
+      if (request.method !== 'POST') {
+        response.setHeader('Allow', 'POST');
+        writeJson(response, 405, { ok: false, error: 'method_not_allowed' });
+        return;
+      }
       const capability = mcpCapabilities.get(mcpMatch[1]!);
       if (!capability) {
         writeJson(response, 409, {

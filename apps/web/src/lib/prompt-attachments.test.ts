@@ -11,6 +11,7 @@ describe('ROOMOTE_FILE_ATTACHMENT_ACCEPT', () => {
 
     expect(accepted).toContain('.r');
     expect(accepted).toContain('.ipynb');
+    expect(accepted).toContain('.har');
   });
 });
 

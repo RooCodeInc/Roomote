@@ -272,6 +272,22 @@ const fastAgentHumanFollowUpEventBaseSchema = z.object({
   attachmentTexts: z.array(z.string()).optional(),
   senderDisplayName: z.string().min(1).optional(),
   senderExternalId: z.string().min(1).optional(),
+  /** Automation provenance for child tasks delegated by this admitted turn.
+   * The acting user is restored from the authenticated turn actor. */
+  delegatedTaskInitiator: z
+    .object({
+      kind: z.literal('automation'),
+      key: z.enum(BACKGROUND_AUTOMATION_KEYS),
+      actor: z
+        .object({
+          externalId: z.string(),
+          displayName: z.string().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  /** Explicit child prompt visibility from the entry surface. */
+  delegatedTaskVisibleInTranscript: z.boolean().optional(),
   /** The message was entered on the web and should be quoted on its side-surface reply. */
   webFollowUp: z.boolean().optional(),
   /**

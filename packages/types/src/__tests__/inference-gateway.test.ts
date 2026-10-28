@@ -165,7 +165,7 @@ describe('inference gateway URL builders', () => {
         upstreamBaseUrl,
         resource: { envVarName: resourceEnvVarName },
         authHeader: { name: 'api-key' },
-        openCodeBaseUrlSuffix: '',
+        openCodeBaseUrlSuffix: '/v1',
       });
       expect(provider?.allowedPaths).toEqual(
         expect.arrayContaining(['/v1/chat/completions', '/v1/responses']),
@@ -178,7 +178,7 @@ describe('inference gateway URL builders', () => {
           'https://api.example.com/api/inference',
           provider!,
         ),
-      ).toBe(`https://api.example.com/api/inference/${providerId}`);
+      ).toBe(`https://api.example.com/api/inference/${providerId}/v1`);
     },
   );
 

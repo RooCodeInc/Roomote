@@ -41,7 +41,7 @@ export async function handlePrReviewLaunch(
   auth: { userId: string },
   body: TaskLaunchRequest,
   harnessModelOverrides?: HarnessModelOverrides,
-) {
+): Promise<Response> {
   const repositoryFullName = body.repo?.trim();
   const prNumber = body.prNumber;
 

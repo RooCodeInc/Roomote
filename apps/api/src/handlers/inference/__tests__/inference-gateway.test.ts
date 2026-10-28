@@ -6,6 +6,11 @@ vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
 }));
 
 import { Hono } from 'hono';
+import { createAzure } from '@ai-sdk/azure';
+import {
+  buildInferenceGatewayOpenCodeBaseUrl,
+  getInferenceGatewayProvider,
+} from '@roomote/types';
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
@@ -414,16 +419,78 @@ describe('inference gateway', () => {
     },
   );
 
-  it('rejects Azure paths outside the inference allowlist', async () => {
-    const fetchMock = stubUpstreamFetch();
-    const response = await postMessages(
-      createApp(createRunToken()),
-      '/api/inference/azure/v1/deployments',
-    );
+  // Match the Azure SDK bundled in OpenCode 1.18.30. Exercise its real URL
+  // builder: custom gateway hosts do not receive an implicit /v1 prefix.
+  it.each([
+    ['azure', 'responses'],
+    ['azure', 'chat/completions'],
+    ['azure-cognitive-services', 'responses'],
+    ['azure-cognitive-services', 'chat/completions'],
+  ] as const)(
+    'proxies the Azure SDK %s %s request',
+    async (providerId, endpoint) => {
+      mockResolveModelProviderEnvValue.mockImplementation(async (names) =>
+        names.some((name: string) => name.endsWith('_RESOURCE_NAME'))
+          ? 'test-resource'
+          : 'provider-secret-key',
+      );
+      const fetchMock = stubUpstreamFetch(
+        new Response('data: [DONE]\n\n', {
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+      );
+      const app = createApp(createRunToken());
+      const gatewayRequests: Request[] = [];
+      const azure = createAzure({
+        baseURL: buildInferenceGatewayOpenCodeBaseUrl(
+          'https://api.example.com/api/inference',
+          getInferenceGatewayProvider(providerId)!,
+        ),
+        apiKey: 'test-run-token',
+        fetch: async (input, init) => {
+          const request = new Request(input, init);
+          gatewayRequests.push(request.clone());
+          return app.request(request);
+        },
+      });
+      const model =
+        endpoint === 'responses'
+          ? azure.responses('gpt-5.6-luna')
+          : azure.chat('gpt-5.5');
+      const result = await model.doStream({
+        prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+      });
+      await result.stream.cancel();
 
-    expect(response.status).toBe(403);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
+      expect(gatewayRequests).toHaveLength(1);
+      expect(gatewayRequests[0]!.url).toBe(
+        `https://api.example.com/api/inference/${providerId}/v1/${endpoint}`,
+      );
+      expect(gatewayRequests[0]!.headers.get('api-key')).toBe('test-run-token');
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const host = providerId === 'azure' ? 'openai' : 'cognitiveservices';
+      expect(url).toBe(
+        `https://test-resource.${host}.azure.com/openai/v1/${endpoint}`,
+      );
+      const headers = new Headers(init.headers);
+      expect(headers.get('api-key')).toBe('provider-secret-key');
+      expect(headers.has('authorization')).toBe(false);
+    },
+  );
+
+  it.each(['azure', 'azure-cognitive-services'])(
+    'rejects %s paths outside the inference allowlist',
+    async (providerId) => {
+      const fetchMock = stubUpstreamFetch();
+      const response = await postMessages(
+        createApp(createRunToken()),
+        `/api/inference/${providerId}/v1/deployments`,
+      );
+
+      expect(response.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('returns 404 when an Azure API key is not configured', async () => {
     mockResolveModelProviderEnvValue.mockImplementation(

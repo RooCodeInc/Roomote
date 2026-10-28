@@ -86,6 +86,12 @@ describe('resolveModelsDevSlug', () => {
     expect(resolveModelsDevSlug('kimi-for-coding/kimi-for-coding')).toBe(
       'kimi-code-plan-cn/kimi-for-coding',
     );
+    expect(resolveModelsDevSlug('kimi-for-coding/k3.1-pro')).toBe(
+      'kimi-code-plan-cn/k3.1-pro',
+    );
+    expect(resolveModelsDevSlug('kimi-for-coding/k3.1-pro-highspeed')).toBe(
+      'kimi-code-plan-cn/k3.1-pro-highspeed',
+    );
   });
 
   it('strips the vercel/ prefix for AI Gateway routed models', () => {
@@ -476,6 +482,42 @@ describe('lookupModelMetadataFromCatalog', () => {
     });
     expect(result.displayName).toBe('Claude Sonnet 5');
   });
+
+  it.each(['k3.1-pro', 'k3.1-pro-highspeed'])(
+    'resolves Kimi for Coding %s metadata through the renamed catalog provider',
+    (slug) => {
+      const catalog = buildCatalog({
+        providers: {
+          'kimi-code-plan-cn': {
+            models: {
+              [slug]: {
+                name: 'Kimi K3.1 Pro',
+                limit: { context: 1_048_576, output: 131_072 },
+                modalities: { input: ['text', 'image', 'video'] },
+                reasoning: true,
+                reasoning_options: [
+                  { type: 'effort', values: ['low', 'high', 'max'] },
+                ],
+                cost: { input: 0, output: 0 },
+              },
+            },
+          },
+        },
+      });
+
+      expect(
+        lookupModelMetadataFromCatalog(catalog, `kimi-for-coding/${slug}`),
+      ).toMatchObject({
+        metadata: {
+          contextWindow: 1_048_576,
+          inputTypes: ['text', 'image', 'video'],
+          supportedReasoningEfforts: ['low', 'high', 'max'],
+          inputPricePerToken: 0,
+          outputPricePerToken: 0,
+        },
+      });
+    },
+  );
 
   it('falls back to the provider-agnostic models map for requesty-routed models missing from the gateway entry', () => {
     const catalog = buildCatalog({

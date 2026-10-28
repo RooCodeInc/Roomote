@@ -40,7 +40,8 @@
     "db:push:test": "pnpm drizzle-kit:test push --force",
     "db:seed": "dotenvx run --quiet -f ../../.env.local -- tsx src/fixtures/seed.ts",
     "db:seed:demo": "dotenvx run --quiet --ignore=MISSING_ENV_FILE -f ../../.env.local -- tsx src/fixtures/seed-demo.ts",
-    "development:create-env-var": "dotenvx run --quiet -f ../../.env.local -- tsx scripts/create-env-var.ts"
+    "development:create-env-var": "dotenvx run --quiet -f ../../.env.local -- tsx scripts/create-env-var.ts",
+    "development:reencrypt-secrets": "dotenvx run --quiet -f ../../.env.local -- tsx scripts/reencrypt-secrets.ts"
   },
   "dependencies": {
     "@roomote/env": "workspace:^",

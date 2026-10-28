@@ -4,6 +4,7 @@ import {
   extractWorkerReleaseTagFromArchivePath,
   extractWorkerReleaseVersionFromArchivePath,
   getWorkerReleaseCompatibilityVersion,
+  isEnvironmentSnapshotFromRelease,
   parseWorkerReleaseTag,
   parseWorkerReleaseTagFromArchivePath,
 } from '../worker-release-selection';
@@ -133,5 +134,24 @@ describe('extractWorkerReleaseVersionFromArchivePath', () => {
         '/roomote/releases/worker-preview-v1.2.3-alpha.1.tar.gz',
       ),
     ).toBe('1.2.3-alpha.1');
+  });
+});
+
+describe('isEnvironmentSnapshotFromRelease', () => {
+  it('reuses only snapshots built by the running release', () => {
+    expect(isEnvironmentSnapshotFromRelease('v1.19.0', '1.19.0')).toBe(true);
+    expect(isEnvironmentSnapshotFromRelease('1.19.0+abc', 'v1.19.0')).toBe(
+      true,
+    );
+    expect(isEnvironmentSnapshotFromRelease('v1.18.2', '1.19.0')).toBe(false);
+  });
+
+  it('treats unstamped snapshots as stale once the release is known', () => {
+    expect(isEnvironmentSnapshotFromRelease(null, '1.19.0')).toBe(false);
+  });
+
+  it('keeps every snapshot when the application release is unknown', () => {
+    expect(isEnvironmentSnapshotFromRelease(null, undefined)).toBe(true);
+    expect(isEnvironmentSnapshotFromRelease('v1.18.2', 'dev')).toBe(true);
   });
 });

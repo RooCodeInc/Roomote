@@ -131,6 +131,7 @@ export type ActivationAutomation =
   | 'release_announcements'
   | 'sentry_triage'
   | 'dependabot_triage'
+  | 'vulnerability_watch'
   | 'codeql_triage'
   | 'issue_fixer'
   | 'security_auditor'

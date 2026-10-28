@@ -484,8 +484,22 @@ async function processDiscordGatewayEvent(
   const sender = interaction
     ? getDiscordInteractionUser(interaction)
     : message?.author;
-  if (!sender || sender.bot) {
+  if (
+    !sender ||
+    sender.id === resolved.botUserId ||
+    (interaction && sender.bot)
+  ) {
     return { ok: true, ignored: 'bot_or_missing_sender' };
+  }
+  const isAutomatedMessage = Boolean(
+    message &&
+    (message.author.bot === true || typeof message.webhook_id === 'string'),
+  );
+  if (
+    isAutomatedMessage &&
+    !isDiscordTaskEntryEvent(event, { botUserId: resolved.botUserId })
+  ) {
+    return { ok: true, ignored: 'not_task_entry' };
   }
 
   if (command?.name === 'help') {
@@ -633,7 +647,34 @@ async function processDiscordGatewayEvent(
     return { ok: true, started: false, reason: 'missing_request' };
   }
 
-  const senderUserId = await findDiscordMappedUserId(sender.id);
+  const senderUserId = isAutomatedMessage
+    ? channel.guildId
+      ? (await findDiscordInstallationByGuildId(channel.guildId))
+          ?.installedByUserId
+      : null
+    : await findDiscordMappedUserId(sender.id);
+  if (isAutomatedMessage && !senderUserId) {
+    apiLogger.warn(
+      `[discord] No installer launch identity for automated mention ${channel.channelId}:${event.eventId}; the guild needs a linked installer before Roomote can respond to bot posts`,
+    );
+    return { ok: true, ignored: 'discord_automation_missing_installer' };
+  }
+  // Match automated channel entry: act as the installer, while delegated tasks
+  // retain the external author's automation provenance.
+  const automationEntry =
+    isAutomatedMessage && senderUserId
+      ? {
+          delegatedTaskInitiator: {
+            kind: 'automation' as const,
+            key: 'slack_channel_auto_start' as const,
+            actingUserId: senderUserId,
+            actor: {
+              externalId: sender.id,
+              displayName: sender.global_name?.trim() || sender.username,
+            },
+          },
+        }
+      : {};
   const conversation = {
     provider: 'discord' as const,
     channelId: metadata.communicationChannelId,
@@ -642,8 +683,13 @@ async function processDiscordGatewayEvent(
       : {}),
   };
   const forceNewTask = command?.name === 'new';
+  // Automated mentions use this Discord conversation, not personal notification
+  // or cross-surface reply routes owned by the installer.
   const attentionResolution =
-    !forceNewTask && senderUserId && message?.message_reference?.message_id
+    !isAutomatedMessage &&
+    !forceNewTask &&
+    senderUserId &&
+    message?.message_reference?.message_id
       ? await findSessionAttentionNotificationReply({
           provider: 'discord',
           workspaceId: channel.guildId ?? 'dm',
@@ -657,7 +703,9 @@ async function processDiscordGatewayEvent(
       ? attentionResolution.attention
       : null;
   const repliedFastSession =
-    !forceNewTask && message?.message_reference?.message_id
+    !isAutomatedMessage &&
+    !forceNewTask &&
+    message?.message_reference?.message_id
       ? await findFastAgentSessionForProviderReply({
           provider: 'discord',
           workspaceId: channel.guildId ?? 'dm',
@@ -679,6 +727,7 @@ async function processDiscordGatewayEvent(
   }
   if (
     !forceNewTask &&
+    !isAutomatedMessage &&
     !repliedFastSession &&
     message?.message_reference?.message_id &&
     (await isFastAgentProviderMessage({
@@ -874,15 +923,17 @@ async function processDiscordGatewayEvent(
     unmentionedReplyAddressedToRoomote =
       shouldRouteUnmentioned.addressedToRoomote === true;
   }
-  await refreshDiscordUserMappingBestEffort({
-    discordUserId: sender.id,
-    discordUsername: sender.username,
-    discordGlobalName: sender.global_name ?? null,
-    ...(channel.isDirectMessage
-      ? { discordDmChannelId: channel.channelId }
-      : {}),
-    userId: senderUserId,
-  });
+  if (!isAutomatedMessage) {
+    await refreshDiscordUserMappingBestEffort({
+      discordUserId: sender.id,
+      discordUsername: sender.username,
+      discordGlobalName: sender.global_name ?? null,
+      ...(channel.isDirectMessage
+        ? { discordDmChannelId: channel.channelId }
+        : {}),
+      userId: senderUserId,
+    });
+  }
 
   // Fast mode is unconditional for ordinary linked-human messages, including
   // reaction summons: a configured emoji synthesizes a bot mention that enters
@@ -1108,7 +1159,8 @@ async function processDiscordGatewayEvent(
           isDiscordBotMentioned(message, resolved.botUserId),
         addressedToRoomote: unmentionedReplyAddressedToRoomote,
         peerConversationsEnabled,
-        visibleInTranscript: true,
+        ...automationEntry,
+        visibleInTranscript: !isAutomatedMessage,
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
     }
@@ -1155,6 +1207,7 @@ async function processDiscordGatewayEvent(
     await processDiscordFastAgentMessage({
       event,
       question: fastQuestion,
+      ...automationEntry,
       ...fastAttachments,
       ...(agentContext ? { agentContext } : {}),
       sender,
@@ -1174,7 +1227,7 @@ async function processDiscordGatewayEvent(
       ...(reactionTarget ? { anchorMessageId: reactionTarget.messageId } : {}),
       activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       directedAtRoomote: true,
-      visibleInTranscript: true,
+      visibleInTranscript: !isAutomatedMessage,
     });
     return { ok: true, fastAnswered: true, fastDefaulted: true };
   }

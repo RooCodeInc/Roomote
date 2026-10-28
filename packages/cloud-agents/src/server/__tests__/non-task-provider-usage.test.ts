@@ -807,6 +807,168 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('reconnects MCP servers the instance reports as failed before prompting', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    const calls: string[] = [];
+    let reconnectAttempted = false;
+    const mcpStatusMock = vi.fn(async () => {
+      calls.push('status');
+      return {
+        data: {
+          gbrain: reconnectAttempted
+            ? { status: 'connected' }
+            : { status: 'failed', error: 'Request timed out' },
+          github: { status: 'connected' },
+          sentry: { status: 'failed', error: 'SSE error: Non-200 (409)' },
+        },
+        error: undefined,
+      };
+    });
+    // OpenCode answers every connect with success, even when the attempt
+    // leaves the server failed; only the status read tells them apart.
+    const mcpConnectMock = vi.fn(async ({ name }: { name: string }) => {
+      calls.push(`connect:${name}`);
+      reconnectAttempted = true;
+      return { data: true, error: undefined };
+    });
+    createOpencodeClientMock.mockReturnValue({
+      config: { providers: configProvidersMock },
+      event: { subscribe: eventSubscribeMock },
+      mcp: { status: mcpStatusMock, connect: mcpConnectMock },
+      session: {
+        abort: sessionAbortMock,
+        children: sessionChildrenMock,
+        create: sessionCreateMock,
+        messages: sessionMessagesMock,
+        promptAsync: sessionPromptAsyncMock,
+        prompt: sessionPromptMock,
+      },
+    });
+    sessionPromptMock.mockImplementation(async () => {
+      calls.push('prompt');
+      return {
+        data: {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            time: { created: 100, completed: 200 },
+          },
+          parts: [{ type: 'text', text: 'answered with tools' }],
+        },
+        error: undefined,
+      };
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'Who is on call?',
+          modelRole: 'primary',
+        },
+        {},
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          reconnectFailedMcpServers: true,
+        },
+      ),
+    ).resolves.toBe('answered with tools');
+
+    expect(mcpStatusMock).toHaveBeenCalledWith(
+      { directory: '/tmp/roomote-fast-native-test' },
+      { signal: expect.any(AbortSignal) },
+    );
+    // Only failed servers are retried, and the prompt waits for the retries.
+    expect(calls).toHaveLength(5);
+    expect(calls[0]).toBe('status');
+    expect(calls.slice(1, 3)).toEqual(
+      expect.arrayContaining(['connect:gbrain', 'connect:sentry']),
+    );
+    expect(calls[3]).toBe('status');
+    expect(calls.at(-1)).toBe('prompt');
+    expect(mcpConnectMock).toHaveBeenCalledWith(
+      { name: 'gbrain', directory: '/tmp/roomote-fast-native-test' },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('reconnected=gbrain stillFailed=sentry'),
+    );
+  });
+
+  it('still prompts when the MCP status check fails', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    const mcpConnectMock = vi.fn();
+    createOpencodeClientMock.mockReturnValue({
+      config: { providers: configProvidersMock },
+      event: { subscribe: eventSubscribeMock },
+      mcp: {
+        status: vi.fn(async () => {
+          throw new Error('socket hang up');
+        }),
+        connect: mcpConnectMock,
+      },
+      session: {
+        abort: sessionAbortMock,
+        children: sessionChildrenMock,
+        create: sessionCreateMock,
+        messages: sessionMessagesMock,
+        promptAsync: sessionPromptAsyncMock,
+        prompt: sessionPromptMock,
+      },
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          time: { created: 100, completed: 200 },
+        },
+        parts: [{ type: 'text', text: 'answered without tools' }],
+      },
+      error: undefined,
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'Who is on call?',
+          modelRole: 'primary',
+        },
+        {},
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          reconnectFailedMcpServers: true,
+        },
+      ),
+    ).resolves.toBe('answered without tools');
+    expect(mcpConnectMock).not.toHaveBeenCalled();
+  });
+
   it('retries the pending-ask lookup after a refresh and fails the prompt when it cannot be read', async () => {
     process.env = {
       ...originalEnv,

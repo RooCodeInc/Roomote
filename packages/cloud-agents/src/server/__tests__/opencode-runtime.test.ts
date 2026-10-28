@@ -129,6 +129,42 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it.each(
+    (
+      [
+        ['requesty', 'azure/gpt-6.1-terra@swedencentral'],
+        ['azure', 'gpt-6.1-terra'],
+        ['azure-cognitive-services', 'gpt-6.1-terra'],
+      ] as const
+    ).flatMap(([providerId, modelId]) =>
+      [
+        undefined,
+        JSON.stringify({
+          provider: { [providerId]: { options: { custom: true } } },
+        }),
+      ].map((configContent) => ({ providerId, modelId, configContent })),
+    ),
+  )(
+    'registers $providerId Terra for vision-only helper selection with config $configContent',
+    ({ providerId, modelId, configContent }) => {
+      const env = buildOpenCodeCliEnv({
+        R_MODEL: 'openai/gpt-6.1-sol',
+        R_SMALL_MODEL: 'openai/gpt-6-luna',
+        R_VISION_MODEL: `${providerId}/${modelId}`,
+        OPENCODE_CONFIG_CONTENT: configContent,
+      });
+      const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
+      expect(config.provider?.[providerId]?.models?.[modelId]).toMatchObject({
+        reasoning: true,
+        tool_call: true,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+        limit: { context: 1_050_000, input: 922_000, output: 128_000 },
+      });
+      if (configContent)
+        expect(config.provider[providerId].options.custom).toBe(true);
+    },
+  );
+
   it('materializes LiteLLM provider config for restricted helper inference', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'litellm/qwen3.6:35b-unsloth',
@@ -536,6 +572,8 @@ describe('buildOpenCodeCliEnv', () => {
     ).toEqual([
       'k3',
       'k3-256k',
+      'k3.1-pro',
+      'k3.1-pro-highspeed',
       'kimi-for-coding',
       'kimi-for-coding-highspeed',
     ]);

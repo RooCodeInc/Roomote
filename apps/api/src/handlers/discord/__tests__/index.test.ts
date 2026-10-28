@@ -433,6 +433,174 @@ describe('Discord Gateway event handler', () => {
     delete process.env.R_DISCORD_GATEWAY_SECRET;
   });
 
+  it.each([
+    { author: { id: 'feed-1', username: 'Deploy feed', bot: true } },
+    {
+      author: { id: 'feed-1', username: 'Deploy feed' },
+      webhook_id: 'webhook-1',
+    },
+    {
+      author: { id: 'feed-1', username: 'Deploy feed', bot: true },
+      channel_id: 'thread-1',
+      message_reference: { message_id: 'previous-bot-reply' },
+    },
+  ])(
+    'routes an automated mention through Fast and delegates with installer identity: %j',
+    async (automated) => {
+      const isThread = 'channel_id' in automated;
+      mocks.getChannel.mockResolvedValue({
+        id: isThread ? 'thread-1' : 'channel-1',
+        name: 'general',
+        type: isThread ? 11 : 0,
+        ...(isThread ? { parentId: 'channel-1' } : {}),
+        guildId: 'guild-1',
+      });
+      mocks.hasFastSession.mockResolvedValue(isThread);
+      mocks.findInstallation.mockResolvedValue({
+        applicationId: 'app-1',
+        botUserId: 'bot-1',
+        installedByUserId: 'installer-1',
+      });
+      mocks.answerFast.mockImplementationOnce(async ({ adapter }) => {
+        await adapter.launchTask({
+          prompt: 'Fix the flaky tests',
+          environmentId: '__all_repositories__',
+        });
+        return 'Started';
+      });
+
+      const response = await postEvent(
+        envelope(
+          message({
+            channel_id: 'channel-1',
+            ...automated,
+            guild_id: 'guild-1',
+            content: '<@bot-1> Fix the flaky tests',
+          }),
+        ),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ fastAnswered: true });
+      expect(mocks.answerFast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'installer-1',
+          question: 'Fix the flaky tests',
+          directedAtRoomote: true,
+        }),
+      );
+      expect(mocks.startNewTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          launchOwnerUserId: 'installer-1',
+          requesterDiscordUserId: 'feed-1',
+          visibleInTranscript: false,
+          initiator: {
+            kind: 'automation',
+            key: 'slack_channel_auto_start',
+            actingUserId: 'installer-1',
+            actor: { externalId: 'feed-1', displayName: 'Deploy feed' },
+          },
+          queuedMessage: expect.objectContaining({ userId: 'installer-1' }),
+        }),
+      );
+      expect(mocks.findMappedUserId).not.toHaveBeenCalled();
+      expect(mocks.upsertUserMapping).not.toHaveBeenCalled();
+      expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+      expect(mocks.completeEvent).toHaveBeenCalled();
+    },
+  );
+
+  it.each([{ bot: true }, { webhook_id: 'webhook-1' }])(
+    'ignores unmentioned automated DM and existing thread messages: %j',
+    async (automated) => {
+      for (const isThread of [false, true]) {
+        mocks.getChannel.mockResolvedValue(
+          isThread
+            ? {
+                id: 'thread-1',
+                name: 'task',
+                type: 11,
+                parentId: 'channel-1',
+                guildId: 'guild-1',
+              }
+            : { id: 'dm-1', type: 1 },
+        );
+        mocks.hasFastSession.mockResolvedValue(true);
+        const response = await postEvent(
+          envelope(
+            message({
+              author: {
+                id: 'feed-1',
+                username: 'feed',
+                ...(automated.bot ? { bot: true } : {}),
+              },
+              ...('webhook_id' in automated
+                ? { webhook_id: automated.webhook_id }
+                : {}),
+              ...(isThread
+                ? { guild_id: 'guild-1', channel_id: 'thread-1' }
+                : {}),
+              content: '<@old-bot> please act',
+            }),
+          ),
+        );
+        expect(await response.json()).toMatchObject({
+          ignored: 'not_task_entry',
+        });
+      }
+      expect(mocks.answerFast).not.toHaveBeenCalled();
+      expect(mocks.findMappedUserId).not.toHaveBeenCalled();
+      expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    null,
+    { applicationId: 'app-1', botUserId: 'bot-1', installedByUserId: null },
+  ])(
+    'fails closed for an automated mention without an installer: %j',
+    async (installation) => {
+      mocks.findInstallation.mockResolvedValue(installation);
+      mocks.getChannel.mockResolvedValue({
+        id: 'channel-1',
+        name: 'general',
+        type: 0,
+        guildId: 'guild-1',
+      });
+      const response = await postEvent(
+        envelope(
+          message({
+            channel_id: 'channel-1',
+            guild_id: 'guild-1',
+            content: '<@bot-1> fix it',
+            author: { id: 'feed-1', username: 'feed', bot: true },
+          }),
+        ),
+      );
+      expect(await response.json()).toMatchObject({
+        ignored: 'discord_automation_missing_installer',
+      });
+      expect(mocks.answerFast).not.toHaveBeenCalled();
+      expect(mocks.findMappedUserId).not.toHaveBeenCalled();
+      expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('ignores Roomote self mentions even without the bot flag', async () => {
+    const response = await postEvent(
+      envelope(
+        message({
+          content: '<@bot-1> reply',
+          author: { id: 'bot-1', username: 'Roomote' },
+        }),
+      ),
+    );
+    expect(await response.json()).toMatchObject({
+      ignored: 'bot_or_missing_sender',
+    });
+    expect(mocks.answerFast).not.toHaveBeenCalled();
+  });
+
   it('routes a configured reaction into the fast agent in a thread anchored on the reacted-on message', async () => {
     mocks.callViaEmojiConfig.mockResolvedValue({
       emoji: 'white_check_mark',
@@ -2252,10 +2420,10 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
-    // The auto-start hook saw it (and declined) before the bot early-return.
+    // The auto-start hook saw it (and declined) before the mention requirement.
     expect(mocks.channelAutoStart).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual(
-      expect.objectContaining({ ignored: 'bot_or_missing_sender' }),
+      expect.objectContaining({ ignored: 'not_task_entry' }),
     );
   });
 

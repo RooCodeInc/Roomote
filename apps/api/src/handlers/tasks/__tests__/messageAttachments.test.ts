@@ -10,6 +10,43 @@ import {
 } from '../messageAttachments';
 
 describe('prepareMessageAttachments', () => {
+  it.each([
+    'application/json',
+    'application/octet-stream',
+    'text/plain',
+    ' APPLICATION/OCTET-STREAM ',
+  ])(
+    'delivers HAR attachments as prompt text with MIME %s',
+    async (mimeType) => {
+      const har = JSON.stringify({
+        log: {
+          version: '1.2',
+          entries: [
+            {
+              request: { method: 'GET', url: 'https://example.com/api' },
+              response: { status: 503 },
+            },
+          ],
+        },
+      });
+      const result = await prepareMessageAttachments({
+        message: 'Investigate this request',
+        attachments: [
+          {
+            filename: 'network.HAR',
+            mimeType,
+            base64: Buffer.from(har).toString('base64'),
+          },
+        ],
+      });
+      expect(result.images).toBeUndefined();
+      expect(result.attachmentTexts).toEqual([expect.stringContaining(har)]);
+      expect(result.message).toBe(
+        `Investigate this request\n\n${result.attachmentTexts![0]}`,
+      );
+    },
+  );
+
   it('preserves message-only calls unchanged', async () => {
     await expect(
       prepareMessageAttachments({ message: 'Continue investigating' }),

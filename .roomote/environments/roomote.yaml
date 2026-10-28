@@ -34,7 +34,7 @@ repositories:
     branch: develop
     tool_versions:
       pnpm: 10.29.3
-      nodejs: 24.13.1
+      nodejs: 24.22.1
     commands:
       - name: Install toolchain and dependencies
         run: mise install && pnpm install

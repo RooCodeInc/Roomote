@@ -115,7 +115,7 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           frozen-lockfile: 'true'
-          node-version: 24.13.1
+          node-version: 24.22.1
           pnpm-version: 10.29.3
       - name: Set up Docker builder
         uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
@@ -181,6 +181,8 @@ jobs:
               ;;
           esac
           echo "version=$baseline" >> "$GITHUB_OUTPUT"
+      - name: Install model-settings smoke browser
+        run: npm install --global agent-browser@0.37.0 && agent-browser install --with-deps
       - name: Exercise deployment lifecycle
         env:
           BASELINE_VERSION: ${{ steps.baseline.outputs.version }}

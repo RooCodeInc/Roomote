@@ -414,7 +414,7 @@ export function isDiscordTextDocumentAttachment(
       'application/yaml',
       'application/x-yaml',
     ].includes(contentType ?? '') ||
-    /\.(?:c|cc|cpp|css|csv|go|h|html?|java|js|json|jsx|log|md|py|rb|rs|sh|sql|svg|toml|ts|tsx|txt|xml|ya?ml)$/iu.test(
+    /\.(?:c|cc|cpp|css|csv|go|h|har|html?|java|js|json|jsx|log|md|py|rb|rs|sh|sql|svg|toml|ts|tsx|txt|xml|ya?ml)$/iu.test(
       attachment.filename,
     )
   );
@@ -572,7 +572,16 @@ export function isDiscordTaskEntryEvent(
 ): boolean {
   const message = getDiscordMessageCreate(event);
   if (message) {
-    if (message.author.bot && options.channelAutoStart !== true) return false;
+    if (options.botUserId && message.author.id === options.botUserId)
+      return false;
+    const isAutomated =
+      message.author.bot === true || typeof message.webhook_id === 'string';
+    if (
+      isAutomated &&
+      options.channelAutoStart !== true &&
+      !isDiscordBotMentioned(message, options.botUserId)
+    )
+      return false;
     const hasContent = Boolean(
       getDiscordMessageContent(message) ||
       getDiscordMessageAttachments(message).length,

@@ -287,8 +287,9 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
         '/v1/embeddings',
         '/v1/models',
       ],
-      // @ai-sdk/azure appends /v1 itself when baseURL is overridden.
-      openCodeBaseUrlSuffix: '',
+      // @ai-sdk/azure only adds /v1 for native Azure OpenAI hosts; a custom
+      // gateway baseURL must include it explicitly.
+      openCodeBaseUrlSuffix: '/v1',
     },
     {
       id: 'azure-cognitive-services',
@@ -305,7 +306,7 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
         '/v1/embeddings',
         '/v1/models',
       ],
-      openCodeBaseUrlSuffix: '',
+      openCodeBaseUrlSuffix: '/v1',
     },
     {
       id: 'google',

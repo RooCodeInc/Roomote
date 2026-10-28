@@ -185,6 +185,14 @@ validate_worker_compatibility() {
     fi
 
     if [ "$worker_compatibility_version" != "$expected_compatibility_version" ]; then
+      # A restored task snapshot keeps the image it started on, so its baked
+      # release trails the deployment after every upgrade. The task's files
+      # live in that snapshot and cannot boot fresh, so report the drift and
+      # keep going. The application release must still match the worker.
+      if [ "$expected_name" = "baked_worker_product_version" ]; then
+        echo "Warning: worker release $worker_version differs from $expected_name $expected_version. Continuing; rebuild the worker image or environment snapshot to pick up the current release." >&2
+        continue
+      fi
       echo "Error: worker release $worker_version is incompatible with $expected_name $expected_version" >&2
       return 1
     fi
@@ -461,9 +469,36 @@ exec node $pm2_entry \"\$@\""
   echo "pm2 installed at $cli_path"
 }
 
+# A restored filesystem keeps its original Node binary, even when this script
+# and the worker archive are refreshed. Warn instead of failing: environment
+# snapshots are rebuilt from the current base image by the daily refresh, and
+# a hard stop would break every task launched from an older snapshot (and every
+# paused task) until then. The warning tells operators what still needs a
+# rebuild or migration.
+validate_tls_runtime() {
+  local version major minor patch minimum_minor minimum_patch
+  version="$(node --version)" || return 1
+  if [[ "$version" =~ ^v(22|24|26)\.([0-9]+)\.([0-9]+)$ ]]; then
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    patch="${BASH_REMATCH[3]}"
+    case "$major" in
+      22) minimum_minor=23; minimum_patch=4 ;;
+      24) minimum_minor=22; minimum_patch=1 ;;
+      26) minimum_minor=12; minimum_patch=1 ;;
+    esac
+    if (( minor > minimum_minor || (minor == minimum_minor && patch >= minimum_patch) )); then
+      return 0
+    fi
+  fi
+  echo "Warning: Node $version does not meet the TLS trust minimum (22.23.4, 24.22.1 or 26.12.1). Continuing; rebuild the worker image or environment snapshot to pick up the updated trust store." >&2
+  return 0
+}
+
 # Fail fast per phase: the script's exit code must reflect the first failing
 # phase, not the last phase, and callers invoke this via `bash <script>` so
 # the shebang's -e does not apply.
+run_phase "tls_runtime" validate_tls_runtime || exit "$?"
 run_phase "worker_install" install_worker || exit "$?"
 run_phase "worker_compatibility" validate_worker_compatibility || exit "$?"
 run_phase "worker_cli_install" install_worker_cli || exit "$?"

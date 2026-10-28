@@ -254,6 +254,72 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(result.model).toBe('openai-compatible/coding');
   });
 
+  it.each(
+    (['vision', 'planning', 'explore'] as const).flatMap((role) =>
+      (
+        [
+          ['requesty', 'azure/gpt-6.1-terra@swedencentral'],
+          ['azure', 'gpt-6.1-terra'],
+          ['azure-cognitive-services', 'gpt-6.1-terra'],
+        ] as const
+      ).flatMap(([providerId, modelId]) =>
+        [false, true].map((gateway) => ({
+          role,
+          providerId,
+          modelId,
+          gateway,
+        })),
+      ),
+    ),
+  )(
+    'registers $providerId Terra used only for $role (gateway=$gateway)',
+    ({ role, providerId, modelId, gateway }) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      const result = generateOpenCodeConfig({
+        homeDir: createHomeDir(),
+        model: 'openai/gpt-6.1-sol',
+        runtimeEnv: {
+          R_MODEL: 'openai/gpt-6.1-sol',
+          R_SMALL_MODEL: 'openai/gpt-6-luna',
+          [descriptor.modelEnvVar]: `${providerId}/${modelId}`,
+          ...(gateway
+            ? {
+                R_INFERENCE_GATEWAY_URL:
+                  'https://api.example.com/api/inference',
+                R_INFERENCE_GATEWAY_KEYS: [
+                  'REQUESTY_API_KEY',
+                  'AZURE_API_KEY',
+                  'AZURE_COGNITIVE_SERVICES_API_KEY',
+                ].join(','),
+              }
+            : {}),
+        },
+      });
+      const config = JSON.parse(result.configContent);
+      expect(result.model).toBe('openai/gpt-6.1-sol');
+      expect(config.small_model).toBe('openai/gpt-6-luna');
+      expect(config.provider?.[providerId]?.models?.[modelId]).toMatchObject({
+        name: 'GPT-6.1 Terra',
+        reasoning: true,
+        tool_call: true,
+        attachment: true,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+        limit: { context: 1_050_000, input: 922_000, output: 128_000 },
+      });
+      const agentName = {
+        vision: 'visual',
+        planning: 'advisor',
+        explore: 'explore',
+      }[role];
+      expect(config.agent[agentName].model).toBe(`${providerId}/${modelId}`);
+      if (gateway) {
+        expect(config.provider[providerId].options.baseURL).toContain(
+          `https://api.example.com/api/inference/${providerId}`,
+        );
+      }
+    },
+  );
+
   it.each([false, true])(
     'keeps shared-model variant and reasoning precedence with task override %s',
     (override) => {
@@ -1006,6 +1072,8 @@ describe('generateOpenCodeConfig provider support', () => {
     ).toEqual([
       'k3',
       'k3-256k',
+      'k3.1-pro',
+      'k3.1-pro-highspeed',
       'kimi-for-coding',
       'kimi-for-coding-highspeed',
     ]);
@@ -1095,7 +1163,7 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
-  it('rebases Azure providers onto the inference gateway without a /v1 suffix', () => {
+  it('rebases Azure providers onto the inference gateway with an explicit /v1 suffix', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
@@ -1113,11 +1181,12 @@ describe('generateOpenCodeConfig provider support', () => {
     };
 
     expect(config.provider.azure?.options).toMatchObject({
-      baseURL: 'https://api.example.com/api/inference/azure',
+      baseURL: 'https://api.example.com/api/inference/azure/v1',
       apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
     expect(config.provider['azure-cognitive-services']?.options).toMatchObject({
-      baseURL: 'https://api.example.com/api/inference/azure-cognitive-services',
+      baseURL:
+        'https://api.example.com/api/inference/azure-cognitive-services/v1',
       apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
   });
@@ -1268,6 +1337,7 @@ describe('generateOpenCodeConfig provider support', () => {
       R_MODEL: 'openai/gpt-6-sol',
       R_SMALL_MODEL: 'openai/gpt-6-luna',
       R_VISION_MODEL: 'openai/gpt-6.1-sol',
+      R_CODE_REVIEW_MODEL: 'openai/gpt-6.1-terra',
       R_MODEL_REASONING_EFFORT: 'high',
       R_CHATGPT_FAST_MODE: '1',
     };
@@ -1290,6 +1360,9 @@ describe('generateOpenCodeConfig provider support', () => {
       serviceTier: 'priority',
     });
     expect(config.provider.openai?.models?.['gpt-6.1-sol']?.options).toEqual({
+      serviceTier: 'priority',
+    });
+    expect(config.provider.openai?.models?.['gpt-6.1-terra']?.options).toEqual({
       serviceTier: 'priority',
     });
     expect(runtimeEnv).not.toHaveProperty('R_CHATGPT_FAST_MODE');

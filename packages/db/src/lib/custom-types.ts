@@ -1,6 +1,105 @@
 import { customType } from 'drizzle-orm/pg-core';
 
-import { decrypt, decryptJSON, encryptJSON, encrypt } from './encryption';
+import { decryptWithKeyGeneration, encryptJSON, encrypt } from './encryption';
+
+/**
+ * Pass an already-encrypted value through unchanged when it decrypts with the
+ * current key. A value that only decrypts with `ENCRYPTION_KEY_PREVIOUS` is
+ * re-encrypted with the current key (same plaintext, same format), so writes
+ * during a key rotation never persist new previous-key ciphertext. Returns
+ * `null` when the value is not ciphertext under either key.
+ */
+function passThroughCiphertext(
+  value: string,
+  isValidPlaintext: (plaintext: string) => boolean,
+): string | null {
+  if (value.length < 88 || !/^[A-Za-z0-9+/]+=*$/.test(value)) {
+    return null;
+  }
+
+  try {
+    const { plaintext, key } = decryptWithKeyGeneration(value);
+
+    if (!isValidPlaintext(plaintext)) {
+      return null;
+    }
+
+    return key === 'current' ? value : encrypt(plaintext);
+  } catch {
+    return null;
+  }
+}
+
+function isJson(plaintext: string): boolean {
+  try {
+    JSON.parse(plaintext);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function encryptedJsonToDriver<TData>(
+  value: TData | string | null,
+): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  // If it's already an encrypted string (base64 pattern), pass through.
+  // This allows updates without re-encryption.
+  if (typeof value === 'string') {
+    // Our encrypted strings are always at least 88 chars of base64
+    // (salt + iv + tag + min data). Plaintext values that only happen to
+    // look like ciphertext, such as long hex or base64-safe secrets, fall
+    // through and are encrypted.
+    const ciphertext = passThroughCiphertext(value, isJson);
+    if (ciphertext !== null) {
+      return ciphertext;
+    }
+
+    // Preserve plaintext strings verbatim, even when they happen to look
+    // like JSON scalars such as numeric OAuth client IDs.
+    return encryptJSON(value);
+  }
+
+  // Otherwise, encrypt the JSON data.
+  return encryptJSON(value as TData);
+}
+
+function encryptedTextToDriver(value: string | null): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  // If it's already an encrypted string (base64 pattern), pass through.
+  // This allows updates without re-encryption.
+  if (typeof value === 'string') {
+    // Our encrypted strings are always at least 88 chars of base64
+    // (salt + iv + tag + min data). Plaintext values that only happen to
+    // look like ciphertext, such as long hex or base64-safe secrets, fall
+    // through and are encrypted.
+    const ciphertext = passThroughCiphertext(value, () => true);
+    if (ciphertext !== null) {
+      return ciphertext;
+    }
+
+    // Otherwise, encrypt the plain text string.
+    return encrypt(value);
+  }
+
+  return null;
+}
+
+/**
+ * Whether a Drizzle column was declared with {@link encryptedJson} or
+ * {@link encryptedText}. Used by the re-encryption command to find every
+ * encrypted column in the schema without a hand-maintained list.
+ */
+export function isEncryptedColumn(column: unknown): boolean {
+  const mapTo = (column as { mapTo?: unknown } | null)?.mapTo;
+  return mapTo === encryptedJsonToDriver || mapTo === encryptedTextToDriver;
+}
 
 /**
  * Custom encrypted JSON column type for Drizzle ORM.
@@ -35,34 +134,7 @@ export function encryptedJson<TData = Record<string, string>>(name: string) {
     dataType() {
       return 'text';
     },
-    toDriver(value: TData | string | null): string | null {
-      if (value === null || value === undefined) {
-        return null;
-      }
-
-      // If it's already an encrypted string (base64 pattern), pass through.
-      // This allows updates without re-encryption.
-      if (typeof value === 'string') {
-        // Check if it looks like our encrypted format (base64).
-        // Our encrypted strings are always at least 88 chars (salt + iv + tag + min data).
-        if (value.length >= 88 && /^[A-Za-z0-9+/]+=*$/.test(value)) {
-          try {
-            decryptJSON(value);
-            return value;
-          } catch {
-            // Fall through and encrypt plaintext values that only happen to
-            // look like ciphertext, such as long hex or base64-safe secrets.
-          }
-        }
-
-        // Preserve plaintext strings verbatim, even when they happen to look
-        // like JSON scalars such as numeric OAuth client IDs.
-        return encryptJSON(value);
-      }
-
-      // Otherwise, encrypt the JSON data.
-      return encryptJSON(value as TData);
-    },
+    toDriver: encryptedJsonToDriver<TData>,
     fromDriver(value: unknown): string | null {
       if (value === null || value === undefined) {
         return null;
@@ -112,32 +184,7 @@ export function encryptedText(name: string) {
     dataType() {
       return 'text';
     },
-    toDriver(value: string | null): string | null {
-      if (value === null || value === undefined) {
-        return null;
-      }
-
-      // If it's already an encrypted string (base64 pattern), pass through.
-      // This allows updates without re-encryption.
-      if (typeof value === 'string') {
-        // Check if it looks like our encrypted format (base64).
-        // Our encrypted strings are always at least 88 chars (salt + iv + tag + min data).
-        if (value.length >= 88 && /^[A-Za-z0-9+/]+=*$/.test(value)) {
-          try {
-            decrypt(value);
-            return value;
-          } catch {
-            // Fall through and encrypt plaintext values that only happen to
-            // look like ciphertext, such as long hex or base64-safe secrets.
-          }
-        }
-
-        // Otherwise, encrypt the plain text string.
-        return encrypt(value);
-      }
-
-      return null;
-    },
+    toDriver: encryptedTextToDriver,
     fromDriver(value: unknown): string | null {
       if (value === null || value === undefined) {
         return null;

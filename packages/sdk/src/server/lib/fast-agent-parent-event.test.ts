@@ -182,7 +182,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   createFastAgentTaskLauncher:
     ({
       buildTask,
+      initiator,
+      userId,
     }: {
+      initiator?: import('@roomote/types').TaskInitiator;
+      userId: string;
       buildTask: (input: {
         prompt: string;
         environmentId: string | null;
@@ -203,7 +207,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       const task = await buildTask(input);
       const taskUrl = mocks.getTaskUrl();
       await input.postKickoff({ taskId: 'child-task-1', taskUrl });
-      await mocks.enqueueTask({ task });
+      await mocks.enqueueTask({
+        task,
+        initiator: initiator ?? { kind: 'user', userId },
+      });
       return { success: true, taskId: 'child-task-1', taskUrl };
     },
   createFastAgentWebTaskLauncher: vi.fn(() => mocks.launchTask),
@@ -364,7 +371,12 @@ vi.mock('./source-control-fast-delivery', async (importOriginal) => ({
   buildSourceControlFastDelivery: mocks.buildSourceControlFastDelivery,
 }));
 
-import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  fastAgentHumanFollowUpEventSchema,
+  getTaskInitiatorLinkedUserId,
+} from '@roomote/types';
 
 import {
   buildEventClientMessageSeed,
@@ -3115,6 +3127,11 @@ describe('deliverFastAgentParentEvent', () => {
         includeRoomoteMemberTools: true,
       });
       expect(mocks.enqueueTask).toHaveBeenCalledWith({
+        initiator: expect.objectContaining({
+          kind: 'automation',
+          key: 'custom_automation',
+          actingUserId: 'u1',
+        }),
         task: expect.objectContaining({
           payload: expect.objectContaining({
             fastAgentSessionId: automationParent.sessionId,
@@ -3938,6 +3955,77 @@ describe('deliverFastAgentParentEvent', () => {
       expect.objectContaining({ channel: 'C456', thread_ts: '200.002' }),
     );
   });
+
+  it.each([false, true])(
+    'restores per-turn Discord automation attribution after durable recovery: automated=%s',
+    async (automated) => {
+      const automationInitiator = {
+        kind: 'automation' as const,
+        key: 'slack_channel_auto_start' as const,
+        actor: { externalId: 'feed-1', displayName: 'Feed' },
+      };
+      const recoveredEvent = fastAgentHumanFollowUpEventSchema.parse(
+        JSON.parse(
+          JSON.stringify({
+            type: 'human_follow_up',
+            eventId: 'mention-1',
+            currentMessageId: 'mention-1',
+            userId: 'installer-1',
+            question: 'Investigate the alert',
+            ...(automated
+              ? {
+                  delegatedTaskInitiator: {
+                    ...automationInitiator,
+                    actingUserId: 'wrong-user',
+                  },
+                  delegatedTaskVisibleInTranscript: false,
+                }
+              : {}),
+          }),
+        ),
+      );
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+        adapter.launchTask({
+          prompt: 'Fix the alert',
+          environmentId: null,
+          parentSessionId: parent.sessionId,
+          postKickoff: vi.fn().mockResolvedValue(undefined),
+        }),
+      );
+      await deliverFastAgentParentEvent({
+        parent: {
+          ...parent,
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'guild-1',
+            conversationId: 'thread-1',
+            replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+          },
+        },
+        event: recoveredEvent,
+      });
+      const launch = mocks.enqueueTask.mock.calls[0]![0];
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          delegatedTaskInitiator: recoveredEvent.delegatedTaskInitiator,
+          delegatedTaskVisibleInTranscript:
+            recoveredEvent.delegatedTaskVisibleInTranscript,
+        }),
+      );
+      expect(launch.initiator).toEqual(
+        automated
+          ? { ...automationInitiator, actingUserId: 'installer-1' }
+          : { kind: 'user', userId: 'installer-1' },
+      );
+      expect(getTaskInitiatorLinkedUserId(launch.initiator)).toBe(
+        'installer-1',
+      );
+      if (automated)
+        expect(launch.task.payload.visibleInTranscript).toBe(false);
+      else
+        expect(launch.task.payload).not.toHaveProperty('visibleInTranscript');
+    },
+  );
 
   it('keeps launch_task available during a Discord parent event', async () => {
     const postKickoff = vi.fn().mockResolvedValue(undefined);

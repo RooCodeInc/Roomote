@@ -48,6 +48,7 @@ vi.mock('@roomote/sdk/server', () => ({
   conflictScanJob: vi.fn(),
   customAutomationsJob: vi.fn(),
   dependabotTriageJob: vi.fn(),
+  vulnerabilityWatchJob: vi.fn(),
   managerStatsJob: vi.fn(),
   providerUsageLimitJob: vi.fn(),
   securityAuditorJob: vi.fn(),

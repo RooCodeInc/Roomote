@@ -108,6 +108,12 @@ const PR_FACTS_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.pullRequestFacts;
 const PR_FACTS_OVERLAP_MS = 24 * 60 * 60 * 1000;
 const BACKFILL_CONTINUATION_DELAY_MS = 1_000;
 
+/**
+ * Longest a single BrainCollectors run keeps looping through backfill passes.
+ * Kept well under the 15-minute collector cadence so runs never stack.
+ */
+const BACKFILL_RUN_BUDGET_MS = 10 * 60 * 1000;
+
 export { redactBrainText };
 
 type IngestPage = {
@@ -690,7 +696,39 @@ async function backfillTaskHistoryOnce(): Promise<void> {
  * the brain is durable memory, not a live cache, so minute-level freshness
  * buys nothing here. Task memories (the outbox above) stay on the fast tick.
  */
+/**
+ * Collector passes run on the shared scheduler worker. A backfill can keep one
+ * pass busy for a long time, and the scheduler starts a new BrainCollectors run
+ * every tick regardless, so overlapping runs once filled every worker slot and
+ * starved the heartbeat and per-minute jobs. Only one run collects at a time;
+ * a tick that finds one in flight finishes immediately.
+ */
+let brainCollectorsInFlight = false;
+
+/**
+ * Set when a run ends on its time budget mid-backfill. The next run resumes
+ * PR facts from their exact saved cursor instead of rewinding by the overlap
+ * window, which would rewrite the same facts every tick when one pass fills
+ * the budget. In-process only: after a restart the overlap rewind is safe.
+ */
+let resumePullRequestFactsExactly = false;
+
 export async function brainCollectorsJob(): Promise<void> {
+  if (brainCollectorsInFlight) {
+    console.log(`${LOG_PREFIX} collectors already running; skipping this tick`);
+    return;
+  }
+
+  brainCollectorsInFlight = true;
+
+  try {
+    await runBrainCollectorsJob();
+  } finally {
+    brainCollectorsInFlight = false;
+  }
+}
+
+async function runBrainCollectorsJob(): Promise<void> {
   const connection = await resolveReadyBrain();
 
   if (!connection) {
@@ -733,12 +771,14 @@ export async function brainCollectorsJob(): Promise<void> {
 
   let includeIncremental = true;
   let continueCollectorIds: string[] = [];
+  let restartPullRequestFactsFromOverlap = !resumePullRequestFactsExactly;
 
-  await drainBrainHistoricalIngestion({
+  const outcome = await drainBrainHistoricalIngestion({
     async runPass() {
       const pullRequestFactsResult = await syncPullRequestFacts(connection, {
-        restartFromOverlap: includeIncremental,
+        restartFromOverlap: restartPullRequestFactsFromOverlap,
       });
+      restartPullRequestFactsFromOverlap = false;
 
       if (pullRequestFactsResult.interrupted) {
         return { progressed: false, interrupted: true };
@@ -764,18 +804,24 @@ export async function brainCollectorsJob(): Promise<void> {
       };
     },
   });
+  resumePullRequestFactsExactly = outcome === 'budget';
 }
 
 /**
  * Keep spending the existing bounded per-pass budgets while historical work
- * advances. The normal scheduler remains at 15 minutes for steady-state API
- * polling; only an active backfill loops quickly, and any Brain backpressure
- * ends the loop until the next scheduled tick.
+ * advances, up to a run budget. The normal scheduler remains at 15 minutes for
+ * steady-state API polling; only an active backfill loops quickly, and Brain
+ * backpressure or the run budget ends the loop until the next scheduled tick.
  */
 export async function drainBrainHistoricalIngestion(input: {
   runPass: () => Promise<{ progressed: boolean; interrupted: boolean }>;
   wait?: () => Promise<void>;
-}): Promise<void> {
+  budgetMs?: number;
+  now?: () => number;
+}): Promise<'settled' | 'interrupted' | 'budget'> {
+  const now = input.now ?? Date.now;
+  const budgetMs = input.budgetMs ?? BACKFILL_RUN_BUDGET_MS;
+  const startedAt = now();
   const wait =
     input.wait ??
     (() =>
@@ -786,8 +832,21 @@ export async function drainBrainHistoricalIngestion(input: {
   for (;;) {
     const result = await input.runPass();
 
-    if (result.interrupted || !result.progressed) {
-      return;
+    if (result.interrupted) {
+      return 'interrupted';
+    }
+
+    if (!result.progressed) {
+      return 'settled';
+    }
+
+    // End the run before the next scheduled tick; that tick resumes the
+    // backfill, so the worker slot is released between runs.
+    if (now() - startedAt >= budgetMs) {
+      console.log(
+        `${LOG_PREFIX} historical ingestion advanced; resuming on the next scheduled tick`,
+      );
+      return 'budget';
     }
 
     console.log(

@@ -183,6 +183,7 @@ export {
   Share2,
   Shapes,
   ShieldQuestion,
+  ShieldCheck,
   SlidersHorizontal,
   Slack,
   Slash,

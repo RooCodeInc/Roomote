@@ -3,6 +3,49 @@ import * as XLSX from 'xlsx';
 import { describe, expect, it } from 'vitest';
 
 import { extractPromptTextAttachments } from '../file-attachments';
+import {
+  ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS,
+  ROOMOTE_FILE_ATTACHMENT_MAX_BYTES,
+} from '../../file-attachments';
+
+const harText = JSON.stringify(
+  {
+    log: {
+      version: '1.2',
+      creator: { name: 'Browser', version: '1.0' },
+      entries: [
+        {
+          startedDateTime: '2026-10-01T12:00:00.000Z',
+          time: 125,
+          request: {
+            method: 'GET',
+            url: 'https://example.com/api/checkout',
+            headers: [],
+          },
+          response: {
+            status: 502,
+            statusText: 'Bad Gateway',
+            headers: [],
+            content: {
+              mimeType: 'application/json',
+              text: '{"error":"upstream unavailable"}',
+            },
+          },
+          timings: {
+            blocked: 0,
+            dns: 0,
+            connect: 0,
+            send: 1,
+            wait: 123,
+            receive: 1,
+          },
+        },
+      ],
+    },
+  },
+  null,
+  2,
+);
 
 async function buildDocx(text: string): Promise<Buffer> {
   const zip = new JSZip();
@@ -57,6 +100,68 @@ async function buildPptx(text: string): Promise<Buffer> {
 }
 
 describe('extractPromptTextAttachments', () => {
+  it.each([
+    'application/json',
+    'application/octet-stream',
+    'text/plain',
+    '',
+    undefined,
+  ])('extracts HAR JSON verbatim with MIME %s', async (mimeType) => {
+    const result = await extractPromptTextAttachments([
+      {
+        filename: 'checkout.HAR',
+        mimeType,
+        bytes: Buffer.from(harText),
+      },
+    ]);
+    expect(result.warnings).toEqual([]);
+    expect(result.attachmentTexts).toEqual([
+      `${mimeType ? `File attachment: checkout.HAR (${mimeType})` : 'File attachment: checkout.HAR'}\n----- BEGIN ATTACHMENT -----\n${harText}\n----- END ATTACHMENT -----`,
+    ]);
+  });
+
+  it('applies the existing file-size limit to HAR files', async () => {
+    const result = await extractPromptTextAttachments([
+      {
+        filename: 'oversized.har',
+        mimeType: 'application/octet-stream',
+        bytes: Buffer.alloc(ROOMOTE_FILE_ATTACHMENT_MAX_BYTES + 1, 97),
+      },
+    ]);
+    expect(result.attachmentTexts).toEqual([]);
+    expect(result.warnings).toEqual([
+      'oversized.har: File exceeds the 8 MB attachment limit.',
+    ]);
+  });
+
+  it('bounds HAR content using the shared text budget', async () => {
+    const largeHar = JSON.parse(harText);
+    largeHar.log.entries[0].response.content.text = 'x'.repeat(
+      ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS,
+    );
+    const result = await extractPromptTextAttachments([
+      {
+        filename: 'large.har',
+        mimeType: 'application/octet-stream',
+        bytes: Buffer.from(JSON.stringify(largeHar)),
+      },
+      {
+        filename: 'later.har',
+        mimeType: 'application/json',
+        bytes: Buffer.from(harText),
+      },
+    ]);
+    const body = result.attachmentTexts[0]!.split(
+      '----- BEGIN ATTACHMENT -----\n',
+    )[1]!.split('\n----- END ATTACHMENT -----')[0]!;
+    expect(body.length).toBeLessThanOrEqual(ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS);
+    expect(body).toContain('https://example.com/api/checkout');
+    expect(body).toContain('[truncated]');
+    expect(result.attachmentTexts[1]).toContain(
+      '[omitted: attachment budget exhausted]',
+    );
+  });
+
   it('formats plain-text attachments for prompt context', async () => {
     const result = await extractPromptTextAttachments([
       {

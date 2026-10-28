@@ -1039,6 +1039,53 @@ describe('GitHub PR review check lifecycle', () => {
 });
 
 describe('getGithubPrReviewCheckResult', () => {
+  it.each(['abc1234', 'def4567'])(
+    'rejects a no-change comparison published as a disposition at %s',
+    (headSha) => {
+      expect(
+        getGithubPrReviewCheckResult({
+          runStatus: RunStatus.Completed,
+          expectedHeadSha: headSha,
+          reviewSummaryBody: `<!-- roomote-review-summary sha=${headSha} mode=sync version=3 phase=reviewed outcome=no_new_delta finding_count=0 -->\n<!-- roomote-review-status:start -->\nNo new code changes to review; the earlier fix remains intact.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n- [x] Earlier finding fixed\n<!-- roomote-review-checklist:end -->`,
+          safetyNetFinalized: false,
+        }),
+      ).toMatchObject({
+        conclusion: 'failure',
+        summary: 'The task completed without publishing a valid review result.',
+      });
+    },
+  );
+
+  it.each([
+    ['clean', 0, 'success'],
+    ['findings_remain', 1, 'failure'],
+    ['incomplete', 0, 'failure'],
+  ] as const)(
+    'preserves a no-change review disposition of %s without relying on prose',
+    (outcome, count, conclusion) => {
+      const body = `<!-- roomote-review-summary sha=def4567 mode=sync version=3 phase=reviewed outcome=${outcome} finding_count=${count} -->\n<!-- roomote-review-status:start -->\nNo new code changes to review.\n<!-- roomote-review-status:end -->`;
+      expect(
+        getGithubPrReviewCheckResult({
+          runStatus: RunStatus.Completed,
+          expectedHeadSha: 'def4567',
+          reviewSummaryBody: body,
+          safetyNetFinalized: false,
+        }),
+      ).toMatchObject({ conclusion });
+      expect(
+        getGithubPrReviewCheckResult({
+          runStatus: RunStatus.Completed,
+          expectedHeadSha: 'abc1234',
+          reviewSummaryBody: body,
+          safetyNetFinalized: false,
+        }),
+      ).toMatchObject({
+        conclusion: 'failure',
+        title: 'Roomote review result is stale',
+      });
+    },
+  );
+
   it('uses structured clean metadata independently of visible prose', () => {
     expect(
       getGithubPrReviewCheckResult({

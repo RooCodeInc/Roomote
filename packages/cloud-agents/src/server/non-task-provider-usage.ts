@@ -397,6 +397,8 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   ) => void;
   /** See the matching option on the prompt runner. */
   disposeInstanceBeforeSession?: { completed: boolean };
+  /** See the matching option on the prompt runner. */
+  reconnectFailedMcpServers?: boolean;
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
@@ -1472,6 +1474,81 @@ export function isNonTaskImageInputUnsupportedError(error: unknown): boolean {
   ].some((pattern) => pattern.test(detail));
 }
 
+const MCP_STATUS_TIMEOUT_MS = 45_000;
+const MCP_RECONNECT_TIMEOUT_MS = 30_000;
+
+/**
+ * Reconnect every MCP server the directory's OpenCode instance reports as
+ * failed. Reading the status also bootstraps the instance when it is not
+ * cached yet, so a server that fails during that bootstrap is retried here
+ * too. Never throws: a server that still cannot connect stays absent from
+ * this turn, exactly as before.
+ */
+async function reconnectFailedOpenCodeMcpServers(
+  client: ReturnType<typeof createOpencodeClient>,
+  directory: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const readStatuses = async () => {
+    try {
+      const result = await client.mcp.status(
+        { directory },
+        {
+          signal: AbortSignal.any([
+            signal,
+            AbortSignal.timeout(MCP_STATUS_TIMEOUT_MS),
+          ]),
+        },
+      );
+      return (result.data ?? null) as Record<
+        string,
+        { status?: string; error?: string }
+      > | null;
+    } catch (error) {
+      console.warn(
+        `[NonTaskProviderUsage] OpenCode MCP status check failed: ${formatOpenCodeSdkError(error)}`,
+      );
+      return null;
+    }
+  };
+
+  const statuses = await readStatuses();
+  if (!statuses) return;
+  const failed = Object.entries(statuses).filter(
+    ([, entry]) => entry?.status === 'failed',
+  );
+  if (failed.length === 0) return;
+
+  // OpenCode answers a connect with success even when the attempt leaves the
+  // server failed, so the outcome is read back from the status map instead.
+  await Promise.all(
+    failed.map(async ([name]) => {
+      try {
+        await client.mcp.connect(
+          { name, directory },
+          {
+            signal: AbortSignal.any([
+              signal,
+              AbortSignal.timeout(MCP_RECONNECT_TIMEOUT_MS),
+            ]),
+          },
+        );
+      } catch {
+        // The status read below reports the server as still failed.
+      }
+    }),
+  );
+  const after = await readStatuses();
+  const names = failed.map(([name]) => name);
+  const reconnected = names.filter(
+    (name) => after?.[name]?.status === 'connected',
+  );
+  const stillFailed = names.filter((name) => !reconnected.includes(name));
+  console.warn(
+    `[NonTaskProviderUsage] Reconnected failed OpenCode MCP servers. reconnected=${reconnected.join(',') || 'none'} stillFailed=${stillFailed.join(',') || 'none'} errors=${JSON.stringify(Object.fromEntries(failed.map(([name, entry]) => [name, after?.[name]?.error ?? entry.error ?? null])))}`,
+  );
+}
+
 /**
  * Shared OpenCode SDK plumbing for non-task inference: leases a managed SDK
  * server, wires the abort/timeout controller, creates a session, and issues the
@@ -1525,6 +1602,15 @@ async function runNonTaskSdkPrompt(
      * retry the refresh on a later turn when the dispose genuinely failed.
      */
     disposeInstanceBeforeSession?: { completed: boolean };
+    /**
+     * Reconnect any MCP server the directory's OpenCode instance reports as
+     * failed before the prompt. OpenCode never retries a failed MCP client
+     * for the lifetime of its instance, so one slow or briefly unreachable
+     * server at instance bootstrap would otherwise stay missing from every
+     * later turn in that directory. Best-effort: failures are logged and the
+     * prompt proceeds.
+     */
+    reconnectFailedMcpServers?: boolean;
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
@@ -1617,6 +1703,13 @@ async function runNonTaskSdkPrompt(
           `[NonTaskProviderUsage] OpenCode instance dispose failed: ${formatOpenCodeSdkError(error)}`,
         );
       }
+    }
+    if (options.reconnectFailedMcpServers) {
+      await reconnectFailedOpenCodeMcpServers(
+        client,
+        sessionDirectory,
+        abortController.signal,
+      );
     }
     const permissionAskHelpers: NonTaskOpenCodePermissionAskHelpers = {
       // Native asks identify the paused call (messageID/callID) but carry no
@@ -2564,6 +2657,9 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onPermissionAsked: options.onPermissionAsked,
       ...(options.disposeInstanceBeforeSession
         ? { disposeInstanceBeforeSession: options.disposeInstanceBeforeSession }
+        : {}),
+      ...(options.reconnectFailedMcpServers
+        ? { reconnectFailedMcpServers: true }
         : {}),
       permission: options.permission,
       preserveReasoning: true,

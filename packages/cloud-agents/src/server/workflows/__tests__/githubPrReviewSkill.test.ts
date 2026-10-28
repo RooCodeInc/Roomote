@@ -43,6 +43,41 @@ function expectAppendixAvoidsCiBookkeeping(
 describe('review-code GitHub workflow paths', () => {
   const skillContent = readSkill('../skills/standard/review-code/SKILL.md');
 
+  it('publishes a review disposition before handing off a no-change sync review', () => {
+    expect(skillContent).toContain('<sync_no_change_result>');
+    expect(skillContent).toContain(
+      'Save the prior summary body, reviewed SHA, terminal disposition, finding count, and checklist before resetting the shared comment to reviewing.',
+    );
+    expect(skillContent).toContain(
+      '`no_new_delta` describes the comparison, not a review disposition: never write `outcome=no_new_delta` in the summary marker.',
+    );
+    expect(skillContent).toContain(
+      'Missing, reviewing, incomplete, malformed, or unknown prior metadata is not a clean result.',
+    );
+    expect(skillContent).toContain(
+      'Never copy the prior head or prior cycle identity onto the current result.',
+    );
+    for (const appendixName of [
+      'sync-github-pr-review',
+      'sync-github-pr-review-with-approval',
+    ]) {
+      const appendix = readAppendix(skillContent, appendixName);
+      expect(appendix).toContain(
+        'Before changing the canonical summary, save the prior result as required by `<sync_no_change_result>`.',
+      );
+      expect(appendix.match(/follow `<sync_no_change_result>`/g)).toHaveLength(
+        2,
+      );
+      expect(appendix).toContain(
+        'use `<outcome>no_new_delta</outcome>` only when the published result is clean.',
+      );
+      expect(appendix).not.toContain('mark the terminal outcome');
+      expect(appendix).not.toContain(
+        'continue directly to the linked-task handoff step',
+      );
+    }
+  });
+
   it('forbids nested judge subagent spawns during code review', () => {
     expect(skillContent).toContain(
       'Do not spawn the `judge` subagent or any other nested review-only subagent',
@@ -366,7 +401,7 @@ describe('review-code GitHub workflow paths', () => {
       'When the review is clean but approval was skipped because the author is Roomote-managed, send an explicit clean result with `<outcome>clean_approval_skipped</outcome>` and `<approval_status>skipped</approval_status>`.',
     );
     expect(skillContent).toContain(
-      'When there is no new delta, send an explicit no-op result with `<outcome>no_new_delta</outcome>` instead of skipping the handoff.',
+      'When there is no new delta, follow the disposition and publication requirements in `<sync_no_change_result>` before sending the handoff; use `<outcome>no_new_delta</outcome>` only when the published result is clean.',
     );
     expect(skillContent).toContain(
       'For every terminal outcome, the linked implementation task received an explicit final review result if the handoff was enabled, a reusable PR owner task ID was available in task context, and the task accepted the follow-up message, or the handoff failed harmlessly without affecting the published review.',

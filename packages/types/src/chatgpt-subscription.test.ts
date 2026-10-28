@@ -16,6 +16,7 @@ describe('mergeOpenCodeChatGptFastModeOptions', () => {
         'openai/gpt-6-astra',
         'openai/gpt-6-sol',
         'openai/gpt-6.1-sol',
+        'openai/gpt-6.1-terra',
         'openai/gpt-6-luna',
         'openai/gpt-5.6-terra',
         'openai/gpt-5.6-sol',
@@ -29,6 +30,7 @@ describe('mergeOpenCodeChatGptFastModeOptions', () => {
           'gpt-6-astra': { options: { serviceTier: 'priority' } },
           'gpt-6-sol': { options: { serviceTier: 'priority' } },
           'gpt-6.1-sol': { options: { serviceTier: 'priority' } },
+          'gpt-6.1-terra': { options: { serviceTier: 'priority' } },
           'gpt-6-luna': { options: { serviceTier: 'priority' } },
           'gpt-5.6-terra': {
             options: { reasoningEffort: 'high', serviceTier: 'priority' },
@@ -46,6 +48,8 @@ describe('mergeOpenCodeChatGptFastModeOptions', () => {
     expect(
       mergeOpenCodeChatGptFastModeOptions(initial, [
         'openrouter/openai/gpt-5.4',
+        'openrouter/openai/gpt-6.1-terra',
+        'vercel/openai/gpt-6.1-terra',
         'openai/gpt-5.4-mini',
         'openai/gpt-5.3-codex-spark',
       ]),

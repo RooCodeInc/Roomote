@@ -157,9 +157,15 @@ case "$service" in
   db-migrate)
     exec /roomote/.docker/run-with-dotenvx.sh node /roomote/migrate/migrate.mjs "$@"
     ;;
+  reencrypt-secrets)
+    # Operator one-shot after an ENCRYPTION_KEY rotation; run it in a
+    # container that already has the api service's environment.
+    cd /roomote/apps/api
+    exec /roomote/.docker/run-with-dotenvx.sh node dist/reencrypt-secrets.js "$@"
+    ;;
   *)
     echo "roomote-app: unknown service '${service}'." >&2
-    echo "Usage: <web|api|controller|bullmq|release-announcement|preview-proxy|db-migrate> [args...]" >&2
+    echo "Usage: <web|api|controller|bullmq|release-announcement|preview-proxy|db-migrate|reencrypt-secrets> [args...]" >&2
     exit 64
     ;;
 esac

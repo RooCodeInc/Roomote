@@ -3748,6 +3748,57 @@ describe('pr_review queue scope dedup', () => {
     expect(persistedRuns).toHaveLength(1);
   });
 
+  it('queues a GitHub re-review when the scope points at a run that is no longer waiting', async () => {
+    const uniquePrNumber = 424_245;
+    const scope = `acme/queue-stale-pointer:${uniquePrNumber}`;
+    const linkage = {
+      provider: 'github' as const,
+      repository: 'acme/queue-stale-pointer',
+      prNumber: uniquePrNumber,
+      prUrl: `https://github.com/acme/queue-stale-pointer/pull/${uniquePrNumber}`,
+    };
+    // A run that orphan recovery already started from the database leaves its
+    // Redis entry and scope pointer behind. Its id no longer names a pending
+    // run, so a first-wins re-review must not defer to it.
+    const staleId = 987_654_321;
+    await TaskRunQueue.getInstance().enqueue({ id: staleId, scope });
+
+    const incoming = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.GithubPrReviewSync,
+          requestedWorkKindDecision: explicitWorkKind,
+          payload: {
+            repo: linkage.repository,
+            prNumber: linkage.prNumber,
+            prTitle: 'Stale pointer re-review',
+            prUrl: linkage.prUrl,
+            headSha: 'c'.repeat(40),
+          },
+        },
+        initiator: { kind: 'automation', key: 'review_code' },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: linkage,
+      },
+      { skipEarlyTitleGeneration: true },
+    );
+    createdTaskIds.push(incoming.taskId);
+
+    const persisted = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, incoming.id),
+    });
+    expect(persisted?.status).toBe(RunStatus.Pending);
+    expect(persisted?.error).toBeNull();
+    await expect(
+      TaskRunQueue.getInstance().getScopeEntryId(scope),
+    ).resolves.toBe(incoming.id);
+    await expect(
+      queueRedis.hget('queue:cloud-jobs:v2:entries', String(staleId)),
+    ).resolves.toBeNull();
+  });
+
   it('keeps non-GitHub re-reviews immediate and replaces a stale queued head', async () => {
     const uniquePrNumber = 424_244;
     const linkage = {

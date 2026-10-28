@@ -816,6 +816,9 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       snapshotStatus: 'ready',
       snapshotCreatedAt,
       snapshotExpiresAt,
+      // Environment snapshot runs boot fresh, so the worker that dequeued this
+      // run is the release baked into the snapshot.
+      workerVersion: taskRun.workerVersion ?? null,
       attachmentSource,
       maxPendingUpdatedAt: attachmentSource ? null : taskRun.createdAt,
     });
