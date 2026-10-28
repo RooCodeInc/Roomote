@@ -42,6 +42,15 @@ export function createClickhouseService(): ServiceDefinition {
         timeout: 120,
         continue_on_error: false,
       });
+
+      // The downloaded executable self-decompresses on first invocation.
+      // Finish that once before the server and readiness clients can race it.
+      await executor.execute({
+        name: 'Verify downloaded ClickHouse binary',
+        run: `${installDir}/clickhouse client --version`,
+        timeout: 60,
+        continue_on_error: false,
+      });
     },
 
     async start(executor, _port) {
