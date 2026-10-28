@@ -445,6 +445,83 @@ describe('createTaskRunGitHubToken', () => {
     expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
   });
 
+  it("mints the task repository's installation when a stamp without an environment spans installations", async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+      {
+        fullName: 'owner-b/docs',
+        installationId: 'install-b',
+        githubRepoId: 403,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'owner-b/web',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+            'owner-b/docs': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toBe('ghs_test_token');
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-b',
+        repositoryIds: [402, 403],
+      },
+      undefined,
+      undefined,
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Not reachable with this token: owner-a/api'),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('keeps failing a spanning stamp without an environment when the task repository is not stamped', async () => {
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'owner-c/other',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow(GitHubInstallationSpanError);
+    expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
+  });
+
   it('fails closed when a GitLab environment stamp spans GitHub installations', async () => {
     mockFindEnvironmentFirst.mockResolvedValue({
       id: 'gitlab-environment',
