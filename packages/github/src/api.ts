@@ -2020,6 +2020,22 @@ export async function listRepositoryPullRequestsForAnalytics({
   });
 }
 
+async function getAnalyticsRepositoriesWithOctokit(params: {
+  userId: string;
+  repositoryIds: string[];
+}): Promise<RepositoryWithOctokit[]> {
+  const repos = await getRepositoriesWithOctokit(params);
+  const accessibleIds = new Set(repos.map((repo) => repo.id));
+
+  if (params.repositoryIds.some((id) => !accessibleIds.has(id))) {
+    throw new Error(
+      'Unable to access all requested GitHub repositories for analytics',
+    );
+  }
+
+  return repos;
+}
+
 export async function getPullRequestsForAnalytics({
   userId,
   repositoryIds,
@@ -2029,7 +2045,7 @@ export async function getPullRequestsForAnalytics({
   repositoryIds: string[];
   createdAfter?: Date | null;
 }): Promise<PullRequestAnalyticsItem[]> {
-  const repos = await getRepositoriesWithOctokit({
+  const repos = await getAnalyticsRepositoriesWithOctokit({
     userId,
     repositoryIds,
   });
@@ -2057,7 +2073,7 @@ export async function getUpdatedPullRequestsForAnalytics({
   repositoryIds: string[];
   updatedAfter?: Date | null;
 }): Promise<PullRequestAnalyticsItem[]> {
-  const repos = await getRepositoriesWithOctokit({
+  const repos = await getAnalyticsRepositoriesWithOctokit({
     userId,
     repositoryIds,
   });
