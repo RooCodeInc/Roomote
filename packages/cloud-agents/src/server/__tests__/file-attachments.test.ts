@@ -209,41 +209,48 @@ describe('extractPromptTextAttachments', () => {
     expect(result.attachmentTexts[1]).toContain('library(DESeq2)');
   });
 
-  it('extracts spreadsheet cells as text', async () => {
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.aoa_to_sheet([
-      ['Name', 'Status'],
-      ['Invoice import', 'Failed'],
-    ]);
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
-    const bytes = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  it.each(['report.xlsx', 'report', 'report.bin'])(
+    'extracts spreadsheet cells as text from %s',
+    async (filename) => {
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.aoa_to_sheet([
+        ['Name', 'Status'],
+        ['Invoice import', 'Failed'],
+      ]);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
+      const bytes = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
+      const result = await extractPromptTextAttachments([
+        {
+          filename,
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          bytes,
+        },
+      ]);
+
+      expect(result.warnings).toEqual([]);
+      expect(result.attachmentTexts[0]).toContain('Sheet: Report');
+      expect(result.attachmentTexts[0]).toContain(
+        'Name,Status\nInvoice import,Failed',
+      );
+    },
+  );
+
+  it.each([
+    ['handoff.docx', 'slides.pptx'],
+    ['handoff', 'slides'],
+    ['handoff.bin', 'slides.bin'],
+  ])('extracts document text from %s and %s', async (docxName, pptxName) => {
     const result = await extractPromptTextAttachments([
       {
-        filename: 'report.xlsx',
-        mimeType:
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        bytes,
-      },
-    ]);
-
-    expect(result.warnings).toEqual([]);
-    expect(result.attachmentTexts[0]).toContain('Sheet: Report');
-    expect(result.attachmentTexts[0]).toContain(
-      'Name,Status\nInvoice import,Failed',
-    );
-  });
-
-  it('extracts docx and pptx text', async () => {
-    const result = await extractPromptTextAttachments([
-      {
-        filename: 'handoff.docx',
+        filename: docxName,
         mimeType:
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         bytes: await buildDocx('Hello DOCX'),
       },
       {
-        filename: 'slides.pptx',
+        filename: pptxName,
         mimeType:
           'application/vnd.openxmlformats-officedocument.presentationml.presentation',
         bytes: await buildPptx('Hello PPTX'),
@@ -251,8 +258,68 @@ describe('extractPromptTextAttachments', () => {
     ]);
 
     expect(result.warnings).toEqual([]);
-    expect(result.attachmentTexts[0]).toContain('Hello DOCX');
-    expect(result.attachmentTexts[1]).toContain('Slide 1\nHello PPTX');
+    expect(result.attachmentTexts[0]).toContain(
+      '----- BEGIN ATTACHMENT -----\nHello DOCX\n----- END ATTACHMENT -----',
+    );
+    expect(result.attachmentTexts[1]).toContain(
+      '----- BEGIN ATTACHMENT -----\nSlide 1\nHello PPTX\n----- END ATTACHMENT -----',
+    );
+  });
+
+  it('extracts a MIME-identified legacy spreadsheet', async () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([['Legacy cells', 'Readable']]),
+      'Report',
+    );
+    const result = await extractPromptTextAttachments([
+      {
+        filename: 'legacy-report',
+        mimeType: ' APPLICATION/VND.MS-EXCEL ',
+        bytes: XLSX.write(workbook, { type: 'buffer', bookType: 'biff8' }),
+      },
+    ]);
+    expect(result.warnings).toEqual([]);
+    expect(result.attachmentTexts[0]).toContain(
+      'Sheet: Report\nLegacy cells,Readable',
+    );
+  });
+
+  it('keeps recognized document extensions authoritative', async () => {
+    const result = await extractPromptTextAttachments([
+      {
+        filename: 'handoff.docx',
+        mimeType: 'application/vnd.ms-excel',
+        bytes: await buildDocx('Recognized extension'),
+      },
+    ]);
+    expect(result.warnings).toEqual([]);
+    expect(result.attachmentTexts[0]).toContain(
+      '----- BEGIN ATTACHMENT -----\nRecognized extension\n----- END ATTACHMENT -----',
+    );
+  });
+
+  it('reports invalid MIME-identified documents and accepts a corrected file', async () => {
+    const mimeType =
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const invalid = await extractPromptTextAttachments([
+      { filename: 'handoff', mimeType, bytes: Buffer.from('not a document') },
+    ]);
+    expect(invalid.attachmentTexts).toEqual([]);
+    expect(invalid.warnings).toEqual([expect.stringContaining('handoff:')]);
+
+    const corrected = await extractPromptTextAttachments([
+      {
+        filename: 'handoff',
+        mimeType,
+        bytes: await buildDocx('Corrected file'),
+      },
+    ]);
+    expect(corrected.warnings).toEqual([]);
+    expect(corrected.attachmentTexts[0]).toContain(
+      '----- BEGIN ATTACHMENT -----\nCorrected file\n----- END ATTACHMENT -----',
+    );
   });
 
   it('uses the full shared budget for a single attachment', async () => {
