@@ -1,6 +1,9 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 
 const globalDbStateTests = [
+  // Deployment-visible grants are shared across otherwise unrelated test actors.
+  'src/server/lib/__tests__/service-credentials.test.ts',
+  'src/server/lib/__tests__/credential-egress.integration.test.ts',
   'src/server/automations/__tests__/vulnerability-watch.integration.test.ts',
   'src/server/lib/pull-requests/__tests__/explicit-draft-intent.db.test.ts',
   // Other MCP setup suites make unscoped connection assertions. Keep this
