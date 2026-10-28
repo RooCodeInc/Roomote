@@ -1,3 +1,5 @@
+import { createServer } from 'node:http';
+
 import { execa } from 'execa';
 
 import { runDoctor } from '../doctor';
@@ -193,6 +195,101 @@ describe('runDoctor', () => {
 
     expect(checks.every((check) => check.status === 'pass')).toBe(true);
   });
+
+  it('reports a real stalled HTTP peer and recovers on the next diagnostic run', async () => {
+    let stalled = true;
+    let receivedStalledRequest = false;
+    const server = createServer((request, response) => {
+      if (stalled && request.url === '/sign-in') {
+        receivedStalledRequest = true;
+        return;
+      }
+      response.end('{}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string')
+      throw new Error('No HTTP port');
+    const port = String(address.port);
+    mockExeca({
+      ports: { web: port, api: port, bullmq: port, previewProxy: port },
+    });
+    global.fetch = originalFetch;
+
+    try {
+      const checks = await runDoctor();
+      expect(receivedStalledRequest).toBe(true);
+      expect(checks).toContainEqual(
+        expect.objectContaining({
+          name: 'web sign-in',
+          status: 'fail',
+          detail: expect.stringMatching(/timeout|timed out/i),
+        }),
+      );
+      expect(checks).toContainEqual(
+        expect.objectContaining({ name: 'api liveness', status: 'pass' }),
+      );
+      stalled = false;
+      expect(
+        (await runDoctor()).every((check) => check.status === 'pass'),
+      ).toBe(true);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      mockFetch();
+    }
+  }, 20_000);
+
+  it.each([
+    ['/oauth2/v2.0/token', 'Teams Azure Bot token'],
+    ['/api/webhooks/teams', 'Teams app callback'],
+  ])(
+    'bounds the %s probe while retaining its warning classification',
+    async (path, name) => {
+      mockExeca({
+        extraWebEnv: {
+          R_TEAMS_BOT_APP_ID: 'test-app',
+          R_TEAMS_BOT_APP_PASSWORD: 'test-only-password',
+        },
+      });
+      const healthyFetch = global.fetch;
+      const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+      const timeout = vi
+        .spyOn(AbortSignal, 'timeout')
+        .mockImplementation(() => nativeTimeout(10));
+      global.fetch = vi.fn(async (input, init) => {
+        if (String(input).includes(path)) {
+          return new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal;
+            if (!signal) throw new Error('Missing probe deadline');
+            signal.addEventListener('abort', () => reject(signal.reason), {
+              once: true,
+            });
+          });
+        }
+        return healthyFetch(input, init);
+      });
+      try {
+        const checks = await runDoctor();
+        expect(checks).toContainEqual(
+          expect.objectContaining({
+            name,
+            status: 'warn',
+            detail: expect.stringMatching(/timeout|timed out/i),
+          }),
+        );
+        expect(checks).toContainEqual(
+          expect.objectContaining({ name: 'api liveness', status: 'pass' }),
+        );
+        expect(timeout).toHaveBeenCalledWith(10_000);
+      } finally {
+        timeout.mockRestore();
+        mockFetch();
+      }
+    },
+  );
 
   it('reads PM2 process env values from the top-level PM2 payload', async () => {
     mockExeca({ publicUrlLocation: 'top-level' });
