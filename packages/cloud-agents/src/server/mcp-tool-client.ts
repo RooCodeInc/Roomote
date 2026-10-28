@@ -58,6 +58,36 @@ export type McpToolDefinition = {
   inputSchema?: unknown;
 };
 
+async function readMcpToolDefinitions(
+  client: Awaited<ReturnType<typeof createCancellableMcpClient>>,
+  signal?: AbortSignal,
+  toolName?: string,
+) {
+  let page = await client.listTools({ options: { signal } });
+  const tools = [...page.tools];
+  const seenCursors = new Set<string>();
+
+  while (page.nextCursor !== undefined) {
+    // Invocation needs only the requested definition. A tool already found
+    // must remain callable even if an unrelated later catalog page is broken.
+    if (toolName && page.tools.some((tool) => tool.name === toolName)) {
+      break;
+    }
+    const cursor = page.nextCursor;
+    if (seenCursors.has(cursor)) {
+      throw new Error('MCP tool catalog repeated a pagination cursor.');
+    }
+    seenCursors.add(cursor);
+    page = await client.listTools({
+      params: { cursor },
+      options: { signal },
+    });
+    tools.push(...page.tools);
+  }
+
+  return { tools };
+}
+
 /** List the tools exposed by a streamable-http MCP server. */
 export async function listMcpTools(options: {
   url: string;
@@ -67,9 +97,7 @@ export async function listMcpTools(options: {
   const client = await createCancellableMcpClient(options);
 
   try {
-    const definitions = await client.listTools({
-      options: { signal: options.signal },
-    });
+    const definitions = await readMcpToolDefinitions(client, options.signal);
     return definitions.tools.map((definition) => ({
       name: definition.name,
       ...(definition.description
@@ -111,9 +139,11 @@ export async function callMcpTool(options: {
   const client = await createCancellableMcpClient(options);
 
   try {
-    const definitions = await client.listTools({
-      options: { signal: options.signal },
-    });
+    const definitions = await readMcpToolDefinitions(
+      client,
+      options.signal,
+      options.toolName,
+    );
     const toolDefinition = definitions.tools.find(
       (tool) => tool.name === options.toolName,
     );
