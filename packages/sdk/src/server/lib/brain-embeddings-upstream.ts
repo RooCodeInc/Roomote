@@ -28,8 +28,9 @@ export function resetBrainEmbeddingsUpstreamCache(): void {
 
 /**
  * Where Memory embeddings are forwarded. `R_BRAIN_EMBEDDINGS_UPSTREAM_URL`
- * always wins. Otherwise a Cloudflare Workers AI token and account become
- * that upstream (base `.../ai`; the gateway appends `/v1/embeddings`).
+ * always wins. Cloudflare Workers AI auto-wires only when no OpenAI or
+ * OpenRouter Memory key is set, so an existing OpenAI-model brain keeps
+ * its provider path. Base `.../ai`; the gateway appends `/v1/embeddings`.
  */
 export async function resolveBrainEmbeddingsUpstream(): Promise<BrainEmbeddingsUpstream | null> {
   const cached = upstreamCache;
@@ -52,6 +53,10 @@ async function readBrainEmbeddingsUpstream(): Promise<BrainEmbeddingsUpstream | 
       apiKey: Env.R_BRAIN_INFERENCE_UPSTREAM_API_KEY?.trim() || undefined,
       source: 'configured',
     };
+  }
+
+  if (await resolveBrainInferenceProvider()) {
+    return null;
   }
 
   const apiKey = (
@@ -77,9 +82,10 @@ async function readBrainEmbeddingsUpstream(): Promise<BrainEmbeddingsUpstream | 
 }
 
 /**
- * Whether this deployment can embed Brain pages. A dedicated embedder
- * (explicit URL or Cloudflare Workers AI) wins; otherwise an
- * OpenAI/OpenRouter key is required. Synthesis is not part of this gate.
+ * Whether this deployment can embed Brain pages. An explicit upstream
+ * URL wins; Cloudflare Workers AI auto-wires only with no OpenAI or
+ * OpenRouter key; otherwise that provider key is required. Synthesis is
+ * not part of this gate.
  */
 export async function isBrainEmbeddingAvailable(): Promise<boolean> {
   if (await resolveBrainEmbeddingsUpstream()) {

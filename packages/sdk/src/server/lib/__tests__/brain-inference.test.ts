@@ -211,17 +211,43 @@ describe('resolveBrainEmbeddingsUpstream', () => {
     });
   });
 
+  it('does not auto-wire Cloudflare when an OpenAI or OpenRouter key already serves embeddings', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(async (names) => {
+      const list = envVarNames(names);
+      if (list.includes('CLOUDFLARE_WORKERS_AI_API_TOKEN')) {
+        return 'cfat_test';
+      }
+      if (list.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
+        return CF_ACCOUNT_ID;
+      }
+      if (
+        list.includes('R_BRAIN_OPENROUTER_API_KEY') ||
+        list.includes('OPENROUTER_API_KEY')
+      ) {
+        return 'sk-or';
+      }
+      return undefined;
+    });
+
+    await expect(resolveBrainEmbeddingsUpstream()).resolves.toBeNull();
+    await expect(isBrainEmbeddingAvailable()).resolves.toBe(true);
+  });
+
   it('caches a Cloudflare miss so an unconfigured tick does not re-read settings', async () => {
     await expect(resolveBrainEmbeddingsUpstream()).resolves.toBeNull();
+    const afterFirst = mockResolveModelProviderEnvValue.mock.calls.length;
+    expect(afterFirst).toBeGreaterThan(0);
     await expect(resolveBrainEmbeddingsUpstream()).resolves.toBeNull();
-    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledTimes(2);
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledTimes(afterFirst);
   });
 
   it('caches a Cloudflare hit across embeddings requests', async () => {
     mockCloudflareWorkersAi();
     await resolveBrainEmbeddingsUpstream();
+    const afterFirst = mockResolveModelProviderEnvValue.mock.calls.length;
+    expect(afterFirst).toBeGreaterThan(0);
     await resolveBrainEmbeddingsUpstream();
-    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledTimes(2);
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledTimes(afterFirst);
   });
 });
 

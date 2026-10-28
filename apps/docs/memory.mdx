@@ -142,11 +142,13 @@ OpenRouter and OpenAI both support memory embedding calls.
 
 ### Cloudflare Workers AI
 
-Deployments that already have a Workers AI token can use it for Memory
-embeddings. Set `CLOUDFLARE_WORKERS_AI_API_TOKEN` and
-`CLOUDFLARE_WORKERS_AI_ACCOUNT_ID`. Roomote forwards embeddings to Workers
-AI's OpenAI-compatible endpoint. Set the embedding model and dimensions
-before Memory's first boot:
+Deployments that already have a Workers AI token and no OpenAI or OpenRouter
+Memory key can use it for Memory embeddings. Set
+`CLOUDFLARE_WORKERS_AI_API_TOKEN` and `CLOUDFLARE_WORKERS_AI_ACCOUNT_ID`.
+Roomote forwards embeddings to Workers AI's OpenAI-compatible endpoint. An
+existing OpenAI-model Memory keeps its provider path; set
+`R_BRAIN_EMBEDDINGS_UPSTREAM_URL` to the `/ai` base to opt in. Set the
+embedding model and dimensions before Memory's first boot:
 
 ```sh
 R_BRAIN_EMBEDDING_MODEL=@cf/baai/bge-m3
