@@ -783,6 +783,109 @@ describe('createTaskRunGitHubToken', () => {
     });
   });
 
+  it('adds git credentials for stamped repositories on other installations', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        host: 'github.com',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        host: 'github.com',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+    mockCreateGitHubTokenWithMetadata
+      .mockResolvedValueOnce({
+        token: 'ghs_primary_token',
+        expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+      })
+      .mockResolvedValueOnce({
+        token: 'ghs_other_org_token',
+        expiresAt: new Date('2030-01-01T00:30:00.000Z'),
+      });
+
+    await expect(
+      createTaskRunWorkerGitHubTokenWithMetadata(
+        buildTaskRun({
+          repo: 'owner-b/web',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toEqual({
+      token: 'ghs_primary_token',
+      source: 'app',
+      expiresAt: new Date('2030-01-01T00:30:00.000Z'),
+      gitCredentials: [
+        {
+          host: 'github.com',
+          repositoryFullName: 'owner-a/api',
+          username: 'x-access-token',
+          token: 'ghs_other_org_token',
+        },
+      ],
+    });
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenNthCalledWith(2, {
+      type: 'installationId',
+      installationId: 'install-a',
+      repositoryIds: [401],
+    });
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('skips another installation that fails to mint without failing the run', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+    mockCreateGitHubTokenWithMetadata
+      .mockResolvedValueOnce({
+        token: 'ghs_primary_token',
+        expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+      })
+      .mockRejectedValueOnce(new Error('installation suspended'));
+
+    await expect(
+      createTaskRunWorkerGitHubTokenWithMetadata(
+        buildTaskRun({
+          repo: 'owner-b/web',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toEqual({
+      token: 'ghs_primary_token',
+      source: 'app',
+      expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+    });
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('skipping: owner-a/api: installation suspended'),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
   it('evicts a cached task token and retries once after a 401', async () => {
     mockCreateGitHubTokenWithMetadata
       .mockResolvedValueOnce({
