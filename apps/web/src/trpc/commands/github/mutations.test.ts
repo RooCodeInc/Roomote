@@ -4,12 +4,14 @@ import { decodeRecord } from '@/lib';
 const {
   mockDbTransaction,
   mockEnvState,
+  mockFindFirstInstallation,
   mockFetch,
   mockResolveDeploymentEnvVar,
   mockResolvePendingGitHubInstallations,
   mockUpsertDeploymentEnvironmentVariables,
 } = vi.hoisted(() => ({
   mockDbTransaction: vi.fn(),
+  mockFindFirstInstallation: vi.fn(),
   mockEnvState: {
     R_APP_URL: 'https://roomote.example.com',
     R_PUBLIC_URL: undefined as string | undefined,
@@ -46,6 +48,7 @@ vi.mock('@roomote/db/server', () => ({
     transaction: mockDbTransaction,
     query: {
       githubInstallations: {
+        findFirst: mockFindFirstInstallation,
         findMany: vi.fn(),
       },
     },
@@ -433,6 +436,33 @@ describe('GitHub App manifest commands', () => {
     expect(mockResolveDeploymentEnvVar).toHaveBeenCalledWith(
       'R_GITHUB_APP_SLUG',
     );
+  });
+
+  it('opens the account picker when the deployment already has an installation', async () => {
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
+      name === 'R_GITHUB_APP_SLUG'
+        ? 'configured-roomote-app'
+        : 'configured-value',
+    );
+    mockFindFirstInstallation.mockResolvedValueOnce({ installationId: 42 });
+
+    const result = await startCreateGitHubInstallationCommand(buildMockAuth(), {
+      redirect: '/settings/source-control',
+    });
+
+    expect(result.success).toBe(true);
+
+    if (!result.success) {
+      return;
+    }
+
+    const installUrl = new URL(result.url);
+    expect(installUrl.pathname).toBe(
+      '/apps/configured-roomote-app/installations/select_target',
+    );
+    expect(decodeRecord(installUrl.searchParams.get('state') ?? '')).toEqual({
+      redirect: '/settings/source-control',
+    });
   });
 
   it('prefers R_PUBLIC_URL for install redirect_url when R_APP_URL is loopback', async () => {
