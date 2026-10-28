@@ -336,7 +336,7 @@ Roomote 1.13.1 improves automation triggers, judgment-model setup, model selecti
 ### Patch changes
 
 - Custom automations can now run on demand or from a private POST webhook, with bounded one-run input, independent runs, credential rotation, and rate limiting.
-- Roomote Cloud now creates a managed email inbox when a deployment first sends email, so deployments that never send mail do not allocate an unused inbox.
+- Managed deployments now create an email inbox when a deployment first sends email, so deployments that never send mail do not allocate an unused inbox.
 - Custom model mapping presets now save supported reasoning values without mutating provider recommendations, and validation names the Advisor role correctly.
 - Discord Fast replies now deliver selected task screenshots, including deferred and retry paths, instead of silently dropping image attachments.
 - Self-hosted deployments can run a CPU decision model beside the stack, so the Memory check, reply addressing, and Roomote's other typed decisions work without a Jev key or a GPU. The judgment sidecar serves `roomote/roomote-judgment-gliner`, a GLiNER 2.5 model fine-tuned on Roomote's decisions, behind the same decision contract Roomote's `roomote` judgment backend calls, capped at 4 GB and 4 CPUs by default. It is opt-in like Memory: the `judgment` compose profile in the self-host and production Compose files, and an idle service in the Railway, Render, and Coolify templates that stays unused until `R_JUDGMENT_UPSTREAM_URL` points at it. The image is published as `ghcr.io/roocodeinc/roomote-judgment`. `docker-compose.self-host.yml` now passes `R_JUDGMENT_MODEL`, `R_JUDGMENT_UPSTREAM_URL`, and `R_JUDGMENT_UPSTREAM_API_KEY` to the app services.
@@ -670,8 +670,8 @@ Roomote 1.9.1 brings Session secrets to every hosted sandbox, adds cross-surface
 - Large task transcripts now open from a bounded recent window and load older messages as you scroll, avoiding unbounded initial loading while preserving live updates, position, and retry controls.
 - Memory disclosure is now consistent for everyone: Roomote identifies a materially useful remembered fact and explains how it informed the work without requiring the former per-user Therapist Mode setting.
 - Deployments now run MinIO from Roomote's own `ghcr.io/roocodeinc/roomote-minio` image, built from the final MinIO community source release, instead of the retired upstream images. The same image provides the `mc` client used to create the artifact bucket, so the separate `minio/mc` image is gone. Existing `/data` volumes are unaffected.
-- Deliver Session service tokens to coding runs on every hosted sandbox provider. Daytona, E2B, Blaxel, Box, and Azure runs now receive substitute tokens and the API proxy base URL the same way Modal and Roomote Cloud runs do, gated by the Session owner's Session secret tools setting. No deployment configuration is required.
-- Deliver owner-approved Session service tokens to coding runs on Modal and Roomote Cloud. When the Session owner has Session secret tools enabled, the controller registers the run after bootstrap and the worker receives substitute tokens, the service manifest, and the API proxy base URL; the model calls approved services through the proxy with ordinary HTTP clients while the real key stays in the API. No deployment configuration is required.
+- Deliver Session service tokens to coding runs on every hosted sandbox provider. Daytona, E2B, Blaxel, Box, and Azure runs now receive substitute tokens and the API proxy base URL the same way Modal and deployment-managed runs do, gated by the Session owner's Session secret tools setting. No deployment configuration is required.
+- Deliver owner-approved Session service tokens to coding runs on Modal and deployment-managed sandboxes. When the Session owner has Session secret tools enabled, the controller registers the run after bootstrap and the worker receives substitute tokens, the service manifest, and the API proxy base URL; the model calls approved services through the proxy with ordinary HTTP clients while the real key stays in the API. No deployment configuration is required.
 - Add the API-side session egress substitution proxy at `/api/session-egress/<grant>/<path>`, so attached coding runs on compute providers without a per-workload connector can call an owner-approved origin with an ordinary HTTP client and a substitute token while the real credential stays in the API.
 - Session views now include every ready Session in the Ready filter and render transcript timestamps without time-zone-dependent hydration failures.
 - Session secret grants can name any credential header, not only `authorization`, `x-api-key`, and `api-key`, so services that authenticate with their own header such as `private-token` or `x-shopify-access-token` can be approved. Request-shaping headers remain refused, and a scheme is still only accepted on `authorization`.
@@ -708,11 +708,11 @@ Roomote 1.9 adds a native Telegram Fast experience, Session-owned Goal Mode, dir
 - Web Session notifications now arrive when an absent user needs to review a response or provide input, carry the actual reply into one personal provider thread, and accept replies that continue the same Session or pending task without duplicate or stale notifications.
 - Goal Mode now belongs to the session instead of one child task, so Roomote can pursue an objective across turns and delegated tasks, continue automatically within a bounded budget, and preserve goal state across web, Telegram, and Discord conversations.
 - Session owners can now approve narrowly scoped API keys through a secure form without placing credentials in chat or agent context. Fast and attached Docker coding runs can use approved keys only for the selected public HTTPS origin, allowed methods, and lifetime, with revocation and expiry enforced before requests and responses.
-- Cloud users now explicitly accept the experimental Voice data flow before their first call, before microphone capture or OpenAI contact begins. The consent explains that audio, transcripts, and workspace context are sent to OpenAI, is stored per user, and does not change self-hosted Voice behavior.
+- Users on managed deployments now explicitly accept the experimental Voice data flow before their first call, before microphone capture or OpenAI contact begins. The consent explains that audio, transcripts, and workspace context are sent to OpenAI, is stored per user, and does not change self-hosted Voice behavior.
 
 ### Patch changes
 
-- Roomote Cloud hides managed Email configuration that members cannot change, while continuing to show the deployment-provided address and connection state.
+- Managed deployments hide Email configuration that members cannot change, while continuing to show the deployment-provided address and connection state.
 - Deployment setup rejects malformed domain names before they can produce invalid routing or certificate configuration.
 - Fast now handles incomplete skill lookup arguments and unavailable skill sources without hiding valid skills, and integration discovery reports exact filter misses instead of returning an ambiguous empty result.
 - Mobile navigation makes recent Sessions easier to reach and moves Session switching into a responsive left rail that keeps the current conversation usable.
@@ -1193,7 +1193,7 @@ Roomote 1.2 enables contextual Message Suggestions by default, streams Fast repl
 - Finalize hosted runs whose Modal sandbox is gone instead of repeatedly retrying maintenance for missing sandboxes.
 - Keep Fast and task prompts lean by discovering remote integration tools only when needed, while preserving permissions and showing the invoked integration action clearly in transcripts.
 - Show linked sender identities and readable display names in Fast and Fast-delegated Slack transcripts instead of anonymous avatars or raw Slack mention tokens.
-- Expose timestamped provisioning and command output for new Roomote Cloud sandbox runs through compute-log lookups, including stdout, stderr, and failure diagnostics.
+- Expose timestamped provisioning and command output for new deployment-managed sandbox runs through compute-log lookups, including stdout, stderr, and failure diagnostics.
 - Start self-hosted Memory from the published gbrain image matching the Roomote release by default while preserving custom image overrides.
 - Recover Sessions whose terminal subagent remains unsettled after a provider timeout instead of leaving the parent Session running indefinitely.
 - Stream Fast replies into web Session transcripts and Slack threads while the model writes them, then settle each stream into the finished reply with its usual content and links.
@@ -1819,16 +1819,16 @@ This release adds new ways to connect and invoke Roomote, gives deployments clea
 
 ## 0.32.1 (2026-08-04)
 
-This patch restores licensed Cloud seat limits and keeps custom automation destinations limited to connected communication providers.
+This patch restores licensed seat limits on managed deployments and keeps custom automation destinations limited to connected communication providers.
 
 ### Highlights
 
-- Restore licensed seat limits for Roomote Cloud deployments so valid provisioned licenses no longer fall back to the free-tier limit when no activation lease is present.
+- Restore licensed seat limits for managed deployments so valid provisioned licenses no longer fall back to the free-tier limit when no activation lease is present.
 - Choose custom automation destinations from connected communication providers only.
 
 ### Patch changes
 
-- Restore licensed seat limits for Roomote Cloud deployments so valid provisioned licenses no longer fall back to the free-tier limit when no activation lease is present.
+- Restore licensed seat limits for managed deployments so valid provisioned licenses no longer fall back to the free-tier limit when no activation lease is present.
 - Show only connected communication providers when choosing a custom automation destination, while preserving task-view-only delivery and existing form edits as integration availability loads.
 
 ## 0.32.0 (2026-08-03)
@@ -1840,7 +1840,7 @@ This release adds OpenCode Go subscriptions, restores convenient automation test
 - Let operators connect an OpenCode Go subscription independently from OpenCode Zen and use supported Go models across Roomote task roles.
 - Run enabled custom automations on demand and test newly created automations immediately.
 - Use current Qwen and DeepSeek recommendations across supported model providers.
-- Retry license usage reporting after transient Roomote Cloud failures.
+- Retry license usage reporting after transient licensing-service failures.
 
 ### Minor changes
 
@@ -1850,7 +1850,7 @@ This release adds OpenCode Go subscriptions, restores convenient automation test
 
 - Let administrators run enabled custom automations on demand from Automations settings, and offer an immediate test run after an automation is created conversationally.
 - Recommend Qwen3.8 Max through supported providers and use OpenCode Zen's supported DeepSeek V4 Flash model identifier.
-- Retry license usage reports after transient Roomote Cloud failures and report concurrent license-key changes accurately instead of dropping usage observations or reporting a false success.
+- Retry license usage reports after transient licensing-service failures and report concurrent license-key changes accurately instead of dropping usage observations or reporting a false success.
 
 ## 0.31.0 (2026-08-03)
 
@@ -1868,7 +1868,7 @@ This release expands Amazon Bedrock and deployment controls, refreshes Automatio
 - Redesign Automations settings around scannable Custom, Enabled, and Available sections, with permalinked configuration dialogs, responsive custom automation controls, and category and provider-aware filtering.
 - Let deployment operators disable the curated integrations catalog and its existing connections through an environment policy without deleting saved credentials or affecting other provider types.
 - Let operators use native Amazon Bedrock Runtime models alongside Mantle, including regional inference profiles and supported reasoning settings, without changing existing Mantle configurations.
-- Add direct Roomote Cloud purchase and renewal paths to self-hosted License settings, including low-seat and upcoming-expiry guidance for administrators.
+- Add license purchase and renewal paths to self-hosted License settings, including low-seat and upcoming-expiry guidance for administrators.
 - Show useful, dismissible product tips alongside task startup progress so users can discover Roomote capabilities while an environment boots.
 - Add a copyable Roomote Cookbook with ready-to-use recipes for vendor outage triage, support investigations, CI failure fixes, product update newsletters, and scheduled maintenance.
 
@@ -2007,7 +2007,7 @@ This release expands Azure, ChatGPT, GitHub, and monday.com capabilities while i
 
 - Run tasks with Azure Container Apps Sandboxes, or connect Azure OpenAI and Azure AI Foundry for model inference.
 - Use monday.com context in tasks and invoke Roomote on GitHub with the shorter `@Roomote` mention.
-- Enable Fast mode for ChatGPT subscriptions and manage optional Roomote Cloud analytics with new cookie consent controls.
+- Enable Fast mode for ChatGPT subscriptions and manage optional hosted analytics with new cookie consent controls.
 - Keep Coolify Docker jobs, environment setup, Slack follow-ups, visual proof, task privacy, and pull request re-reviews working more reliably.
 
 ### Minor changes
@@ -2015,7 +2015,7 @@ This release expands Azure, ChatGPT, GitHub, and monday.com capabilities while i
 - Add Azure Container Apps Sandboxes as a preview compute provider with fast suspend and resume, snapshots, stable preview URLs, configurable sizing, and guided worker image setup. Thanks to @tebieshi for contributing this improvement.
 - Add first-class Azure OpenAI and Azure AI Foundry inference provider setup and model routing.
 - Add Fast mode for ChatGPT subscriptions and improve subscription provider connection, model availability, and settings controls.
-- Add cookie consent controls to Roomote Cloud and defer optional support and product analytics services until users grant consent.
+- Add cookie consent controls to managed deployments and defer optional support and product analytics services until users grant consent.
 - Let GitHub users invoke Roomote with the shorter `@Roomote` mention, with an administrator setting to require the full bot name instead.
 - Add a read-only monday.com integration so Roomote tasks can use the current user's board and work-item context.
 
@@ -2517,7 +2517,7 @@ Multi-SCM triage and mentions, richer chat and release UX, and more reliable sel
 
 - Analytics overview and cost views now avoid redundant queries and unnecessary data loading while preserving their existing filters and attribution.
 - Anthropic and Bedrock Mantle tasks using newer Claude models now use compatible adaptive thinking settings instead of failing on their first model call.
-- New and retried Roomote Cloud tasks now use the deployment-managed compute provider consistently while existing snapshots remain resumable on their source provider.
+- New and retried tasks on managed deployments now use the deployment-managed compute provider consistently while existing snapshots remain resumable on their source provider.
 - Cost analytics time filters now load correctly instead of failing for finite periods such as the default seven-day view.
 - Discord channel permission diagnostics now identify the connected bot correctly, so settings validation works against the live Discord API.
 - Managed Roomote compute now keeps its app naming separate from bring-your-own Modal configuration, preventing deployment-managed sandbox attribution conflicts.
@@ -2536,7 +2536,7 @@ Multi-SCM triage and mentions, richer chat and release UX, and more reliable sel
 - Inference providers now carry recommended per-role model defaults (helper, vision, code review, explore, planning). Connecting a provider in the setup wizard applies its recommended defaults automatically, and a "Use recommended" action on the Default Models card in Settings > Models re-applies them at any time. Google Vertex AI now defaults to Claude models (Sonnet 5 coding, Haiku 4.5 helper/explore, Opus 4.8 review/planning), and Google Gemini defaults to Gemini 3.1 Pro for coding with Flash for helper/explore. Requesty is no longer offered for new connections; existing Requesty connections keep working.
 - GitHub App setup now creates public GitHub Apps so the install step can pick the target organization, instead of forcing private apps that can only install on the creating account.
 - Failed environment starts show the original prompt with a retry control so operators can relaunch without retyping the kickoff.
-- Add Roomote Cloud analytics and support integrations behind deployment flags so hosted deployments can enable cloud analytics, the in-app support chat widget, and related remote telemetry wiring without requiring operators to build those surfaces themselves.
+- Add hosted analytics and support integrations behind deployment flags so managed deployments can enable analytics, the in-app support chat widget, and related remote telemetry wiring without requiring operators to build those surfaces themselves.
 - Add the Roomote deployment-managed compute provider: deployments that ship managed sandbox credentials get a zero-setup sandbox option in setup and Settings while bring-your-own Modal, E2B, Daytona, and Blaxel remain available.
 - Slack setup can now create the Slack app for you: paste an app configuration token and Roomote creates the app through Slack's `apps.manifest.create` API, saves the client ID, client secret, and signing secret automatically, and advances straight to the Connect to Slack install step. Entering values manually and the prefilled-manifest path remain available as fallbacks, and the mock Slack harness now covers `apps.manifest.create` so the flow is testable without a real workspace.
 - Deliver spawned-task settle outcomes back to the launching run so follow-up work such as environment verification completion is pushed into the parent task instead of depending on agent-side polling that can go idle.
@@ -2549,7 +2549,7 @@ Multi-SCM triage and mentions, richer chat and release UX, and more reliable sel
 - Give Discord its own gateway secret (Telegram-style) instead of reusing the shared public webhooks secret, reducing blast radius if one channel's secret is rotated or leaked.
 - Allow the production Docker socket proxy to create and remove managed task workspace volumes so Compose-based deployments can provision workers without 403 volume API failures.
 - Stop Gitea pull requests from flooding with bot review threads when the bot username does not start with `roomote`, by correctly recognizing bot comments without re-entering mention intake.
-- Hide Sandboxes settings when Roomote Cloud is enabled: remove the nav entry and redirect direct visits so cloud deployments do not expose byo-sandbox configuration.
+- Hide Sandboxes settings on managed deployments: remove the nav entry and redirect direct visits so those deployments do not expose byo-sandbox configuration.
 - Show provider headers in multi-provider model choosers and group ChatGPT subscription models under ChatGPT so long model lists are easier to scan in launch and Settings surfaces.
 - Default models is now Model mapping with a preset chooser and confirmation dialog before applying recommended provider defaults, so operators can review the mapping instead of it overwriting immediately.
 - Tasks no longer hang forever when OpenCode session creation never returns; the run fails closed with diagnostics instead of waiting indefinitely.

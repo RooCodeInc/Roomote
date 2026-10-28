@@ -1,7 +1,7 @@
 ---
 title: Getting started
 icon: book-open
-description: Choose Roomote Cloud or self-hosting, complete setup, and run your first task.
+description: Deploy Roomote on your own infrastructure, complete setup, and run your first task.
 ---
 
 Roomote agents work on your repositories in isolated sandboxes and return
@@ -9,20 +9,19 @@ results you can review. Start, follow, and steer their work from the web
 dashboard, with optional connections to your team's chat and other tools.
 
 This guide takes you from choosing where Roomote runs to completing your first
-repository task. Both hosting paths run the same Roomote product.
+repository task on infrastructure you control.
 
 ## 1. Choose where Roomote runs
 
 <CardGroup cols={2}>
-  <Card title="Roomote Cloud" icon="cloud" href="/cloud">
-    Roomote manages hosting, networking, sandboxes, and upgrades for your
-    isolated deployment. You choose inference, connect repositories, and
-    decide what work to run.
-  </Card>
-  <Card title="Self-hosted" icon="server" href="/self-hosting">
+  <Card title="Self-host Roomote" icon="server" href="/self-hosting">
     Run Roomote on your own hardware or infrastructure you control. You manage
     the host, networking, sandboxes, and maintenance, then connect inference
     and repositories.
+  </Card>
+  <Card title="Hosting platforms" icon="layers" href="/self-hosting/platforms">
+    Deploy on infrastructure you manage through Railway, Render, or another
+    hosting provider.
   </Card>
 </CardGroup>
 
@@ -44,9 +43,8 @@ The guide walks through:
 2. Connecting a repository and checking that a sandbox is ready to run work.
 3. Running a small repository inspection task and reviewing the result.
 
-Have a repository you can authorize Roomote to access. For inference, use
-managed Roomote inference when offered, or bring a supported subscription or
-provider API key. The hosting guide explains what is already supplied.
+Have a repository you can authorize Roomote to access. For inference, bring a
+supported subscription or provider API key.
 
 <Tip>
   Slack and other communications providers are optional. You can complete
