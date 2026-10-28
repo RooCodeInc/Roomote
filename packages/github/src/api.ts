@@ -576,6 +576,18 @@ export async function createTaskRunWorkerGitHubTokenWithMetadata(
   };
 }
 
+/**
+ * Errors that will not clear on retry: the installation was suspended,
+ * removed, or lost access to the repositories (401/403/404/422).
+ */
+function isPermanentInstallationTokenError(error: unknown): boolean {
+  const status =
+    typeof error === 'object' && error !== null && 'status' in error
+      ? Number((error as { status: unknown }).status)
+      : NaN;
+  return status === 401 || status === 403 || status === 404 || status === 422;
+}
+
 function earliestTokenExpiry(left: Date | null, right: Date | null) {
   if (!left) return right;
   if (!right) return left;
@@ -647,6 +659,12 @@ async function createAdditionalInstallationGitCredentials(
         });
       }
     } catch (error) {
+      // Transient failures (5xx, rate limits, network) propagate so the
+      // caller retries and an hourly refresh keeps the worker's current
+      // credentials instead of dropping this organization's repositories.
+      if (!isPermanentInstallationTokenError(error)) {
+        throw error;
+      }
       console.warn(
         `[createAdditionalInstallationGitCredentials] Failed to mint git credentials for task run ${taskRun.id} on another GitHub installation; skipping: ${group
           .map((row) => row.fullName)

@@ -863,7 +863,9 @@ describe('createTaskRunGitHubToken', () => {
         token: 'ghs_primary_token',
         expiresAt: new Date('2030-01-01T01:00:00.000Z'),
       })
-      .mockRejectedValueOnce(new Error('installation suspended'));
+      .mockRejectedValueOnce(
+        Object.assign(new Error('installation suspended'), { status: 403 }),
+      );
 
     await expect(
       createTaskRunWorkerGitHubTokenWithMetadata(
@@ -884,6 +886,41 @@ describe('createTaskRunGitHubToken', () => {
       expect.stringContaining('skipping: owner-a/api: installation suspended'),
     );
     consoleWarnSpy.mockRestore();
+  });
+
+  it('propagates a transient failure on another installation so refresh retries', async () => {
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+    mockCreateGitHubTokenWithMetadata
+      .mockResolvedValueOnce({
+        token: 'ghs_primary_token',
+        expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Service unavailable'), { status: 503 }),
+      );
+
+    await expect(
+      createTaskRunWorkerGitHubTokenWithMetadata(
+        buildTaskRun({
+          repo: 'owner-b/web',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow('Service unavailable');
   });
 
   it('evicts a cached task token and retries once after a 401', async () => {
