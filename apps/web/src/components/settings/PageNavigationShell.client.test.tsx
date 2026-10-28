@@ -74,5 +74,9 @@ describe('PageNavigationShell', () => {
       'overflow-y-auto',
     );
     expect(screen.getByText('content')).toBeInTheDocument();
+    const main = screen.getByRole('main');
+    expect(main).toContainElement(screen.getByRole('heading', { level: 1 }));
+    expect(main).toContainElement(screen.getByText('content'));
+    expect(main).not.toContainElement(screen.getByRole('navigation'));
   });
 });
