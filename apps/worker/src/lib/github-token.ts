@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -10,7 +11,7 @@ import {
 import { randomUUID } from 'crypto';
 import { createServer } from 'http';
 import { homedir } from 'os';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 
@@ -272,6 +273,34 @@ export function removeSourceControlCredentialFiles(): void {
 
   for (const filePath of credentialFilePaths) {
     rmSync(filePath, { force: true });
+  }
+
+  // A killed writer cannot run its finally cleanup. The snapshot caller has
+  // quiesced live writers; also scrub complete remnants from earlier processes.
+  let fileNames: string[];
+  try {
+    fileNames = readdirSync(GH_TOKEN_DIR);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return;
+    throw error;
+  }
+  const publishedNames = [
+    GH_TOKEN_FILE_PATH,
+    SOURCE_CONTROL_CREDENTIALS_FILE_PATH,
+  ].map((filePath) => basename(filePath));
+  const temporarySuffix =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/;
+  for (const fileName of fileNames) {
+    if (
+      publishedNames.some(
+        (name) =>
+          fileName.startsWith(`${name}.`) &&
+          temporarySuffix.test(fileName.slice(name.length + 1)),
+      )
+    ) {
+      // No recursive option: unlink matching files/symlinks, never their targets.
+      rmSync(join(GH_TOKEN_DIR, fileName), { force: true });
+    }
   }
 }
 

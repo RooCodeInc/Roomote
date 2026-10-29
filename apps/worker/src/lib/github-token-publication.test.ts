@@ -16,6 +16,7 @@ vi.mock('fs', async (importOriginal) => {
     ...actual,
     writeFileSync: vi.fn(actual.writeFileSync),
     renameSync: vi.fn(actual.renameSync),
+    readdirSync: vi.fn(actual.readdirSync),
   };
 });
 
@@ -28,6 +29,7 @@ describe('source-control credential publication', () => {
     actualFs = await vi.importActual('fs');
     vi.mocked(fs.writeFileSync).mockImplementation(actualFs.writeFileSync);
     vi.mocked(fs.renameSync).mockImplementation(actualFs.renameSync);
+    vi.mocked(fs.readdirSync).mockImplementation(actualFs.readdirSync);
     state.home = actualFs.mkdtempSync('/tmp/roomote-publication-test-');
     credentials = await import('./github-token');
     credentials.ensureGitCredentialHelper();
@@ -143,5 +145,62 @@ describe('source-control credential publication', () => {
         .readdirSync(join(state.home, '.roomote'))
         .filter((file) => file.endsWith('.tmp')),
     ).toEqual([]);
+  });
+
+  it('scrubs only canonical crashed-publication remnants without following symlink targets', () => {
+    const directory = join(state.home, '.roomote');
+    const uuid = '11111111-1111-4111-8111-111111111111';
+    const orphans = [
+      `gh-token.${uuid}.tmp`,
+      `source-control-repository-credentials.tsv.${uuid}.tmp`,
+    ];
+    const preserved = [
+      'unrelated.tmp',
+      'gh-token.tmp',
+      'gh-token.invalid-id.tmp',
+      `unrelated.${uuid}.tmp`,
+    ];
+    for (const name of [...orphans, ...preserved])
+      actualFs.writeFileSync(join(directory, name), 'synthetic fixture', {
+        mode: 0o600,
+      });
+    const target = join(state.home, 'keep-target');
+    actualFs.writeFileSync(target, 'keep target');
+    const link = join(
+      directory,
+      'gh-token.22222222-2222-4222-8222-222222222222.tmp',
+    );
+    actualFs.symlinkSync(target, link);
+
+    credentials.removeSourceControlCredentialFiles();
+
+    for (const name of orphans)
+      expect(actualFs.existsSync(join(directory, name))).toBe(false);
+    for (const name of preserved)
+      expect(actualFs.existsSync(join(directory, name))).toBe(true);
+    expect(actualFs.existsSync(link)).toBe(false);
+    expect(actualFs.readFileSync(target, 'utf8')).toBe('keep target');
+  });
+
+  it('keeps credential scrubbing idempotent when the directory is absent', () => {
+    actualFs.rmSync(join(state.home, '.roomote'), {
+      recursive: true,
+      force: true,
+    });
+    expect(() =>
+      credentials.removeSourceControlCredentialFiles(),
+    ).not.toThrow();
+    expect(() =>
+      credentials.removeSourceControlCredentialFiles(),
+    ).not.toThrow();
+  });
+
+  it('surfaces non-missing-directory failures to the snapshot scrub caller', () => {
+    vi.mocked(fs.readdirSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error('directory denied'), { code: 'EACCES' });
+    });
+    expect(() => credentials.removeSourceControlCredentialFiles()).toThrow(
+      'directory denied',
+    );
   });
 });

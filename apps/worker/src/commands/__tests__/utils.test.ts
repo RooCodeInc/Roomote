@@ -13,6 +13,7 @@ import type { TaskRun } from '@roomote/sdk/client';
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
   readFileSync: vi.fn(),
+  readdirSync: vi.fn(() => []),
   renameSync: vi.fn(),
   writeFileSync: vi.fn(),
   mkdirSync: vi.fn(),
