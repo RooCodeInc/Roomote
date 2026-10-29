@@ -13,6 +13,7 @@ import type { TaskRun } from '@roomote/sdk/client';
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
   readFileSync: vi.fn(),
+  renameSync: vi.fn(),
   writeFileSync: vi.fn(),
   mkdirSync: vi.fn(),
   chmodSync: vi.fn(),
@@ -32,9 +33,13 @@ vi.mock('http', () => ({
 }));
 
 function findWrite(path: string) {
+  const publication = [...vi.mocked(fs.renameSync).mock.calls]
+    .reverse()
+    .find((call) => call[1] === path);
+  const writtenPath = publication?.[0] ?? path;
   return [...vi.mocked(fs.writeFileSync).mock.calls]
     .reverse()
-    .find((call) => call[0] === path);
+    .find((call) => call[0] === writtenPath);
 }
 
 const COMMON_ENV_PATH = '/home/testuser/.roomote/env.sh';
@@ -463,6 +468,14 @@ describe('injectEnvVars', () => {
       await injectEnvVars(envVars);
 
       expect(findWrite(GH_TOKEN_PATH)?.[1]).toBe('ghs_test_token\n');
+      expect(findWrite(GH_TOKEN_PATH)?.[2]).toEqual({
+        mode: 0o600,
+        flag: 'wx',
+      });
+      expect(fs.renameSync).toHaveBeenCalledWith(
+        expect.stringContaining(`${GH_TOKEN_PATH}.`),
+        GH_TOKEN_PATH,
+      );
       expect(fs.rmSync).toHaveBeenCalledWith(SOURCE_CONTROL_CREDENTIALS_PATH, {
         force: true,
       });
@@ -499,6 +512,14 @@ describe('injectEnvVars', () => {
 
       expect(findWrite(SOURCE_CONTROL_CREDENTIALS_PATH)?.[1]).toBe(
         'gitlab.com\tgroup/project\toauth2\tglptt_scoped_token\n',
+      );
+      expect(findWrite(SOURCE_CONTROL_CREDENTIALS_PATH)?.[2]).toEqual({
+        mode: 0o600,
+        flag: 'wx',
+      });
+      expect(fs.renameSync).toHaveBeenCalledWith(
+        expect.stringContaining(`${SOURCE_CONTROL_CREDENTIALS_PATH}.`),
+        SOURCE_CONTROL_CREDENTIALS_PATH,
       );
       expect(fs.rmSync).toHaveBeenCalledWith(GH_TOKEN_PATH, { force: true });
       expect(fs.rmSync).toHaveBeenCalledWith(LEGACY_GITLAB_TOKEN_PATH, {
