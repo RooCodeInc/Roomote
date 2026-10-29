@@ -22,10 +22,19 @@ const DYNAMIC_ROUTE_MATCHERS: ReadonlyArray<{
 ];
 
 /**
- * Route-pattern prefixes whose query strings are useful, non-identifying
- * signal (setup wizard step state). Everything else loses its query string.
+ * Only known setup-step categories are anonymous signal. Other query fields
+ * and arbitrary step values can contain credentials or identifying content.
  */
-const QUERY_STRING_ALLOWED_PREFIXES: readonly string[] = ['/setup'];
+const SETUP_TELEMETRY_STEPS = new Set([
+  'welcome',
+  'email-account',
+  'email-password',
+  'auth-provider',
+  'auth-env-vars',
+  'inference',
+  'env-vars',
+  'invoke',
+]);
 
 const UUID_SEGMENT =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -115,10 +124,9 @@ export function normalizePath(
       '/' + pathname.split('/').filter(Boolean).map(redactSegment).join('/');
   }
 
-  const search = rawSearch?.replace(/^\?/, '') ?? '';
-  const includeSearch =
-    search.length > 0 &&
-    QUERY_STRING_ALLOWED_PREFIXES.some((prefix) => path.startsWith(prefix));
-
-  return includeSearch ? { path, search } : { path };
+  const step =
+    path === '/setup' ? new URLSearchParams(rawSearch).get('step') : null;
+  return step && SETUP_TELEMETRY_STEPS.has(step)
+    ? { path, search: `step=${step}` }
+    : { path };
 }

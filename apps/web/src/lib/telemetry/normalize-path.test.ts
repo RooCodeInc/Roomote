@@ -82,7 +82,7 @@ describe('normalizePath', () => {
     });
   });
 
-  it('drops query strings except on allowlisted routes', () => {
+  it('retains only bounded setup-step signal from query strings', () => {
     expect(normalizePath('/tasks', 'foo=bar')).toEqual({ path: '/tasks' });
     expect(normalizePath('/setup', 'step=invoke')).toEqual({
       path: '/setup',
@@ -91,6 +91,51 @@ describe('normalizePath', () => {
     expect(normalizePath('/setup', '?step=invoke')).toEqual({
       path: '/setup',
       search: 'step=invoke',
+    });
+  });
+
+  it('drops extra setup query fields instead of forwarding credentials or identifying content', () => {
+    expect(
+      normalizePath(
+        '/setup',
+        '?step=email-account&token=synthetic-marker&email=fixture%40example.invalid&provider=custom',
+      ),
+    ).toEqual({
+      path: '/setup',
+      search: 'step=email-account',
+    });
+    expect(normalizePath('/setup', '?token=synthetic-marker')).toEqual({
+      path: '/setup',
+    });
+  });
+
+  it.each(['custom-user-value', 'synthetic-marker', '', 'WELCOME'])(
+    'omits unrecognized step value %j',
+    (step) => {
+      expect(
+        normalizePath('/setup', new URLSearchParams({ step }).toString()),
+      ).toEqual({ path: '/setup' });
+    },
+  );
+
+  it('canonicalizes encoded and duplicate step parameters without retaining the raw query', () => {
+    expect(
+      normalizePath(
+        '/setup',
+        '?%73tep=welcome&step=synthetic-marker&token=synthetic-marker',
+      ),
+    ).toEqual({ path: '/setup', search: 'step=welcome' });
+    expect(
+      normalizePath('/setup', '?step=synthetic-marker&step=welcome'),
+    ).toEqual({ path: '/setup' });
+  });
+
+  it('does not allow setup-lookalike route queries', () => {
+    expect(
+      normalizePath('/setup-extra', 'step=invoke&token=synthetic-marker'),
+    ).toEqual({ path: '/setup-extra' });
+    expect(normalizePath('/setup/custom', 'step=invoke')).toEqual({
+      path: '/setup/custom',
     });
   });
 });
