@@ -84,7 +84,13 @@ export function IntegrationToolAutoModeSetting() {
           maxLength={INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH}
           placeholder={COPY.guidancePlaceholder}
           rows={4}
-          onChange={(event) => setPolicyDraft(event.target.value)}
+          onChange={(event) =>
+            setPolicyDraft(
+              !save.isPending && event.target.value === settings.data.policy
+                ? null
+                : event.target.value,
+            )
+          }
         />
         <div className="flex items-center gap-2">
           <Button

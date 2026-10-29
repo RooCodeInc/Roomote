@@ -210,6 +210,52 @@ describe('IntegrationToolAutoModeSetting', () => {
     );
   });
 
+  it('hydrates after an edit is reverted to the exact saved policy before a background refresh', async () => {
+    show();
+    edit('Temporary local draft');
+    edit('');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    saved = { ...saved, policy: 'Updated elsewhere' };
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ['auto'] });
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+        'Updated elsewhere',
+      ),
+    );
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
+
+  it('preserves an intentional revert to the previous saved policy during an in-flight save', async () => {
+    const first = deferred<Settings>();
+    state.setAuto.mockImplementationOnce(() => first.promise);
+    show();
+    edit('Submitted change');
+    save();
+    await waitFor(() => expect(state.setAuto).toHaveBeenCalledTimes(1));
+    edit('');
+    await act(async () =>
+      first.resolve({ ...saved, policy: 'Submitted change' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue('');
+  });
+
+  it('does not consume a trailing space while continuing from the saved text', () => {
+    saved = { ...saved, policy: 'Existing guidance' };
+    client.setQueryData(['auto'], saved);
+    show();
+    edit('Existing guidance ');
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+      'Existing guidance ',
+    );
+  });
+
   it('says when Auto has no hosted model to assess with', () => {
     client.setQueryData(['auto'], {
       ...saved,
