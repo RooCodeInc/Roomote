@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -34,17 +34,18 @@ export function IntegrationToolAutoModeSetting() {
   const settings = useQuery(
     trpc.integrationToolPolicies.getAuto.queryOptions(),
   );
-  const [policy, setPolicy] = useState('');
-  useEffect(() => {
-    if (settings.data) setPolicy(settings.data.policy);
-  }, [settings.data]);
+  const [policyDraft, setPolicyDraft] = useState<string | null>(null);
+  const policy = policyDraft ?? settings.data?.policy ?? '';
 
   const save = useMutation(
     trpc.integrationToolPolicies.setAuto.mutationOptions({
-      onSuccess: (result) => {
+      onSuccess: (result, submitted) => {
         queryClient.setQueryData(
           trpc.integrationToolPolicies.getAuto.queryKey(),
           result,
+        );
+        setPolicyDraft((current) =>
+          current?.trim() === submitted.policy.trim() ? null : current,
         );
       },
       onError: () => toast.error('Failed to update Auto mode.'),
@@ -83,7 +84,7 @@ export function IntegrationToolAutoModeSetting() {
           maxLength={INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH}
           placeholder={COPY.guidancePlaceholder}
           rows={4}
-          onChange={(event) => setPolicy(event.target.value)}
+          onChange={(event) => setPolicyDraft(event.target.value)}
         />
         <div className="flex items-center gap-2">
           <Button
@@ -100,7 +101,7 @@ export function IntegrationToolAutoModeSetting() {
               size="sm"
               variant="ghost"
               disabled={save.isPending}
-              onClick={() => setPolicy(settings.data.policy)}
+              onClick={() => setPolicyDraft(null)}
             >
               Discard
             </Button>
