@@ -255,6 +255,25 @@ the deployment's first installation. With more than one installation, scope a
 search to the organization or repository you mean so it runs under the right
 one.
 
+## Task Git access across installations
+
+<Note>
+The cross-installation task behavior below is available on `develop` after
+v1.19.4; it is not included in v1.19.4.
+</Note>
+
+A task with a primary GitHub repository can clone, fetch, and push other active
+GitHub repositories available to that task even when they belong to another
+installation of the configured app. Roomote supplies repository-scoped Git
+credentials for those additional installations. If an additional installation
+has lost access, its repositories can remain unavailable without blocking work
+on the primary repository.
+
+This applies to HTTPS Git operations. The task's `gh` CLI and primary API
+credential still use one installation; they do not automatically gain access
+to the other organizations. GitHub repositories explicitly listed together in
+an [environment](/environments) must still belong to one installation.
+
 ## Daily GitHub management
 
 Roomote can use GitHub's native tools directly, without starting a coding task:
@@ -262,7 +281,7 @@ pull request and issue edits, comments, replies and reactions, reviews, labels,
 branches, and small file changes. Their discovered descriptions and schemas
 define the supported arguments. These actions use the deployment GitHub App,
 require an active Roomote member, and run under a token that reaches only the
-repositories connected on that installation, the same boundary a coding task
+repositories connected on that installation, the same API boundary a coding task
 has. What the token may do there is set by the App's permissions on GitHub. No
 personal GitHub OAuth connection is required. Ask for the specific change and
 identify the repository and target issue, pull request, or comment. Every call
@@ -309,9 +328,9 @@ An environment-backed task can also push branches and create or update pull
 requests in another active GitHub repository connected to the same GitHub App
 installation, even when that repository is not part of the environment
 workspace. This write access does not automatically add the repository to the
-prepared workspace. Roomote rejects inactive repositories, repositories
-connected through another provider, and repositories that belong to a different
-GitHub App installation.
+prepared workspace. These task delivery tools reject inactive repositories,
+repositories connected through another provider, and repositories that belong
+to a different GitHub App installation.
 
 Read-only requests, creations, and additive label actions run directly. Before
 editing, replacing, assigning, clearing, moving, or deleting an item, Roomote
