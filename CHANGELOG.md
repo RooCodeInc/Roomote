@@ -2,6 +2,21 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.19.5 (2026-10-29)
+
+Roomote 1.19.5 improves GitHub work across organizations and restores integration-key access for scheduled and manually run custom automations.
+
+### Highlights
+
+- Connect additional GitHub organizations and use HTTPS Git across repositories available to a task.
+- Start pull request reviews reliably when multiple GitHub organizations are connected.
+- Use existing integration keys in scheduled and manually run custom automations.
+
+### Patch changes
+
+- Scheduled and manually run custom automations can now use their creator's available personal and deployment-wide integration keys instead of finding an empty integration list. New key approvals still require a human turn, and webhook-triggered runs do not receive integration keys.
+- Work with GitHub repositories across organizations: Update GitHub now opens the account picker to add another installation, pull request reviews no longer fail to start when multiple organizations are connected, and tasks can clone, fetch, and push available repositories across installations using HTTPS Git. Task API and pull request delivery access retain their existing installation boundaries.
+
 ## 1.19.4 (2026-10-27)
 
 Roomote 1.19.4 expands model choice with GPT-6.1 Terra and Kimi K3.1 Pro, including Highspeed options on supported Kimi providers.
