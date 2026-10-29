@@ -2903,10 +2903,7 @@ async function withUnsharedTaskUpdates(
 
 async function resolveDelegatedTaskActor(
   parent: FastAgentParent,
-  event: Extract<
-    FastAgentParentEvent,
-    { type: 'child_message' | 'task_activity' | 'task_settled' }
-  >,
+  event: { actingUserId?: string },
 ): Promise<{
   userId?: string;
   denialReason?: 'no_acting_user' | 'actor_owner_mismatch';
@@ -2925,6 +2922,27 @@ async function resolveDelegatedTaskActor(
     columns: { id: true },
   });
   return actor ? { userId: actor.id } : { denialReason: 'no_acting_user' };
+}
+
+/**
+ * A scheduled or manual custom automation run acts for the user who created
+ * the automation, so it may use that user's integration keys, provided the
+ * run's Session is owned by the same active user. Webhook-triggered runs carry
+ * caller-supplied payloads and stay without a credential actor.
+ */
+async function resolveAutomationCredentialActor(
+  parent: FastAgentParent,
+  event: Extract<FastAgentParentEvent, { type: 'automation_triggered' }>,
+): Promise<{
+  userId?: string;
+  denialReason?: 'no_acting_user' | 'actor_owner_mismatch';
+}> {
+  if (event.trigger === 'webhook') return { denialReason: 'no_acting_user' };
+  const automation = await getCustomAutomationById(event.automationId);
+  if (!automation?.createdByUserId) return { denialReason: 'no_acting_user' };
+  return resolveDelegatedTaskActor(parent, {
+    actingUserId: automation.createdByUserId,
+  });
 }
 
 export async function deliverFastAgentParentEvent(
@@ -3121,7 +3139,9 @@ export async function deliverFastAgentParentEventWithLock(
       params.event.type === 'task_activity' ||
       params.event.type === 'task_settled'
         ? await resolveDelegatedTaskActor(params.parent, params.event)
-        : undefined;
+        : params.event.type === 'automation_triggered'
+          ? await resolveAutomationCredentialActor(params.parent, params.event)
+          : undefined;
     let parentTurn = await createFastAgentParentTurn({
       parent: params.parent,
       event: params.event,

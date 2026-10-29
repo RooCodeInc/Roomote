@@ -4833,7 +4833,12 @@ export async function answerFastAgentQuestion({
             privacy: currentSessionPrivacy,
             privateOwnerUserId: currentPrivateOwnerUserId,
             privateSessionsExperimentEnabled,
-            humanTurn: !platformEvent,
+            // Custom automation runs act for their creator once the parent
+            // event resolved that creator as the Session owner.
+            humanTurn:
+              !platformEvent ||
+              (platformEventKind === 'automation' &&
+                serviceCredentialPlatformActorUserId === userId),
           },
           availableIntegrations,
           {

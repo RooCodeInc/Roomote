@@ -2031,9 +2031,36 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
-  it.each(['human', 'platform_event'] as const)(
-    'passes trusted %s context to operator HTTP requests without argument authority',
-    async (turnSource) => {
+  it.each([
+    ['human', {}, true],
+    ['platform_event', {}, false],
+    [
+      'platform_event',
+      {
+        platformEventKind: 'automation',
+        serviceCredentialPlatformActorUserId: 'user-1',
+      },
+      true,
+    ],
+    [
+      'platform_event',
+      {
+        platformEventKind: 'automation',
+        serviceCredentialPlatformActorUserId: 'user-2',
+      },
+      false,
+    ],
+    [
+      'platform_event',
+      {
+        platformEventKind: 'delegated_task',
+        serviceCredentialPlatformActorUserId: 'user-1',
+      },
+      false,
+    ],
+  ] as const)(
+    'passes trusted %s context %o to operator HTTP requests without argument authority',
+    async (turnSource, eventParams, expectedHumanTurn) => {
       mocks.listIntegrations.mockResolvedValue([
         {
           id: '_roomote_http_integrations',
@@ -2073,6 +2100,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
       await answerFastAgentQuestion({
         ...baseParams,
+        ...eventParams,
         turnSource,
         adapter: callbacks(),
       });
@@ -2080,7 +2108,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({
           sessionId: 'conversation-1',
           userId: 'user-1',
-          humanTurn: turnSource === 'human',
+          humanTurn: expectedHumanTurn,
         }),
         expect.any(Array),
         {
