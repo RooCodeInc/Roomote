@@ -18,7 +18,7 @@
     "internal-deps": "pnpm list --filter @roomote/worker --depth Infinity 2>/dev/null | grep -E '@roomote/' | grep 'link:' | sed 's/.*@roomote/@roomote/' | sed 's/ link:.*//' | sort -u"
   },
   "dependencies": {
-    "@hono/node-server": "2.0.10",
+    "@hono/node-server": "2.1.3",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@roo-code/judgement": "0.4.1",
     "@roomote/auth": "workspace:^",
