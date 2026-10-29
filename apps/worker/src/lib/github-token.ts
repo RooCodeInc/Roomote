@@ -3,9 +3,11 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'fs';
+import { randomUUID } from 'crypto';
 import { createServer } from 'http';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -341,9 +343,21 @@ export function getGitHubTokenFileStatus(): GitHubTokenFileStatus {
   }
 }
 
+function publishCredentialFile(filePath: string, content: string): void {
+  // Git and gh read in separate processes, including during synchronous writes.
+  // Keep the prior complete file readable until the replacement is ready.
+  const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporaryPath, content, { mode: 0o600, flag: 'wx' });
+    renameSync(temporaryPath, filePath);
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
+}
+
 function writeGhToken(token: string): void {
   ensureGhTokenDirectory();
-  writeFileSync(GH_TOKEN_FILE_PATH, `${token}\n`, { mode: 0o600 });
+  publishCredentialFile(GH_TOKEN_FILE_PATH, `${token}\n`);
 }
 
 /**
@@ -377,10 +391,9 @@ function writeSourceControlRepositoryCredentials(
     })
     .join('\n');
 
-  writeFileSync(
+  publishCredentialFile(
     SOURCE_CONTROL_CREDENTIALS_FILE_PATH,
     content ? `${content}\n` : '',
-    { mode: 0o600 },
   );
 }
 
@@ -405,7 +418,8 @@ function writeSourceControlToken(
     case 'GITLAB_TOKEN':
     case 'GITEA_TOKEN':
     case 'ADO_TOKEN':
-      clearSourceControlRepositoryCredentials();
+      // Shared repository credentials are published once after all env vars.
+      clearLegacySourceControlCredentials();
       break;
   }
 }
@@ -418,7 +432,8 @@ function clearSourceControlToken(envVar: SourceControlTokenEnvVar): void {
     case 'GITLAB_TOKEN':
     case 'GITEA_TOKEN':
     case 'ADO_TOKEN':
-      clearSourceControlRepositoryCredentials();
+      // Clearing one provider must not remove another provider's live rows.
+      clearLegacySourceControlCredentials();
       break;
   }
 }
