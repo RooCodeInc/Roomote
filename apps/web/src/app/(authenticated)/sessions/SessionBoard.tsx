@@ -41,6 +41,7 @@ import {
 
 import { BasicTooltip, Button, Funnel } from '@/components/system';
 import { useSessionStatusMutation } from '@/components/sessions/use-session-status-mutation';
+import { useSessionSelectionActive } from '@/components/sessions/SessionSelection';
 import {
   canDropSessionBoardCard,
   getSessionBoardDropStatus,
@@ -454,6 +455,8 @@ export function SessionBoardCard({
 }) {
   const reducedMotion = useReducedMotion() ?? false;
   const registry = useContext(SessionBoardCardRegistryContext);
+  const selecting = useSessionSelectionActive();
+  const canDrag = canManage && !selecting;
   const dnd = useContext(SessionBoardDndContext);
   const [isFlying, setIsFlying] = useState(false);
   const dragData = useRef<SessionBoardDragData>({
@@ -470,7 +473,7 @@ export function SessionBoardCard({
   const draggable = useDraggable({
     id: sessionId,
     data: dragData.current,
-    disabled: !canManage || dnd?.statusMutationPending === true,
+    disabled: !canDrag || dnd?.statusMutationPending === true,
   });
 
   useLayoutEffect(() => {
@@ -529,14 +532,14 @@ export function SessionBoardCard({
         <div
           ref={setDragNodeRef}
           style={{ transform: dragTransform }}
-          className={`relative w-full ${canManage ? 'cursor-grab active:cursor-grabbing' : ''}`}
-          {...(canManage ? draggable.attributes : {})}
-          {...(canManage ? dragListeners : {})}
-          role={canManage ? 'group' : undefined}
-          aria-label={canManage ? `Move ${title} to another status` : undefined}
+          className={`relative w-full ${canDrag ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          {...(canDrag ? draggable.attributes : {})}
+          {...(canDrag ? dragListeners : {})}
+          role={canDrag ? 'group' : undefined}
+          aria-label={canDrag ? `Move ${title} to another status` : undefined}
           aria-pressed={undefined}
-          title={canManage ? 'Drag to change session status' : undefined}
-          data-session-board-drag-activator={canManage ? true : undefined}
+          title={canDrag ? 'Drag to change session status' : undefined}
+          data-session-board-drag-activator={canDrag ? true : undefined}
         >
           {children}
         </div>
