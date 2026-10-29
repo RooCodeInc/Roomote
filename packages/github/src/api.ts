@@ -29,6 +29,7 @@ import {
   environmentRepositoryMappings,
   repositories,
   and,
+  asc,
   eq,
   isNull,
   inArray,
@@ -288,16 +289,36 @@ export async function resolveTaskRunEnvironmentGitHubRepositories(
  * (`payload.repo`). Returns null when that repository is not an active GitHub
  * repository, so callers keep failing closed.
  */
+async function resolveOldestInstallationId(
+  rows: Repository[],
+): Promise<string | null> {
+  const installationIds = [
+    ...new Set(
+      rows
+        .map((row) => row.installationId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (installationIds.length === 0) return null;
+  const oldest = await db.query.githubInstallations.findFirst({
+    where: and(
+      inArray(githubInstallations.id, installationIds),
+      isNull(githubInstallations.suspendedAt),
+    ),
+    orderBy: [asc(githubInstallations.createdAt)],
+    columns: { id: true },
+  });
+  return oldest?.id ?? null;
+}
+
 async function resolvePrimaryRepositoryInstallationScope(
   taskRun: TaskRun,
   stampedRepositories: string[],
 ): Promise<CreateGitHubTokenOptions | null> {
   const primaryRepository = taskRun.payload.repo;
-  if (
-    !primaryRepository ||
-    primaryRepository === ALL_REPOSITORIES ||
-    !stampedRepositories.includes(primaryRepository)
-  ) {
+  const allRepositories =
+    !primaryRepository || primaryRepository === ALL_REPOSITORIES;
+  if (!allRepositories && !stampedRepositories.includes(primaryRepository)) {
     return null;
   }
 
@@ -308,9 +329,13 @@ async function resolvePrimaryRepositoryInstallationScope(
       inArray(repositories.fullName, stampedRepositories),
     ),
   });
-  const primaryInstallationId = stampedRows.find(
-    (row) => row.fullName === primaryRepository,
-  )?.installationId;
+  // All-repository runs have no repository of their own: anchor on the
+  // deployment's oldest active installation, the same one unconnected reads
+  // use. Repositories on other installations get their own git credentials.
+  const primaryInstallationId = allRepositories
+    ? await resolveOldestInstallationId(stampedRows)
+    : stampedRows.find((row) => row.fullName === primaryRepository)
+        ?.installationId;
   if (!primaryInstallationId) {
     return null;
   }
@@ -325,7 +350,7 @@ async function resolvePrimaryRepositoryInstallationScope(
     (repository) => !includedRepositories.has(repository),
   );
   console.warn(
-    `[resolveTaskRunGitHubTokenOptions] Stamped GitHub repositories for task run ${taskRun.id} span multiple installations; minting the ${primaryRepository} installation only. Not reachable with this token: ${excludedRepositories.join(', ')}`,
+    `[resolveTaskRunGitHubTokenOptions] Stamped GitHub repositories for task run ${taskRun.id} span multiple installations; minting the ${allRepositories ? 'oldest' : primaryRepository} installation only (other installations get git credentials). Not reachable with this token: ${excludedRepositories.join(', ')}`,
   );
 
   return resolveTokenOptionsForRepositoryNames({
