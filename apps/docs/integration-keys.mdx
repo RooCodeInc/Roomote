@@ -71,6 +71,12 @@ approved origin using any HTTP method approved for that integration. Roomote's
 API sends the request with the real key and returns the response. For scripts,
 SDKs, CLIs, or many calls, Roomote launches an attached coding task instead.
 
+**In scheduled and manually run custom automations**, Roomote acts for the
+user who created the automation. It can use that user's integration keys and
+deployment-wide keys the same way, but cannot request new approvals; those still
+need a human turn. Webhook-triggered runs do not get integration keys, because
+their payloads come from outside callers.
+
 **In coding tasks launched from the session**, the task receives each approved
 service as a substitute token in its environment, plus one base URL. The agent
 calls the service through that base URL with the substitute as its bearer

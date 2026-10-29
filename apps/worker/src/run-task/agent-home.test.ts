@@ -1072,6 +1072,8 @@ describe('generateOpenCodeConfig provider support', () => {
     ).toEqual([
       'k3',
       'k3-256k',
+      'k3.1-pro',
+      'k3.1-pro-highspeed',
       'kimi-for-coding',
       'kimi-for-coding-highspeed',
     ]);

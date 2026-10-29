@@ -16,6 +16,7 @@ import {
   filterRepositoryNamesForSourceControlProvider,
   normalizePemEnvValue,
   resolveRepositoryNamesForSourceControlProviderFromPayload,
+  type SourceControlGitCredential,
 } from '@roomote/types';
 import {
   type GitHubInstallation,
@@ -281,6 +282,61 @@ export async function resolveTaskRunEnvironmentGitHubRepositories(
   });
 }
 
+/**
+ * Narrows a stamped repository scope that spans GitHub App installations to
+ * the repositories on the installation that owns the task's own repository
+ * (`payload.repo`). Returns null when that repository is not an active GitHub
+ * repository, so callers keep failing closed.
+ */
+async function resolvePrimaryRepositoryInstallationScope(
+  taskRun: TaskRun,
+  stampedRepositories: string[],
+): Promise<CreateGitHubTokenOptions | null> {
+  const primaryRepository = taskRun.payload.repo;
+  if (
+    !primaryRepository ||
+    primaryRepository === ALL_REPOSITORIES ||
+    !stampedRepositories.includes(primaryRepository)
+  ) {
+    return null;
+  }
+
+  const stampedRows = await db.query.repositories.findMany({
+    where: and(
+      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
+      eq(repositories.isActive, true),
+      inArray(repositories.fullName, stampedRepositories),
+    ),
+  });
+  const primaryInstallationId = stampedRows.find(
+    (row) => row.fullName === primaryRepository,
+  )?.installationId;
+  if (!primaryInstallationId) {
+    return null;
+  }
+
+  const sameInstallationRows = stampedRows.filter(
+    (row) => row.installationId === primaryInstallationId,
+  );
+  const includedRepositories = new Set(
+    sameInstallationRows.map((row) => row.fullName),
+  );
+  const excludedRepositories = stampedRepositories.filter(
+    (repository) => !includedRepositories.has(repository),
+  );
+  console.warn(
+    `[resolveTaskRunGitHubTokenOptions] Stamped GitHub repositories for task run ${taskRun.id} span multiple installations; minting the ${primaryRepository} installation only. Not reachable with this token: ${excludedRepositories.join(', ')}`,
+  );
+
+  return resolveTokenOptionsForRepositoryNames({
+    taskRun,
+    repositoryNames: sameInstallationRows.map((row) => row.fullName),
+    repositoryRows: sameInstallationRows,
+    missingMessagePrefix: 'Stamped repositories not found',
+    spanningMessagePrefix: 'Stamped repositories',
+  });
+}
+
 async function resolveTaskRunGitHubTokenOptions(
   taskRun: TaskRun,
 ): Promise<CreateGitHubTokenOptions> {
@@ -314,12 +370,27 @@ async function resolveTaskRunGitHubTokenOptions(
         skipUnavailableRepositories: true,
       });
     } catch (error) {
+      if (!isGitHubInstallationSpanError(error)) {
+        throw error;
+      }
+
+      // Without an environment (all-repository workspaces, PR reviews), keep
+      // the stamped repositories on the task's own repository installation so
+      // a second connected organization does not block every run.
+      if (!repositoryRows?.length) {
+        const primaryOptions = await resolvePrimaryRepositoryInstallationScope(
+          taskRun,
+          stampedRepositories,
+        );
+        if (!primaryOptions) {
+          throw error;
+        }
+        return primaryOptions;
+      }
+
       // Extra advertised checkouts can span GitHub App installations. Mint the
       // environment's installation instead of blocking a workspace that already
       // has a single-installation GitHub scope.
-      if (!repositoryRows?.length || !isGitHubInstallationSpanError(error)) {
-        throw error;
-      }
 
       // The payload still advertises the excluded repositories as on-demand
       // checkouts, so name them: a later clone failure is otherwise opaque.
@@ -460,6 +531,11 @@ export type TaskRunWorkerGitHubToken = {
   token: string;
   source: 'user' | 'app';
   expiresAt: Date | null;
+  /**
+   * Per-repository git credentials for stamped repositories on other GitHub
+   * App installations. Git only: `gh` and API calls keep the primary token.
+   */
+  gitCredentials?: SourceControlGitCredential[];
 };
 
 /**
@@ -477,12 +553,134 @@ export type TaskRunWorkerGitHubToken = {
 export async function createTaskRunWorkerGitHubTokenWithMetadata(
   taskRun: TaskRun,
 ): Promise<TaskRunWorkerGitHubToken> {
-  const metadata = await createTaskRunGitHubTokenWithMetadata(taskRun);
+  const options = await resolveTaskRunGitHubTokenOptions(taskRun);
+  const metadata = await createGitHubTokenWithMetadata(options);
+  const additional =
+    options.type === 'installationId'
+      ? await createAdditionalInstallationGitCredentials(
+          taskRun,
+          String(options.installationId),
+        )
+      : null;
+
   return {
     token: metadata.token,
     source: 'app',
-    expiresAt: metadata.expiresAt,
+    expiresAt: earliestTokenExpiry(
+      metadata.expiresAt,
+      additional?.expiresAt ?? null,
+    ),
+    ...(additional?.credentials.length
+      ? { gitCredentials: additional.credentials }
+      : {}),
   };
+}
+
+/**
+ * Errors that will not clear on retry: the installation was suspended,
+ * removed, or lost access to the repositories (401/403/404/422). GitHub also
+ * answers rate limits with 403 and token-endpoint spam protection with 422,
+ * so recognized rate limits stay transient.
+ */
+function isPermanentInstallationTokenError(error: unknown): boolean {
+  if (getGitHubRateLimitRetryAfterMs(error) !== null) {
+    return false;
+  }
+  const status =
+    typeof error === 'object' && error !== null && 'status' in error
+      ? Number((error as { status: unknown }).status)
+      : NaN;
+  return status === 401 || status === 403 || status === 404 || status === 422;
+}
+
+function earliestTokenExpiry(left: Date | null, right: Date | null) {
+  if (!left) return right;
+  if (!right) return left;
+  return left.getTime() <= right.getTime() ? left : right;
+}
+
+/**
+ * A GitHub App token covers one installation, so stamped repositories on
+ * other installations get their own repository-scoped tokens, delivered as
+ * per-repository git credentials. Best effort: an installation that fails to
+ * mint is logged and skipped rather than blocking the run, since the primary
+ * token already covers the task's own repository.
+ */
+async function createAdditionalInstallationGitCredentials(
+  taskRun: TaskRun,
+  primaryInstallationId: string,
+): Promise<{
+  credentials: SourceControlGitCredential[];
+  expiresAt: Date | null;
+}> {
+  const stampedRepositories =
+    resolveRepositoryNamesForSourceControlProviderFromPayload(
+      taskRun.payload,
+      DEFAULT_SOURCE_CONTROL_PROVIDER,
+    ) ?? [];
+  if (stampedRepositories.length === 0) {
+    return { credentials: [], expiresAt: null };
+  }
+
+  const rows = await db.query.repositories.findMany({
+    where: and(
+      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
+      eq(repositories.isActive, true),
+      inArray(repositories.fullName, [...new Set(stampedRepositories)]),
+    ),
+  });
+  const rowsByInstallation = new Map<string, Repository[]>();
+  for (const row of rows) {
+    if (
+      !row.installationId ||
+      row.installationId === primaryInstallationId ||
+      row.githubRepoId == null
+    ) {
+      continue;
+    }
+    const group = rowsByInstallation.get(row.installationId) ?? [];
+    group.push(row);
+    rowsByInstallation.set(row.installationId, group);
+  }
+
+  const credentials: SourceControlGitCredential[] = [];
+  let expiresAt: Date | null = null;
+  for (const [installationId, group] of rowsByInstallation) {
+    try {
+      const metadata = await createGitHubTokenWithMetadata({
+        type: 'installationId',
+        installationId,
+        repositoryIds: group
+          .map((row) => row.githubRepoId)
+          .filter((id): id is number => id != null),
+      });
+      expiresAt = earliestTokenExpiry(expiresAt, metadata.expiresAt);
+      for (const row of group) {
+        credentials.push({
+          host: row.host || 'github.com',
+          repositoryFullName: row.fullName,
+          username: 'x-access-token',
+          token: metadata.token,
+        });
+      }
+    } catch (error) {
+      // Transient failures (5xx, rate limits, network) propagate so the
+      // caller retries and an hourly refresh keeps the worker's current
+      // credentials instead of dropping this organization's repositories.
+      if (!isPermanentInstallationTokenError(error)) {
+        throw error;
+      }
+      console.warn(
+        `[createAdditionalInstallationGitCredentials] Failed to mint git credentials for task run ${taskRun.id} on another GitHub installation; skipping: ${group
+          .map((row) => row.fullName)
+          .join(
+            ', ',
+          )}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return { credentials, expiresAt };
 }
 
 export async function createTaskRunWorkerGitHubToken(

@@ -445,6 +445,83 @@ describe('createTaskRunGitHubToken', () => {
     expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
   });
 
+  it("mints the task repository's installation when a stamp without an environment spans installations", async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+      {
+        fullName: 'owner-b/docs',
+        installationId: 'install-b',
+        githubRepoId: 403,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'owner-b/web',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+            'owner-b/docs': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toBe('ghs_test_token');
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-b',
+        repositoryIds: [402, 403],
+      },
+      undefined,
+      undefined,
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Not reachable with this token: owner-a/api'),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('keeps failing a spanning stamp without an environment when the task repository is not stamped', async () => {
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'owner-c/other',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow(GitHubInstallationSpanError);
+    expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
+  });
+
   it('fails closed when a GitLab environment stamp spans GitHub installations', async () => {
     mockFindEnvironmentFirst.mockResolvedValue({
       id: 'gitlab-environment',
@@ -705,6 +782,187 @@ describe('createTaskRunGitHubToken', () => {
       expiresAt: new Date('2030-01-01T01:00:00.000Z'),
     });
   });
+
+  it('adds git credentials for stamped repositories on other installations', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        host: 'github.com',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        host: 'github.com',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+    mockCreateGitHubTokenWithMetadata
+      .mockResolvedValueOnce({
+        token: 'ghs_primary_token',
+        expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+      })
+      .mockResolvedValueOnce({
+        token: 'ghs_other_org_token',
+        expiresAt: new Date('2030-01-01T00:30:00.000Z'),
+      });
+
+    await expect(
+      createTaskRunWorkerGitHubTokenWithMetadata(
+        buildTaskRun({
+          repo: 'owner-b/web',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toEqual({
+      token: 'ghs_primary_token',
+      source: 'app',
+      expiresAt: new Date('2030-01-01T00:30:00.000Z'),
+      gitCredentials: [
+        {
+          host: 'github.com',
+          repositoryFullName: 'owner-a/api',
+          username: 'x-access-token',
+          token: 'ghs_other_org_token',
+        },
+      ],
+    });
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenNthCalledWith(2, {
+      type: 'installationId',
+      installationId: 'install-a',
+      repositoryIds: [401],
+    });
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('skips another installation that fails to mint without failing the run', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+    mockCreateGitHubTokenWithMetadata
+      .mockResolvedValueOnce({
+        token: 'ghs_primary_token',
+        expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('installation suspended'), { status: 403 }),
+      );
+
+    await expect(
+      createTaskRunWorkerGitHubTokenWithMetadata(
+        buildTaskRun({
+          repo: 'owner-b/web',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toEqual({
+      token: 'ghs_primary_token',
+      source: 'app',
+      expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+    });
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('skipping: owner-a/api: installation suspended'),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('propagates a transient failure on another installation so refresh retries', async () => {
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+    mockCreateGitHubTokenWithMetadata
+      .mockResolvedValueOnce({
+        token: 'ghs_primary_token',
+        expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Service unavailable'), { status: 503 }),
+      );
+
+    await expect(
+      createTaskRunWorkerGitHubTokenWithMetadata(
+        buildTaskRun({
+          repo: 'owner-b/web',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow('Service unavailable');
+  });
+
+  it.each([
+    Object.assign(new Error('API rate limit exceeded for installation'), {
+      status: 403,
+    }),
+    Object.assign(new Error('The endpoint has been spammed'), { status: 422 }),
+  ])(
+    'treats a rate-limited mint on another installation as transient',
+    async (rateLimitError) => {
+      mockFindMany.mockResolvedValue([
+        {
+          fullName: 'owner-a/api',
+          installationId: 'install-a',
+          githubRepoId: 401,
+        },
+        {
+          fullName: 'owner-b/web',
+          installationId: 'install-b',
+          githubRepoId: 402,
+        },
+      ]);
+      mockCreateGitHubTokenWithMetadata
+        .mockResolvedValueOnce({
+          token: 'ghs_primary_token',
+          expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+        })
+        .mockRejectedValueOnce(rateLimitError);
+
+      await expect(
+        createTaskRunWorkerGitHubTokenWithMetadata(
+          buildTaskRun({
+            repo: 'owner-b/web',
+            repositoryProviders: {
+              'owner-a/api': 'github',
+              'owner-b/web': 'github',
+            },
+          } as TaskRun['payload']),
+        ),
+      ).rejects.toBe(rateLimitError);
+    },
+  );
 
   it('evicts a cached task token and retries once after a 401', async () => {
     mockCreateGitHubTokenWithMetadata
