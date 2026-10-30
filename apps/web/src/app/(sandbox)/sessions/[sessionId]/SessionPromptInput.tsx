@@ -389,16 +389,26 @@ export function SessionPromptInput({
         toast.error('Goal Mode does not support attachments.');
         return false;
       }
-      const result = await trpcClient.fastSessions.startGoal.mutate({
-        sessionId,
-        objective,
-      });
-      if (!result.success) {
-        toast.error(result.error);
+      try {
+        const result = await trpcClient.fastSessions.startGoal.mutate({
+          sessionId,
+          objective,
+        });
+        if (!result.success) {
+          toast.error(result.error);
+          return false;
+        }
+        toast.success(`Pursuing goal: ${objective}`);
+        sent = true;
+      } catch (error) {
+        toast.error('Could not start the goal.', {
+          description:
+            error instanceof Error && error.message
+              ? error.message
+              : 'Try again shortly.',
+        });
         return false;
       }
-      toast.success(`Pursuing goal: ${objective}`);
-      sent = true;
     } else {
       // Always send the current picker state: it round-trips the persisted
       // choice and clears it when the picker is reset to the default.
