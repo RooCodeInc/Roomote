@@ -52,6 +52,7 @@ import {
   SelectTrigger,
   SelectValue,
   Sparkles,
+  Skeleton,
   Spinner,
   Switch,
 } from '@/components/system';
@@ -191,6 +192,7 @@ export function SourceControl() {
 
   const gitHubInstallations = useGitHubInstallations();
   const sourceControlConfigStatus = useSourceControlConfigStatus();
+  const [retryingProviderStatus, setRetryingProviderStatus] = useState(false);
   const gitHubRepositories = useRepositories({
     sourceControlProvider: 'github',
   });
@@ -465,12 +467,42 @@ export function SourceControl() {
           {isAdmin ? <SourceControlAdminSettings /> : null}
         </div>
       </Section>
-      {providerBlocks.map((providerBlock) => (
-        <SourceControlProviderBlock
-          key={providerBlock.provider}
-          {...providerBlock}
-        />
-      ))}
+      {sourceControlConfigStatus.isError || retryingProviderStatus ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+          <p role="status" className="text-sm text-foreground">
+            Failed to load source control provider status.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-label="Retry provider status"
+            aria-busy={sourceControlConfigStatus.isFetching}
+            disabled={sourceControlConfigStatus.isFetching}
+            onClick={() => {
+              setRetryingProviderStatus(true);
+              void sourceControlConfigStatus
+                .refetch()
+                .finally(() => setRetryingProviderStatus(false));
+            }}
+          >
+            {sourceControlConfigStatus.isFetching ? <Spinner /> : null}
+            {sourceControlConfigStatus.isFetching ? 'Retrying...' : 'Retry'}
+          </Button>
+        </div>
+      ) : null}
+      {sourceControlConfigStatus.data
+        ? providerBlocks.map((providerBlock) => (
+            <SourceControlProviderBlock
+              key={providerBlock.provider}
+              {...providerBlock}
+            />
+          ))
+        : sourceControlConfigStatus.isPending && !retryingProviderStatus
+          ? providerBlocks.map(({ provider }) => (
+              <Skeleton key={provider} className="h-24 w-full rounded-lg" />
+            ))
+          : null}
     </div>
   );
 }
