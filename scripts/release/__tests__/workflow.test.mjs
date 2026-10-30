@@ -289,7 +289,7 @@ test('GHCR app and embedded worker use the checked-out build commit', () => {
   );
   assert.match(
     workerRelease,
-    /^echo "\$\{GITHUB_SHA:-.*\}" > "\$TAG\/COMMIT"$/m,
+    /^echo "\$\{GITHUB_SHA:-.*\}" > "\$PACKAGE_DIR\/COMMIT"$/m,
   );
 });
 

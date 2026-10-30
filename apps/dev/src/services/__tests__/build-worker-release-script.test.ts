@@ -91,6 +91,7 @@ exit 44
           BASH_ENV: '/dev/null',
           PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
           PNPM_LOG: pnpmLogPath,
+          GITHUB_SHA: '0123456789abcdef0123456789abcdef01234567',
           SENTRY_AUTH_TOKEN: 'task-sentry-token',
           SENTRY_ORG: '',
           SENTRY_PROJECT: '',
@@ -128,6 +129,7 @@ exit 44
       ['NODE_PTY_VERSION', '1.0.0\n'],
       ['PM2_VERSION', '7.0.1\n'],
       ['VERSION', 'local-dev\n'],
+      ['COMMIT', '0123456789abcdef0123456789abcdef01234567\n'],
     ]) {
       const { stdout } = await execa(
         'tar',
