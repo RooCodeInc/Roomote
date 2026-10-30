@@ -289,6 +289,76 @@ describe('MockTelegramServer', () => {
     expect(message?.reactions).toEqual(['👀']);
   });
 
+  it('keeps bot reactions through duplicate deliveries and edits without crossing chats', async () => {
+    const received: Array<{
+      headers: IncomingMessage['headers'];
+      body: string;
+    }> = [];
+    const webhook = await startStubWebhook(received);
+    onCleanup(() => webhook.stop());
+    const { server, baseUrl } = await startServer(baseState(), {
+      webhookUrl: webhook.url,
+      secretToken: 'synthetic-webhook-secret',
+    });
+    onCleanup(() => server.stop());
+    await providerFor(baseUrl).addReaction({
+      channelId: '111000111',
+      messageId: '1000',
+      name: 'eyes',
+    });
+    const message = {
+      message_id: 1000,
+      chat: { id: 111000111, type: 'private' },
+      from: { id: 111000111, first_name: 'Grace' },
+      text: 'please look into the flaky login test',
+    };
+    await server.dispatch({ kind: 'message', updateId: 42, message });
+    const storedMessage = () =>
+      server
+        .getState()
+        .messages?.find(
+          (row) => row.chat_id === '111000111' && row.message_id === 1000,
+        );
+    expect(storedMessage()?.reactions).toEqual(['👀']);
+
+    await server.dispatch({
+      kind: 'edited_message',
+      message: { ...message, text: 'updated request' },
+    });
+    expect(storedMessage()).toMatchObject({
+      text: 'updated request',
+      reactions: ['👀'],
+    });
+    await server.dispatch({
+      kind: 'message',
+      message: { ...message, chat: { id: -100222000222, type: 'supergroup' } },
+    });
+    expect(
+      server
+        .getState()
+        .messages?.find(
+          (row) => row.chat_id === '-100222000222' && row.message_id === 1000,
+        )?.reactions,
+    ).toEqual([]);
+    expect(storedMessage()?.reactions).toEqual(['👀']);
+
+    const cleared = await fetch(
+      `${baseUrl}/bot${BOT_TOKEN}/setMessageReaction`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: '111000111',
+          message_id: 1000,
+          reaction: [],
+        }),
+      },
+    );
+    expect(cleared.status).toBe(200);
+    expect(storedMessage()?.reactions).toEqual([]);
+    expect(received).toHaveLength(3);
+  });
+
   it('deletes bot messages and errors on a second delete', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
