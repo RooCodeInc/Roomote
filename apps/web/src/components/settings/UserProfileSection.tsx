@@ -241,7 +241,7 @@ export function UserProfileSection({
                 )}
               </span>
             </button>
-            <div className="space-y-3">
+            <div className="min-w-0 space-y-3">
               <div className="min-w-0">
                 <p className="text-muted-foreground text-xs font-medium">
                   Name
