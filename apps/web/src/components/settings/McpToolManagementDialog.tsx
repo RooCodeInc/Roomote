@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 
 import {
   Alert,
   AlertDescription,
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -67,10 +69,30 @@ export function McpToolManagementDialog({
   isAdmin,
 }: McpToolManagementDialogProps) {
   const toolsQuery = useMcpConnectionTools(open ? mcpId : null);
+  const [retryError, setRetryError] = useState<{
+    mcpId: string;
+    message: string;
+  } | null>(null);
+  const activeRetryError = retryError?.mcpId === mcpId ? retryError : null;
+  const hasLoadError = toolsQuery.isError || activeRetryError !== null;
+  const errorMessage =
+    toolsQuery.error instanceof Error
+      ? toolsQuery.error.message
+      : 'Failed to load tools for this integration.';
+  const retryTools = async () => {
+    if (!open || !mcpId || toolsQuery.isFetching) return;
+    const error = { mcpId, message: errorMessage };
+    setRetryError(error);
+    try {
+      await toolsQuery.refetch();
+    } finally {
+      setRetryError((current) => (current === error ? null : current));
+    }
+  };
   const loadedTools = toolsQuery.data?.tools ?? [];
   const hasLoadedTools =
     !toolsQuery.isPending &&
-    !toolsQuery.isError &&
+    !hasLoadError &&
     toolsQuery.data != null &&
     loadedTools.length > 0;
 
@@ -87,29 +109,38 @@ export function McpToolManagementDialog({
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
-          {toolsQuery.isPending ? (
+          {toolsQuery.isPending && !activeRetryError ? (
             <div className="flex min-h-32 items-center justify-center">
               <Spinner />
             </div>
           ) : null}
 
-          {!toolsQuery.isPending && toolsQuery.isError ? (
+          {hasLoadError ? (
             <Alert variant="light" className="bg-card dark:bg-foreground/10">
-              <AlertDescription className="block">
-                <McpToolLoadErrorMessage
-                  integrationName={integrationName}
-                  message={
-                    toolsQuery.error instanceof Error
-                      ? toolsQuery.error.message
-                      : 'Failed to load tools for this integration.'
-                  }
-                />
+              <AlertDescription className="flex flex-wrap items-center gap-2">
+                <div className="min-w-0 flex-1 wrap-anywhere">
+                  <McpToolLoadErrorMessage
+                    integrationName={integrationName}
+                    message={activeRetryError?.message ?? errorMessage}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label="Retry loading integration tools"
+                  aria-busy={toolsQuery.isFetching}
+                  disabled={toolsQuery.isFetching}
+                  onClick={() => void retryTools()}
+                >
+                  {toolsQuery.isFetching ? 'Retrying…' : 'Retry'}
+                </Button>
               </AlertDescription>
             </Alert>
           ) : null}
 
           {!toolsQuery.isPending &&
-          !toolsQuery.isError &&
+          !hasLoadError &&
           toolsQuery.data?.tools.length === 0 ? (
             <Alert variant="light">
               <AlertDescription>
