@@ -70,6 +70,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  RetryableLoadError,
   Slack,
   VideoIcon,
   Rows4,
@@ -410,6 +411,8 @@ function SessionArtifactViewer({
     data: artifact,
     isPending,
     isError,
+    isFetching,
+    refetch,
   } = useArtifactByPath(selection.owner, selection.path, selection.version);
   const selectedArtifact =
     artifact?.path === selection.path &&
@@ -463,7 +466,15 @@ function SessionArtifactViewer({
           owner={selection.owner}
           className="h-full border-0"
           isLoading={isPending}
-          emptyMessage={isError ? 'This artifact is unavailable.' : undefined}
+          emptyMessage={
+            isError ? (
+              <RetryableLoadError
+                message="Couldn't load this artifact."
+                isRetrying={isFetching}
+                onRetry={() => void refetch()}
+              />
+            ) : undefined
+          }
           onPreviousArtifact={onPreviousArtifact}
           onNextArtifact={onNextArtifact}
         />
