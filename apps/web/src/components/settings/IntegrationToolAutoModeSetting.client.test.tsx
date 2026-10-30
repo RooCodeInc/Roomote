@@ -1,36 +1,30 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const state = vi.hoisted(() => ({
-  settings: {
-    mode: 'off' as 'off' | 'on',
-    policy: '',
-    model: { kind: 'judgment' } as
-      | { kind: 'judgment' }
-      | { kind: 'helper'; model: string }
-      | null,
-  },
-  setAuto: vi.fn(),
-}));
+type Settings = {
+  mode: 'off' | 'on';
+  policy: string;
+  model: { kind: 'judgment' } | { kind: 'helper'; model: string } | null;
+};
 
-vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({ data: state.settings }),
-  useQueryClient: () => ({ setQueryData: vi.fn() }),
-  useMutation: (options: { mutationFn: (input: unknown) => unknown }) => ({
-    isPending: false,
-    mutate: (input: unknown) => {
-      state.setAuto(input);
-      return options.mutationFn(input);
-    },
-  }),
-}));
+const state = vi.hoisted(() => ({ setAuto: vi.fn(), getAuto: vi.fn() }));
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     integrationToolPolicies: {
-      getAuto: { queryOptions: () => ({}), queryKey: () => ['auto'] },
+      getAuto: {
+        queryOptions: () => ({ queryKey: ['auto'], queryFn: state.getAuto }),
+        queryKey: () => ['auto'],
+      },
       setAuto: {
         mutationOptions: (options: object) => ({
           ...options,
-          mutationFn: async (input: unknown) => input,
+          mutationFn: state.setAuto,
         }),
       },
     },
@@ -39,14 +33,59 @@ vi.mock('@/trpc/client', () => ({
 
 import { IntegrationToolAutoModeSetting } from './IntegrationToolAutoModeSetting';
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('IntegrationToolAutoModeSetting', () => {
+  let client: QueryClient;
+  let saved: Settings;
+
   beforeEach(() => {
-    state.settings = { mode: 'off', policy: '', model: { kind: 'judgment' } };
-    state.setAuto.mockClear();
+    saved = { mode: 'off', policy: '', model: { kind: 'judgment' } };
+    client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, staleTime: Infinity },
+        mutations: { retry: false },
+      },
+    });
+    client.setQueryData(['auto'], saved);
+    state.getAuto.mockReset().mockImplementation(async () => saved);
+    state.setAuto
+      .mockReset()
+      .mockImplementation(async (input: Pick<Settings, 'mode' | 'policy'>) => ({
+        ...saved,
+        ...input,
+        policy: input.policy.trim(),
+      }));
   });
 
-  it('has no deployment-wide switch: Auto is turned on per session', () => {
-    render(<IntegrationToolAutoModeSetting />);
+  afterEach(() => client.clear());
+
+  function show() {
+    return render(
+      <QueryClientProvider client={client}>
+        <IntegrationToolAutoModeSetting />
+      </QueryClientProvider>,
+    );
+  }
+  const edit = (value: string) =>
+    fireEvent.change(screen.getByLabelText('Additional instructions'), {
+      target: { value },
+    });
+  const save = () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+  it('keeps Auto per session and saves trimmed guidance without changing the stored mode', async () => {
+    saved = { ...saved, mode: 'on', policy: 'Existing guidance' };
+    client.setQueryData(['auto'], saved);
+    show();
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(
       screen.getByText(/choose Auto from the tool approvals menu/),
@@ -54,62 +93,175 @@ describe('IntegrationToolAutoModeSetting', () => {
     expect(
       screen.getByRole('link', { name: 'Integrations page' }),
     ).toHaveAttribute('href', '/integrations');
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+      'Existing guidance',
+    );
+    edit('  Reads only.  ');
+    save();
+    await waitFor(() =>
+      expect(state.setAuto).toHaveBeenCalledWith(
+        { mode: 'on', policy: '  Reads only.  ' },
+        expect.anything(),
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeDisabled(),
+    );
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+      'Reads only.',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Discard' }),
+    ).not.toBeInTheDocument();
   });
 
-  it('always shows the guidance and saves it without changing the stored mode', async () => {
-    const { rerender } = render(<IntegrationToolAutoModeSetting />);
-    expect(
-      screen.getByPlaceholderText(
-        'For example: Anything that moves money needs a person to approve it.',
-      ),
-    ).toBeInTheDocument();
-    const guidance = screen.getByLabelText('Additional instructions');
+  it('retains edits made during Save and can persist that newer draft separately', async () => {
+    const first = deferred<Settings>();
+    state.setAuto.mockImplementationOnce(() => first.promise);
+    show();
+    edit('Ask before shared-data cleanup.');
+    save();
+    await waitFor(() => expect(state.setAuto).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
-    fireEvent.change(guidance, { target: { value: 'Reads only.' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() =>
-      expect(state.setAuto).toHaveBeenLastCalledWith({
-        mode: 'off',
-        policy: 'Reads only.',
-      }),
+    edit('Ask before shared-data cleanup. Ask before changing access too.');
+    await act(async () =>
+      first.resolve({ ...saved, policy: 'Ask before shared-data cleanup.' }),
     );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+      'Ask before shared-data cleanup. Ask before changing access too.',
+    );
+    expect(client.getQueryData<Settings>(['auto'])?.policy).toBe(
+      'Ask before shared-data cleanup.',
+    );
+    save();
+    await waitFor(() => expect(state.setAuto).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeDisabled(),
+    );
+    expect(client.getQueryData<Settings>(['auto'])?.policy).toBe(
+      'Ask before shared-data cleanup. Ask before changing access too.',
+    );
+  });
 
-    // A mode saved by an earlier release is kept as it was.
-    state.settings = {
-      mode: 'on',
-      policy: 'Existing guidance',
-      model: { kind: 'judgment' },
-    };
-    rerender(<IntegrationToolAutoModeSetting />);
+  it('preserves a dirty draft through background refresh and discards to the latest saved policy', async () => {
+    show();
+    edit('Local draft');
+    saved = { ...saved, policy: 'Updated elsewhere' };
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ['auto'] });
+    });
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+      'Local draft',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
     await waitFor(() =>
       expect(screen.getByLabelText('Additional instructions')).toHaveValue(
-        'Existing guidance',
+        'Updated elsewhere',
       ),
     );
-    fireEvent.change(screen.getByLabelText('Additional instructions'), {
-      target: { value: 'New guidance' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
+
+  it('retains the latest draft after a failed save and allows a real second mutation', async () => {
+    const first = deferred<Settings>();
+    state.setAuto.mockImplementationOnce(() => first.promise);
+    show();
+    edit('First draft');
+    save();
+    await waitFor(() => expect(state.setAuto).toHaveBeenCalledTimes(1));
+    edit('Latest draft');
+    await act(async () => first.reject(new Error('save failed')));
     await waitFor(() =>
-      expect(state.setAuto).toHaveBeenLastCalledWith({
-        mode: 'on',
-        policy: 'New guidance',
-      }),
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+      'Latest draft',
+    );
+    save();
+    await waitFor(() => expect(state.setAuto).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(client.getQueryData<Settings>(['auto'])?.policy).toBe(
+        'Latest draft',
+      ),
+    );
+  });
+
+  it('hydrates an untouched editor when a background read changes saved guidance', async () => {
+    show();
+    saved = { ...saved, policy: 'Updated elsewhere' };
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ['auto'] });
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+        'Updated elsewhere',
+      ),
+    );
+  });
+
+  it('hydrates after an edit is reverted to the exact saved policy before a background refresh', async () => {
+    show();
+    edit('Temporary local draft');
+    edit('');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    saved = { ...saved, policy: 'Updated elsewhere' };
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ['auto'] });
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+        'Updated elsewhere',
+      ),
+    );
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
+
+  it('preserves an intentional revert to the previous saved policy during an in-flight save', async () => {
+    const first = deferred<Settings>();
+    state.setAuto.mockImplementationOnce(() => first.promise);
+    show();
+    edit('Submitted change');
+    save();
+    await waitFor(() => expect(state.setAuto).toHaveBeenCalledTimes(1));
+    edit('');
+    await act(async () =>
+      first.resolve({ ...saved, policy: 'Submitted change' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue('');
+  });
+
+  it('does not consume a trailing space while continuing from the saved text', () => {
+    saved = { ...saved, policy: 'Existing guidance' };
+    client.setQueryData(['auto'], saved);
+    show();
+    edit('Existing guidance ');
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+      'Existing guidance ',
     );
   });
 
   it('says when Auto has no hosted model to assess with', () => {
-    render(<IntegrationToolAutoModeSetting />);
-    expect(
-      screen.queryByText('Auto mode isn’t available yet.'),
-    ).not.toBeInTheDocument();
-
-    state.settings = {
-      mode: 'off',
-      policy: 'Existing guidance',
+    client.setQueryData(['auto'], {
+      ...saved,
       model: { kind: 'helper', model: 'openai/gpt-test' },
-    };
-    render(<IntegrationToolAutoModeSetting />);
+    });
+    show();
     expect(
       screen.getByText('Auto mode isn’t available yet.'),
     ).toBeInTheDocument();
