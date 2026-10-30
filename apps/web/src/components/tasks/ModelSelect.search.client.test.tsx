@@ -35,6 +35,20 @@ beforeEach(() => {
 });
 
 describe('ModelSelect real controls', () => {
+  it.each([undefined, 'Environment setup model', 'Coding model'])(
+    'names the focused search input using the picker context %s',
+    async (ariaLabel) => {
+      render(<ModelSelect ariaLabel={ariaLabel} onValueChange={vi.fn()} />);
+      fireEvent.click(screen.getByRole('combobox'));
+
+      const input = await screen.findByRole('combobox', {
+        name: ariaLabel ?? 'Model',
+      });
+      expect(input.tagName).toBe('INPUT');
+      expect(input).toHaveFocus();
+    },
+  );
+
   it.each([undefined, 'Use default'])(
     'keeps eight models on Select with empty option %s',
     (emptyOptionLabel) => {
