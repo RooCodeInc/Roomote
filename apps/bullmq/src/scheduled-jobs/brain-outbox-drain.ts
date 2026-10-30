@@ -706,10 +706,11 @@ async function backfillTaskHistoryOnce(): Promise<void> {
 let brainCollectorsInFlight = false;
 
 /**
- * Set when a run ends on its time budget mid-backfill. The next run resumes
+ * Set while the PR-fact scan itself needs another pass. The next run resumes
  * PR facts from their exact saved cursor instead of rewinding by the overlap
  * window, which would rewrite the same facts every tick when one pass fills
- * the budget. In-process only: after a restart the overlap rewind is safe.
+ * the budget or the sink only accepts part of a batch. In-process only:
+ * after a restart the overlap rewind is safe.
  */
 let resumePullRequestFactsExactly = false;
 
@@ -772,12 +773,14 @@ async function runBrainCollectorsJob(): Promise<void> {
   let includeIncremental = true;
   let continueCollectorIds: string[] = [];
   let restartPullRequestFactsFromOverlap = !resumePullRequestFactsExactly;
+  let pullRequestFactsNeedContinuation = false;
 
-  const outcome = await drainBrainHistoricalIngestion({
+  await drainBrainHistoricalIngestion({
     async runPass() {
       const pullRequestFactsResult = await syncPullRequestFacts(connection, {
         restartFromOverlap: restartPullRequestFactsFromOverlap,
       });
+      pullRequestFactsNeedContinuation = pullRequestFactsResult.resumeExactly;
       restartPullRequestFactsFromOverlap = false;
 
       if (pullRequestFactsResult.interrupted) {
@@ -804,7 +807,7 @@ async function runBrainCollectorsJob(): Promise<void> {
       };
     },
   });
-  resumePullRequestFactsExactly = outcome === 'budget';
+  resumePullRequestFactsExactly = pullRequestFactsNeedContinuation;
 }
 
 /**
@@ -1495,7 +1498,11 @@ async function syncPullRequestFacts(
   options: {
     restartFromOverlap: boolean;
   },
-): Promise<{ progressed: boolean; interrupted: boolean }> {
+): Promise<{
+  progressed: boolean;
+  interrupted: boolean;
+  resumeExactly: boolean;
+}> {
   const state = await getBrainSyncState(db, PR_FACTS_COLLECTOR_ID);
   const cursor = getPullRequestFactsResumeCursor(
     state,
@@ -1543,37 +1550,50 @@ async function syncPullRequestFacts(
     .limit(PR_FACTS_BATCH_SIZE);
 
   if (facts.length === 0) {
-    return { progressed: false, interrupted: false };
+    return { progressed: false, interrupted: false, resumeExactly: false };
   }
 
   let ingested = 0;
+  let lastIngested: (typeof facts)[number] | undefined;
+  const checkpointProgress = async () => {
+    if (!lastIngested) return;
+    await upsertBrainSyncState(db, PR_FACTS_COLLECTOR_ID, {
+      watermark: lastIngested.updatedAt,
+      backfillCursor: JSON.stringify({
+        updatedAt: lastIngested.updatedAt.toISOString(),
+        id: lastIngested.id,
+      } satisfies PullRequestFactsCursor),
+    });
+  };
 
   for (const fact of facts) {
     try {
       await postToBrain(buildPullRequestFactPage(fact), connection);
       ingested++;
+      lastIngested = fact;
     } catch (error) {
+      // Keep the prefix the sink accepted. Replaying it on every retry can
+      // consume the entire rate limit before the failed fact is reached.
+      await checkpointProgress();
       // Leave the watermark unadvanced past this fact; retry next tick.
       console.warn(
         `${LOG_PREFIX} PR fact sync failed for ${fact.repositoryFullName}#${fact.prNumber}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      const interrupted = isBrainRateLimited(error) || isBrainNotReady(error);
       return {
         progressed: false,
-        interrupted: isBrainRateLimited(error) || isBrainNotReady(error),
+        interrupted,
+        // A fresh overlap rejected before any write must retry that overlap:
+        // its saved checkpoint may still be ahead of the rejected late fact.
+        resumeExactly:
+          interrupted && (ingested > 0 || !options.restartFromOverlap),
       };
     }
   }
 
-  const last = facts.at(-1)!;
-  await upsertBrainSyncState(db, PR_FACTS_COLLECTOR_ID, {
-    watermark: last.updatedAt,
-    backfillCursor: JSON.stringify({
-      updatedAt: last.updatedAt.toISOString(),
-      id: last.id,
-    } satisfies PullRequestFactsCursor),
-  });
+  await checkpointProgress();
 
   if (ingested > 0) {
     console.log(
@@ -1584,5 +1604,6 @@ async function syncPullRequestFacts(
   return {
     progressed: facts.length === PR_FACTS_BATCH_SIZE,
     interrupted: false,
+    resumeExactly: facts.length === PR_FACTS_BATCH_SIZE,
   };
 }

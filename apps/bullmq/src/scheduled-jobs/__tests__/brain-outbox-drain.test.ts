@@ -301,6 +301,7 @@ describe('task memory drain classification', () => {
 });
 
 import { personIdentitySlug } from '../brain-collectors/identity';
+import { upsertBrainSyncState } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 import {
   brainCollectorsJob,
@@ -682,6 +683,81 @@ describe('collector continuation orchestration', () => {
     }
 
     expect(mockRunBrainCollectors).not.toHaveBeenCalled();
+  });
+
+  it.each([429, 503])(
+    'checkpoints only the accepted PR-fact prefix before HTTP %s',
+    async (status) => {
+      mockGetSyncState.mockResolvedValue({ backfillCompletedAt: new Date() });
+      const updatedAt = new Date('2026-10-26T01:00:00Z');
+      const facts = [1, 2, 3].map((id) => ({
+        id: `pr-fact-${id}`,
+        repositoryFullName: 'owner/repo',
+        prNumber: id,
+        title: 'Ship it',
+        htmlUrl: `https://example.test/owner/repo/pull/${id}`,
+        authorLogin: 'octocat',
+        state: 'open',
+        createdAtRemote: updatedAt,
+        closedAtRemote: null,
+        mergedAtRemote: null,
+        updatedAt,
+      }));
+      mockPullRequestFacts.mockResolvedValue(facts);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ result: {} }))
+        .mockResolvedValueOnce(
+          new Response('embedding unavailable', { status }),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        await brainCollectorsJob();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(upsertBrainSyncState).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(String),
+        {
+          watermark: updatedAt,
+          backfillCursor: JSON.stringify({
+            updatedAt: updatedAt.toISOString(),
+            id: facts[0]!.id,
+          }),
+        },
+      );
+      expect(mockRunBrainCollectors).not.toHaveBeenCalled();
+    },
+  );
+
+  it('leaves the PR-fact checkpoint unchanged when the first write is rejected', async () => {
+    mockGetSyncState.mockResolvedValue({ backfillCompletedAt: new Date() });
+    mockPullRequestFacts.mockResolvedValue([
+      {
+        id: 'pr-fact-rejected',
+        repositoryFullName: 'owner/repo',
+        prNumber: 1,
+        title: 'Ship it',
+        htmlUrl: 'https://example.test/pr/1',
+        state: 'open',
+        createdAtRemote: new Date('2026-10-26T01:00:00Z'),
+        updatedAt: new Date('2026-10-26T01:00:00Z'),
+      },
+    ]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('rate limited', { status: 429 })),
+    );
+    try {
+      await brainCollectorsJob();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(upsertBrainSyncState).not.toHaveBeenCalled();
   });
 });
 
