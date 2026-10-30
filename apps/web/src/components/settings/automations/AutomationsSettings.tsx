@@ -1927,6 +1927,7 @@ export function AutomationsSettings({
   const [formState, setFormState] = useState<FormState | null>(null);
   const [savedState, setSavedState] = useState<FormState | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [retryingInitialSettings, setRetryingInitialSettings] = useState(false);
   const [slackChannelAccessWarnings, setSlackChannelAccessWarnings] =
     useState<SlackChannelAccessWarnings>(EMPTY_SLACK_CHANNEL_ACCESS_WARNINGS);
   const [managerSlackChannelId, setManagerSlackChannelId] = useState<
@@ -1963,6 +1964,16 @@ export function AutomationsSettings({
   });
 
   const settingsQuery = useQuery(trpc.automations.getSettings.queryOptions());
+  const hasInitialSettingsError =
+    settingsQuery.data === undefined &&
+    (settingsQuery.isError || retryingInitialSettings);
+  const retryInitialSettings = () => {
+    if (settingsQuery.isFetching || retryingInitialSettings) return;
+    setRetryingInitialSettings(true);
+    void settingsQuery
+      .refetch()
+      .finally(() => setRetryingInitialSettings(false));
+  };
   const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const slackChannelsQuery = useQuery(
     trpc.automations.listSlackChannels.queryOptions(undefined, {
@@ -3238,6 +3249,26 @@ export function AutomationsSettings({
   ) as Record<ScheduleOnlyBackgroundAutomationId, string | null>;
   return (
     <div className="space-y-6 md:flex md:min-h-0 md:flex-1 md:flex-col md:gap-6 md:space-y-0">
+      {hasInitialSettingsError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-2">
+          <p className="text-sm">
+            Could not load built-in automation settings.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label="Retry loading built-in automation settings"
+            aria-busy={retryingInitialSettings || settingsQuery.isFetching}
+            disabled={retryingInitialSettings || settingsQuery.isFetching}
+            onClick={retryInitialSettings}
+          >
+            {retryingInitialSettings || settingsQuery.isFetching
+              ? 'Retrying…'
+              : 'Retry'}
+          </Button>
+        </div>
+      ) : null}
       {!settingsQuery.isPending &&
       capabilities?.requiresSlackReconnect &&
       capabilities.missingScopes.length > 0 ? (
@@ -3290,7 +3321,8 @@ export function AutomationsSettings({
           <div className="flex flex-col gap-3 md:mr-auto">
             {toolbarLeading}
             <div id="managerChannel" className="scroll-mt-24">
-              {settingsQuery.isPending || !formState ? (
+              {hasInitialSettingsError ? null : settingsQuery.isPending ||
+                !formState ? (
                 <Skeleton className="h-5 w-64" />
               ) : (
                 <AutomationDefaultDestinationSetting
@@ -3359,7 +3391,8 @@ export function AutomationsSettings({
           </div>
         }
       >
-        {settingsQuery.isPending || !formState ? (
+        {hasInitialSettingsError ? null : settingsQuery.isPending ||
+          !formState ? (
           <LoadingSkeleton />
         ) : visibleBuiltInAutomations.size === 0 &&
           !(
