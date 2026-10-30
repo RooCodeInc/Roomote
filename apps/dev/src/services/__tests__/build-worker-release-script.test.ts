@@ -124,6 +124,22 @@ exit 44
       ]);
       expect(stdout).toBe(content);
     }
+    for (const [file, content] of [
+      ['NODE_PTY_VERSION', '1.0.0\n'],
+      ['PM2_VERSION', '7.0.1\n'],
+      ['VERSION', 'local-dev\n'],
+    ]) {
+      const { stdout } = await execa(
+        'tar',
+        [
+          '-xOzf',
+          path.join(outputDir, 'worker-vlocal-dev.tar.gz'),
+          `worker-vlocal-dev/${file}`,
+        ],
+        { stripFinalNewline: false },
+      );
+      expect(stdout).toBe(content);
+    }
   });
 
   it('preserves the last release and cleans unpublished files when native tar fails', async () => {
