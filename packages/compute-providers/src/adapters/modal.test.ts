@@ -1342,7 +1342,7 @@ describe('ModalClient', () => {
 
     expect(buildScript).toContain('NODE_PTY_VERSION="$(');
     expect(buildScript).toContain(
-      'echo "$NODE_PTY_VERSION" > "$TAG/NODE_PTY_VERSION"',
+      'echo "$NODE_PTY_VERSION" > "$PACKAGE_DIR/NODE_PTY_VERSION"',
     );
   });
 });
