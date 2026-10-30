@@ -13,11 +13,13 @@ import { useIntegrationToolPolicies } from '@/hooks/useIntegrationToolPolicies';
 import {
   Badge,
   BasicTooltip,
+  Button,
   Ban,
   CheckCheck,
   ChevronDown,
   ChevronRight,
   MessageCircleQuestionMark,
+  Skeleton,
   ToggleButton,
   type LucideIcon,
 } from '@/components/system';
@@ -248,6 +250,18 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
     enabled: open && active,
     scope,
   });
+  const [isRetrying, setIsRetrying] = useState(false);
+  const showControls = active && policies.hasData;
+  const readFailed = policies.isError || isRetrying;
+  const retryPolicies = async () => {
+    if (policies.isFetching) return;
+    setIsRetrying(true);
+    try {
+      await policies.refetch();
+    } finally {
+      setIsRetrying(false);
+    }
+  };
   const modeFor = (tool: ManageableTool) =>
     (integrationId
       ? policies.modes.get(integrationToolPolicyKey(integrationId, tool.name))
@@ -255,12 +269,39 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
 
   return (
     <>
+      {active && readFailed ? (
+        <div className="flex flex-col gap-2 pb-2 sm:flex-row sm:items-center sm:justify-between">
+          <p role="alert" className="text-sm text-foreground">
+            Unable to load tool approval choices.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="self-start"
+            aria-label="Retry loading tool approval choices"
+            disabled={policies.isFetching || isRetrying}
+            onClick={() => void retryPolicies()}
+          >
+            {policies.isFetching || isRetrying ? 'Retrying…' : 'Retry'}
+          </Button>
+        </div>
+      ) : active && !policies.hasData ? (
+        <div
+          role="status"
+          aria-label="Loading tool approval choices"
+          className="pb-2"
+        >
+          <Skeleton className="h-8 w-full" />
+        </div>
+      ) : null}
       {groupIntegrationToolsByAccess(tools).map((group) => (
         <IntegrationToolApprovalGroup
           key={group.id}
           title={group.title}
           count={group.tools.length}
-          {...(active
+          disabled={readFailed}
+          {...(showControls
             ? {
                 modes: group.tools.map((tool) => shownMode(modeFor(tool))),
                 onChangeAll: (mode: IntegrationToolPolicyMode) =>
@@ -283,8 +324,9 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
                     <ToolDescription text={tool.description} />
                   ) : null}
                 </div>
-                {active ? (
+                {showControls ? (
                   <IntegrationToolApprovalModeControl
+                    disabled={readFailed}
                     toolName={tool.name}
                     value={shownMode(modeFor(tool))}
                     onChange={(mode) => {

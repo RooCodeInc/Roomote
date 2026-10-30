@@ -96,6 +96,10 @@ vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
         ],
       ]),
       isUpdating: false,
+      hasData: true,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
       setMode: approvals.setMode,
       setModes: vi.fn(),
     };
