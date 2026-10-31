@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { betterAuth } from 'better-auth';
 import { APIError } from 'better-auth/api';
 import { nextCookies } from 'better-auth/next-js';
-import { genericOAuth, microsoftEntraId, slack } from 'better-auth/plugins';
+import { genericOAuth, slack } from 'better-auth/plugins';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
 // Subpath import on purpose: the SDK barrel drags the whole server graph
@@ -30,6 +30,11 @@ import { Env, getBetterAuthSecret, isEmailChannelEnabled } from './env';
 import { getBetterAuthBaseUrlConfig } from './better-auth-base-url';
 import { withCanonicalForwardedProto } from './canonical-forwarded-proto';
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
+import {
+  MICROSOFT_ENTRA_PROVIDER_ID,
+  normalizeLegacyOAuthCallback,
+  oauthCompatibilityPlugin,
+} from './auth-oauth-compatibility';
 import {
   isNewAuthUserEmailAllowed,
   isSignInAllowedByAccessPolicy,
@@ -202,7 +207,6 @@ type AdoProfile = {
   id?: unknown;
 };
 
-const MICROSOFT_ENTRA_PROVIDER_ID = 'microsoft-entra-id';
 const SLACK_OPENID_SCOPES = ['openid', 'profile', 'email'];
 const DEFAULT_GITLAB_BASE_URL = 'https://gitlab.com';
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
@@ -779,23 +783,7 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
               clientSecret: slackClientSecret,
               scopes: SLACK_OPENID_SCOPES,
             }),
-            authorizationUrlParams: () => ({
-              nonce: crypto.randomUUID(),
-            }),
           },
-        ]
-      : []),
-    ...(hasMicrosoftAuth
-      ? [
-          microsoftEntraId({
-            clientId: microsoftClientId,
-            clientSecret: microsoftClientSecret,
-            tenantId: microsoftTenantId,
-            // offline_access stores an Entra refresh token so delegated
-            // Microsoft Graph tokens (Teams history reads) can be minted for
-            // the linked user later.
-            scopes: ['openid', 'profile', 'email', 'offline_access'],
-          }),
         ]
       : []),
     ...(gitlabClientId && gitlabClientSecret
@@ -1260,6 +1248,15 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       ...(genericOAuthConfigs.length > 0
         ? [genericOAuth({ config: genericOAuthConfigs })]
         : []),
+      oauthCompatibilityPlugin(
+        hasMicrosoftAuth
+          ? {
+              clientId: microsoftClientId,
+              clientSecret: microsoftClientSecret,
+              tenantId: microsoftTenantId,
+            }
+          : undefined,
+      ),
       nextCookies(),
     ],
   });
@@ -1287,6 +1284,6 @@ export async function handleAuthRequest(request: Request) {
   // otherwise have no access to the request.
   return runWithInviteContext(
     extractInviteTokenFromRequest(normalizedRequest),
-    () => auth.handler(normalizedRequest),
+    () => auth.handler(normalizeLegacyOAuthCallback(normalizedRequest)),
   );
 }

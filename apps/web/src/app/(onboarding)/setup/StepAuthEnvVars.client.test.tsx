@@ -47,8 +47,7 @@ vi.mock('sonner', () => ({
 vi.mock('@/lib/auth-client', () => ({
   authClient: {
     signIn: {
-      oauth2: signInOauth2Mock,
-      social: signInSocialMock,
+      social: signInOauth2Mock,
     },
   },
 }));
@@ -1064,7 +1063,7 @@ describe('StepAuthEnvVars', () => {
 
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
-        providerId: 'microsoft-entra-id',
+        provider: 'microsoft-entra-id',
         callbackURL: '/setup',
         disableRedirect: true,
       });
@@ -1108,7 +1107,7 @@ describe('StepAuthEnvVars', () => {
 
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
-        providerId: 'slack',
+        provider: 'slack',
         callbackURL: '/api/slack/install-after-auth?redirect=%2Fsetup',
         disableRedirect: true,
       });
@@ -1149,7 +1148,7 @@ describe('StepAuthEnvVars', () => {
 
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
-        providerId: 'microsoft-entra-id',
+        provider: 'microsoft-entra-id',
         callbackURL: '/setup',
         disableRedirect: true,
       });

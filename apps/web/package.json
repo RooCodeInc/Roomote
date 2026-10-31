@@ -28,7 +28,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1000.0",
     "@aws-sdk/s3-request-presigner": "3.1000.0",
-    "@better-auth/drizzle-adapter": "^1.6.22",
+    "@better-auth/drizzle-adapter": "^1.7.12",
     "@codemirror/lang-yaml": "^6.0.0",
     "@codemirror/merge": "^6.0.0",
     "@codemirror/state": "^6.0.0",
@@ -92,7 +92,7 @@
     "@zxcvbn-ts/core": "^4.1.2",
     "ai": "^6.0.116",
     "ansi-to-react": "^6.2.6",
-    "better-auth": "^1.6.22",
+    "better-auth": "^1.7.12",
     "better-sse": "^0.16.1",
     "change-case": "^5.4.4",
     "class-variance-authority": "^0.7.1",

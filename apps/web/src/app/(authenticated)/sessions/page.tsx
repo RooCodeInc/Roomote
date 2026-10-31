@@ -19,6 +19,7 @@ import {
   type SessionScope,
 } from '@/lib/server/sessions';
 import { Empty, EmptyDescription, EmptyHeader } from '@/components/system';
+import { SessionSelection } from '@/components/sessions/SessionSelection';
 
 import { SessionsFilters } from './SessionsFilters';
 import { SessionCard } from './SessionCard';
@@ -130,100 +131,107 @@ export default async function SessionsPage({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 w-full flex-col bg-card">
-      <div className="border-b-4 border-b-card bg-background p-4">
-        <SessionsFilters
-          userId={user ?? null}
-          timePeriod={timePeriod}
-          scope={scope}
-          status={status ?? 'all'}
-          view={view}
-          query={q ?? ''}
-          repository={params.repository ?? null}
-          pullRequest={params.pullRequest ?? null}
-          source={params.source ?? 'all'}
-          sourceOptions={sources}
-          model={params.model ?? null}
-          archive={archive}
-        />
-      </div>
-      <main
-        className={`min-h-0 flex-1 overflow-y-auto bg-background ${view === 'board' ? 'md:flex md:flex-col md:overflow-hidden' : ''}`}
+      <SessionSelection
+        key={JSON.stringify(params)}
+        sessionIds={result.sessions
+          .filter((session) => session.canManage)
+          .map((session) => session.id)}
+        toolbar={
+          <SessionsFilters
+            userId={user ?? null}
+            timePeriod={timePeriod}
+            scope={scope}
+            status={status ?? 'all'}
+            view={view}
+            query={q ?? ''}
+            repository={params.repository ?? null}
+            pullRequest={params.pullRequest ?? null}
+            source={params.source ?? 'all'}
+            sourceOptions={sources}
+            model={params.model ?? null}
+            archive={archive}
+          />
+        }
       >
-        {result.sessions.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              {hasAppliedFilters ? (
-                <>
-                  <EmptyDescription>
-                    No sessions match your filters.
-                  </EmptyDescription>
-                  <EmptyDescription>
-                    <Link
-                      href={clearFiltersHref}
-                      className="font-semibold hover:underline"
+        <main
+          className={`min-h-0 flex-1 overflow-y-auto bg-background ${view === 'board' ? 'md:flex md:flex-col md:overflow-hidden' : ''}`}
+        >
+          {result.sessions.length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                {hasAppliedFilters ? (
+                  <>
+                    <EmptyDescription>
+                      No sessions match your filters.
+                    </EmptyDescription>
+                    <EmptyDescription>
+                      <Link
+                        href={clearFiltersHref}
+                        className="font-semibold hover:underline"
+                      >
+                        Clear filters
+                      </Link>{' '}
+                      to show all sessions.
+                    </EmptyDescription>
+                  </>
+                ) : (
+                  <EmptyDescription>No sessions found.</EmptyDescription>
+                )}
+              </EmptyHeader>
+            </Empty>
+          ) : view === 'board' ? (
+            <SessionBoard>
+              {boardColumns.map(({ column, sessions: columnSessions }) => (
+                <SessionBoardColumn
+                  key={column}
+                  column={column}
+                  label={getSessionStatusLabel(column)}
+                  count={columnSessions.length}
+                  statusFilter={status}
+                >
+                  {columnSessions.map((session) => (
+                    <SessionBoardCard
+                      key={session.id}
+                      sessionId={session.id}
+                      column={column}
+                      canManage={session.canManage ?? false}
+                      title={session.title}
                     >
-                      Clear filters
-                    </Link>{' '}
-                    to show all sessions.
-                  </EmptyDescription>
-                </>
-              ) : (
-                <EmptyDescription>No sessions found.</EmptyDescription>
-              )}
-            </EmptyHeader>
-          </Empty>
-        ) : view === 'board' ? (
-          <SessionBoard>
-            {boardColumns.map(({ column, sessions: columnSessions }) => (
-              <SessionBoardColumn
-                key={column}
-                column={column}
-                label={getSessionStatusLabel(column)}
-                count={columnSessions.length}
-                statusFilter={status}
+                      <SessionCard
+                        session={session}
+                        viewerUserId={authorizedUser.userId}
+                        query={q}
+                        hideAttentionBadges
+                      />
+                    </SessionBoardCard>
+                  ))}
+                </SessionBoardColumn>
+              ))}
+            </SessionBoard>
+          ) : (
+            <div className="divide-y divide-card">
+              {result.sessions.map((session) => (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  viewerUserId={authorizedUser.userId}
+                  query={q}
+                />
+              ))}
+            </div>
+          )}
+          {result.nextCursor ? (
+            <div className="flex justify-center p-4">
+              <Link
+                href={`/sessions?${olderParams.toString()}`}
+                className="text-sm underline-offset-4 hover:underline"
               >
-                {columnSessions.map((session) => (
-                  <SessionBoardCard
-                    key={session.id}
-                    sessionId={session.id}
-                    column={column}
-                    canManage={session.canManage ?? false}
-                    title={session.title}
-                  >
-                    <SessionCard
-                      session={session}
-                      viewerUserId={authorizedUser.userId}
-                      query={q}
-                      hideAttentionBadges
-                    />
-                  </SessionBoardCard>
-                ))}
-              </SessionBoardColumn>
-            ))}
-          </SessionBoard>
-        ) : (
-          <div className="divide-y divide-card">
-            {result.sessions.map((session) => (
-              <SessionCard
-                key={session.id}
-                session={session}
-                viewerUserId={authorizedUser.userId}
-                query={q}
-              />
-            ))}
-          </div>
-        )}
-        {result.nextCursor ? (
-          <div className="flex justify-center p-4">
-            <Link
-              href={`/sessions?${olderParams.toString()}`}
-              className="text-sm underline-offset-4 hover:underline"
-            >
-              Show older sessions
-            </Link>
-          </div>
-        ) : null}
-      </main>
+                Show older sessions
+              </Link>
+            </div>
+          ) : null}
+        </main>
+      </SessionSelection>
     </div>
   );
 }

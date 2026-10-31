@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { format, formatDistanceToNow, isSameDay, isSameYear } from 'date-fns';
 import type { SessionManualStatus } from '@roomote/types';
 
@@ -21,6 +20,11 @@ import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInfe
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
+import {
+  SessionSelectionControl,
+  SessionSelectionLink,
+  SessionSelectionRow,
+} from '@/components/sessions/SessionSelection';
 import { SessionActions } from '../../(sandbox)/sessions/[sessionId]/SessionDeleteAction';
 
 type SessionCardData = {
@@ -108,41 +112,53 @@ export function SessionCard({
   const accessibleActivityTimestamp = activityDate.toLocaleString();
 
   return (
-    <div className="ph-no-capture group/card relative flex w-full @container items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10 group-data-[dragging=true]/board:hover:bg-transparent">
-      <Link
+    <SessionSelectionRow
+      sessionId={session.id}
+      className="ph-no-capture group/card relative flex w-full @container items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10 group-data-[dragging=true]/board:hover:bg-transparent"
+    >
+      <SessionSelectionLink
+        sessionId={session.id}
+        title={session.title}
+        canManage={session.canManage ?? false}
         href={`/sessions/${session.id}`}
         className="absolute inset-0 z-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="sr-only">{session.title}</span>
-      </Link>
+      </SessionSelectionLink>
       <div className="pointer-events-none relative z-10 mt-1 shrink-0">
-        {session.ownerKind === 'automation' ? (
-          <span
-            className="flex size-8 items-center justify-center overflow-clip rounded-full border border-border bg-white dark:bg-muted"
-            aria-hidden="true"
-          >
-            <TaskAutomationIcon
-              automationKey={session.ownerAutomation}
-              className="size-7"
+        <SessionSelectionControl
+          sessionId={session.id}
+          title={session.title}
+          canManage={session.canManage ?? false}
+        >
+          {session.ownerKind === 'automation' ? (
+            <span
+              className="flex size-8 items-center justify-center overflow-clip rounded-full border border-border bg-white dark:bg-muted"
+              aria-hidden="true"
+            >
+              <TaskAutomationIcon
+                automationKey={session.ownerAutomation}
+                className="size-7"
+              />
+            </span>
+          ) : (
+            <Avatar
+              imageUrl={session.ownerImageUrl}
+              name={ownerDisplayName}
+              email={session.ownerEmail ?? undefined}
+              size="md"
+              alt=""
+              loading="eager"
+              decoding="sync"
             />
-          </span>
-        ) : (
-          <Avatar
-            imageUrl={session.ownerImageUrl}
-            name={ownerDisplayName}
-            email={session.ownerEmail ?? undefined}
-            size="md"
-            alt=""
-            loading="eager"
-            decoding="sync"
-          />
-        )}
-        {session.unread && session.ownerUserId === viewerUserId ? (
-          <span
-            aria-label="Unread activity"
-            className="absolute top-0 right-0 size-2 rounded-full bg-accent-foreground ring-2 ring-background"
-          />
-        ) : null}
+          )}
+          {session.unread && session.ownerUserId === viewerUserId ? (
+            <span
+              aria-label="Unread activity"
+              className="absolute top-0 right-0 size-2 rounded-full bg-accent-foreground ring-2 ring-background"
+            />
+          ) : null}
+        </SessionSelectionControl>
       </div>
       <div className="pointer-events-none relative z-10 min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground/75 md:items-center">
@@ -230,6 +246,6 @@ export function SessionCard({
           />
         </div>
       ) : null}
-    </div>
+    </SessionSelectionRow>
   );
 }

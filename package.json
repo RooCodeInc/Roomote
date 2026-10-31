@@ -1,6 +1,6 @@
 {
   "name": "roomote",
-  "version": "1.19.5",
+  "version": "1.19.6",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
@@ -109,8 +109,8 @@
       "glob": ">=13.0.3",
       "follow-redirects": "1.16.1",
       "ioredis": "5.10.1",
-      "better-auth>zod": "^4.3.6",
-      "@better-auth/core>zod": "^4.3.6",
+      "better-auth>zod": "^4.5.0",
+      "@better-auth/core>zod": "^4.5.0",
       "js-cookie": "3.0.7",
       "js-yaml": "4.3.2",
       "gray-matter>js-yaml": "3.15.2",

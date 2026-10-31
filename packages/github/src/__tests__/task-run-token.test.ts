@@ -4,7 +4,9 @@ const {
   mockFindFirst,
   mockFindEnvironmentFirst,
   mockFindMappings,
+  mockFindInstallation,
 } = vi.hoisted(() => ({
+  mockFindInstallation: vi.fn(),
   mockCreateGitHubTokenWithMetadata: vi.fn(),
   mockFindMany: vi.fn(),
   mockFindFirst: vi.fn(),
@@ -28,10 +30,16 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: mockFindEnvironmentFirst,
       },
       environmentRepositoryMappings: { findMany: mockFindMappings },
+      githubInstallations: { findFirst: mockFindInstallation },
     },
   },
+  asc: vi.fn((value: unknown) => ({ type: 'asc', value })),
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
-  githubInstallations: {},
+  githubInstallations: {
+    id: 'githubInstallations.id',
+    createdAt: 'githubInstallations.createdAt',
+    suspendedAt: 'githubInstallations.suspendedAt',
+  },
   githubPendingInstallations: {},
   environments: {
     id: 'environments.id',
@@ -490,6 +498,47 @@ describe('createTaskRunGitHubToken', () => {
     );
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining('Not reachable with this token: owner-a/api'),
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('anchors an all-repository stamp without an environment on the oldest installation', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+    mockFindInstallation.mockResolvedValue({ id: 'install-a' });
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: '__all_repositories__',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toBe('ghs_test_token');
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-a',
+        repositoryIds: [401],
+      },
+      undefined,
+      undefined,
     );
     consoleWarnSpy.mockRestore();
   });
