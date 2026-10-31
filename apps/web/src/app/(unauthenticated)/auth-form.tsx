@@ -109,8 +109,8 @@ export function AuthForm({
 
     try {
       const callbackURL = getAuthProviderCallbackUrl(provider, redirectUrl);
-      const result = await authClient.signIn.oauth2({
-        providerId: provider === 'slack' ? provider : 'microsoft-entra-id',
+      const result = await authClient.signIn.social({
+        provider: provider === 'slack' ? provider : 'microsoft-entra-id',
         callbackURL,
       });
 

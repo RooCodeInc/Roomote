@@ -19,7 +19,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/auth-client', () => ({
   authClient: {
     signIn: {
-      oauth2: signInOauth2Mock,
+      social: signInOauth2Mock,
     },
   },
 }));
@@ -51,7 +51,7 @@ describe('AuthForm', () => {
 
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
-        providerId: 'slack',
+        provider: 'slack',
         callbackURL:
           '/api/slack/install-after-auth?redirect=%2Ftasks%3Fview%3Dmine',
       });
@@ -69,7 +69,7 @@ describe('AuthForm', () => {
 
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
-        providerId: 'microsoft-entra-id',
+        provider: 'microsoft-entra-id',
         callbackURL: '/setup',
       });
     });
@@ -86,7 +86,7 @@ describe('AuthForm', () => {
 
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
-        providerId: 'microsoft-entra-id',
+        provider: 'microsoft-entra-id',
         callbackURL: '/setup',
       });
     });
@@ -103,7 +103,7 @@ describe('AuthForm', () => {
 
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
-        providerId: 'microsoft-entra-id',
+        provider: 'microsoft-entra-id',
         callbackURL: '/setup',
       });
     });
@@ -120,7 +120,7 @@ describe('AuthForm', () => {
 
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
-        providerId: 'microsoft-entra-id',
+        provider: 'microsoft-entra-id',
         callbackURL: '/settings',
       });
     });

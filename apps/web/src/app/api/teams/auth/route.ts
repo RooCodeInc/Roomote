@@ -98,14 +98,14 @@ async function startMicrosoftOAuth({
   const authResponse = await handleAuthRequest(
     new Request(
       new URL(
-        type === 'link' ? '/api/auth/oauth2/link' : '/api/auth/sign-in/oauth2',
+        type === 'link' ? '/api/auth/link-social' : '/api/auth/sign-in/social',
         callbackHost,
       ),
       {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          providerId: MICROSOFT_ENTRA_PROVIDER_ID,
+          provider: MICROSOFT_ENTRA_PROVIDER_ID,
           callbackURL: returnPath,
           errorCallbackURL: returnPath,
         }),

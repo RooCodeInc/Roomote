@@ -80,12 +80,12 @@ describe('GET /api/teams/auth', () => {
 
     const authRequest = handleAuthRequestMock.mock.calls[0]?.[0] as Request;
     await expect(authRequest.clone().json()).resolves.toMatchObject({
-      providerId: 'microsoft-entra-id',
+      provider: 'microsoft-entra-id',
       callbackURL: '/api/teams/auth?state=token-1',
       errorCallbackURL: '/api/teams/auth?state=token-1',
     });
     expect(authRequest.url).toBe(
-      'http://localhost:13000/api/auth/sign-in/oauth2',
+      'http://localhost:13000/api/auth/sign-in/social',
     );
     // Better Auth rejects POSTs without an Origin (MISSING_OR_NULL_ORIGIN).
     expect(authRequest.headers.get('origin')).toBe('http://localhost:13000');
@@ -135,11 +135,11 @@ describe('GET /api/teams/auth', () => {
     );
 
     const authRequest = handleAuthRequestMock.mock.calls[0]?.[0] as Request;
-    expect(authRequest.url).toBe('http://localhost:13000/api/auth/oauth2/link');
+    expect(authRequest.url).toBe('http://localhost:13000/api/auth/link-social');
     expect(authRequest.headers.get('cookie')).toBe('session=abc');
     expect(authRequest.headers.get('origin')).toBe('http://localhost:13000');
     await expect(authRequest.clone().json()).resolves.toMatchObject({
-      providerId: 'microsoft-entra-id',
+      provider: 'microsoft-entra-id',
       callbackURL: '/api/teams/auth?state=token-3&linked=1',
       errorCallbackURL: '/api/teams/auth?state=token-3&linked=1',
     });

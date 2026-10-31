@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { betterAuth } from 'better-auth';
 import { APIError } from 'better-auth/api';
 import { nextCookies } from 'better-auth/next-js';
-import { genericOAuth, microsoftEntraId, slack } from 'better-auth/plugins';
+import { genericOAuth, slack } from 'better-auth/plugins';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
 // Subpath import on purpose: the SDK barrel drags the whole server graph
@@ -30,6 +30,11 @@ import { Env, getBetterAuthSecret, isEmailChannelEnabled } from './env';
 import { getBetterAuthBaseUrlConfig } from './better-auth-base-url';
 import { withCanonicalForwardedProto } from './canonical-forwarded-proto';
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
+import {
+  normalizeLegacyOAuthCallback,
+  oauthCompatibilityPlugin,
+  EXPLICIT_LINK_PROVIDERS,
+} from './auth-oauth-compatibility';
 import {
   isNewAuthUserEmailAllowed,
   isSignInAllowedByAccessPolicy,
@@ -779,23 +784,7 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
               clientSecret: slackClientSecret,
               scopes: SLACK_OPENID_SCOPES,
             }),
-            authorizationUrlParams: () => ({
-              nonce: crypto.randomUUID(),
-            }),
           },
-        ]
-      : []),
-    ...(hasMicrosoftAuth
-      ? [
-          microsoftEntraId({
-            clientId: microsoftClientId,
-            clientSecret: microsoftClientSecret,
-            tenantId: microsoftTenantId,
-            // offline_access stores an Entra refresh token so delegated
-            // Microsoft Graph tokens (Teams history reads) can be minted for
-            // the linked user later.
-            scopes: ['openid', 'profile', 'email', 'offline_access'],
-          }),
         ]
       : []),
     ...(gitlabClientId && gitlabClientSecret
@@ -1099,6 +1088,9 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       modelName: 'authAccounts',
       accountLinking: {
         allowDifferentEmails: true,
+        // The compatibility plugin limits these providers to server-stamped
+        // explicit links; their unverified emails cannot implicitly link users.
+        trustedProviders: EXPLICIT_LINK_PROVIDERS,
       },
     },
     verification: {
@@ -1260,6 +1252,15 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       ...(genericOAuthConfigs.length > 0
         ? [genericOAuth({ config: genericOAuthConfigs })]
         : []),
+      oauthCompatibilityPlugin(
+        hasMicrosoftAuth
+          ? {
+              clientId: microsoftClientId,
+              clientSecret: microsoftClientSecret,
+              tenantId: microsoftTenantId,
+            }
+          : undefined,
+      ),
       nextCookies(),
     ],
   });
@@ -1287,6 +1288,6 @@ export async function handleAuthRequest(request: Request) {
   // otherwise have no access to the request.
   return runWithInviteContext(
     extractInviteTokenFromRequest(normalizedRequest),
-    () => auth.handler(normalizedRequest),
+    () => auth.handler(normalizeLegacyOAuthCallback(normalizedRequest)),
   );
 }
