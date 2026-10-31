@@ -8,34 +8,97 @@ import {
 import type { OAuthProvider } from 'better-auth/oauth2';
 import { verifyProviderIdToken } from 'better-auth/oauth2';
 import { microsoft } from 'better-auth/social-providers';
-import { and, authAccounts, authUsers, db, eq } from '@roomote/db/server';
 
-const PROVIDERS = new Set([
+export const MICROSOFT_ENTRA_PROVIDER_ID = 'microsoft-entra-id';
+
+// Providers registered with the legacy generic-OAuth callback URL whose
+// profiles may carry placeholder or unverified emails.
+const PROVIDER_IDS = new Set([
   'slack',
-  'microsoft-entra-id',
+  MICROSOFT_ENTRA_PROVIDER_ID,
   'gitlab',
   'gitea',
   'bitbucket',
   'ado',
 ]);
-export const EXPLICIT_LINK_PROVIDERS = [
-  'gitlab',
-  'gitea',
-  'bitbucket',
-  'ado',
-  'slack',
-  'microsoft-entra-id',
-];
 
-// Keep provider-registered URLs stable, including on dynamically resolved
-// preview hosts. Both authorization and token exchange must use this URL.
-function legacyCallback(redirectURI: string) {
-  const url = new URL(redirectURI);
-  url.pathname = url.pathname.replace(
-    '/api/auth/callback/',
-    '/api/auth/oauth2/callback/',
-  );
-  return url.toString();
+type ProviderTokens = Parameters<OAuthProvider['getUserInfo']>[0];
+type ProviderUserInfo = NonNullable<
+  Awaited<ReturnType<OAuthProvider['getUserInfo']>>
+>;
+
+// The built-in Microsoft helper decodes the ID token without verifying it.
+// Verify it first (signature, issuer, audience, expiry, tenant, nonce), then
+// bind the old helper's OIDC userinfo profile (name, preferred_username and
+// optional email_verified) to the verified subject.
+async function verifyMicrosoftProfile(
+  provider: OAuthProvider,
+  tokens: ProviderTokens,
+): Promise<ProviderUserInfo | null> {
+  if (
+    !tokens.idToken ||
+    !(await verifyProviderIdToken(
+      provider,
+      tokens.idToken,
+      tokens.expectedIdTokenNonce,
+    ))
+  )
+    return null;
+  const info = await provider.getUserInfo(tokens);
+  if (!info) return null;
+  const response = await fetch('https://graph.microsoft.com/oidc/userinfo', {
+    headers: { Authorization: `Bearer ${tokens.accessToken}` },
+  });
+  if (!response.ok) return null;
+  const profile = (await response.json()) as {
+    sub?: string;
+    name?: string;
+    given_name?: string;
+    family_name?: string;
+    email?: string;
+    preferred_username?: string;
+    picture?: string;
+    email_verified?: boolean;
+  };
+  if (!('sub' in info.data) || profile.sub !== info.data.sub) return null;
+  return {
+    data: info.data,
+    user: {
+      name:
+        profile.name ??
+        (`${profile.given_name ?? ''} ${profile.family_name ?? ''}`.trim() ||
+          undefined),
+      email: profile.email ?? profile.preferred_username,
+      image: profile.picture,
+      emailVerified: profile.email_verified ?? false,
+    },
+  };
+}
+
+// Explicit linking is the only flow allowed to accept these providers'
+// unverified or placeholder emails. Core's link flow only checks
+// userInfo.emailVerified and never persists it, so marking the profile
+// verified for a server-stamped explicit link lets that link proceed while
+// sign-in keeps core's default policy: an unverified email can neither
+// create a user implicitly linked by email nor attach itself to an existing
+// user, and returning users still sign in by their linked identity.
+async function applyExplicitLinkTrust(
+  providerId: string,
+  info: ProviderUserInfo,
+): Promise<ProviderUserInfo> {
+  const state = await getOAuthState();
+  const marker = state?.serverContext?.roomoteExplicitLink;
+  const explicitLink =
+    !!state?.link &&
+    !!marker &&
+    typeof marker === 'object' &&
+    'providerId' in marker &&
+    marker.providerId === providerId &&
+    'userId' in marker &&
+    marker.userId === state.link.userId;
+  return explicitLink
+    ? { ...info, user: { ...info.user, emailVerified: true } }
+    : info;
 }
 
 export function oauthCompatibilityPlugin(options?: {
@@ -51,12 +114,14 @@ export function oauthCompatibilityPlugin(options?: {
         const provider = microsoft({
           ...options,
           disableDefaultScope: true,
+          // offline_access stores an Entra refresh token so delegated
+          // Microsoft Graph tokens (Teams history reads) can be minted later.
           scope: ['openid', 'profile', 'email', 'offline_access'],
           disableProfilePhoto: true,
         });
         providers.push({
           ...provider,
-          id: 'microsoft-entra-id',
+          id: MICROSOFT_ENTRA_PROVIDER_ID,
           requiresIdTokenNonce: true,
           // Existing accounts use the app-scoped OIDC subject, not Graph oid.
           // Keep all upstream signature, issuer, audience and tenant checks.
@@ -70,10 +135,13 @@ export function oauthCompatibilityPlugin(options?: {
         context: {
           socialProviders: providers.map((provider) => ({
             ...provider,
+            // Keep provider-registered URLs stable, including on dynamically
+            // resolved preview hosts. Core composes the redirect URI for both
+            // authorization and token exchange as baseURL + callbackPath.
+            callbackPath: `/oauth2/callback/${provider.id}`,
             createAuthorizationURL: async (data) => {
               const url = await provider.createAuthorizationURL({
                 ...data,
-                redirectURI: legacyCallback(data.redirectURI),
                 // The Slack helper uses the authenticated userinfo endpoint,
                 // and needs a fresh authorization nonce for every request.
                 ...(provider.id === 'slack'
@@ -82,123 +150,21 @@ export function oauthCompatibilityPlugin(options?: {
               });
               // The built-in Microsoft helper does not yet forward the core
               // nonce argument; bind its verified ID token to this flow too.
-              if (provider.id === 'microsoft-entra-id' && data.idTokenNonce) {
+              if (
+                provider.id === MICROSOFT_ENTRA_PROVIDER_ID &&
+                data.idTokenNonce
+              ) {
                 url.searchParams.set('nonce', data.idTokenNonce);
               }
               return url;
             },
-            validateAuthorizationCode: (data) =>
-              provider.validateAuthorizationCode({
-                ...data,
-                redirectURI: legacyCallback(data.redirectURI),
-              }),
             getUserInfo: async (tokens) => {
-              if (
-                provider.id === 'microsoft-entra-id' &&
-                (!tokens.idToken ||
-                  !(await verifyProviderIdToken(
-                    provider,
-                    tokens.idToken,
-                    tokens.expectedIdTokenNonce,
-                  )))
-              )
-                return null;
-              let info = await provider.getUserInfo(tokens);
-              if (!info) return null;
-              if (provider.id === 'microsoft-entra-id') {
-                // Preserve the old helper's OIDC userinfo profile (including
-                // preferred_username and optional email_verified), but bind it
-                // to the subject from the ID token verified above.
-                const response = await fetch(
-                  'https://graph.microsoft.com/oidc/userinfo',
-                  {
-                    headers: { Authorization: `Bearer ${tokens.accessToken}` },
-                  },
-                );
-                if (!response.ok) return null;
-                const profile = (await response.json()) as {
-                  sub?: string;
-                  name?: string;
-                  given_name?: string;
-                  family_name?: string;
-                  email?: string;
-                  preferred_username?: string;
-                  picture?: string;
-                  email_verified?: boolean;
-                };
-                if (!('sub' in info.data) || profile.sub !== info.data.sub)
-                  return null;
-                info = {
-                  data: info.data,
-                  user: {
-                    name:
-                      profile.name ??
-                      (`${profile.given_name ?? ''} ${profile.family_name ?? ''}`.trim() ||
-                        undefined),
-                    email: profile.email ?? profile.preferred_username,
-                    image: profile.picture,
-                    emailVerified: profile.email_verified ?? false,
-                  },
-                };
-              }
-              if (EXPLICIT_LINK_PROVIDERS.includes(provider.id)) {
-                const state = await getOAuthState();
-                // These providers may return placeholder/unverified emails.
-                // Trust them only for a session-authorized explicit link,
-                // never as evidence for implicit email-based account linking.
-                if (state) {
-                  const marker = state.serverContext?.roomoteExplicitLink;
-                  const explicitLink =
-                    marker &&
-                    typeof marker === 'object' &&
-                    'providerId' in marker &&
-                    marker.providerId === provider.id &&
-                    'userId' in marker &&
-                    marker.userId === state.link?.userId;
-                  if (!explicitLink) {
-                    if (
-                      !state.link &&
-                      (provider.id === 'slack' ||
-                        provider.id === 'microsoft-entra-id')
-                    ) {
-                      // Normal sign-up remains available, and verified emails
-                      // retain core's implicit-link policy. Unverified emails
-                      // may only sign in by an already linked identity.
-                      if (info.user.emailVerified) return info;
-                      if (
-                        info.user.email &&
-                        !(await db.query.authUsers.findFirst({
-                          where: eq(
-                            authUsers.email,
-                            info.user.email.toLowerCase(),
-                          ),
-                        }))
-                      )
-                        return info;
-                    }
-                    // Existing provider identities can still sign in, but an
-                    // unlinked identity cannot attach itself by email.
-                    if (state.link || !provider.accountSubject) return null;
-                    const accountId = await provider.accountSubject({
-                      tokens,
-                      profile: info.data,
-                    });
-                    if (
-                      typeof accountId !== 'string' &&
-                      typeof accountId !== 'number'
-                    )
-                      return null;
-                    const account = await db.query.authAccounts.findFirst({
-                      where: and(
-                        eq(authAccounts.providerId, provider.id),
-                        eq(authAccounts.accountId, String(accountId)),
-                      ),
-                    });
-                    if (!account) return null;
-                  }
-                }
-              }
-              return info;
+              const info =
+                provider.id === MICROSOFT_ENTRA_PROVIDER_ID
+                  ? await verifyMicrosoftProfile(provider, tokens)
+                  : await provider.getUserInfo(tokens);
+              if (!info || !PROVIDER_IDS.has(provider.id)) return info;
+              return applyExplicitLinkTrust(provider.id, info);
             },
           })),
         },
@@ -208,8 +174,7 @@ export function oauthCompatibilityPlugin(options?: {
       before: [
         {
           matcher: (ctx) =>
-            ctx.path === '/link-social' &&
-            EXPLICIT_LINK_PROVIDERS.includes(ctx.body?.provider),
+            ctx.path === '/link-social' && PROVIDER_IDS.has(ctx.body?.provider),
           handler: createAuthMiddleware(async (ctx) => {
             const session = await getSessionFromCtx(ctx);
             if (session)
@@ -226,12 +191,14 @@ export function oauthCompatibilityPlugin(options?: {
   };
 }
 
-// Internal dispatch only: no browser redirect, so POST callbacks retain their
-// form body and all upstream state/nonce validation still runs in core.
+// Rewrites the registered legacy callback URL onto core's /callback/:id route
+// before dispatch, so state and nonce validation still run in core. Core
+// answers a form POST callback with a 302 to its own /api/auth/callback/:id,
+// so that path is browser-visible and must stay reachable as well.
 export function normalizeLegacyOAuthCallback(request: Request): Request {
   const url = new URL(request.url);
   const match = /^\/api\/auth\/oauth2\/callback\/([^/]+)$/.exec(url.pathname);
-  if (!match || !PROVIDERS.has(match[1]!)) return request;
+  if (!match || !PROVIDER_IDS.has(match[1]!)) return request;
   url.pathname = `/api/auth/callback/${match[1]}`;
   return new Request(url, request);
 }

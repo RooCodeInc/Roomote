@@ -42,6 +42,7 @@ let exchanges: URLSearchParams[];
 let userIds: string[];
 let extraClaims: Record<string, unknown>;
 let tokenNonce: string | null;
+let slackEmailVerified: boolean;
 
 function jwt() {
   const encode = (value: object) =>
@@ -144,6 +145,7 @@ beforeEach(() => {
   exchanges = [];
   userIds = [];
   extraClaims = {};
+  slackEmailVerified = true;
   vi.mocked(resolveAuthProviderConfig).mockResolvedValue({
     signature: crypto.randomUUID(),
     slackClientId: 'fixture-client',
@@ -192,7 +194,7 @@ beforeEach(() => {
           sub: subject,
           email: `${subject}@example.test`,
           name: 'Slack Fixture',
-          email_verified: true,
+          email_verified: slackEmailVerified,
         });
       }
       if (
@@ -385,9 +387,10 @@ it('retains returning generic OAuth sign-in by existing provider identity', asyn
   ).toBe(user.id);
 });
 
-it.each(['gitlab', 'microsoft-entra-id'])(
+it.each(['slack', 'gitlab', 'microsoft-entra-id'])(
   'keeps unverified %s profiles out of implicit email linking',
   async (provider) => {
+    slackEmailVerified = false;
     const signup = await request('sign-up/email', {
       email: `${subject}@example.test`,
       name: 'Existing Fixture',

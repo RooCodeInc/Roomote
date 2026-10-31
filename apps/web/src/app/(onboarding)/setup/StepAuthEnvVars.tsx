@@ -24,17 +24,11 @@ import {
 
 const BOOTSTRAP_SIGN_IN_CALLBACK_PATH = '/setup';
 
-function getOAuth2ProviderId(
+// Microsoft sign-in is registered under the Entra provider id.
+function toSocialProviderId(
   providerId: SetupAuthStatus['preselectedProvider'],
-): string | null {
-  switch (providerId) {
-    case 'slack':
-      return providerId;
-    case 'microsoft':
-      return 'microsoft-entra-id';
-    default:
-      return null;
-  }
+): string {
+  return providerId === 'microsoft' ? 'microsoft-entra-id' : providerId;
 }
 
 export function StepAuthEnvVars({
@@ -118,8 +112,7 @@ export function StepAuthEnvVars({
             BOOTSTRAP_SIGN_IN_CALLBACK_PATH,
           );
           const result = await authClient.signIn.social({
-            provider:
-              getOAuth2ProviderId(selectedProvider.id) ?? selectedProvider.id,
+            provider: toSocialProviderId(selectedProvider.id),
             callbackURL,
             disableRedirect: true,
           });

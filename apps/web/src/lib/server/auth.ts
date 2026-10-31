@@ -31,9 +31,9 @@ import { getBetterAuthBaseUrlConfig } from './better-auth-base-url';
 import { withCanonicalForwardedProto } from './canonical-forwarded-proto';
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
 import {
+  MICROSOFT_ENTRA_PROVIDER_ID,
   normalizeLegacyOAuthCallback,
   oauthCompatibilityPlugin,
-  EXPLICIT_LINK_PROVIDERS,
 } from './auth-oauth-compatibility';
 import {
   isNewAuthUserEmailAllowed,
@@ -207,7 +207,6 @@ type AdoProfile = {
   id?: unknown;
 };
 
-const MICROSOFT_ENTRA_PROVIDER_ID = 'microsoft-entra-id';
 const SLACK_OPENID_SCOPES = ['openid', 'profile', 'email'];
 const DEFAULT_GITLAB_BASE_URL = 'https://gitlab.com';
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
@@ -1088,15 +1087,6 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       modelName: 'authAccounts',
       accountLinking: {
         allowDifferentEmails: true,
-        // The compatibility plugin limits these providers to server-stamped
-        // explicit links; their unverified emails cannot implicitly link users.
-        trustedProviders: (request) =>
-          request &&
-          /^\/api\/auth\/(?:oauth2\/)?callback\//.test(
-            new URL(request.url).pathname,
-          )
-            ? EXPLICIT_LINK_PROVIDERS
-            : [],
       },
     },
     verification: {
