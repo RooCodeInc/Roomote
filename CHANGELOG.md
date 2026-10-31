@@ -2,6 +2,20 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.19.6 (2026-10-31)
+
+Roomote 1.19.6 restores reliable all-repository automations across GitHub organizations and makes it easier to clean up sessions without losing your place.
+
+### Highlights
+
+- Run all-repository automations when multiple GitHub organizations are connected.
+- Select and delete sessions in bulk from either overview, keeping your current view and filters.
+
+### Patch changes
+
+- All-repository automations now start reliably when connected GitHub repositories span multiple organizations, instead of failing to create source-control credentials after another GitHub App installation is added.
+- Select and delete multiple sessions from the Sessions list or board again, with page-scoped selection and failed deletions retained for retry. Deleting one or several sessions keeps you in the current overview with its filters and page instead of redirecting home.
+
 ## 1.19.5 (2026-10-29)
 
 Roomote 1.19.5 improves GitHub work across organizations and restores integration-key access for scheduled and manually run custom automations.
