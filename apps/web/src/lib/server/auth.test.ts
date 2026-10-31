@@ -203,6 +203,27 @@ describe('getAuth', () => {
     expect(options.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
   });
 
+  it('limits explicit-link provider trust to state-validated callback requests', async () => {
+    await getAuth();
+    const trust =
+      mockBetterAuth.mock.calls.at(-1)?.[0].account.accountLinking
+        .trustedProviders;
+    expect(trust(undefined)).toEqual([]);
+    expect(
+      trust(new Request('https://auth.example.test/api/auth/sign-in/social')),
+    ).toEqual([]);
+    expect(
+      trust(new Request('https://auth.example.test/api/auth/link-social')),
+    ).toEqual([]);
+    expect(
+      trust(
+        new Request(
+          'https://auth.example.test/api/auth/callback/microsoft-entra-id',
+        ),
+      ),
+    ).toContain('microsoft-entra-id');
+  });
+
   it('delivers password reset links through AgentMail when email is enabled', async () => {
     mockIsEmailChannelEnabled.mockReturnValue(true);
     await getAuth();

@@ -1090,7 +1090,13 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
         allowDifferentEmails: true,
         // The compatibility plugin limits these providers to server-stamped
         // explicit links; their unverified emails cannot implicitly link users.
-        trustedProviders: EXPLICIT_LINK_PROVIDERS,
+        trustedProviders: (request) =>
+          request &&
+          /^\/api\/auth\/(?:oauth2\/)?callback\//.test(
+            new URL(request.url).pathname,
+          )
+            ? EXPLICIT_LINK_PROVIDERS
+            : [],
       },
     },
     verification: {
