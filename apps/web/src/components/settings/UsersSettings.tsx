@@ -234,13 +234,28 @@ export function UsersSettings() {
     return <Skeleton className="h-64 w-full" />;
   }
 
-  if (settingsQuery.isError || !settingsQuery.data) {
-    return (
-      <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-        <p>Failed to load user settings.</p>
-      </div>
-    );
+  const loadError = (
+    <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+      <AlertCircle className="size-4 shrink-0" />
+      <p className="flex-1">
+        {settingsQuery.data
+          ? 'Failed to refresh user settings.'
+          : 'Failed to load user settings.'}
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={settingsQuery.isFetching}
+        onClick={() => void settingsQuery.refetch()}
+      >
+        Retry
+      </Button>
+    </div>
+  );
+
+  if (!settingsQuery.data) {
+    return loadError;
   }
 
   const {
@@ -327,6 +342,7 @@ export function UsersSettings() {
 
   return (
     <div className="space-y-6">
+      {settingsQuery.isError ? loadError : null}
       {cloudEnabled ? null : (
         <Section icon={ScrollText} title="License">
           <div className="space-y-4">
