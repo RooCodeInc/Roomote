@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
 
 const authorizeSchema = z.object({
   response_type: z.literal('code'),
-  client_id: z.string().uuid(),
+  client_id: z.guid(),
   redirect_uri: z.string().url(),
   state: z.string().min(1),
   code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/),

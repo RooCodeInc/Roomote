@@ -257,7 +257,7 @@ export async function integrationRequest(
       : undefined;
   const secretRef = z
     .string()
-    .uuid()
+    .check(z.guid())
     .safeParse(
       typeof rawId === 'string' && rawId.startsWith('session:')
         ? rawId.slice(8)

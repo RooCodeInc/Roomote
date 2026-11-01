@@ -19,7 +19,7 @@ export const llmUsageRouter = router({
         eventKey: z.string().min(1).nullable().optional(),
         taskId: z.string().nullable().optional(),
         runId: z.number().int().nullable().optional(),
-        environmentId: z.string().uuid().nullable().optional(),
+        environmentId: z.guid().nullable().optional(),
         harnessSessionId: z.string().nullable().optional(),
         messageId: z.string().nullable().optional(),
         providerId: z.string().nullable().optional(),
@@ -36,8 +36,11 @@ export const llmUsageRouter = router({
         costSource: z.enum(LLM_USAGE_COST_SOURCES).nullable().optional(),
         messageCreatedAt: z.date().nullable().optional(),
         messageCompletedAt: z.date().nullable().optional(),
-        pricingMetadata: z.record(z.unknown()).nullable().optional(),
-        details: z.record(z.unknown()).nullable().optional(),
+        pricingMetadata: z
+          .record(z.string(), z.unknown())
+          .nullable()
+          .optional(),
+        details: z.record(z.string(), z.unknown()).nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {

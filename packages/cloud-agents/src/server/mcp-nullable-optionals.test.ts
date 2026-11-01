@@ -137,6 +137,59 @@ describe('withNullableOptionals', () => {
   it('passes through undefined unchanged', () => {
     expect(withNullableOptionals(undefined)).toBeUndefined();
   });
+
+  it('preserves object and array checks and descriptions while adapting nested fields', () => {
+    const original = z
+      .object({
+        entries: z
+          .array(z.object({ name: z.string().optional() }))
+          .max(2)
+          .describe('bounded entries'),
+      })
+      .refine((value) => value.entries.length > 0, 'At least one entry')
+      .describe('checked object');
+    const adapted = withNullableOptionals(original);
+    expect(adapted.description).toBe('checked object');
+    expect(adapted.shape.entries.description).toBe('bounded entries');
+    expect(adapted.parse({ entries: [{ name: null }] })).toEqual({
+      entries: [{ name: undefined }],
+    });
+    expect(adapted.safeParse({ entries: [] }).success).toBe(false);
+    expect(adapted.safeParse({ entries: [{}, {}, {}] }).success).toBe(false);
+  });
+
+  it('adapts nested discriminated unions and transformed objects', () => {
+    const original = z
+      .discriminatedUnion('kind', [
+        z.object({ kind: z.literal('text'), note: z.string().optional() }),
+        z.object({
+          kind: z.literal('count'),
+          count: z.number().int().optional(),
+        }),
+      ])
+      .transform((value) => ({ ...value, parsed: true }));
+    const adapted = withNullableOptionals(original);
+    expect(adapted.parse({ kind: 'text', note: null })).toEqual({
+      kind: 'text',
+      note: undefined,
+      parsed: true,
+    });
+    expect(adapted.parse({ kind: 'count', count: '2' })).toEqual({
+      kind: 'count',
+      count: 2,
+      parsed: true,
+    });
+    expect(adapted.safeParse({ kind: 'other' }).success).toBe(false);
+  });
+
+  it('evaluates a default factory for each null input', () => {
+    let next = 0;
+    const adapted = withNullableOptionals(
+      z.object({ value: z.number().default(() => ++next) }),
+    );
+    expect(adapted.parse({ value: null }).value).toBe(1);
+    expect(adapted.parse({ value: null }).value).toBe(2);
+  });
 });
 
 describe('NullableOptionalsMcpServer', () => {
@@ -255,7 +308,7 @@ describe('NullableOptionalsMcpServer', () => {
     >;
     expect(properties.prNumber).toMatchObject({ type: 'integer' });
     expect(properties.resolved).toMatchObject({
-      anyOf: [{ type: 'boolean' }, { type: 'null' }],
+      type: ['boolean', 'null'],
     });
 
     await client.callTool({

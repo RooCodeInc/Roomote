@@ -138,8 +138,8 @@ const adoServiceHookSubscriptionSchema = z
     resourceVersion: z.string().optional(),
     consumerId: z.string().optional(),
     consumerActionId: z.string().optional(),
-    publisherInputs: z.record(z.string()).optional(),
-    consumerInputs: z.record(z.string()).optional(),
+    publisherInputs: z.record(z.string(), z.string()).optional(),
+    consumerInputs: z.record(z.string(), z.string()).optional(),
   })
   .passthrough();
 const adoServiceHookSubscriptionListResponseSchema = z.object({

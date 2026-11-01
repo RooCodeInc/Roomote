@@ -96,7 +96,7 @@ const fastAgentCapabilitySnapshotSchema = z.object({
     >,
   ),
   initialMilestones: z
-    .record(
+    .partialRecord(
       fastAgentCapabilityIdSchema,
       z.enum(['offered', 'completed', 'declined', 'deferred']),
     )

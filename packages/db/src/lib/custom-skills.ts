@@ -34,7 +34,7 @@ async function requireMember(tx: Transaction, actorUserId: string) {
 }
 
 async function readSkill(tx: Transaction, skillId: string) {
-  if (!z.string().uuid().safeParse(skillId).success)
+  if (!z.guid().safeParse(skillId).success)
     throw new CreateCustomSkillError('Skill not found', 404);
   const [skill] = await tx
     .select()

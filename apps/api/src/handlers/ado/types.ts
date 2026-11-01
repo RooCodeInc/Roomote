@@ -167,7 +167,7 @@ const adoWorkItemResourceSchema = z
     // work-item-update shape with per-field old/new values.
     revision: z
       .object({
-        fields: z.record(adoWorkItemRevisionFieldSchema).optional(),
+        fields: z.record(z.string(), adoWorkItemRevisionFieldSchema).optional(),
         revisedBy: adoIdentitySchema.optional(),
       })
       .passthrough()

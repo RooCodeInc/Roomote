@@ -3,11 +3,11 @@ import { z } from 'zod';
 export const automationAdditionalRulesSchema = z
   .object({
     text: z.string().min(1).max(8000),
-    repositoryIds: z.array(z.string().uuid()).nullable(),
+    repositoryIds: z.array(z.guid()).nullable(),
     destinations: z.array(
       z
         .object({
-          repositoryId: z.string().uuid(),
+          repositoryId: z.guid(),
           target: z
             .object({
               provider: z.enum(['slack', 'discord', 'teams', 'telegram']),

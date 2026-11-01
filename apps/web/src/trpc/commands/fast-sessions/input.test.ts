@@ -76,15 +76,21 @@ describe('Session input schemas', () => {
   });
 
   it('rejects too many extracted attachments', () => {
-    expect(() =>
-      startFastSessionInputSchema.parse({
-        text: 'Implement these plans',
-        attachmentTexts: Array.from(
-          { length: 21 },
-          (_, index) => `Attachment ${index}`,
-        ),
+    const result = startFastSessionInputSchema.safeParse({
+      text: 'Implement these plans',
+      attachmentTexts: Array.from(
+        { length: 21 },
+        (_, index) => `Attachment ${index}`,
+      ),
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toEqual([
+      expect.objectContaining({
+        code: 'too_big',
+        maximum: 20,
+        path: ['attachmentTexts'],
       }),
-    ).toThrow('Array must contain at most 20 element(s)');
+    ]);
   });
 
   it('rejects extracted attachment text over the aggregate limit', () => {

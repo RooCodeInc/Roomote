@@ -9,6 +9,7 @@ const requestSchema = z.object({
   state: z.unknown(),
   questions: z
     .record(
+      z.string(),
       z.object({
         type: z.literal('noul'),
         instructions: z.string().min(1).max(32_768),

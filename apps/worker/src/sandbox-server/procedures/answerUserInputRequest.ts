@@ -15,6 +15,7 @@ import {
 } from './slackQuoteTracking';
 
 const requestUserInputAnswersSchema = z.record(
+  z.string(),
   z.object({
     answers: z.array(z.string()),
   }),

@@ -221,7 +221,7 @@ function toOpenCodeJsonSchema(zod: ZodV4, args: unknown) {
 describe('Fast native tool schemas as OpenAI receives them', () => {
   const validator = new Ajv2020({ strict: false }).addFormat(
     'uuid',
-    (value: string) => z.string().uuid().safeParse(value).success,
+    (value: string) => z.guid().safeParse(value).success,
   );
   let workDir: string;
   let zod: ZodV4;

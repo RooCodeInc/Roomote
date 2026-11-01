@@ -25,7 +25,7 @@ const inboundMessageSchema = z
     message_id: z.number().int().optional(),
     message_thread_id: z.number().int().optional(),
     date: z.number().int().optional(),
-    entities: z.array(z.record(z.unknown())).optional(),
+    entities: z.array(z.record(z.string(), z.unknown())).optional(),
   })
   .passthrough();
 
@@ -70,7 +70,7 @@ const configSchema = z.object({
         })
         .passthrough(),
     ),
-    messages: z.array(z.record(z.unknown())).optional(),
+    messages: z.array(z.record(z.string(), z.unknown())).optional(),
     behavior: z
       .object({
         rejectHtmlParseMode: z.boolean().optional(),
@@ -99,13 +99,13 @@ const configSchema = z.object({
               id: z.string().min(1),
               from: z.object({ id: z.number() }).passthrough(),
               data: z.string().optional(),
-              message: z.record(z.unknown()).optional(),
+              message: z.record(z.string(), z.unknown()).optional(),
             })
             .passthrough(),
         }),
         z.object({
           kind: z.literal('update'),
-          update: z.record(z.unknown()),
+          update: z.record(z.string(), z.unknown()),
         }),
       ]),
     )

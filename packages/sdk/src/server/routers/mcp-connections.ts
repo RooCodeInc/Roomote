@@ -271,7 +271,7 @@ export const mcpConnectionsRouter = router({
   hasValidTokens: userOnlyProcedure
     .input(
       z.object({
-        id: z.string().uuid(),
+        id: z.guid(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -353,7 +353,7 @@ export const mcpConnectionsRouter = router({
    * not be able to read directly.
    */
   markCredentialEgressBootstrapReady: authenticatedProcedure
-    .input(z.object({ nonce: z.string().uuid() }).strict())
+    .input(z.object({ nonce: z.guid() }).strict())
     .mutation(async ({ ctx, input }) => {
       try {
         await markCredentialEgressBootstrapReady(ctx.auth, input.nonce);
@@ -367,7 +367,7 @@ export const mcpConnectionsRouter = router({
     }),
 
   getCredentialEgressDelivery: authenticatedProcedure
-    .input(z.object({ nonce: z.string().uuid() }).strict())
+    .input(z.object({ nonce: z.guid() }).strict())
     .query(async ({ ctx, input }) => {
       try {
         return {

@@ -44,7 +44,7 @@ const rBioconductorRecipeSchema = z
         r_version: z.string().min(1),
         bioconductor_version: z.string().min(1),
         packages: z.array(rResolvedPackageSchema).min(1),
-        renv_lock: z.record(z.unknown()),
+        renv_lock: z.record(z.string(), z.unknown()),
         resolution_fingerprint: recipeFingerprintSchema,
       })
       .optional(),

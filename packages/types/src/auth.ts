@@ -10,13 +10,13 @@ export const runTokenPayloadSchema = z.object({
   exp: z.number().int().positive('Expiration (exp) must be a positive integer'),
   iat: z.number().int().positive('Issued at (iat) must be a positive integer'),
   nbf: z.number().int().positive('Not before (nbf) must be a positive integer'),
-  v: z.literal(1, { errorMap: () => ({ message: 'Version must be 1' }) }),
+  v: z.literal(1, { error: () => ({ message: 'Version must be 1' }) }),
   r: z.object({
     // Absent user claim means the run runs as the deployment service
     // principal (automation-initiated work with no human driver).
     u: z.string().min(1, 'User ID must be non-empty when present').optional(),
     t: z.literal('run', {
-      errorMap: () => ({ message: 'Token type must be "run"' }),
+      error: () => ({ message: 'Token type must be "run"' }),
     }),
   }),
 });
@@ -51,11 +51,11 @@ export const authTokenPayloadSchema = z.object({
   exp: z.number().int().positive('Expiration (exp) must be a positive integer'),
   iat: z.number().int().positive('Issued at (iat) must be a positive integer'),
   nbf: z.number().int().positive('Not before (nbf) must be a positive integer'),
-  v: z.literal(1, { errorMap: () => ({ message: 'Version must be 1' }) }),
+  v: z.literal(1, { error: () => ({ message: 'Version must be 1' }) }),
   r: z.object({
     u: z.string().min(1, 'User ID is required'),
     t: z.literal('auth', {
-      errorMap: () => ({ message: 'Token type must be "auth"' }),
+      error: () => ({ message: 'Token type must be "auth"' }),
     }),
   }),
 });
@@ -91,11 +91,11 @@ export const mcpAccessTokenPayloadSchema = z.object({
   exp: z.number().int().positive('Expiration (exp) must be a positive integer'),
   iat: z.number().int().positive('Issued at (iat) must be a positive integer'),
   nbf: z.number().int().positive('Not before (nbf) must be a positive integer'),
-  v: z.literal(1, { errorMap: () => ({ message: 'Version must be 1' }) }),
+  v: z.literal(1, { error: () => ({ message: 'Version must be 1' }) }),
   r: z.object({
     u: z.string().min(1, 'User ID is required'),
     t: z.literal('mcp', {
-      errorMap: () => ({ message: 'Token type must be "mcp"' }),
+      error: () => ({ message: 'Token type must be "mcp"' }),
     }),
     s: z.array(z.string().min(1)).min(1, 'At least one scope is required'),
   }),
@@ -121,16 +121,16 @@ export interface McpAccessTokenContext {
 export const previewTokenPayloadSchema = z.object({
   iss: z.string().min(1, 'Issuer (iss) is required'),
   sub: z.literal('preview', {
-    errorMap: () => ({ message: 'Subject must be "preview"' }),
+    error: () => ({ message: 'Subject must be "preview"' }),
   }),
   exp: z.number().int().positive('Expiration (exp) must be a positive integer'),
   iat: z.number().int().positive('Issued at (iat) must be a positive integer'),
   nbf: z.number().int().positive('Not before (nbf) must be a positive integer'),
-  v: z.literal(1, { errorMap: () => ({ message: 'Version must be 1' }) }),
+  v: z.literal(1, { error: () => ({ message: 'Version must be 1' }) }),
   r: z.object({
     u: z.string().min(1, 'User ID is required'),
     t: z.literal('pt', {
-      errorMap: () => ({ message: 'Token type must be "pt"' }),
+      error: () => ({ message: 'Token type must be "pt"' }),
     }),
   }),
 });

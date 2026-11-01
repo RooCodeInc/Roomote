@@ -9,10 +9,10 @@ import { findAccessibleSession } from '@/lib/server/sessions';
 
 export const runtime = 'nodejs';
 
-const paramsSchema = z.object({ sessionId: z.string().uuid() });
+const paramsSchema = z.object({ sessionId: z.guid() });
 const bodySchema = z.object({
-  notificationId: z.string().uuid(),
-  clientId: z.string().uuid(),
+  notificationId: z.guid(),
+  clientId: z.guid(),
   action: z.enum(['accepted', 'failed', 'opened']),
 });
 

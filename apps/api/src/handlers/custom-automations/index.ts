@@ -63,7 +63,7 @@ const modelSchema = z
   .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.');
 
 const environmentTargetSchema = z.union([
-  z.string().uuid(),
+  z.guid(),
   z.literal(ALL_REPOSITORIES),
   z.literal(FAST_EXECUTION),
 ]);

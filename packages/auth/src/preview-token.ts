@@ -86,7 +86,7 @@ export async function validatePreviewToken(
   const parseResult = previewTokenPayloadSchema.safeParse(rawPayload);
 
   if (!parseResult.success) {
-    const validationErrors = parseResult.error.errors
+    const validationErrors = parseResult.error.issues
       .map((err) => `${err.path.join('.')}: ${err.message}`)
       .join(', ');
 

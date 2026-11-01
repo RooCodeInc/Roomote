@@ -170,6 +170,7 @@ const acpRequestUserInputQuestionSchema = z.object({
 });
 
 const acpRequestUserInputAnswersSchema = z.record(
+  z.string(),
   z.object({
     answers: z.array(z.string()),
   }),
@@ -252,7 +253,7 @@ function runTokenOnlyScoped<T extends z.ZodType>(
 
       const targetId =
         typeof extractRunId === 'function'
-          ? extractRunId(input)
+          ? extractRunId(input as z.output<T>)
           : (input as Record<string, unknown>)[extractRunId as string];
 
       if (targetId !== ctx.auth.runId) {
@@ -317,7 +318,7 @@ export const taskRunsRouter = router({
       // apps/api sendMessageToTask and the webhook queue sites), which write
       // task_runs directly. Both fields sent by a run-token caller are
       // stripped by this schema.
-      result: z.record(z.unknown()).optional(),
+      result: z.record(z.string(), z.unknown()).optional(),
     }),
     'id',
   ).mutation(({ input: { id, ...values } }) => updateTaskRun(id, values)),
@@ -412,7 +413,7 @@ export const taskRunsRouter = router({
       source: z.enum(runEventSources),
       eventType: z.enum(runEventTypes),
       message: z.string().optional(),
-      details: z.record(z.unknown()).optional(),
+      details: z.record(z.string(), z.unknown()).optional(),
     }),
     'runId',
   ).mutation(({ input }) => recordTaskRunEvent(input)),
@@ -540,7 +541,7 @@ export const taskRunsRouter = router({
       costSource: z.enum(LLM_USAGE_COST_SOURCES).nullable().optional(),
       messageCreatedAt: z.date().nullable().optional(),
       messageCompletedAt: z.date().nullable().optional(),
-      details: z.record(z.unknown()).nullable().optional(),
+      details: z.record(z.string(), z.unknown()).nullable().optional(),
     }),
     'runId',
   ).mutation(({ input }) => recordTaskInferenceUsage(input)),
@@ -604,7 +605,7 @@ export const taskRunsRouter = router({
         .nonnegative()
         .nullable()
         .optional(),
-      details: z.record(z.unknown()).nullable().optional(),
+      details: z.record(z.string(), z.unknown()).nullable().optional(),
     }),
     'runId',
   ).mutation(({ input }) => recordComputeProviderUsage(input)),

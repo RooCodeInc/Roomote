@@ -116,7 +116,7 @@ const integrationToolArgumentValueSchema = z.union([
   z.boolean(),
   z.null(),
   z.array(z.unknown()),
-  z.record(z.unknown()),
+  z.record(z.string(), z.unknown()),
 ]);
 
 /**
@@ -187,7 +187,7 @@ export const CALL_INTEGRATION_TOOL_TOOL = {
     // models take the null branch for a property-less object even when the
     // integration tool needs arguments.
     args: z
-      .record(integrationToolArgumentValueSchema)
+      .record(z.string(), integrationToolArgumentValueSchema)
       .describe(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args),
   },
   annotations: {

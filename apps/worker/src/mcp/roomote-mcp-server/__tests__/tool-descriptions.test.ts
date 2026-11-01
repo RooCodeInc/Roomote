@@ -136,10 +136,11 @@ function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
   while (
     current instanceof z.ZodOptional ||
     current instanceof z.ZodNullable ||
-    current instanceof z.ZodEffects
+    current instanceof z.ZodPipe
   ) {
-    current =
-      current instanceof z.ZodEffects ? current.innerType() : current.unwrap();
+    current = (
+      current instanceof z.ZodPipe ? current.in : current.unwrap()
+    ) as z.ZodType;
   }
 
   return current;

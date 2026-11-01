@@ -41,11 +41,11 @@ const fastSessionMessageInputShape = {
  * prompt opens a blank workspace.
  */
 export const pinnedFastSessionLaunchSchema = z.object({
-  launchId: z.string().uuid(),
+  launchId: z.guid(),
   repo: z.string().trim().min(1),
   branch: z.string().trim().min(1).optional(),
   sha: z.string().trim().min(1).optional(),
-  environmentId: z.string().uuid().optional(),
+  environmentId: z.guid().optional(),
   harness: z.enum(launchCodingHarnesses).optional(),
   computeProvider: z.enum(computeProviders).optional(),
 });
@@ -93,7 +93,7 @@ function requireFastSessionContent(
 export const startFastSessionInputSchema = z
   .object({
     ...fastSessionMessageInputShape,
-    conversationId: z.string().uuid().optional(),
+    conversationId: z.guid().optional(),
     privacy: z.enum(['shared', 'private']).optional(),
     pinnedLaunch: pinnedFastSessionLaunchSchema.optional(),
     /** Open the Session for a voice call; any text is the pre-typed message. */
@@ -105,18 +105,18 @@ export const startFastSessionInputSchema = z
 
 export const fastSessionAutoToolApprovalsInputSchema = z.object({
   /** The unified session; omitted for one that has not started yet. */
-  sessionId: z.string().uuid().optional(),
+  sessionId: z.guid().optional(),
 });
 
 export const setFastSessionAutoToolApprovalsInputSchema = z.object({
-  sessionId: z.string().uuid(),
+  sessionId: z.guid(),
   enabled: z.boolean(),
 });
 
 export const replyToFastSessionInputSchema = z
   .object({
-    sessionId: z.string().uuid(),
-    clientMessageId: z.string().uuid().optional(),
+    sessionId: z.guid(),
+    clientMessageId: z.guid().optional(),
     /** The message was spoken on a voice call; the reply goes to the voice. */
     voiceMode: z.boolean().optional(),
     ...fastSessionMessageInputShape,
@@ -124,29 +124,29 @@ export const replyToFastSessionInputSchema = z
   .superRefine(requireFastSessionContent);
 
 export const deleteFastSessionQueuedMessageInputSchema = z.object({
-  sessionId: z.string().uuid(),
+  sessionId: z.guid(),
   /** The client id the queued reply was sent with. */
-  clientMessageId: z.string().uuid(),
+  clientMessageId: z.guid(),
 });
 
 export const steerFastSessionQueuedMessageInputSchema = z.object({
-  sessionId: z.string().uuid(),
+  sessionId: z.guid(),
   /** The client id of the oldest queued reply to send now. */
-  clientMessageId: z.string().uuid(),
+  clientMessageId: z.guid(),
 });
 
 export const stopFastSessionInputSchema = z.object({
-  sessionId: z.string().uuid(),
+  sessionId: z.guid(),
 });
 
 export const fastSessionPrReviewActionInputSchema = z.object({
-  sessionId: z.string().uuid(),
-  deliveryId: z.string().uuid(),
+  sessionId: z.guid(),
+  deliveryId: z.guid(),
   choice: z.enum(['yes', 'auto', 'dismiss']),
 });
 
 export const fastSessionCapabilityOfferResponseInputSchema = z.object({
-  sessionId: z.string().uuid(),
+  sessionId: z.guid(),
   offerId: z.string().min(1),
   capability: fastAgentCapabilityIdSchema,
   resolution: z.enum(['completed', 'dismissed']),
@@ -154,7 +154,7 @@ export const fastSessionCapabilityOfferResponseInputSchema = z.object({
 });
 
 export const updateFastSessionModelSelectionInputSchema = z.object({
-  sessionId: z.string().uuid(),
+  sessionId: z.guid(),
   model: fastSessionMessageInputShape.model,
   reasoningEffort: fastSessionMessageInputShape.reasoningEffort,
 });

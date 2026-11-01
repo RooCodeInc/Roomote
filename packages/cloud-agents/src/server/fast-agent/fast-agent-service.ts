@@ -1961,7 +1961,11 @@ function isSuccessfulChatReactionResult(
 const addRemoteMcpArgsSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
-    url: z.string().url().startsWith('https://').max(2_048),
+    url: z
+      .string()
+      .regex(/^https:\/\/.*/)
+      .url()
+      .max(2_048),
     visibility: customMcpServerVisibilitySchema.optional(),
   })
   .strict();

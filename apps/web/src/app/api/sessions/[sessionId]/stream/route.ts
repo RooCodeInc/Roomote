@@ -43,7 +43,7 @@ export async function GET(
   }
 
   const { sessionId } = await props.params;
-  const parsedSessionId = z.string().uuid().safeParse(sessionId);
+  const parsedSessionId = z.guid().safeParse(sessionId);
   if (!parsedSessionId.success) {
     return NextResponse.json({ error: 'Not Found' }, { status: 404 });
   }
