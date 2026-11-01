@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 
 const revocationSchema = z.object({
   token: z.string().min(1),
-  client_id: z.string().uuid(),
+  client_id: z.guid(),
 });
 
 export async function POST(request: NextRequest) {

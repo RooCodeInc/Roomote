@@ -46,7 +46,7 @@ const getSessionPageData = cache(async (sessionId: string) => {
   }
   // Both lookup columns are uuid; a garbage route param would otherwise throw
   // 22P02 in Postgres instead of 404ing.
-  if (!z.string().uuid().safeParse(sessionId).success) {
+  if (!z.guid().safeParse(sessionId).success) {
     notFound();
   }
 

@@ -1013,7 +1013,9 @@ const sharedTaskPayloadSchema = z.object({
    * span multiple providers. Aggregate selections also include this map when
    * homogeneous so downstream attribution can verify complete coverage.
    */
-  repositoryProviders: z.record(sourceControlProviderSchema).optional(),
+  repositoryProviders: z
+    .record(z.string(), sourceControlProviderSchema)
+    .optional(),
 
   /**
    * Source-control instance host for repository resolution (for example
@@ -1076,13 +1078,13 @@ const sharedTaskPayloadSchema = z.object({
    * When specified, additional repositories defined in the environment
    * will be cloned alongside the primary repository.
    */
-  environmentId: z.string().uuid().optional(),
+  environmentId: z.guid().optional(),
 
   /**
    * Optional environment definition ID for setup/update tasks that should be
    * associated with an environment record without changing workspace selection.
    */
-  environmentDefinitionId: z.string().uuid().optional(),
+  environmentDefinitionId: z.guid().optional(),
 
   /** Marks a repository-free environment-definition task that needs nested Docker. */
   preparesEnvironment: z.boolean().optional(),
@@ -1094,7 +1096,7 @@ const sharedTaskPayloadSchema = z.object({
    * this marker may record a verification result for that environment through
    * the `record_verification` MCP action.
    */
-  verifiesEnvironmentId: z.string().uuid().optional(),
+  verifiesEnvironmentId: z.guid().optional(),
 
   /**
    * Optional validated repository subset to prepare when `repo` is the
@@ -1168,7 +1170,7 @@ const sharedTaskPayloadSchema = z.object({
    * the task. */
   liveTaskStream: z.boolean().optional(),
   /** Runless Fast conversation that delegated this task on any chat provider. */
-  fastAgentSessionId: z.string().uuid().optional(),
+  fastAgentSessionId: z.guid().optional(),
   /** A Session explicitly requested this review, so its result reaches that
    * Session through the pull-request feedback relay even though review runs
    * otherwise stay quiet there. Settle still announces only failures. */
@@ -1545,7 +1547,7 @@ const suggestedTasksPayloadSchema = delegatedTaskPayloadSchema.extend({
     .min(1)
     .max(4000)
     .optional(),
-  selectedRepositoryIds: z.array(z.string().uuid()).min(1).optional(),
+  selectedRepositoryIds: z.array(z.guid()).min(1).optional(),
 });
 
 export const suggestedTasksTaskSchema = sharedTaskSchema.extend({
@@ -1605,18 +1607,18 @@ export const snapshotEnvironmentAttachmentSchema = z.preprocess(
   z.discriminatedUnion('source', [
     z.object({
       source: z.literal('active_snapshot_row'),
-      environmentSnapshotId: z.string().uuid(),
+      environmentSnapshotId: z.guid(),
       sourceSnapshotId: z.string().nullable(),
       sourceSnapshotCreatedAt: z.string().datetime().nullable(),
     }),
     z.object({
       source: z.literal('pending_snapshot_row'),
-      environmentSnapshotId: z.string().uuid(),
+      environmentSnapshotId: z.guid(),
       claimedAt: z.string().datetime(),
     }),
     z.object({
       source: z.literal('legacy_active_snapshot_row'),
-      environmentSnapshotId: z.string().uuid(),
+      environmentSnapshotId: z.guid(),
     }),
     z.object({
       source: z.literal('legacy_sandbox_row'),
@@ -1645,7 +1647,7 @@ export const snapshotEnvironmentSchema = sharedTaskSchema.extend({
      * The environment config defines which repositories, services,
      * and setup commands to include in the snapshot.
      */
-    environmentId: z.string().uuid(),
+    environmentId: z.guid(),
     environmentSnapshotAttachment:
       snapshotEnvironmentAttachmentSchema.optional(),
   }),

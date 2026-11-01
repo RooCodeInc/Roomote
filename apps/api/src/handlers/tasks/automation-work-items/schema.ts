@@ -12,7 +12,7 @@ const automationWorkItemBaseSchema = z.object({
   actionKind: z.string().trim().min(1).max(120),
   investigationContext: z.string().trim().max(4000).optional(),
   fingerprint: z.string().trim().max(255).optional(),
-  targetEnvironmentId: z.string().uuid().optional(),
+  targetEnvironmentId: z.guid().optional(),
   workspaceReadiness: workspaceReadinessSchema.optional(),
   readinessMessage: z.string().trim().min(1).max(500).optional(),
 });
@@ -28,16 +28,20 @@ export const automationWorkItemSchema = z
       disposition: z.literal('act'),
       executionPrompt: z
         .string({
-          required_error:
-            'Act automation work items must include executionPrompt.',
+          error: (issue) =>
+            issue.input === undefined
+              ? 'Act automation work items must include executionPrompt.'
+              : undefined,
         })
         .trim()
         .min(1, 'Act automation work items must include executionPrompt.')
         .max(6000),
       targetRepositoryFullName: z
         .string({
-          required_error:
-            'Act automation work items must include targetRepositoryFullName.',
+          error: (issue) =>
+            issue.input === undefined
+              ? 'Act automation work items must include targetRepositoryFullName.'
+              : undefined,
         })
         .trim()
         .min(

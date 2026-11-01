@@ -17,8 +17,8 @@ const replyChunkEventSchema = z.object({
   contentBlocks: z.array(
     z.object({ type: z.literal('text'), text: z.string() }),
   ),
-  metadata: z.record(z.unknown()).nullable(),
-  payload: z.record(z.unknown()),
+  metadata: z.record(z.string(), z.unknown()).nullable(),
+  payload: z.record(z.string(), z.unknown()),
   logicalEventId: z.string().optional(),
   text: z.string().optional(),
 });

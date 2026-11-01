@@ -106,7 +106,7 @@ export async function validateAuthToken(
   const parseResult = authTokenPayloadSchema.safeParse(rawPayload);
 
   if (!parseResult.success) {
-    const validationErrors = parseResult.error.errors
+    const validationErrors = parseResult.error.issues
       .map((err) => `${err.path.join('.')}: ${err.message}`)
       .join(', ');
 

@@ -68,7 +68,7 @@ export const serviceCredentialPrepareToolSchema = z
 
 export const serviceCredentialCreateSchema = z
   .object({
-    pendingRef: z.string().uuid(),
+    pendingRef: z.guid(),
     secret: z.string().min(8).max(4096),
     /**
      * Required, and required to match the prepared policy exactly, whenever
@@ -82,13 +82,13 @@ export const serviceCredentialCreateSchema = z
 
 export const serviceCredentialRevokeSchema = z
   .object({
-    secretRef: z.string().uuid(),
+    secretRef: z.guid(),
   })
   .strict();
 
 export const serviceCredentialVisibilityUpdateSchema = z
   .object({
-    secretRef: z.string().uuid(),
+    secretRef: z.guid(),
     visibility: serviceCredentialVisibilitySchema,
   })
   .strict();
@@ -113,7 +113,7 @@ export const SERVICE_CREDENTIAL_REQUEST_BODY_MAX_BYTES = 65_536;
 
 export const serviceCredentialRequestSchema = z
   .object({
-    secretRef: z.string().uuid(),
+    secretRef: z.guid(),
     /** Any method; the broker enforces the grant's approved methods. */
     method: credentialEgressMethodSchema,
     path: z.string().min(1).max(2048),

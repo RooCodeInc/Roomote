@@ -18,9 +18,9 @@ import { getUsersById } from '@/lib/server/users';
 
 export const runtime = 'nodejs';
 
-const paramsSchema = z.object({ sessionId: z.string().uuid() });
+const paramsSchema = z.object({ sessionId: z.guid() });
 const bodySchema = z.object({
-  clientId: z.string().uuid(),
+  clientId: z.guid(),
   channel: z.enum(['view', 'voice']).default('view'),
   generation: z.number().int().nonnegative().optional(),
 });

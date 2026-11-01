@@ -200,12 +200,14 @@ export const customMcpServerNameSchema = z
     CUSTOM_MCP_SERVER_NAME_PATTERN,
     'Server name must be a lowercase slug (letters, digits, "-", "_"), at most 64 characters.',
   )
-  .refine(
-    (name) => !RESERVED_CUSTOM_MCP_SERVER_NAMES.has(name),
-    (name) => ({
-      message: `'${name}' is reserved by a built-in ${PRODUCT_NAME} integration.`,
-    }),
-  );
+  .superRefine((name, ctx) => {
+    if (RESERVED_CUSTOM_MCP_SERVER_NAMES.has(name)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `'${name}' is reserved by a built-in ${PRODUCT_NAME} integration.`,
+      });
+    }
+  });
 
 export const customMcpServerHeadersSchema = z
   .record(z.string(), z.string().max(MAX_CUSTOM_MCP_HEADER_VALUE_LENGTH))

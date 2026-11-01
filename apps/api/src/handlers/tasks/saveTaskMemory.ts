@@ -26,7 +26,7 @@ function describeTaskMemoryIssues(
         const value = issue.path.reduce<unknown>(
           (acc, key) =>
             acc && typeof acc === 'object'
-              ? (acc as Record<string | number, unknown>)[key]
+              ? (acc as Record<PropertyKey, unknown>)[key]
               : undefined,
           input,
         );
@@ -36,7 +36,7 @@ function describeTaskMemoryIssues(
             : Array.isArray(value)
               ? `${value.length} entries`
               : undefined;
-        return `${path}: at most ${issue.maximum} ${issue.type === 'array' ? 'entries' : 'characters'}${actual ? ` (got ${actual})` : ''}`;
+        return `${path}: at most ${issue.maximum} ${issue.origin === 'array' ? 'entries' : 'characters'}${actual ? ` (got ${actual})` : ''}`;
       }
       return `${path}: ${issue.message}`;
     })

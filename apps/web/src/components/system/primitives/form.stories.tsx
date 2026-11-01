@@ -125,7 +125,10 @@ const profileFormSchema = z.object({
     }),
   email: z
     .string({
-      required_error: 'Please select an email to display.',
+      error: (issue) =>
+        issue.input === undefined
+          ? 'Please select an email to display.'
+          : undefined,
     })
     .email(),
   bio: z.string().max(160).min(4),
@@ -243,11 +246,15 @@ const settingsFormSchema = z.object({
   marketingEmails: z.boolean().default(false).optional(),
   securityEmails: z.boolean(),
   communicationMethod: z.enum(['email', 'sms', 'push'], {
-    required_error: 'You need to select a notification method.',
+    error: (issue) =>
+      issue.input === undefined
+        ? 'You need to select a notification method.'
+        : undefined,
   }),
   theme: z.enum(['light', 'dark', 'system']),
   language: z.string({
-    required_error: 'Please select a language.',
+    error: (issue) =>
+      issue.input === undefined ? 'Please select a language.' : undefined,
   }),
 });
 

@@ -85,7 +85,7 @@ export async function getTaskMessages(
 
     if (!task) {
       const userId = c.get('mcpAuth').userId;
-      if (userId && z.string().uuid().safeParse(taskId).success) {
+      if (userId && z.guid().safeParse(taskId).success) {
         const [conversation] = await db
           .select({ id: fastAgentConversations.id })
           .from(fastAgentConversations)

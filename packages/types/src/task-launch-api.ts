@@ -110,12 +110,12 @@ export const taskLaunchRequestSchema = z.object({
     .trim()
     .regex(/^[0-9a-f]{7,40}$/i, 'sha must be a git commit SHA')
     .optional(),
-  environmentId: z.string().uuid().optional(),
+  environmentId: z.guid().optional(),
   /**
    * Idempotency key for standard launches. Retrying with the same id returns
    * the task the first request created instead of starting another one.
    */
-  launchId: z.string().uuid().optional(),
+  launchId: z.guid().optional(),
   type: launchTaskTypeSchema.optional(),
   repositoryFullNames: z.array(z.string().trim().min(1)).min(1).optional(),
   selectedRepositories: z.array(z.string().trim().min(1)).min(1).optional(),
@@ -140,7 +140,7 @@ export const taskLaunchRequestSchema = z.object({
    * Fast conversation whose Session should own the launched task. `pr-review`
    * launches attach the review to this Session and announce its outcome there.
    */
-  fastConversationId: z.string().uuid().optional(),
+  fastConversationId: z.guid().optional(),
 });
 
 export type TaskLaunchRequest = z.infer<typeof taskLaunchRequestSchema>;

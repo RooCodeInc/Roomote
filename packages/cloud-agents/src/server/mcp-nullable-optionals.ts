@@ -83,7 +83,7 @@ function deserializeTransportPrimitive(schema: ZodTypeAny): ZodTypeAny {
 
 function allowNullDeep(schema: ZodTypeAny): ZodTypeAny {
   if (schema instanceof z.ZodOptional) {
-    const inner = allowNullDeep(schema.unwrap());
+    const inner = allowNullDeep(schema.unwrap() as ZodTypeAny);
     const nullable =
       inner instanceof z.ZodNullable
         ? inner
@@ -91,50 +91,66 @@ function allowNullDeep(schema: ZodTypeAny): ZodTypeAny {
     return keepDescription(nullable.optional(), schema.description);
   }
   if (schema instanceof z.ZodDefault) {
-    const defaultValue = schema._def.defaultValue;
-    const inner = allowNullDeep(schema.removeDefault())
+    const defaultValue = () => schema.def.defaultValue;
+    const inner = allowNullDeep(schema.removeDefault() as ZodTypeAny)
       .nullable()
       .transform((value) => value ?? defaultValue());
     return keepDescription(inner.default(defaultValue), schema.description);
   }
   if (schema instanceof z.ZodNullable) {
-    return new z.ZodNullable({
-      ...schema._def,
-      innerType: allowNullDeep(schema.unwrap()),
-    });
+    return keepDescription(
+      new z.ZodNullable({
+        ...schema.def,
+        innerType: allowNullDeep(schema.unwrap() as ZodTypeAny),
+      }),
+      schema.description,
+    );
   }
-  if (schema instanceof z.ZodEffects) {
-    return new z.ZodEffects({
-      ...schema._def,
-      schema: allowNullDeep(schema.innerType()),
-    });
+  if (schema instanceof z.ZodPipe) {
+    return keepDescription(
+      new z.ZodPipe({
+        ...schema.def,
+        in: allowNullDeep(schema.in as ZodTypeAny),
+        out: allowNullDeep(schema.out as ZodTypeAny),
+      }),
+      schema.description,
+    );
   }
   if (schema instanceof z.ZodObject) {
     const shape = withNullableOptionals(schema.shape as z.ZodRawShape);
-    return new z.ZodObject({ ...schema._def, shape: () => shape });
+    return keepDescription(
+      new z.ZodObject({ ...schema.def, shape }),
+      schema.description,
+    );
   }
   if (schema instanceof z.ZodArray) {
-    return new z.ZodArray({
-      ...schema._def,
-      type: allowNullDeep(schema.element),
-    });
+    return keepDescription(
+      new z.ZodArray({
+        ...schema.def,
+        element: allowNullDeep(schema.element as ZodTypeAny),
+      }),
+      schema.description,
+    );
+  }
+  if (schema instanceof z.ZodDiscriminatedUnion) {
+    return keepDescription(
+      new z.ZodDiscriminatedUnion({
+        ...schema.def,
+        discriminator: schema.def.discriminator,
+        options: schema.options.map((option) =>
+          allowNullDeep(option as ZodTypeAny),
+        ),
+      }),
+      schema.description,
+    );
   }
   if (schema instanceof z.ZodUnion) {
     const options = (schema.options as ZodTypeAny[]).map(allowNullDeep);
-    return new z.ZodUnion({
-      ...schema._def,
-      options: options as [ZodTypeAny, ZodTypeAny, ...ZodTypeAny[]],
-    });
-  }
-  if (schema instanceof z.ZodDiscriminatedUnion) {
-    const options = (schema.options as z.AnyZodObject[]).map(
-      (option) => allowNullDeep(option) as z.AnyZodObject,
-    );
     return keepDescription(
-      z.discriminatedUnion(
-        schema.discriminator,
-        options as [z.AnyZodObject, z.AnyZodObject, ...z.AnyZodObject[]],
-      ),
+      new z.ZodUnion({
+        ...schema.def,
+        options: options as [ZodTypeAny, ZodTypeAny, ...ZodTypeAny[]],
+      }),
       schema.description,
     );
   }

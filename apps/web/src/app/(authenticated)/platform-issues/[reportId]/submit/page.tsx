@@ -6,7 +6,7 @@ import { getPlatformIssueReportCommand } from '@/trpc/commands/platform-issue-re
 
 import { PlatformIssueSubmission } from './PlatformIssueSubmission';
 
-const reportIdSchema = z.string().uuid();
+const reportIdSchema = z.guid();
 
 export default async function Page({
   params,

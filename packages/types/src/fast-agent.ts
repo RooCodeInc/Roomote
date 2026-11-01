@@ -177,7 +177,7 @@ export function isFastAgentCommunicationConversation(
 }
 
 export const fastAgentParentSchema = z.object({
-  sessionId: z.string().uuid(),
+  sessionId: z.guid(),
   conversation: fastAgentConversationSchema,
 });
 

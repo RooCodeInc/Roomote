@@ -214,7 +214,7 @@ export const credentialEgressProxyAuthorizeSchema = z
     method: credentialEgressMethodSchema,
     path: requestPathSchema,
     phase: z.enum(CREDENTIAL_EGRESS_PHASES).default('request'),
-    authorizationId: z.string().uuid().optional(),
+    authorizationId: z.guid().optional(),
   })
   .strict();
 

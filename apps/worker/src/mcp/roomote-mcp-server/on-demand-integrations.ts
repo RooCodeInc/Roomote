@@ -33,7 +33,7 @@ const onDemandMcpServerSchema = z.object({
   displayName: z.string().min(1),
   description: z.string().optional(),
   url: z.string().url(),
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
 });
 
 const onDemandMcpCatalogSchema = z.object({

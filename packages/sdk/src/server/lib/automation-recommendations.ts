@@ -86,14 +86,14 @@ type GitHubOctokitCache = Map<string, Promise<GitHubOctokit>>;
 
 export const automationRecommendationJobSchema = z.object({
   fingerprint: z.string().min(1),
-  repositoryIds: z.array(z.string().uuid()),
+  repositoryIds: z.array(z.guid()),
 });
 export type AutomationRecommendationJob = z.infer<
   typeof automationRecommendationJobSchema
 >;
 
 export const automationSignalPrefetchJobSchema = z.object({
-  repositoryId: z.string().uuid(),
+  repositoryId: z.guid(),
   signalsVersion: z.number().int().positive(),
 });
 export type AutomationSignalPrefetchJob = z.infer<

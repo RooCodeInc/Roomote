@@ -63,7 +63,7 @@ export const toolApprovalsRouter = router({
           integrationId: z.string().min(1).max(200),
           toolName: z.string().min(1).max(200),
           nativeRequestId: z.string().min(1).max(200),
-          args: z.unknown(),
+          args: z.unknown().optional(),
           userRequest: z
             .string()
             .max(INTEGRATION_TOOL_USER_REQUEST_MAX_CHARS)
@@ -83,7 +83,7 @@ export const toolApprovalsRouter = router({
 
   /** Poll one of this task's approvals while the Session owner decides. */
   status: taskRunProcedure
-    .input(z.object({ approvalId: z.string().uuid() }).strict())
+    .input(z.object({ approvalId: z.guid() }).strict())
     .query(async ({ ctx, input }) => ({
       status: await getTaskToolApprovalStatus({
         runId: ctx.runId,

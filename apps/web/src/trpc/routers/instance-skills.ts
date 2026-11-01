@@ -12,7 +12,7 @@ import {
   updateInstanceSkillCommand,
 } from '../commands/instance-skills';
 
-const skillIdSchema = z.object({ skillId: z.string().uuid() }).strict();
+const skillIdSchema = z.object({ skillId: z.guid() }).strict();
 
 export const instanceSkillsRouter = createRouter({
   list: protectedProcedure.query(({ ctx: { auth } }) =>
@@ -31,7 +31,7 @@ export const instanceSkillsRouter = createRouter({
       customSkillDefinitionSchema
         .extend({
           expectedVersion: z.number().int().positive(),
-          skillId: z.string().uuid(),
+          skillId: z.guid(),
         })
         .strict(),
     )

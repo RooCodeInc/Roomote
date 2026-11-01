@@ -11,7 +11,7 @@ const claims = z.object({
   sub: z.string().min(1),
   aud: z.literal('roomote-session-broker'),
   exp: z.number().int(),
-  r: z.object({ t: z.literal('session-broker'), c: z.string().uuid() }),
+  r: z.object({ t: z.literal('session-broker'), c: z.guid() }),
 });
 
 export interface SessionBrokerContext {

@@ -97,6 +97,7 @@ export function shouldPollForAutomaticFailedStartRetry(input: {
   );
 }
 const requestUserInputAnswersSchema = z.record(
+  z.string(),
   z.object({
     answers: z.array(z.string()),
   }),
@@ -206,7 +207,7 @@ export const answerSandboxUserInputRequestInputSchema = z.object({
 });
 
 export const handlePrReviewNotificationActionInputSchema = z.object({
-  deliveryId: z.string().uuid(),
+  deliveryId: z.guid(),
   choice: z.enum(['yes', 'auto', 'dismiss']),
 });
 

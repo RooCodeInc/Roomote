@@ -126,7 +126,7 @@ export const linearSessionsRouter = router({
         sessionId: z.string(),
         content: z.string(),
         signal: z.enum(['select']).optional(),
-        signalMetadata: z.record(z.unknown()).optional(),
+        signalMetadata: z.record(z.string(), z.unknown()).optional(),
       }),
     )
     .mutation(async ({ input }) => {

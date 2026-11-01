@@ -32,8 +32,7 @@ import {
   TASK_MODEL_ROLE_DESCRIPTORS,
 } from '@roomote/types';
 import { captureInstanceEvent } from '@roomote/telemetry/server';
-import type { z } from 'zod';
-import zodToJsonSchema from 'zod-to-json-schema';
+import { z } from 'zod';
 
 import { decodeInferenceErrorEnvelope } from './inference-error-envelope';
 import { streamOpenCodeEventsAcrossDisposal } from './opencode-event-stream';
@@ -2730,9 +2729,10 @@ async function generateTrackedNonTaskObjectWithSdk<
 export function buildNonTaskStructuredOutputJsonSchema(
   schema: z.ZodTypeAny,
 ): Record<string, unknown> {
-  return zodToJsonSchema(schema, {
-    $refStrategy: 'none',
-    target: 'jsonSchema7',
+  return z.toJSONSchema(schema, {
+    reused: 'inline',
+    target: 'draft-7',
+    io: 'input',
   }) as Record<string, unknown>;
 }
 
