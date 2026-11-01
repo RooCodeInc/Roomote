@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.19.7 (2026-11-01)
+
+Roomote 1.19.7 strengthens runtime security while keeping your existing sign-in and task workflows familiar.
+
+### Highlights
+
+- Includes security updates for request parsing, input validation, Microsoft authentication, and URI handling.
+
+### Patch changes
+
+- Update runtime dependencies to address security issues in request parsing, input validation, Microsoft authentication, and URI handling while preserving existing sign-in, account-linking, and task workflows.
+
 ## 1.19.6 (2026-10-31)
 
 Roomote 1.19.6 restores reliable all-repository automations across GitHub organizations and makes it easier to clean up sessions without losing your place.
