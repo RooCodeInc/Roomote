@@ -7,7 +7,7 @@
     "dompurify": "3.4.17",
     "jsdom": "26.1.0",
     "snowflake-sdk": "3.3.0",
-    "zod": "4.6.6"
+    "zod": "4.6.7"
   },
   "pnpm": {
     "overrides": {

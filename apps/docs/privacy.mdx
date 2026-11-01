@@ -7,7 +7,7 @@ description: Understand Roomote data handling, anonymous telemetry, and the cont
 Roomote keeps the data boundaries for a deployment explicit. Product content,
 credentials, prompts, code, and repository names are not part of the default
 anonymous telemetry payload. Deployment administrators control whether a
-self-hosted deployment shares that telemetry, while Roomote Cloud follows its
+self-hosted deployment shares that telemetry, while a managed deployment follows its
 own privacy policy.
 
 This page covers the telemetry payload, its identifiers, the controls that turn
@@ -89,9 +89,9 @@ The setting applies to everyone in the deployment. When disabled, no
 analytics code runs in the browser and no usage events or daily reports
 leave your servers.
 
-## Roomote Cloud Specifics
+## Managed deployment controls
 
-Roomote Cloud deployments always keep Roomote anonymous analytics enabled and
+Managed deployments always keep Roomote anonymous analytics enabled and
 do not show this switch, as described in our privacy policy. Cookie consent
 controls only optional support and product-experience services such as Intercom
 and PostHog.

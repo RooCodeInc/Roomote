@@ -721,12 +721,16 @@ describe('UsersSettings', () => {
 
     expect(await screen.findByText('4 of 10 seats used')).toBeInTheDocument();
     expect(screen.getByText('Free tier')).toBeInTheDocument();
+    expect(screen.queryByText(/Roomote Cloud/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /Refresh the key/ }),
+    ).not.toBeInTheDocument();
     const purchaseLink = screen.getByRole('link', {
-      name: 'Buy a license on Roomote Cloud',
+      name: 'Contact Roomote for a license',
     });
     expect(purchaseLink).toHaveAttribute(
       'href',
-      'https://cloud.roomote.dev/sign-up?utm_source=self-host&utm_medium=settings_users&utm_campaign=license_purchase',
+      'mailto:help@roomote.dev?subject=Roomote%20self-hosted%20license',
     );
     fireEvent.click(purchaseLink);
     expect(mockCapture).toHaveBeenCalledWith('license_purchase_cta_clicked', {
@@ -764,7 +768,7 @@ describe('UsersSettings', () => {
     expect(screen.queryByText('License')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('License key')).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('link', { name: 'Buy a license on Roomote Cloud' }),
+      screen.queryByRole('link', { name: 'Contact Roomote for a license' }),
     ).not.toBeInTheDocument();
   });
 
@@ -864,7 +868,9 @@ describe('UsersSettings', () => {
       await screen.findByText('This license expires soon.', { exact: false }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('link', { name: 'Refresh the key in Roomote Cloud' }),
+      screen.getByRole('link', {
+        name: 'Refresh the key in your license account',
+      }),
     ).toHaveAttribute('href', 'https://cloud.roomote.dev/');
   });
 });

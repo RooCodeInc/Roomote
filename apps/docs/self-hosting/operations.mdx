@@ -95,6 +95,11 @@ one. Check the running application version and applied schema migration at any
 time under **Settings → Deployment → Diagnostics**; both are also recorded in
 every backup bundle's manifest.
 
+When upgrading from Roomote 1.19.5 or earlier to 1.19.6 or later, upgrade all
+servers handling sign-in and account linking together. Restart any sign-in or
+account-linking attempts begun before the upgrade. Existing signed-in sessions
+are retained, and registered OAuth callback URLs do not need to change.
+
 Roomote surfaces release history and available updates in the web app:
 
 - **Admins** on self-hosted deployments see an update notice in the sidenav when

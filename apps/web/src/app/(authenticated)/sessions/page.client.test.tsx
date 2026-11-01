@@ -1,19 +1,46 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 
-const { getSessionsMock, sessionStatusState } = vi.hoisted(() => ({
-  getSessionsMock: vi.fn(),
-  sessionStatusState: {
-    current: ['active', 'needs_input', 'blocked', 'ready', 'done'] as Array<
-      'active' | 'needs_input' | 'blocked' | 'ready' | 'done'
-    >,
-  },
-}));
+const { getSessionsMock, sessionStatusState, remove, refresh, push } =
+  vi.hoisted(() => ({
+    remove: vi.fn(),
+    refresh: vi.fn(),
+    push: vi.fn(),
+    getSessionsMock: vi.fn(),
+    sessionStatusState: {
+      current: ['active', 'needs_input', 'blocked', 'ready', 'done'] as Array<
+        'active' | 'needs_input' | 'blocked' | 'ready' | 'done'
+      >,
+    },
+  }));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/sessions',
-  useRouter: () => ({ replace: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn(), refresh, push }),
   useSearchParams: () => new URLSearchParams(),
 }));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({ sessions: { delete: { mutationOptions: () => ({}) } } }),
+}));
+vi.mock('@tanstack/react-query', () => ({
+  useMutation: () => ({ mutateAsync: remove }),
+}));
+vi.mock(
+  '../../(sandbox)/sessions/[sessionId]/SessionDeleteAction',
+  async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    SessionActions: () => (
+      <button type="button" aria-label="More session actions" />
+    ),
+  }),
+);
 
 vi.mock('@/components/sessions/use-session-status-mutation', () => ({
   useSessionStatusMutation: () => ({ isPending: false, mutate: vi.fn() }),
@@ -37,6 +64,7 @@ vi.mock('@/lib/server/sessions', () => ({
       ownerEmail: 'test@example.com',
       ownerImageUrl: null,
       ownerUserId: 'user-1',
+      canManage: status !== 'blocked',
       privacy: 'shared',
       sourceSurface: 'web',
       activityAt: 1_788_000_000,
@@ -62,6 +90,7 @@ vi.mock('@/lib/server/sessions', () => ({
 describe('Sessions list', () => {
   beforeEach(() => {
     getSessionsMock.mockClear();
+    remove.mockReset().mockResolvedValue({ deleted: true });
     sessionStatusState.current = [
       'active',
       'needs_input',
@@ -69,6 +98,230 @@ describe('Sessions list', () => {
       'ready',
       'done',
     ];
+  });
+
+  it.each(['list', 'board'])(
+    'supports individual and page-wide selection without navigation or dragging in %s view',
+    async (view) => {
+      const { container } = render(
+        await SessionsPage({ searchParams: Promise.resolve({ view }) }),
+      );
+      const sessionLink = screen.getByRole('link', { name: /^Review active/ });
+      expect(sessionLink).toHaveAttribute('href', '/sessions/active');
+      fireEvent.click(screen.getByRole('button', { name: 'Select sessions' }));
+      expect(
+        screen.queryByRole('link', { name: /^Review active/ }),
+      ).not.toBeInTheDocument();
+      expect(
+        container.querySelector('[data-session-board-drag-activator]'),
+      ).toBeNull();
+      fireEvent.click(
+        screen.getByRole('button', { name: /^Select session: Review active/ }),
+      );
+      expect(
+        screen.getByRole('checkbox', { name: /^Select Review active/ }),
+      ).toBeChecked();
+      expect(
+        screen.getByRole('checkbox', {
+          name: 'Select all sessions on this page',
+        }),
+      ).toBePartiallyChecked();
+      expect(
+        screen.getByRole('checkbox', { name: /^Select Review blocked/ }),
+      ).toBeDisabled();
+      fireEvent.click(
+        screen.getByRole('checkbox', {
+          name: 'Select all sessions on this page',
+        }),
+      );
+      expect(screen.getByRole('button', { name: 'Delete (4)' })).toBeEnabled();
+      expect(
+        screen.getByRole('checkbox', {
+          name: 'Select all sessions on this page',
+        }),
+      ).toBeChecked();
+      fireEvent.click(
+        screen.getByRole('checkbox', { name: /^Select Review ready/ }),
+      );
+      expect(screen.getByRole('button', { name: 'Delete (3)' })).toBeEnabled();
+      expect(push).not.toHaveBeenCalled();
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Exit selection mode' }),
+      );
+      expect(
+        screen.getByRole('link', { name: /^Review active/ }),
+      ).toHaveAttribute('href', '/sessions/active');
+      fireEvent.click(screen.getByRole('button', { name: 'Select sessions' }));
+      expect(screen.getByRole('button', { name: 'Delete (0)' })).toBeDisabled();
+    },
+  );
+
+  it.each(['list', 'board'])(
+    'confirms bulk deletion and refreshes the current %s view without redirecting',
+    async (view) => {
+      render(
+        await SessionsPage({
+          searchParams: Promise.resolve({
+            view,
+            user: 'user-1',
+            before: 'cursor',
+          }),
+        }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Select sessions' }));
+      fireEvent.click(
+        screen.getByRole('checkbox', {
+          name: 'Select all sessions on this page',
+        }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Delete (4)' }));
+      expect(remove).not.toHaveBeenCalled();
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Cancel',
+        }),
+      );
+      expect(screen.getByRole('button', { name: 'Delete (4)' })).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Delete (4)' }));
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Delete (4)',
+        }),
+      );
+      await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+      expect(remove.mock.calls.map(([input]) => input.sessionId)).toEqual([
+        'active',
+        'needs_input',
+        'ready',
+        'done',
+      ]);
+      expect(push).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Select sessions' }),
+      ).toBeEnabled();
+    },
+  );
+
+  it('keeps only failed deletions selected, including rejected requests, and permits retry', async () => {
+    remove
+      .mockResolvedValueOnce({ deleted: true })
+      .mockResolvedValueOnce({ deleted: false, reason: 'session_busy' })
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce({ deleted: true });
+    render(await SessionsPage({ searchParams: Promise.resolve({}) }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select sessions' }));
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'Select all sessions on this page',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Delete (4)' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Delete (4)',
+      }),
+    );
+    await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+    expect(
+      screen.getByRole('checkbox', { name: /^Select Review needs_input/ }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: /^Select Review ready/ }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: /^Select Review active/ }),
+    ).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Delete (2)' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete (2)' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Delete (2)',
+      }),
+    );
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    expect(
+      remove.mock.calls.slice(4).map(([input]) => input.sessionId),
+    ).toEqual(['needs_input', 'ready']);
+  });
+
+  it.each(['list', 'board'])(
+    'locks selection while deleting a single selected session in %s view',
+    async (view) => {
+      let finish!: (result: { deleted: boolean }) => void;
+      remove.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      render(await SessionsPage({ searchParams: Promise.resolve({ view }) }));
+      fireEvent.click(screen.getByRole('button', { name: 'Select sessions' }));
+      fireEvent.click(
+        screen.getByRole('checkbox', { name: /^Select Review active/ }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Delete (1)' }));
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Delete (1)',
+        }),
+      );
+      expect(
+        screen.getByRole('button', { name: 'Deleting...' }),
+      ).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+      expect(
+        screen.getByRole('checkbox', {
+          name: 'Select all sessions on this page',
+          hidden: true,
+        }),
+      ).toBeDisabled();
+      expect(remove).toHaveBeenCalledOnce();
+      await act(async () => finish({ deleted: true }));
+      expect(refresh).toHaveBeenCalledOnce();
+      expect(push).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole('button', { name: 'Select sessions' }),
+      ).toBeEnabled();
+    },
+  );
+
+  it('prunes selections on refresh, including an empty result, and resets on view/filter/page changes', async () => {
+    const { rerender } = render(
+      await SessionsPage({ searchParams: Promise.resolve({}) }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Select sessions' }));
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'Select all sessions on this page',
+      }),
+    );
+    sessionStatusState.current = ['active'];
+    rerender(await SessionsPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByRole('button', { name: 'Delete (1)' })).toBeEnabled();
+    sessionStatusState.current = [];
+    rerender(await SessionsPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByRole('button', { name: 'Delete (0)' })).toBeDisabled();
+    sessionStatusState.current = ['active', 'ready'];
+    rerender(await SessionsPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByRole('button', { name: 'Delete (0)' })).toBeDisabled();
+    for (const params of [
+      { view: 'board' },
+      { view: 'board', status: 'active' },
+      { view: 'board', before: 'older' },
+    ]) {
+      fireEvent.click(
+        screen.getByRole('checkbox', {
+          name: 'Select all sessions on this page',
+        }),
+      );
+      rerender(await SessionsPage({ searchParams: Promise.resolve(params) }));
+      expect(
+        screen.getByRole('button', { name: 'Select sessions' }),
+      ).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Select sessions' }));
+      expect(screen.getByRole('button', { name: 'Delete (0)' })).toBeDisabled();
+    }
   });
 
   it('keeps every session and long-content link accessible, including older sessions', async () => {

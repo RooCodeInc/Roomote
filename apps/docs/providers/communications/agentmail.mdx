@@ -12,17 +12,14 @@ Roomote can receive email sent to a dedicated deployment inbox, start tasks
 from those messages, and reply in the same email thread. AgentMail delivers
 inbound mail through a `message.received` webhook, so Roomote must be reachable
 at a stable public HTTPS URL. Self-hosted deployments bring their own AgentMail
-account and API key; Roomote Cloud provisions managed credentials.
+account and API key.
 
 ## Enable the email channel
 
 Email is off by default. Set `R_EMAIL_CHANNEL_ENABLED=true` in the
 deployment's environment and restart. Until then the provider does not
 appear in settings, inbound webhook deliveries are acknowledged and dropped,
-and Roomote never sends email. New Roomote Cloud deployments have a managed
-`<workspace-slug>@roomote.me` inbox by default. Roomote Cloud creates it the
-first time the deployment sends an email, such as a verification email or a
-notification. Older deployments stay disabled until Roomote enables them.
+and Roomote never sends email.
 
 Enabling the channel gives the deployment an email sender for the first
 time, so new password sign-ups also receive a verification email (see
@@ -55,10 +52,10 @@ then:
 3. In the Roomote UI (**Settings > Communications > Email (AgentMail)**),
    paste the key and save.
 
-Roomote Cloud manages these credentials and the webhook. Its Communications
-settings show the inbox and connection status without exposing setup, removal,
-or repair controls. The configuration steps below apply to self-hosted
-deployments.
+If your deployment has managed email credentials, Communications settings show
+the inbox and connection status without setup, removal, or repair controls.
+Its inbox is created on the first outbound email. The configuration steps below
+apply to deployments where you manage the credentials.
 
 Roomote uses the inbox the key is scoped to; there is nothing else to enter.
 On save it validates the key, registers a webhook on the inbox for

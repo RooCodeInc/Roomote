@@ -93,7 +93,8 @@ export function SessionActions({
       onSuccess: (result) => {
         if (result.deleted) {
           toast.success('Session deleted.');
-          router.push('/');
+          setOpen(false);
+          if (!listRow) router.push('/');
           router.refresh();
           return;
         }

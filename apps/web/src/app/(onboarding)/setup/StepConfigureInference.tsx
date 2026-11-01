@@ -47,8 +47,8 @@ export function StepConfigureInference({
       <StepTitle text={INFERENCE_STEP.title} />
       <div className="space-y-4 max-w-xl">
         <p>
-          Your Roomote Cloud trial includes $5 of inference to try things out,
-          or you can configure your own provider directly.
+          Your deployment includes $5 of inference to try things out, or you can
+          configure your own provider directly.
         </p>
         <p>
           Some Roomote functionality uses fast judgement models, not just LLMs.

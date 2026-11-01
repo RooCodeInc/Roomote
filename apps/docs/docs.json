@@ -5,7 +5,7 @@
   "description": "Documentation for Roomote, the open, self-hostable platform for cloud coding agents.",
   "markdown": {
     "instructions": [
-      "Start new users at /index to choose Roomote Cloud or self-hosting. Use /cloud for managed hosting and /self-hosting for an operator deployment, including home networks at /homelab. Both paths continue through /first-task. Use Local development only when the user intends to modify Roomote itself.",
+      "Start new users at /index, then /self-hosting to choose and prepare a host, including home networks at /homelab or infrastructure providers at /self-hosting/platforms. Continue through /first-task. Use Local development only when the user intends to modify Roomote itself.",
       "When an agent is asked to follow /self-hosting or install Roomote autonomously, read and follow /self-hosting/agent-installation as the normative automation contract even though it is intentionally hidden from side navigation.",
       "Use the one-command Linux installer for both evaluation and production. On macOS or Windows, create or reuse a full Ubuntu VM and run the same installer inside it; do not replace the installer with the repository's development Compose files.",
       "For a local VM, prepare a stable public HTTPS domain before connecting providers. Use a named tunnel with internal origin TLS or public DNS with ports 80/443 forwarded to the Linux host. Cloudflare Quick Tunnels do not support the Server-Sent Events Roomote uses; do not use them for the complete setup path.",
@@ -44,7 +44,6 @@
         "group": "Getting started",
         "pages": [
           "index",
-          "cloud",
           {
             "group": "Self-hosted",
             "icon": "server",
@@ -228,6 +227,10 @@
     ]
   },
   "redirects": [
+    {
+      "source": "/cloud",
+      "destination": "/self-hosting"
+    },
     {
       "source": "/anonymous-analytics",
       "destination": "/privacy"

@@ -3069,6 +3069,77 @@ describe('deliverFastAgentParentEvent', () => {
     },
   );
 
+  it.each(['schedule', 'manual'] as const)(
+    "lets a %s custom automation run use its creator's integration keys",
+    async (trigger) => {
+      mocks.findCustomAutomation.mockResolvedValue({
+        id: 'automation-1',
+        name: 'Weekly scan',
+        createdByUserId: 'u1',
+      });
+
+      await deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'automation_triggered',
+          eventId: 'occurrence-1',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          trigger,
+        },
+      });
+
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          platformEventKind: 'automation',
+          serviceCredentialPlatformActorUserId: 'u1',
+        }),
+      );
+    },
+  );
+
+  it.each([
+    ['a webhook trigger', 'webhook', 'u1', 'no_acting_user'],
+    [
+      'a creator who does not own the Session',
+      'schedule',
+      'u2',
+      'actor_owner_mismatch',
+    ],
+    ['no recorded creator', 'schedule', null, 'no_acting_user'],
+  ] as const)(
+    'keeps integration keys unavailable for a custom automation run with %s',
+    async (_label, trigger, createdByUserId, denialReason) => {
+      mocks.findCustomAutomation.mockResolvedValue({
+        id: 'automation-1',
+        name: 'Weekly scan',
+        createdByUserId,
+      });
+
+      await deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'automation_triggered',
+          eventId: 'occurrence-1',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          trigger,
+        },
+      });
+
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serviceCredentialPlatformDenialReason: denialReason,
+        }),
+      );
+      expect(mocks.answerQuestion.mock.calls[0]![0]).not.toHaveProperty(
+        'serviceCredentialPlatformActorUserId',
+      );
+    },
+  );
+
   it.each([undefined, 'anthropic/claude-sonnet-5'])(
     'keeps child model selection independent of the automation session: %s',
     async (childModel) => {

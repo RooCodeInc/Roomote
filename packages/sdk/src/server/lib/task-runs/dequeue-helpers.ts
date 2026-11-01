@@ -614,6 +614,9 @@ async function createProviderToken(
         await createTaskRunWorkerGitHubTokenWithMetadata(taskRun);
       return {
         ...buildSourceControlTokenMetadata(provider, metadata.token),
+        ...(metadata.gitCredentials?.length
+          ? { gitCredentials: metadata.gitCredentials }
+          : {}),
         source: metadata.source,
         expiresAt: metadata.expiresAt,
       };

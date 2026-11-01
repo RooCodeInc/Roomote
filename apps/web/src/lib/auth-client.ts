@@ -1,13 +1,12 @@
 'use client';
 
 import { createAuthClient } from 'better-auth/react';
-import { genericOAuthClient } from 'better-auth/client/plugins';
 
 type BaseAuthClient = ReturnType<typeof createAuthClient>;
 type OAuth2SignInInput = {
   callbackURL?: string;
   disableRedirect?: boolean;
-  providerId: string;
+  provider: string;
 };
 type OAuth2SignInResult = {
   data?: { redirect?: boolean; url?: string } | null;
@@ -16,7 +15,7 @@ type OAuth2SignInResult = {
 type OAuth2LinkInput = {
   callbackURL: string;
   errorCallbackURL?: string;
-  providerId: string;
+  provider: string;
   scopes?: string[];
 };
 type OAuth2LinkResult = {
@@ -58,17 +57,14 @@ type ChangeEmailResult = {
 };
 type RoomoteAuthClient = BaseAuthClient & {
   signIn: BaseAuthClient['signIn'] & {
-    oauth2(input: OAuth2SignInInput): Promise<OAuth2SignInResult>;
+    social(input: OAuth2SignInInput): Promise<OAuth2SignInResult>;
   };
-  oauth2: {
-    link(input: OAuth2LinkInput): Promise<OAuth2LinkResult>;
-  };
+  linkSocial(input: OAuth2LinkInput): Promise<OAuth2LinkResult>;
   unlinkAccount(input: UnlinkAccountInput): Promise<UnlinkAccountResult>;
   resetPassword(input: ResetPasswordInput): Promise<ResetPasswordResult>;
   changePassword(input: ChangePasswordInput): Promise<ChangePasswordResult>;
   changeEmail(input: ChangeEmailInput): Promise<ChangeEmailResult>;
 };
 
-export const authClient: RoomoteAuthClient = createAuthClient({
-  plugins: [genericOAuthClient()],
-}) as RoomoteAuthClient;
+export const authClient: RoomoteAuthClient =
+  createAuthClient() as RoomoteAuthClient;

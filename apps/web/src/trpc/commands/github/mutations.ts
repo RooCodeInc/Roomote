@@ -540,9 +540,24 @@ export async function startCreateGitHubInstallationCommand(
 
   const query = params.toString();
 
+  // Once the deployment has an installation, `installations/new` can jump
+  // straight to that installation's settings, leaving no way to install the
+  // App on another account. `select_target` always shows GitHub's account
+  // picker (and keeps `state`), so it covers adding another organization as
+  // well as changing repositories on an existing installation.
+  const hasActiveInstallation = Boolean(
+    await db.query.githubInstallations.findFirst({
+      where: isNull(githubInstallations.suspendedAt),
+      columns: { installationId: true },
+    }),
+  );
+  const installPath = hasActiveInstallation
+    ? 'installations/select_target'
+    : 'installations/new';
+
   return {
     success: true,
-    url: `https://github.com/apps/${appSlug}/installations/new${query ? `?${query}` : ''}`,
+    url: `https://github.com/apps/${appSlug}/${installPath}${query ? `?${query}` : ''}`,
   };
 }
 

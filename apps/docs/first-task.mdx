@@ -4,9 +4,8 @@ icon: play
 description: Connect a model and repository, run a small task, and review the result in your browser.
 ---
 
-Follow this guide after you can open your Roomote deployment. The steps are
-the same for Roomote Cloud and self-hosted deployments, with hosting
-differences called out below. By the end, you will have a Roomote task that
+Follow this guide after you can open your Roomote deployment. By the end,
+you will have a Roomote task that
 reads a repository, runs commands in a sandbox, and reports what it found.
 
 ## Before you start
@@ -16,13 +15,12 @@ Have these ready:
 - the deployment's initial setup link, or an administrator account if setup
   has already started
 - an inference provider account with usable credentials and available credit
-  or quota, unless you choose the Roomote inference offered during Cloud setup
+  or quota
 - permission to connect one repository for the first task
 
 An inference provider supplies the model. A sandbox provider supplies the
 isolated workspace where the agent edits files and runs commands. Both are
-needed for the task in this guide. Cloud provisions a sandbox provider;
-for a self-hosted deployment, the installer can configure Docker on your host.
+needed for the task in this guide. The installer can configure Docker on your host.
 
 <Note>
 You can start a conversation after connecting inference alone. Repository
@@ -33,7 +31,7 @@ can complete the whole guide in your browser.
 
 ## 1. Open your deployment and create your account
 
-Open the deployment link from the Cloud portal or your self-hosted installer.
+Open the deployment link from your installer or hosting platform.
 Follow the account setup prompts. If you have already created the account,
 sign in and continue from your current setup step.
 
@@ -115,8 +113,8 @@ commands, services, tool versions, or preview ports for later work.
 ## 5. Confirm where the task will run
 
 If a sandbox provider is already configured, Roomote can start the task
-without another setup step. Keep the provider provisioned for your Cloud
-deployment or configured by your self-hosted installer.
+without another setup step. Keep the provider configured by your installer
+or deployment administrator.
 
 If Roomote asks for a sandbox, use its configuration controls to select and
 configure a provider:

@@ -226,7 +226,7 @@ export async function setLicenseKeyCommand(
 
     if (state.status === 'expired') {
       throw new Error(
-        'That license key has expired. Refresh it in Roomote Cloud or contact Roomote for help.',
+        'That license key has expired. Refresh it in your license account or contact Roomote for help.',
       );
     }
 
@@ -244,12 +244,12 @@ export async function setLicenseKeyCommand(
     }
     if (activation.status === 'rejected') {
       throw new Error(
-        'Roomote Cloud rejected the activation response. Contact Roomote support if this continues.',
+        'The licensing service rejected the activation response. Contact Roomote support if this continues.',
       );
     }
     if (activation.status !== 'synced') {
       throw new Error(
-        'Roomote Cloud could not activate this license. Check your network connection and try again.',
+        'The licensing service could not activate this license. Check your network connection and try again.',
       );
     }
   }

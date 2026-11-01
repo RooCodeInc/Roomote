@@ -296,4 +296,22 @@ describe('SessionActions', () => {
     });
     expect(mocks.refresh).toHaveBeenCalled();
   });
+
+  it.each([true, false])(
+    'refreshes deletion in place only for overview actions (listRow=%s)',
+    (listRow) => {
+      render(<SessionActions sessionId="session-1" listRow={listRow} />);
+      fireEvent.click(screen.getByText('Delete session'));
+      fireEvent.click(
+        screen.getAllByRole('button', { name: 'Delete session' }).at(-1)!,
+      );
+      expect(mocks.remove).toHaveBeenCalledWith({ sessionId: 'session-1' });
+      expect(mocks.refresh).toHaveBeenCalledOnce();
+      if (listRow) expect(mocks.push).not.toHaveBeenCalled();
+      else expect(mocks.push).toHaveBeenCalledWith('/');
+      expect(
+        screen.queryByRole('heading', { name: 'Delete this session?' }),
+      ).not.toBeInTheDocument();
+    },
+  );
 });

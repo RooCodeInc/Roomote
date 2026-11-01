@@ -27,8 +27,8 @@ export function createUseAuthenticateOAuthLinkedAccount({
   return function useAuthenticateOAuthLinkedAccount() {
     return useMutation({
       mutationFn: async (redirectPath: string) => {
-        const result = await authClient.oauth2.link({
-          providerId,
+        const result = await authClient.linkSocial({
+          provider: providerId,
           callbackURL: redirectPath,
           errorCallbackURL: redirectPath,
         });

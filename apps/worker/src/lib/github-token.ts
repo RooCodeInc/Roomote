@@ -69,8 +69,10 @@ unset ADO_TOKEN
 
 /**
  * Custom git credential helper that reads provider credentials from files on
- * every invocation. GitHub keeps using a single file-backed token so `gh auth
- * setup-git` and HTTPS git operations see the freshest token. GitLab keeps
+ * every invocation. GitHub uses a single file-backed token so `gh auth
+ * setup-git` and HTTPS git operations see the freshest token, except for
+ * repositories on another GitHub App installation, which carry their own
+ * scoped credential in the repository credentials file. GitLab keeps
  * using scoped repository credentials written to a file because those tokens
  * are already short-lived and repository-scoped.
  */
@@ -102,6 +104,24 @@ case "$1" in
   get)
     case "$HOST" in
       github.com)
+        # Repositories on another GitHub App installation carry their own
+        # scoped credential; everything else uses the primary token.
+        REPOSITORY_PATH="$(normalize_repository_path "$PATH_VALUE")"
+        if [ -n "$REPOSITORY_PATH" ] && [ -r "$SOURCE_CONTROL_CREDENTIALS_FILE" ]; then
+          REPOSITORY_KEY="$(printf '%s' "$REPOSITORY_PATH" | tr '[:upper:]' '[:lower:]')"
+          while IFS=$'\\t' read -r credential_host repo username token; do
+            REPO_KEY="$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')"
+            if [ "$credential_host" = "$HOST" ] && [ "$REPO_KEY" = "$REPOSITORY_KEY" ] && [ -n "$username" ] && [ -n "$token" ]; then
+              echo "protocol=\${PROTOCOL:-https}"
+              echo "host=$HOST"
+              echo "path=$PATH_VALUE"
+              echo "username=$username"
+              echo "password=$token"
+              echo ""
+              exit 0
+            fi
+          done < "$SOURCE_CONTROL_CREDENTIALS_FILE"
+        fi
         if [ -r "$GH_TOKEN_FILE" ]; then
           TOKEN="$(tr -d '\\n' < "$GH_TOKEN_FILE")"
           if [ -n "$TOKEN" ]; then
