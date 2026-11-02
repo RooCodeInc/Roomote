@@ -140,12 +140,14 @@ scopes:
   (with header or OAuth authentication, credentials held server-side) and
   local stdio servers, available to agents in every task.
 - **Per-environment**, in the YAML view of the environment editor. See
-  [Environments](/environments). An environment entry with the same name as a
-  deployment-wide server takes precedence in that environment.
+  [Environments](/environments). For names not already occupied by a remote
+  server, environment entries take precedence over deployment-wide stdio servers.
 - **Personal**, under **Personal Settings > Personal MCP servers**: remote
   servers available only to their owner. A personal server takes precedence
-  over a shared server with the same name, while an environment entry still
-  takes precedence over both.
+  over a deployment-wide remote server with the same name. During task setup,
+  personal and deployment-wide remote servers are installed before environment
+  entries; an environment entry with an occupied name is skipped. Use distinct
+  names when you need both connections.
 
 Use deployment or user-linked integrations when the tool is broadly useful
 across teams. Use an environment-level MCP server when the tool only makes
