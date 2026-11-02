@@ -76,7 +76,13 @@ export function applyChannelMessagesResultBudget(
       truncated: true,
       omittedMessageCount: omitted,
       ...(newestOmitted ? { nextLatest: newestOmitted.id } : {}),
-      note: `Result truncated to the newest ${subset.length} of ${messages.length} messages in the requested range. To read the older messages, call again with latest set to nextLatest and the same oldest; that page will not repeat any message returned here.`,
+      note: [
+        `Result truncated to the newest ${subset.length} of ${messages.length} messages in the requested range. To read the older messages, call again with latest set to nextLatest and the same oldest; that page will not repeat any message returned here.`,
+        // A provider read that already stopped early keeps its explanation.
+        payload.note,
+      ]
+        .filter(Boolean)
+        .join(' '),
     };
   };
 

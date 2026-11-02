@@ -2497,15 +2497,44 @@ export class SlackNotifier {
    * time window. Thread replies are expanded and included alongside top-level
    * channel messages.
    */
-  public async fetchChannelMessages({
-    channel,
-    oldest,
-    latest,
-  }: {
+  public async fetchChannelMessages(params: {
     channel: string;
     oldest?: string;
     latest?: string;
   }): Promise<SlackChannelMessage[]> {
+    return (await this.fetchChannelMessagesWithinBudget(params)).messages;
+  }
+
+  /**
+   * Like `fetchChannelMessages`, but stops issuing Slack requests once
+   * `deadlineAt` (epoch ms) passes and returns what it has, marked incomplete.
+   * Busy channels with many threads, or Slack tiers that allow one history
+   * request per minute, can otherwise outlast the caller's timeout and return
+   * nothing at all.
+   */
+  public async fetchChannelMessagesWithinBudget({
+    channel,
+    oldest,
+    latest,
+    deadlineAt,
+  }: {
+    channel: string;
+    oldest?: string;
+    latest?: string;
+    deadlineAt?: number;
+  }): Promise<{
+    messages: SlackChannelMessage[];
+    incomplete?: {
+      /** Oldest top-level message fetched when history paging stopped early. */
+      historyStoppedAtTs?: string;
+      /** Threads whose replies in the window were not fetched. */
+      unexpandedThreadCount?: number;
+    };
+  }> {
+    const pastDeadline = () =>
+      deadlineAt !== undefined && Date.now() >= deadlineAt;
+    let historyStoppedAtTs: string | undefined;
+    let unexpandedThreadCount = 0;
     const historyMessages: SlackApiThreadMessage[] = [];
     const threadRootTimestamps = new Set<string>();
     const oldestTs = parseSlackTimestamp(oldest);
@@ -2533,6 +2562,19 @@ export class SlackNotifier {
 
         cursor = result.response_metadata?.next_cursor || undefined;
 
+        if (cursor && pastDeadline() && historyMessages.length > 0) {
+          // History pages arrive newest first, so the oldest part of the
+          // window is what remains unread.
+          historyStoppedAtTs = historyMessages.reduce(
+            (oldestSeen, message) =>
+              Number.parseFloat(message.ts) < Number.parseFloat(oldestSeen)
+                ? message.ts
+                : oldestSeen,
+            historyMessages[0]!.ts,
+          );
+          break;
+        }
+
         if (
           oldestTs !== null &&
           cursor &&
@@ -2544,7 +2586,12 @@ export class SlackNotifier {
         }
       } while (cursor);
 
-      if (oldest && oldestTs !== null) {
+      if (
+        oldest &&
+        oldestTs !== null &&
+        !pastDeadline() &&
+        !historyStoppedAtTs
+      ) {
         // Best effort: the bounded read above is the primary result. Some
         // Slack tiers only allow one history request per minute, so a failed
         // lookback must not turn an otherwise successful read into an error.
@@ -2585,6 +2632,10 @@ export class SlackNotifier {
       );
 
       for (const threadTs of threadRootTimestamps) {
+        if (pastDeadline()) {
+          unexpandedThreadCount += 1;
+          continue;
+        }
         const threadMessages = await this.fetchThreadMessages({
           channel,
           threadTs,
@@ -2604,7 +2655,7 @@ export class SlackNotifier {
         }
       }
 
-      return [...messagesByTs.values()]
+      const messages = [...messagesByTs.values()]
         .sort((a, b) => Number.parseFloat(a.ts) - Number.parseFloat(b.ts))
         .filter((message) => {
           const numericTs = Number.parseFloat(message.ts);
@@ -2616,6 +2667,16 @@ export class SlackNotifier {
           }
           return true;
         });
+
+      return historyStoppedAtTs || unexpandedThreadCount > 0
+        ? {
+            messages,
+            incomplete: {
+              ...(historyStoppedAtTs ? { historyStoppedAtTs } : {}),
+              ...(unexpandedThreadCount > 0 ? { unexpandedThreadCount } : {}),
+            },
+          }
+        : { messages };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(

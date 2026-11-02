@@ -56,6 +56,10 @@ export type CommunicationChannelMessagesPayload = {
   channelId: string;
   requestedOldest?: string;
   requestedLatest?: string;
+  /** Set when the provider read stopped early; see `note` and `nextLatest`. */
+  truncated?: true;
+  nextLatest?: string;
+  note?: string;
   messageCount: number;
   messages: CommunicationLookupMessage[];
 };

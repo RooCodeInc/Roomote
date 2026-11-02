@@ -188,6 +188,9 @@ const slackLookupStrategy: CommunicationLookupStrategy = {
       ...(result.requestedLatest
         ? { requestedLatest: result.requestedLatest }
         : {}),
+      ...(result.truncated ? { truncated: result.truncated } : {}),
+      ...(result.nextLatest ? { nextLatest: result.nextLatest } : {}),
+      ...(result.note ? { note: result.note } : {}),
       messageCount: result.messageCount,
       messages: result.messages.map((message) => ({
         provider: 'slack',

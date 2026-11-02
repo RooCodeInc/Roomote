@@ -3164,6 +3164,52 @@ describe('SlackNotifier', () => {
   });
 
   describe('fetchChannelMessages', () => {
+    it('stops at the deadline and reports what it did not read', async () => {
+      vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      ).mockResolvedValue(new Map([['U123', 'Alice']]));
+      const fetchMock = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          messages: [
+            {
+              user: 'U123',
+              text: 'root',
+              ts: '112.000',
+              thread_ts: '112.000',
+              reply_count: 2,
+              latest_reply: '112.500',
+              type: 'message',
+            },
+            { user: 'U123', text: 'newer', ts: '113.000', type: 'message' },
+          ],
+          response_metadata: { next_cursor: 'cursor-1' },
+        }),
+      });
+      getGlobalWithFetch().fetch = fetchMock;
+
+      const result = await notifier.fetchChannelMessagesWithinBudget({
+        channel: 'C123',
+        oldest: '100.000',
+        latest: '113.000',
+        deadlineAt: Date.now() - 1,
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.messages.map((message) => message.ts)).toEqual([
+        '112.000',
+        '113.000',
+      ]);
+      expect(result.incomplete).toEqual({
+        historyStoppedAtTs: '112.000',
+        unexpandedThreadCount: 1,
+      });
+    });
+
     it('paginates channel history and expands thread replies', async () => {
       const getUsersInfoSpy = vi
         .spyOn(

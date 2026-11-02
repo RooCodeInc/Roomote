@@ -6,6 +6,7 @@ import type { Variables } from '../../../types';
 const {
   findActiveSlackInstallationForChannelMock,
   fetchChannelMessagesMock,
+  fetchIncompleteMock,
   resolveChannelIdMock,
   isAppInChannelMock,
   isUserInChannelMock,
@@ -13,6 +14,7 @@ const {
 } = vi.hoisted(() => ({
   findActiveSlackInstallationForChannelMock: vi.fn(),
   fetchChannelMessagesMock: vi.fn(),
+  fetchIncompleteMock: vi.fn(),
   resolveChannelIdMock: vi.fn(),
   isAppInChannelMock: vi.fn(),
   isUserInChannelMock: vi.fn(),
@@ -47,6 +49,16 @@ vi.mock('@roomote/slack', () => ({
   SlackNotifier: vi.fn(
     class {
       fetchChannelMessages = fetchChannelMessagesMock;
+      fetchChannelMessagesWithinBudget = async ({
+        deadlineAt: _deadlineAt,
+        ...params
+      }: Record<string, unknown>) => {
+        const incomplete = fetchIncompleteMock();
+        return {
+          messages: await fetchChannelMessagesMock(params),
+          ...(incomplete ? { incomplete } : {}),
+        };
+      };
       resolveChannelId = resolveChannelIdMock;
       isAppInChannel = isAppInChannelMock;
       isUserInChannel = isUserInChannelMock;
@@ -273,6 +285,49 @@ describe('slack channel messages MCP endpoint', () => {
       oldest: '1775001600.000000',
       latest: '1775088000.000000',
     });
+  });
+
+  it('returns a partial result with paging hints when Slack is too slow', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
+        type: 'standard',
+        slackThreadTs: null,
+        payload: {},
+      }) as never,
+    );
+    fetchChannelMessagesMock.mockResolvedValue([
+      {
+        ts: '1711929900.000000',
+        user: 'U234',
+        username: 'Bob',
+        text: 'newest',
+        type: 'message',
+      },
+    ]);
+    fetchIncompleteMock.mockReturnValueOnce({
+      historyStoppedAtTs: '1711929900.000000',
+      unexpandedThreadCount: 3,
+    });
+
+    const response = await postChannelMessages(runToken, {
+      channel: 'eng',
+      oldest: '2026-04-01T00:00:00Z',
+      latest: '2026-04-02T00:00:00Z',
+    });
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      truncated: true,
+      nextLatest: '1711929900.000000',
+      messageCount: 1,
+    });
+    expect(String((body as { note?: unknown }).note)).toContain(
+      'latest=1711929900.000000',
+    );
+    expect(String((body as { note?: unknown }).note)).toContain(
+      'Replies in 3 thread(s)',
+    );
   });
 
   it('uses the originating Slack channel when channel is omitted', async () => {

@@ -70,6 +70,9 @@ type SlackChannelMessagesPayload = {
   channelId: string;
   requestedOldest?: string;
   requestedLatest?: string;
+  truncated?: true;
+  nextLatest?: string;
+  note?: string;
   messageCount: number;
   messages: Array<{
     ts: string;
@@ -657,12 +660,16 @@ export async function lookupSlackChannelMessages(options: {
   });
 
   let messages: SlackThreadMessage[];
+  let incomplete:
+    | { historyStoppedAtTs?: string; unexpandedThreadCount?: number }
+    | undefined;
   try {
-    messages = await slack.fetchChannelMessages({
+    ({ messages, incomplete } = await slack.fetchChannelMessagesWithinBudget({
       channel: channelId,
       ...(oldestBoundary ? { oldest: oldestBoundary.slackTs } : {}),
       ...(latestBoundary ? { latest: latestBoundary.slackTs } : {}),
-    });
+      deadlineAt: Date.now() + SLACK_CHANNEL_MESSAGES_TIME_BUDGET_MS,
+    }));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new McpProxyError(
@@ -678,7 +685,42 @@ export async function lookupSlackChannelMessages(options: {
     channelId,
     ...(oldestBoundary ? { requestedOldest: oldestBoundary.requested } : {}),
     ...(latestBoundary ? { requestedLatest: latestBoundary.requested } : {}),
+    ...(incomplete
+      ? {
+          truncated: true as const,
+          ...(incomplete.historyStoppedAtTs
+            ? { nextLatest: incomplete.historyStoppedAtTs }
+            : {}),
+          note: describeIncompleteSlackChannelRead(incomplete),
+        }
+      : {}),
     messageCount: normalizedMessages.length,
     messages: normalizedMessages,
   };
+}
+
+/**
+ * Stay well inside the 60s integration-call timeout so a slow read returns
+ * partial results instead of nothing.
+ */
+const SLACK_CHANNEL_MESSAGES_TIME_BUDGET_MS = 40_000;
+
+function describeIncompleteSlackChannelRead(incomplete: {
+  historyStoppedAtTs?: string;
+  unexpandedThreadCount?: number;
+}): string {
+  const parts = [
+    'Slack was too slow to read this whole window in one call, so this result is partial.',
+  ];
+  if (incomplete.historyStoppedAtTs) {
+    parts.push(
+      `Older top-level messages were not read: call again with latest=${incomplete.historyStoppedAtTs} to continue further back.`,
+    );
+  }
+  if (incomplete.unexpandedThreadCount) {
+    parts.push(
+      `Replies in ${incomplete.unexpandedThreadCount} thread(s) were not read; use a narrower window or fetch a specific thread.`,
+    );
+  }
+  return parts.join(' ');
 }
