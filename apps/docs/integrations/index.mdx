@@ -132,7 +132,7 @@ authorized requests. This opt-in feature does not change sandbox networking.
 
 ## Custom MCP servers
 
-Beyond the built-in catalog, you can connect your own MCP servers at two
+Beyond the built-in catalog, you can connect your own MCP servers at three
 scopes:
 
 - **Deployment-wide**, on the **Integrations** page (see
@@ -142,6 +142,10 @@ scopes:
 - **Per-environment**, in the YAML view of the environment editor. See
   [Environments](/environments). An environment entry with the same name as a
   deployment-wide server takes precedence in that environment.
+- **Personal**, under **Personal Settings > Personal MCP servers**: remote
+  servers available only to their owner. A personal server takes precedence
+  over a shared server with the same name, while an environment entry still
+  takes precedence over both.
 
 Use deployment or user-linked integrations when the tool is broadly useful
 across teams. Use an environment-level MCP server when the tool only makes
