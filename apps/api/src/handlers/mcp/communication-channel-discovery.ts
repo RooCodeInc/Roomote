@@ -450,5 +450,18 @@ export async function listCommunicationDestinations(
     destinations: filtered,
     offset: input.offset,
     limit: input.limit,
+    ...(input.kind === 'channel'
+      ? { limitations: [SLACK_CHANNEL_LISTING_LIMITATION] }
+      : {}),
   });
 }
+
+/**
+ * An agent that cannot find its automation's private target channel here
+ * should not conclude that Slack access was lost.
+ */
+const SLACK_CHANNEL_LISTING_LIMITATION = {
+  provider: 'slack' as const,
+  reason:
+    'Only public Slack channels Roomote has joined are listed; private channels are never standalone destinations, and a missing channel does not mean Slack access was lost. To post in the current conversation, including a custom automation result for its configured channel, use send_chat_reply.',
+};
