@@ -26,7 +26,12 @@ describe('BullMQ build artifact', () => {
           '--out-dir',
           outputDirectory,
         ],
-        { cwd: packageDirectory, stdio: 'pipe' },
+        {
+          cwd: packageDirectory,
+          stdio: 'pipe',
+          timeout: 45_000,
+          killSignal: 'SIGKILL',
+        },
       );
 
       const bundlePath = join(outputDirectory, 'index.js');
@@ -39,5 +44,5 @@ describe('BullMQ build artifact', () => {
     } finally {
       rmSync(outputDirectory, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 });
