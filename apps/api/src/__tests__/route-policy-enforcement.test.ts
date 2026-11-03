@@ -21,6 +21,12 @@ vi.mock('@roomote/redis', async (importOriginal) => {
 
   return {
     ...actual,
+    // This suite injects verified credentials rather than exercising token
+    // storage; real grant lifecycle enforcement is covered by HTTP access tests.
+    isMcpOAuthGrantLive: vi.fn(
+      async (auth) =>
+        auth.clientId === 'fixture-client' && auth.grantId === 'fixture-grant',
+    ),
     getRedis: () => ({
       // In-memory stand-in for the atomic INCR+EXPIRE rate limit script.
       eval: async (_script: string, _numKeys: number, key: string) => {
@@ -103,6 +109,8 @@ vi.mock('../middleware', async (importOriginal) => {
           c.set('authContext', {
             tokenType: 'mcp',
             userId: mcpAuthState.userId,
+            clientId: 'fixture-client',
+            grantId: 'fixture-grant',
             resource: getRoomoteMcpResourceUrl(
               Env.R_PUBLIC_URL ?? Env.R_APP_URL,
             ),
@@ -116,6 +124,8 @@ vi.mock('../middleware', async (importOriginal) => {
             tokenType: 'mcp',
             userId: 'user-123',
             resource: 'https://wrong.example/mcp',
+            clientId: 'fixture-client',
+            grantId: 'fixture-grant',
             scopes: ['mcp:roomote'],
             version: 1,
           } as Variables['authContext']);
@@ -126,6 +136,8 @@ vi.mock('../middleware', async (importOriginal) => {
             tokenType: 'mcp',
             userId: 'user-123',
             resource: getLegacyRoomoteMcpResourceUrl(Env.TRPC_URL),
+            clientId: 'fixture-client',
+            grantId: 'fixture-grant',
             scopes: ['mcp:roomote'],
             version: 1,
           } as Variables['authContext']);
