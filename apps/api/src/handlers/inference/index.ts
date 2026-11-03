@@ -6,12 +6,15 @@ import {
   formatSingleLineLog,
   rebaseRoomoteModelIdToUpstream,
   ROOMOTE_INFERENCE_PROVIDER_ID,
+  AGENT_SAFETY_STOP_CODE,
+  AGENT_SAFETY_STOP_TEXT,
 } from '@roomote/types';
 import {
   db,
   DevLoginInferencePlaceholderError,
   eq,
   taskRuns,
+  admitTaskInferenceRequest,
 } from '@roomote/db/server';
 import { recordLlmUsage } from '@roomote/sdk/server';
 
@@ -362,7 +365,7 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   }
 
   const taskRun = await db.query.taskRuns.findFirst({
-    columns: { id: true },
+    columns: { id: true, taskId: true },
     where: eq(taskRuns.id, auth.runId),
   });
 
@@ -382,6 +385,21 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       body = await c.req.json();
     } catch {
       return c.json({ error: 'Invalid JSON' }, 400);
+    }
+    if (
+      !taskRun.taskId ||
+      !(await admitTaskInferenceRequest(taskRun.taskId, auth.runId))
+    ) {
+      return c.json(
+        {
+          error: {
+            code: AGENT_SAFETY_STOP_CODE,
+            message: AGENT_SAFETY_STOP_TEXT,
+            type: 'invalid_request_error',
+          },
+        },
+        400,
+      );
     }
     return evaluateJevgrepRequest(body);
   }
@@ -480,6 +498,24 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   }
 
   try {
+    // GET catalog/metadata reads are free; every POST attempt (including failed
+    // requests and provider retries) consumes one durable admission before fetch.
+    if (
+      method === 'POST' &&
+      (!taskRun.taskId ||
+        !(await admitTaskInferenceRequest(taskRun.taskId, auth.runId)))
+    ) {
+      return c.json(
+        {
+          error: {
+            code: AGENT_SAFETY_STOP_CODE,
+            message: AGENT_SAFETY_STOP_TEXT,
+            type: 'invalid_request_error',
+          },
+        },
+        400,
+      );
+    }
     const upstreamResponse = await fetchWithLongLivedStreamDispatcher(
       upstreamUrl,
       {

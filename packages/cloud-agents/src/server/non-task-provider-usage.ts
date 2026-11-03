@@ -1,4 +1,7 @@
 import { mkdtempSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { createRunToken } from '@roomote/auth';
+import { Env } from '@roomote/env';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,9 +17,17 @@ import {
   recordLlmUsage,
   resolveEffectiveModelRuntimeEnv,
   taskRuns,
+  resolveSandboxModelRuntimeEnv,
+  stopTaskForAgentSafety,
 } from '@roomote/db/server';
 import {
   formatErrorForLog,
+  AGENT_SAFETY,
+  AGENT_SAFETY_STOP_TEXT,
+  AgentSafetyPass,
+  isAgentSafetyStop,
+  buildInferenceGatewayUrl,
+  type AgentSafetyReason,
   getOpenAiCompatibleRuntimeConfigs,
   getTaskModelDisplayName,
   isInferenceCreditsExhaustedError,
@@ -197,7 +208,7 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   /** Explicit reasoning-effort override applied to the resolved model. */
   reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
-  /** null lets OpenCode own the prompt lifecycle without a Roomote deadline. */
+  /** null uses the finite platform maximum; a prompt cannot disable safety. */
   timeoutMs?: number | null;
   /**
    * OpenCode retries some provider failures internally before the prompt
@@ -1626,7 +1637,39 @@ async function runNonTaskSdkPrompt(
 }> {
   const { model, resolvedModelRuntimeEnv } = runtime;
   const reasoningEffort = runtime.reasoningEffort ?? params.reasoningEffort;
-  const timeoutMs = params.timeoutMs === undefined ? 120_000 : params.timeoutMs;
+  const timeoutMs = Math.min(
+    params.timeoutMs === undefined
+      ? 120_000
+      : (params.timeoutMs ?? AGENT_SAFETY.passTimeoutMs),
+    AGENT_SAFETY.passTimeoutMs,
+  );
+  let taskGatewayEnv: Partial<Record<string, string>> = {};
+  if (params.taskId) {
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, params.taskId),
+      orderBy: desc(taskRuns.id),
+      columns: { id: true, actingUserId: true },
+    });
+    if (!run)
+      throw new Error(
+        'Task helper requires a persisted run for inference admission',
+      );
+    const gatewayMarkers = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: { ...resolvedModelRuntimeEnv, R_MODEL: model },
+    });
+    taskGatewayEnv = {
+      ROOMOTE_TASK_INFERENCE_GATEWAY: buildInferenceGatewayUrl(Env.TRPC_URL),
+      ROOMOTE_TASK_INFERENCE_TOKEN: await createRunToken({
+        runId: run.id,
+        userId: run.actingUserId,
+        timeoutMs,
+      }),
+      R_INFERENCE_GATEWAY_CHATGPT:
+        gatewayMarkers.R_INFERENCE_GATEWAY_CHATGPT ?? '',
+      R_MODEL: model,
+      R_SMALL_MODEL: model,
+    };
+  }
   const promptErrorLabel =
     options.promptErrorLabel ??
     `OpenCode structured prompt failed (model ${model})`;
@@ -1638,8 +1681,8 @@ async function runNonTaskSdkPrompt(
     totalMs: 0,
   };
   const server = await leaseOpenCodeSdkServer({
-    env: { ...resolvedModelRuntimeEnv, ...options.env },
-    ephemeral: options.ephemeral,
+    env: { ...resolvedModelRuntimeEnv, ...options.env, ...taskGatewayEnv },
+    ephemeral: params.taskId ? true : options.ephemeral,
     preserveReasoning: options.preserveReasoning ?? Boolean(reasoningEffort),
     promptOnlySubagents: options.promptOnlySubagents,
     reasoningOverride: reasoningEffort
@@ -1649,15 +1692,25 @@ async function runNonTaskSdkPrompt(
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
         : Math.min(timeoutMs, DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS),
-    useConfiguredServer: options.useConfiguredServer,
+    useConfiguredServer: params.taskId ? false : options.useConfiguredServer,
   });
   setupTiming.serverLeaseMs = Date.now() - setupStartedAtMs;
   options.onServerLeased?.(server.url);
   const abortController = new AbortController();
+  let safetyPersistence: Promise<void> | undefined;
   const timeout =
     timeoutMs === null
       ? undefined
       : setTimeout(() => {
+          if (timeoutMs === AGENT_SAFETY.passTimeoutMs) {
+            if (params.taskId)
+              safetyPersistence = stopTaskForAgentSafety({
+                taskId: params.taskId,
+                reason: 'pass_time_limit',
+              }).catch(() => undefined);
+            abortController.abort(new Error(AGENT_SAFETY_STOP_TEXT));
+            return;
+          }
           abortController.abort(
             new NonTaskOpenCodePromptTimeoutError(timeoutMs),
           );
@@ -1825,6 +1878,50 @@ async function runNonTaskSdkPrompt(
     await options.onSessionReady?.(sessionId);
 
     const trackedSessionIds = new Set([sessionId]);
+    const safetyPasses = new Map<string, AgentSafetyPass>();
+    const safetyPass = (id: string) => {
+      let pass = safetyPasses.get(id);
+      if (!pass) {
+        pass = new AgentSafetyPass((value) =>
+          createHash('sha256').update(value).digest('hex'),
+        );
+        safetyPasses.set(id, pass);
+      }
+      return pass;
+    };
+    safetyPass(sessionId);
+    let safetyStopped = false;
+    const safetyStop = async (
+      reason: AgentSafetyReason,
+      stoppedSessionId = sessionId,
+    ) => {
+      if (safetyStopped) return;
+      safetyStopped = true;
+      safetyPersistence = params.taskId
+        ? stopTaskForAgentSafety({
+            taskId: params.taskId,
+            reason,
+            details: {
+              sessionId: stoppedSessionId,
+              ...safetyPasses.get(stoppedSessionId)?.snapshot(),
+            },
+          })
+        : Promise.resolve();
+      // Reject and abort locally immediately, then persist the durable latch.
+      const error = new Error(AGENT_SAFETY_STOP_TEXT);
+      rejectSessionError(error);
+      abortController.abort(error);
+      await safetyPersistence;
+    };
+    const safetyTimer = setInterval(() => {
+      for (const [id, pass] of safetyPasses) {
+        if (pass.checkTime()) {
+          void safetyStop('pass_time_limit', id).catch(() => undefined);
+          break;
+        }
+      }
+    }, 1_000);
+    safetyTimer.unref();
     const sessionsCreatedThisTurn = new Set<string>();
     const usageRecordings = new Map<string, Promise<void>>();
     const observedUsageEventKeys = new Set<string>();
@@ -1965,9 +2062,12 @@ async function runNonTaskSdkPrompt(
             if (
               (event.type === 'session.created' ||
                 event.type === 'session.updated') &&
-              event.properties.info.parentID === sessionId
+              trackedSessionIds.has(event.properties.info.parentID ?? '')
             ) {
-              trackedSessionIds.add(event.properties.sessionID);
+              const childId =
+                event.properties.info.id ?? event.properties.sessionID;
+              trackedSessionIds.add(childId);
+              safetyPass(childId);
               if (event.type === 'session.created') {
                 sessionsCreatedThisTurn.add(event.properties.sessionID);
               }
@@ -1979,7 +2079,39 @@ async function runNonTaskSdkPrompt(
                 rejectSessionError(error);
                 return;
               }
+            } else if (
+              event.type === 'session.idle' &&
+              event.properties.sessionID !== sessionId
+            ) {
+              safetyPasses.delete(event.properties.sessionID);
             } else if (event.type === 'message.part.updated') {
+              const part = event.properties.part;
+              if (
+                part.type === 'tool' &&
+                trackedSessionIds.has(part.sessionID) &&
+                ['completed', 'error'].includes(part.state.status)
+              ) {
+                const state = part.state as {
+                  status: string;
+                  input?: unknown;
+                  output?: unknown;
+                  error?: unknown;
+                };
+                const reason = safetyPass(part.sessionID).completed({
+                  id: part.callID,
+                  name: part.tool,
+                  args: state.input,
+                  result: {
+                    status: state.status,
+                    output: state.output,
+                    error: state.error,
+                  },
+                });
+                if (reason) {
+                  await safetyStop(reason, part.sessionID);
+                  return;
+                }
+              }
               const taskPart = normalizeParentOpenCodeTaskPart(
                 event.properties.part,
                 sessionId,
@@ -2024,6 +2156,15 @@ async function runNonTaskSdkPrompt(
               trackedSessionIds.has(event.properties.info.sessionID)
             ) {
               const info = event.properties.info;
+              if (isAgentSafetyStop(info.error)) {
+                await safetyStop('task_request_limit');
+                return;
+              }
+              const reason = safetyPass(info.sessionID).step(info.id);
+              if (reason) {
+                await safetyStop(reason, info.sessionID);
+                return;
+              }
               const messageId = asString(info.id);
               if (
                 info.sessionID === sessionId &&
@@ -2081,6 +2222,7 @@ async function runNonTaskSdkPrompt(
               // can succeed until the account is topped up, so end the
               // prompt instead of reporting a temporary error.
               if (
+                isAgentSafetyStop(event.properties.status.message) ||
                 isInferenceCreditsExhaustedError(
                   event.properties.status.message,
                 )
@@ -2375,17 +2517,20 @@ async function runNonTaskSdkPrompt(
       }, NON_TASK_SESSION_ABORT_TIMEOUT_MS);
       sessionAbortTimeout.unref();
       try {
-        await client.session
-          .abort(
-            { sessionID: sessionId, directory: sessionDirectory },
-            { signal: sessionAbortController.signal },
-          )
-          .catch(() => undefined);
+        await Promise.allSettled(
+          [...trackedSessionIds].map((id) =>
+            client.session.abort(
+              { sessionID: id, directory: sessionDirectory },
+              { signal: sessionAbortController.signal },
+            ),
+          ),
+        );
       } finally {
         clearTimeout(sessionAbortTimeout);
       }
       throw error;
     } finally {
+      clearInterval(safetyTimer);
       abortController.signal.removeEventListener('abort', abortEventMonitor);
       eventAbortController.abort();
       void eventMonitor?.catch(() => undefined);
@@ -2404,6 +2549,23 @@ async function runNonTaskSdkPrompt(
     externalSignal?.removeEventListener('abort', abortFromExternalSignal);
     if (timeout) clearTimeout(timeout);
     server.release();
+    if (safetyPersistence) {
+      let persistenceTimeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          safetyPersistence.catch(() => undefined),
+          new Promise<void>((resolve) => {
+            persistenceTimeout = setTimeout(
+              resolve,
+              NON_TASK_SESSION_ABORT_TIMEOUT_MS,
+            );
+            persistenceTimeout.unref();
+          }),
+        ]);
+      } finally {
+        if (persistenceTimeout) clearTimeout(persistenceTimeout);
+      }
+    }
   }
 }
 
@@ -2566,6 +2728,8 @@ async function runControlPlaneWithFallback<T>(
     try {
       return await execute(runtime, false);
     } catch (error) {
+      if (isAgentSafetyStop(error instanceof Error ? error.message : error))
+        throw error;
       const trigger = classifyModelFallbackTrigger(error, {
         retriesUsed: attempt - 1,
       });

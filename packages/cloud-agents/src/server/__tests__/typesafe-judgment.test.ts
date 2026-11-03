@@ -7,6 +7,7 @@ const {
   mockCaptureJudgment,
   mockIsJudgmentCaptureEnabled,
   mockEnv,
+  mockAdmitTaskInference,
 } = vi.hoisted(() => ({
   mockResolveModelProviderEnvValue: vi.fn(),
   mockGetJudgmentSelection: vi.fn(),
@@ -15,6 +16,7 @@ const {
   mockRecordLlmUsage: vi.fn(),
   mockCaptureJudgment: vi.fn(),
   mockIsJudgmentCaptureEnabled: vi.fn(),
+  mockAdmitTaskInference: vi.fn().mockResolvedValue(true),
   mockEnv: {
     R_JUDGMENT_MODEL: undefined as string | undefined,
     R_JUDGMENT_UPSTREAM_URL: undefined as string | undefined,
@@ -29,6 +31,7 @@ vi.mock('@roomote/db/server', () => ({
   getDeploymentJudgmentModelSelection: mockGetJudgmentSelection,
   recordLlmUsage: mockRecordLlmUsage,
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
+  admitTaskInferenceRequest: mockAdmitTaskInference,
 }));
 
 vi.mock('../non-task-provider-usage', () => ({
@@ -110,6 +113,7 @@ const directAnswers = {
 describe('evaluateTypeSafeJudgments', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAdmitTaskInference.mockResolvedValue(true);
     resetJudgmentBackendCache();
     resetDecisionModelCache();
     mockEnv.R_JUDGMENT_MODEL = undefined;
@@ -129,6 +133,17 @@ describe('evaluateTypeSafeJudgments', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('admits direct task-associated decisions before dispatch and stops when their allowance is gone', async () => {
+    const upstream = mockFetchResponse({ answers: directAnswers });
+    mockAdmitTaskInference.mockResolvedValue(false);
+    await expect(
+      evaluateDecisionModel({ taskId: 'task-1', state: 'test', questions }),
+    ).rejects.toThrow('Roomote stopped this task at a safety limit');
+    expect(mockAdmitTaskInference).toHaveBeenCalledWith('task-1');
+    expect(upstream).not.toHaveBeenCalled();
+    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
   });
 
   it.each(['typesafe', 'openrouter', 'vercel'] as const)(

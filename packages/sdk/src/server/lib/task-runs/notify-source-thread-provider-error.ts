@@ -6,6 +6,7 @@ import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   type AcpPersistedEnvelope,
   asRecord,
+  isAgentSafetyStop,
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
@@ -308,6 +309,9 @@ async function notifySourceThreadOfTerminalProviderError(input: {
 
   const parent = getFastAgentParentFromPayload(run.payload);
   if (parent) {
+    // Safety notices are already persisted directly with the durable latch.
+    // Do not wake inference to explain a stop or launch a replacement pass.
+    if (isAgentSafetyStop(input.errorSummary)) return;
     if (input.preformatted) return;
     const error = redactSecrets(input.errorSummary).trim();
     if (!error) return;

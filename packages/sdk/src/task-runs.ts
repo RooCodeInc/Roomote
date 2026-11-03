@@ -8,6 +8,11 @@ import {
 } from './client';
 import { hasBootstrapFailureSignal } from './bootstrap-failure-signal';
 
+export const stopForAgentSafety = (
+  input: AppRouterInput['taskRuns']['stopForAgentSafety'],
+  options?: { signal?: AbortSignal },
+) => client.taskRuns.stopForAgentSafety.mutate(input, options);
+
 export type TaskRun = NonNullable<AppRouterOutput['taskRuns']['findFirstById']>;
 
 export type DequeuedTaskRun = NonNullable<

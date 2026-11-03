@@ -23,6 +23,7 @@ export const ACP_ENVELOPE_EVENT_TYPES = {
   AssistantThought: 'roomote_runtime.assistant_thought',
   AssistantThoughtChunk: 'roomote_runtime.assistant_thought_chunk',
   AssistantMessage: 'roomote_runtime.assistant_message',
+  AgentSafetyStop: 'roomote_runtime.agent_safety_stop',
   AssistantMessageChunk: 'roomote_runtime.assistant_message_chunk',
   Plan: 'roomote_runtime.plan',
   ToolCall: 'roomote_runtime.tool_call',
@@ -861,6 +862,7 @@ export function inferAcpMessageKind(
   switch (eventType) {
     case ACP_ENVELOPE_EVENT_TYPES.UserPrompt:
     case ACP_ENVELOPE_EVENT_TYPES.AssistantMessage:
+    case ACP_ENVELOPE_EVENT_TYPES.AgentSafetyStop:
     case ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk:
       return 'text';
     case ACP_ENVELOPE_EVENT_TYPES.AssistantThought:

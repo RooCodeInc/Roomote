@@ -14,6 +14,8 @@ import {
   isDeploymentExperimentEnabled,
   slackInstallations,
   recordVulnerabilityAssessment,
+  stopTaskForAgentSafety,
+  taskRuns,
 } from '@roomote/db/server';
 
 import {
@@ -651,6 +653,35 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(({ input }) => setTaskHarnessSessionId(input)),
+  stopForAgentSafety: runScoped(
+    z.object({
+      runId: z.number(),
+      reason: z.enum([
+        'identical_tool_loop',
+        'pass_step_limit',
+        'pass_tool_limit',
+        'pass_time_limit',
+        'task_request_limit',
+      ]),
+      details: z
+        .object({
+          sessionId: z.string().max(200).optional(),
+          steps: z.number().int().nonnegative().optional(),
+          completedTools: z.number().int().nonnegative().optional(),
+          identicalCompletions: z.number().int().nonnegative().optional(),
+          elapsedMs: z.number().nonnegative().optional(),
+        })
+        .optional(),
+    }),
+    'runId',
+  ).mutation(async ({ input }) => {
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.runId),
+      columns: { taskId: true },
+    });
+    if (!run?.taskId) throw new TRPCError({ code: 'NOT_FOUND' });
+    await stopTaskForAgentSafety({ taskId: run.taskId, ...input });
+  }),
   createSnapshot: runScoped(
     z.object({
       runId: z.number(),
@@ -1223,7 +1254,15 @@ export const taskRunsRouter = router({
     'runId',
   ).mutation(async ({ input }) => {
     try {
-      const answer = await evaluateRepositoryJudgement(input.request);
+      const run = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, input.runId),
+        columns: { taskId: true },
+      });
+      if (!run?.taskId) throw new TRPCError({ code: 'NOT_FOUND' });
+      const answer = await evaluateRepositoryJudgement(
+        input.request,
+        run.taskId,
+      );
       return answer
         ? { kind: 'answered' as const, answer }
         : { kind: 'unavailable' as const };
@@ -1238,7 +1277,13 @@ export const taskRunsRouter = router({
     'runId',
   ).mutation(async ({ input }) => {
     try {
+      const run = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, input.runId),
+        columns: { taskId: true },
+      });
+      if (!run?.taskId) throw new TRPCError({ code: 'NOT_FOUND' });
       const evaluations = await evaluateJudgeFileCriteria({
+        taskId: run.taskId,
         state: input.state,
         criteria: input.criteria,
       });

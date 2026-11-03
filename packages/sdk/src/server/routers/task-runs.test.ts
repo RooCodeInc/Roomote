@@ -5,6 +5,7 @@ const jevgrepMocks = vi.hoisted(() => ({
 const judgeFileMocks = vi.hoisted(() => ({
   evaluate: vi.fn(),
   repository: vi.fn(),
+  findRunForInference: vi.fn(),
 }));
 vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
   resolveJudgmentBackend: jevgrepMocks.backend,
@@ -13,10 +14,23 @@ vi.mock('@roomote/cloud-agents/server/judge-file', () => ({
   evaluateJudgeFileCriteria: judgeFileMocks.evaluate,
   evaluateRepositoryJudgement: judgeFileMocks.repository,
 }));
-vi.mock('@roomote/db/server', async (original) => ({
-  ...(await original<typeof import('@roomote/db/server')>()),
-  isDeploymentExperimentEnabled: jevgrepMocks.experiment,
-}));
+vi.mock('@roomote/db/server', async (original) => {
+  const actual = await original<typeof import('@roomote/db/server')>();
+  return {
+    ...actual,
+    db: {
+      ...actual.db,
+      query: {
+        ...actual.db.query,
+        taskRuns: {
+          ...actual.db.query.taskRuns,
+          findFirst: judgeFileMocks.findRunForInference,
+        },
+      },
+    },
+    isDeploymentExperimentEnabled: jevgrepMocks.experiment,
+  };
+});
 
 import { z } from 'zod';
 
@@ -208,6 +222,7 @@ function createRunCaller() {
 describe('taskRunsRouter queue message guards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    judgeFileMocks.findRunForInference.mockResolvedValue({ taskId: 'task-42' });
     mockEnqueueTask.mockResolvedValue({ id: 99, taskId: 'task-99' });
     mockFindTaskRun.mockResolvedValue({ id: 42 });
     mockFindTaskRunForAccess.mockResolvedValue({ id: 42 });
@@ -326,7 +341,7 @@ describe('taskRunsRouter queue message guards', () => {
       kind: 'answered',
       answer: { outcome: 'pass', confidence: 0.98 },
     });
-    expect(judgeFileMocks.repository).toHaveBeenCalledWith(request);
+    expect(judgeFileMocks.repository).toHaveBeenCalledWith(request, 'task-42');
     judgeFileMocks.repository.mockClear();
     await expect(
       createAuthCaller().evaluateRepositoryJudgement({ runId: 42, request }),
@@ -399,9 +414,42 @@ describe('taskRunsRouter queue message guards', () => {
     });
     expect(judgeFileMocks.evaluate).toHaveBeenCalledWith(
       expect.objectContaining({
+        taskId: 'task-42',
         state: expect.objectContaining({ path: 'Example.tsx' }),
       }),
     );
+  });
+
+  it('does not dispatch repository judgments without a persisted task binding', async () => {
+    judgeFileMocks.findRunForInference.mockResolvedValue(undefined);
+    await expect(
+      createRunCaller().evaluateRepositoryJudgement({
+        runId: 42,
+        request: {
+          kind: 'judge',
+          rule: 'Use sentence case',
+          evidence: [],
+          focusPaths: [],
+          complete: true,
+          unresolved: [],
+        },
+      }),
+    ).resolves.toEqual({ kind: 'error' });
+    await expect(
+      createRunCaller().evaluateJudgeFileCriteria({
+        runId: 42,
+        state: {
+          path: 'Example.tsx',
+          patch: '+changed',
+          patchTruncated: false,
+          finalContent: 'changed',
+          finalContentTruncated: false,
+        },
+        criteria: [{ id: 'criterion_0', rule: 'Use sentence case.' }],
+      }),
+    ).resolves.toEqual({ kind: 'error' });
+    expect(judgeFileMocks.repository).not.toHaveBeenCalled();
+    expect(judgeFileMocks.evaluate).not.toHaveBeenCalled();
   });
 
   it('strips actingUserId from run-token update input (confused-deputy guard)', async () => {

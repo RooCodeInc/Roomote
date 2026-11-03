@@ -10,11 +10,15 @@ const mocks = vi.hoisted(() => ({
   getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
   canRetryFailedStart: vi.fn(),
   findRun: vi.fn(),
+  findTaskSafety: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
-    query: { taskRuns: { findFirst: mocks.findRun } },
+    query: {
+      taskRuns: { findFirst: mocks.findRun },
+      tasks: { findFirst: mocks.findTaskSafety },
+    },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -32,6 +36,7 @@ vi.mock('@roomote/db/server', () => ({
     values,
   })),
   taskRuns: { id: 'task_runs.id', result: 'task_runs.result' },
+  tasks: { id: 'tasks.id' },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -79,6 +84,7 @@ function makeRun(
 describe('notifyFastAgentParentOnSettle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.findTaskSafety.mockResolvedValue({ safetyStoppedAt: null });
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
     mocks.enqueueParentEvent.mockResolvedValue({ queued: true });
     mocks.listPullRequests.mockResolvedValue([]);
@@ -102,6 +108,18 @@ describe('notifyFastAgentParentOnSettle', () => {
 
     expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
     expect(mocks.updateSet).not.toHaveBeenCalled();
+  });
+
+  it('does not wake parent inference or offer a retry for a durably safety-stopped task', async () => {
+    mocks.findTaskSafety.mockResolvedValue({ safetyStoppedAt: new Date() });
+    expect(
+      await notifyFastAgentParentOnSettle(
+        makeRun({ fastAgentParent: fastParent }),
+        RunStatus.Failed,
+      ),
+    ).toBe('already_notified');
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+    expect(mocks.canRetryFailedStart).not.toHaveBeenCalled();
   });
 
   it('stays quiet for a successful session-requested review settle', async () => {
