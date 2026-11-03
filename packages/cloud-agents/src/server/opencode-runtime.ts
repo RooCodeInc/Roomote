@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -708,7 +708,19 @@ export function buildOpenCodeCliEnv(
   // launching service's own configuration.
   scrubOpenCodeHelperEnv(env, extraEnv);
 
+  // An OAuth loader can replace the SDK fetch and ignore baseURL entirely.
+  // Keep direct auth for ordinary sessions, never gateway-bound task helpers.
+  if (isTaskHelperGatewayEnv(extraEnv)) delete env.OPENCODE_AUTH_CONTENT;
+
   return env;
+}
+
+function isTaskHelperGatewayEnv(
+  env?: Partial<Record<string, string | undefined>>,
+): boolean {
+  return Boolean(
+    env?.ROOMOTE_TASK_INFERENCE_GATEWAY && env.ROOMOTE_TASK_INFERENCE_TOKEN,
+  );
 }
 
 /** Task-associated control-plane helpers use the same admission boundary as
@@ -1020,6 +1032,20 @@ async function startManagedOpenCodeSdkServer(
     `--port=${port}`,
   ]);
   const env = buildOpenCodeCliEnv(extraEnv, options);
+  // Do not delete the service's shared auth.json: unrelated sessions still use
+  // it. Give this managed lease an empty auth store, overriding caller paths.
+  const taskDataHome = isTaskHelperGatewayEnv(extraEnv)
+    ? mkdtempSync(join(tmpdir(), 'roomote-task-helper-data-'))
+    : undefined;
+  if (taskDataHome) env.XDG_DATA_HOME = taskDataHome;
+  const cleanupTaskData = () => {
+    if (!taskDataHome) return;
+    try {
+      rmSync(taskDataHome, { recursive: true, force: true });
+    } catch {
+      console.warn('[OpenCode] Could not clean up isolated task-helper data.');
+    }
+  };
   // OpenCode blocks its first request on an `@opencode-ai/plugin` registry
   // install into each config directory it loads; a fresh container after a
   // deploy paid that in full (minutes, or a 300s timeout). Copy the
@@ -1033,13 +1059,20 @@ async function startManagedOpenCodeSdkServer(
       }`,
     );
   }
-  const proc = spawn(command.command, command.args, {
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    // Own process group, so shutdown can signal the entire tree (shell
-    // wrappers included) via the negative pid.
-    detached: true,
-  });
+  let proc: ChildProcess;
+  try {
+    proc = spawn(command.command, command.args, {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // Own process group, so shutdown can signal the entire tree (shell
+      // wrappers included) via the negative pid.
+      detached: true,
+    });
+  } catch (error) {
+    cleanupTaskData();
+    throw error;
+  }
+  proc.once('close', cleanupTaskData);
 
   liveOpenCodeSdkServerProcs.add(proc);
   proc.once('exit', () => {
@@ -1082,6 +1115,7 @@ async function startManagedOpenCodeSdkServer(
       settled = true;
       clearTimeout(timeout);
       stopChildProcess(proc);
+      cleanupTaskData();
       reject(error);
     };
 

@@ -22,6 +22,11 @@ while an old runtime is alive.
   counter, rather than one reservation per helper prompt. An unsupported
   gateway provider fails closed. Typed decision calls with task context also
   reserve before direct dispatch (including optional shadow evaluations).
+  Gateway-bound helper startup strips inline subscription OAuth and overrides
+  the data home with a private, empty auth store, cleaned up when the process
+  closes or startup fails. Shared session auth files remain untouched. This
+  prevents a built-in OAuth loader from replacing the SDK transport and
+  bypassing the configured gateway URL.
 - A rejected admission beyond the ceiling atomically latches the task and
   inserts a task notice plus an owning-session notice, if present. Worker pass
   limits call the same durable stop mutation. Concurrent/late stop events do
@@ -80,3 +85,10 @@ settle/error relays do not wake parent inference for a safety-stopped task.
   provider-side financial limits.
 - Rollback is additive/N-1 safe. Rolling application code back removes these
   enforcement checks; the four columns remain readable by the newer release.
+
+The opt-in `task-helper-subscription-transport.test.ts` regression runs the real
+pinned OpenCode binary against a local denying gateway with synthetic ChatGPT
+and Copilot OAuth fixtures. Enable it with
+`ROOMOTE_TEST_OPENCODE_SUBSCRIPTIONS=1`; it uses no live provider credentials or
+paid inference. The normal suite covers environment stripping and private-store
+startup/cleanup without requiring the binary.

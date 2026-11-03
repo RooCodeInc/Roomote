@@ -1,4 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -55,6 +62,7 @@ describe('buildOpenCodeCliEnv', () => {
     'MISTRAL_API_KEY',
     'BASH_ENV',
     'OPENCODE_COMMAND',
+    'OPENCODE_AUTH_CONTENT',
   ] as const;
   const originalValues = new Map<string, string | undefined>();
 
@@ -76,6 +84,32 @@ describe('buildOpenCodeCliEnv', () => {
       }
     }
   });
+
+  it.each([false, true])(
+    'strips subscription OAuth in task-gateway mode (explicit=%s), without changing ordinary helpers',
+    (explicit) => {
+      const oauth = JSON.stringify({
+        openai: {
+          type: 'oauth',
+          access: 'synthetic-access',
+          refresh: 'synthetic-refresh',
+          expires: Date.now() + 60_000,
+        },
+      });
+      process.env.OPENCODE_AUTH_CONTENT = oauth;
+      const authEnv = explicit ? { OPENCODE_AUTH_CONTENT: oauth } : {};
+      const env = buildOpenCodeCliEnv({
+        ...authEnv,
+        R_MODEL: 'openai/gpt-5.4',
+        R_SMALL_MODEL: 'openai/gpt-5.4',
+        ROOMOTE_TASK_INFERENCE_GATEWAY: 'http://127.0.0.1:9999/api/inference',
+        ROOMOTE_TASK_INFERENCE_TOKEN: 'synthetic-run-token',
+      });
+      expect(env.OPENCODE_AUTH_CONTENT).toBeUndefined();
+      expect(buildOpenCodeCliEnv(authEnv).OPENCODE_AUTH_CONTENT).toBe(oauth);
+      expect(process.env.OPENCODE_AUTH_CONTENT).toBe(oauth);
+    },
+  );
 
   it("does not pass the launching service's deployment secrets to the helper", () => {
     const inherited = {
@@ -957,7 +991,8 @@ describe('buildOpenCodeCliEnv', () => {
 // whole process tree dies on shutdown.
 const FIXTURE_SERVER_SOURCE = `
 const { spawn } = require('node:child_process');
-const { writeFileSync } = require('node:fs');
+const { existsSync, writeFileSync } = require('node:fs');
+const path = require('node:path');
 const { createServer } = require('node:http');
 
 const portArg = process.argv.find((arg) => arg.startsWith('--port='));
@@ -970,7 +1005,7 @@ createServer((req, res) => {
 }).listen(port, '127.0.0.1', () => {
   writeFileSync(
     process.env.OPENCODE_FIXTURE_PID_FILE,
-    JSON.stringify({ serverPid: process.pid, grandchildPid: grandchild.pid }),
+    JSON.stringify({ serverPid: process.pid, grandchildPid: grandchild.pid, dataHome: process.env.XDG_DATA_HOME, hasInlineAuth: Boolean(process.env.OPENCODE_AUTH_CONTENT), hasPersistedAuth: existsSync(path.join(process.env.XDG_DATA_HOME || '', 'opencode', 'auth.json')) }),
   );
 });
 `;
@@ -1087,6 +1122,66 @@ describe('OpenCode SDK server shutdown', () => {
     expect(process.listenerCount('SIGINT')).toBeGreaterThanOrEqual(1);
     expect(process.listenerCount('SIGHUP')).toBeGreaterThanOrEqual(1);
   });
+
+  it.each([false, true])(
+    'isolates and cleans up task helper auth storage (startup failure=%s)',
+    async (failStartup) => {
+      const fixturePath = path.join(fixtureDir, 'fixture-server.cjs');
+      const pidFilePath = path.join(fixtureDir, 'pids.json');
+      const sharedDataHome = path.join(fixtureDir, 'shared-data');
+      mkdirSync(path.join(sharedDataHome, 'opencode'), { recursive: true });
+      const oauth = JSON.stringify({
+        openai: {
+          type: 'oauth',
+          access: 'synthetic-access',
+          refresh: 'synthetic-refresh',
+          expires: Date.now() + 60_000,
+        },
+      });
+      const sharedAuthPath = path.join(sharedDataHome, 'opencode', 'auth.json');
+      writeFileSync(sharedAuthPath, oauth);
+      writeFileSync(
+        fixturePath,
+        failStartup
+          ? `require('node:fs').writeFileSync(process.env.OPENCODE_FIXTURE_PID_FILE, JSON.stringify({ dataHome: process.env.XDG_DATA_HOME, hasInlineAuth: Boolean(process.env.OPENCODE_AUTH_CONTENT) })); process.exit(7);`
+          : FIXTURE_SERVER_SOURCE,
+      );
+      process.env.OPENCODE_COMMAND = `${process.execPath} ${fixturePath}`;
+      const request = leaseOpenCodeSdkServer({
+        env: {
+          OPENCODE_FIXTURE_PID_FILE: pidFilePath,
+          OPENCODE_AUTH_CONTENT: oauth,
+          XDG_DATA_HOME: sharedDataHome,
+          R_MODEL: 'openai/gpt-5.4',
+          R_SMALL_MODEL: 'openai/gpt-5.4',
+          ROOMOTE_TASK_INFERENCE_GATEWAY: 'http://127.0.0.1:9999/api/inference',
+          ROOMOTE_TASK_INFERENCE_TOKEN: `synthetic-token-${failStartup}`,
+        },
+        ephemeral: true,
+        useConfiguredServer: false,
+        startTimeoutMs: 15_000,
+      });
+      if (failStartup)
+        await expect(request).rejects.toThrow('exited before it was ready');
+      const lease = failStartup ? undefined : await request;
+      try {
+        expect(await waitFor(() => existsSync(pidFilePath), 5_000)).toBe(true);
+        const fixture = JSON.parse(readFileSync(pidFilePath, 'utf8'));
+        if (fixture.serverPid)
+          trackedPids = [fixture.serverPid, fixture.grandchildPid];
+        expect(fixture.dataHome).not.toBe(sharedDataHome);
+        expect(fixture.hasInlineAuth).toBe(false);
+        expect(readFileSync(sharedAuthPath, 'utf8')).toBe(oauth);
+        if (!failStartup) expect(fixture.hasPersistedAuth).toBe(false);
+        lease?.release();
+        expect(await waitFor(() => !existsSync(fixture.dataHome), 5_000)).toBe(
+          true,
+        );
+      } finally {
+        lease?.release();
+      }
+    },
+  );
 
   it('seeds the plugin install into every config dir before spawning the server', async () => {
     const fixturePath = path.join(fixtureDir, 'fixture-server.cjs');
